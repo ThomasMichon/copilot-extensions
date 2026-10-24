@@ -110,6 +110,33 @@ def test_caller_session_id_capability_is_advertised() -> None:
     assert CALLER_SESSION_ID_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
+def test_retained_producer_capability_is_distinct_from_transport() -> None:
+    from agent_bridge.protocol import (
+        RETAINED_INBOX_PROTOCOL_VERSION, RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION,
+    )
+
+    assert RETAINED_INBOX_PROTOCOL_VERSION == 48
+    assert RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION == 49
+    assert HTTP_PROTOCOL_MIN_SUPPORTED == 1
+
+
+@pytest.mark.parametrize("generation,transport,producer", [
+    (0, False, False), (47, False, False), (48, True, False),
+    (49, True, True), (50, True, True),
+])
+def test_retained_producer_mixed_version_detection(generation, transport, producer) -> None:
+    from agent_bridge.protocol import (
+        RETAINED_INBOX_PROTOCOL_VERSION, RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION,
+    )
+
+    health = {"status": "ok"}
+    if generation:
+        health.update(protocol_version=generation, min_protocol_version=1)
+    client = _client(health)
+    assert client.daemon_supports(RETAINED_INBOX_PROTOCOL_VERSION) is transport
+    assert client.daemon_supports(RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION) is producer
+
+
 def _app(tmp_path):
     cfg = ServiceConfig(
         port=0,

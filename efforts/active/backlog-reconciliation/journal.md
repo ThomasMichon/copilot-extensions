@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-24 - Verified reboot-free repair and research resumption](<journal/2026/10.24 verified-repair-and-research-resumption.md>)
 - [2026-10-23 - Operator-authorized folder-trust source repair](<journal/2026/10.23 folder-trust-source-repair.md>)
 - [2026-10-23 - Batches eighty-one and eighty-two, eleven complete lossless consolidations](<journal/2026/10.23 batches-81-82.md>)
 - [2026-10-23 - Batches seventy-nine and eighty, twelve complete lossless consolidations](<journal/2026/10.23 batches-79-80.md>)

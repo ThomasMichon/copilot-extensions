@@ -1,20 +1,16 @@
 {
-  "evidence_family": "http48-unchanged-source-link-v1",
-  "preserved_from": {
-    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-db_schema-py-8f576283170d.json",
-    "sha256": "d77c2df107218862dfaf75e6bc330bafe95db8055a2ab133ac4452f7dbf493f0"
-  },
-  "advertisement_evidence": {
+  "evidence_family": "http48-shared-asgi-v1",
+  "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
-    "sha256": "a279ccf250421673e63b077e9be2a5dd780dfbd99662baf35486d57dacee4729"
+    "sha256": "05eb7a6ea2befcba8ec0f97a5679544a89ca211a3e9765e04c616dd963f1cd92"
   },
-  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "b179c886e69306bc7318c9d39e24dce6b7820b99",
+    "commit": "019bf810e360b7b219f7467f85de4d121afe7893",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 48,
     "source_path": "plugins/agent-bridge/src/agent_bridge/db_schema.py",
-    "source_git_blob": "bd4f5b0d6353de694d838dff16f6d13710b98ed5",
-    "source_sha256": "308cf6061374f84f0aba43aa5ae935eb7fea2d92a610e3ef1d6d0f5c24ddf766"
+    "source_git_blob": "522b3e8eab873dd3b3b9c2a93b0fde60ae48e77d",
+    "source_sha256": "fae776b9c5c43a6132748cbd74f5d84209d194891d2811f857bfdd10e0f6973f"
   }
 }

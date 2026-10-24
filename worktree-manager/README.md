@@ -443,8 +443,9 @@ own SSH targets, and returned rows retain the selected source's logical identity
 Ordinary Worktrees loads require the engine's resident current-roster
 publication, including its observed git/session/mux facts and bounded claim
 aggregates. The local and machine-SSH loaders hold the CLI's
-`list --current --stream --follow` feed by default; the Manager never connects
-to daemon transport directly or recomputes/overlays those facts. Complete
+`list --current --stream --follow` feed by default. An explicitly advertised
+resident Picker handoff may use the same authenticated local feed directly,
+without a CLI relay; it never imports engine code or recomputes/overlays those facts. Complete
 snapshot/update barriers replace rows atomically. Planned cutover notices and
 abrupt disconnects are distinct; reconnect retains explicitly stale last-good
 rows until the replacement generation completes. Unsupported authority is an
@@ -480,7 +481,7 @@ Those inspections run in the background only after opening the detail card;
 ordinary row rendering never walks a claim graph or performs network reads.
 Descendant claims remain owned by their original worktrees.
 
-Interactive Picker startup first presents a pending project-binding view with
+Unresolved interactive Picker startup presents a pending project-binding view with
 Escape to cancel. Project-default discovery and engine `picker-bootstrap`
 resolution run after that view's first refresh, off the input thread. Operational
 actions are not available until the engine's project/cwd/live decisions are
@@ -509,6 +510,88 @@ bootstrap remains configuration-load-free. Only an explicit unsupported-option
 response falls back to the older bootstrap, whose missing fields retain the
 memoized worker scalar queries. Configuration, identity and timeout failures
 are not retried as compatibility fallbacks.
+
+The optional version-1 resident bootstrap supplies those same scalars and fresh
+headless policy before an advertised provider handoff. The Manager consumes a
+project/engine-scoped payload, keeps its ordinary command for actions and
+nonlocal sources, and uses the existing atomic receiver for the local socket
+feed. The socket request preserves the ordinary local CLI's default
+current-platform and present-checkout selection. Feed transport and publication
+do not perform synchronous launch-trace writes. Missing capability retains the ordinary front door. This avoids repeated
+local bootstrap/feed CLI starts; it does not itself keep a cold Textual UI warm
+or qualify first-visible/input-ready latency. See the
+[resident read contract](../plugins/agent-worktrees/docs/engine-picker-contract.md#optional-resident-picker-bootstrap)
+for selection, failure, cancellation and deadline semantics.
+
+The existing Manager mux resident can retain one single-use, initialized
+Textual spare and at most four active UI processes. Each has its own mux
+terminal, project binding and engine state; applications do not share mutable
+UI globals. A matching engine, invocation context and Manager runtime are
+required before an atomic handoff consumes the spare. Missing or incompatible
+resident support retains the cold path without provisioning another service.
+Admission compares a digest of the caller's non-transport environment with the
+spare's actual environment, including home/config paths and Picker overrides;
+different settings retain the cold path rather than inheriting the resident's.
+Session, claim, handoff and authorization-bearing contexts use the cold path and
+are stripped before a spare starts. No raw caller environment or credentials
+are journaled. Per-launch trace identity is excluded from the reusable
+environment fingerprint and carried separately into the admitted UI.
+An absent Manager-root environment value uses the selected provider's canonical
+default when comparing contexts; an explicit different root remains incompatible.
+Spare and completion commands use isolated Python startup and the owning
+constructed slot's retention bootstrap, so inherited Python paths cannot select
+a different Manager. A consumed UI enters the caller's cwd before project binding;
+the engine's explicit switch-to-anchor policy still applies afterward.
+Warm admission revalidates the current mux incarnation as well as the worker's
+process birth identity. Prewarming is disabled when process-birth identity is
+unavailable, preserving the cold path without repeatedly spawning unusable UIs.
+The current primitive supports Windows/Linux; macOS retains the cold path
+until its process-birth identity is supported.
+An already-accepted bootstrap can bind directly rather than repeating project
+discovery behind a second pending view.
+Automatic update and orphan courtesy checks yield to the bounded initial-local
+visible-refresh gate; an explicit forced orphan refresh remains immediate. Exiting
+while an automatic check waits prevents its backend request from starting.
+
+Resident bootstrap also binds its authoritative runtime root for diagnostic
+paths, avoiding a synchronous `picker-paths` subprocess before local feed
+enrollment. Older engines preserve the existing path lookup. UI acquisition,
+activation, source preparation and loader start have optional
+launch-trace checkpoints; these are diagnostics, not latency qualification.
+Drain closes UI admissions and retires idle spares, but active UIs keep the
+resident busy until their decisions are consumed or bounded result retention
+expires. Results are bounded and retained briefly for
+the attaching caller; cancellation and abandoned attachment are owner-cleaned.
+Final resident shutdown retires every owned UI session, including attached
+ones, rather than abandoning its cleanup deadlines; changed mux incarnations
+are refused instead of targeting a replacement.
+The UI also checks its owner's process birth while mounted. Abrupt owner loss
+ends both pending and bound UIs without publishing a decision, and retires
+only its known protocol files and empty slot directories. Unknown files remain
+for diagnosis rather than being recursively deleted.
+A retirement refusal is isolated to its slot so another completed session can
+still expire or be consumed. On POSIX, the selected tmux socket is explicit in
+creation, probes, attachment and cleanup commands; attachment does not switch
+silently to the default server after clearing nested-terminal environment.
+This source facility does not establish a two-second native launch guarantee.
+
+Providers advertising the optional terminal-session contract let the existing
+engine front door attach directly to that UI. A second Manager Python process
+is needed only afterward to consume the retained decision, not to first open
+the screen. Result consumption validates the original project/engine handoff
+and is exclusive, so replay cannot execute the action twice. The action process
+rebinds that handoff's project, configuration scalars and cwd policy before
+dispatching a retained decision, including remote Restore. Native session
+incarnation changes refuse stale cleanup. Optional housekeeping, pivots and
+background remote pings defer to initial local-feed settlement, with a bounded
+escape rather than making a failed local source block the other views forever.
+After fresh resident binding is accepted, per-launch data preparation can enroll
+the current feed while widgets are constructed. The presentation consumes that
+same loader once through its existing Inbox path; cancellation closes it and
+late source preparation cannot start a replacement. No project data is loaded
+into the idle spare before launch admission. Reloads obtain fresh source
+snapshots and loaders; cancelling the initial loader cannot cancel its replacement.
+
 Binding replacement never waits for an older scalar read; late results stay in
 their original binding/epoch. Failed scalar lookups may retry after reload,
 without discarding accepted bootstrap values.
@@ -1265,8 +1348,9 @@ shell typo into an agent launch.
 The **worktrees** views are the first slice of the extracted Picker: they read
 **live** worktrees by shelling out to the `agent-worktrees` engine
 (`agent-worktrees --project <p> list --json --current`) — the **process
-boundary** the Textual Picker will sit on. The Manager never imports the plugin;
-the only coupling is the engine's stable `--json` verbs (the pinned
+boundary** the Textual Picker uses. The Manager never imports the plugin;
+coupling is through the engine's stable JSON verbs or optional resident read
+contract (the pinned
 [engine ↔ Picker contract](../plugins/agent-worktrees/docs/engine-picker-contract.md)),
 and the client ([`engine_client.py`](src/worktree_manager/engine_client.py))
 requires the current-roster authority contract. Older or incompatible engines

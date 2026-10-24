@@ -1,0 +1,16 @@
+{
+  "evidence_family": "http49-shared-asgi-v1",
+  "shared_operation_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http49-retained-producer.json",
+    "sha256": "bc5fc8664decb1a72bd3f0ec444f5c55894165d817060b2a4d1845b5df32a1cc"
+  },
+  "scope": "shared named ASGI portfolio, not an independent capture",
+  "captured_from": {
+    "commit": "7c61179a52beb96699f3e9f3191e54b52e7d958c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 49,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/live_startup_controls.py",
+    "source_git_blob": "94bd9fdf2e0242fba7030844693d4db82aa2c39b",
+    "source_sha256": "f33d32da7b32dafb9e1338995daa4d6b3154e495dd093e516d936cb77aeaf7fd"
+  }
+}

@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations

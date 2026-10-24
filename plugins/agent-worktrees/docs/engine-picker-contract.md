@@ -1,11 +1,104 @@
 # The engine ↔ Picker `--json` contract
 
 The interactive front-end (the **Worktree Manager**'s Picker) reaches the
-`agent-worktrees` engine **only** by shelling out to its machine-readable CLI
-verbs: `<project> <verb> --json`, never `import agent_worktrees`. That process
-boundary is what keeps the coupling one-way and dependency-free (the Picker owns
-no worktree logic or state), and it is why the TUI framework (Textual) stays
-entirely out of the plugin engine.
+`agent-worktrees` engine across a process boundary: its machine-readable CLI
+verbs (`<project> <verb> --json`) or the optional authenticated resident read
+contract below, never `import agent_worktrees`. That boundary keeps the coupling
+one-way and dependency-free (the Picker owns no worktree logic or state), and
+keeps the TUI framework (Textual) entirely out of the plugin engine.
+
+## Optional resident Picker bootstrap
+
+The elected monitor advertises `picker-bootstrap-v1` on its existing control
+endpoint. Action `picker-bootstrap` accepts `contract_version: 1`, an explicit
+`project`, absolute invocation `cwd`, Boolean `default_live`, and optional
+provider selection (`provider`, `providers_dir`). It resolves fresh layered
+project policy, including headless behavior, without changing the daemon's
+active project. The configured execution-space identity is validated before
+any handoff; invalid identity returns an explicit unavailable response.
+Workspace metadata reads one Git administration entry and one
+exact tracking record; it never reconstructs the roster in a request handler.
+The result carries `ok`, `contract_version`, resident `generation`,
+`runtime_root`, the existing version-1 `bootstrap` payload and
+`manager_command`. Bootstrap includes the optional project configuration
+scalars. A headless result offers no Manager command.
+
+A control-plane provider may explicitly advertise
+`resident_picker: {"version": 1, "command": ["<qualified-provider>", "..."]}`.
+The command is provider-owned, not a guessed runtime or PATH lookup. The
+Manager's installer publishes its own binstub with `--resident-picker`.
+An exact `--project NAME` bare TTY entry can request this bootstrap before
+importing the ordinary CLI dispatcher. The optional bootstrap RPC has one total
+one-second communication budget and uses the existing owner token without creating it.
+Missing capability, unavailable bootstrap, invalid installation context,
+headless/non-TTY invocation and an explicit engine override retain the
+ordinary front door. Once an advertised provider starts, its real exit result
+is preserved under the existing caller-owned process lifetime.
+
+The inherited bootstrap and exact engine argv are consumed by the provider,
+not propagated as ambient instructions. Only the accepted project and engine
+binding can select the local resident socket path. The Manager reads its
+existing token and capability before subscribing to `worktrees-feed`; remote,
+provider-exec and compatibility sources retain their CLI contracts. Socket
+frames enter the same atomic receiver as CLI frames. Authentication,
+capability and live-peer timeout failures are terminal; transport loss retains
+the existing cancellable reconnect behavior and explicitly stale last-good
+rows. Health and initial admission share one startup budget; begin/update
+transactions retain two-second deadlines and idle progress retains five-second
+deadlines. Cancellation closes the socket rather than leaving a relay child.
+
+This read transport does not make a cold UI process resident or certify its
+two-second native launch budget. Framework imports, visible/input-ready paint
+and current-row delivery remain separately measured boundaries.
+
+### Optional provider-owned terminal session
+
+A provider can add `session: {"version": 1, "root": "<absolute-provider-root>"}`
+inside `resident_picker`. The authenticated bootstrap forwards this as
+`manager_session`. This is an optional attachment contract, not a worktree
+reader or permission to provision a service.
+
+The existing engine front door reads only the provider's active loopback route
+and existing token, then requests `picker-session-v1` with the fresh bootstrap,
+exact engine argv, selected provider generation and invocation context.
+Manager admits a matching bounded single-use UI context or declines so the
+ordinary command can run. Missing tokens are never created by this read path;
+previous routes and arbitrary same-named executables are not substituted.
+Per-launch trace identity is carried separately from reusable environment
+scope, so a new launch ID does not make an otherwise matching spare foreign.
+
+An admitted response carries a scoped session directory and exact provider-owned
+attachment and completion argv. The existing engine process attaches its real
+terminal directly; it does not start another Python front door before the UI
+is visible. Manager's retained runtime consumes the completed decision afterward.
+It revalidates project, engine, original handoff and provider root, and claims
+the result once before executing an action. Interrupted or invalid admitted
+sessions fail visibly rather than opening a second cold UI or replaying an
+action. The provider owns mux identity, cancellation, bounded result retention,
+drain and runtime lifetime; the engine owns no Textual or mux implementation.
+
+Completion uses `agent_procutil.interactive.run_interactive` only after
+attachment returns. Windows retains its real console streams and a required
+Job. Linux/macOS completion uses a dedicated owned session and PTY relay,
+with input/resize/suspend handling and inherited redirected non-TTY streams.
+Its completion terminal-device identity changes; the UI attachment path does
+not. Every ordinary job group in that private session settles before return,
+including shell-created groups after interruption or caller death; explicitly
+detached
+managed workloads keep their existing lifecycle. This does not add another
+interpreter to the pre-paint attachment path.
+
+Each UI has independent process-local bindings. The Manager resident retains
+one initialized spare and at most four active UI processes, not a shared
+Textual application serving unrelated terminals. Optional housekeeping, pivots
+and background peer probes wait for local feed settlement, with a two-second
+escape and cancellation; explicit remote navigation remains demand-driven.
+No project-bound feed is retained before fresh launch admission. This facility
+does not itself qualify native first-frame, input or current-row budgets.
+The UI continues checking its resident owner's process birth after binding.
+Owner loss, identity replacement or explicit cancellation exits through normal
+Textual teardown (including loader cancellation) and cannot publish a launch
+decision from that retired lifetime.
 
 ## Repository hosting admission
 

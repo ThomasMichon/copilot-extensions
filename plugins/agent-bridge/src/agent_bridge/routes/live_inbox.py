@@ -19,6 +19,7 @@ from ..live_inbox_models import (
 )
 from ..live_inbox_runtime import LiveInboxRuntime
 from ..loop_governance import LoopGovernance
+from ..models import SendMessageRequest
 from ..runtime_custody import RuntimeCustodyError
 
 router = APIRouter(
@@ -88,6 +89,40 @@ def _refusals() -> Iterator[None]:
         raise HTTPException(status_code=409, detail={
             "code": "retained_inbox_refused", "message": str(exc),
         }) from exc
+
+
+def enqueue_message(
+    request: Request, db: Database, session_id: str, body: SendMessageRequest, *,
+    kind: str, expected_session_id: str | None, now: float,
+) -> tuple[int | None, str | None]:
+    """Associate ordinary admitted sends only with their currently enrolled inbox.
+
+    Observing unavailable owners is not a legacy fallback. The DB serializes
+    the actual enrollment decision and surfaces this refusal for retained work.
+    Identical keyed recovery needs neither a new enrollment nor an open epoch.
+    """
+    if db.read_only:
+        raise HTTPException(status_code=503, detail="retained inbox database is read-only")
+    admission = None
+    refusal = None
+    try:
+        current_db, governance, runtime = _current_owners(request)
+        if current_db is not db:
+            raise RuntimeCustodyError("Inbox frontend database owner changed")
+        admission = runtime.producer_admission(db, governance)
+    except HTTPException as exc:
+        detail = exc.detail
+        refusal = detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail)
+    except RuntimeCustodyError as exc:
+        refusal = str(exc)
+    with _refusals():
+        return db.enqueue_live_message_if_fresh(
+            session_id, sender=body.sender, body=body.body, now=now,
+            reply_to=body.reply_to, kind=kind, delivery=body.delivery,
+            expected_session_id=expected_session_id, idempotency_key=body.idempotency_key,
+            report_duplicate=True, runtime_admission=admission,
+            enrolled_inbox=True, inbox_refusal=refusal,
+        )
 
 
 @router.post("/negotiate", response_model=InboxNegotiationInfo)

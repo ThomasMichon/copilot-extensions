@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,10 +48,26 @@ def test_no_prompt_create_reports_observed_ready_identity(monkeypatch, status, t
     }]
 
 
-def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
+def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch, tmp_path):
     dispatch_src = Path(__file__).resolve().parents[2] / "agent-dispatch" / "src"
     monkeypatch.syspath_prepend(str(dispatch_src))
-    from agent_dispatch import bridge, ordinary_bridge
+    from agent_dispatch import bridge, hosting_policy, ordinary_bridge
+
+    workspace = tmp_path / "execution-harness"
+    (workspace / ".git").mkdir(parents=True)
+    policy_calls = []
+
+    def metadata_owner(argv, **kwargs):
+        assert argv == ["metadata-owner", "repos", "find", "example", "--registered-only", "--json"]
+        policy_calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps({"path": str(workspace)}), "")
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
+    monkeypatch.setattr(hosting_policy, "agent_worktrees_launch_prefix", lambda: ["metadata-owner"])
+    monkeypatch.setattr(hosting_policy, "subprocess", SimpleNamespace(
+        run=metadata_owner, SubprocessError=subprocess.SubprocessError,
+    ))
 
     parser = core.build_parser()
     created = {
@@ -124,3 +141,4 @@ def test_dispatch_ordinary_calls_parse_with_real_bridge_parser(monkeypatch):
     ordinary_bridge.start(task, **kwargs)
     ordinary_bridge.observe(handle)
     assert calls == ["create", "send", "send", "wait"]
+    assert len(policy_calls) == 1

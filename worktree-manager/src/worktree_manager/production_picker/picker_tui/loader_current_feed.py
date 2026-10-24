@@ -121,6 +121,13 @@ class CurrentFeedMixin:
                 self._records[source.cache_key] = records
 
     def _feed_once(self, source, gen) -> str:
+        if source.local:
+            from ... import resident_picker
+            from .data_ssh import _project
+
+            root = resident_picker.root_for(_project())
+            if root is not None:
+                return self._feed_once_resident(source, gen, root)
         from .data_ssh import _kill_proc_tree
 
         proc = self._spawn_stream(feed_argv(source))
@@ -182,6 +189,28 @@ class CurrentFeedMixin:
                 errors.join(timeout=1)
             finally:
                 self._untrack(proc)
+
+    def _feed_once_resident(self, source, gen, root) -> str:
+        from ... import resident_transport
+        from .data_ssh import _project
+
+        receiver = CurrentFeed()
+        stream = resident_transport.frames(
+            root, _project(), alive=lambda: self._feed_current(source, gen),
+            startup_timeout=source.timeout,
+        )
+        try:
+            for frame in stream:
+                if not self._feed_current(source, gen):
+                    return "cancelled"
+                rows = receiver.receive(frame)
+                if rows is not None:
+                    self._feed_commit(source, gen, rows)
+                if receiver.notice is not None:
+                    return f"resident going away: {receiver.notice}"
+            return "cancelled"
+        finally:
+            stream.close()
 
     def _load_current_feed(self, source, gen) -> None:
         with self._lock:

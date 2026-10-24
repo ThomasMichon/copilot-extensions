@@ -154,9 +154,9 @@ class _ControlHandler(socketserver.StreamRequestHandler):
             if not isinstance(payload, dict):
                 payload = {}
             owner = self.server.owner
-            if action in {"worktrees-read", "repos-map-read"}:
-                owner._on_current_read_started(action)
-                current_read = action
+            if action in {"worktrees-read", "repos-map-read", "picker-bootstrap"}:
+                current_read = "worktrees-read" if action == "picker-bootstrap" else action
+                owner._on_current_read_started(current_read)
             if owner.stream_handle is not None and action == "worktrees-feed":
                 def disconnected():
                     readable, _, _ = select.select([self.request], [], [], 0)

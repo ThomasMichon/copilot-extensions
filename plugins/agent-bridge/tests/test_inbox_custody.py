@@ -397,7 +397,7 @@ def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
     assert path.read_bytes() == before
     db = Database(path)
     try:
-        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 31
+        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 32
         row, = db.execute_read("SELECT * FROM live_messages")
         assert row["body"] == "possibly already polled"
         assert row["runtime_custody_json"] is None and row["handoff_json"] is None

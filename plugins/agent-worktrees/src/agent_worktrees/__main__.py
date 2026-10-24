@@ -51,6 +51,14 @@ from __future__ import annotations
 if __name__ == "__main__":
     from .current_roster_entry import run_module_if_selected
     run_module_if_selected()
+    import sys as _entry_sys
+
+    if len(_entry_sys.argv) == 3 and _entry_sys.argv[1] == "--project":
+        from .picker_fast_entry import dispatch as _dispatch_resident_picker
+
+        _resident_picker_result = _dispatch_resident_picker(_entry_sys.argv[1:])
+        if _resident_picker_result is not None:
+            raise SystemExit(_resident_picker_result)
 
 import argparse
 import contextlib
@@ -214,30 +222,8 @@ def _env_set(new_name: str, value: str) -> None:
 
 
 def _fire_launch_resolution_watchdog() -> None:
-    """Self-terminate a hung bare-launch invocation (copilot-extensions #<TBD>).
-
-    The pre-handoff resolution in ``cmd_launch`` (project/config resolution,
-    filesystem probes, an optional git call for the recovery anchor) has been
-    observed to survive its hosting console being closed mid-call and hang
-    indefinitely at near-zero CPU rather than exit -- a known CPython-on-
-    Windows interaction where the installed console-control handler reports
-    the close "handled" and returns immediately even though the blocked
-    native call (e.g. a git subprocess wait) is never actually interrupted, so
-    the process never gets a chance to notice and exit on its own. Whatever
-    the trigger, nothing downstream can be trusted to notice a stall here, so
-    this watchdog guarantees a hard ceiling: ``os._exit`` bypasses the stuck
-    call entirely rather than trying to unwind through it.
-    """
-    try:
-        sys.stderr.write(
-            "[agent-worktrees] bare-launch resolution exceeded "
-            f"{_LAUNCH_RESOLUTION_TIMEOUT_SECS}s -- self-terminating a likely "
-            "hang instead of blocking forever.\n"
-        )
-        sys.stderr.flush()
-    except Exception:
-        pass
-    os._exit(1)
+    """Retain the legacy patch seam while the front-door owner enforces it."""
+    front_door_cli.fire_launch_resolution_watchdog(_LAUNCH_RESOLUTION_TIMEOUT_SECS)
 
 
 # How long cmd_launch's pre-handoff resolution (before it hands the console off

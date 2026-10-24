@@ -9,6 +9,11 @@ multiple consumers reuse one implementation instead of reinventing it.
   install it from a local path or a pinned Git ref).
 - **Import module:** `zdd`
 
+Package-level exports load their owning modules on first access. A routing-only
+client does not import daemon diagnostics or singleton supervision. Existing
+root imports, `from zdd import *`, and canonical object identities are preserved;
+this changes import work, not routing, cutover or process-retirement policy.
+
 ## What's inside
 
 ### `zdd.lifecycle` -- durable transition history
