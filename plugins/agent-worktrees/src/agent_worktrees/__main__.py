@@ -4225,8 +4225,10 @@ def _resident_hook_decision(
     _bind_nudge_decision = _self_override("_bind_nudge_decision", _session_binding_cli._bind_nudge_decision)
 
     cwd = _hook_payload_cwd(payload)
-    if kind == "snapshot" and git_ops._windows_observation() and segment_cache.observation_blocked("", cwd):
-        return {"segment": segment_cache.pending_segment()}
+    if kind == "snapshot" and git_ops._windows_observation():
+        retained = segment_cache.project_for_observation_path(cwd)
+        if segment_cache.observation_blocked(retained or "", cwd) or segment_cache.observation_busy():
+            return {"segment": segment_cache.pending_segment_for_path(cwd)}
     previous_project = cfg.active_project()
     _activate_project_for_path(cwd, force=True)
     try:

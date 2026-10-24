@@ -475,6 +475,10 @@ class WorktreeStatusCache:
                 key: computed_at
                 for key, (_, computed_at, demanded_at) in self._entries.items()
                 if now - demanded_at <= self._demand_ttl and now - computed_at >= self._ttl
+                and not (
+                    self._cleanup_owner is not None
+                    and self._cleanup_owner.observation_blocked(key[0])
+                )
             }
             expired = [
                 key

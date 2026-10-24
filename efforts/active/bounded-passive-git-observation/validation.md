@@ -8,6 +8,32 @@ not native/process-survival or installed qualification.
 
 ## Windows-first caller-custody checkpoint
 
+### Contained review corrections after source refresh
+
+After the mechanical index-only rebase, the focused consumer selection below
+passes **133 tests, 99 deselected** (14.77 seconds pytest / 36.44 seconds total).
+This covers retained snapshot sibling/unknown hints before discovery,
+interrupted multi-ticket settlement, blocked-project sampling fairness,
+successful undrain reopening, the actual server close-before-force barrier,
+and two updater generations contending through predecessor cleanup/release.
+No production deadline or observation budget was changed.
+
+Raw files were opened before their commands and retained under `.venv-tools`:
+`r1a-review-contained-failfirst-20261024.log`,
+`r1a-review-lifecycle-failfirst-20261024.log`,
+`r1a-review-undrain-failfirst-20261024.log`, and
+`r1a-review-contained-green-20261024.log`. The first two runs also exposed
+incomplete injected fixture arguments/methods; corrected runs captured the
+actual updater and undrain failures before their source fixes. Do not count
+those fixture errors as causal product regressions.
+
+The original 124/22 logs remain unchanged. No new shared Job code was changed
+or rerun at this contained checkpoint. Atomic creation/facade implementation
+and client ordering remain pending the owner-qualified caller-recovery stop
+in the linked proposal; none of those missing tests, current-head server CI,
+source review or native/platform/installed qualification is represented by
+this local pure/injected pass.
+
 The amended implementation passes **124 tests, 99 deselected** through the
 normal isolated consumer wrapper:
 

@@ -532,12 +532,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             tracking_write_server = None
 
     def _close_request_surface_admission(reason: str = "superseded") -> None:
-        """Soft-close without losing live handler counts or tearing sockets down.
-
-        While custody exists, read callbacks return existing degraded shapes;
-        write/lifecycle decisions still reject. Actual close follows settlement
-        in `_close_request_surfaces`, never a generic known-pending fallback.
-        """
+        """Keep degraded read routes and handler counts until custody settles."""
         keep_cleanup_reads = segment_cache.observation_busy(worktree_status_runtime)
         if hook_server is not None and not keep_cleanup_reads:
             hook_server.close_admission(reason)
@@ -782,6 +777,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         wake_event.set()
                         return {"draining": True, "error": "current-roster authority unavailable"}
                     receipts.open_admission()
+                    if core.git_ops._windows_observation():
+                        segment_cache.open_observation_admission()
                     with trace.stage("publish-lock"):
                         _locks.write_lock(lock, extra=_lock_extra())
             trace.emit("complete", "ok")
@@ -791,9 +788,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return {"ok": False, "error": f"unsupported action {action!r}"}
         timeout = float(payload.get("timeout") or 0.0)
         poll = float(payload.get("poll") or 0.1)
-        force = bool(payload.get("force")) and not (
-            core.git_ops._windows_observation() and any(segment_cache.observation_counts())
-        )
+        with state_lock:
+            if core.git_ops._windows_observation():
+                segment_cache.close_observation_admission()
+            force = bool(payload.get("force")) and not (
+                core.git_ops._windows_observation() and any(segment_cache.observation_counts())
+            )
         return drain_with_diagnostics(
             state_lock=state_lock, enter=_enter_drain_only_state,
             cleanup=_cleanup_retired_request_surfaces, busy=_drain_busy_reasons,

@@ -1,5 +1,64 @@
 # Atomic creation and handoff review proposal
 
+## Admission update and newly exposed recovery stop
+
+The exact private-adapter deadline/stream-retention amendment, local
+observation facade and client drain-before-promotion ordering are now admitted.
+No generic factory, `owned_process.py`, POSIX or global-CWD change is admitted.
+The original proposal below remains its design record, not a claim that those
+changes have already been implemented.
+
+The required caller-recovery trace exposed an additional **unadmitted**
+lifecycle hunk. `status_monitor_cutover.activate_after_update` constructs
+`CutoverOrchestrator` without `expected_old` or `refuse_old`. Its
+`_predecessor_health_check` checks status/roster at a port, not the exact
+PID/start-time identity. Consequently `zdd.cutover_rollback._rollback` uses
+its unguarded branch: a live port can lead to route restoration and undrain
+without the current-owner comparison. `_undrain` only requires the positive
+`draining: false` receipt in the guarded configuration. A client promotion
+failure after the proposed drain-first ordering would rely on this boundary.
+
+**Stop the client ordering change here rather than auto-undraining.** The
+stronger `runtime_monitor_recovery.reconcile_owned_transition` path exists,
+but it is a retained installer recovery path, not the immediate unguarded
+rollback invoked by this constructor. Its existence cannot qualify that
+immediate route/undrain decision.
+
+### Smallest additional exact owner proposal
+
+Admit only `status_monitor_cutover.py:activate_after_update`'s pre-orchestrator
+selection/constructor hunk, plus its existing cutover-helper tests:
+
+1. While holding the existing cutover guard, capture and authenticate the
+   current routed predecessor using existing endpoint/`routed_monitor_identity`
+   mechanisms, including a nonempty process-start identity. Refuse inconsistent
+   or missing proof; do not synthesize identity from port readiness.
+2. Pass that existing `Endpoint` as ZDD's existing `expected_old`, with
+   `refuse_old` fencing exact endpoint plus native start identity. The
+   publication guard must do no network/Git work. Reuse the existing
+   predecessor health callback through a local owner-bound wrapper that
+   verifies the retained PID/start identity before/after the health response
+   and its returned PID.
+3. Use the existing guarded ZDD rollback, with **no ZDD implementation or
+   recovery API change**: mark drain started before the client call, confirm
+   successor termination, CAS the route only from the exact expected
+   successor, restore the exact predecessor, and require a positive existing
+   undrain receipt. Uncertain termination/publication or owner change keeps
+   the existing reconciliation breadcrumb and returns failure.
+
+Pure/injected tests must execute the actual helper/orchestrator pairing:
+promotion failure after predecessor drain restores/undrains the same verified
+owner only after successor exit; third-owner route change and PID/start reuse
+produce zero blind undrains; failed undrain and unconfirmed successor exit
+remain failed/reconcilable, never successful cutover. Preserve ordinary
+client force behavior outside observation custody. This adds no wire field,
+new controller, auto-undrain shortcut or service operation.
+
+This lifecycle hunk has **not** been edited. The admitted atomic-creation
+implementation is also still pending at this stop; no caller-death or native
+qualification is claimed. Independently contained review corrections may
+proceed within the existing carrier/caller/server/lease hunks.
+
 Back to [the effort](README.md). **Proposal only; no new native creation API,
 shared adapter change or client/lifecycle implementation is admitted here.**
 The Windows-first source remains draft and unaccepted; native qualification

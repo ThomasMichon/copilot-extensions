@@ -372,10 +372,12 @@ def _with_updater_lease(session, compute):
     lease = SingleInstance(
         _aw_runtime_home(), service="status-updater", lock_name=f"status-updater-{name}.lock",
     )
-    try:
-        lease.acquire()
-    except AlreadyRunningError:
-        return 0
+    while True:
+        try:
+            lease.acquire()
+            break
+        except AlreadyRunningError:
+            time.sleep(1.0)
     try:
         return compute()
     finally:
