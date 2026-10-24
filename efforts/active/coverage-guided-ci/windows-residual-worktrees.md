@@ -88,6 +88,44 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-RECOVERED existing fixture and publication-adapter boundary
+
+This settles only `tests/test_pr_break_glass.py:3`, header
+`@@ -231,6 +232,51 @@`, full original hunk SHA256
+`67b9fddab49e377bfaa99c067b35c2443f7267d03b5f7b419517332299705f9a`.
+Its original census header, hash and `MX-RECOVERED` disposition remain
+unchanged.
+
+The three complete functions `_recovered_pr_seed`, `_copy_recovered_pr`
+and `recovered_pr` match actual B-RECOVERED #7904 merge
+`f18c945017e9d2533a448b817ce976756118255d` by AST at comparison
+`c5694fee01`. The latter two also match the immutable source. The seed
+intentionally differs: its accepted `_published_seed_environment` replaces
+the historical bare `MonkeyPatch.context()` plus monitor-disable setting.
+That existing hermetic setup supplies isolated HOME, Git configuration,
+identity key and disabled monitor without depending on function-scoped
+autouse fixtures. The historical seed setup is not reapplied.
+
+Only `_copy_recovered_pr`'s `_stub_remote_target` call belongs to
+B-PUBSTUB; the adapter's complete AST matches actual #7886 merge
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, #7904 and the comparison.
+It retains real fresh transport validation before scenario relabeling.
+The copied fixture's remote-tip observer instead belongs to B-RECOVERED:
+it reads the current private remote on invocation, not a cached shared
+observation or publication authorization.
+
+Four native consumer controls pass: seed/sibling byte isolation despite
+first-copy commit/ref/record/hook changes, relocation of an existing
+rewrite identity without inventing an absent one, real confirmed recovery
+with retained commits and unchanged seed record/refs, and scenario-adapter
+refusal after actual transport disagreement. Result: 45.73 pytest
+seconds, 72.73 seconds including preparation and cleanup, exactly two
+contained Windows workers with unchanged marks, item deadlines and
+resource limits. This focused functional selection is not full-module,
+normal-group or repeated complete same-head performance qualification.
+No code/test edit is needed; other residuals and parent qualification
+remain open.
+
 ### MX-BACKED-TYPES existing recovered and backed tuple contracts
 
 This settles only `tests/test_pr_recovery_advanced_head.py:2`, header
