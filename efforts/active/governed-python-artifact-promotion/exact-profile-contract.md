@@ -54,6 +54,25 @@ capability; they cannot weaken existing acquisition restrictions. The bounded
 [zero-configuration plan](../lean-runtime-dependencies/zero-configuration-defaults.md)
 owns the adapter/consumer amendment before enabling it.
 
+Direct execution of that trusted setup flow by a user or an authorized agent
+is the installation authority's approval of the package dependencies required
+by the selected harness configuration, including the installer and selected
+plugins. The component installers inherit that scoped operation; they do not
+seek a separate approver for each dependency or exact lock. The authority
+adapter may bind the resulting complete source-mode lock to that invocation
+after independently checking the selected source, declared constraints and
+existing acquisition policy. No prior list of exact dependency hashes is
+required from the operator for source resolution.
+
+This operation authorization is distinct from authentication of a
+producer-supplied release profile and from admission of its actual wheel bytes.
+The invocation does not authorize arbitrary packages, configuration outside its
+selection, a public-feed escape or bypass of integrity, provenance, seasoning
+or revocation checks. Reading configuration, discovering a candidate or
+presenting a digest is not evidence that this setup operation was invoked.
+The adapter must compose with the existing installation/custody owner rather
+than accepting a caller's self-declared approval flag.
+
 Public profiles contain only dependency identities/hashes and portable target
 constraints, never private feed identities, credentials or third-party bytes.
 Private feed-compatibility evidence remains adopter-owned. Public approval

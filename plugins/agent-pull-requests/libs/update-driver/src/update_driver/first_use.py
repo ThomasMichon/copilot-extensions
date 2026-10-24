@@ -23,7 +23,16 @@ RECIPES = {
     "agent-pull-requests": "AGENT_PULL_REQUESTS",
     "agent-ssh": "AGENT_SSH",
     "agent-codespaces": "AGENT_CODESPACES",
+    "agent-logger": "AGENT_LOGGER",
 }
+LOGGER_COMMANDS = (
+    ("agent-logger", "agent_logger"),
+    ("collate-session", "agent_logger.segmenter.collate"),
+    ("read-session-digest", "agent_logger.segmenter.read_digest"),
+    ("prepare-session-log", "agent_logger.segmenter.prepare_log"),
+    ("ramp-up-session", "agent_logger.segmenter.ramp_up"),
+    ("session-sync", "agent_logger.sync.engine"),
+)
 PROTOCOL = 1
 INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision")
 CONTEXT_KEYS = (
@@ -47,6 +56,11 @@ CODESPACES_CONTEXT_KEYS = (
     "AGENT_CODESPACES_HOME", "AGENT_CODESPACES_INSTALLATION_ID",
     "AGENT_CODESPACES_NO_SELFPROVISION", "AGENT_CODESPACES_PINNED_CONTEXT",
 )
+LOGGER_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_LOGGER_HOME", "AGENT_LOGGER_INSTALLATION_ID",
+    "AGENT_LOGGER_NO_SELFPROVISION", "AGENT_LOGGER_PINNED_CONTEXT",
+)
 
 
 class ProvisionError(core.DriverError):
@@ -68,6 +82,7 @@ def _environment(payload: Path) -> dict[str, str]:
     # An unrelated ambient payload cannot replace the explicitly owning source.
     for key in (
         "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
+        "COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
         "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "UPDATE_DRIVER_WITNESS",
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
@@ -76,6 +91,8 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_SSH_ACTION", "AGENT_SSH_DRY_RUN",
         "AGENT_CODESPACES_VALIDATED_CONTEXT", "AGENT_CODESPACES_PAYLOAD_ROOT",
         "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
+        "AGENT_LOGGER_VALIDATED_CONTEXT", "AGENT_LOGGER_PAYLOAD_ROOT",
+        "AGENT_LOGGER_ACTION", "AGENT_LOGGER_DRY_RUN",
     ):
         result.pop(key, None)
     return result
@@ -106,23 +123,33 @@ def _inspect(
     if (
         manifest.get("schema") != "copilot-extensions.payload-invocation"
         or type(manifest.get("version")) is not int or manifest["version"] != 2
-        or manifest.get("command") != plugin
+        or (plugin != "agent-logger" and manifest.get("command") != plugin)
         or manifest.get("installationContext") != "required"
-        or manifest.get("provisionMode", "snapshot") != (
+        or (plugin != "agent-logger" and manifest.get("provisionMode", "snapshot") != (
             "snapshot" if plugin in ("agent-ssh", "agent-codespaces") else "direct"
-        )
+        ))
         or manifest.get("installer", "install") != "install"
         or manifest.get("noSelfProvisionEnv") != no_self
     ):
         raise ProvisionError("owning payload does not declare the fixed provision recipe")
+    if plugin == "agent-logger":
+        commands = manifest.get("commands")
+        if (
+            manifest.get("plugin") != plugin or manifest.get("installerLifecycle") is not True
+            or any(key in manifest for key in ("command", "module", "provisionMode"))
+            or not isinstance(commands, list)
+            or any(not isinstance(item, dict) for item in commands)
+            or tuple((item.get("command"), item.get("module")) for item in commands) != LOGGER_COMMANDS
+        ):
+            raise ProvisionError("Logger first use requires its fixed six-command lifecycle declaration")
     if os.environ.get(no_self) or (plugin == "agent-pull-requests" and no_self in os.environ):
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
-    if plugin in ("agent-ssh", "agent-codespaces"):
-        label = "SSH" if plugin == "agent-ssh" else "CodeSpaces"
+    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger"):
+        label = {"agent-ssh": "SSH", "agent-codespaces": "CodeSpaces", "agent-logger": "Logger"}[plugin]
         if (
-            manifest.get("module") != plugin.replace("-", "_")
+            (plugin != "agent-logger" and manifest.get("module") != plugin.replace("-", "_"))
             or manifest.get("legacyRuntimeRoot") != "." + plugin
             or manifest.get("payloadRootEnv") != prefix + "_PAYLOAD_ROOT"
             or manifest.get("payloadDispatcher") != {
@@ -130,13 +157,15 @@ def _inspect(
             }
         ):
             raise ProvisionError(f"{label} first use requires its declared native runtime gate")
-    if plugin == "agent-codespaces" and (
-        "AGENT_CODESPACES_INSTALLATION_ID" in os.environ
-        or runtime_root != Path.home() / ".agent-codespaces"
+    if plugin in ("agent-codespaces", "agent-logger") and (
+        prefix + "_INSTALLATION_ID" in os.environ
+        or runtime_root != Path.home() / ("." + plugin)
         or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
         or payload.name != plugin
     ):
-        raise ProvisionError("CodeSpaces first use requires its canonical installed payload and default legacy root")
+        raise ProvisionError(
+            f"{label} first use requires its canonical installed payload and default legacy root"
+        )
     if plugin in ("agent-pull-requests", "agent-ssh"):
         label = "SSH" if plugin == "agent-ssh" else "Pull Requests"
         installed = (
@@ -263,6 +292,7 @@ def enqueue(
         "agent-pull-requests": PULL_REQUESTS_CONTEXT_KEYS,
         "agent-ssh": SSH_CONTEXT_KEYS,
         "agent-codespaces": CODESPACES_CONTEXT_KEYS,
+        "agent-logger": LOGGER_CONTEXT_KEYS,
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
@@ -305,7 +335,9 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
 
         # Reuse the canonical complete-input copier under this request's custody.
         # Keep these files: native publication may retain a source path into them.
-        legacy_stage = admission["plugin"] in {"agent-pull-requests", "agent-ssh", "agent-codespaces"}
+        legacy_stage = admission["plugin"] in {
+            "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
+        }
         inputs = _path(
             runtime_root / ".install-stage" if legacy_stage
             else root / "provision-inputs"
