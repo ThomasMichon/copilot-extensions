@@ -88,12 +88,28 @@ If drain begins after recovery entered, it waits through replacement and
 reconnect admission. Only that same task's exact reconnect prompt, native
 identity and delivery key may finish through the closed gate while kernel
 operation custody remains held; ordinary prompts and inherited child tasks
-receive no exception. Cancellation releases the admission accounting without
-replaying an uncertain launch or send.
+receive no exception. Cancellation releases the in-process admission accounting
+without replaying an uncertain launch or send. Cancelling a launcher await does
+not stop its native launcher thread. Every durable `launching` row remains in
+the cold-drain census, including historical rows or rows without an in-memory
+session. Drain refuses while any such launch outcome is unresolved, even after
+the original coroutine returned or a new frontend rehydrated the database.
 An already-registered replacement is identity-checked and adopted, including
 when the former owner crashed between registration and its journal update.
 A launch marked in progress without provable replacement identity remains
 fenced rather than spawning another native process.
+
+An explicit dormant stop persists a fresh `cold_recovery_stop_token` before
+waiting for lifecycle ownership. Startup and heartbeat recovery refuse any
+retained token. Manual resume may override only the token it captured at
+admission; a newer stop wins at the launch and reconnect boundaries. Successful
+manual admission clears only its captured token, and background recovery can
+be re-enabled only by a conditional database write that respects newer stops.
+Busy-refused stops create no token; ordinary redeploy detach is not a dormant
+stop. Schema 29 adds this nullable gate. Legacy stopped, recovery-disabled rows
+receive conservative ambiguity tokens because the older schema cannot prove
+whether suppression came from cold drain or an explicit stop. They require
+manual resume rather than invented operator provenance.
 
 An interrupted session without a surviving replacement is loaded into a new
 local Session Host using the **same persisted native conversation**.

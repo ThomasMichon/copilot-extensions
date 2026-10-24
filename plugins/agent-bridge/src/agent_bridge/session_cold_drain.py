@@ -213,10 +213,13 @@ async def cold_drain(
     nonresumable: list[str] = []
     preserved: list[str] = []
     failures: list[dict[str, str]] = []
+    pending_launches = set(cold_outages.unsettled_launches(manager.db))
     if getattr(manager, "_active_acquisitions", 0):
         failures.append({"session_id": "", "reason": "in-flight acquisition remains fenced"})
     else:
         for session in list(manager._sessions.values()):
+            if session.session_id in pending_launches:
+                continue
             record = manager._host_index.get(session.session_id)
             if (
                 session.client is None
@@ -273,6 +276,13 @@ async def cold_drain(
         for session in manager._sessions.values()
         if session.client is not None and session.client.is_running
     ]
+    for session_id in cold_outages.unsettled_launches(manager.db):
+        failures.append(
+            {
+                "session_id": session_id,
+                "reason": "native replacement launch outcome remains unresolved",
+            }
+        )
     if (
         not manager.is_draining
         or busy

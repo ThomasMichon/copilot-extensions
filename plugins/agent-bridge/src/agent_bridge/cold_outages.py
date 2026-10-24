@@ -28,6 +28,10 @@ log = logging.getLogger("agent-bridge")
 RECONNECT_PROMPT = "Resume. Host agent-bridge updated."
 
 
+class ColdRecoveryStoppedError(ValueError):
+    """A durable stop superseded automatic or previously admitted recovery."""
+
+
 def _confirmed(row: dict[str, Any]) -> bool:
     if row["state"] != "reconnected" or not row["reconnect_evidence_json"]:
         return False
@@ -60,12 +64,61 @@ class _RecoveryAdmission:
     manager: Any
     session_id: str
     task: Any
+    stop_token: str | None
+    automatic: bool
     active: bool = True
+    manual_admitted: bool = False
 
 
 _recovery_admission: ContextVar[_RecoveryAdmission | None] = ContextVar(
     "cold-recovery-admission", default=None,
 )
+
+
+@dataclass
+class _AutomaticRecovery:
+    manager: Any
+    session_id: str
+    task: Any
+    active: bool = True
+
+
+_automatic_recovery: ContextVar[_AutomaticRecovery | None] = ContextVar(
+    "automatic-cold-recovery", default=None,
+)
+
+
+def _stop_token(manager: SessionManager, session_id: str) -> str | None:
+    row = manager.db.get_session(session_id)
+    if row is None:
+        raise KeyError(session_id)
+    return row["cold_recovery_stop_token"]
+
+
+def _assert_recovery_current(manager: SessionManager, session_id: str) -> _RecoveryAdmission:
+    held = _recovery_admission.get()
+    if (
+        held is None or not held.active or held.manager is not manager
+        or held.session_id != session_id or held.task is not asyncio.current_task()
+    ):
+        raise ValueError("cold recovery requires its task-bound admission")
+    if _stop_token(manager, session_id) != held.stop_token or (
+        held.automatic and held.stop_token is not None
+    ):
+        raise ColdRecoveryStoppedError("Durable stop superseded cold recovery admission")
+    return held
+
+
+def manual_recovery_stop_token(manager: SessionManager, session_id: str) -> str | None:
+    """Authorize only the stop token captured by this task's manual resume."""
+    held = _recovery_admission.get()
+    if (
+        held is not None and held.active and held.manager is manager
+        and held.session_id == session_id and held.task is asyncio.current_task()
+        and not held.automatic
+    ):
+        return held.stop_token
+    return None
 
 
 @contextmanager
@@ -75,17 +128,39 @@ def recovery_admission(manager: SessionManager, session_id: str) -> Iterator[Non
     if held is not None and held.active and held.task is asyncio.current_task():
         if held.manager is not manager or held.session_id != session_id:
             raise ValueError("native recovery admission belongs to another session")
+        _assert_recovery_current(manager, session_id)
         yield
         return
     if manager.is_draining:
         from .session_manager import DaemonDrainingError
 
         raise DaemonDrainingError("session")
-    held = _RecoveryAdmission(manager, session_id, asyncio.current_task())
+    origin = _automatic_recovery.get()
+    if origin is not None and (
+        not origin.active or origin.manager is not manager
+        or origin.session_id != session_id or origin.task is not asyncio.current_task()
+    ):
+        raise ValueError("automatic cold recovery belongs to another task/session")
+    stop_token = _stop_token(manager, session_id)
+    if origin is not None and stop_token is not None:
+        raise ColdRecoveryStoppedError("Automatic cold recovery is durably stopped")
+    held = _RecoveryAdmission(
+        manager, session_id, asyncio.current_task(), stop_token, origin is not None,
+    )
     token = _recovery_admission.set(held)
     manager._active_acquisitions = getattr(manager, "_active_acquisitions", 0) + 1
     try:
         yield
+        if held.manual_admitted:
+            _assert_recovery_current(manager, session_id)
+            if not manager.db.clear_cold_recovery_stop(session_id, held.stop_token):
+                raise ColdRecoveryStoppedError("A newer stop superseded manual recovery")
+            row = latest(manager.db, session_id)
+            session = manager.get_session(session_id)
+            if row is not None and _confirmed(row) and session is not None:
+                session.background_recovery_enabled = manager.db.update_session_background_recovery(
+                    session_id, True,
+                )
     finally:
         held.active = False
         _recovery_admission.reset(token)
@@ -97,7 +172,11 @@ def admitted_recovery(method: Any) -> Any:
     async def run(manager: SessionManager, session_id: str, *args: Any, **kwargs: Any) -> Any:
         session_id = manager._resolve_ref(session_id) or session_id
         with recovery_admission(manager, session_id):
-            return await method(manager, session_id, *args, **kwargs)
+            result = await method(manager, session_id, *args, **kwargs)
+            held = _assert_recovery_current(manager, session_id)
+            if not held.automatic:
+                held.manual_admitted = True
+            return result
 
     return run
 
@@ -113,6 +192,7 @@ def reconnect_admitted_before_drain(
     ):
         return False
     require_custody(manager, session_id)
+    _assert_recovery_current(manager, session_id)
     row = latest(manager.db, session_id)
     session = manager.get_session(session_id)
     return (
@@ -401,6 +481,7 @@ def claim(manager: SessionManager, session: Session) -> dict[str, Any]:
 
 def launching(manager: SessionManager, session: Session) -> None:
     require_custody(manager, session.session_id)
+    _assert_recovery_current(manager, session.session_id)
     row = latest(manager.db, session.session_id)
     if row["recovery_phase"] != "reserved":
         raise ValueError("registered/uncertain replacement must be reconciled, not relaunched")
@@ -427,6 +508,7 @@ def guarded_resume(method: Any) -> Any:
         session = manager.get_session(session_id)
         if session is None:
             raise KeyError(session_id)
+        _assert_recovery_current(manager, session_id)
         with operation(manager, session_id):
             row = claim(manager, session)
             partial = bool(
@@ -470,6 +552,18 @@ def latest(db: Any, session_id: str) -> dict[str, Any] | None:
         (session_id,),
     )
     return dict(rows[0]) if rows else None
+
+
+def unsettled_launches(db: Any) -> list[str]:
+    """Retain every launching journal row, including orphaned historical rows."""
+    if not available(db):
+        return []
+    return [
+        row["session_id"]
+        for row in db.execute_read(
+            "SELECT session_id FROM cold_outages WHERE recovery_phase='launching' ORDER BY rowid"
+        )
+    ]
 
 
 def prepare(manager: SessionManager, session: Session, identities: dict[str, Any]) -> str:
@@ -554,6 +648,7 @@ def resume_policy(manager: SessionManager, session: Session) -> dict[str, Any] |
     if row is None:
         return None
     require_custody(manager, session.session_id)
+    _assert_recovery_current(manager, session.session_id)
     if row["state"] not in {
         "interrupted",
         "reconnect_admitted",
@@ -586,6 +681,7 @@ async def reconnect(manager: SessionManager, session: Session, row: dict[str, An
     if latest(manager.db, session.session_id)["recovery_phase"] != "registered":
         raise ValueError("reconnect requires a registered owned replacement")
     async with session._turn_start_lock:
+        _assert_recovery_current(manager, session.session_id)
         if session.acp_session_id != row["native_session_id"]:
             raise ValueError("cold reconnect native identity changed")
         saved = manager.db.execute_read(
@@ -695,7 +791,9 @@ def provider_result(
         ),
     )
     if confirmed:
-        manager._set_background_recovery_enabled(session, True)
+        session.background_recovery_enabled = manager.db.update_session_background_recovery(
+            session.session_id, True,
+        )
 
 
 async def recover(
@@ -724,6 +822,8 @@ async def recover(
         if session is None:
             log.error("Cold recovery has no retained session %s", row["session_id"])
             continue
+        if _stop_token(manager, session.session_id) is not None:
+            continue
         if manager._generation_id == latest(manager.db, session.session_id)["owner_generation"]:
             continue
         if row["state"] == "nonresumable" or (
@@ -732,10 +832,15 @@ async def recover(
             continue
         if _confirmed(row) and session.client is not None and session.client.is_running:
             continue
+        origin = _AutomaticRecovery(manager, session.session_id, asyncio.current_task())
+        token = _automatic_recovery.set(origin)
         try:
             await manager.resume_session(session.session_id, drain=False, allow_recreate=False)
         except (OSError, RuntimeError, ValueError, KeyError):
             log.exception("Same-native cold recovery refused for %s", session.session_id)
             continue
+        finally:
+            origin.active = False
+            _automatic_recovery.reset(token)
         count += 1
     return count

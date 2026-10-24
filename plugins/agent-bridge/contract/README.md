@@ -192,8 +192,11 @@ no-native allocation. Supporting native-fixture regressions cover ownership
 races, interrupted drain/registration/claim windows, supersession ordering,
 partial exit and uncertain admission. The required portfolio also covers
 ordinary and cold recovery versus concurrent drain, strict completion-flag
-decoding, and the unresolved-reconnect fence across
-prompt-triggered, automatic and externally seeded handoffs. These are source evidence, not native
+decoding, the unresolved-reconnect fence across
+prompt-triggered, automatic and externally seeded handoffs, durable explicit-stop
+intent across recovery and schema migration, and real cancelled launcher threads
+retained in same-frontend, rehydrated and orphan-row drain censuses.
+These are source evidence, not native
 Copilot, deployment or host qualification.
 
 The affected semantic owners share this explicitly labelled operation evidence.
