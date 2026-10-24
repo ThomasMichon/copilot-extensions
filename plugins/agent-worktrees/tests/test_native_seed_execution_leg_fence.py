@@ -41,6 +41,7 @@ def native_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> NativeReco
     monkeypatch.setattr(cfg, "load_config", lambda *a, **kw: config)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
+    (tmp_path / "checkout").mkdir()
     path = tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(tmp_path / "checkout"), "demo",
         "test", "windows", tmp_path,

@@ -737,3 +737,24 @@ do not establish that later transport fences preserve installed parity.
   authority. Continue Phase 3 outcome correlation through existing owners and
   restore the negotiated target-owned SSH native fence. No containing release,
   authorized rollout or installed conversation acceptance is implied.
+- **2026-10-24** -- Linked-journal Manager observation slice #8588 merged after
+  final-head approval, resolved AHP/Unicode findings and green required CI.
+  Manager observations now retain resolution, launch, Restore, embodiment
+  and provider handoff boundaries, without asserting allocation, Copilot start
+  or prompt acceptance. Engine/target/native correlation and the negotiated
+  SSH native-seed fence remain the next executable work. Both efforts stay
+  Active; release/authorized rollout and original delivered conversation,
+  exactly-once and cleanup gates remain open.
+- **2026-10-24** -- Prepared negotiated target-native SSH admission: version-2
+  envelopes require the matching native capability flag before configuration,
+  bind the saved Manager attempt ID in the existing target receipt, and retain
+  native fencing on the identity-only launch hop. Structured mutation handlers
+  advance to protocol 8 rather than allowing an older daemon to drop the new
+  metadata. Version-1 reads remain compatible. Remote New/cold Resume composers
+  are restored through this contract, without host-local remote-leg lookup.
+  Target daemon replay/provider checks, encoded Windows transport, Manager
+  client/observation and UI checks pass; adjacent hosting fixtures now create
+  the real workspace and pass mandatory project/hosting identity. Current-head
+  review/CI, native POSIX transport qualification and containing-release/
+  authorized installed conversation acceptance remain open. This is source
+  progress, not a delivered repair or completion of either parent effort.

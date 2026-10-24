@@ -27,12 +27,17 @@ optional launch planning and returns no `launch` member.
 The Worktrees composer is host-rendered for local and machine-SSH sources.
 Prompted remote `resolve --json --machine <target>` invokes the target's own
 `resolve --json --launch-request-b64 <envelope>` first. The UTF-8 JSON envelope
-is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries version 1, a 32-character hexadecimal
+is bounded to 7168 bytes (7 KiB, including JSON metadata) and carries a version, a 32-character hexadecimal
 `request_id`, `kind` (`new` or `resume`), `worktree_id` (null for New), `text`
-and Boolean `no_mux`. POSIX shell arguments are quoted; PowerShell commands
+and Boolean `no_mux`. Version 1 remains readable for legacy callers. Native-fenced
+callers use version 2, adding exactly `native_seed_required: true` and
+`attempt_id` (32 lowercase hexadecimal characters, or null for an unjournaled
+caller). The command must also carry `--require-native-seed`; a missing or
+contradictory flag/envelope refuses before configuration or admission.
+POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
 Structured admission/status accepts only its protocol options, `--json`, and
-the hosting-admission capability fence;
+the hosting-admission capability fence and the matching native-seed fence;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
@@ -41,13 +46,22 @@ launch-request error envelope and exit status 3 for both admission and status;
 they never enter ordinary or remote machine resolution.
 
 The target's existing tracking-write daemon owns admission and seed staging.
-Hosting-aware admission and seed stage/take require verb version 7; older
-writers cannot receive a weak fallback. The receiver checks fresh policy before
+Structured admission, creation and staging require verb version 8 so older
+writers cannot discard version-2 correlation. Seed stage/take retain their
+existing hosting/native protocol. Older writers cannot receive a weak fallback.
+The receiver checks fresh policy before
 writing an admission receipt or seed.
 Admission retains a text-free fingerprint and allocated worktree/intent IDs
 under external tracking state. The returned receipt carries those identities,
-not prompt text. The host's subsequent remote plan launches the same worktree
-with `--stage-launch-seed --seed-id <id>`. The existing target setup and native
+not prompt text. Version-2 receipt and status include the persisted attempt ID
+and native requirement. Replay binds those fields as well as the intent
+fingerprint; an attempt ID is correlation, never permission to retry or create.
+The host verifies the receipt's version, native capability and all identities.
+Its remote plan exposes `launch_request_version: 2`, `launch_attempt_id` and
+`native_seed_required: true`, alongside the existing request/worktree/seed IDs.
+The subsequent launch selects the same worktree with
+`--stage-launch-seed --seed-id <id> --require-native-seed`.
+The existing target setup and native
 backend boundary perform cold checks, reservation, failed-start release and
 successful handoff discard.
 
@@ -701,11 +715,15 @@ The Manager requests `resolve --stage-launch-seed --require-native-seed` for
 prompted requests. The latter is a capability handshake: engines without the
 native execution-leg fence reject it before allocation or staging. The fence
 itself is unconditional in current engines, including direct stage callers.
-Direct engine requests requiring this fence refuse remote/cross-environment
-dispatch before SSH admission; the capability requirement is never silently dropped.
-Launch-seed stage/take mutation protocol version 5 and structured
-`launch_request_stage` version 4 exclude older resident handlers that lack that
-fence, using the existing same-code fallback. Both retain launch-admission guards.
+Remote/cross-environment requests requiring this fence use the version-2
+structured admission above, only for non-preview JSON New or cold Resume with
+explicit prompt text. `--launch-attempt-id <hex>` optionally correlates that
+request with the Manager's saved intent; it is refused for local, seedless,
+preview or non-native requests rather than silently ignored. Both target hops
+keep the native requirement. There is no weaker capability-stripping retry.
+Launch-seed stage/take and structured admission exclude older resident handlers
+through their declared verb versions and the existing same-code fallback.
+Both retain launch-admission guards.
 
 Staging validates the actual execution leg while holding the same strict
 per-record lock that publishes the intent. Active, unknown, or opaque hosted

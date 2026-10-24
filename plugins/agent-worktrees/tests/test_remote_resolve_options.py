@@ -85,24 +85,26 @@ def test_remote_plan_preserves_supported_options_and_quotes_values(
 
 @pytest.mark.parametrize("target", ["remote-host", "local-host"])
 @pytest.mark.parametrize("selector", [["--new"], ["--worktree-id", "wt-a"]])
-def test_native_seed_requirement_refuses_remote_dispatch_before_target_mutation(
+def test_native_seed_requirement_reaches_only_structured_remote_admission(
     remote, monkeypatch: pytest.MonkeyPatch, capfd, target: str, selector: list[str],
 ) -> None:
     _, entry, plans = remote
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *args, **kwargs: {
         entry.key: entry, "local-host": replace(entry, key="local-host"),
     })
-    monkeypatch.setattr(
-        remote_seed_launch, "prepare",
-        lambda *args, **kwargs: pytest.fail("pre-fence target received prompt admission"),
-    )
+    calls = []
+    def prepare(config, alias, shell, args, text):
+        calls.append((args, text))
+        return {"action": "remote"}
+    monkeypatch.setattr(remote_seed_launch, "prepare", prepare)
     args = _parse([
         "--json", "--machine", target, "--environment", "WSL", *selector,
         "--seed", "retained intent", "--stage-launch-seed", "--require-native-seed",
     ])
-    assert resolve_cli.cmd_resolve(args) == 2
-    assert "native-seed" in json.loads(capfd.readouterr().out)["error"]
-    assert not plans
+    assert resolve_cli.cmd_resolve(args) == 0
+    assert len(plans) == len(calls) == 1
+    assert "--require-native-seed" in calls[0][0]
+    assert calls[0][1] == "retained intent"
 
 
 @pytest.mark.parametrize("json_mode", [False, True])
@@ -221,7 +223,7 @@ def test_remote_option_inventory_covers_all_resolve_parser_destinations() -> Non
         "dry_run", "recovery", "defer_projections", "no_resume", "bare_resume", "restore",
         "no_mux", "no_fast_forward", "json", "worktree_id", "codename", "base", "auto",
         "new_worktree", "bridge", "profile", "defer_new_seed", "stage_launch_seed",
-        "require_native_seed", "native_resume_session",
+        "require_native_seed", "native_resume_session", "launch_attempt_id", "require_agent_hosting",
         "seed_id", "launch_request_b64", "launch_request_status", "machine", "environment",
         "target_no_mux", "parent_session", "caller_worktree", "owner_ref", "seed", "copilot_args",
     }
@@ -238,5 +240,5 @@ def test_powershell_remote_plan_quotes_each_value(remote) -> None:
     script = base64.b64decode(plan["remote_command"].rsplit(" ", 1)[1]).decode("utf-16le")
     assert script == (
         "& 'example' '--profile' 'profile with ''quotes''; $value' "
-        "'--no-resume' '--no-fast-forward'; exit $LASTEXITCODE"
+        "'--no-resume' '--no-fast-forward' '--require-agent-hosting'; exit $LASTEXITCODE"
     )

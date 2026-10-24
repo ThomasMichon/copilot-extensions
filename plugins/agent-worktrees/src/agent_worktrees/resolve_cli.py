@@ -20,6 +20,7 @@ from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
 from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
+from .resolve_machine_cli import remote_selector_args as _remote_selector_args
 
 
 def _core():
@@ -264,40 +265,6 @@ class _ResolveEarlyExit(RuntimeError):
         self.exit_code = exit_code
 
 
-def _remote_selector_args(state: ResolveCommandState) -> list[str]:
-    if getattr(state.args, "require_native_seed", False):
-        raise ValueError("Remote --require-native-seed is unsupported; launch on the target.")
-    if getattr(state.args, "owner_ref", None):
-        raise ValueError("Remote --owner-ref is unsupported; create owned worktrees on the target.")
-    if getattr(state.args, "copilot_args", None):
-        raise ValueError("Remote Copilot arguments are unsupported; pass them on the target.")
-    args = (
-        ["--base"] if state.use_base else ["--new"] if state.use_new else
-        ["--worktree-id", str(state.worktree_id)] if state.worktree_id else []
-    )
-    for name in ("bare_resume", "restore"):
-        if getattr(state.args, name, False):
-            args.append("--" + name.replace("_", "-"))
-    if getattr(state.args, "target_no_mux", False) or (
-        not state.use_json and getattr(state.args, "no_mux", False)
-    ):
-        args.append("--no-mux")
-    for name in (
-        "dry_run", "no_resume", "no_fast_forward", "recovery", "defer_projections",
-        "bridge", "defer_new_seed", "stage_launch_seed",
-    ):
-        if getattr(state.args, "seed", None) and name in ("defer_new_seed", "stage_launch_seed"):
-            continue  # Structured admission already guarantees queued seed staging.
-        if getattr(state.args, name, False):
-            args.append("--" + name.replace("_", "-"))
-    for name in ("profile", "parent_session", "caller_worktree", "native_resume_session"):
-        value = getattr(state.args, name, None)
-        if value is not None:
-            args.append("--" + name.replace("_", "-") + "=" + str(value))
-    args.append("--require-agent-hosting")
-    return args
-
-
 def add_parsers(sub) -> None:
     """Register the ``resolve`` subcommand."""
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
@@ -381,6 +348,7 @@ def add_parsers(sub) -> None:
         help="Require atomically fenced native launch-seed staging",
     )
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
+    parser.add_argument("--launch-attempt-id", default=None, help="Correlate a negotiated remote prompt admission")
     parser.add_argument("--launch-request-b64", default=None, help="Accept a structured target-local launch request")
     parser.add_argument("--launch-request-status", default=None, help="Inspect an admitted target-local launch request")
     parser.add_argument("--machine", default=None, help="Target machine name (bypasses machine picker)")
@@ -448,6 +416,20 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _cmd_resolve(args: argparse.Namespace) -> int:
+    attempt_id = getattr(args, "launch_attempt_id", None)
+    if attempt_id is not None:
+        from .launch_request import _protocol_fields
+
+        try:
+            _protocol_fields({"version": 2, "attempt_id": attempt_id, "native_seed_required": True})
+            if not (
+                getattr(args, "json", False) and getattr(args, "machine", None)
+                and getattr(args, "seed", None) and getattr(args, "require_native_seed", False)
+                and not getattr(args, "dry_run", False)
+            ):
+                raise ValueError("Launch attempt correlation requires negotiated remote JSON prompt admission")
+        except ValueError as exc:
+            return output._json_error(str(exc), exit_code=2)
     native_resume = getattr(args, "native_resume_session", None)
     if native_resume is not None and (
         not native_resume or not getattr(args, "worktree_id", None)
@@ -729,6 +711,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             f"{state.requested_machine} "
             f"{getattr(state.args, 'environment', None) or ''}".strip()
         )
+
+    if getattr(state.args, "launch_attempt_id", None) is not None:
+        return output._json_error("Launch attempt correlation requires a remote target", exit_code=2)
 
     try:
         _validate_profile_assignment_config(config)

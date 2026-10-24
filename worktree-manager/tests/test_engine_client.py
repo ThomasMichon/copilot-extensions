@@ -945,6 +945,14 @@ def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expecte
     def run_json(project, args, *, timeout, stream_progress):
         assert stream_progress is True
         seen.append(timeout)
+        if target and seed:
+            return {
+                "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
+                "launch_request_version": 2, "native_seed_required": True,
+                "launch_attempt_id": None, "launch_request_id": "a" * 32,
+                "seed_id": "a" * 32, "seed_pending": True,
+                "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+            }
         return {
             **_RESUME_PLAN, "seed_pending": bool(seed),
             "seed_id": "intent" if seed else None,
@@ -957,6 +965,56 @@ def test_resolve_remote_prompt_timeout_floor(new, target, seed, timeout, expecte
         target_machine=target, seed=seed, timeout=timeout,
     )
     assert seen == [expected]
+
+
+@pytest.mark.parametrize("new", [False, True])
+@pytest.mark.parametrize("damage", [
+    None, "action", "launch_request_version", "native_seed_required", "launch_attempt_id",
+    "launch_request_id", "seed_id", "seed_kind", "worktree_id", "missing",
+])
+def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
+    calls = []
+    def run_json(project, args, **kwargs):
+        calls.append(args)
+        assert args[args.index("--launch-attempt-id") + 1] == "b" * 32
+        assert "--require-native-seed" in args
+        result = {
+            "action": "remote", "ssh_alias": "target", "remote_command": "fixture",
+            "launch_request_version": 2, "native_seed_required": True,
+            "launch_attempt_id": "b" * 32, "launch_request_id": "a" * 32,
+            "seed_id": "a" * 32, "seed_pending": True,
+            "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+        }
+        if damage == "missing":
+            del result["launch_attempt_id"]
+        elif damage:
+            result[damage] = {
+                "action": "exec", "launch_request_version": 1, "native_seed_required": False,
+                "launch_attempt_id": "c" * 32, "launch_request_id": "invalid",
+                "seed_id": "c" * 32, "seed_kind": "wrong", "worktree_id": "",
+            }[damage]
+        return result
+    monkeypatch.setattr(ec, "run_json", run_json)
+    options = dict(new=new, worktree_id=None if new else "wt-a", target_machine="target",
+                   seed="fixture", launch_attempt_id="b" * 32)
+    if damage:
+        with pytest.raises(ec.EngineFeatureUnavailable, match="inspect the target admission"):
+            ec.resolve_launch_plan("example", **options)
+    else:
+        assert ec.resolve_launch_plan("example", **options).action == "remote"
+    assert len(calls) == 1
+
+
+def test_old_engine_never_retries_without_attempt_correlation(monkeypatch):
+    calls = []
+    def run_json(project, args, **kwargs):
+        calls.append(args)
+        raise ec.EngineError("unrecognized arguments: --launch-attempt-id")
+    monkeypatch.setattr(ec, "run_json", run_json)
+    with pytest.raises(ec.EngineFeatureUnavailable, match="native-transport fence"):
+        ec.resolve_launch_plan("example", new=True, target_machine="target",
+                               seed="fixture", launch_attempt_id="b" * 32)
+    assert len(calls) == 1
 
 
 def test_resolve_base_sends_base_flag(monkeypatch):

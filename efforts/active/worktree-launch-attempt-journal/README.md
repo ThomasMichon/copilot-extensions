@@ -49,8 +49,9 @@ or permission to replay an ambiguous creation or prompt.
 
 At effort start, Manager saved prompt-only history from the confirmation widget.
 Storage #8505 and confirmation #8542 now preserve known-target intent before
-effects. Truthful unresolved-locality refusal recording merged in #8574;
-comprehensive outcome correlation remains incomplete. Engine activity
+effects. Truthful unresolved-locality refusal recording merged in #8574 and Manager
+boundary observations merged in #8588. Engine/target/native outcome correlation
+remains incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
@@ -447,3 +448,46 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   seam regressions prove that valid Unicode resolution does not block launch.
   The affected storage/outcome/AHP/production portfolio passes 188 cases with
   four skips; current-head review and CI still apply.
+
+### 2026-10-24 -- Manager observations merged; engine/target correlation next
+
+- #8588 merged as `2a0bbfb2e653223c694b493713c2f261fc90db3c` after the final
+  head received approval with no open issues and required CI, attribution and
+  identifier checks passed. Both parent issues remain open. Review corrected
+  AHP pre-effect ordering and engine-supported Unicode worktree identities.
+- Re-read both canonical plans after merge. Only the bounded Manager
+  observation item is complete; target receipt binding, native acceptance,
+  negotiated SSH seeds, retention/migration, inspection and installed
+  same-conversation validation remain open.
+- The source is forwarded onto the confirmed merged history with a recovery
+  backup. All eleven non-index changed blobs matched the merge exactly.
+  The owned effort-index row also matched; its only additional difference
+  was an unrelated contributor's index update, retained rather than replayed
+  over. The guarded routine sync still refused its deleted remote PR ref
+  before changing source.
+- Continue correlation through existing engine/target owners without giving
+  the journal replay authority. Keep the native transport fence atomic and
+  negotiate receiver capability before enabling remote prompt delivery.
+
+### 2026-10-24 -- Negotiated remote prompted correlation prepared
+
+- Added version-2 structured admission for non-preview remote New/cold Resume
+  prompts. The selected target checks the matching native capability before
+  configuration, persists the attempt ID with its existing request/worktree/seed
+  receipt, and checks that binding on replay. Mutation protocol 8 excludes older
+  daemon handlers; legacy version-1 reads remain supported. Target request ID,
+  not journal attempt ID, continues to own recovery/idempotency.
+- Restored remote prompt composition only through that negotiated path. The
+  Manager passes the saved attempt ID, verifies capability and all returned
+  identities before launch, and never queries a remote execution leg locally.
+  The second SSH hop keeps the native requirement and carries identities, not
+  another prompt copy. Open and native cold-start/duplicate-delivery fences are
+  unchanged. Local and seedless engine/native correlation remain incomplete.
+- Target protocol/daemon/replay/native-fence checks pass, including real Windows
+  encoded-shell transport with version-1/version-2 decoding. Manager client,
+  observations and UI checks pass. Corrected adjacent hosting fixtures without
+  weakening admission. Source module-size, lint and install-contract gates pass.
+  Native POSIX transport is not qualified by the Windows run; actual installed
+  local/SSH conversation, prompt acceptance, release/rollout, retention,
+  inspection and sweep gates remain open. Current-head review and required CI
+  are still owed before merge.

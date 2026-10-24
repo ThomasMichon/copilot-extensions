@@ -1,0 +1,9 @@
+{
+  "comment": "Restore remote New and cold Resume prompt composition through negotiated target-native admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
