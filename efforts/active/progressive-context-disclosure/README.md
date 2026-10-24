@@ -75,6 +75,12 @@ upfront context and unnecessary exploration.
   claim, frozen result and independent source/native/archival hold. Normal
   review, actual merge and full current-root readback precede tracker
   supersession; intake selects no normative standard or implementation owner.
+- **Two-family task-skill intake:** #4197 uses the same Phase 8
+  migration-intake/domain-acceptance gate and the existing Phase 4 authoring
+  lane. Its finite documentation acceptance does not select a new disclosure
+  standard or make unrelated calibration/native activation prerequisites of a
+  valid bounded refactor. Existing authority and genuinely applicable
+  prerequisites remain; no implementation or resource custody changes.
 
 ## Context
 
@@ -285,6 +291,113 @@ row and complete unchanged historical Journal. A topical link, old #7868
 receipt, proposed payload or title is not delivery. Missing scope or custody
 keeps that original OPEN. Journal only actual intake; no feature completion,
 cancellation, implementation/native authorization or blanket ACK regime follows.
+
+#### Direct complete two-family skill-entry/reference refactor from #4197
+
+<!-- backlog-reconciliation:7556:transfer:4197:to:efforts/active/progressive-context-disclosure/README.md -->
+
+This direct unchecked intake uses the SAME existing reviewed Active ROOT
+through its Phase 8 migration-intake deduplication/domain-acceptance gate and
+the existing plugin-owned authoring/migration lane. Preserve ALL incumbent
+Plan rows, actual global Validation, Participants/Coordination and entire
+historical Journal. The architecture, evaluation and authoring/review lanes
+retain their roles, frozen evidence, rejected/confounded/invalid
+classifications, original repetitions/alternatives, nonexpiring claims and
+separate native/source/archival holds. This finite task-skill refactor does not
+select a new overarching disclosure syntax, schema or native composition
+standard. It creates no new programme or implementation/resource owner.
+
+##### Direct unchecked Plan
+
+- [ ] P1. Refactor BOTH actual Bridge and Codespaces skill families into concise
+  usable entrypoints with attributable subject/applicability routing into
+  substantive end-to-end references. Preserve frontmatter/discovery and
+  supported skill names; do not replace the body with an insufficient pointer
+  or move critical first-action safety out of view.
+- [ ] P2. Credit the existing Bridge command catalog and peer-message
+  references. Reuse or extend their substantive material rather than duplicate
+  it or call it absent; make the entry/guide/backlink path coherent for a
+  complete supported journey. Supply the missing suitable Codespaces lifecycle
+  reference decomposition rather than merely adding unrelated standalone
+  skills.
+- [ ] P3. Preserve complete supported setup/readiness, account/venue/target
+  selection, source-qualified command-catalog invocation, safe sync/async and
+  long-running dispatch, multiturn observation/results and failure/uncertainty
+  handling for BOTH families. A carrier receipt, session listing or nominal
+  command exit is not operation acceptance or completion.
+- [ ] P4. Preserve Bridge live-peer and durable-versus-internal session
+  identity, continuation/handoff, effort-slice coordination and remote worktree
+  close-out, and Codespaces CLI-mode, diagnostic-only SSH, claims/exclusive
+  custody, finalization/session recovery, stop-versus-delete, sync and
+  credential-relay boundaries. These are reference content, not permission to
+  run the workflows.
+- [ ] P5. Reconcile extracted wording against CURRENT owning authority before
+  moving it. Preserve real owner/consent/trust/failure/compatibility safeguards
+  and actual resource obligations; do not copy obsolete force, expiry, retry or
+  process-retirement advice into a new guide as if extraction ratified it. Any
+  semantic correction is explicit and reviewed, not silently disguised as
+  mechanical movement.
+- [ ] P6. Keep an actual entry-to-end path that is discoverable without eagerly
+  ingesting every command/workflow. Measure actual entry/reference UTF-8 size,
+  character/word counts and route shape before/after, but impose no guessed
+  byte/line/token threshold and claim no startup latency or model-admission
+  improvement from sizes alone.
+- [ ] P7. Keep finite documentation acceptance separate from #4138 runtime
+  ingestion/cache/minimal-mode performance and from ROOT normative
+  calibration/native activation. Use currently approved task-skill/reference
+  rules. Do not waive an actual existing contract prerequisite; if a proposed
+  semantic form needs a decision, record that bounded dependency explicitly
+  rather than requiring unrelated whole-parent completion.
+
+##### Direct unchecked local Validation
+
+- [ ] V1. Review BOTH actual resulting entries and referenced guides from their
+  supported entrypoints. Verify concise routing plus substantive end-to-end
+  coverage, meaningful owner/applicability cues, correct relative bases,
+  backlinks and no missing/escaping target. Counts alone or a directory entry
+  are not the acceptance.
+- [ ] V2. Map every preserved current workflow and safeguard from the
+  original/inherited #4197 requirement to its new authoritative location. Check
+  command ownership, sync/async/result/continuation semantics,
+  claims/cleanup/recovery and source/credential boundaries without executing a
+  workflow.
+- [ ] V3. Record actual before/after body/reference sizes and content-path
+  review with the exact source and qualification limits. No arbitrary numeric
+  threshold, performance benchmark, model trial or mandatory native/service
+  experiment is added to this documentation-only outcome.
+- [ ] V4. Apply the owning normal documentation/customization/link/publication
+  checks when separately authorized for implementation; do not count a merely
+  proposed split or unrelated #7295 transport guide as complete. No check,
+  hook, archive, skill operation, test or native session is executed by this
+  intake.
+
+##### Continuing Coordination and delivery gate
+
+- [ ] C1. Use existing ROOT Phase 8 migration-intake review and same
+  authoring/plugin custodians; preserve architecture/evaluation/review lanes
+  and all source/resource holds. The documented domain-Plan acceptance is
+  normal review of the actual addition, not a new universal ACK, agent,
+  alternate effort or source reassignment.
+- [ ] C2. Continue through ROOT Plan/Validation/Journal and eligible OPEN
+  bounded-source claims before implementation. Preserve the
+  original/inherited #1612/#1615-#1619 history and separate
+  #2173/#2256/#1508/#7101 scopes; closed historical trackers are provenance, not
+  required live claim tokens. Do not leave superseded #4197 as a required live
+  token.
+- [ ] C3. Obtain a NEW normal reviewed ACTUAL source merge delivering this
+  ENTIRE direct unchecked Plan, local Validation, actual global ROOT Validation
+  entry and continuing Coordination. Old ROOT creation, #7868's earlier
+  unrelated intake, title/child link, Draft/Done substitute or a proposal is
+  not delivery.
+- [ ] C4. BEFORE #4197 supersession, fully read back the FULL CURRENT Active
+  ROOT Plan/own global Validation/Participants/Coordination and complete
+  historical Journal. Verify all original/current workflow clauses,
+  alternatives, evidence tiers, unknowns, incumbent rows and actual same
+  owners/claims/holds survive. Journal only the actual administrative intake.
+  If domain acceptance, eligibility, complete delivery or custody preservation
+  is unresolved, RETAIN #4197. No skill/product code, source/resource/lease
+  transfer, native operation, actual refactor or parent completion is
+  authorized or claimed.
 
 ### Phase 5 - Plugin-owned rendering and native-host seam
 
@@ -504,6 +617,17 @@ and creates no replacement umbrella or competing effort.
 
 ## Validation Plan
 
+- [ ] Global Validation C (#4197): resolve EVERY direct two-family Plan/local
+  Validation clause above at its original finite documentation tier: concise
+  Bridge AND Codespaces entries, complete substantive discoverable end-to-end
+  references, correct links and preserved CURRENT
+  authority/safety/compatibility/workflow custody. Administrative intake is not
+  refactoring, model/latency proof or native activation. Preserve EVERY
+  incumbent ROOT Plan AND own Validation item; parent Done/archive requires
+  all resolved OR explicitly transferred to named accepted tracked objectives.
+  This parent gate does not make unrelated experiments, native-host activation
+  or the whole programme prerequisites of a valid bounded skill refactor.
+
 - [ ] Global Validation A (#4139): prove topic/section random access loads the
   required research and interacting source context, not irrelevant full blocks,
   and the actual diagnostic identifies duplicated/overlapping chunks with
@@ -569,6 +693,24 @@ reviewed decision record. Then update authoring guidance and reviewer
 enforcement before migrating the complete contributor stack.
 
 ## Journal
+
+### 2026-10-24 - Two-family task-skill reference acceptance proposed
+
+- Added #4197's complete Bridge AND Codespaces entry/reference refactor
+  directly to Phase 4: seven Plan, four local Validation and four continuing
+  Coordination clauses, plus one actual global Validation entry. All remain
+  unchecked. Existing Bridge catalog/peer references are credited; neither an
+  entry-only pointer nor an unrelated transport guide proves the whole task.
+- Existing Phase 8/migration-intake domain acceptance and the same three lanes
+  govern this addition. Every incumbent checkbox, alternative, frozen result,
+  unknown, native/source/archival hold and historical Journal line is
+  preserved. Normal review, actual merge and full current readback precede
+  source supersession. This finite documentation outcome imposes no arbitrary
+  size threshold, performance/model/native trial or unrelated whole-parent
+  prerequisite; genuinely applicable contract gates and custody remain.
+- This is proposed administrative intake only: no actual skill refactor,
+  implementation, source/resource transfer, experiment, runtime operation or
+  parent completion is declared or authorized.
 
 ### 2026-10-24 - Research-artifact and per-skill cost acceptance proposed
 
