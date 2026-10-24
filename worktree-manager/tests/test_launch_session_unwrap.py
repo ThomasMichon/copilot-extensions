@@ -461,7 +461,7 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
         'run_runtime_preflight "Knowledge plugin preflight" --stream-progress '
         '"${_KNOWLEDGE_ARGS[@]}"'
     ) in sh
-    assert 'resolve_args+=(resolve --require-agent-hosting "$@")' in sh
+    assert 'resolve_args+=(resolve "$@")' in sh
     assert 'AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON"' in sh
     assert "--prepare-projections --json" in sh
     assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
@@ -479,7 +479,7 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
         "Invoke-RuntimePreflight -Label 'Knowledge plugin preflight' "
         "-PreflightArgs $knowledgeArgs -StreamProgress"
     ) in ps
-    assert "@('resolve', '--require-agent-hosting') + $CopilotArgs" in ps
+    assert "@('resolve') + $CopilotArgs" in ps
     assert "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = '1'" in ps
     assert "$env:AGENT_WORKTREES_DEFER_PROJECTIONS = $savedProjectionDeferral" in ps
     assert "'--prepare-projections', '--json'" in ps

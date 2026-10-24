@@ -10,7 +10,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; enforcement and source marker merged; release blocked, adoption gated
+- **Status:** Active; selected adopters enforced; intrinsic launch-command correction in progress
 - **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
   [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
@@ -101,6 +101,10 @@ The operator clarified the discovery defaults during implementation, verbatim:
 
 > Yeah keep in mind this is specific repos opting *out* of agent discovery; by default assume all repos could have an agent when checking them directly. That said, repos.yaml and related.yaml need to opt *in* to declaring an agent, and projects.yaml of course defines only repos expected to launch into Copilot and use Worktree Manager. copilot-extensions is a worktree-class related repo only, no agent
 
+The operator corrected the implementation interface, verbatim:
+
+> So, we introduced a bug, via a `--require-agent-hosting` flag on agent-worktrees; that shouldn't exist. Instead, only the commands which normally would launch copilot should internally enforce this, no flags necessary
+
 ## Plan
 
 ### Phase 0 - Reviewed proposal
@@ -171,10 +175,23 @@ _Agent-recommended follow-through; live changes require separate authorization._
   publish through the normal release flow and validate authorized adoption.
   Keep release, installation and actual enforced behavior distinct.
 
-Release is blocked by the existing coverage-packet defect tracked in #8500 and
-#8516. The existing fix #8508 and its governed Main helper adoption retain their
-release owner; this effort does not fork that fix, widen its evidence cap, retry
-past the gate or claim that a merged source change is installed.
+The earlier coverage-packet release blocker (#8500/#8516) cleared through fix
+#8508 and its governed Main helper adoption. The original enforcement is
+released and selected installed negative checks pass. Final discovery
+acceptance and the corrected Worktrees launch interface remain open; a release
+of the earlier implementation does not close those gates.
+
+### Phase 4 - Intrinsic Worktrees launch enforcement
+
+_Operator-requested correction; no new hosting-policy option._
+
+- [x] Remove the Worktrees hosting flag and its Manager, remote and Dispatch
+  caller plumbing. Keep policy enforcement intrinsic to the actual Copilot
+  launch/resume paths; source and inspection operations receive no launch flag.
+- [x] Prove unflagged launch denial, ordinary remote inspection and automatic
+  selected-receiver compatibility checks without a user-controlled policy flag.
+- [ ] Land the correction through normal review/release and verify authorized
+  installed acceptance before declaring this effort complete.
 
 ## Validation Plan
 
@@ -477,3 +494,70 @@ daemon or separately resolved Worktrees owner has upgraded.
   evidence to that owner rather than creating a competing fix or bypassing
   the cap. Release, installed enforcement and approved catalog reconciliation
   remain unresolved completion gates.
+
+### 2026-10-24 - Released adoption and intrinsic-command correction
+
+- The earlier release blocker cleared through its existing owner. Qualified
+  promotion run 40130392044 and merged release #8677 publish the implementation
+  and actual repository marker. No parallel repair or Main pin bypass was used.
+- Authorized installed checks in selected Linux/WSL and native Windows
+  environments reject managed source hosting at the actual registered checkout.
+  Running Bridge receivers advertise the hosting capability. Approved
+  project-only deregistration preserves the worktree/no-agent repository
+  entries, state directories, all inventoried worktree identities, recorded
+  sessions and claim links. A remaining cached discovery advertisement is not
+  called reconciled merely because registration removal succeeded.
+- The operator rejected the Worktrees hosting flag. It was an unnecessary
+  receiver-acknowledgment mechanism, not permission to weaken intrinsic
+  enforcement. Its unconditional remote injection also reached ordinary
+  `list --json` commands, which do not launch Copilot.
+- Removed that parser option and its Worktrees-targeting Manager, remote,
+  structured-request and Dispatch argument plumbing. Existing launch and
+  receiving guards remain unconditional. Dispatch uses the selected receiver's
+  existing read-only policy contract before ordinary unflagged embodiment;
+  unsupported or malformed receivers still refuse without a launch.
+- The disconnected correction cohorts pass 528 Worktrees cases with 35
+  platform skips, 162 Manager cases with 12 platform skips, and 111 Dispatch
+  cases. They retain negative launch/seed/custody assertions, reject the obsolete
+  option, and exercise real remote source-inspection command serialization.
+  Native qualification, correction review/release and final discovery
+  acceptance remain open; no corrective runtime was deployed from WIP source.
+- Native Windows qualification of the clean correction candidate passes 561
+  Worktrees cases with two platform skips, 162 Manager cases with 12 platform
+  skips, and 111 Dispatch cases, with verified cleanup for every bounded job.
+  Committed-diff module ceilings pass without widening; installation and both
+  Bridge contracts with all 814 fixtures pass without recapturing unrelated
+  evidence. Correction review, release and installed acceptance remain open.
+
+### 2026-10-24 - Internal compatibility before launch effects
+
+- Provider review identified two real ordering gaps after removing the option:
+  an older remote receiver could accept a launch or structured prompt before
+  establishing hosting support, and Manager could resolve New through an older
+  engine before its later launch guard. Both are addressed internally, without
+  restoring the option or adding another user-controlled hosting switch.
+- Unseeded remote handoff validates the receiving owner's existing read-only
+  policy answer before executing the normal command. Structured prompt
+  preparation performs a separate read-only probe before the original
+  admission call; the returned launcher checks again before execution.
+  Inspection, status, help, plain source allocation and retirement remain
+  ungated by this launch mechanism.
+- Manager validates the selected engine's owner-policy contract before
+  effectful resolution and rechecks before compatibility retries. For remote
+  targets a local namesake's denial establishes capability, not remote
+  permission; the receiving host remains authoritative for admission.
+- Retained the full 7 KiB request-envelope and 28,000-character command bounds.
+  The separate preflight avoids inflating the encoded admission payload.
+  Explicitly bounded Manager remote prompt preparation now allows at least
+  300 seconds for the 60-second policy query, 180-second admission and transport
+  margin; unbounded preparation and larger explicit budgets remain unchanged.
+- Linux correction cohorts pass 415 Worktrees cases with six platform skips
+  and 172 Manager cases with 12 platform skips, with verified bounded cleanup.
+  Real legacy-receiver probes are witnessed before assertions of zero launch,
+  allocation or seed effects. Native qualification and provider re-review
+  remain required; the existing Dispatch qualification is unchanged.
+- Native qualification of that review correction passes 577 Worktrees cases
+  with eight platform skips and 172 Manager cases with 12 skips. The real
+  PowerShell receiver matrix covers allowed, unsupported, malformed and denied
+  answers before a fake launch effect; all bounded jobs verify cleanup.
+  Review, release and installed correction remain separate gates.

@@ -10,6 +10,7 @@ import shlex
 from types import SimpleNamespace
 
 import pytest
+from remote_policy_receiver import accepted_remote_owner as accepted_remote_owner
 
 from agent_worktrees import launch_request, launch_seed_state, output, remote_seed_launch, resolve_cli, tracking
 from test_launch_request import admission_config as admission_config, authority as authority

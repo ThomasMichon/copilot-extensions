@@ -52,7 +52,6 @@ def remote_selector_args(state: ResolveCommandState) -> list[str]:
         value = getattr(state.args, name, None)
         if value is not None:
             args.append("--" + name.replace("_", "-") + "=" + str(value))
-    args.append("--require-agent-hosting")
     if getattr(state.args, "require_native_seed", False):
         args.append("--require-native-seed")
     if getattr(state.args, "launch_attempt_id", None) is not None:
@@ -211,12 +210,9 @@ def _in_ssh_session() -> bool:
 
 
 def _remote_launch_command(shell: str, project: str, args: list[str] | None) -> str:
-    from .remote_seed_launch import shell_command
+    from .remote_hosting import shell_command
 
-    options = list(args or [])
-    if "--require-agent-hosting" not in options:
-        options.append("--require-agent-hosting")
-    return shell_command(shell, [project, *options])
+    return shell_command(shell, project, list(args or []))
 
 
 def _emit_remote_plan_for_env(

@@ -18,6 +18,34 @@ from .launch_request import MAX_REQUEST_BYTES
 MAX_REMOTE_COMMAND_CHARS = 28000
 
 
+def _run_ssh(alias: str, command: str, *, timeout: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias, command],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=timeout, **no_window_kwargs(),
+    )
+
+
+def _admit_owner(project: str, alias: str, shell: str, selectors: list[str]) -> None:
+    from repository_policy import validate_hosting_result
+
+    from .remote_hosting import policy_arguments
+
+    try:
+        result = _run_ssh(
+            alias, shell_command(shell, policy_arguments(project, selectors)), timeout=60,
+        )
+        if result.returncode:
+            raise ValueError(result.stdout.strip() or result.stderr.strip()
+                             or f"receiver exited {result.returncode}")
+        validate_hosting_result(json.loads(result.stdout))
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        raise RuntimeError(
+            f"Remote hosting admission on {alias} failed: {exc}. "
+            "No launch request was submitted."
+        ) from exc
+
+
 def _unconfirmed_admission(project: str, alias: str, request_id: str, kind: str,
                            reason: str) -> RuntimeError:
     return RuntimeError(
@@ -62,7 +90,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
     for index, arg in enumerate(args):
         if index == selector_end or arg in (
             "--new", "--worktree-id", "--no-mux", "--defer-new-seed", "--stage-launch-seed",
-            "--require-agent-hosting", "--require-native-seed",
+            "--require-native-seed",
             "--require-launch-attempt",
         ) or arg in attempt_options:
             continue
@@ -83,19 +111,18 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         raise ValueError("Remote prompt exceeds the launch-request transport limit")
     encoded = base64.b64encode(raw).decode("ascii")
     project = cfg.project_name()
+    from .remote_hosting import shell_command as hosting_command
+
     command = shell_command(shell, [
-        project, "resolve", "--json", "--require-agent-hosting", "--launch-request-b64", encoded,
+        project, "resolve", "--json", "--launch-request-b64", encoded,
         *(["--require-native-seed"] if native_required else []),
         *(["--require-launch-attempt"] if "--require-launch-attempt" in args else []),
     ])
     if len(command) > MAX_REMOTE_COMMAND_CHARS:
         raise ValueError("Remote launch request exceeds the remote shell command limit")
+    _admit_owner(project, alias, shell, args)
     try:
-        result = subprocess.run(
-            ["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias, command],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
-            **no_window_kwargs(),
-        )
+        result = _run_ssh(alias, command, timeout=180)
     except (OSError, subprocess.TimeoutExpired) as exc:
         reason = "SSH admission timed out" if isinstance(exc, subprocess.TimeoutExpired) else str(exc)
         raise _unconfirmed_admission(project, alias, request_id, kind, reason) from exc
@@ -135,8 +162,8 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         raise _unconfirmed_admission(
             project, alias, request_id, kind, "mismatched launch identity",
         )
-    launch_args = [project, "--worktree-id", receipt["worktree_id"],
-                   "--require-agent-hosting", "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
+    launch_args = ["--worktree-id", receipt["worktree_id"],
+                   "--stage-launch-seed", "--seed-id", receipt["seed_id"]]
     if native_required:
         launch_args.append("--require-native-seed")
     if "--require-launch-attempt" in args:
@@ -145,7 +172,7 @@ def prepare(config, alias: str, shell: str, args: list[str], text: str) -> dict:
         launch_args.append("--no-mux")
     return {
         "action": "remote", "ssh_alias": alias,
-        "remote_command": shell_command(shell, launch_args),
+        "remote_command": hosting_command(shell, project, launch_args),
         "worktree_id": receipt["worktree_id"], "seed_id": receipt["seed_id"],
         "seed_kind": kind, "seed_pending": True, "launch_request_id": request_id,
         **({

@@ -745,7 +745,6 @@ if [[ -n "$_IS_DIRECT" ]]; then
     direct_args=(-m agent_worktrees)
     [[ -n "$LAUNCH_PROJECT" && "$1" != agent-policy ]] && direct_args+=(--project "$LAUNCH_PROJECT")
     direct_args+=("$@")
-    [[ "$1" != resolve ]] || direct_args+=(--require-agent-hosting)
     exec "$PYTHON" "${direct_args[@]}"
 fi
 
@@ -757,7 +756,7 @@ setup_log INFO 'Calling agent_worktrees resolve'
 launch_trace resolve_start
 resolve_args=(-m agent_worktrees)
 [[ -n "$LAUNCH_PROJECT" ]] && resolve_args+=(--project "$LAUNCH_PROJECT")
-resolve_args+=(resolve --require-agent-hosting "$@")
+resolve_args+=(resolve "$@")
 JSON=$(AGENT_WORKTREES_DEFER_PROJECTIONS=1 "$PYTHON" "${resolve_args[@]}")
 RC=$?
 if [[ $RC -ne 0 ]]; then

@@ -6,6 +6,7 @@ import json
 import os
 import shlex
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from repository_policy import AgentHostingError, require_agent_hosting, validate_hosting_result
@@ -37,6 +38,33 @@ def selected_marketplace_id() -> str:
     return marketplace
 
 
+def _query_receiver(
+    argv: list[str], *, timeout: float | None, receiver: Sequence[str] | None = None,
+) -> dict:
+    from .bridge import BridgeUnavailable
+
+    prefix = receiver if receiver is not None else agent_worktrees_launch_prefix()
+    if not prefix:
+        raise BridgeUnavailable("Execution metadata resolution requires agent-worktrees")
+    try:
+        result = subprocess.run(
+            [*prefix, *argv], capture_output=True, text=True, check=False,
+            timeout=timeout if timeout is not None else 30,
+            env=agent_worktrees_environment(), **no_window_kwargs(),
+        )
+        if result.returncode:
+            raise BridgeUnavailable(
+                result.stderr.strip() or result.stdout.strip()
+                or "Required repository hosting receiver refused or is unsupported",
+            )
+        data = json.loads(result.stdout)
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+        return data
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise BridgeUnavailable(f"Repository hosting admission is unavailable: {exc}") from exc
+
+
 def require_execution_harness(
     *, path: str | None = None, project: str | None = None,
     worktree_id: str | None = None, timeout: float | None = 30,
@@ -46,33 +74,13 @@ def require_execution_harness(
     from .embody import resolve_worktree
 
     marketplace = selected_marketplace_id()
-    timeout = timeout if timeout is not None else 30
-
-    def query(argv: list[str]) -> dict:
-        prefix = agent_worktrees_launch_prefix()
-        if not prefix:
-            raise BridgeUnavailable("Execution metadata resolution requires agent-worktrees")
-        try:
-            result = subprocess.run(
-                [*prefix, *argv], capture_output=True, text=True, check=False,
-                timeout=timeout, env=agent_worktrees_environment(), **no_window_kwargs(),
-            )
-            if result.returncode:
-                raise BridgeUnavailable(
-                    result.stderr.strip() or result.stdout.strip()
-                    or "Required repository hosting receiver refused or is unsupported",
-                )
-            data = json.loads(result.stdout)
-            if not isinstance(data, dict):
-                raise ValueError("expected a JSON object")
-            return data
-        except (OSError, subprocess.SubprocessError, ValueError) as exc:
-            raise BridgeUnavailable(f"Repository hosting admission is unavailable: {exc}") from exc
 
     if worktree_id:
         path = resolve_worktree(worktree_id, project=project, timeout=timeout)["path"]
     elif path is None and project:
-        path = query(["repos", "find", project, "--registered-only", "--json"]).get("path")
+        path = _query_receiver(
+            ["repos", "find", project, "--registered-only", "--json"], timeout=timeout,
+        ).get("path")
     if not isinstance(path, str) or not path:
         raise BridgeUnavailable("Selected execution harness has no authoritative checkout path")
     try:
@@ -89,13 +97,28 @@ def require_execution_harness(
 
 
 def require_embodiment_harness(
+    receiver: Sequence[str],
     *, project: str | None, worktree_id: str | None, timeout: float | None,
 ) -> dict:
-    """Select the local embodiment ground without substituting a task's repository."""
-    return require_execution_harness(
+    """Admit the actual selected receiver before its normal embodiment command."""
+    from .bridge import BridgeUnavailable
+
+    policy = require_execution_harness(
         path=str(Path.cwd()) if not project and not worktree_id else None,
         project=project, worktree_id=worktree_id, timeout=timeout,
     )
+    try:
+        admitted = _query_receiver(
+            ["agent-policy", "check", "--path", policy["repository"],
+             "--operation", "dispatch", "--json"],
+            timeout=timeout, receiver=receiver,
+        )
+        validate_hosting_result(admitted)
+        if Path(admitted["repository"]).resolve() != Path(policy["repository"]).resolve():
+            raise ValueError("selected receiver checked a different repository")
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise BridgeUnavailable(f"Selected embodiment receiver refused hosting admission: {exc}") from exc
+    return admitted
 
 
 def remote_harness_check(project: str | None) -> str:

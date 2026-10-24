@@ -32,11 +32,17 @@ def _unexpected(*args: object, **kwargs: object) -> None:
     pytest.fail("denied hosting reached an effectful boundary")
 
 
-def test_embodiment_parser_proves_receiving_owner_supports_hosting_policy() -> None:
+@pytest.mark.parametrize("argv", [["embody", "--new"], ["resolve", "--base", "--json"]])
+def test_launch_parsers_have_no_hosting_opt_in(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
-    handoff_cli.add_parsers(parser.add_subparsers())
-    args = parser.parse_args(["embody", "--new", "--require-agent-hosting"])
-    assert args.require_agent_hosting is True
+    sub = parser.add_subparsers()
+    handoff_cli.add_parsers(sub)
+    resolve_cli.add_parsers(sub)
+    args = parser.parse_args(argv)
+    assert not hasattr(args, "require_agent_hosting")
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args([*argv, "--require-agent-hosting"])
+    assert exc.value.code == 2
 
 
 @pytest.fixture(autouse=True)
