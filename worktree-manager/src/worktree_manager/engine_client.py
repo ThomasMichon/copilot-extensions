@@ -27,6 +27,11 @@ from pathlib import Path
 from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime, picker_review
+from .worktree_rows_contract import (
+    _int_field as _int_field,
+    _bool_field as _bool_field,
+    _dirty_field as _dirty_field,
+)
 from .engine_environment import (
     _PYTHON_PARENT_ENV as _PYTHON_PARENT_ENV,
     _engine_environment as _engine_environment,
@@ -468,33 +473,6 @@ class Worktree:
         return "".join(bits)
 
 
-def _int_field(value: object, *, name: str) -> int:
-    if value in (None, ""):
-        return 0
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be an integer")
-    try:
-        return int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{name} must be an integer") from exc
-
-
-def _bool_field(value: object, *, name: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value in (None, "", 0):
-        return False
-    if value == 1:
-        return True
-    if isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized in ("true", "yes", "1"):
-            return True
-        if normalized in ("false", "no", "0", ""):
-            return False
-    raise ValueError(f"{name} must be a boolean")
-
-
 def worktree_from_dict(d: dict) -> Worktree:
     """Build the Manager's cross-cutting worktree model from a contract row."""
     identity = parse_machine_identity(d)
@@ -514,14 +492,6 @@ def worktree_from_dict(d: dict) -> Worktree:
         path=d.get("path"),
         raw=d,
     )
-
-
-def _dirty_field(value: object) -> bool:
-    if type(value) is int:
-        if value < 0:
-            raise ValueError("dirty must be a nonnegative count")
-        return value > 0
-    return _bool_field(value, name="dirty")
 
 
 @dataclass(frozen=True)

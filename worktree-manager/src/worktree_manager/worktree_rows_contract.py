@@ -27,6 +27,41 @@ _RECEIVER_FIELDS = frozenset({
 })
 
 
+def _int_field(value: object, *, name: str) -> int:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _bool_field(value: object, *, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, "", 0):
+        return False
+    if value == 1:
+        return True
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in ("true", "yes", "1"):
+            return True
+        if normalized in ("false", "no", "0", ""):
+            return False
+    raise ValueError(f"{name} must be a boolean")
+
+
+def _dirty_field(value: object) -> bool:
+    if type(value) is int:
+        if value < 0:
+            raise ValueError("dirty must be a nonnegative count")
+        return value > 0
+    return _bool_field(value, name="dirty")
+
+
 def publication_wire_rows(rows: list[dict]) -> list[dict]:
     """Remove local metadata only from previously admitted publication rows."""
     return [{key: value for key, value in row.items() if key not in _RECEIVER_FIELDS}
