@@ -209,7 +209,10 @@ def _resolve_remote_default_branch(
                 "ls-remote", "--symref", remote, "HEAD", cwd=path, check=False,
                 **git_ops._observation_options(deadline, cap=10),
             )
-        except (subprocess.TimeoutExpired, git_ops.push_timeout.ObservationUnavailable):
+        except (
+            subprocess.TimeoutExpired, git_ops.push_timeout.ObservationUnavailable,
+            git_ops.push_timeout.ObservationCleanupError,
+        ):
             raise
         except Exception:
             ls = None
@@ -439,6 +442,8 @@ def _render_status_segment(
     deadline = git_ops._observation_deadline(observation_deadline)
     try:
         rec, _branch, info = _segment_git_observation(target, fetch, deadline)
+    except git_ops.push_timeout.ObservationCleanupError:
+        raise
     except Exception:
         return ""  # not a worktree / git failure -> empty bar, no noise
 
@@ -576,6 +581,8 @@ def _status_segment_json(
     deadline = git_ops._observation_deadline(observation_deadline)
     try:
         rec, branch, info = _segment_git_observation(target, fetch, deadline)
+    except git_ops.push_timeout.ObservationCleanupError:
+        raise
     except Exception:
         return None
 
