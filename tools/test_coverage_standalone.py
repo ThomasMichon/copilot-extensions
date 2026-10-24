@@ -330,7 +330,9 @@ class TestStandaloneCoverage:
 
         root = Path(__file__).resolve().parents[1]
         jobs = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())["jobs"]
-        assert "unit-plan" in jobs and "unit-tests" in jobs
+        assert "unit-tests" in jobs
+        assert any("tools/ci_pr_unit_reuse.py" in step.get("run", "")
+                   for step in jobs["unit-tests"]["steps"])
         assert not any(name.startswith("fleet-native-") for name in jobs)
         runs = "\n".join(step.get("run", "") for job in jobs.values() for step in job.get("steps", []))
         assert "coverage_guided_selection/standalone.py" not in runs

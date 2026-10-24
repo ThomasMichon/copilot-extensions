@@ -24,7 +24,9 @@ def test_coverage_collection_is_independent_of_source_promotion() -> None:
     )
     ci = yaml.safe_load((repo / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
     assert "source-units" in workflow["jobs"]
-    assert "unit-plan" in ci["jobs"] and "unit-tests" in ci["jobs"]
+    assert "unit-tests" in ci["jobs"]
+    assert any("tools/ci_pr_unit_reuse.py" in step.get("run", "")
+               for step in ci["jobs"]["unit-tests"]["steps"])
     for jobs in (workflow["jobs"], ci["jobs"]):
         assert "full" not in jobs
         steps = [step for job in jobs.values() for step in job.get("steps", [])]
