@@ -405,6 +405,7 @@ def test_windows_cleanup_failure_is_explicit_and_not_retried():
 
 @pytest.mark.parametrize("exits", [True, False])
 def test_group_confirmation_waits_for_exit_without_releasing_root(monkeypatch, exits):
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(pid=10, returncode=None)
     observations = []
     closed = []
@@ -497,6 +498,10 @@ def test_pidfd_exit_observation_accepts_high_descriptors():
 
 @pytest.mark.parametrize("boundary", ["retire", "confirm", "wait"])
 def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary):
+    monkeypatch.setattr(protocol, "sys", SimpleNamespace(
+        platform="linux", executable=sys.executable,
+    ))
+    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
     process = SimpleNamespace(stdin=None, stdout=None, stderr=None, returncode=None)
     failure = (
         subprocess.TimeoutExpired(["guard"], 2) if boundary == "wait"
