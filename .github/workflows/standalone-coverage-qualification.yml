@@ -1,0 +1,100 @@
+name: Native standalone coverage qualification
+
+# Explicit qualification only; never a Source promotion prerequisite or a
+# publisher. Release/main-pointer admission and performance remain separate.
+on:
+  workflow_dispatch:
+    inputs:
+      measured_commit:
+        description: Exact full source SHA to qualify on both native platforms
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Require an immutable measured source
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: source
+        env:
+          MEASURED_COMMIT: ${{ inputs.measured_commit }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = os.environ["MEASURED_COMMIT"]
+          if not re.fullmatch(r"[0-9a-f]{40}", source):
+              raise ValueError("qualification requires an exact full source SHA")
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write("sha=" + source + "\n")
+          PY
+
+  fleet-manager-baselines-linux:
+    name: fleet-manager (native Linux full coverage)
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Earn complete installed-package baseline under native host containment
+        run: >-
+          python tools/coverage_guided_selection/standalone.py fleet-manager
+          --prepare --admission-wait 60 --timeout 720
+          --measured-commit "${{ needs.gate.outputs.sha }}"
+          --out fleet-manager-linux.json
+      - name: Retain native qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline-fleet-manager-linux
+          path: fleet-manager-linux.json
+          if-no-files-found: error
+          retention-days: 7
+
+  fleet-manager-baselines-windows:
+    name: fleet-manager (native Windows full coverage)
+    needs: gate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.gate.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Earn complete installed-package baseline under native host containment
+        run: >-
+          python tools/coverage_guided_selection/standalone.py fleet-manager
+          --prepare --admission-wait 60 --timeout 720
+          --measured-commit "${{ needs.gate.outputs.sha }}"
+          --out fleet-manager-windows.json
+      - name: Retain native qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-baseline-fleet-manager-windows
+          path: fleet-manager-windows.json
+          if-no-files-found: error
+          retention-days: 7

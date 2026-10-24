@@ -1639,6 +1639,9 @@ actually consumes them.
 
 ## See also
 
+- [Native standalone coverage baselines](standalone-coverage-baselines.md) —
+  installed-package Linux/Windows fleet evidence and the staged selection bootstrap.
+
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — contributor process: opening a
   PR, waiting for a review verdict, documentation-impact requirements.
 - [`docs/install-contract.md`](install-contract.md) — what the marketplace
