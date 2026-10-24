@@ -152,6 +152,13 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
         or any(not isinstance(value, str) or not value for value in build["requires"])
     ):
         raise PromotionArtifactError("unsupported candidate build backend or backend-path")
+    from native_daemon_artifacts import trusted_setup as native_setup
+
+    native = native_setup(source_dir, data)
+    if native is not None:
+        if trusted_setup is not None and trusted_setup != native:
+            raise PromotionArtifactError("conflicting trusted native build ownership")
+        trusted_setup = native
     for name in ("setup.py", "setup.cfg"):
         if (source_dir / name).exists() or (source_dir / name).is_symlink():
             if (

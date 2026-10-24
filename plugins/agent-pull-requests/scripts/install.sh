@@ -604,6 +604,12 @@ if [[ "$ACTION" == install || "$ACTION" == update || "$ACTION" == stamp || "$ACT
     _source_runtime_unchanged || exit 1
 fi
 
+case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     snap_dir="$INSTALL_DIR/snapshots/$SRC_VERSION"

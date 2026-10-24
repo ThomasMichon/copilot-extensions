@@ -31,6 +31,8 @@ re-spawn) and surfaced for a human, which is the safe default.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import hashlib
 import json
 import logging
@@ -3770,6 +3772,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         self._sync_event_subscriptions()
         return spawned
 
+    @daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
     def serve(
         self,
         *,

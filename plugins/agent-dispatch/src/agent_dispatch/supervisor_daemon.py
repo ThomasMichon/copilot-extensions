@@ -32,6 +32,8 @@ See ``visions/plugins/agent-dispatch`` -- Concept *the supervisor*, Feature
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import contextlib
 import copy
 import json
@@ -2060,6 +2062,7 @@ class SupervisorDaemon(BoundedReconciliation):
         log.info("re-resolved coordinator endpoint after a connection failure")
         return True
 
+    @daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
     def serve(
         self,
         *,

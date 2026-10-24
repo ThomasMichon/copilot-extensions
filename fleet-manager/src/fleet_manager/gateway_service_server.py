@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import base64
 import logging
@@ -589,6 +591,10 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
         raise
 
 
+@daemon_entrypoint(
+    "fleet-manager-service-gateway", source=__file__, purpose="production",
+    runtime_root=lambda policy_path, tls_path: policy_path.absolute().parent,
+)
 def serve(policy_path: Path, tls_path: Path) -> int:
     """Foreground runner; the external service manager owns process lifetime."""
     try:

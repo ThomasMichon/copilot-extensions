@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 import sys
 from pathlib import Path
 
-from agent_procutil import direct_python, windowless_daemon_kwargs
+from agent_procutil import direct_python, spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec
 from work_coalescing_singleton import client as wcs_client
 
 from .mux_mapping_registry import _try_lock_file_once, _unlock_file
+from .self_install import default_root
 
 _SESSION_CREDENTIAL_ENV_KEYS = {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
+
+
+def selected_root(root: Path | None = None) -> Path:
+    """Anchor caller-relative runtime paths without following their indirection."""
+    return Path(os.path.abspath(root if root is not None else default_root()))
 
 
 def daemon_is_live(data: dict | None, *, endpoint_from_rendezvous) -> bool:
@@ -90,15 +96,14 @@ def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:
             os.fspath(cwd) if cwd is not None and os.path.isdir(cwd)
             else os.path.expanduser("~")
         )
-        kwargs: dict = {
-            "cwd": run_dir,
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-            "env": env,
-        }
-        kwargs.update(windowless_daemon_kwargs(breakaway=True))
-        subprocess.Popen([python, *argv[1:]], **kwargs)  # noqa: S603 - trusted argv
+        run_dir = os.fspath(selected_root(Path(run_dir)))
+        spawn_daemon(
+            [python, *argv[1:]], cwd=run_dir, env=env,
+            log_path=Path(run_dir) / "mux-daemon.log", console_children=True,
+            instance=DaemonInstanceSpec(
+                "worktree-manager-mux", Path(run_dir), Path(__file__).resolve(),
+            ),
+        )
         return True
     except (OSError, RuntimeError, ValueError) as exc:
         logging.getLogger(__name__).error("Mux daemon launch failed: %s", exc)

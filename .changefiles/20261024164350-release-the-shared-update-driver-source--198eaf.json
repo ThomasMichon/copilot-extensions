@@ -1,0 +1,9 @@
+{
+  "comment": "Release the shared update-driver source with its synchronized installer reconciliation support",
+  "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    }
+  ]
+}

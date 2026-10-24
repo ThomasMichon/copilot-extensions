@@ -42,6 +42,8 @@ may a later increment tear the connection down.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import json
 import logging
@@ -58,7 +60,7 @@ from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
-from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, wait_for_owner_startup
+from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, spawn_owner_process, wait_for_owner_startup
 from . import owner_session_records
 
 if TYPE_CHECKING:
@@ -892,6 +894,7 @@ def _bridge_forwards_of(owner: Any) -> dict[str, int]:
     return method() if callable(method) else {}
 
 
+@daemon_entrypoint("agent-codespaces-owner", source=__file__, purpose="production")
 async def run_owner_daemon(
     owner: ConnectionOwner,
     *,
@@ -974,20 +977,7 @@ def ensure_owner_running(
     if is_owner_live():
         return True
     try:
-        import sys
-
-        from agent_procutil import spawn_daemon
-
-        # Relay/SSH children inherit its hidden console; stdio is appended to a
-        # log beside its state so a startup crash leaves a traceback.
-        stdio_log = OWNER_FILE.parent.absolute() / "logs" / "owner-stdio.log"
-        child = spawn_daemon(
-            [sys.executable, "-m", "agent_codespaces", "owner"],
-            cwd=os.path.expanduser("~"),  # never the caller's cwd
-            log_path=stdio_log,
-            console_children=True,
-            display="agent_codespaces owner",
-        )
+        child, stdio_log = spawn_owner_process(RUNTIME_DIR, source=__file__)
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False

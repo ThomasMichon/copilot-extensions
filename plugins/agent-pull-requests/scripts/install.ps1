@@ -756,6 +756,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
     if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
     if ($Action -eq 'status') {

@@ -18,6 +18,8 @@ fine over ``external`` mode -- that decoupling is the whole point.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+
 import os
 import importlib.util
 import subprocess
@@ -195,6 +197,7 @@ def _spawn(
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
     return spawn_daemon(
         _with_log_level_bootstrap(cmd),
+        instance=DaemonInstanceSpec("agent-index-engine", root, Path(__file__).resolve()),
         cwd=root,
         log_path=engine_log_path(root),
         env=env,
@@ -348,5 +351,9 @@ def run_foreground() -> int:
         )
     if os.name != "nt":
         os.execv(str(py), cmd)  # replace this process; never returns  # noqa: S606
-    proc = subprocess.Popen(cmd)  # noqa: S603
+    proc = spawn_instance(
+        cmd, instance=DaemonInstanceSpec(
+            "agent-index-engine", engine_home().absolute(), Path(__file__).resolve(),
+        ),
+    )
     return proc.wait()

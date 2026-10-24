@@ -455,6 +455,37 @@ not full engine/daemon or performance qualification. Run that selector locally
 on Windows with psmux and PowerShell available; platforms without supported
 warm-worker birth identity retain the cold path and skip this packet.
 
+## Optional daemon-instance lifetime acceptance
+
+`tools/clean-room/scenarios/leased-daemon-instances` is a credential-free Tier-P
+source/native consumer proof. Use a fresh disposable Linux container, a
+read-only candidate and either a prebuilt helper bundle or an explicitly
+selected source-build toolchain. Its README defines the inputs and actual
+process/filesystem assertions; no normal startup invokes a compiler.
+
+Run `python -m pytest tools/test_native_daemon_artifacts.py` for the artifact
+contract controls. On a supported, prepared Linux build host, explicitly select
+`PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` and
+`test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc`
+for real construction, installed lifecycle and compiler/Python-free execution.
+That native lane remains opt-in rather than enlarging required unit-only CI.
+
+`python -m pytest tools/test_cleanroom_daemon_fixtures.py` checks finite
+Gateway-fixture custody and environment restoration on success/failure, plus
+host refusal for the synthetic production-control probe. The existing
+process-hygiene scenario retains its full six-scenario flood thresholds; its
+daemon roles inherit shared test custody while transient clients remain light.
+Supply the installed shared package or an explicit candidate source through
+`CR_PPC_PROCUTIL_SOURCE`/`CR_HARNESS_MOUNT`.
+
+Run both `tools/check-daemon-coverage.py` and `tools/check-headless-launch.py`;
+visibility flags and lifetime attribution are separate contracts.
+
+`tools/on_demand_tests/test_scratch_copy_boundaries.py` is an explicit filesystem
+packet for the bounded, isolated development-test lane. It checks scratch
+exclusion before source/test copying and strict link refusal in unfiltered
+build contexts. It is not enrolled in the eligible unit packet.
+
 ## Optional candidate dependency profiles
 
 The installation-context Python `runtime-profile-policy` reader has no

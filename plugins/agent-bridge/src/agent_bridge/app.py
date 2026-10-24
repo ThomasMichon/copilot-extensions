@@ -8,7 +8,6 @@ import logging
 import sys
 import threading
 import time
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +15,7 @@ from fastapi import FastAPI
 
 from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
+from .app_lifecycle import lifespan
 from .app_supersession import retire_previous_daemon
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
@@ -323,8 +323,8 @@ async def _start_credential_relay(app: FastAPI, *, start_listener: bool = True):
     return None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
     """Application lifespan -- initialize DB, topology, and session manager."""
     cfg = app.state.config
 

@@ -460,7 +460,36 @@ def main() -> int:
         action="store_true",
         help="verify vendored copies without changing files",
     )
+    parser.add_argument(
+        "--only-python-engine", action="store_true",
+        help="synchronize only the canonical Python engine files, preserving concurrent native/support edits",
+    )
     arguments = parser.parse_args()
+    if arguments.only_python_engine:
+        pairs = [
+            (CANONICAL_DIR / name, consumer / "scripts" / name)
+            for consumer in ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS)
+            for name in ier.PYTHON_FILES
+        ]
+        for source, destination in pairs:
+            for path in (source, destination):
+                if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
+                    raise RuntimeError("linked Python installer-engine source or destination")
+            if not source.is_file():
+                raise FileNotFoundError(f"canonical Python engine missing: {source.name}")
+        drift = []
+        for source, destination in pairs:
+            if destination.is_file() and destination.read_bytes() == source.read_bytes():
+                continue
+            drift.append(destination.relative_to(REPO).as_posix())
+            if not arguments.check:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+        if arguments.check and drift:
+            print("\n".join(drift), file=sys.stderr)
+            return 1
+        print(f"Python installer-engine scope: {len(pairs)} files, {len(drift)} differences.")
+        return 0
     if arguments.check:
         problems = verify()
         if problems:

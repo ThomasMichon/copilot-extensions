@@ -4400,6 +4400,10 @@ if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
     Assert-SourceRuntime
 }
+if ($Action -in @('install', 'update', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 switch ($Action) {
     'install'   { Invoke-Install }
     'update'    { Invoke-Update }

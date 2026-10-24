@@ -25,6 +25,8 @@ Runnable as ``python -m agent_bridge session-host-agent <name>``.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import logging
 import os
 from typing import Any
@@ -32,6 +34,7 @@ from typing import Any
 log = logging.getLogger("agent-bridge.session-host")
 
 
+@daemon_entrypoint("agent-bridge-session-host", source=__file__, purpose="production")
 async def run_agent_session_host(
     agent_name: str,
     *,

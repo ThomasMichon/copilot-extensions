@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import json
 import os
@@ -86,6 +88,14 @@ def ready(path: Path, *, now: float | None = None) -> bool:
 
 
 async def run(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
+    """Start only while the caller has not already withdrawn the request."""
+    if stop is not None and stop.is_set():
+        return
+    await _run_service(config, stop=stop)
+
+
+@daemon_entrypoint("agent-pull-requests-service", source=__file__, purpose="production")
+async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
     """Adopt existing state, then own exactly the existing WatchService lifetime."""
     stop = stop if stop is not None else asyncio.Event()
     if stop.is_set():

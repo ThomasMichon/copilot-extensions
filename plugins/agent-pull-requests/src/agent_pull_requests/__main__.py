@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import importlib.util
 import json
@@ -532,6 +534,7 @@ def _watch_boot() -> None:
     home = "AGENT_PULL_REQUESTS_HOME"
     spawn_daemon(
         [sys.executable, "-m", "agent_pull_requests", "serve"],
+        instance=DaemonInstanceSpec("agent-pull-requests", root, Path(__file__).resolve()),
         cwd=root,
         log_path=root / "watch-daemon.log",
         env_overrides={home: str(root)} if os.environ.get(home, "").strip() else None,
@@ -623,6 +626,7 @@ def _cmd_watch_status(args: argparse.Namespace) -> int:
     return 0
 
 
+@daemon_entrypoint("agent-pull-requests", source=__file__, purpose="production")
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the resident PR-watch daemon in the foreground.
 

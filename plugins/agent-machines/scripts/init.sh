@@ -1093,6 +1093,8 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             _fail "selected cell runtime $SRC_VERSION failed immutable cutover validation"
             exit 1
         fi
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
         _write_cell_manifest \
             "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$PACKAGE_VERSION" \
             "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
@@ -1795,6 +1797,12 @@ if [[ "$ACTION" == "stamp" ]]; then
     exit 0
 fi
 
+case "$ACTION" in
+    install|init|provision|cell-provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
 _step 'agent-machines init'
 
 if [[ ! -d "$PKG_SRC_DIR" ]]; then

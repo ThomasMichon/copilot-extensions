@@ -37,6 +37,8 @@ that one-time bootstrap transition is a plain stop/start, not a regression.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import json
 import secrets
 import socket as _socket
@@ -154,6 +156,7 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     env_overrides.update(windowless_python_env(python))
     home.mkdir(parents=True, exist_ok=True)
     proc = spawn_daemon(cmd, cwd=home, log_path=log_path,
+                        instance=DaemonInstanceSpec("agent-mcp", home, Path(__file__).resolve()),
                         env_overrides=env_overrides,
                         display=f"agent_mcp serve --passive --control-port {control_port}")
     ctx.token_by_port[control_port] = ctx.new_control_token

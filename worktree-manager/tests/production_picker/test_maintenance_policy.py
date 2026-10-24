@@ -34,7 +34,7 @@ def test_policy_vetoes_every_picker_admission(policy, monkeypatch, body):
     monkeypatch.setattr(housekeeping, "sweep_finished_session_worktrees", _forbidden)
     monkeypatch.setattr(monitor_roots, "_write_lock", _forbidden)
     monkeypatch.setattr(monitor_roots.engine_client, "engine_base_command", _forbidden)
-    monkeypatch.setattr(monitor_roots.subprocess, "Popen", _forbidden)
+    monkeypatch.setattr(monitor_roots, "spawn_daemon", _forbidden)
 
     runner._start_anchor_heal_check("fixture")
     runner._start_housekeeping()

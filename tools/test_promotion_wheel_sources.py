@@ -369,26 +369,54 @@ def test_promotion_actions_never_receive_or_persist_the_release_pat():
     assert '"pr", "view"' in wait["run"] and '"pr", "checks"' in wait["run"]
 
 
-def test_git_helper_uses_each_steps_token_without_storing_it(tmp_path):
+@pytest.mark.parametrize("ambient_helper", (False, True))
+def test_git_helper_uses_each_steps_token_without_storing_it(tmp_path, monkeypatch, ambient_helper):
     if shutil.which("gh") is None:
         pytest.skip("the hosted promotion credential helper requires GitHub CLI")
+    if ambient_helper:
+        monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+        monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+        monkeypatch.setenv(
+            "GIT_CONFIG_VALUE_0",
+            "!printf 'username=ambient-fixture\\npassword=ambient-fixture\\n'",
+        )
+        monkeypatch.setenv("GIT_DIR", str(tmp_path / "unavailable-ambient-repository"))
     config = tmp_path / "gitconfig"
+    home = tmp_path / "home"
+    home.mkdir()
+    temporary = tmp_path / "temporary"
+    temporary.mkdir()
     environment = {
-        **os.environ, "GH_TOKEN": "read-only-sentinel", "GH_HOST": "github.com",
+        key: value for key, value in os.environ.items()
+        if key.upper() in {"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "SYSTEMDRIVE", "LANG", "LC_ALL"}
+    }
+    environment.update({
+        "HOME": str(home), "USERPROFILE": str(home), "XDG_CONFIG_HOME": str(home / ".config"),
+        "APPDATA": str(home / "AppData/Roaming"), "LOCALAPPDATA": str(home / "AppData/Local"),
+        "TEMP": str(temporary), "TMP": str(temporary), "TMPDIR": str(temporary),
+        "GH_TOKEN": "read-only-sentinel", "GH_HOST": "github.com", "GH_PROMPT_DISABLED": "1",
         "GH_CONFIG_DIR": str(tmp_path / "gh"), "GIT_CONFIG_GLOBAL": str(config),
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0",
-    }
+        "GIT_CEILING_DIRECTORIES": str(tmp_path),
+    })
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    repository = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"], env=environment,
+        cwd=home, capture_output=True, text=True, creationflags=flags, timeout=15,
+    )
+    assert repository.returncode != 0, "credential fixture must not inherit a repository"
     subprocess.run(
         ["gh", "auth", "setup-git", "--hostname", "github.com"], env=environment,
-        capture_output=True, text=True, check=True, creationflags=flags,
+        cwd=home, capture_output=True, text=True, check=True, creationflags=flags, timeout=15,
     )
     for token in ("read-only-sentinel", "release-write-sentinel"):
         result = subprocess.run(
             ["git", "credential", "fill"], input="protocol=https\nhost=github.com\n\n",
-            cwd=tmp_path, env={**environment, "GH_TOKEN": token},
-            capture_output=True, text=True, check=True, creationflags=flags,
+            cwd=home, env={**environment, "GH_TOKEN": token},
+            capture_output=True, text=True, check=True, creationflags=flags, timeout=15,
         )
         fields = dict(line.split("=", 1) for line in result.stdout.splitlines())
-        assert fields.get("password") == token
+        matches_synthetic_token = fields.pop("password", None) == token
+        result.stdout = result.stderr = ""
+        assert matches_synthetic_token, "credential helper must honor the synthetic per-step token"
         assert token not in config.read_text()

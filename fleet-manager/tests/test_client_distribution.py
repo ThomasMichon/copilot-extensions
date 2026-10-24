@@ -155,7 +155,10 @@ def test_wheel_contains_record_bound_exact_primitive_and_no_runtime_dependencies
         for extra in ("auth", "server"):
             enabled = {canonicalize_name(requirement.name) for requirement in requirements
                        if requirement.marker.evaluate({"extra": extra})}
-            assert enabled == {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
+            expected = {"pyjwt", "cryptography", "jwcrypto", "joserfc"}
+            if extra == "server":
+                expected.add("agent-procutil")
+            assert enabled == expected
         identity = [requirement for requirement in requirements
                     if requirement.marker.evaluate({"extra": "runtime-authentication"})]
         assert len(identity) == 1
@@ -435,7 +438,10 @@ def test_gateway_build_inputs_deliver_the_complete_runtime_family(
                 allow = pattern.startswith("!")
                 if fnmatch.fnmatchcase(name, pattern.removeprefix("!").rstrip("/")):
                     included = allow
-        if name not in copied or not included:
+        supplied = name in copied or any(
+            source.endswith("/") and name.startswith(source) for source in copied
+        )
+        if not supplied or not included:
             resource.unlink()
 
     output = tmp_path / "artifacts"

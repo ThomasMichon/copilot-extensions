@@ -47,6 +47,8 @@ handler rather than imported at module load, so the light paths -- above all
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import json
 import logging
@@ -603,6 +605,7 @@ def _cmd_source_digest(args: argparse.Namespace) -> int:
 # serve -- resident warmth daemon
 # ---------------------------------------------------------------------------
 
+@daemon_entrypoint("agent-mcp", source=__file__, purpose="production")
 def _cmd_serve(args: argparse.Namespace) -> int:
     import asyncio
 

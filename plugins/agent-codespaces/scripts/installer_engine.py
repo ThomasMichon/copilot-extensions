@@ -31,7 +31,7 @@ from installer_wheel_inputs import _check_deadline, _ordinary
 from installer_wheel_snapshot import WheelInstallInputs, _digest, _open, _unchanged
 
 _GENERATED_DIRECTORIES = {
-    ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
+    ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
     "build", "dist", "node_modules",
 }
 

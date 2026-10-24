@@ -28,6 +28,8 @@ keyed by bridge config, reused across requests.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import contextlib
 import json
@@ -608,6 +610,10 @@ class Server:
                      "single-instance lease; one-host-per-home restored")
             return
 
+    @daemon_entrypoint(
+        "agent-mcp", source=__file__, purpose="production",
+        runtime_root=lambda self: self.socket_path.absolute().parent,
+    )
     async def serve_forever(self) -> None:
         # Take the single-instance lease before binding so a losing host never
         # touches the winner's socket handle. Standing down is a clean no-op exit.

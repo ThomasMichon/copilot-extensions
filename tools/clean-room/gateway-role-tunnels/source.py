@@ -33,13 +33,28 @@ RUNNER_FILES = frozenset({
     "run.py", "source.py", "architecture.py", "engine.py", "witness.py",
     "fixture_auth.py", "fixture_service.py", "probe.py",
 })
+PROCUTIL_MODULES = frozenset("""
+__init__ _async _build_native _caller_owned _daemon_instance_child
+_daemon_instance_identity _daemon_instance_native _daemon_instance_owner
+_daemon_instance_store _darwin_caller_owned _interactive_groups
+_interactive_session _interactive_terminal _interpreter _linux_pidfd
+_windows_caller_owned daemon daemon_broker daemon_instances diagnostics
+interactive metrics metrics_accounting native_child owned_process startup streaming wsl
+""".split())
+PROCUTIL_RESOURCES = frozenset("""
+daemon_instance_native.c daemon_instances.ps1 daemon_instances.sh
+native_daemon.ps1 native_daemon.sh native_owned.ps1 native_owned.sh
+""".split())
 REQUIRED = frozenset({
     "fleet-manager/pyproject.toml", "fleet-manager/setup.py", "fleet-manager/README.md",
     *(f"fleet-manager/src/fleet_manager/{name}.py" for name in PACKAGE_MODULES),
     *(f"libs/versioned-runtime/{name}" for name in RESOURCES),
     "libs/installer-engine/installer_engine_process.py",
     "libs/installer-engine/runtime_launcher.py",
-    "libs/agent-procutil/src/agent_procutil/__init__.py",
+    "libs/agent-procutil/pyproject.toml", "libs/agent-procutil/setup.py",
+    "libs/agent-procutil/README.md",
+    *(f"libs/agent-procutil/src/agent_procutil/{name}.py" for name in PROCUTIL_MODULES),
+    *(f"libs/agent-procutil/src/agent_procutil/{name}" for name in PROCUTIL_RESOURCES),
     *(PROOF + name for name in RUNNER_FILES),
     IMAGE + "Dockerfile", IMAGE + "Dockerfile.dockerignore",
 })
@@ -123,6 +138,8 @@ def materialize(repository: Path, ref: str, run: Path) -> dict:
         mode, kind, oid = metadata.decode().split()
         if (name.startswith("fleet-manager/src/") and name not in REQUIRED):
             raise ProofError("unknown-package-source", "repo-config")
+        if name.startswith("libs/agent-procutil/src/") and name not in REQUIRED:
+            raise ProofError("unknown-procutil-source", "repo-config")
         if name in REQUIRED:
             if mode not in ("100644", "100755") or kind != "blob":
                 raise ProofError("source-not-regular-blob", "repo-config")

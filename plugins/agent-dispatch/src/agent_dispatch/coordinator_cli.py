@@ -9,6 +9,8 @@ routes monkeypatch-sensitive cross-calls back through the live
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import json as _json
 import os
@@ -173,6 +175,7 @@ def _cmd_print_endpoint(args: argparse.Namespace) -> int:
     return 0
 
 
+@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def _cmd_serve(args: argparse.Namespace) -> int:
     from .logging_setup import configure_file_logging
     from .server import CoordinatorAlreadyLiveError, serve

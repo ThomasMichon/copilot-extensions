@@ -1581,6 +1581,12 @@ EOF
   chg "wrote systemd user units to ${UNIT_DIR}"
 }
 
+case "$ACTION" in
+  install|update|provision)
+    . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+    reconcile_installer_instances "$SCRIPT_DIR"
+    ;;
+esac
 case "${ACTION}" in
   install)
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package || exit 1; fi

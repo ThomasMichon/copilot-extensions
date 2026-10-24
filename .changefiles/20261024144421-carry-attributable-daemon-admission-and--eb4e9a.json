@@ -1,0 +1,17 @@
+{
+  "comment": "Carry attributable daemon admission and disposable test lifetime through standalone services and manager launches",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

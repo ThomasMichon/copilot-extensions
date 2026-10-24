@@ -34,6 +34,9 @@ Headlessness does not establish durable lifetime: keep bounded helpers inside
 caller-owned cleanup, but use the canonical explicit escape/ensure primitive
 for daemons that must outlive it. Verify survival after caller Job cleanup,
 not only parent exit or an early health probe; preserve contained-test suppression.
+Flags are not instance custody: use the owner's attributed launch/startup path.
+Test daemons need runner-renewed leases (defaults: 10 minutes; 4-hour unattended maximum);
+interactive tests declare a pause-tolerant policy. Retain exact cleanup receipts.
 Before starting a long-lived, repeating, or backgrounded process, invoke the
 `spawning-headless-processes` skill to select the correct primitive for the
 target language and OS.

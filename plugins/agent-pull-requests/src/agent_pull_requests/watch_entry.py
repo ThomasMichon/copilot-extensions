@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+from pathlib import Path
+
 import os
 import socket
 import sys
@@ -168,6 +171,9 @@ def run_target(
                 "--poll-interval", str(poll_interval),
             ],
             cwd=invocation.runtime.runtime_root,
+            instance=DaemonInstanceSpec(
+                "agent-pull-requests", invocation.runtime.runtime_root, Path(__file__).resolve(),
+            ),
             log_path=installation.run_root / "watch-owner.log",
             env=environment, console_children=True,
         )
@@ -217,6 +223,10 @@ def stop(invocation: WatchInvocation, *, timeout: float = 120.0) -> bool:
         return True
 
 
+@daemon_entrypoint(
+    "agent-pull-requests", source=__file__, purpose="production",
+    runtime_root=lambda invocation, *args, **kwargs: invocation.runtime.runtime_root,
+)
 def serve_passive(invocation: WatchInvocation, args, *, fetch, native_fetch=None) -> int:
     if not args.passive_instance or not 0 < args.port <= 65535:
         raise PermissionError("watch passive entry requires its reserved instance and port")

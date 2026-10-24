@@ -142,7 +142,7 @@ jobs:
             output.write("run=" + str(needed).lower() + "\n")
         print(json.dumps({"run_source_ast_guards": needed}))
         PY
-    - name: Full source AST guards (three bounded workers)
+    - name: Full source guards (bounded workers)
       if: steps.code-impact.outputs.run == 'true' && steps.source-ast-impact.outputs.run == 'true'
       timeout-minutes: 6
       run: python tools/run-source-ast-guards.py

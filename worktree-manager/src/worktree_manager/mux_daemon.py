@@ -8,6 +8,8 @@ the Manager never imports ``agent_worktrees`` in-process.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import hashlib
 import json
 import os
@@ -28,11 +30,9 @@ from .mux_attached_clients import AttachedClientObserver
 from .mux_mapping_registry import (
     MuxMappingRegistry,
     LIVE_MAPPING_BACKSTOP_INTERVAL_S,
-    get_mapping,
-    live_mapping_republish_due,
+    get_mapping, live_mapping_republish_due,
     registry_path,
-    register_mapping,
-    register_next_mapping,
+    register_mapping, register_next_mapping,
     remove_mapping,
 )
 from .self_install import default_root
@@ -829,6 +829,10 @@ class MuxDaemonRuntime:
             self.server = None
 
 
+@daemon_entrypoint(
+    "worktree-manager-mux", source=__file__, purpose="production",
+    runtime_root=lambda root=None, **kwargs: mux_daemon_process.selected_root(root),
+)
 def run_daemon_foreground(
     root: Path | None = None,
     *,
@@ -851,7 +855,7 @@ def run_daemon_foreground(
     through the ZDD routing table, then self-promotes by claiming the lease once
     the old active retires.
     """
-    resolved_root = root if root is not None else default_root()
+    resolved_root = mux_daemon_process.selected_root(root)
     lock = lock_path(resolved_root)
     lease = None if passive else _acquire_daemon_lease(resolved_root)
     if not passive and lease is None:
@@ -977,7 +981,7 @@ def ensure_daemon_running(
     single-instance lease and only one actually starts a server, so this
     function stays simple and never risks deadlocking against the very
     child it just spawned."""
-    resolved_root = Path(root if root is not None else default_root()).absolute()
+    resolved_root = mux_daemon_process.selected_root(root)
     lock = lock_path(resolved_root)
     if _daemon_is_live(read_lock_data(lock)):
         return True

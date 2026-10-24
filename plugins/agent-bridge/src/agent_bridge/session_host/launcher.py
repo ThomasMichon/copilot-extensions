@@ -24,6 +24,10 @@ worktree-resolve/``spawn_local`` path and the frontend reattach index is Phase 2
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import (
+    DaemonInstanceSpec, daemon_entrypoint, spawn_instance,
+)
+
 import argparse
 import asyncio
 import json
@@ -286,8 +290,11 @@ def launch_session_host(
     spawn_options = host_spawn_kwargs()
     if acquisition_launch is not None:
         acquisition_launch.begin_host()
-    proc = subprocess.Popen(
+    proc = spawn_instance(
         host_argv,
+        instance=DaemonInstanceSpec(
+            "agent-bridge-session-host", sd.absolute(), Path(__file__).resolve(),
+        ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -476,6 +483,7 @@ async def _spawn_child(
     )
 
 
+@daemon_entrypoint("agent-bridge-session-host", source=__file__, purpose="production")
 async def run_host(
     child_argv: list[str],
     *,

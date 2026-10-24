@@ -13,6 +13,9 @@ import ...`` call sites and tests are unaffected by the split.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+from pathlib import Path
+
 import json
 import platform
 import subprocess
@@ -534,8 +537,12 @@ class SubprocessLauncher:
         self.cwd = cwd
 
     def launch(self, reg: dict, cmd: list[str]) -> ProcHandle:
-        return subprocess.Popen(  # noqa: S603
+        return spawn_instance(
             cmd,
+            instance=DaemonInstanceSpec(
+                "agent-dispatch-registration", Path(self.cwd or Path(__file__).parent).absolute(),
+                Path(__file__).resolve(),
+            ),
             stdin=subprocess.DEVNULL,
             cwd=self.cwd,
             **no_window_kwargs(),

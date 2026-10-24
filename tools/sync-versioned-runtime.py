@@ -53,6 +53,11 @@ COMPONENT_NAMES = (
     "versioned_runtime_publication.py",
     "versioned_runtime_native.ps1",
 )
+INSTALLER_INSTANCE_NAMES = (
+    "installer-instance-reconcile.ps1", "installer-instance-reconcile.sh",
+    "installer_instance_reconcile.py",
+    "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_native.c",
+)
 DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
 DEPENDENCY_CONFIG = DEPENDENCY_POLICY.with_name("installer_dependency_config.py")
 
@@ -109,11 +114,28 @@ def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
+def installer_instance_sources(repo: Path) -> dict[str, Path]:
+    engine = repo / "libs" / "installer-engine"
+    procutil = repo / "libs" / "agent-procutil" / "src" / "agent_procutil"
+    return {
+        name: (procutil if name.startswith("daemon_instance") else engine) / name
+        for name in INSTALLER_INSTANCE_NAMES
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--check", action="store_true",
         help="verify every plugin copy matches the canonical; write nothing",
+    )
+    ap.add_argument(
+        "--only-installer-instances", action="store_true",
+        help="synchronize only the disposable-instance installer adapters and native bindings",
+    )
+    ap.add_argument(
+        "--native-wheel", type=Path,
+        help="explicitly assemble a source-verified prebuilt procutil native asset; never builds at startup",
     )
     args = ap.parse_args()
 
@@ -168,6 +190,35 @@ def main() -> int:
         for name in RESOLVER_NAMES:
             pairs.append((resolver_bytes[name], plugin / "scripts" / name))
 
+    instance_pairs: list[tuple[bytes, Path]] = []
+    executable_paths: set[Path] = set()
+    for name, source in installer_instance_sources(REPO).items():
+        if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or not source.is_file():
+            print(f"canonical installer instance helper missing or linked: {name}", file=sys.stderr)
+            return 1
+        data = source.read_bytes()
+        instance_pairs.extend((data, consumer / "scripts" / name) for consumer in consumers)
+        wsl = REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
+        if name in {"daemon_instances.ps1", "installer-instance-reconcile.ps1"} and (
+            wsl / "wsl-keepalive.ps1"
+        ).is_file():
+            instance_pairs.append((data, wsl / name))
+    if args.native_wheel is not None:
+        from native_daemon_artifacts import wheel_assets
+
+        source = REPO / "libs" / "agent-procutil"
+        try:
+            assets = wheel_assets(args.native_wheel, source_dir=source)
+        except (OSError, ValueError, RuntimeError) as error:
+            print(f"native artifact assembly refused: {error}", file=sys.stderr)
+            return 1
+        for relative, data in assets.items():
+            for consumer in consumers:
+                destination = consumer / "scripts" / relative
+                instance_pairs.append((data, destination))
+                executable_paths.add(destination)
+    pairs = instance_pairs if args.only_installer_instances else [*pairs, *instance_pairs]
+
     for _want_bytes, dest in pairs:
         bad_destination = uer._find_symlinked_ancestor(dest, REPO.resolve())
         if bad_destination is not None:
@@ -178,7 +229,11 @@ def main() -> int:
     written: list[str] = []
     for want_bytes, dest in pairs:
         current = dest.read_bytes() if dest.exists() else None
-        if current is not None and _sha(current) == _sha(want_bytes):
+        mode_matches = (
+            dest not in executable_paths or sys.platform == "win32"
+            or bool(dest.stat().st_mode & 0o111)
+        ) if current is not None else False
+        if current is not None and _sha(current) == _sha(want_bytes) and mode_matches:
             continue
         rel = dest.relative_to(REPO).as_posix()
         if args.check:
@@ -186,6 +241,8 @@ def main() -> int:
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(want_bytes)
+        if dest in executable_paths:
+            dest.chmod(0o755)
         written.append(rel)
 
     n_plugins = len(plugins)
@@ -193,14 +250,21 @@ def main() -> int:
     scope = f"{n_plugins} plugins (+ resolvers in {n_res}); {len(standalone)} standalone adopter(s)"
     if args.check:
         if drifted:
+            source_label = (
+                "the canonical installer-instance sources" if args.only_installer_instances
+                else f"the canonical sources in {RESOLVER_DIR.relative_to(REPO).as_posix()}"
+            )
             print(
                 "vendored versioned-runtime files are out of sync with the "
-                f"canonical sources in {RESOLVER_DIR.relative_to(REPO).as_posix()}:",
+                f"{source_label.removeprefix('the ')}:",
                 file=sys.stderr,
             )
             for d in drifted:
                 print(f"  - {d}", file=sys.stderr)
-            print("\nRun: python tools/sync-versioned-runtime.py", file=sys.stderr)
+            command = "python tools/sync-versioned-runtime.py"
+            if args.only_installer_instances:
+                command += " --only-installer-instances"
+            print(f"\nRun: {command}", file=sys.stderr)
             return 1
         print(f"versioned-runtime files in sync across {scope}.")
         return 0

@@ -1,6 +1,6 @@
 {
   "name": "plugin-process-hygiene-convergence",
-  "description": "Tier-P F1 scenario: an adversarial mock harness validating the transient-hook-client contract (visions/plugin-services 'process-count-scales-with-services-not-sessions' and 'hooks-and-callbacks-are-transient' Behaviors, PR #2300) against a synthetic mock daemon -- NOT a real plugin runtime, so it runs fast, dependency-free (stdlib only), and identically on every OS. Six adversarial scenarios (each a real-OS-process flood, never threads/asyncio): a concurrent flood against a live daemon (all served, exactly one daemon process survives); a flood against an absent daemon (all degrade to inline/no-op, zero self-promoted daemons); a daemon appearing mid-flood (both sides of the transition behave); a daemon dying mid-packet (every in-flight client degrades cleanly within a bounded budget, none hang); a concurrent daemon-election race (exactly one contender wins the single-instance lease, the rest stand down); and a repeated-flood process-count invariant (process count returns to baseline after every round, with zero leftovers). Real per-plugin conformance against this validated contract is issue #2301's own audit, cited against this harness's evidence rather than re-validated here. Design doc: efforts/active/plugin-process-hygiene/adversarial-convergence-mock.md. Name-free / public.",
+  "description": "Tier-P F1 adversarial transient-hook-client contract proof against a synthetic mock, not a product runtime. Stdlib networking and the shared agent-procutil test-instance lifecycle exercise six real-process floods: live and absent daemon, mid-flood appearance, mid-packet death, singleton contention, and repeated-flood process counts. Every mock daemon inherits finite test custody; transient clients remain lightweight. Real per-plugin conformance remains issue #2301. Name-free and credential-free.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -10,7 +10,8 @@
   "config": {
     "CR_PPC_SCENARIOS": "comma-separated subset of: flood-against-live-daemon,flood-against-absent-daemon,daemon-appears-mid-flood,daemon-dies-mid-packet,concurrent-daemon-race,process-count-invariant-under-repeated-floods",
     "CR_PPC_FLOOD_N": "concurrent clients per flood (default 50)",
-    "CR_PPC_ROUNDS": "rounds for the repeated-flood invariant (default 5)"
+    "CR_PPC_ROUNDS": "rounds for the repeated-flood invariant (default 5)",
+    "CR_PPC_PROCUTIL_SOURCE": "Optional explicit shared-package source directory; otherwise use the installed package or CR_HARNESS_MOUNT/libs/agent-procutil/src."
   },
   "expected_artifacts": [],
   "stages": [

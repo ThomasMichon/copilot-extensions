@@ -25,7 +25,7 @@ dependencies = []
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_procutil = ["native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh"]
+agent_procutil = ["native_daemon.ps1", "native_owned.ps1", "native_owned.sh", "native_daemon.sh", "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_native.c", "native/*/daemon-instance"]
 
 [tool.ruff]
 target-version = "py310"

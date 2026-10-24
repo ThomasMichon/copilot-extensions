@@ -1350,6 +1350,8 @@ if ($Action -eq 'cell-provision') {
             Write-Fail "selected cell runtime $SrcVersion failed immutable cutover validation"
             exit 1
         }
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
         Write-CellDeployManifest `
             -PluginRoot $pluginRoot `
             -SourcePluginDir $OriginPayloadRoot `
@@ -2280,6 +2282,10 @@ function Invoke-Stamp {
 if ($Action -eq 'stamp-binstub') { Invoke-StampBinstubOnly; exit 0 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
+if ($Action -in @('install', 'init', 'provision', 'cell-provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 # -- Preflight checks --------------------------------------------------
 
 Write-Step 'agent-machines init'

@@ -22,6 +22,8 @@ pattern instead of duplicating the resolution logic.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import json
 import os
@@ -418,6 +420,7 @@ def _ensure_supervisor_daemon(args: argparse.Namespace, machine: str | None, env
     return {"ensured": spawned, "reason": "spawned" if spawned else "spawn failed"}
 
 
+@daemon_entrypoint("agent-dispatch-supervisor", source=__file__, purpose="production")
 def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     """``supervise serve`` -- run the singleton supervisor daemon (foreground).
 
@@ -657,21 +660,20 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     the singleton daemon subsumes it.
     """
     sub = getattr(args, "supervise_command", None)
-    if sub == "register":
-        return _cmd_supervise_register(args)
-    if sub == "status":
-        return _cmd_supervise_status(args)
-    if sub == "list":
-        return _cmd_supervise_list(args)
-    if sub == "remove":
-        return _cmd_supervise_remove(args)
-    if sub == "serve":
-        return _cmd_supervise_serve(args)
-    if sub == "daemon-status":
-        return _cmd_supervise_daemon_status(args)
-    if sub == "override":
-        return _cmd_supervise_override(args)
+    handlers = {
+        "register": _cmd_supervise_register, "status": _cmd_supervise_status,
+        "list": _cmd_supervise_list, "remove": _cmd_supervise_remove,
+        "serve": _cmd_supervise_serve, "daemon-status": _cmd_supervise_daemon_status,
+        "override": _cmd_supervise_override,
+    }
+    if handler := handlers.get(sub):
+        return handler(args)
 
+    return _run_supervise(args)
+
+
+@daemon_entrypoint("agent-dispatch-lane", source=__file__, purpose="production")
+def _run_supervise(args: argparse.Namespace) -> int:
     from .supervisor import (
         Supervisor,
         make_embody_spawn,

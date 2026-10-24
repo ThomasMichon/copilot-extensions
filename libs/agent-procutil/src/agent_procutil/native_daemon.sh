@@ -2,6 +2,7 @@
 # Native equivalent of daemon.py's POSIX new-session/contained launch contract.
 
 __native_daemon_source="$(readlink -e -- "${BASH_SOURCE[0]}")"
+__native_instances_source="$(dirname -- "$__native_daemon_source")/daemon_instances.sh"
 
 start_native_daemon() {
     local script="$1" working="$2" log="$3" channel frame code=0
@@ -12,20 +13,34 @@ start_native_daemon() {
         printf '%s\n' 'Native daemon requires normalized Linux paths and a free admission descriptor.' >&2
         return 1
     }
+    source "$__native_instances_source"
+    script="$(readlink -e -- "$script")" || return 1
+    new_daemon_instance_reservation "$(basename -- "$script")" "$working" "$script" \
+        "${COPILOT_EXTENSIONS_DAEMON_REGISTRY:-}" || return 1
     channel="$(umask 077; mktemp -d -- "$working/.native-daemon-XXXXXXXX")" || return 1
     (umask 077; mkfifo -- "$channel/ready") || { rmdir -- "$channel"; return 1; }
     exec 7<>"$channel/ready" || return 1
     if [[ "${COPILOT_EXTENSIONS_TEST_CONTAINED:-}" == 1 ]]; then
+        COPILOT_EXTENSIONS_DAEMON_INSTANCE="$__daemon_instance_id" \
+        COPILOT_EXTENSIONS_DAEMON_REGISTRY="$__daemon_instance_root" \
         "$BASH" "$__native_daemon_source" --child "$script" "$working" "$@" \
             </dev/null >>"$log" 2>&1 &
     else
+        COPILOT_EXTENSIONS_DAEMON_INSTANCE="$__daemon_instance_id" \
+        COPILOT_EXTENSIONS_DAEMON_REGISTRY="$__daemon_instance_root" \
         setsid -- "$BASH" "$__native_daemon_source" --child "$script" "$working" "$@" \
             </dev/null >>"$log" 2>&1 &
     fi
     __native_daemon_pid=$!
-    if ! IFS= read -r -t 15 -u 7 frame || [[ "$frame" != "ready:$__native_daemon_pid" ]]; then
+    if ! IFS= read -r -t 15 -u 7 frame || [[ ! "$frame" =~ ^ready:([1-9][0-9]*)$ ]]; then
         printf '%s\n' 'Native daemon admission failed; consult its diagnostic log.' >&2
         code=1
+    else
+        local actual="${BASH_REMATCH[1]}"
+        local -A instance
+        if ! _di_read "$__daemon_instance_record" instance ||
+            [[ "${instance[pid]:-}" != "$actual" ]]; then code=1
+        else __native_daemon_pid="$actual"; fi
     fi
     exec 7>&-
     rm -- "$channel/ready" || code=1
@@ -51,6 +66,16 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
         [[ "$group" == "$$" && "$session" == "$$" ]] || exit 1
     fi
     cd -- "$working" || exit 1
+    source "$__native_instances_source"
+    local_instance_purpose=''
+    declare -A local_instance_record
+    _di_read "$COPILOT_EXTENSIONS_DAEMON_REGISTRY/$COPILOT_EXTENSIONS_DAEMON_INSTANCE.instance" local_instance_record || exit 1
+    if [[ "${local_instance_record[purpose]}" != production ]]; then
+        __daemon_instance_ready_fd=7
+        run_daemon_instance "$(basename -- "$script")" "$working" "$script" -- "$BASH" "$script" "$@"
+        exit $?
+    fi
+    enter_daemon_instance "$(basename -- "$script")" "$working" "$script" || exit 1
     trap '' HUP
     printf 'ready:%s\n' "$$" >&7
     exec 7>&-

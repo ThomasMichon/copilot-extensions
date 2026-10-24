@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from agent_procutil import detached_kwargs, windowless_daemon_kwargs
+from agent_procutil import spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec
 from zdd import breadcrumb, diagnostics, routing
 from zdd.cutover import CutoverOrchestrator
 
@@ -272,6 +273,7 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
     """
     from .self_install import _runtime_installer
 
+    root = mux_daemon_process.selected_root(root)
     runtime = _runtime_installer().runtime
     selected_python = runtime.slot_python(slot.parent.parent, slot.name)
     bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
@@ -294,17 +296,11 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__"):
         env.pop(name, None)
     env.update(extra_env)
-    kwargs: dict[str, object] = {
-        "cwd": str(root),
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": env,
-    }
-    kwargs.update(windowless_daemon_kwargs(breakaway=True))
-    if os.name != "nt":
-        kwargs.update(detached_kwargs())
-    return subprocess.Popen(argv, **kwargs)  # noqa: S603
+    return spawn_daemon(
+        argv, cwd=root, env=env, log_path=root / "mux-daemon-passive.log",
+        console_children=True,
+        instance=DaemonInstanceSpec("worktree-manager-mux", root, Path(__file__).resolve()),
+    )
 
 
 def _health_check(host: str, port: int, *, root: Path, generation: str | None = None) -> bool:

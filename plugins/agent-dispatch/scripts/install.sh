@@ -2651,6 +2651,12 @@ case "$ACTION" in
         ;;
 esac
 case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
+case "$ACTION" in
     install)   do_install ;;
     stamp)     do_stamp ;;
     provision) do_install ;;

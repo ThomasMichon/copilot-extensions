@@ -7,6 +7,8 @@ that ensures only one eligible supervisor invokes the command.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import _thread
 import contextlib
 import json
@@ -660,6 +662,7 @@ def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
     }
 
 
+@daemon_entrypoint("agent-dispatch-emitter", source=__file__, purpose="production")
 def serve(
     spec_path: str | Path,
     *,

@@ -3646,6 +3646,10 @@ $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
     Initialize-SourceRuntime
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     switch ($Action) {
         'install'   { Invoke-Install }
         'uninstall' { Invoke-Uninstall }

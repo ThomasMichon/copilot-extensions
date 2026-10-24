@@ -656,6 +656,10 @@ if (-not (Enter-InstallLock)) {
 $script:McpInstallFailure = $null
 try {
 Assert-SourceRuntime
+if ($Action -in @('install', 'init', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 # -- Preflight checks --------------------------------------------------

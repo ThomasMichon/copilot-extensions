@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import contextlib
 import importlib.util
@@ -243,6 +245,15 @@ def build_app(*, passive: bool = False) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Admit direct framework hosts before their startup work."""
+        from agent_procutil.daemon_instances import admit_daemon_instance
+
+        with admit_daemon_instance("agent-index", source=__file__, purpose="production"):
+            async with _lifespan(app):
+                yield
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
         data_dir().mkdir(parents=True, exist_ok=True)
         try:
             from .sources.providers import discover_and_register_providers
@@ -760,6 +771,7 @@ def _clear_routing() -> None:
         log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
 
 
+@daemon_entrypoint("agent-index", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Bind an OS-assigned local endpoint and run the service."""
     import uvicorn

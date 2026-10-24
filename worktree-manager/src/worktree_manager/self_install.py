@@ -783,6 +783,7 @@ def self_install(
     _after_activate=None,
     _before_publish=None,
     _transactional_activation: bool = False,
+    _reconcile_instances: bool = True,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     r = (root or default_root()).resolve()
@@ -806,6 +807,13 @@ def self_install(
                                      slot=str(slot), reason="dry-run", cleaned=would_clean)
         previous = current_version(r)
         was_current = not needs_install(version, r)
+        if _reconcile_instances and not (
+            os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+            or os.environ.get("PYTEST_CURRENT_TEST")
+        ):
+            from installer_instance_reconcile import reconcile_installer_instances
+
+            reconcile_installer_instances(running_payload_dir() / "scripts")
         with installer.candidate(pd, r, assemble=_copy_payload) as ready:
             slot = ready.slot
             return _complete_candidate(

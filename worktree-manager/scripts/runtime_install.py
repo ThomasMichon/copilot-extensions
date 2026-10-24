@@ -294,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.root is None:
         parser.error("--root is required for installation")
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    reconcile = not command or command[:1] in (["update"], ["self-install"])
     if args.repair_update and command[:1] != ["update"]:
         parser.error("Bootstrap repair is only valid for update")
     os.environ.pop("__PYVENV_LAUNCHER__", None)
@@ -372,9 +373,12 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 _after_activate=lambda slot: _activate_after_bootstrap_update(args.root, slot),
                 _transactional_activation=True,
+                _reconcile_instances=reconcile,
             )
         else:
-            result = self_install(install_payload, root=args.root, dry_run=False)
+            result = self_install(
+                install_payload, root=args.root, dry_run=False, _reconcile_instances=reconcile,
+            )
         if result.action == "error":
             print(result.reason, file=sys.stderr)
             return 1

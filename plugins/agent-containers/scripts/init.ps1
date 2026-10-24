@@ -735,6 +735,10 @@ if (-not (Enter-InstallLock)) {
 
 try {
 Assert-SourceRuntimeIdentity
+if ($Action -in @('install', 'init', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 if ($Action -eq 'stamp') {
     if ($Profile) { throw 'Select a runtime profile with provision, not stamp' }
     Invoke-Stamp

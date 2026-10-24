@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import os
 import sys
@@ -143,6 +145,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--control-port", type=int, default=None, help=argparse.SUPPRESS)
 
 
+@daemon_entrypoint("agent-worktrees-status-monitor", source=__file__, purpose="production")
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 

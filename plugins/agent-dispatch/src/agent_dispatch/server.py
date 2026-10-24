@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import logging
 import os
 import socket
@@ -273,6 +275,7 @@ def _clear_routing() -> None:
         log.debug("zdd routing clear-on-shutdown skipped", exc_info=True)
 
 
+@daemon_entrypoint("agent-dispatch-coordinator", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = False) -> None:
     """Bind and serve the coordinator (blocking).
 

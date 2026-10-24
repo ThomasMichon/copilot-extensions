@@ -4233,3 +4233,61 @@ Wire it as a `pre-push` hook (see `tools/hooks/pre-push`, which also runs
 if any privately-configured internal identifier leaks into the tree; it no-ops
 unless a denylist is configured, see the agent-codespaces README "Local
 identifier guard").
+## Native daemon-instance artifact construction
+
+The shared `agent-procutil` Linux kernel binding is a **prebuilt runtime asset**,
+not a first-use compiler prerequisite. Supported Linux wheels contain the
+executable `agent_procutil/native/linux-<architecture>/daemon-instance`
+(`x86_64` or `aarch64`) and carry a platform-specific wheel tag. Ordinary
+startup and reconciliation never invoke `cc`, install a toolchain, or treat
+the C source alone as delivered native capability. An unavailable or
+unsupported binding refuses explicitly.
+
+Explicit source/package builds require a C compiler. The package-owned
+`_build_native.py --output <absolute-output>` command and wheel build hook own
+that step; they do not fetch build dependencies. Governed artifact construction
+admits only the exact registered build hook. Its source verifier independently
+rebuilds the declared ELF on the matching Linux build platform and compares
+bytes, in addition to the ordinary wheel RECORD and candidate-source checks.
+This is an artifact-construction prerequisite, not a runtime probe or installer
+fallback.
+
+For `installer_instance_reconcile.reconcile_installer_instances(helper_root,
+registry_root=...)`, `helper_root` contains the shared `daemon_instances.sh`
+and its native executable (or `daemon_instances.ps1` on Windows). The Python
+adapter loads `installer-instance-reconcile.sh` / `.ps1` beside its **own
+module**, not from that native binding directory. Ship the Python adapter and
+its platform wrapper together; a procutil wheel package directory is a valid
+native binding root without an installer wrapper copied into it.
+
+Namespaced provisioning uses the same adapter, after its existing context and
+governance admission, including healthy reuse. A pending selection record is
+not cleanup authority: Index's recovery path must successfully validate and
+commit the existing selection transaction before its provision coordinator
+reconciles daemon instances. Unknown, refused, or failed recovery does not
+invoke cleanup. Status, import, and other read-only paths remain non-mutating.
+
+Source payload assembly on the matching supported Linux build host can
+explicitly stage the already-built, source-verified wheel asset through:
+
+```bash
+python tools/sync-versioned-runtime.py --only-installer-instances --native-wheel <procutil-wheel>
+```
+
+The same command with `--check` audits the selected family and executable.
+Without `--native-wheel`, synchronization carries source/native adapters but
+does not claim to deliver a Linux executable. Generated native binaries are
+ignored by Git and are not hand-committed. Build/test scratch (`.test-runs`)
+is excluded from library payload copies and input fingerprints.
+Copy exclusion happens before traversal. Unfiltered build contexts still reject
+links inside scratch; excluding a path from fingerprints or a filtered-copy
+scan never authorizes an unfiltered copy to follow it.
+
+The on-demand artifact qualification is
+`tools/test_native_daemon_artifacts.py::test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc`,
+with `PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` in a supported Linux build
+environment. It builds through the canonical wheel owner, verifies source-bound
+ELF bytes, installs the wheel offline, exercises package/source native lookup
+without Python or compiler on PATH, and runs the native lifetime/artifact
+selectors against the installed package. It is not part of ordinary unit-only
+PR collection.

@@ -386,6 +386,8 @@ class Engine:
         pass
     def build(self, sha, timeout):
         return "synthetic-image"
+    def open_runner_lifetime(self):
+        pass
     def cleanup(self):
         (root / "cleanup-started").touch()
         deadline = time.monotonic() + 5
@@ -471,8 +473,8 @@ def test_new_sources_remain_bounded_and_production_image_has_no_fixture_dependen
     assert len(Path(__file__).read_text().splitlines()) < 500
     dockerfile = (ROOT / SOURCE.IMAGE / "Dockerfile").read_text()
     assert "python:3.13-slim" in dockerfile and "uv:0.11.7" in dockerfile
-    assert dockerfile.count('--exclude-newer "7 days"') == 2
-    assert "USER 10001:10001" in dockerfile and "[service-gateway]" in dockerfile
+    assert dockerfile.count('--exclude-newer "7 days"') == 3
+    assert "USER ${GATEWAY_UID}:${GATEWAY_GID}" in dockerfile and "[service-gateway]" in dockerfile
     assert "HEALTHCHECK NONE" in dockerfile
     assert '"doctor"' not in dockerfile
     assert "COPY . " not in dockerfile and "fixture" not in dockerfile.lower()

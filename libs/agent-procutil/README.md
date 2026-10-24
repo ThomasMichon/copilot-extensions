@@ -446,6 +446,154 @@ evidence.
 
 ## Launching a resident daemon: `spawn_daemon`
 
+### Attributable instances and explicit test lifetime
+
+`agent_procutil.daemon_instances` is the shared filesystem lifecycle owner.
+It does not require an installer record, a running sibling service, a new
+singleton election, or an installed-package identity. Source paths are
+first-class provenance. Import and inspection never reconcile or start a service.
+
+```python
+from pathlib import Path
+from agent_procutil.daemon_instances import (
+    DaemonInstanceSpec, daemon_entrypoint, daemon_test_lifecycle,
+)
+
+@daemon_entrypoint("example", source=__file__, runtime_root=runtime_home, purpose="production")
+async def serve():
+    await run_server()
+
+with daemon_test_lifecycle(owner="example-test", registry_root=test_registry) as overlay:
+    # Pass overlay to the actual test process; its lifecycle owner renews it.
+    test_env = {**base_env, **overlay}
+```
+
+The entrypoint decorator retains admission across synchronous and asynchronous
+bodies. `runtime_root` may also be a resolver receiving the decorated callable's
+arguments. Nested admission in one process shares a reference-counted receipt.
+Production admission starts no expiry thread or extra containment Job.
+Raw admission/decorators default to **no purpose**, not protected production.
+Without an inherited reservation or actual test-lifecycle declaration they
+refuse before application work. A named production service entrypoint declares
+`purpose="production"` explicitly; a source pathname by itself is not that
+declaration. Zipapp provenance records the verified real archive plus its
+existing source member rather than pretending the virtual member is a file.
+
+Pass `instance=DaemonInstanceSpec(service, runtime_root, source, ...)` to
+`spawn_daemon`. It reserves before creation, carries a locator into startup
+admission, binds native birth identity, and returns `process.instance_receipt`.
+`spawn_instance(argv, instance=spec, popen=None, **kwargs)` supplies the same
+tracking for an existing raw/callback spawn without changing stdio or detachment.
+For a manually controlled spawn, use `reserve_instance`, `instance_environment`,
+and `bind_instance`; cancel only a **positively refused** creation through
+`cancel_instance_reservation(..., creation_refused=True)`. Lost responses and
+uncertain cleanup retain the original record.
+
+An automatic executable provenance is never a library-file fallback. POSIX
+lookup uses the actual child environment's `PATH` (including its default when
+absent), resolving relative entries/paths against the child cwd. Multiple
+distinct executable targets require an explicit instance rather than guessing
+which execution-error fallback succeeds. Windows automatic provenance requires
+an existing, fully qualified `.exe`/`.com`: `CreateProcess` search does not use
+the child's replacement `PATH`/cwd, so a bare Windows command requires an
+explicit instance. Normalized Python provenance names the actual executable.
+
+Positive creation refusals cancel only an unconsumed no-PID reservation.
+Broker failures distinguish no target creation, staged-but-unadmitted children,
+and possibly started work. Only a confirmed pre-admission exit may settle its
+tracking record without an application-file cleanup. Unknown exit, identity,
+custody or started effects preserve the original receipt and never trigger an
+automatic replay. Commit failure carries `instance_receipt` for recovery.
+
+`spawn_finite_worker(argv, instance=spec, **spawn_daemon_kwargs)` declares
+`spec.lifecycle="finite-worker"` and retains the same headless/broker lifetime
+policy. Production finite workers have **no TTL**. Their Python shim records
+`finished` work closure even after the creator exits; this is not a claim that a
+process observed its own kernel exit. The same explicit cleanup/backstop settles
+only the control record after exact process-birth exit is observed. It never
+stops live production finite work or deletes its production artifacts, and
+uncertain launch/protected records continue to hold.
+
+Production purpose has no lease. Explicit `unattended-test` purpose defaults to
+`DaemonLeasePolicy(ttl_seconds=600, max_lifetime_seconds=14400)`. Interactive
+tests must supply their own finite pause-tolerant policy; temporary pathnames,
+pytest metadata, and agent-turn activity never select a test policy.
+`daemon_test_lifecycle` yields an explicit environment declaration, not a shared
+single-use instance. Each child reserves separately. The actual owner process
+renews only its run, and its context teardown is the primary cleanup path.
+A daemon does not renew itself. Renewal cannot revive expiry or extend the
+immutable maximum lifetime.
+
+Leased Python commands receive same-process startup admission before application
+code. Windows venv redirectors are bypassed using `direct_python`, retaining
+venv imports. The child observes expiry independently of its launcher;
+Windows disposable children establish a strict kill-on-close descendant Job.
+One local lifecycle thread handles renewal/expiry per process.
+
+The default discovery root comes from the OS user's profile rather than an
+isolated `HOME`. Explicit test roots are supported. Schema 1 stores private,
+bounded `.instance` files containing `key<TAB>base64(UTF-8 value)` lines and
+per-instance `.lock` files. Windows uses the existing byte-lock offset
+`1 << 30`; Linux uses whole-file `flock`. Native birth tokens retain raw Windows
+creation FILETIME, Linux boot/namespace/start ticks, or Darwin start tuples.
+Windows path IDs use raw 64-bit volume/128-bit file identity consistently across
+Python versions. The registry stores no argv tails, credentials or environment
+dumps.
+
+`cleanup_instance(receipt)` returns `InstanceCleanupResult(instance_id, status,
+reason, removed)`, with status `settled`, `held`, `live`, or `missing`. It never
+signals an unproved numeric PID. Reused/unknown identities, redirected or changed
+paths, protected work and unknown launch outcomes hold. A guard may declare
+individual already-created lifecycle files using `add_artifact`; cleanup does
+not recursively delete runtime roots, source, installed code, undeclared logs,
+or retained evidence. Canonical lock files remain to prevent split custody.
+An existing code/config directory may be a borrowed, read-only metadata anchor,
+including a root-owned container payload. Recording its identity does not confer
+ownership or deletion authority. Registry entries and individually declared
+artifacts still require current-user ownership and exact file identity. Missing
+explicit runtime directories may be created privately as admission metadata;
+callers avoiding business-state creation should use an existing anchor.
+
+`reconcile_instances(registry_root=None, limit=128, max_seconds=5)` is an explicit
+installer backstop for **expired disposable** instances and observed-exit
+finite control records. Resident production and unexpired disposable records
+are preserved. No import, status, lookup or session-start
+routine invokes it implicitly. The module CLI offers `inspect` and `reconcile`
+with `--registry-root`, `--limit`, and `--max-seconds`.
+The additional finite-production control-record case requires observed native
+exit and never inherits disposable-artifact reclamation authority.
+Collectors resume lexicographically after the last visited canonical instance
+key and wrap at EOF, so protected, unexpired and held rows cannot permanently
+starve later entries. Count and whole-call time bounds still apply. The same
+owned inventory contains `.reconcile.lock` and atomically published
+`.reconcile.cursor`; all bindings use the ASCII header
+`copilot-daemon-reconcile-v1`, newline, an empty or 32-lowercase-hex key, and a
+final newline. This is progress metadata, not an instance or ownership grant.
+Nonblocking collector custody serializes cursor advancement across bindings.
+Missing inventories remain absent; empty inventories create no progress files.
+Invalid, redirected, inaccessible or foreign controls fail visibly without
+repair. Inspection never advances the cursor.
+
+The standalone Python-free binding is `daemon_instances.ps1`, with
+`New-DaemonInstanceReservation`, `Set-DaemonInstanceProcess`, `Enter-DaemonInstance`,
+`Exit-DaemonInstance`, and `Invoke-DaemonInstanceReconcile`. Bash exposes
+`new_daemon_instance_reservation`, `enter_daemon_instance`,
+`run_daemon_instance`, and `reconcile_daemon_instances`. Both use the same record
+protocol. Native Linux kernel binding source is `daemon_instance_native.c`;
+Supported Linux platform wheels include `native/linux-<architecture>/daemon-instance`
+for `x86_64` and `aarch64`. The setuptools package build compiles that resource;
+an explicit source/development build may instead run
+`python src/agent_procutil/_build_native.py --output
+src/agent_procutil/native/linux-<architecture>/daemon-instance`.
+The source-build environment needs its own C compiler, not the runtime host.
+The Linux native lane requires working pidfd syscalls (Linux 5.3 or newer);
+`daemon-instance check` reports unavailable kernel support without signaling work.
+Startup, install and update never compile a missing runtime helper or install a
+toolchain. A missing native artifact
+refuses disposable native admission or holds reconciliation with a diagnostic;
+it is not permission to fall back to numeric-PID signaling. Darwin external
+termination currently holds when kernel-pinned custody cannot be established.
+
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
 and meant to outlive it) launches through one primitive instead of hand-built
 `Popen` kwargs:

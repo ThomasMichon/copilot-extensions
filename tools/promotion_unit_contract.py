@@ -215,7 +215,7 @@ def ci_requires_units(
 def ci_requires_source_ast_guards(
     event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
 ) -> bool:
-    """Omit only PR inputs outside the three full scanners' source/policy roots."""
+    """Omit only PR inputs outside the full scanners' source/policy roots."""
     if event != "pull_request":
         return True
     paths = changed_paths(base, head, read_diff, merge_base=True)

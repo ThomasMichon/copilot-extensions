@@ -6,6 +6,8 @@ start the same resident daemon, so both go through :func:`spawn_service`.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import os
 import subprocess
 import sys
@@ -74,6 +76,7 @@ def spawn_service(args: Sequence[str]) -> subprocess.Popen:
             str(Path(__file__).resolve().parent.parent), *args,
         ],
         cwd=root,
+        instance=DaemonInstanceSpec("agent-vault", root, Path(__file__).resolve()),
         log_path=root / SERVICE_STDIO_LOG,
         env_overrides=overrides,
         contained_fallback=True,

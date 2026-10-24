@@ -553,6 +553,18 @@ COPY wheels/ /build/wheels/
 COPY Dockerfile .dockerignore release.json install.txt context.json verify-and-install.py native-probe.py /build/
 RUN --network=none ["python", "-I", "-B", "-S", "/build/verify-and-install.py"]
 FROM --platform={target.platform} {base_image} AS runtime
+USER 0
+RUN set -eu; \\
+    test ! -L /var/lib/agent-index; \\
+    if ! getent group {gid} >/dev/null; then groupadd --gid {gid} agent-index-{gid}; fi; \\
+    if getent passwd {uid} >/dev/null; then \\
+        account="$(getent passwd {uid} | cut -d: -f1)"; \\
+        usermod --gid {gid} --home /var/lib/agent-index "$account"; \\
+    else \\
+        useradd --uid {uid} --gid {gid} --home-dir /var/lib/agent-index \\
+            --no-create-home --shell /usr/sbin/nologin agent-index-{uid}; \\
+    fi; \\
+    install -d -m 700 -o {uid} -g {gid} /var/lib/agent-index
 COPY --from=build /opt/agent-index/ /opt/agent-index/
 COPY --from=build --chown={uid}:{gid} /var/lib/agent-index/ /var/lib/agent-index/
 USER {uid}:{gid}

@@ -28,6 +28,7 @@ sys.path.insert(
 )
 try:
     from agent_procutil import no_window_kwargs
+    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
 
@@ -930,18 +931,26 @@ def run_contained(
     env: Mapping[str, str],
     sandbox: Path,
     limits: Limits,
+    daemon_purpose: str = "unattended-test",
+    daemon_lease: DaemonLeasePolicy | None = None,
 ) -> int:
-    """Run a contained tree and fail if it escapes into Windows environment state."""
+    """Run an owned test tree; interactive tests require an explicit lease policy."""
     environment_snapshot = _read_registry_environment()
     unreaped = None
     try:
-        result = _run_contained_process(
-            command,
-            cwd=cwd,
-            env=env,
-            sandbox=sandbox,
-            limits=limits,
-        )
+        with daemon_test_lifecycle(
+            owner=f"contained-test-runner:{os.getpid()}",
+            registry_root=sandbox.absolute() / "daemon-instances",
+            purpose=daemon_purpose,
+            lease=daemon_lease,
+        ) as daemon_environment:
+            result = _run_contained_process(
+                command,
+                cwd=cwd,
+                env={**env, **daemon_environment},
+                sandbox=sandbox,
+                limits=limits,
+            )
     except UnreapedProcessError as exc:
         unreaped = exc
         raise

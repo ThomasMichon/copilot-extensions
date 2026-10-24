@@ -23,6 +23,8 @@ point of the spike.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import json
 import socket
@@ -191,6 +193,7 @@ class SessionHost:
                 self.proc.terminate()
 
     # ---- run -------------------------------------------------------------
+    @daemon_entrypoint("session-host-fixture", source=__file__)
     def run(self) -> int:
         self.spawn_child()
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import contextlib
 import io
@@ -16,10 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import (
-    no_window_kwargs,
-    spawn_daemon,
-    windowless_python,
-    windowless_python_env,
+    no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env,
 )
 import httpx
 
@@ -591,6 +590,7 @@ def _config_from_args(args: argparse.Namespace) -> Config:
     return Config(host=host, port=cfg.port if port is None else int(port))
 
 
+@daemon_entrypoint("agent-index", source=__file__, purpose="production")
 def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     """Lazily import and delegate to the real ``.server.serve``.
 
@@ -1393,6 +1393,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             overrides["AGENT_INDEX_LOG_LEVEL"] = "warning"
         handle = spawn_daemon(
             cmd, cwd=root, log_path=root / "service-stdio.log", env=env, env_overrides=overrides,
+            instance=DaemonInstanceSpec("agent-index", root, Path(__file__).resolve()),
             display=f"agent_index {start_command} --passive --port {port}",
         )
         passive_instance.update({"port": port, "pid": handle.pid})

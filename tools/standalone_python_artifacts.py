@@ -37,7 +37,7 @@ def source_closure(component: str, root: Path, builder) -> tuple[Path, list, tup
         if (
             not path.is_dir() or not path.resolve().is_relative_to(root.resolve())
             or builder.uer._find_symlinked_ancestor(path, root) is not None
-            or builder.uer._find_symlink(path) is not None
+            or builder.uer._find_symlink(path, skip_test_runs=False) is not None
         ):
             raise ArtifactBuildError("standalone source/resource is missing, linked or outside candidate")
     if not (source / "pyproject.toml").is_file():

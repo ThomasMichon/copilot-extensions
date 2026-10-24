@@ -8,6 +8,7 @@ import subprocess
 import stat
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -77,6 +78,35 @@ def test_posix_interpreter_selection_stays_unchanged(monkeypatch):
     )
 
 
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("relative_root", ["relative-root", "../relative-root"])
+def test_selected_root_anchors_relative_paths_without_resolving_links(
+    tmp_path, monkeypatch, explicit, relative_root,
+):
+    cwd = tmp_path / "caller" if relative_root.startswith("..") else tmp_path
+    cwd.mkdir(exist_ok=True)
+    monkeypatch.chdir(cwd)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", relative_root)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(Path, "resolve", lambda *_a, **_k: pytest.fail("must retain path indirection"))
+        selected = mux_daemon_process.selected_root(Path(relative_root) if explicit else None)
+    assert selected == tmp_path / "relative-root"
+
+
+def test_ordinary_start_anchors_relative_cwd_before_instance_spec(tmp_path, monkeypatch):
+    (tmp_path / "relative-root").mkdir()
+    monkeypatch.chdir(tmp_path)
+    captured = {}
+    monkeypatch.setattr(mux_daemon_process, "direct_daemon_python", lambda source: (source, {}))
+    monkeypatch.setattr(
+        mux_daemon_process, "spawn_daemon",
+        lambda argv, **kwargs: captured.update(kwargs),
+    )
+    assert mux_daemon_process.spawn_detached(["python"], cwd=Path("relative-root"))
+    assert captured["cwd"] == str(tmp_path / "relative-root")
+    assert captured["instance"].runtime_root == tmp_path / "relative-root"
+
+
 @pytest.mark.parametrize("gui_name", ["pythonw.exe", "gui-host.exe"], ids=["relocated", "renamed"])
 def test_linked_gui_keeps_console_and_venv_from_configured_home(tmp_path, monkeypatch, gui_name):
     base = tmp_path / "base"
@@ -116,7 +146,7 @@ def test_ordinary_start_uses_direct_interpreter_and_scrubs_credentials(monkeypat
         captured.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(pid=77)
 
-    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(mux_daemon_process, "spawn_daemon", popen)
     assert mux_daemon_process.spawn_detached(["venv-python", "-m", "worktree_manager"])
     assert captured["argv"] == ["base-pythonw", "-m", "worktree_manager"]
     env = captured["kwargs"]["env"]
@@ -139,7 +169,8 @@ def test_ordinary_start_reports_unsupported_interpreter_without_spawning(monkeyp
     assert "unsupported direct interpreter" in caplog.text
 
 
-def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, monkeypatch):
+@pytest.mark.parametrize("relative", [False, True])
+def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, monkeypatch, relative):
     root = tmp_path / "stable"
     root.mkdir()
     slot = root / "versions" / "candidate"
@@ -155,11 +186,16 @@ def test_passive_start_preserves_direct_venv_and_payload_environment(tmp_path, m
         captured.update(argv=argv, kwargs=kwargs)
         return SimpleNamespace(pid=77)
 
-    monkeypatch.setattr(subprocess, "Popen", popen)
-    proc = mux_daemon_cutover.spawn_passive(slot, root=root, port=54321)
+    monkeypatch.setattr(mux_daemon_cutover, "spawn_daemon", popen)
+    monkeypatch.chdir(tmp_path)
+    proc = mux_daemon_cutover.spawn_passive(
+        slot, root=Path("stable") if relative else root, port=54321,
+    )
     assert proc.pid == 77
     assert captured["argv"][0] == "base-pythonw"
-    assert captured["kwargs"]["cwd"] == str(root)
+    assert captured["kwargs"]["cwd"] == root
+    assert captured["kwargs"]["instance"].runtime_root == root
+    assert f"--root={root}" in captured["argv"]
     env = captured["kwargs"]["env"]
     assert env["__PYVENV_LAUNCHER__"] == str(target_python)
     assert "PYTHONPATH" not in env

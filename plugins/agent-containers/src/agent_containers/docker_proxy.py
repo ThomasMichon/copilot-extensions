@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+
 import argparse
 import contextlib
 import json
@@ -14,7 +16,7 @@ import time
 from pathlib import Path
 from typing import BinaryIO
 
-from agent_procutil import no_window_kwargs, windowless_daemon_kwargs
+from agent_procutil import no_window_kwargs, spawn_daemon
 
 _IDLE_EXIT_SECONDS = 120.0
 
@@ -140,6 +142,10 @@ def _serve_control(listener: socket.socket) -> None:
                 pass
 
 
+@daemon_entrypoint(
+    "agent-containers-docker-proxy", source=__file__, purpose="production",
+    runtime_root=lambda container, container_id, endpoint_file: endpoint_file.absolute().parent,
+)
 def serve(container: str, container_id: str, endpoint_file: Path) -> int:
     data_listener = socket.socket()
     control_listener = socket.socket()
@@ -251,7 +257,7 @@ def ensure_broker(
     if _healthy_endpoint(current, container, container_id):
         return int(current["port"])
 
-    process = subprocess.Popen(
+    process = spawn_daemon(
         [
             sys.executable,
             "-m",
@@ -261,9 +267,10 @@ def ensure_broker(
             container_id,
             str(endpoint_file),
         ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        instance=DaemonInstanceSpec(
+            "agent-containers-docker-proxy", endpoint_file.absolute().parent, Path(__file__).resolve(),
+        ),
+        log_path=endpoint_file.absolute().parent / "docker-proxy.log",
         # Never the caller's ambient cwd: this is a long-lived detached
         # proxy daemon that may outlive whatever repo/worktree checkout the
         # caller happened to be running from (service-lifecycle-
@@ -272,7 +279,6 @@ def ensure_broker(
         # absolute arguments (`endpoint_file`), so its cwd is irrelevant to
         # its job -- root it at HOME.
         cwd=os.path.expanduser("~"),
-        **windowless_daemon_kwargs(breakaway=True),
     )
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

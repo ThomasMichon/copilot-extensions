@@ -15,6 +15,8 @@ Endpoints:
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import logging
 import os
@@ -200,6 +202,16 @@ async def _idle_monitor(timeout: float) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Retain process admission across the complete engine application lifetime."""
+    from agent_procutil.daemon_instances import admit_daemon_instance
+
+    with admit_daemon_instance("agent-index-engine", source=__file__, purpose="production"):
+        async with _lifespan(app):
+            yield
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
     """Engine lifespan -- load config and clean up on shutdown."""
     global _config, _idle_task
     from agent_index.index_config import IndexConfig
@@ -367,6 +379,7 @@ def _systemd_socket_fd() -> int | None:
     return _SD_LISTEN_FDS_START
 
 
+@daemon_entrypoint("agent-index-engine", source=__file__, purpose="production")
 def run_engine(*, host: str = "127.0.0.1", port: int = 8421) -> None:
     """Start the agent-index engine server with uvicorn.
 
@@ -522,4 +535,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
