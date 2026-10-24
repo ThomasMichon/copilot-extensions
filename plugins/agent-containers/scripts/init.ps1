@@ -419,52 +419,112 @@ function Deploy-SelfProvisioningBinstub {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
+    $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-containers'
-        $stubContent = @"
+        $quote = "'" + '"' + "'" + '"' + "'"
+        $rootSh = "'" + $InstallDir.Replace("'", $quote) + "'"
+        $sourceSh = "'" + $sourceRoot.Replace("'", $quote) + "'"
+        $stubContent = @'
 #!/usr/bin/env bash
+_root=__ROOT__
+_source=__SOURCE__
+set -euo pipefail
 export PYTHONUTF8=1
-_root="`$HOME/.agent-containers"
-AGENT_RT_PY=""
-if [ -f "`$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="`$_root"; . "`$_root/bin/resolve-runtime.sh"; fi
-[ -n "`$AGENT_RT_PY" ] && exec "`$AGENT_RT_PY" -m agent_containers "`$@"
-_i="`$(cat "`$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
-[ -f "`$_i" ] || _i="`$(ls "`$HOME"/.copilot/installed-plugins/*/agent-containers/scripts/init.sh 2>/dev/null | head -n1)"
-if [ -n "`$_i" ] && [ -f "`$_i" ]; then echo "[agent-containers] runtime not provisioned; run: bash \"`$_i\" provision" >&2; else echo "[agent-containers] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
-exit 1
-"@
+_snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_payload="$_snap"
+if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
+    _payload=""
+    if [[ -n "$_snap" && -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
+fi
+if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
+    if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+        _resolver="$_root/bin/resolve-runtime.sh"
+        if [[ -f "$_resolver" ]] &&
+           grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+            AGENT_RT_ROOT="$_root"
+            AGENT_RT_RESOLVE_TRACE_MODE=ready
+            AGENT_RT_PY=""
+            if ! . "$_resolver"; then
+                printf '[agent-containers] runtime resolver failed; update the owning installation.\n' >&2
+                exit 126
+            fi
+            if [[ -n "$AGENT_RT_PY" ]]; then
+                export AGENT_CONTAINERS_HOME="$_root"
+                export AGENT_CONTAINERS_STATE_DIR="$_root"
+                exec "$AGENT_RT_PY" -m agent_containers "$@"
+            fi
+        fi
+    fi
+    printf '[agent-containers] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.\n' >&2
+    exit 126
+fi
+export AGENT_CONTAINERS_HOME="$_root"
+export AGENT_CONTAINERS_STATE_DIR="$_root"
+export AGENT_CONTAINERS_PAYLOAD_ROOT="$_payload"
+exec bash "$_payload/scripts/runtime-gate.sh" "$@"
+'@
+        $stubContent = $stubContent.Replace('__ROOT__', $rootSh).Replace('__SOURCE__', $sourceSh).Replace("`r`n", "`n")
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
         return
     }
     $ps1Path = Join-Path $LocalBin 'agent-containers.ps1'
     $ps1Content = @'
+$ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
-$_root = Join-Path $env:USERPROFILE '.agent-containers'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
-    return $AgentRtPy
+$_root = '__ROOT__'
+$_source = '__SOURCE__'
+$_pointer = Join-Path $_root 'payload-dir'
+$_snap = if ([IO.File]::Exists($_pointer)) { [IO.File]::ReadAllText($_pointer).Trim() } else { '' }
+$_payload = $_snap
+# Old ordinary snapshots have no canonical source receipt. Use only their
+# captured publisher, never another marketplace or an ambient PATH command.
+if (-not $_snap -or -not [IO.File]::Exists((Join-Path $_snap 'snapshot-provenance.json'))) {
+    $_payload = if ($_snap -and [IO.File]::Exists((Join-Path $_source 'scripts\runtime-gate.ps1'))) { $_source } else { '' }
 }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_containers @args; exit $LASTEXITCODE }
-if ($env:AGENT_CONTAINERS_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-containers] runtime not provisioned (AGENT_CONTAINERS_NO_SELFPROVISION set).'); exit 1 }
-$_snap = ''
-try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\init.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-containers] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
-[Console]::Error.WriteLine('[agent-containers] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-containers eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_containers @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-containers] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
+$_gate = if ($_payload) { Join-Path $_payload 'scripts\runtime-gate.ps1' } else { '' }
+if (-not $_gate -or -not [IO.File]::Exists($_gate)) {
+    if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
+        $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+        if ([IO.File]::Exists($_resolver) -and
+            (Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+            $env:AGENT_RT_ROOT = $_root
+            $AgentRtPy = $null
+            try {
+                . $_resolver -TraceMode ready
+            } catch {
+                [Console]::Error.WriteLine("[agent-containers] runtime resolver failed; update the owning installation: $($_.Exception.Message)")
+                exit 126
+            }
+            if ($AgentRtPy) {
+                $env:AGENT_CONTAINERS_HOME = $_root
+                $env:AGENT_CONTAINERS_STATE_DIR = $_root
+                $_nativeArgs = $args
+                $_argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
+                if (-not $_argumentMode -or $_argumentMode -eq 'Legacy') {
+                    $_nativeArgs = @($args | ForEach-Object {
+                        '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+                    })
+                }
+                $_previousEap = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { & $AgentRtPy -m agent_containers @_nativeArgs } finally { $ErrorActionPreference = $_previousEap }
+                exit $LASTEXITCODE
+            }
+        }
+    }
+    [Console]::Error.WriteLine('[agent-containers] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.')
+    exit 126
+}
+$env:AGENT_CONTAINERS_HOME = $_root
+$env:AGENT_CONTAINERS_STATE_DIR = $_root
+$env:AGENT_CONTAINERS_PAYLOAD_ROOT = $_payload
+& $_gate @args
+exit $LASTEXITCODE
 '@
-    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+    $ps1Content = $ps1Content.Replace('__ROOT__', $InstallDir.Replace("'", "''")).Replace('__SOURCE__', $sourceRoot.Replace("'", "''"))
+    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, (New-Object Text.UTF8Encoding($true)))
 
     $cmdPath = Join-Path $LocalBin 'agent-containers.cmd'
     # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
@@ -475,7 +535,7 @@ exit 1
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_PS1=%USERPROFILE%\.local\bin\agent-containers.ps1"
+set "_PS1=%~dp0agent-containers.ps1"
 if not exist "%_PS1%" (echo [agent-containers] binstub not found: %_PS1%>&2 & exit /b 127)
 set "_PSHOST="
 for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"

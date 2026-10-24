@@ -224,7 +224,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] **Agent-recommended bounded slice:** qualify Bridge command-side first use before provision trace/status/root/lock writes, with actual standalone reachability, healthy managed invocation, helper skew and independently selected installation scope.
 - [x] **Agent-recommended bounded slice:** qualify Dispatch command-side first use through the canonical required-context dispatcher contract, preserving legacy defaults for unrelated version-1 manifests and actual selected-cell scope.
 - [ ] **Agent-recommended capability follow-up:** qualify Dispatch's native scoped staging/service publication before replacing explicit cold-cell/custom-root command readiness with provisioning.
-- [ ] **Agent-recommended review follow-up:** restore and qualify serialized no-flock stale-lock recovery in Bridge's retained command gate under #7030, separately from its merged publication-admission slice.
+- [x] **Agent-recommended review follow-up:** restore and qualify serialized no-flock stale-lock recovery in Bridge's retained command gate under #7030, separately from its merged publication-admission slice.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection

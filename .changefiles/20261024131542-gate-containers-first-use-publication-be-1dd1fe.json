@@ -1,0 +1,9 @@
+{
+  "comment": "Gate Containers first-use publication before writes, retain exact global roots and publishers, and qualify fallback-lock custody across platforms.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

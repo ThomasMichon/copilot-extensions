@@ -215,6 +215,23 @@ def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> N
         pytest.skip("pwsh not available")
     home = tmp_path / "home"
     home.mkdir()
+    environment = _isolated_env(home)
+    control = subprocess.run(
+        [pwsh, "-NoProfile", "-NonInteractive", "-Command", "exit 0"],
+        capture_output=True, text=True, timeout=30, env=environment, cwd=tmp_path,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert control.returncode == 0, control.stdout + control.stderr
+    local = home / ".local"
+
+    def local_state() -> dict[str, bytes | None]:
+        return {
+            path.relative_to(local).as_posix(): path.read_bytes() if path.is_file() else None
+            for path in local.rglob("*")
+        }
+
+    local_existed = local.exists()
+    before = local_state()
     install_dir = tmp_path / "rt"
     install_dir.mkdir()
     holder = _ps_holder(pwsh, install_dir / ".install.lock")
@@ -222,8 +239,9 @@ def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> N
         result = subprocess.run(
             [pwsh, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-File", str(PS_SCRIPT), "-Action", "stamp", "-InstallDir", str(install_dir)],
-            capture_output=True, text=True, timeout=120, env=_isolated_env(home),
+            capture_output=True, text=True, timeout=120, env=environment,
             cwd=tmp_path,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     finally:
         holder.kill()
@@ -232,7 +250,7 @@ def test_powershell_installer_fails_closed_without_mutating(tmp_path: Path) -> N
     assert result.returncode != 0, output
     assert LOCK_FAILURE in output
     assert sorted(p.name for p in install_dir.iterdir()) == [".install.lock"]
-    assert not (home / ".local").exists()
+    assert local.exists() == local_existed and local_state() == before
 
 
 # ---------------------------------------------------------------------------
