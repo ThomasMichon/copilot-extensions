@@ -101,12 +101,21 @@ def _observe_unreaped(process: UnreapedChild):
     return status
 
 
+def _zombie_only_group(process: subprocess.Popen) -> bool:
+    """Confirm the group holds no live member besides its exited, unreaped leader."""
+    if sys.platform != "darwin":
+        return False
+    from agent_procutil._darwin_caller_owned import GroupCensus
+
+    return not GroupCensus().active(process.pid)
+
+
 def _retire_posix_group(
     process: UnreapedChild, *, inherit_process_group: bool = False,
 ) -> None:
     # Exclusive Popen ownership plus WNOWAIT pins the original PID through termination.
     # Never poll, communicate or wait this child before this boundary.
-    _observe_unreaped(process)
+    exited = _observe_unreaped(process) is not None
     try:
         if inherit_process_group:
             os.kill(process.pid, signal.SIGKILL)
@@ -114,6 +123,11 @@ def _retire_posix_group(
             os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except PermissionError:
+        # Darwin refuses killpg() for a group left with only its exited leader;
+        # leader exit alone never proves settlement, so a census must confirm it.
+        if inherit_process_group or not exited or not _zombie_only_group(process):
+            raise
 
 
 def _communicate_unreaped(

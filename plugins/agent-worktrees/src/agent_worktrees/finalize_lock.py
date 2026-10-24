@@ -79,8 +79,9 @@ class FinalizeLock:
                     token_parts = observed.split(":")
                     owner_text = token_parts[0]
                     owner_start_time = (
-                        token_parts[1]
-                        if len(token_parts) >= 3 and token_parts[1].isdigit()
+                        ":".join(token_parts[1:-1])
+                        if len(token_parts) >= 3
+                        and all(part.isdigit() for part in token_parts[1:-1])
                         else ""
                     )
                     try:

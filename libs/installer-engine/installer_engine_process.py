@@ -272,7 +272,9 @@ def _terminate_group(process: subprocess.Popen) -> None:
         return
     try:
         os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        # Darwin reports EPERM for a group whose only members are zombies; the
+        # ps check below still refuses to settle while a live member remains.
         pass
     deadline = time.monotonic() + 10
     while True:
