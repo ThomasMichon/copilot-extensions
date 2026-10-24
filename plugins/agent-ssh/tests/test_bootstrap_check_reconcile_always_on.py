@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -84,10 +85,23 @@ def _make_fake_plugin(root: Path) -> Path:
     scripts_dir = plugin_dir / "scripts"
     scripts_dir.mkdir(parents=True)
     (plugin_dir / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
+    (plugin_dir / "plugin.json").write_text('{"name":"agent-ssh"}', encoding="utf-8")
     (scripts_dir / "init.sh").write_text(
         "#!/usr/bin/env bash\necho stub-init-ran\n", encoding="utf-8"
     )
     (scripts_dir / "init.sh").chmod(0o755)
+    driver = plugin_dir / "libs" / "update-driver" / "scripts"
+    driver.mkdir(parents=True)
+    query = driver.parent / "src" / "update_driver" / "json-query.awk"
+    query.parent.mkdir(parents=True)
+    shutil.copyfile(
+        _PLUGIN_ROOT.parents[1] / "libs/update-driver/src/update_driver/json-query.awk", query,
+    )
+    (driver / "first-use.sh").write_text(
+        "# Installation driver lifecycle contract: vault-stamp-v1\n"
+        'printf "launched:123 log:%s/first-use-00000000-0000-0000-0000-000000000000.log\\n" "$1"\n',
+        encoding="utf-8",
+    )
     return plugin_dir
 
 
@@ -109,6 +123,11 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     from PATH here (a python3 store-alias stub can shadow the real
     interpreter bash's ``command -v python3`` would otherwise resolve)."""
     env = dict(os.environ)
+    for key in (
+        "COPILOT_EXTENSIONS_CONTEXT", "AGENT_SSH_NO_SELFPROVISION",
+        "AGENT_SSH_PINNED_CONTEXT", "UPDATE_DRIVER_WITNESS",
+    ):
+        env.pop(key, None)
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
@@ -116,7 +135,7 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(_BASH is None or sys.platform != "linux", reason="native Linux hook routing")
 def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
@@ -138,10 +157,11 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert result.returncode == 0 and result.stdout == "{}"
+    assert "bootstrap provision supervision launched" in result.stderr, result.stderr
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(_BASH is None or sys.platform != "linux", reason="native Linux hook routing")
 def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
@@ -167,7 +187,8 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert result.returncode == 0 and result.stdout == "{}"
+    assert "bootstrap provision supervision launched" in result.stderr, result.stderr
 
 
 if __name__ == "__main__":

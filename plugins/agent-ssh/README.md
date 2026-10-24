@@ -8,9 +8,23 @@ transports.
 The payload carries canonical installer-engine Python helpers for the shared
 installation driver's fixed legacy `stamp`/`provision` recipe. Those files are
 maintained by `tools/sync-installer-engine.py`, not a separate SSH copier.
-This prerequisite does not route ordinary SSH commands, bootstrap or explicit
-installer callers through the driver, and does not qualify retained snapshots,
-custom roots or cells. The native service-less installer remains unchanged.
+The legacy session bootstrap packages that same standalone foundation through
+the canonical dependency materializer. First stamp and manifest-selected drift
+submit fixed native actions before holding any outer provisioning lock. The
+15-second hook returns exactly `{}`; stderr identifies its launched supervisor
+and log, not durable acceptance. The ordinary request receipt and result in that
+log remain authoritative. Healthy and namespaced hooks remain no-ops; companion
+registration and session guidance keep their independent hooks.
+
+Managed publication, disabled self-provisioning, pinned reads, nested owners,
+unavailable sources and unsupported retained/custom sources refuse before queue
+or installation writes. Drift never replaces the manifest's selected source
+with the current hook payload. Native service-less actions/options and
+transaction custody are unchanged. Checkout stamping retains the foundation's
+complete local dependency graph so later snapshot provisioning stays
+self-contained; this is packaging, not adoption of the snapshot publisher.
+Ordinary SSH command publishers, explicit installers, retained snapshots, custom
+roots and cells are not adopted by this bootstrap change.
 
 The installer's `uninstall` action serializes with install/update. It removes
 runtime/config contents but keeps transaction-lock files and `.install-stage`

@@ -375,6 +375,39 @@ def test_ssh_recipes_use_explicit_bounded_native_portfolio() -> None:
         ]
 
 
+def test_ssh_bootstrap_uses_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "ssh-bootstrap" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("ssh-bootstrap-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("ssh-bootstrap-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-bootstrap'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        assert [step["run"].split() for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_ssh_bootstrap.py",
+             "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "agent-ssh",
+             "--test-file", "tests/test_bootstrap_check_reconcile_always_on.py",
+             "--test-file", "tests/test_bootstrap_driver.py",
+             "--test-file", "tests/test_payload_invocation.py", "-k", '"bootstrap"',
+             "--test-timeout", "60", "--timeout", "180"],
+            ["python", "tools/run-plugin-tests.py", "agent-ssh",
+             "--test-file", "tests/test_install_snapshot.py", "-k", "checkout_stamp",
+             "--test-timeout", "120", "--timeout", "240"],
+        ]
+
+
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

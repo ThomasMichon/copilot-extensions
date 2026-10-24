@@ -905,6 +905,20 @@ preserve installation and source bytes without creating a queue. Healthy
 hook/CLI re-entry adds no requests or completion changes. This isolated native
 qualification is not host rollout or adoption of explicit installers/cells.
 
+The manual `ssh-bootstrap` portfolio qualifies SSH's actual direct session hook
+against its unchanged 15-second deadline on native Windows and Linux. The
+packaged foundation comes through the existing source materializer. First
+stamp is Python-free; drift retains the hook's metadata-reader prerequisite
+and exact deployment-manifest source rather than choosing today's payload.
+The fixed native admission refuses unsupported snapshots/copies, publication
+policy, nested custody and helper skew before creating the execution root.
+Caller Job/group loss does not cancel the ordinary queued action. Complete
+receipts/results, installed CLI/distribution/module origin and healthy reentry
+are verified separately from the output-free hook launch acknowledgement.
+Initial runtime preparation uses the already-qualified fixed recipe, not SSH's
+unadopted primary command. Explicit installers, command publishers, custom roots,
+cells and retained-source #5379 remain separate.
+
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;
 accepted requests are retained for a later supported launch, not silently

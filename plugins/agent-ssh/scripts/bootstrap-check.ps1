@@ -19,36 +19,9 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
 }
 # --- end bootstrap-killswitch guard ---
 
-<#
-    agent-ssh session-start hook -- version-gated runtime reconcile.
-
-    Runs at session start (via hooks.json). Ensures the installed `agent-ssh`
-    binstub/venv matches the plugin source version, so a `copilot plugin update`
-    that bumps the payload is picked up automatically -- without any manual
-    reinstall.
-
-    Fast path: compare the deployed version (~/.agent-ssh/deploy-manifest.json)
-    to the source version (plugin pyproject.toml). If they match and the runtime
-    venv exists, exit immediately. Otherwise re-run the plugin's own installer
-    (scripts/init -> canonical install) in the BACKGROUND so session start never
-    blocks on a venv build; the versioned-venv swap is atomic, so concurrent use
-    stays safe.
-
-    Deployed to ~/.agent-ssh/bin/ by scripts/install.ps1. Only reconciles
-    staleness -- first install is the one-time setting-up-ssh-* / setup step. PS5.1+.
-
-    NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
-    reconcile used to require a checked-in, per-project opt-in flag in
-    ``<project>/.copilot-extensions/config.yaml``, because a raw reconcile
-    could race a live session. Now that every reconcile-capable plugin's
-    update path is always-ZDD (safe to run unattended), that justification
-    is gone; the gate was removed rather than kept as a redundant consent
-    checkbox. Frequency/trigger stays deliberately bounded -- still only
-    once per session start, only on a real version drift. What DOES still
-    bound concurrency is the single-flight + stale-reap guard below (a
-    lock file, not the removed opt-in).
-#>
-$ErrorActionPreference = 'SilentlyContinue'
+# SSH's first stamp and manifest-selected drift share the installation driver.
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $script:SessionStartJsonEmitted = $false
 function Write-SessionStartJson {
     if (-not $script:SessionStartJsonEmitted) {
@@ -57,102 +30,93 @@ function Write-SessionStartJson {
     }
 }
 function Exit-SessionStart {
+    param([int]$Code = 0)
     Write-SessionStartJson
-    exit 0
+    exit $Code
 }
-
-if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }
-
-$InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'
-$Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
-
-# Not provisioned yet -> do the cheap FIRST install ('stamp') so the binstub is
-# on PATH this session; the self-provisioning binstub then builds the venv on
-# first use (#1393). Only fires when the installer declares a 'stamp' action
-# (and only resolves when run from the plugin payload, where install.ps1 is a
-# sibling); otherwise a safe no-op.
-if (-not (Test-Path $Manifest)) {
-    $installer = Join-Path $PSScriptRoot 'install.ps1'
-    if ((Test-Path $installer) -and (Select-String -Path $installer -Pattern "'stamp'" -Quiet)) {
-        $pw = Get-Command pwsh -ErrorAction SilentlyContinue
-        $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-        & $exe -NoProfile -ExecutionPolicy Bypass -File $installer stamp *> $null
-    }
-    Exit-SessionStart
-}
-
+$PluginDir = Split-Path -Parent $PSScriptRoot
 try {
-    $m = Get-Content $Manifest -Raw | ConvertFrom-Json
-    $pluginDir = $m.source.path
-    if (-not $pluginDir) { Exit-SessionStart }
-    $pluginDir = $pluginDir -replace '/', '\'
-    if (-not (Test-Path $pluginDir)) { Exit-SessionStart }
-
-    $deployed = "" + $m.source.version
-    $current  = $deployed
-    $pyproj = Join-Path $pluginDir 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
-    }
-
-    # Up to date and runtime present -> fast no-op (the common case).
-    # "Provisioned" no longer implies a `.venv`: the marker runtime model (#581)
-    # publishes the active slot via a `current-version` marker with NO junction on
-    # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
-    # Treat a marker whose slot python exists as provisioned too -- otherwise a
-    # current runtime needlessly background-rebuilds every session.
-    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
-    if (-not $provisioned) {
-        $cvMarker = Join-Path $InstallDir 'current-version'
-        if (Test-Path $cvMarker) {
-            $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
-            # ...and only when it names the CURRENT payload version: the marker is
-            # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
-            # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) { Exit-SessionStart }
+    $InstallDir = Join-Path $env:USERPROFILE '.agent-ssh'
+    $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
+    $installerAction = 'stamp'
+    if (Test-Path -LiteralPath $Manifest) {
+        $source = ([IO.File]::ReadAllText($Manifest) | ConvertFrom-Json).source
+        if ($source.path -isnot [string] -or -not $source.path -or
+            $source.version -isnot [string] -or -not $source.version) {
+            throw 'The deployed runtime source or version is unavailable.'
         }
-    }
-    if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
-
-    $init = Join-Path $pluginDir 'scripts\init.ps1'
-    if (-not (Test-Path $init)) { Exit-SessionStart }
-
-    # --- Good boot-citizen guard: single-flight + stale-reap ---
-    # This hook fires on EVERY new session now that the opt-in gate is gone
-    # (agent-bridge-unified-zdd-cutover Phase 0 review finding): without
-    # this, a slow or wedged reconcile gets re-spawned every session,
-    # stacking orphaned background installers. If a prior reconcile PID
-    # recorded in reconcile.lock is still alive:
-    #   YOUNG  -> a reconcile is already in flight; do nothing (never stack).
-    #   STALE  -> it is wedged; reap it, then relaunch (self-heal, so a
-    #             one-off wedge can't poison every future session).
-    $staleSeconds = 600
-    $lockFile = Join-Path $InstallDir 'reconcile.lock'
-    try {
-        if (Test-Path $lockFile) {
-            $lockPid = 0
-            [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
-            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
-                $ageSec = ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalSeconds
-                if ($ageSec -lt $staleSeconds) { Exit-SessionStart }         # in flight -- don't stack
-                Stop-Process -Id $lockPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
-            }
+        # Do not replace a retained or unavailable source with today's hook payload.
+        $PluginDir = $source.path -replace '/', '\'
+        if (-not (Test-Path -LiteralPath $PluginDir -PathType Container)) {
+            throw 'The deployed runtime source is unavailable.'
         }
-    } catch { }
-
-    [Console]::Error.WriteLine("[agent-ssh] runtime $deployed -> $current; reconciling in background...")
-    $pw = Get-Command pwsh -ErrorAction SilentlyContinue
-    $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
-    # conhost --headless so Windows Terminal / the DefTerm handoff can't surface
-    # it as a window -- -WindowStyle Hidden ALONE is ignored by DefTerm (see
-    # agent-bridge). Base64-encode the reconcile command to avoid arg quoting.
-    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& `"$init`""))
-    $proc = Start-Process -FilePath 'conhost.exe' -WorkingDirectory $env:USERPROFILE -PassThru -WindowStyle Hidden `
-        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
+        $deployed = $source.version
+        $versionLine = Select-String -LiteralPath (Join-Path $PluginDir 'pyproject.toml') `
+            -Pattern '^\s*version\s*=' | Select-Object -First 1
+        if (-not $versionLine) { throw 'The selected payload version is unavailable.' }
+        $current = $versionLine.Line -replace '.*=\s*"([^"]+)".*', '$1'
+        $provisioned = Test-Path -LiteralPath (Join-Path $InstallDir '.venv')
+        $marker = Join-Path $InstallDir 'current-version'
+        if (-not $provisioned -and (Test-Path -LiteralPath $marker)) {
+            $selected = [IO.File]::ReadAllText($marker).Trim()
+            if ($selected -and $selected -ceq $current -and (
+                (Test-Path -LiteralPath (Join-Path $InstallDir "versions\$selected\Scripts\python.exe")) -or
+                (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
+            )) { $provisioned = $true }
+        }
+        if ($provisioned -and $deployed -ceq $current) { Exit-SessionStart }
+        $installerAction = 'provision'
+    }
+    if ($env:AGENT_SSH_NO_SELFPROVISION -or (Test-Path Env:AGENT_SSH_PINNED_CONTEXT)) {
+        [Console]::Error.WriteLine('[agent-ssh] bootstrap deferred: self-provisioning is disabled or identity reads are pinned.')
+        Exit-SessionStart
+    }
+    if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
+        throw 'Nested bootstrap submission is unsupported; retain the current installation owner.'
+    }
+    $name = ([IO.File]::ReadAllText((Join-Path $PluginDir 'plugin.json')) | ConvertFrom-Json).name
+    if ($name -isnot [string] -or $name -cne 'agent-ssh') { throw 'The selected payload is not Agent SSH.' }
+    $location = Get-Location
+    if ($location.Provider.Name -cne 'FileSystem') { throw 'Bootstrap requires a filesystem project location.' }
+    $project = $location.ProviderPath
+    $executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
+    $firstUse = Join-Path $PluginDir 'libs\update-driver\scripts\first-use.ps1'
+    if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf) -or -not (
+        Select-String -LiteralPath $firstUse -SimpleMatch `
+            '# Installation driver lifecycle contract: vault-stamp-v1' -Quiet
+    )) { throw 'The packaged installation driver lacks the SSH stamp lifecycle contract.' }
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
-        if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }
-    } catch { }
-} catch { }
-
+        $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $acknowledgement = @(& $shell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File $firstUse -Root $executionRoot -Payload $PluginDir `
+            -RuntimeRoot $InstallDir -Project $project -InstallerAction $installerAction)
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previousEap }
+    if ($code -ne 0) { throw "Installation driver admission failed (exit $code)." }
+    $acknowledgementText = $acknowledgement -join "`n"
+    if ($acknowledgementText -cnotmatch '\A\s*\{') { throw 'Installation driver launch acknowledgement is unavailable.' }
+    $ack = $acknowledgementText | ConvertFrom-Json -ErrorAction Stop
+    if ($ack.launched -isnot [bool] -or -not $ack.launched -or
+        ($ack.pid -isnot [int] -and $ack.pid -isnot [long]) -or $ack.pid -le 0 -or
+        ($ack.created -isnot [int] -and $ack.created -isnot [long]) -or $ack.created -le 0 -or
+        $ack.log -isnot [string]) {
+        throw 'Installation driver launch acknowledgement is malformed.'
+    }
+    if (-not [StringComparer]::OrdinalIgnoreCase.Equals(
+            [IO.Path]::GetDirectoryName($ack.log), $executionRoot) -or
+        [IO.Path]::GetFileName($ack.log) -cnotmatch '\Afirst-use-[0-9a-f]{32}\.log\z') {
+        throw 'Installation driver launch diagnostics name another execution root.'
+    }
+    [Console]::Error.WriteLine(
+        "[agent-ssh] bootstrap $installerAction supervision launched; inspect first-use diagnostics in $executionRoot. " +
+        'Launch is not durable request acceptance.'
+    )
+    [Console]::Error.WriteLine('[agent-ssh] driver launch acknowledgement: ' + $acknowledgementText)
+} catch {
+    [Console]::Error.WriteLine("[agent-ssh] Runtime publication refused: $($_.Exception.Message)")
+    Exit-SessionStart -Code 3
+}
 Exit-SessionStart

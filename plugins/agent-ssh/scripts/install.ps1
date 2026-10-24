@@ -726,7 +726,7 @@ function Materialize-SnapshotLibs {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
-    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve')) {
+    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve', 'update-driver', 'single-instance-lease')) {
         $source = Resolve-VendoredLib -LibName $lib
         if (-not $source) { throw "Cannot locate required snapshot library: $lib" }
         $destination = Join-Path $libsDir $lib
@@ -746,7 +746,7 @@ function Materialize-SnapshotLibs {
         $text = [regex]::Replace($text, '(?ms)(^\[tool\.uv\.sources\][ \t]*\r?\n)(.*?)(?=^\[|\z)', {
             param($table)
             $body = $table.Groups[2].Value
-            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve')) {
+            foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell', 'fleet-contracts', 'machine-transport', 'plugin-resolve', 'update-driver', 'single-instance-lease')) {
                 $pattern = '(?m)^(?![ \t]*#)([^\r\n]*?)path\s*=\s*"\.\./\.\./libs/' + [regex]::Escape($lib) + '"([^\r\n]*)(\r?)$'
                 $body = [regex]::Replace($body, $pattern, {
                     param($entry)
