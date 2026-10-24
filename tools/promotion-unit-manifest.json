@@ -1159,7 +1159,7 @@
     "tools/promotion_unit_tests/test_ci_pr_unit_reuse.py::test_context_fingerprints_identify_changes_without_disclosing_values"
   ],
   "sources": {
-    "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "845eb566c3174c4d2be2eda4c7bf42d48b49327afdd6a6d5eae8d1a6d65172ff",
+    "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "d71c64cd963d2d92d4e59581b9ec427fa5edb73d0227872f87b59cef1bd20ef2",
     "tools/promotion_unit_tests/test_state_root_read.py": "d6a76e3af9ac42c30240a94d29543a0c57f0f75a503a36e1a2a94ec0958fe228",
     "tools/artifact_source_build.py": "bd7079c5ac69199305b5aa949976ccf184e3cb6ffcf068521f17cd53cbc0e508",
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",
