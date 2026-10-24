@@ -51,7 +51,7 @@ def test_ssh_foundation_uses_existing_source_materialization_owner():
 )
 @pytest.mark.parametrize("condition", [
     "ordinary", "empty-no-self", "no-ack", "foreign-ack", "driver-refused", "old-driver",
-    "wrong-plugin", "array-plugin",
+    "wrong-plugin", "array-plugin", "snapshot", "ordinary-copy",
 ])
 def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, phase, condition):
     if os.name != "nt" and _BASH is None:
@@ -60,7 +60,11 @@ def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, 
     home.mkdir()
     project = tmp_path / "project-\u6d4b\u8bd5"
     project.mkdir()
-    payload = tmp_path / "payload"
+    payload = home / ".copilot" / "installed-plugins" / "fixture-market" / "agent-ssh"
+    if condition == "snapshot":
+        payload = home / ".agent-ssh" / "snapshots" / "retained"
+    elif condition == "ordinary-copy":
+        payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
     suffix = "ps1" if os.name == "nt" else "sh"
@@ -107,7 +111,7 @@ def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, 
         driver.write_text("exit 99\n", encoding="utf-8")
     installation = home / ".agent-ssh"
     if phase == "drift":
-        installation.mkdir()
+        installation.mkdir(exist_ok=True)
         (installation / "deploy-manifest.json").write_text(json.dumps({
             "source": {"version": "0.0.0", "path": str(payload)},
         }), encoding="utf-8")
@@ -136,12 +140,13 @@ def test_native_bootstrap_validates_launch_handoff_without_installing(tmp_path, 
     )
     refused = condition in {
         "no-ack", "foreign-ack", "driver-refused", "old-driver", "wrong-plugin", "array-plugin",
+        "snapshot", "ordinary-copy",
     }
     assert result.returncode == (3 if refused else 0), result.stdout + result.stderr
     assert result.stdout == "{}"
     assert ("supervision launched" in result.stderr) == (not refused)
     handoff = project / "handoff"
-    if condition in {"old-driver", "wrong-plugin", "array-plugin"}:
+    if condition in {"old-driver", "wrong-plugin", "array-plugin", "snapshot", "ordinary-copy"}:
         assert not handoff.exists()
     else:
         assert handoff.read_text(encoding="utf-8-sig").splitlines() == [

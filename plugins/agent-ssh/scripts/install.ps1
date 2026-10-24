@@ -944,7 +944,8 @@ function Invoke-Stamp {
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
         # Copy everything needed to `uv pip install .` from the slot (src, libs,
         # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests',
+            'snapshot-provenance.json')
         if ($SourceRuntimeIdentity) { $exclude = @() }
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
