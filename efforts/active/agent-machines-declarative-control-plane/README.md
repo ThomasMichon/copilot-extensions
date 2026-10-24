@@ -51,6 +51,10 @@ actions are derived views rather than separately maintained inventories.
   Closed #1418 and consolidated source issues are history, not live claim
   tokens. This narrow amendment does not dispose of #3115's separate umbrella
   requirement or any other objective.
+- **Topology-location intake:** #4137's complete finite Plan/Validation below
+  continues through this same reviewed root and incumbent schema/topology
+  owners. It does not reopen #1418, change #3115's separate condition, assign
+  implementation or release a source/resource hold.
 
 ## Context
 
@@ -88,6 +92,79 @@ fleet, topology, or operating environment.
   repositories, and fail clearly when a declared relationship is unresolved
   (#1418).
 - [ ] Reject ambiguous ownership and dependency cycles before planning changes.
+
+#### Direct finite topology-location and portability acceptance from #4137
+
+<!-- backlog-reconciliation:7556:transfer:4137:to:efforts/active/agent-machines-declarative-control-plane/README.md -->
+
+This is unresolved topology-location acceptance in Phase 1, not completed
+relocation, new implementation authority or a new home-global inventory.
+Preserve every incumbent Plan, Validation, Participant, Coordination, Proposal
+and historical Journal entry.
+
+##### Plan
+
+- [ ] P1: Credit the delivered standard hidden requirement-package layout,
+  bounded legacy package fallback and standalone home-relative package source.
+  Keep requirement packages distinct from shared machine-topology declarations;
+  package-layout migration does not establish topology authority migration.
+- [ ] P2: Identify and document the canonical portable topology home in the
+  current shared ownership model and its path/precedence/producer/reader
+  contract. Preserve the original standard-hidden-location and portability
+  intent; its example filename is illustrative. Resolve relocation OR record
+  the original owner's explicit accepted existing/replacement arrangement,
+  rather than silently treating a hidden candidate or package root as completion.
+- [ ] P3: Reconcile every affected topology reader AND producer,
+  canonical/legacy locations and supported compatibility/migration. Preserve
+  canonical logical identities, accepted aliases, ambiguity/conflict refusal,
+  project scoping and the portable-declaration versus machine-local-package
+  boundary. Do not create a competing registry, shadow inventory or implicit
+  enrollment/restore authority.
+- [ ] P4: Keep versioned topology/source changes under their existing source
+  owners and review flow, with safe supported migration/rollback or compatibility
+  where applicable. Preserve existing transport/resource/credential custody and
+  unrelated machine requirements; no source rewrite, provisioning or runtime
+  mutation follows from this planning intake.
+
+##### Local Validation
+
+- [ ] V1: Map the accepted canonical topology path/authority and compatibility
+  against actual current reader, producer and documentation consumers.
+  Demonstrate selected repository/legacy/hidden-location precedence and
+  portability at this original finite source/docs tier; prove that the
+  already-delivered PACKAGE migration is not being relabeled as topology
+  relocation.
+- [ ] V2: Preserve canonical identity/alias matching and conflict/ambiguity
+  refusal, project isolation, standalone packages and existing source/resource
+  ownership across the selected arrangement. Record meaningful
+  absent/legacy/conflicting-source outcomes. Do not require all hosts, every
+  native restore or the whole control-plane programme to complete this finite
+  path decision; independently existing native/rollout gates remain with their
+  actual owners.
+- [ ] V3: BEFORE administrative supersession of #4137, obtain a NEW normal
+  reviewed ACTUAL merge containing this complete direct ROOT Plan/Validation/
+  continuing Coordination/Journal and actual global Validation row. Then read
+  back the CURRENT FULL ROOT, including every old checkbox, Participants,
+  Coordination, Proposal and Journal, and confirm unchanged custody. Historical
+  root creation, #7864/#7897, a title/link, child-only note or proposed payload is
+  not this receiving receipt. If full intake is not accepted, retain the source
+  issue.
+
+##### Continuing Coordination
+
+- [ ] C1: Extend the existing ROOT's continuing coordination explicitly to this
+  finite #4137 case under the incumbent schema host, topology/source owners and
+  module/provider/parity roles. Preserve migration-intake's deduplication/
+  ownership gate and eligible OPEN bounded-source claims BEFORE implementation;
+  create no assignee, transfer, claim release or generic new ACK through
+  consolidation. Closed #1418 remains historical, and the separate live-umbrella
+  condition already retained for other work is unchanged.
+- [ ] C2: Journal the NEW reviewed intake and current full readback, distinguish
+  delivered package layout from unresolved topology-location acceptance, and
+  name the next finite unfinished decision. Preserve all pre-existing phases,
+  alternatives, validation, historical evidence and resource/native/rollout
+  holds; keep the ROOT Active. Administrative supersession is neither
+  implementation nor parent completion.
 
 ### Phase 2 - Build deterministic projections
 
@@ -318,6 +395,14 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 
 ## Validation Plan
 
+- [ ] G1: Resolve EVERY directly retained #4137 topology-location/portability Plan,
+  own Validation and continuing Coordination clause at its original finite
+  tier, preserving the illustrative filename, accepted relocation/replacement
+  decision, real topology-versus-package distinction and incumbent
+  source/identity/resource owners. Verify the NEW reviewed merge and CURRENT
+  FULL ROOT readback before source supersession; intake alone is not topology
+  relocation or fleet/native convergence.
+
 - [ ] Complete every directly retained Phase 4b/#2684 Plan/Validation clause at
   its original evidence tier and selected scope, preserving current owners,
   sweep/watchdog/tier alternatives, trusted pins and #3115's separate gate.
@@ -394,6 +479,19 @@ first, then migrate reconcilers and retire shadow inventories only after
 behavioral parity is demonstrated.
 
 ## Journal
+
+### 2026-10-24 - Finite topology-location acceptance proposed
+
+- Added #4137's complete unchecked topology-location/portability Plan, local
+  Validation, continuing Coordination and actual global Validation entry in
+  Phase 1. The delivered requirement-package layout remains credited and
+  distinct; the accepted topology home and reader/producer compatibility
+  decision remain unfinished.
+- Existing schema/topology/module/provider/parity custody, every incumbent
+  checkbox and historical Journal entry, migration intake and #3115's separate
+  live-umbrella condition remain unchanged. Normal review, actual merge and
+  current full-root readback precede administrative source supersession.
+  No topology migration, implementation, native operation or rollout occurred.
 
 ### 2026-10-22 - Retained declared scheduled-mesh acceptance
 
