@@ -226,6 +226,21 @@ observation changes; zero semantic-row deltas are the negotiated v2 guarantee.
 Neither protocol implements targeted observation requests or mutation receipts
 yet; those remain separate owner operations.
 
+### Test-only contended-host tier
+
+The native Worktrees and synthetic Manager deadline fixtures accept
+`WORKTREES_TEST_BUDGET_FACTOR=1|2|3`, default `1`. This is an explicit
+per-run test opt-in, not a runtime setting or a new production deadline.
+Selected fixture waits, deliberate delays and teardown budgets scale together;
+semantic, source/cursor, restart-count and cleanup assertions remain intact.
+The original nominal two-second goal is still measured separately.
+
+Reports distinguish `contended_test_pass`, factor, actual elapsed time and
+`nominal_qualified`. Factors above one never set nominal qualification true.
+A contended-tier pass does not erase a failed nominal run, authorize merge,
+or change production settings. The source effort's validation record carries
+the bounded selectors, actual results and remaining performance work.
+
 ### Held current-roster feed and cutover
 
 `list --current --stream --follow` is an additive held contract. `--follow`

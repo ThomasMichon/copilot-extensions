@@ -154,6 +154,24 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-24 — Explicit contended-host test tier; nominal performance stays open
+- Added only test-local opt-in factor 1/2/3, default 1. Production source and
+  deadline/configuration bytes remain identical to `19f58003`; no fake clock,
+  skipped assertion, removed sleep or new global runtime configuration.
+- Under the expressly authorized contended tier, all five Manager controls
+  pass at 2x with exact one/two-child counts and complete owned cleanup.
+  Worktrees module passes its full 1,100-row/update/cutover case at 2x,
+  initial completion 3.843 seconds.
+- Console/guarded 2x misses were strictly the four-second observer admission
+  deadline. Late complete snapshots validated atomically through engine and
+  Manager; no semantic/cleanup defect was found. The one authorized 3x run
+  selected only those two failures: full cases pass at 2.047/3.985 seconds.
+- These are contended-tier passes, not nominal passes. Every nominal
+  qualification field remains false; original 1x failures and raw 2x misses
+  are retained. Nominal performance work remains in #7935/#7936/#7946.
+- Exact result acceptance, fresh current-head review/required CI and the
+  normal merge gate remain outstanding; no automatic readiness or merge.
+
 ### 2026-10-24 — Refreshed draft and reusable-generator correction
 - Normal owned-branch sync retained `f3610e0f` and replayed the source on the
   merged #8392 owner repair. Its relevant HTTP47 bytes match, and the repair

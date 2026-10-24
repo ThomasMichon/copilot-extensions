@@ -89,8 +89,26 @@ def _record_state(loader):
     } for value in loader.records()]
 
 
+def _fixture_budgets(source, factor):
+    return {
+        "source_startup": source.timeout, "observer": 5 * factor,
+        "publication": loader_feed.INITIAL_TIMEOUT, "idle": loader_feed.IDLE_TIMEOUT,
+        "cleanup": 3 * factor,
+    }
+
+
+@pytest.mark.parametrize("idle", [5.0, 0.8])
+def test_test_budget_report_records_actual_overrides(monkeypatch, idle):
+    monkeypatch.setattr(loader_feed, "INITIAL_TIMEOUT", 0.3)
+    monkeypatch.setattr(loader_feed, "IDLE_TIMEOUT", idle)
+    source = data_ssh.Source("host", "Win", None, local=True, timeout=4)
+    assert _fixture_budgets(source, 2) == {
+        "source_startup": 4, "observer": 10, "publication": 0.3, "idle": idle, "cleanup": 6,
+    }
+
+
 def _report(request, factor, started, events, source, loader, worker, children, failure,
-            cleanup_failure, armed=None):
+            cleanup_failure, armed=None, synthetic_delays=None):
     if not (directory := os.environ.get("F1_NATIVE_REPORT_DIR")):
         return
     directory = Path(directory).resolve()
@@ -110,12 +128,8 @@ def _report(request, factor, started, events, source, loader, worker, children, 
         "contended_test_pass": success,
         "started_monotonic": started, "finished_monotonic": time.monotonic(),
         "events": events, "watchdog_budgets": armed,
-        "fixture_budgets": {
-            "source_startup": source.timeout, "observer": 5 * factor,
-            "publication": 0.15 * factor, "idle": 0.4 * factor,
-            "startup_delay": 0.4 * factor, "stall": 10 * factor,
-            "heartbeat": 0.1 * factor, "cleanup": 3 * factor,
-        },
+        "fixture_budgets": _fixture_budgets(source, factor),
+        "synthetic_delays": synthetic_delays,
         "records": _record_state(loader), "state": loader._state.get(source.cache_key),
         "source_error": loader.error_for_source(source.source_id),
         "children": [{"pid": child.pid, "argv": child.args, "returncode": child.poll()}
@@ -165,7 +179,8 @@ def test_feed_process_startup_uses_source_budget_not_publication_budget(monkeypa
             raise
         finally:
             _report(request, factor, started, events, source, loader, worker, children,
-                    failure, cleanup_failure)
+                    failure, cleanup_failure,
+                    synthetic_delays={"startup": 0.4 * factor, "hold": 10 * factor})
 
 
 @pytest.mark.parametrize(
@@ -247,7 +262,8 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
             raise
         finally:
             _report(request, factor, started, events, source, loader, worker, children,
-                    failure, cleanup_failure, armed)
+                    failure, cleanup_failure, armed,
+                    synthetic_delays={"negative_stall": 10 * factor, "heartbeat": 0.1 * factor})
 
 
 def test_feed_unterminated_frame_without_watchdog_expiry_is_terminal(monkeypatch):

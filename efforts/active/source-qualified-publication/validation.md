@@ -715,3 +715,92 @@ The additional cost is one bounded decode of each already-encoded candidate;
 no process, history scan, second publication writer or schema change is added.
 Fresh publication, review and required CI remain necessary for this correction,
 while readiness, merge, native retry and rollout remain unauthorized.
+
+### Explicitly authorized contended-host tier
+
+The operator subsequently authorized a bounded test-only contended-host tier
+after profiling the loaded host: begin at 2x and permit one 3x follow-up only
+for declared timing/fixture-admission expiry, never to mask semantic,
+restart-count, ownership or cleanup findings. No quiet-machine prerequisite
+was imposed for this tier. This changed test-run authorization, not production
+defaults or the original nominal performance goals.
+
+Timed executions used test-only commit
+`5152829024475591cec147467bfea7229ec5c035`, on production ancestor
+`19f58003`. Production source/configuration diffs are empty. Two local
+test-module helpers accept only factors 1/2/3, default 1; normal CI/default
+behavior stays at factor 1.
+
+#### Budget classes remain distinct
+
+- Worktrees observer goal: nominal 2s, contended acceptance 4s/6s.
+  Step waits 2s → 4s/6s, reader/feed-close waits 1s → 2s/3s,
+  failure-only diagnostic cap 10s → 20s/30s.
+- Manager selected fixture source timeout 2s → 4s/6s, observer wait
+  5s → 10s/15s, cleanup join 3s → 6s/9s.
+- Artificial Manager publication/idle overrides .15s/.4s scale with
+  synthetic delays: startup .4s, negative stall 10s and healthy heartbeat
+  .1s all multiply by the same factor. Thus .15f < .4f < 2f and
+  heartbeat period remains below idle expiry. Startup-only controls do not
+  override the unused production idle default.
+- Outer watchdogs are separate: Worktrees item/group/plugin
+  30/300/900 seconds become 60/600/1800 at 2x and 90/900/2700 at 3x.
+  Manager's 600-second contained-run ceiling becomes 1200/1800.
+  Resource/process caps do not change.
+- Real Worktrees client/read/idle and Manager production deadlines remain
+  unchanged. Per-test monkeypatches and synthetic `Source.timeout` values
+  are not committed runtime settings.
+
+Static AST comparison preserves all original 74 Worktrees and 26 Manager
+assertions (normalizing only the explicitly scaled test wait names), the
+exact `Popen` call, its preceding real monotonic start and the guarded child
+observer script. Additional checks strengthen report/cleanup validation.
+No test uses clock retiming.
+
+#### Actual sequential results
+
+| Selected case | Tier / acceptance budget | Actual result |
+|---|---|---|
+| Manager startup local/source variants | 2x | Both pass; exactly one child each |
+| Manager recovery startup / initial-publication / partial-frame | 2x | All pass; exactly two children each, no partial/empty overwrite, complete owned cleanup |
+| Worktrees module | 2x / 4s | Full case pass, initial completion 3.843s |
+| Worktrees console | 2x / 4s | Fail: observer expiry; diagnostic snapshot done at 4.406s |
+| Worktrees guarded-module | 2x / 4s | Fail: observer expiry; diagnostic snapshot done at 4.297s |
+| Worktrees console | One 3x / 6s follow-up | Full case pass, initial completion 2.047s |
+| Worktrees guarded-module | Same single 3x invocation / 6s | Full case pass, initial completion 3.985s |
+
+Manager ran first, then Worktrees. Manager JUnit records 5/5 passes.
+Worktrees 2x JUnit records one pass/two failures; its raw failures are retained.
+Before escalation, both late snapshots independently passed engine/Manager
+admission: 1,100 exact identities, declared counts, correct fields, no error
+frame or premature visible publication, joined readers and owned termination.
+Update/cutover were not reached in those failed 2x runs, so they were not
+claimed as passed. The single 3x invocation selected only console/guarded,
+and JUnit records 2/2 passes including all update/cutover/exit/cleanup checks.
+No fourth factor, extra timed retry or passing-module rerun occurred.
+
+Aggregate CPU samples immediately before Manager were 99.04/100/100%;
+before Worktrees 2x, 98.86/97.93/93.92%; before 3x,
+99.52/98.27/94.67%. These finite loaded-host observations do not establish
+causal attribution, a worst-case bound or a speedup from changing the budget.
+The separate daemon/tool profile remains with its owner; no raw locals or
+session content were profiled here and no service was changed.
+
+All contended reports explicitly set `nominal_run_exercised: false` and
+`nominal_qualified: false`. Actual Worktrees elapsed times and comparison with
+the original two-second threshold are separate fields; a scaled pass never
+becomes a nominal pass. Original nominal failures remain preserved.
+
+The report helper's initial generic delay/idle labels included inactive
+startup-control values. Raw files were not rewritten: an explicit annotation
+records active publication/source budgets, unchanged unused idle default,
+and scenario-specific delays. Future reporting reads actual patched module
+values; two in-process reporting tests cover this correction. Parser/ratio
+validation passed 11 Worktrees and 11 Manager cases; the corrected Manager
+reporting selector passed 13 cases without any timed rerun.
+
+The current result awaits explicit acceptance of the exact contended-tier
+evidence, fresh current-head review and required CI. Nominal performance work
+remains tracked by #7935/#7936/#7946; this tier neither changes production
+SLAs/configuration nor closes those goals. No automatic PR-ready/merge or
+rollout follows from scaled intent or success alone.
