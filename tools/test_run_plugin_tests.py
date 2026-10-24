@@ -825,11 +825,13 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
 
 
 @pytest.fixture
-def codespaces_native_plan(tmp_path, monkeypatch):
-    tests = tmp_path / "tests"
-    tests.mkdir()
-    target = tests / "test_installer_engine_adoption.py"
-    target.write_text(textwrap.dedent("""
+def codespaces_native_plan(monkeypatch):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        tests = root / "tests"
+        tests.mkdir()
+        target = tests / "test_installer_engine_adoption.py"
+        target.write_text(textwrap.dedent("""
         import pytest
         @pytest.mark.parametrize("editable", [False, True])
         def test_codespaces_library_install_order_retry_and_errors(editable): pass
@@ -842,17 +844,17 @@ def codespaces_native_plan(tmp_path, monkeypatch):
         def test_native_dev_generation_dependency_failure_preserves_working_runtime(): pass
         @pytest.mark.parametrize("value", [False, True])
         def test_future_unclassified_contract(value): pass
-    """), encoding="utf-8")
-    (tests / "test_other.py").write_text("def test_unrelated_file(): pass\n", encoding="utf-8")
-    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
-    monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
-    monkeypatch.setenv("TEMP", str(tmp_path))
-    original_plan = runner._test_group_plan
-    monkeypatch.setattr(
-        runner, "_test_group_plan",
-        lambda name, groups: original_plan(name, groups, windows=True),
-    )
-    return tmp_path, target, original_plan
+        """), encoding="utf-8")
+        (tests / "test_other.py").write_text("def test_unrelated_file(): pass\n", encoding="utf-8")
+        monkeypatch.setattr(runner, "_plugin_dir", lambda _name: root)
+        monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
+        monkeypatch.setenv("TEMP", str(root))
+        original_plan = runner._test_group_plan
+        monkeypatch.setattr(
+            runner, "_test_group_plan",
+            lambda name, groups: original_plan(name, groups, windows=True),
+        )
+        yield root, target, original_plan
 
 
 @pytest.mark.parametrize("kexpr", [None, " ", "True", "future", "never_matches"])

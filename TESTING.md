@@ -2510,8 +2510,8 @@ still caps every group within the default 900-second aggregate, and the
 subprocess deadlines are unchanged. An unexpectedly empty unfiltered partition
 fails. Filtered empty groups throughout an automatically partitioned plan may
 be traversed, including other files preceding the installer partitions, but
-cannot turn an entirely empty explicit-file selection into success; only the existing non-explicit
-guard-only empty-suite convention remains a skip.
+cannot turn an entirely empty explicit-file selection into success; only the
+existing non-explicit guard-only empty-suite convention remains a skip.
 
 Within these automatic Codespaces partitions, pytest assertion exit `1` is sticky:
 later partitions still execute, but later passes cannot turn the plugin result
