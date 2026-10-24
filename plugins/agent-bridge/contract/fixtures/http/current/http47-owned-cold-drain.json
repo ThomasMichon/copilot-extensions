@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "71506a09c94387d104346b88992d07a4f42566bd49f06df914fea706f66db593",
+  "execution_closure_sha256": "7d90cbe759817d392e16cfd3ffc040108903045404ca9801a9dd521b11714539",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -798,8 +798,8 @@
       "sha256": "1770b1876e18074c426ef0387d3535bd6e452ff0fc6fbdba99bceacc5debd8ba"
     },
     "libs/zdd/src/zdd/conditional.py": {
-      "blob": "d792b150f857bc0fc98b25f30fad24fff93d51e7",
-      "sha256": "b02e3a32e368501a2ba325b80748d788674f1ccb4769872f66068dae04770707"
+      "blob": "7ed32b1030ad296a9e90aa3a2c493688f89af49f",
+      "sha256": "38cde9d113f3d690122ab8c87c8f9b1b67b5271d58ce551c67f4f0c837d50a27"
     },
     "libs/zdd/src/zdd/cutover.py": {
       "blob": "6be649c32f7adfa9f68fd6dd255217f873cb13ac",
@@ -2174,8 +2174,8 @@
       "sha256": "26e074557053fbd691b1975ae585f7b276f0d2a5c2760706d13e4a73ca3f41da"
     },
     "plugins/agent-bridge/tests/test_cold_drain.py": {
-      "blob": "664b2e488b2ca7c65a9700b5e571a25079f5a5d8",
-      "sha256": "794216a18113bbecdc7fdc93bd79794c713b8e3d7078f701e8d4996f39028dd8"
+      "blob": "cde96f5237ea795777a73f8b53215721f6f65a1a",
+      "sha256": "6e9b49a5d2dae0e06a6cfe973b497582cf14255e8dece7d12f1e16305ec7ca58"
     },
     "plugins/agent-bridge/tests/test_cold_recovery_drain.py": {
       "blob": "3ea615a533e7ff1ae4a25a059a90ca423edf8ae6",
@@ -2221,6 +2221,10 @@
       "blob": "c2019cc05ae8398ef6a3f8457f248e7aa2cbbd64",
       "sha256": "cda108bc1f75ef174651578e7c901a21ca0c0d08c9e674463d29f04175e71a8e"
     },
+    "plugins/agent-worktrees/libs/zdd/src/zdd/conditional.py": {
+      "blob": "7ed32b1030ad296a9e90aa3a2c493688f89af49f",
+      "sha256": "38cde9d113f3d690122ab8c87c8f9b1b67b5271d58ce551c67f4f0c837d50a27"
+    },
     "tools/_admission_protocol.py": {
       "blob": "d22dfb5ff8589518de557ba4ed254fca3cc4af55",
       "sha256": "baa0c1a2af44616eedf02bf678c128fd3c07045bd8e5542d4fe8ece3df54dc21"
@@ -2258,8 +2262,8 @@
       "sha256": "a4fc42f91705658ab43fb9a538cefec6701b5cd595a106b7d9236d76e0ad8e55"
     },
     "tools/bridge_http47_evidence.py": {
-      "blob": "ba2417b7557d5d51cdb7f71a5dcbea4a2ffc70af",
-      "sha256": "2f252382003a4dd0709172c018ce11585be73bf820f1b90d7a98cd65eec751db"
+      "blob": "8948d38c79216f4d72ecdd24fa50bbc30f64854c",
+      "sha256": "afee8c5e97386c5fe02cd8f58b9294784edc09d946916993b2cb29cd4ecdddc8"
     },
     "tools/bridge_http47_runtime.py": {
       "blob": "7e27a8dfed6876fee91ed9c696025737dabfa328",
@@ -3191,6 +3195,7 @@
   "checked_probes": {
     "test_http47_capture_actual_observations": 1,
     "test_cold_drain_default_client_automatic_and_strict_cutover_precedes_effects": 1,
+    "test_cold_drain_strict_graceful_rejects_even_mislabelled_clean": 2,
     "test_startup_cold_outage_after_initial_scan_waits_for_predecessor_exit": 1,
     "test_heartbeat_partial_cold_replacement_exit_preserves_delivery_fence": 2,
     "test_cold_recovery_two_successors_exclude_before_native_spawn": 1,
@@ -3234,7 +3239,7 @@
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "80046c7d31b282cecfd8debcc849d3aee7da9c22",
+    "commit": "7e6dda368be00f76f4245bbc27825200969f239e",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",

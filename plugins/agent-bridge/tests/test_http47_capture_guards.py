@@ -26,6 +26,14 @@ def fixture_git(root: Path, *args: str) -> str:
     return evidence.git(root, *args).decode("utf-8").strip()
 
 
+def test_http47_registry_encoding_is_lossless_and_bounded() -> None:
+    registry = json.loads((ROOT / evidence.REGISTRY).read_bytes())
+    compact = evidence.encode(registry, indent=1)
+    assert json.loads(compact) == registry
+    assert len(compact) <= 1024 * 1024
+    assert len(compact) < len(evidence.encode(registry))
+
+
 @pytest.fixture(scope="module")
 def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
     seed = tmp_path_factory.mktemp("http47-registered-seed")
@@ -193,6 +201,8 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
     before = public_hashes(root)
     calls = stub_transport(monkeypatch)
     outputs = capture.capture(root, commit, write=True)
+    registry = json.loads(outputs[evidence.REGISTRY])
+    assert outputs[evidence.REGISTRY] == evidence.encode(registry, indent=1)
     after = public_hashes(root)
     for path, sha in before.items():
         if path not in outputs:
