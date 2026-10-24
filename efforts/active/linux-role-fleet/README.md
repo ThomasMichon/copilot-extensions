@@ -7,9 +7,11 @@
 - **Status:** Active; plan reviewed, isolated adoption proof delivered
 - **Vision:** [machine-fleet](../../../visions/machine-fleet/README.md):
   `repeatable-role-fleet-adoption`, `bounded-desired-state-control`,
-  `role-placement-preserves-service-authority`
+  `role-placement-preserves-service-authority`,
+  `convention-discoverable-diagnostic-logs`
 - **Umbrella issue:** #6030
 - **Sub-issues:** #5861 (existing named reconciliation follow-on)
+  and #8377 (diagnostic logging audit and retention)
 
 ## Guiding Intent
 
@@ -162,6 +164,28 @@ owners retain those changes.
 - Local JSONL adopter/debug capture is useful independent evidence, not a
   completion claim for any of these controller or hosted-sink items.
 
+### Diagnostic logging audit and retention amendment
+
+The operator extended this existing effort:
+
+> We should also do an audit of existing logging while we in this effort and ensure all logging goes to clearly by-convention discoverable and predicable locations, with timestamps, attribution, and 30-day retention
+
+The [logging audit and implementation plan](logging-conventions.md) records
+source-backed coverage, existing owners and measurable acceptance. It includes
+native installer/cutover output, not just optional telemetry. #8377 owns
+integration; #8370 retains installer-attempt logging and #6812 retains
+install/update progress formatting. No competing implementation or live fleet
+mutation follows from this amendment.
+
+- [ ] Complete the writer/consumer inventory with explicit disposition for
+  every diagnostic logging category.
+- [ ] Implement owner-resolved log discovery, timestamps and attribution
+  through the existing logging/launch and deployment owners.
+- [ ] Enforce elapsed 30-day retention for active, archived, quiet/restarted
+  and container-owned logging; preserve explicit incomplete-attempt protection.
+- [ ] Validate concurrent writers, native Windows/POSIX handles, protocol
+  output/privacy and truthful failed/rolled-back/committed outcomes.
+
 ### Mission amendment - Setup, refresh and first useful services
 
 Public-safe summary of the operator's 2026-10-10 direction; full private wording
@@ -308,6 +332,11 @@ All entries are **agent-recommended implementation gates**.
   processes, managed worktrees/plugin loading and configured source auth.
 - [ ] User-controlled monitoring is bounded/redacted and off-fleet analytics
   export remains disabled without separate explicit policy/consent.
+- [ ] Logging inventory and convention discovery cover all selected roles and
+  every native/structured output category without terminal-output dependence.
+- [ ] Synthetic clock and real writer tests prove the 30-day boundary,
+  continuous rollover, idle/startup cleanup, concurrent append safety and
+  protected incomplete-attempt handling; size/count-only rotation is not proof.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
@@ -348,6 +377,13 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- Logging audit requested under #8377: existing append-only, size-rotated and
+  daily-backup-count writers do not establish universal age-based retention.
+  #8370's installer-attempt implementation and #6812's formatter remain with
+  their existing owners. Audit evidence and the proposed convention are in
+  [the logging sub-plan](logging-conventions.md); implementation is not claimed.
+- #8334 merged the shared native single-operation JSONL append correction.
+  This is concurrency correctness, not rotation, retention or deployment proof.
 - #8298 merged into `dev`: fleet preparation and local diagnostic-spool intent
   are reviewed documentation, not a deployed controller or Grafana service.
   #8323 follows up only the existing Bridge/Dispatch JSONL append correctness.
