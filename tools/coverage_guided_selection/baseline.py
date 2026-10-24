@@ -87,7 +87,9 @@ _AMBIENT_PYTEST_SELECTION_ENV_VARS = ("PYTEST_ADDOPTS",)
 # `pytest-json-report` is ever imported in this module's own process.
 _DRIVER_SCRIPT = textwrap.dedent(
     """
+    import hashlib
     import json
+    import os
     import sys
     from pathlib import Path
 
@@ -115,6 +117,21 @@ _DRIVER_SCRIPT = textwrap.dedent(
     if __name__ == "__main__":
         test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
         test_paths = json.loads(test_paths_json)
+        options = json.loads(sys.argv[8]) if len(sys.argv) > 8 else {}
+        child_stream = None
+        if options.get("child_stream_control"):
+            import importlib.util
+            for name in ("_cgs_child_audit", "_cgs_child_stream", "_cgs_child_stream_parent"):
+                spec = importlib.util.spec_from_file_location(name, options[name])
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[name] = module
+                spec.loader.exec_module(module)
+            child_stream = sys.modules["_cgs_child_stream_parent"]
+            child_stream.configure_parent(
+                options["child_stream_control"], sys.executable,
+                options["child_stream_nonce"], options["child_stream_inventory"],
+                options["child_stream_helpers"],
+            )
 
         # Captured via a hook plugin (not pytest-json-report's own
         # "keywords" field, which only records marker NAMES present on an
@@ -127,10 +144,12 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # declared tier even though this driver never registers that
         # guard plugin.
         tier_by_nodeid = {}
+        markers_by_nodeid = {}
 
         class _TierCollector:
             def pytest_collection_modifyitems(self, items):
                 for item in items:
+                    markers_by_nodeid[item.nodeid] = sorted({m.name for m in item.iter_markers()})
                     marker = item.get_closest_marker("portfolio_tier")
                     tier_by_nodeid[item.nodeid] = (
                         str(marker.args[0]).upper()
@@ -164,7 +183,17 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 cov = coverage.Coverage.current()
                 if cov is not None:
                     cov.switch_context(item.nodeid)
+                if child_stream is not None:
+                    child_stream.register_context(item.nodeid)
                 return (yield)
+
+        class _CompactPaths:
+            # Keep native artifact paths below MAX_PATH without UNC prefixes:
+            # SQLite file URIs do not accept the extended-path authority.
+            @pytest.fixture
+            def tmp_path(self, request, tmp_path_factory):
+                name = hashlib.sha256(request.node.nodeid.encode()).hexdigest()[:4]
+                return tmp_path_factory.mktemp(name)
 
         # Managed directly via the `coverage` API rather than
         # pytest-cov's own `--cov=`/`--cov-context=test` CLI options --
@@ -207,13 +236,15 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # downstream project's own coverage config happens to set.
         cov = coverage.Coverage(
             data_file=cov_data_file,
-            source=[cov_source],
+            source=[options.get("installed_source", cov_source)],
             data_suffix=False,
             config_file=False,
         )
         cov.start()
         cov.save()  # force schema creation now, single-threaded
 
+        if child_stream is not None:
+            child_stream.begin_collection(cov)
         exit_code = pytest.main(
             [
                 *test_paths,
@@ -234,9 +265,14 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 "-o",
                 "addopts=",
             ],
-            plugins=[_TierCollector(), _ContextSwitcher()],
+            plugins=[
+                _TierCollector(), _ContextSwitcher(),
+                *([_CompactPaths()] if options.get("compact_tmp_paths") else []),
+            ],
         )
 
+        if child_stream is not None:
+            child_stream.end_collection()
         cov.stop()
         cov.save()
 
@@ -256,10 +292,15 @@ _DRIVER_SCRIPT = textwrap.dedent(
         phase_suffixes = ("|run", "|setup", "|teardown")
         coverage_map = {}
         for measured_file in cov_data.measured_files():
-            try:
-                rel = Path(measured_file).resolve().relative_to(cwd_path).as_posix()
-            except ValueError:
-                rel = measured_file
+            if options.get("source_mapping"):
+                rel = options["source_mapping"].get(str(Path(measured_file).resolve()))
+                if rel is None:
+                    raise RuntimeError("measured source has no verified installed-source mapping")
+            else:
+                try:
+                    rel = Path(measured_file).resolve().relative_to(cwd_path).as_posix()
+                except ValueError:
+                    rel = measured_file
             per_line = {}
             for lineno, contexts in cov_data.contexts_by_lineno(measured_file).items():
                 tests = set()
@@ -290,9 +331,16 @@ _DRIVER_SCRIPT = textwrap.dedent(
                     total += float(phase_data.get("duration", 0.0))
             durations[nodeid] = total
 
+        children = None
+        if child_stream is not None:
+            children = child_stream.finish_parent()
+            child_stream.merge_coverage(coverage_map, children.pop("coverage"))
         Path(out_file).write_text(
             json.dumps(
-                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map}
+                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map,
+                 "summary": report.get("summary", {}),
+                 "python_version": sys.version.split()[0], "children": children,
+                 "markers": markers_by_nodeid, "coverage_version": coverage.__version__}
             )
         )
         sys.exit(0)

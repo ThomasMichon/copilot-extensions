@@ -15,45 +15,24 @@ from tools.coverage_guided_selection import baseline
 from tools.coverage_guided_selection import baseline_chunks as chunks
 
 
-def test_workflow_keeps_deadline_enrollment_and_only_two_heavy_opt_ins() -> None:
+def test_coverage_collection_is_independent_of_source_promotion() -> None:
     import yaml
 
     repo = Path(__file__).resolve().parents[1]
     workflow = yaml.safe_load(
         (repo / ".github/workflows/validate-and-promote.yml").read_text(encoding="utf-8"),
     )
-    full = workflow["jobs"]["full"]
-    assert full["timeout-minutes"] == 30
-    step = next(s for s in full["steps"] if s.get("name", "").startswith("Coverage baseline"))
-    assert step["env"]["BASELINE_WORKERS"] == (
-        "${{ (matrix.plugin == 'agent-worktrees' || matrix.plugin == 'agent-dispatch') "
-        "&& '2' || '1' }}"
-    )
-    assert '--workers "$BASELINE_WORKERS"' in step["run"]
-    assert step.get("continue-on-error", False) is False
-    enrolled = [
-        "agent-ssh", "agent-codespaces", "agent-containers", "agent-vault",
-        "agent-logger", "agent-mcp", "agent-bridge", "agent-worktrees", "agent-dispatch",
-    ]
-    assert all(f'"{plugin}"' in step["if"] for plugin in enrolled)
-    upload = next(s for s in full["steps"] if s.get("name", "").startswith("Upload coverage"))
-    assert upload["if"] == step["if"]
-    assert upload["with"]["name"] == "coverage-baseline-${{ matrix.plugin }}"
-    assert upload["with"]["path"] == "${{ matrix.plugin }}.json"
-    assert upload.get("continue-on-error", False) is False
-    assert upload["with"]["if-no-files-found"] == "error"
     ci = yaml.safe_load((repo / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
-    names = {
-        "Coverage-guided-ci selection prototype tests (Phase 0 pilot)",
-        "Real-suite round-trip + fixture-phase integration tests",
-    }
-    selectors = [
-        step["run"] for job in ci["jobs"].values() for step in job.get("steps", [])
-        if step.get("name") in names
-    ]
-    assert len(selectors) == 2
-    assert all("tools/test_coverage_guided_selection.py" in run for run in selectors)
-    assert all("coverage_baseline_chunk_contract" not in run for run in selectors)
+    assert "source-units" in workflow["jobs"]
+    assert "unit-plan" in ci["jobs"] and "unit-tests" in ci["jobs"]
+    for jobs in (workflow["jobs"], ci["jobs"]):
+        assert "full" not in jobs
+        steps = [step for job in jobs.values() for step in job.get("steps", [])]
+        assert not any(step.get("name", "").startswith(("Coverage baseline", "Upload coverage"))
+                       for step in steps)
+        assert all("coverage_guided_selection/standalone.py" not in step.get("run", "")
+                   and "--workers \"$BASELINE_WORKERS\"" not in step.get("run", "")
+                   for step in steps)
 
 
 def _spec(tmp_path: Path, index: int = 0) -> chunks.Chunk:
