@@ -515,6 +515,23 @@ export AGENT_VAULT_PAYLOAD_ROOT="$_snapshot"
 exec bash "$_gate" "$@"
 DISPATCH
 )" || return 1
+    elif [[ "$command_name" == agent-ssh ]]; then
+        cold_dispatch="$(cat <<'DISPATCH'
+if [[ "$_root" != "$HOME/.agent-ssh" ]]; then
+    printf '[agent-ssh] cold custom-root provisioning requires explicit installation management.\n' >&2
+    exit 126
+fi
+_gate="$_snapshot/scripts/runtime-gate.sh"
+if [[ ! -f "$_gate" ]] ||
+   ! grep -Fq '# Installation driver contract: ssh-first-use-v1' "$_gate"; then
+    printf '[agent-ssh] owning snapshot dispatcher is unavailable; repair the owning payload.\n' >&2
+    exit 126
+fi
+export AGENT_SSH_HOME="$_root"
+export AGENT_SSH_PAYLOAD_ROOT="$_snapshot"
+exec bash "$_gate" "$@"
+DISPATCH
+)" || return 1
     elif [[ "$command_name" == agent-pull-requests ]]; then
         cold_dispatch="$(cat <<'DISPATCH'
 if [[ "$_root" != "$HOME/.agent-pull-requests" ]]; then

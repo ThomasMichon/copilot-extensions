@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installation driver contract: ssh-first-use-v1
 set -euo pipefail
 
 export PYTHONUTF8=1
@@ -35,6 +36,11 @@ resolve_runtime() {
     AGENT_RT_PY=""
     AGENT_RT_ROOT="$RUNTIME_ROOT"
     export AGENT_RT_ROOT
+    if ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$RUNTIME_RESOLVER"; then
+        printf '[agent-ssh] read-only runtime resolver is unavailable; update or repair the owning payload.\n' >&2
+        exit 126
+    fi
+    local AGENT_RT_RESOLVE_TRACE_MODE=ready
     # shellcheck source=/dev/null
     . "$RUNTIME_RESOLVER"
 }
@@ -151,87 +157,34 @@ if [[ -n "${AGENT_SSH_NO_SELFPROVISION:-}" ]]; then
     exit 1
 fi
 
-mkdir -p "$RUNTIME_ROOT"
-STATUS_PATH="$RUNTIME_ROOT/.provision-status"
-_lock_link=""
-_unlock_provision() {
-    if [[ -n "$_lock_link" ]]; then
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        [[ "$_owner" == "$$" ]] && rm -f "$_lock_link"
-        _lock_link=""
-    else
-        flock -u 9 2>/dev/null || true
-        exec 9>&-
+if [[ "${AGENT_SSH_PINNED_CONTEXT+x}" == x ]]; then
+    printf '[agent-ssh] pinned invocation requires a prepared owning runtime; provision independently.\n' >&2
+    exit 126
+fi
+if [[ -n "$CONTEXT" || "$RUNTIME_ROOT" != "$LEGACY_ROOT" ||
+      ( -n "${AGENT_SSH_HOME:-}" && "$AGENT_SSH_HOME" != "$LEGACY_ROOT" ) ]]; then
+    printf '[agent-ssh] cold namespaced/custom-root provisioning requires explicit installation management.\n' >&2
+    exit 126
+fi
+if [[ "${UPDATE_DRIVER_WITNESS+x}" == x ]]; then
+    printf '[agent-ssh] nested first-use submission is unsupported; retain the current installation owner.\n' >&2
+    exit 126
+fi
+PROJECT="$(pwd -P)"
+EXECUTION_ROOT="$HOME/.copilot-extensions/update-driver"
+first_use() {
+    local payload="$1" action="$2"
+    local driver="$payload/libs/update-driver/scripts/first-use.sh"
+    if [[ ! -f "$driver" ]] ||
+       ! grep -Fq '# Installation driver lifecycle contract: ssh-command-v1' "$driver"; then
+        printf '[agent-ssh] packaged installation driver lacks the SSH stamp lifecycle contract.\n' >&2
+        exit 126
     fi
+    bash "$driver" "$EXECUTION_ROOT" "$payload" "$RUNTIME_ROOT" "$PROJECT" \
+        --installer-action "$action" --wait
 }
-if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
-    exec 9>"$RUNTIME_ROOT/.provision.lock"
-    flock 9
-else
-    _lock_link="$RUNTIME_ROOT/.provision.lock.pid"
-    until ln -s "$$" "$_lock_link" 2>/dev/null; do
-        _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
-        case "$_owner" in
-            *[!0-9]*|"") _live=0 ;;
-            *) if kill -0 "$_owner" 2>/dev/null; then _live=1; else _live=0; fi ;;
-        esac
-        if [[ -z "$_owner" ]]; then
-            # The link vanished after the failed `ln -s` (or is not a
-            # symlink): never unlink then -- a live lock could be created
-            # between the read and the unlink. Just retry.
-            sleep 0.1
-        elif [[ "$_live" == 0 && "$(readlink "$_lock_link" 2>/dev/null || true)" == "$_owner" ]]; then
-            rm -f "$_lock_link"
-        else
-            sleep 1
-        fi
-    done
-fi
-trap '_unlock_provision' EXIT INT TERM
+first_use "$PAYLOAD_ROOT" stamp-provision
 resolve_runtime
-if [[ -n "$AGENT_RT_PY" ]]; then
-    _unlock_provision
-    trap - EXIT INT TERM
-    run_runtime "$@"
-fi
-printf '%s\n' '[agent-ssh] runtime not provisioned -- provisioning on first use (may take ~30-120s: builds a versioned venv). Do not kill; extend your timeout.' >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' \
-    'agent-ssh' "$STATUS_PATH" >&2
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-
-set +e
-bash "$INSTALLER" stamp --install-dir "$RUNTIME_ROOT" >&2
-PROVISION_EXIT=$?
-if [[ "$PROVISION_EXIT" -eq 0 ]]; then
-    _snapshot="$(cat "$RUNTIME_ROOT/payload-dir" 2>/dev/null || true)"
-    _snapshot_installer="$_snapshot/scripts/install.sh"
-    if [[ ! -f "$_snapshot_installer" ]]; then
-        printf '[agent-ssh] stamped snapshot installer not found: %s\n' \
-            "$_snapshot_installer" >&2
-        PROVISION_EXIT=127
-    else
-        bash "$_snapshot_installer" provision --install-dir "$RUNTIME_ROOT" >&2
-        PROVISION_EXIT=$?
-    fi
-fi
-set -e
-if [[ "$PROVISION_EXIT" -ne 0 ]]; then
-    printf 'failed rc=%s %s\n' "$PROVISION_EXIT" "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    printf '[agent-ssh] provisioning FAILED. See the log above; retry, or run: bash "%s" provision --install-dir "%s"\n' \
-        "$INSTALLER" "$RUNTIME_ROOT" >&2
-    exit "$PROVISION_EXIT"
-fi
-
-resolve_runtime
-if [[ -n "$AGENT_RT_PY" ]]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-    _unlock_provision
-    trap - EXIT INT TERM
-    run_runtime "$@"
-fi
-
-_unlock_provision
-trap - EXIT INT TERM
-printf 'failed rc=1 %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$STATUS_PATH" 2>/dev/null || true
-printf '[agent-ssh] provisioning reported success but no runtime slot resolved.\n' >&2
+[[ -z "$AGENT_RT_PY" ]] || run_runtime "$@"
+printf '[agent-ssh] driver completed without a resolvable runtime.\n' >&2
 exit 1

@@ -23,8 +23,15 @@ with the current hook payload. Native service-less actions/options and
 transaction custody are unchanged. Checkout stamping retains the foundation's
 complete local dependency graph so later snapshot provisioning stays
 self-contained; this is packaging, not adoption of the snapshot publisher.
-Ordinary SSH command publishers, explicit installers, retained snapshots, custom
-roots and cells are not adopted by this bootstrap change.
+The generated legacy primary and payload commands also use this packaged driver.
+Their fixed SSH-only `stamp-provision` request holds the same queue custody
+across stamping and provisioning from the exact selected snapshot, including
+caller loss between those steps. The primary delegates to its own tagged
+snapshot dispatcher rather than today's installed payload. Healthy commands
+still dispatch directly with their original arguments and exit outcomes;
+cold custom roots/cells and missing/skewed support refuse without an outer
+provision lock, status writes or a foreground fallback. Explicit installers and
+network-backed retained-source qualification under #5379 remain separate.
 
 The installer's `uninstall` action serializes with install/update. It removes
 runtime/config contents but keeps transaction-lock files and `.install-stage`

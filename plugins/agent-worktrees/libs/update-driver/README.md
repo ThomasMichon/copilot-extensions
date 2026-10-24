@@ -711,8 +711,7 @@ The Windows reader invokes its native helper with
 typed in-process parameters, preserving JSON probe bytes rather than passing
 them through another PowerShell command-line parser.
 
-SSH's fixed service-less `stamp`/`provision` recipe is separate from adoption of
-its ordinary command and explicit installer publishers. It retains
+SSH's fixed service-less `stamp`/`provision` recipe retains
 SSH's existing snapshot-default manifest and bespoke `runtime-gate` dispatchers;
 it does not rewrite that declaration into Pull Requests' direct-dispatch model.
 Admission requires SSH's exact module, legacy root, payload-root environment and
@@ -734,6 +733,21 @@ invoking the fixed native action. Frozen inputs use SSH's existing
 `.install-stage/<request-id>-<live-executor-pid>/agent-ssh` location, preserving
 the native installer's staging reaper and transaction lock. It does not pass
 Vault service flags, force an update, create a profile or perform remote SSH work.
+
+SSH's generated legacy primary and payload cold commands use the fixed
+`stamp-provision` selection under the `ssh-command-v1` native contract. One
+ordinary request retains custody across the canonical stamp, exact selected
+snapshot validation/freezing and canonical provision. The accepted source graph
+must match that snapshot, except the three canonical top-level snapshot sidecars
+and intentionally omitted top-level tests; the observer never submits the second half, so caller
+loss during foundation construction or stamping cannot strand a stamp-only
+operation. This finite SSH-only composition is not an arbitrary installer action
+or a new queue/executor. A primary delegates to its own selected snapshot's
+tagged dispatcher, never an unrelated installed payload. Healthy dispatch keeps
+its arguments and exit status. Cold refusal precedes trace/status/root/outer-lock
+writes; no-self-provision, pinned, nested, managed, missing/skewed support and
+unsupported custom-root/cell publication never fall back to foreground execution.
+Explicit installers and the network-backed #5379 acceptance remain separate.
 
 Both native clients take the execution root, owning payload, addressed runtime
 root and originating project. Before creating driver state, they honor the

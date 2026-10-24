@@ -1,4 +1,5 @@
 # Installation driver lifecycle contract: vault-stamp-v1
+# Installation driver lifecycle contract: ssh-command-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,
@@ -8,7 +9,7 @@ param(
     [string]$ExpectedSource,
     [string]$ReceiptLog,
     [ValidateSet('default', 'client-only')][string]$ServiceMode = 'default',
-    [ValidateSet('provision', 'stamp')][string]$InstallerAction = 'provision',
+    [ValidateSet('provision', 'stamp', 'stamp-provision')][string]$InstallerAction = 'provision',
     [switch]$Wait
 )
 $ErrorActionPreference = 'Stop'
@@ -46,6 +47,9 @@ switch -CaseSensitive ($plugin) {
     'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
     'agent-ssh' { $prefix = 'AGENT_SSH' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
+}
+if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
+    throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
 }
 if ($plugin -ceq 'agent-ssh') {
     $sshDeclaration = @{

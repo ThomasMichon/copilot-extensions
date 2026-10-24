@@ -24,7 +24,7 @@ RECIPES = {
     "agent-ssh": "AGENT_SSH",
 }
 PROTOCOL = 1
-INSTALLER_ACTIONS = ("provision", "stamp")
+INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision")
 CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID",
@@ -91,6 +91,8 @@ def _inspect(
     plugin = json.loads((payload / "plugin.json").read_text(encoding="utf-8")).get("name")
     if not isinstance(plugin, str) or plugin not in RECIPES:
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
+    if installer_action == "stamp-provision" and plugin != "agent-ssh":
+        raise ProvisionError("stamp-to-selected-snapshot provisioning requires SSH")
     prefix = RECIPES[plugin]
     no_self = prefix + "_NO_SELFPROVISION"
     if (
@@ -312,33 +314,81 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         environment["PATH"] = os.pathsep.join(filter(None, (
             str(Path(sys.executable).parent), environment.get("PATH"),
         )))
-        if os.name == "nt":
-            shell = Path(os.environ["SystemRoot"]) / (
-                "System32/WindowsPowerShell/v1.0/powershell.exe"
-            )
-            argv = [
-                str(shell), "-NoLogo", "-NoProfile", "-NonInteractive",
-                "-ExecutionPolicy", "Bypass", "-File", str(frozen.plugin / "scripts" / "install.ps1"),
-                installer_action, "-InstallDir", str(runtime_root),
-                *(("-NoService",) if client_only else ()),
-            ]
-        elif sys.platform.startswith("linux"):
-            shell = shutil.which("bash")
-            if shell is None:
-                raise ProvisionError("native provision shell is unavailable")
-            argv = [
-                shell, str(frozen.plugin / "scripts" / "install.sh"),
-                installer_action, "--install-dir", str(runtime_root),
-                *(("--no-service",) if client_only else ()),
-            ]
-        else:
-            raise ProvisionError("native plugin provision execution is not qualified on this platform")
-        # The queue's existing owned process encloses this entire native tree.
-        # The installer retains its staging, lifecycle and publication checks.
-        return subprocess.call(
-            argv, env=environment, cwd=admission["project"],
-            stdin=subprocess.DEVNULL, **no_window_kwargs(),
+        code = _run_installer(
+            frozen.plugin, runtime_root, admission["project"], environment,
+            "stamp" if installer_action == "stamp-provision" else installer_action,
+            client_only=client_only,
         )
+        if code != 0 or installer_action != "stamp-provision":
+            return code
+        custody.assert_owned()
+        snapshot = _path(Path((runtime_root / "payload-dir").read_text(
+            encoding="utf-8-sig",
+        ).strip()), exists=True)
+        selected = _inspect(snapshot, runtime_root, Path(admission["project"]))
+        if snapshot.parent != runtime_root / "snapshots" or any(
+            selected[key] != admission[key]
+            for key in ("plugin", "source", "source_fingerprint", "marketplace_id")
+        ) or _ssh_stamp_hash(frozen.plugin) != _ssh_stamp_hash(snapshot):
+            raise ProvisionError("stamped snapshot differs from the accepted owning source")
+        retained = engine.freeze_inputs(snapshot, destination.parent / "selected" / admission["plugin"])
+        if retained.payload_hash != selected["input_hash"] or _inspect(
+            snapshot, runtime_root, Path(admission["project"]),
+        ) != selected:
+            raise ProvisionError("selected snapshot changed while freezing provision inputs")
+        custody.assert_owned()
+        environment["COPILOT_PLUGIN_ROOT"] = str(snapshot)
+        environment["COPILOT_PLUGIN_STAGED_FROM"] = str(snapshot)
+        return _run_installer(
+            retained.plugin, runtime_root, admission["project"], environment, "provision",
+        )
+
+
+def _ssh_stamp_hash(payload: Path) -> str:
+    import installer_engine as engine
+
+    # The canonical legacy stamp changes only these publication sidecars and
+    # intentionally omits top-level tests; every other admitted byte must match.
+    sidecars = {"snapshot-provenance.json", ".source-payload-path", ".snapshot-version"}
+    files = tuple(
+        path for path in engine._source_files(engine._package_roots(payload))
+        if path.relative_to(payload).as_posix() not in sidecars
+        and path.relative_to(payload).parts[0] != "tests"
+    )
+    return engine.runtime.fingerprint_source(files)
+
+
+def _run_installer(
+    payload: Path, runtime_root: Path, project: str, environment: dict[str, str],
+    installer_action: str, *, client_only: bool = False,
+) -> int:
+    if os.name == "nt":
+        shell = Path(os.environ["SystemRoot"]) / (
+            "System32/WindowsPowerShell/v1.0/powershell.exe"
+        )
+        argv = [
+            str(shell), "-NoLogo", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-File", str(payload / "scripts" / "install.ps1"),
+            installer_action, "-InstallDir", str(runtime_root),
+            *(("-NoService",) if client_only else ()),
+        ]
+    elif sys.platform.startswith("linux"):
+        shell = shutil.which("bash")
+        if shell is None:
+            raise ProvisionError("native provision shell is unavailable")
+        argv = [
+            shell, str(payload / "scripts" / "install.sh"),
+            installer_action, "--install-dir", str(runtime_root),
+            *(("--no-service",) if client_only else ()),
+        ]
+    else:
+        raise ProvisionError("native plugin provision execution is not qualified on this platform")
+    # The queue's existing owned process encloses this entire native tree.
+    # The installer retains its staging, lifecycle and publication checks.
+    return subprocess.call(
+        argv, env=environment, cwd=project,
+        stdin=subprocess.DEVNULL, **no_window_kwargs(),
+    )
 
 
 def main() -> int:

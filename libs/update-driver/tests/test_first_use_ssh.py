@@ -25,7 +25,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+@pytest.mark.parametrize("installer_action", ["provision", "stamp", "stamp-provision"])
 def test_ssh_fixed_recipe_preserves_identity_custody_options_and_result(
     owning_ssh, area, monkeypatch, installer_action,
 ):
@@ -48,7 +48,9 @@ def test_ssh_fixed_recipe_preserves_identity_custody_options_and_result(
     drain(root=root)
     result = status(request.id, root=root)
     assert result.state == "completed" and result.exit_code == 7, result.log_path.read_text()
-    assert (installation / "executed").read_text() == installer_action
+    assert (installation / "executed").read_text() == (
+        "stamp" if installer_action == "stamp-provision" else installer_action
+    )
     frozen = Path((installation / "source-path").read_text().strip()).parent
     assert frozen.name == "agent-ssh" and frozen.parent.parent == installation / ".install-stage"
     assert frozen.parent.name.startswith(request.id + "-")
@@ -131,7 +133,7 @@ def test_ssh_refusal_precedes_acquisition_queue_and_plugin_writes(
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == source
 
 
-@pytest.mark.parametrize("installer_action", ["provision", "stamp"])
+@pytest.mark.parametrize("installer_action", ["provision", "stamp", "stamp-provision"])
 @pytest.mark.parametrize("owning_fixture", ["owning_ssh", "selected_ssh_snapshot"])
 def test_ssh_native_admission_reaches_exact_source_check_without_writes(
     request, area, installer_action, owning_fixture,
@@ -327,7 +329,7 @@ def materialized_ssh(owning_ssh, area):
 
 
 def test_actual_ssh_materialized_stamp_preserves_source_and_defers_runtime(
-    materialized_ssh, area,
+    materialized_ssh, area, monkeypatch,
 ):
     payload, installation, project = materialized_ssh
     before = {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()}
@@ -340,6 +342,10 @@ def test_actual_ssh_materialized_stamp_preserves_source_and_defers_runtime(
     pointer = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
     assert pointer.is_relative_to(installation / "snapshots")
     assert (pointer / "scripts" / "installer_engine.py").is_file()
+    provision.inspect(pointer, installation, project)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.syspath_prepend(str(payload / "scripts"))
+    assert provision._ssh_stamp_hash(pointer) == provision._ssh_stamp_hash(payload)
     assert not (installation / "current-version").exists()
     assert not list((installation / "versions").glob("*/pyvenv.cfg"))
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == before

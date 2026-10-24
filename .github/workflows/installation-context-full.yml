@@ -15,12 +15,71 @@ on:
           - pull-requests-bootstrap
           - ssh-recipes
           - ssh-bootstrap
+          - ssh-commands
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  ssh-commands-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-commands'
+    name: SSH commands (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify generated SSH commands, whole-transaction caller loss and no-write controls
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_ssh_command.py
+          --test-timeout 900 --timeout 1200
+      - name: Preserve healthy cell and context dispatch
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 60 --timeout 180
+  ssh-commands-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-commands'
+    name: SSH commands (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify generated SSH commands, whole-transaction caller loss and no-write controls
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_ssh_command.py
+          --test-timeout 900 --timeout 1200
+      - name: Preserve healthy cell and context dispatch
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 60 --timeout 180
   ssh-bootstrap-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'ssh-bootstrap'
     name: SSH bootstrap (Ubuntu)
