@@ -136,12 +136,15 @@ consumer incarnation, installation and open admission epoch. It does not mint a
 credential, bind a client-selected database or retroactively enroll an ordinary
 legacy registration. A remote `venue` remains unsupported in this local owner.
 
-Schema 32 adds the nonpartial session-history index used by ordinary admission.
+Schema 32 adds the nonpartial consumer-session history index and partial
+retained-message session index used by ordinary admission.
 Current-consumer selection uses the existing unique current index; a separate
 indexed history-existence check preserves retired-target refusal without loading
-all incarnations. The normal writable migration preserves every enrollment,
-message and handoff. Passive adoption requires the prepared schema and exact
-index; neither read-only open nor adoption creates it.
+all incarnations. The retained-row fallback uses its partial index rather than
+scanning a never-enrolled target's old unassociated messages. The normal writable
+migration preserves every enrollment, message and handoff. Passive adoption
+requires the prepared schema and exact indexes; neither read-only open nor
+adoption creates them.
 
 Enrollment compare-and-swaps the observed predecessor, retaining both
 incarnations. An identical retry after a lost enrollment reply observes the same

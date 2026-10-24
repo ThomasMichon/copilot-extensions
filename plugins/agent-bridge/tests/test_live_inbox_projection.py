@@ -93,3 +93,57 @@ def test_ordinary_admission_is_bounded_by_consumer_history_indexes(
     finally:
         conn.set_progress_handler(None, 0)
     assert len(ticks) * 100 <= 10_000
+
+
+@pytest.mark.parametrize("history_size", [0, 20_000])
+@pytest.mark.parametrize("retained", [False, True])
+def test_admission_indexes_retained_history_without_reclassifying_legacy(
+    inbox, history_size, retained,
+) -> None:
+    db, _, _, admission, _ = inbox
+    sid = "never-enrolled"
+    assert db.register_live_session(
+        sid, machine="machine-a", cwd=".", worktree_id=None, repo="repo-a",
+        branch=None, pid=103, role=None, now=10.0, process_started_at=1.0,
+    ) == "live"
+    with db._runtime_transaction(write=True) as conn:
+        conn.executemany(
+            "INSERT INTO live_messages "
+            "(session_id,sender,body,created_at,delivered_at,consumed_at) VALUES (?,?,?,?,?,?)",
+            ((sid, "sender", "legacy history", 1.0, 2.0, 3.0) for _ in range(history_size)),
+        )
+    original = None
+    if retained:
+        mid = db.enqueue_live_message(
+            sid, "sender", "retained original", 10.0, runtime_admission=admission,
+        )
+        original = dict(db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))[0])
+    ticks = []
+    conn = db._get_conn()
+
+    def progress() -> int:
+        ticks.append(True)
+        return 0
+
+    conn.set_progress_handler(progress, 100)
+    try:
+        def send():
+            return db.enqueue_live_message_if_fresh(
+                sid, sender="sender", body="new legacy input", now=11.0,
+                idempotency_key="new-operation", enrolled_inbox=True, runtime_admission=admission,
+            )
+
+        if retained:
+            with pytest.raises(RuntimeCustodyError, match="current frontend and consumer enrollment"):
+                send()
+        else:
+            mid, reason = send()
+            assert mid is not None and reason is None
+    finally:
+        conn.set_progress_handler(None, 0)
+    assert len(ticks) * 100 <= 10_000
+    stored, = db.execute_read("SELECT * FROM live_messages WHERE id=?", (mid,))
+    if retained:
+        assert dict(stored) == original
+    else:
+        assert stored["runtime_custody_json"] is None and stored["handoff_json"] is None

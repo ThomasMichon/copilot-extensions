@@ -260,6 +260,7 @@ def test_v31_history_index_migration_preserves_original_custody_and_requires_pre
     enroll(db, owner, admission, successor, consumer.incarnation)
     passive = Database(db.db_path, read_only=True)
     db.execute_write("DROP INDEX bridge_inbox_consumers_session")
+    db.execute_write("DROP INDEX live_messages_retained_session")
     db.execute_write("UPDATE schema_version SET version=31")
     tables = ("live_messages", "bridge_inbox_consumers", "bridge_runtime_epoch",
               "bridge_runtime_producers")
@@ -298,6 +299,7 @@ def test_v31_history_index_migration_preserves_original_custody_and_requires_pre
     "DROP TABLE bridge_inbox_consumers",
     "DROP INDEX bridge_inbox_consumers_current",
     "DROP INDEX bridge_inbox_consumers_session",
+    "DROP INDEX live_messages_retained_session",
     "DROP TRIGGER live_sessions_retire_inbox_consumer_delete",
 ])
 def test_prepared_storage_never_repairs_missing_enrollment_history(enrolled, damage):

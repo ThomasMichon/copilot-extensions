@@ -356,6 +356,17 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
   accepts both contracts and 660 fixtures; all 124 current
   capture/contract/maintenance cases and the 18 changed-source module limits
   pass. Current-head independent review remains required.
+- The reviewed head received approval, but a further same-owner check found
+  the retained-row fallback scanning the legacy target's own old unassociated
+  messages: 140,200 VM steps with 20,000 historical rows. The same unmerged
+  schema-32 preparation now also owns a partial retained-message session index.
+  Positive/negative controls require never-enrolled targets to stay legacy,
+  while an original retained row without consumer enrollment must still refuse
+  and remain unchanged. Both prepared indexes are required without passive DDL.
+  The final 199-case custody/adoption/producer/index/capture portfolio passes,
+  including the retained-row negative control. Refreshed committed-source
+  evidence and independent review remain required. The earlier approval is not
+  used for these additional changes.
 
 ### 2026-10-24 - Local HTTP-48 adapter merged; wire the ordinary producer and SDK next
 - #8540 merged as `d67f4a1d4d75d4ddea5c5a721983a5aa4d25073c` after the

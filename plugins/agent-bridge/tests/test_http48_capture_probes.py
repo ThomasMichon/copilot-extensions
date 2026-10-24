@@ -50,12 +50,22 @@ def test_http48_capture_actual_observations(
     history_index, = db.execute_read(
         "SELECT sql FROM sqlite_master WHERE name='bridge_inbox_consumers_session'",
     )
+    retained_index, = db.execute_read(
+        "SELECT sql FROM sqlite_master WHERE name='live_messages_retained_session'",
+    )
     observed_schema = {
         "version": db.execute_read("SELECT version FROM schema_version")[0][0],
         "history_index": (
             "WHERE" not in history_index["sql"].upper()
             and [row["name"] for row in db.execute_read(
                 "PRAGMA index_info(bridge_inbox_consumers_session)",
+            )] == ["session_id"]
+        ),
+        "retained_history_index": (
+            "WHERE RUNTIME_CUSTODY_JSON IS NOT NULL OR HANDOFF_JSON IS NOT NULL"
+            in " ".join(retained_index["sql"].upper().split())
+            and [row["name"] for row in db.execute_read(
+                "PRAGMA index_info(live_messages_retained_session)",
             )] == ["session_id"]
         ),
     }
