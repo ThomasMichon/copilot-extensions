@@ -966,6 +966,25 @@ an explicit failure after free-custody confirmation, even with no wait timeout.
 Other diagnostic observers can use a bounded timeout and inspect `worker.log`.
 There is no resident monitor to invent an execution outcome.
 
+CodeSpaces' legacy session bootstrap also uses the fixed canonical-installed
+`stamp`/`provision` actions above. Its foundation is packaged through the
+existing canonical dependency materializer, not discovered in Manager or a
+sibling plugin. The 15-second hook emits only `{}` and identifies the bounded
+native supervisor in diagnostics; ordinary request receipts and durable final
+results remain distinct. First stamp can start without Python, while POSIX
+drift detection retains its metadata-reader prerequisite. Drift selects the
+hook's own installed payload, not SSH's manifest-source behavior. Native
+publication/context controls and own config-derived service semantics remain
+unchanged; there is no outer age/PID owner or foreground fallback.
+The manual `codespaces-bootstrap` portfolio exercises real materialized cold
+stamp, overlapping cold supervisors, caller Job/group loss, version drift,
+failed-candidate selection preservation, healthy no-op and source-independent
+installed consumers on Windows/Linux. Isolated adopted disabled-Owner
+configuration and native registration adapters do not qualify live host
+registration or serving behavior. Independent provider/guidance hooks remain
+available after bootstrap refusal. Command publishers, selected snapshots,
+explicit installers, cells/custom roots and #6909 qualification remain separate.
+
 Ordinary contained-test suppression in `agent_procutil` remains unchanged. Core
 synthetic/native-process fixtures never run a real updater or touch live homes.
 They demonstrate the shared queue, not a complete installation migration or

@@ -48,11 +48,11 @@ FAMILIES: dict[str, list[str]] = {
     # Versioned-venv reconcile that locates its plugin source from $PSScriptRoot
     # and gates on a .venv link. The shared, unified template.
     "versioned-venv/psscriptroot": [
-        "agent-codespaces",
         "agent-logger",
-        "agent-pull-requests",
     ],
-    # Vault submits typed stamp/provision requests to the shared execution owner.
+    # These adopters submit their own typed actions to the shared execution owner.
+    "versioned-venv/driver-agent-codespaces": ["agent-codespaces"],
+    "versioned-venv/driver-agent-pull-requests": ["agent-pull-requests"],
     "versioned-venv/driver-agent-vault": ["agent-vault"],
     # Containers slots also bind its persistent base/provider-exec dependency choice.
     "versioned-venv/dependency-profile-agent-containers": ["agent-containers"],

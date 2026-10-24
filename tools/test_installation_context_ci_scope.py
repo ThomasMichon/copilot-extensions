@@ -225,6 +225,41 @@ def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, ru
     assert name not in required["jobs"]
 
 
+def test_codespaces_bootstrap_remains_an_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "codespaces-bootstrap" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    for platform, runner, admission in (
+        ("linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        name = f"codespaces-bootstrap-{platform}"
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-bootstrap'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        assert job["env"][admission] == "1" and "strategy" not in job
+        assert name not in required["jobs"]
+        executions = [step["run"].split() for step in job["steps"] if "run" in step]
+        assert executions == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_codespaces_bootstrap.py",
+             "--test-file", "tests/test_first_use_codespaces.py",
+             "--test-file", "tests/test_first_use_codespaces_checkout.py",
+             "--test-timeout", "900", "--timeout", "1200"],
+            ["python", "tools/run-plugin-tests.py", "agent-codespaces",
+             "--test-file", "tests/test_bootstrap_check_reconcile_always_on.py",
+             "--test-file", "tests/test_bootstrap_driver.py",
+             "--test-file", "tests/test_bridge_provider_manifest.py",
+             "--test-file", "tests/test_write_session_guidance.py",
+             "--test-timeout", "60", "--timeout", "240"],
+        ]
+
+
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

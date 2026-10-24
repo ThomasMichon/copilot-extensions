@@ -140,6 +140,8 @@ Windows stamping captures the private snapshot candidate's canonical source
 before publishing the command and replacing the previous selection. Failed
 resolver or command publication leaves that previous snapshot and its selectors
 intact. Resolver destinations must be files, not directories.
+Checkout-stamped Windows snapshots retain the declared local dependency graph,
+including the bootstrap driver, for provisioning without the original checkout.
 The global command binds configuration and provisioning to its installed root.
 The generated PowerShell command uses UTF-8 with a BOM so Windows PowerShell
 5.1 preserves non-ASCII installation paths.
@@ -151,6 +153,34 @@ Cold `provision` builds and activates the addressed runtime without publishing
 user-global commands; ordinary install/update/stamp retain their command
 publication responsibilities. An incomplete selected slot remains a cold
 candidate rather than a silent POSIX dispatcher exit.
+
+### Session bootstrap execution
+
+The legacy/default session bootstrap submits cold `stamp` and installed-payload
+version-drift `provision` actions to the same durable installation driver. Its
+self-contained foundation ships through canonical dependency materialization;
+it does not require Manager, another plugin or an existing Python runtime for
+the first stamp. POSIX drift detection retains its existing Python metadata
+reader. The hook uses its own canonical installed payload and default legacy
+root, not the deployment manifest's potentially different source.
+
+The existing 15-second hook returns `{}` after bounded native launch admission.
+Its diagnostic acknowledgement identifies a supervisor and log, **not** durable
+queue acceptance or installation success. Read the ordinary request receipt
+and final result in that log/queue. The driver owns construction and native
+installer execution independently of the caller; the hook never runs an
+installer in the foreground or reaps an age/PID marker.
+
+Healthy runtime detection remains a no-op. Managed publication, pinned reads,
+no-self-provisioning, nested custody, missing/skewed driver support and
+unsupported source/installation selection retain explicit refusal or defer
+outcomes without another installer fallback. First stamp preserves native
+Windows snapshot versus POSIX payload-pointer behavior. Drift preserves the
+canonical config-derived Connection Owner reconciliation, including disabled
+and unknown configuration; no client-only service flag is introduced.
+Provider registration and exact-session guidance remain independent hooks.
+This migration does not cover primary/payload command publishers, selected
+snapshots, explicit installers or namespaced/custom-root bootstrap publication.
 
 ## Configuration
 
