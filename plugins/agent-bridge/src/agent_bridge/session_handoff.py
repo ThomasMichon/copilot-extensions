@@ -24,6 +24,8 @@ class _SessionHandoffMixin:
         guard in ``handoff_session``)."""
         if not self._auto_handoff.enabled:
             return False
+        if session._native_turn_transport is not None:
+            return False
         if session.target.type == "remote-acp":
             return False
         if _workspace_key(session.agent_name, session.target, session.caller_id):
@@ -177,9 +179,14 @@ class _SessionHandoffMixin:
         concurrency guard see a coherent state.
         """
         turn_index = session.turn_count
-        session.turn_count += 1
+        native_owner = session._native_turn_transport
+        native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
+        custody = ({
+            "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,
+        } if native_owner is not None else {})
         now = time.time()
-        self._db.create_turn(session.session_id, turn_index, prompt, now)
+        self._db.create_turn(session.session_id, turn_index, prompt, now, **custody)
+        session.turn_count += 1
         session.status = SessionStatus.RUNNING
         session.last_output_at = now
         self._db.update_session_status(
@@ -187,7 +194,10 @@ class _SessionHandoffMixin:
         )
         result: dict[str, Any] | None = None
         try:
-            result = await session.client.send_prompt(prompt)
+            result = await (
+                session.client.send_prompt(prompt) if native_attempt is None
+                else native_attempt.owner.client.send_prompt(prompt, native_attempt=native_attempt)
+            )
         except Exception as exc:
             self._db.update_turn(
                 session.session_id,
@@ -259,6 +269,10 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        if session._native_turn_transport is not None:
+            from .runtime_custody import RuntimeCustodyError
+
+            raise RuntimeCustodyError("Selected native transport lifecycle handoff is not enrolled")
         from .hosting_policy import require_session_hosting
         from .cold_outages import assert_prompt_allowed
 

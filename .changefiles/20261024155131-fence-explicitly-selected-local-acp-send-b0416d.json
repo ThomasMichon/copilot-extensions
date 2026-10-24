@@ -1,0 +1,9 @@
+{
+  "comment": "Fence explicitly selected local ACP sends through original turn custody without replaying uncertain attempts",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
