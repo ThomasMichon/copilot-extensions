@@ -116,7 +116,7 @@ cannot qualify an unknown runtime target or settle outstanding SDK/native work.
       reproduction in the bounded development lane. Preserve unit-only,
       impact-scoped required CI; do not add native/process matrices to it.
 - [x] Review and merge the implementation through #8469.
-- [ ] Review and merge the historical HTTP-46 qualification helpers.
+- [x] Review and merge the historical HTTP-46 qualification helpers through #8503.
 - [ ] Return to the same #8389 source PR for reconciliation, fresh qualification
       and actual current-head review after the remaining capture-owner gate.
 
@@ -211,6 +211,13 @@ not a reproduction of the unavailable original capture checkpoint.
 
 The focused launcher is documented in the
 [contract evidence guide](../../../plugins/agent-bridge/contract/README.md#qualifying-the-historical-capture-owner).
-Qualification helper review/landing and the return to the dependent #8389
-source integration remain open. No native, release, installed or serving-route
-qualification is implied.
+Qualification helper review/landing completed through #8503. The dependent
+#8389 integration now retains the genuine shared ancestor once, all 269
+upstream HTTP provenance additions and all 204 inbox-branch additions in their
+original order: 2,006 HTTP and 51 preference records. The five published chunks
+remain byte-identical; the index is 300,305 bytes, below the unchanged cap.
+Only current-generation capture metadata conflicts selected the actual reviewed
+upstream packet hashes; operation bodies are unchanged and both historical
+capture lineages remain retained. Fresh capture from the complete merged inbox
+source, checker validation and current-head review are still owed. No native,
+release, installed or serving-route qualification is implied.

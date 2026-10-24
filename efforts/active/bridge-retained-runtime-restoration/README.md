@@ -202,9 +202,30 @@ The later [provenance layout](provenance-layout.md) cleared normal review in
 [#8420](https://github.com/ThomasMichon/copilot-extensions/pull/8420).
 The source-format implementation merged in
 [#8469](https://github.com/ThomasMichon/copilot-extensions/pull/8469);
-historical capture-owner closure and dependent-source qualification remain open.
+historical capture-owner qualification merged in
+[#8503](https://github.com/ThomasMichon/copilot-extensions/pull/8503).
+Dependent-source capture and current-head review remain open.
 
 ## Journal
+
+### 2026-10-23 - Return to the inbox source with both complete histories
+- #8503 merged as `17bec8794444148b65e0b78f1279d51df6a5f30b` after
+  current-head Copilot approval, no open findings and green required checks.
+  The source effort was reread; full restoration remains Active.
+- Reconcile the same #8389 onto that reviewed source. Preserve both ordered
+  append-only provenance deltas after their genuine shared prefix: 2,006 HTTP
+  records plus 51 preference records. All five upstream chunks remain exact,
+  and the resulting index is 300,305 bytes under the unchanged guard.
+- The 68 current HTTP-47 packet conflicts differ only in source/closure/shared
+  capture bindings; their actual reviewed upstream bytes and hashes remain
+  paired. Original inbox captures remain in retained source history.
+  No pre-47 packet, capability floor or historical record is rewritten.
+- The reviewed producer/durability repair and final associated-control refusal
+  retain identical implementation/test/doc patches after integration. The
+  merged inbox/storage/adoption/receipt/recovery cohort passed 213 cases with
+  two unrelated collection skips and verified cleanup. A genuine
+  committed-source capture/no-write pair,
+  canonical checker and current-head review remain required before merge.
 
 ### 2026-10-23 - Qualify the historical HTTP-46 capture owner
 - The actual updated writer completed inline and chunked `--write`/no-write
@@ -221,7 +242,7 @@ historical capture-owner closure and dependent-source qualification remain open.
   preparation precedes network disconnection. The two collection-time skips
   are unrelated to the selected positive case; all four inner replays must
   pass without skipped cases.
-- Qualification helper review/merge remains open. Then return to the same
+- Qualification helper review/merge completed through #8503. Return to the same
   #8389 source integration for complete-history reconciliation, fresh source
   qualification and current-head review. Full custody, native START, release,
   installation and running adoption remain separate open gates.
