@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; DB foundation, provenance implementation and historical capture qualification merged; inbox source in progress, full Phase 1 open
+- **Status:** Active; internal inbox owner and lossless provenance qualification merged; authenticated consumer/SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -159,7 +159,7 @@ require their own review and qualification.
 ### Phase 4a - Preserve source evidence with lossless provenance sidecars
 - [x] Review the [versioned provenance layout](provenance-layout.md) before
       implementing the bounded source-format change.
-- [ ] Complete its reader/writer, publication and validation gates, then
+- [x] Complete its reader/writer, publication and validation gates, then
       return to #8389 without dropping evidence or increasing the size guard.
 
 ### Phase 5 - Separately qualify adoption
@@ -185,7 +185,7 @@ require their own review and qualification.
       [validation.md](validation.md); absent native evidence remains unqualified.
 - [ ] Parent acknowledgement, operational permission and protected-owner gates
       remain distinct from this effort's source completion.
-- [ ] Historical contract provenance materializes completely and losslessly
+- [x] Historical contract provenance materializes completely and losslessly
       through all canonical consumers, with immutable artifacts below the
       unchanged per-file cap; no runtime qualification is inferred.
 
@@ -204,9 +204,33 @@ The source-format implementation merged in
 [#8469](https://github.com/ThomasMichon/copilot-extensions/pull/8469);
 historical capture-owner qualification merged in
 [#8503](https://github.com/ThomasMichon/copilot-extensions/pull/8503).
-Dependent-source capture is complete; current evidence-head review remains open.
+The dependent internal inbox owner and fresh committed-source evidence merged
+in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
+Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-23 - Inbox owner merged; continue at the real consumer boundary
+- #8389 merged as `d9363f0fd16539ebbd10fdf6a4ad724be4629023` after
+  Copilot approval on final head `fd4b237e7ef09b37d4c15ca64e103a44f66ce0af`.
+  The final associated-control finding is fixed; the non-blocking documentation
+  assessment was corrected in the PR description without changing the head.
+  Every review thread is resolved.
+- The first managed merge refused an expected required PR-gate check.
+  After that exact check and the other required checks reported success, one
+  normal managed retry completed. No required check was bypassed.
+- The final isolated inbox/capture-refusal cohort passed 293 cases with two
+  unrelated collection skips and verified cleanup. The genuine source
+  capture/no-write pair and complete provenance preservation are recorded below.
+- Reread this effort after merge. Phase 1a and the bounded Phase 4a provenance
+  prerequisite are complete; the full effort remains Active. Continue Phase 1
+  at authenticated consumer enrollment and the actual poll-to-SDK handoff
+  through existing registration, transport and extension owners. First trace
+  their identity, negotiation and interruption boundaries; do not activate the
+  internal primitives by treating caller-supplied observations as authentication.
+- Ordinary legacy delivery is not restore-qualified. Actual SDK/native
+  qualification, target compatibility, installer restoration, release and
+  separately authorized running adoption remain unresolved.
 
 ### 2026-10-23 - Capture the reconciled inbox source
 - Genuine committed source `c0b3a2a09a67d93c7ceb8d4cc936254ba2444beb`,

@@ -2,8 +2,9 @@
 
 Back to the [effort](README.md). **Prospective, agent-recommended design.**
 Source-only format work is authorized and this contract cleared normal review
-in #8420. Implementation and its source/evidence gates remain open.
-It does not authorize runtime changes.
+in #8420. Its implementation and dependent-source evidence gates are complete
+through #8469, #8503 and #8389. It does not authorize runtime changes or close
+the full restoration effort.
 
 ## Problem and scope
 
@@ -117,7 +118,7 @@ cannot qualify an unknown runtime target or settle outstanding SDK/native work.
       impact-scoped required CI; do not add native/process matrices to it.
 - [x] Review and merge the implementation through #8469.
 - [x] Review and merge the historical HTTP-46 qualification helpers through #8503.
-- [ ] Return to the same #8389 source PR for reconciliation, fresh qualification
+- [x] Return to the same #8389 source PR for reconciliation, fresh qualification
       and actual current-head review after the remaining capture-owner gate.
 
 No source, native or operational completion is claimed by this proposal.
@@ -228,5 +229,9 @@ interpreter/entrypoint receipts and 68 outputs. The capture appends 67 HTTP
 records, preserving every prior record in order: 2,073 HTTP plus 51 preference
 records, five unchanged chunks and a 323,955-byte index. The canonical checker
 accepts both contracts and all 583 fixtures against the reviewed base.
-Review and merge of the final evidence head remain owed. No native, release,
-installed or serving-route qualification is implied.
+The final evidence head `fd4b237e7ef09b37d4c15ca64e103a44f66ce0af` received
+Copilot approval; all findings were resolved and required checks passed.
+Normal managed completion merged #8389 as
+`d9363f0fd16539ebbd10fdf6a4ad724be4629023`. This closes this bounded
+source-evidence prerequisite, not native, release, installed or serving-route
+qualification.
