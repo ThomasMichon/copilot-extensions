@@ -116,6 +116,16 @@ checks and versioned seed/admission contracts refuse unsupported receivers
 before launch effects. Source-only `create` omits
 optional launch planning and returns no `launch` member.
 
+Before effectful resolution, Manager probes the selected engine's existing
+read-only owner-policy contract. Local resolution requires actual admission;
+for a remote target, the local report establishes engine support only and does
+not substitute the policy of a local namesake for the receiving host's check.
+Compatibility retries recheck the selected owner before another resolution.
+Remote launch handoffs check that receiver before executing the ordinary
+command. Structured prompt preparation checks before its first admission call,
+and the returned launcher checks again before execution. Ordinary inspection,
+request-status and retirement commands receive no launch gate.
+
 ## Launch-attempt resolution receipts
 
 Journaled Manager actions send `--launch-attempt-id <32-lowercase-hex>` and

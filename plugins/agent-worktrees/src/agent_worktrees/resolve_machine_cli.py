@@ -210,9 +210,9 @@ def _in_ssh_session() -> bool:
 
 
 def _remote_launch_command(shell: str, project: str, args: list[str] | None) -> str:
-    from .remote_seed_launch import shell_command
+    from .remote_hosting import shell_command
 
-    return shell_command(shell, [project, *(args or [])])
+    return shell_command(shell, project, list(args or []))
 
 
 def _emit_remote_plan_for_env(

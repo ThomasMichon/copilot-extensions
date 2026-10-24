@@ -70,7 +70,8 @@ def test_remote_plan_preserves_supported_options_and_quotes_values(
     assert plan["ssh_alias"] == "guest profile"
     shell, login, command = shlex.split(plan["remote_command"])
     assert (shell, login) == ("bash", "-lc")
-    argv = shlex.split(command)
+    assert "agent-policy" in command and "--require-agent-hosting" not in command
+    argv = shlex.split(command.split(" && ", 1)[1])
     assert argv[0] == "example"
     forwarded = _parse(argv[1:])
     for field in (
@@ -211,7 +212,10 @@ def test_remote_native_resume_preserves_exact_head_and_no_resume(remote, json_mo
     assert resolve_cli.cmd_resolve(args) == 0
     plan, = plans
     _, _, command = shlex.split(plan["remote_command"])
-    forwarded = _parse(shlex.split(command)[1:])
+    assert "'check' '--worktree-id' 'example-worktree'" in command or (
+        "check --worktree-id example-worktree" in command
+    )
+    forwarded = _parse(shlex.split(command.split(" && ", 1)[1])[1:])
     assert forwarded.native_resume_session == "native-original"
     assert forwarded.worktree_id == "example-worktree"
     assert forwarded.no_resume is True
@@ -239,7 +243,8 @@ def test_powershell_remote_plan_quotes_each_value(remote) -> None:
     ) == 0
     plan, = plans
     script = base64.b64decode(plan["remote_command"].rsplit(" ", 1)[1]).decode("utf-16le")
-    assert script == (
+    assert "'agent-policy' 'check' '--project-root'" in script
+    assert script.endswith(
         "& 'example' '--profile' 'profile with ''quotes''; $value' "
         "'--no-resume' '--no-fast-forward'; exit $LASTEXITCODE"
     )

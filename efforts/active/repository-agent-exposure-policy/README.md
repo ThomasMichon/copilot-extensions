@@ -528,3 +528,31 @@ daemon or separately resolved Worktrees owner has upgraded.
   Committed-diff module ceilings pass without widening; installation and both
   Bridge contracts with all 814 fixtures pass without recapturing unrelated
   evidence. Correction review, release and installed acceptance remain open.
+
+### 2026-10-24 - Internal compatibility before launch effects
+
+- Provider review identified two real ordering gaps after removing the option:
+  an older remote receiver could accept a launch or structured prompt before
+  establishing hosting support, and Manager could resolve New through an older
+  engine before its later launch guard. Both are addressed internally, without
+  restoring the option or adding another user-controlled hosting switch.
+- Unseeded remote handoff validates the receiving owner's existing read-only
+  policy answer before executing the normal command. Structured prompt
+  preparation performs a separate read-only probe before the original
+  admission call; the returned launcher checks again before execution.
+  Inspection, status, help, plain source allocation and retirement remain
+  ungated by this launch mechanism.
+- Manager validates the selected engine's owner-policy contract before
+  effectful resolution and rechecks before compatibility retries. For remote
+  targets a local namesake's denial establishes capability, not remote
+  permission; the receiving host remains authoritative for admission.
+- Retained the full 7 KiB request-envelope and 28,000-character command bounds.
+  The separate preflight avoids inflating the encoded admission payload.
+  Explicitly bounded Manager remote prompt preparation now allows at least
+  300 seconds for the 60-second policy query, 180-second admission and transport
+  margin; unbounded preparation and larger explicit budgets remain unchanged.
+- Linux correction cohorts pass 415 Worktrees cases with six platform skips
+  and 172 Manager cases with 12 platform skips, with verified bounded cleanup.
+  Real legacy-receiver probes are witnessed before assertions of zero launch,
+  allocation or seed effects. Native qualification and provider re-review
+  remain required; the existing Dispatch qualification is unchanged.

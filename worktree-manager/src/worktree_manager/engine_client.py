@@ -51,7 +51,7 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
 _DEFAULT_TIMEOUT = 120
-_REMOTE_ADMISSION_TIMEOUT = 240
+_REMOTE_ADMISSION_TIMEOUT = 300
 class EngineError(RuntimeError):
     """The agent-worktrees engine is absent, failed, or returned no valid JSON.
 
@@ -618,8 +618,9 @@ def resolve_launch_plan(
     must refuse the capability flag before mutation, rather than silently
     dropping preservation. Every launch also requires hosting-policy admission;
     an engine predating that capability is refused without a weaker fallback.
-    Explicitly bounded remote prompted requests allow at least 240 seconds:
-    the outer engine must outlive its 180-second SSH admission and startup.
+    Explicitly bounded remote prompted requests allow at least 300 seconds:
+    the outer engine must outlive its 60-second owner-policy check and
+    180-second SSH admission/startup, retaining a transport margin.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
@@ -638,6 +639,16 @@ def resolve_launch_plan(
         )
     from .seed_launch import require_launch_capabilities, require_attempt_plan, require_attempt_target
     require_attempt_target(launch_attempt_id, target_machine=target_machine, seed=seed)
+    from .hosting_admission import require_owner_hosting
+
+    def admit_owner() -> None:
+        require_owner_hosting(
+            project, worktree_id,
+            request=lambda owner, argv: run_json(owner, argv, allow_nonzero=True),
+            failure=EngineFeatureUnavailable, support_only=bool(target_machine),
+        )
+
+    admit_owner()
 
     args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
@@ -700,6 +711,7 @@ def resolve_launch_plan(
             "--base" in detail
             or "--json requires --worktree-id or --new" in detail
         ):
+            admit_owner()
             obj = run_json(
                 project,
                 ["resolve", "--base", "--no-mux"],
