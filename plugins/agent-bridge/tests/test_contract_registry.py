@@ -67,7 +67,7 @@ def test_http_declared_generation_matches_current_fixture() -> None:
 def test_http_declared_generation_matches_current_control_input() -> None:
     fixture = _fixture("inputs/http47/negotiated-drain.json")
     body = fixture["advertised"]
-    assert body["protocol_version"] == bridge_protocol.HTTP_PROTOCOL_VERSION
+    assert body["protocol_version"] == bridge_protocol.NEGOTIATED_DRAIN_PROTOCOL_VERSION
     assert (
         body["min_protocol_version"]
         == bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED
@@ -90,7 +90,8 @@ def test_native_resume_does_not_reuse_the_published_receipt_generation() -> None
         bridge_protocol.NEGOTIATED_DRAIN_PROTOCOL_VERSION
         > bridge_protocol.STARTUP_PROGRESS_PROTOCOL_VERSION
     )
-    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 47
+    assert bridge_protocol.RETAINED_INBOX_PROTOCOL_VERSION == 48
+    assert bridge_protocol.HTTP_PROTOCOL_VERSION == 48
     assert bridge_protocol.HTTP_PROTOCOL_MIN_SUPPORTED == 1
 
 
@@ -576,6 +577,9 @@ def test_health_fixture_matches_route_serialization(tmp_path, monkeypatch) -> No
         )
     )
     actual = asyncio.run(health_route.health(request))
+    assert actual.pop("capabilities") == {
+        health_route.HOSTING_CAPABILITY: health_route.HOSTING_CAPABILITY_VERSION,
+    }
     expected["protocol_version"] = bridge_protocol.HTTP_PROTOCOL_VERSION
     expected["drain_contract"] = _fixture("inputs/http47/negotiated-drain.json")["advertised"]["drain_contract"]
     # "slot"."pid" is this test process's real pid (slot_descriptor calls

@@ -66,6 +66,34 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         destination = seed / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / path, destination)
+    http = next(c for c in registry["contracts"] if c["id"] == "agent-bridge.http-wire")
+    if http["declared_range"]["current"] > 47:
+        # This is a composed, disposable HTTP-47 test cohort, not a rewrite of
+        # the current receiver or a claim to reproduce a historical commit.
+        protocol = seed / evidence.PREFIX / "protocol.py"
+        text = protocol.read_text(encoding="utf-8")
+        text = text.replace("RETAINED_INBOX_PROTOCOL_VERSION = 48\n", "")
+        text = text.replace("HTTP_PROTOCOL_VERSION = 48\n", "HTTP_PROTOCOL_VERSION = 47\n")
+        protocol.write_text(text, encoding="utf-8")
+        http["declared_range"].update(current=47, previous_generation=46)
+        http["capability_versions"].pop("retained_inbox", None)
+        for row in http["source_paths"]:
+            if row["path"] == evidence.PREFIX + "protocol.py":
+                row["sha256"] = evidence.digest(protocol.read_bytes())
+            elif row["path"] not in evidence.AFFECTED and row["semantic"]:
+                covered = any(
+                    f["generation"] < 48
+                    and (captured := json.loads((seed / f["path"]).read_bytes()).get(
+                        "captured_from", {},
+                    )).get("source_path") == row["path"]
+                    and captured.get("source_sha256") == row["sha256"]
+                    for f in http["fixtures"]
+                )
+                if not covered:
+                    row.update(semantic=False, non_semantic_reason=(
+                        "Disposable HTTP-47 test cohort excludes the later adapter's semantics."
+                    ))
+        write_registry(seed, registry)
     evidence.check_history(seed, registry)
     fixture_git(seed, "init", "-q")
     commit = commit_fixture(seed, "Synthetic capture source seed")
@@ -701,13 +729,18 @@ def test_http47_capture_probe_request_binding_refuses_substitution(repository, m
 
 
 def test_http47_capture_loaded_production_bytes_are_not_an_import_label(
-    repository, monkeypatch, tmp_path
+    monkeypatch, tmp_path
 ):
     import test_http47_capture_probes as probes
     from agent_bridge import protocol
 
-    root, commit = repository
-    proof = evidence.source_snapshot(root, commit, evidence.baseline(root, commit))
+    # Check the currently imported cohort, not the deliberately composed
+    # HTTP-47 publication fixture's different protocol implementation.
+    registry = evidence.registry_codec.load(ROOT).materialized
+    proof = {
+        path: {"sha256": evidence.git_evidence.sha256_bytes((ROOT / path).read_bytes())}
+        for path in evidence.proof_paths(ROOT, registry)
+    }
     probes.loaded_source_proof(proof)
     wrong = tmp_path / "unproven-protocol.py"
     wrong.write_text("HTTP_PROTOCOL_VERSION = 45\n")

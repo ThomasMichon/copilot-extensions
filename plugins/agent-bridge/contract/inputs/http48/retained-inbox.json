@@ -1,0 +1,41 @@
+{
+  "schema": "http48-retained-inbox-cases-v1",
+  "generation": 48,
+  "requests": {
+    "body": "retained original body",
+    "unsupported_contract": "retained-inbox-v2",
+    "outcomes": ["unknown", "sdk_accepted", "consumed"]
+  },
+  "expected": {
+    "advertised": {"protocol_version": 48, "min_protocol_version": 1},
+    "unsupported_contract": 422,
+    "negotiate": {
+      "status": 200,
+      "contract": "retained-inbox-v1",
+      "exact_installation": true,
+      "epoch": 1,
+      "expected_incarnation": null
+    },
+    "enroll": 200,
+    "poll": {
+      "status": 200,
+      "body": "retained original body",
+      "handoff_stage": "offered",
+      "same_message": true,
+      "same_handoff": true,
+      "unchanged_retry": true
+    },
+    "wrong_epoch": 409,
+    "begin": [{"begin": true}, {"begin": false}],
+    "outcomes_after_close": [
+      {"stage": "unknown"},
+      {"stage": "sdk_accepted"},
+      {"stage": "consumed"}
+    ],
+    "duplicate_outcome": {"stage": "consumed"},
+    "retained": {"body": "retained original body", "delivered": true, "consumed": true},
+    "post_close_begin": 503,
+    "proxy": 409,
+    "unauthenticated": 401
+  }
+}

@@ -229,7 +229,10 @@ def install(*, observer: bool = False) -> None:
         )
 
 
-def verify_interpreters(directory: Path, proof: dict) -> dict:
+def verify_interpreters(
+    directory: Path, proof: dict, *,
+    expected_roles: frozenset[str] = frozenset({"worker", "host", "peer"}),
+) -> dict:
     """Require a bound entrypoint for every actual contributing child launch."""
     logs = []
     for path in sorted(directory.glob("*.jsonl")):
@@ -261,11 +264,11 @@ def verify_interpreters(directory: Path, proof: dict) -> dict:
                 if event["source"] not in proof:
                     raise ValueError("HTTP-47 executed source outside committed closure")
                 sources.add(event["source"])
-    if launched != started or {role for _, role in started} != {"worker", "host", "peer"}:
+    if launched != started or {role for _, role in started} != expected_roles:
         raise ValueError("HTTP-47 contributing interpreter launch/entrypoint coverage mismatch")
     return {
         "policy": "every-owned-interpreter-source-and-entrypoint-v1",
-        "roles": ["observer", "worker", "host", "peer"],
+        "roles": ["observer", *(role for role in ("worker", "host", "peer") if role in expected_roles)],
         "verified_sources": sorted(sources),
         "scope": "contained Python fixtures; not native Copilot or Windows qualification",
     }
