@@ -50,19 +50,28 @@ def test_pull_requests_fixed_recipe_retains_source_root_and_result(
     assert result.state == "completed" and result.exit_code == 7, result.log_path.read_text()
     assert (installation / "executed").read_text() == installer_action
     frozen = Path((installation / "source-path").read_text().strip()).parent
-    assert frozen == root / "provision-inputs" / request.id
+    assert frozen.name == payload.name
+    assert frozen.parent.parent == installation / ".install-stage"
+    assert frozen.parent.name.startswith(request.id + "-")
+    assert int(frozen.parent.name.rpartition("-")[2]) > 0
     assert (frozen / "plugin.json").read_bytes() == (payload / "plugin.json").read_bytes()
     assert (installation / "client-only").read_text().strip() == "0"
 
 
 @pytest.mark.parametrize("native", [False, True])
-@pytest.mark.parametrize("reason", ["client-only", "no-self", "pinned", "managed", "malformed"])
+@pytest.mark.parametrize("reason", [
+    "client-only", "no-self", "pinned", "managed", "malformed", "noninstalled", "custom-root",
+])
 def test_pull_requests_refuses_before_queue_or_plugin_writes(
     owning_pull_requests, area, monkeypatch, native, reason,
 ):
     payload, installation, project = owning_pull_requests
     root = area / "cold"
-    if reason == "no-self":
+    if reason == "noninstalled":
+        payload = area / "market" / "plugins" / "agent-pull-requests"
+    elif reason == "custom-root":
+        installation = installation.with_name("other-pull-requests")
+    elif reason == "no-self":
         monkeypatch.setenv("AGENT_PULL_REQUESTS_NO_SELFPROVISION", "1")
     elif reason == "pinned":
         monkeypatch.setenv("AGENT_PULL_REQUESTS_PINNED_CONTEXT", "{}")
@@ -144,12 +153,12 @@ def test_pull_requests_substituted_source_remains_interrupted(
 
 
 @pytest.fixture
-def materialized_pull_requests(owning_pull_requests):
+def materialized_pull_requests(owning_pull_requests, area):
     payload, installation, project = owning_pull_requests
     repository = Path(__file__).resolve().parents[3]
-    shutil.rmtree(payload)
+    candidate = area / "materialized" / "plugins" / "agent-pull-requests"
     shutil.copytree(
-        repository / "plugins" / "agent-pull-requests", payload,
+        repository / "plugins" / "agent-pull-requests", candidate,
         ignore=shutil.ignore_patterns(
             "__pycache__", "*.pyc", ".pytest_cache", "tests", "build", "dist", "*.egg-info",
         ),
@@ -157,10 +166,12 @@ def materialized_pull_requests(owning_pull_requests):
     previous = sys.path[:]
     try:
         release = runpy.run_path(str(repository / "tools" / "materialize_main.py"))
-        result = release["materialize"](payload.parents[1], canonical_root=repository)
+        result = release["materialize"](candidate.parents[1], canonical_root=repository)
     finally:
         sys.path[:] = previous
     assert not any(line.startswith("SKIP ") for line in result), result
+    shutil.rmtree(payload)
+    shutil.copytree(candidate, payload)
     assert (payload / "scripts" / "installer_engine.py").is_file()
     return payload, installation, project
 
@@ -169,6 +180,10 @@ def test_actual_pull_requests_materialized_admission_and_owned_stamp(
     materialized_pull_requests, area,
 ):
     payload, installation, project = materialized_pull_requests
+    cache = payload / "__pycache__"
+    cache.mkdir()
+    (cache / "ignored.pyc").write_bytes(b"not a canonical input")
+    (payload / "empty-directory").mkdir()
     before = {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()}
     admission = provision.inspect(payload, installation, project, installer_action="stamp")
     assert admission["plugin"] == "agent-pull-requests"
@@ -181,9 +196,7 @@ def test_actual_pull_requests_materialized_admission_and_owned_stamp(
     result = status(request.id, root=root)
     assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
     pointer = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
-    assert pointer.is_relative_to(root / "provision-inputs" / request.id) or (
-        os.name == "nt" and pointer.is_relative_to(installation / "snapshots")
-    )
+    assert pointer.is_relative_to(installation / "snapshots")
     assert (pointer / "scripts" / "installer_engine.py").is_file()
     assert (installation.parent / ".local" / "bin" / (
         "agent-pull-requests.ps1" if os.name == "nt" else "agent-pull-requests"

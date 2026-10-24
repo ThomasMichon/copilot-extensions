@@ -238,31 +238,34 @@ def test_native_mode_needs_no_python_and_never_mutates_legacy(tmp_path, enabled)
 
 
 @pytest.mark.parametrize("changed", [False, True])
-def test_native_copied_input_checks_bytes_before_using_original_governance(tmp_path, changed):
-    profile = tmp_path / "profile"
-    profile.mkdir()
-    marketplace = tmp_path / "marketplace"
-    origin = marketplace / "plugins" / "agent-pull-requests"
-    shutil.copytree(
-        SCRIPTS.parent, origin,
-        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests", ".pytest_cache"),
-    )
-    catalog = marketplace / ".github" / "plugin" / "marketplace.json"
-    catalog.parent.mkdir(parents=True)
-    catalog.write_text(json.dumps({
-        "name": "fixture-market",
-        "plugins": [{"name": "agent-pull-requests", "source": "./plugins/agent-pull-requests"}],
-    }), encoding="utf-8")
-    copied = tmp_path / "frozen-inputs" / "request"
-    shutil.copytree(origin, copied)
+def test_native_frozen_input_checks_canonical_source_bytes_and_ignores_only_generated_files(
+    legacy_staging, changed,
+):
+    import ast
+
+    profile, origin, _, _, environment = legacy_staging
+    repository = SCRIPTS.parents[2]
+    tree = ast.parse((repository / "libs" / "installer-engine" / "installer_engine.py").read_text())
+    generated = ast.literal_eval(next(
+        node.value for node in tree.body if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "_GENERATED_DIRECTORIES"
+                for target in node.targets)
+    ))
+    for name in (*generated, "fixture.egg-info", "fixture.dist-info"):
+        directory = origin / name
+        directory.mkdir()
+        (directory / "generated").write_text("not an admitted input", encoding="utf-8")
+    (origin / "ignored.pyc").write_bytes(b"not a source input")
+    (origin / "ignored.pyo").write_bytes(b"not a source input")
+    (origin / "empty-directory").mkdir()
+    copied = profile / ".agent-pull-requests" / ".install-stage" / "request" / origin.name
+    shutil.copytree(origin, copied, ignore=shutil.ignore_patterns(
+        *generated, "*.egg-info", "*.dist-info", "*.pyc", "*.pyo", "empty-directory",
+    ))
     if changed:
-        (copied / "plugin.json").write_text('{"name":"agent-pull-requests"}', encoding="utf-8")
-    environment = {
-        **os.environ, "HOME": str(profile), "USERPROFILE": str(profile),
-        "COPILOT_PLUGIN_ROOT": str(origin), "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        "COPILOT_PLUGIN_STAGED_FROM": str(origin),
-    }
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        (copied / "content.txt").write_text("not the source bytes", encoding="utf-8")
+    environment.update(COPILOT_PLUGIN_ROOT=str(origin), COPILOT_PLUGIN_INSTALL_STAGED="1",
+                       COPILOT_PLUGIN_STAGED_FROM=str(origin))
     if os.name == "nt":
         environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
     result = native(copied / "scripts" / "payload-mode", environment=environment)
@@ -270,7 +273,7 @@ def test_native_copied_input_checks_bytes_before_using_original_governance(tmp_p
         assert result.returncode != 0 and "differs from its origin" in result.stderr
     else:
         assert result.returncode == 0 and result.stdout.strip() == "legacy", result.stderr
-    assert not (profile / ".agent-pull-requests").exists()
+    assert not (profile / ".agent-pull-requests" / "current-version").exists()
     assert not (profile / ".local").exists()
 
 

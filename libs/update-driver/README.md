@@ -679,9 +679,17 @@ Its installer has no service-selection option: client-only requests refuse
 before queue or plugin writes rather than passing Vault's `NoService` flag.
 The canonical installer-engine sync owner supplies its input freezer; the
 existing native installer remains the executor and publication authority.
-Its native mode reader verifies an ordinary copied input tree against the
-declared owning source before using that source's governance; a staging hint
-alone is not admission. The Windows reader invokes its native helper with
+This recipe requires the canonical installed payload and default legacy root.
+It freezes beneath that installation's existing `.install-stage` layout under
+the same outer queue custody. Arbitrary copied/out-of-layout directory payloads or custom-root
+recipes refuse before acquisition or queue/plugin writes. The native mode
+reader retains its canonical installed-origin and staging-location checks,
+then verifies the copied source bytes. A canonical frozen tree may omit
+generated artifacts and empty directories, but may not omit or alter an
+admitted file or add a cached/extraneous file. Complete legacy staging retains
+its existing whole-tree check; ordinary payloads cannot borrow an installed
+source's identity by setting staging hints.
+The Windows reader invokes its native helper with
 typed in-process parameters, preserving JSON probe bytes rather than passing
 them through another PowerShell command-line parser.
 

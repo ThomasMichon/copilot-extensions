@@ -22,6 +22,10 @@ The installer builds an immutable versioned venv under
 `~/.agent-pull-requests/versions/<version>/`, deploys a real
 `~/.local/bin/agent-pull-requests` binstub, and self-reconciles that runtime on
 session start the same way the other Python runtime plugins do.
+Before completing or selecting a legacy runtime generation, both native
+installers run its actual CLI in isolation with `--help`. A successful package
+import alone is not candidate health; a failed entry point leaves the prior
+selection and completion intact.
 
 Both native installers also accept an explicitly
 [prepared source payload](../../tools/prepare_runtime_source.md). Its verified
@@ -60,8 +64,19 @@ nonempty scoped map requires resolvable source identity.
 Legacy self-staging revalidates the original installed marketplace against the
 current policy. The child accepts an origin hint only inside its own canonical
 staging layout, with an existing installed payload and identical, link-free
-payload contents; staging flags alone never bypass admission. A replaced or
+payload contents; staging flags alone never bypass admission. A canonical
+frozen input may omit generated artifacts and empty directories, but its
+complete admitted file set and bytes must still match. Arbitrary copied
+payloads cannot borrow an installed origin through environment hints.
+A replaced or
 unavailable origin fails closed rather than guessing its marketplace.
+
+The standalone installation driver's fixed legacy stamp/provision recipe is
+qualified separately from ordinary publishers. It uses this same installed
+payload, default legacy root, native staging layout and installer, and does
+not accept a service option or an arbitrary source/root. Ordinary command,
+bootstrap, cell and explicit installer callers are not migrated by that
+recipe alone.
 
 ## Verbs
 

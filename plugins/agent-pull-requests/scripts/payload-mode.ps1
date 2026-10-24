@@ -4,22 +4,19 @@ $payload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $legacy = Join-Path $env:USERPROFILE '.agent-pull-requests'
 $stageRoot = Join-Path $legacy '.install-stage'
 $stage = Split-Path -Parent $payload
-$legacyStage = (Split-Path -Parent $stage) -eq $stageRoot
-$copiedInput = $env:COPILOT_PLUGIN_INSTALL_STAGED -ceq '1' -and
-    $env:COPILOT_PLUGIN_STAGED_FROM -and
-    -not [StringComparer]::OrdinalIgnoreCase.Equals($env:COPILOT_PLUGIN_STAGED_FROM, $payload)
-if ($legacyStage -or $copiedInput) {
+if ((Split-Path -Parent $stage) -eq $stageRoot) {
     # Staging hints locate evidence, never waive native governance admission.
     if ($env:COPILOT_PLUGIN_INSTALL_STAGED -cne '1' -or
-        -not [IO.Path]::IsPathRooted([string]$env:COPILOT_PLUGIN_STAGED_FROM)) {
+        -not [IO.Path]::IsPathRooted([string]$env:COPILOT_PLUGIN_STAGED_FROM) -or
+        (Split-Path -Leaf $payload) -cne 'agent-pull-requests') {
         throw 'Staged installer provenance is incomplete'
     }
     $origin = (Resolve-Path -LiteralPath $env:COPILOT_PLUGIN_STAGED_FROM).Path
     $marketplace = Split-Path -Parent $origin
     $installed = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
-    if (($legacyStage -and (Split-Path -Parent $marketplace) -ne $installed) -or
+    if ((Split-Path -Parent $marketplace) -ne $installed -or
         (Split-Path -Leaf $origin) -cne 'agent-pull-requests') {
-        throw 'Staged installer origin is not an owning payload'
+        throw 'Staged installer origin is not a canonical installed payload'
     }
     foreach ($root in @($payload, $origin)) {
         $cursor = $root
@@ -32,19 +29,51 @@ if ($legacyStage -or $copiedInput) {
     }
     $entries = @(Get-ChildItem -LiteralPath $payload -Recurse -Force)
     $originalEntries = @(Get-ChildItem -LiteralPath $origin -Recurse -Force)
-    if ($entries.Count -ne $originalEntries.Count) { throw 'Staged installer payload differs from its origin' }
+    foreach ($entry in @($entries + $originalEntries)) {
+        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Staged installer payload contains a link or mismatched entry'
+        }
+    }
+    $completeCopy = $entries.Count -eq $originalEntries.Count
     foreach ($entry in $entries) {
         $relative = $entry.FullName.Substring($payload.Length + 1)
-        $original = Get-Item -LiteralPath (Join-Path $origin $relative) -Force
-        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-            ($original.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-            $entry.PSIsContainer -ne $original.PSIsContainer) {
-            throw 'Staged installer payload contains a link or mismatched entry'
+        $original = Get-Item -LiteralPath (Join-Path $origin $relative) -Force -ErrorAction SilentlyContinue
+        if (-not $original -or $entry.PSIsContainer -ne $original.PSIsContainer) {
+            $completeCopy = $false
+            break
         }
         if (-not $entry.PSIsContainer -and
             (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash -cne
             (Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash) {
+            $completeCopy = $false
+            break
+        }
+    }
+    if (-not $completeCopy) {
+        # The canonical freezer excludes generated artifacts and empty directories.
+        $generated = @('.git', '.venv', '__pycache__', '.pytest_cache', '.ruff_cache',
+            'build', 'dist', 'node_modules')
+        $sourceFiles = @($originalEntries | Where-Object {
+            if ($_.PSIsContainer) { return $false }
+            $parts = $_.FullName.Substring($origin.Length + 1).Split('\')
+            for ($i = 0; $i -lt $parts.Length - 1; $i++) {
+                if ($parts[$i] -cin $generated -or $parts[$i].EndsWith('.egg-info') -or
+                    $parts[$i].EndsWith('.dist-info')) { return $false }
+            }
+            return -not $_.Name.EndsWith('.pyc') -and -not $_.Name.EndsWith('.pyo')
+        })
+        $stagedFiles = @($entries | Where-Object { -not $_.PSIsContainer })
+        if ($stagedFiles.Count -ne $sourceFiles.Count) {
             throw 'Staged installer payload differs from its origin'
+        }
+        foreach ($original in $sourceFiles) {
+            $relative = $original.FullName.Substring($origin.Length + 1)
+            $copy = Get-Item -LiteralPath (Join-Path $payload $relative) -Force -ErrorAction SilentlyContinue
+            if (-not $copy -or $copy.PSIsContainer -or
+                (Get-FileHash -LiteralPath $copy.FullName -Algorithm SHA256).Hash -cne
+                (Get-FileHash -LiteralPath $original.FullName -Algorithm SHA256).Hash) {
+                throw 'Staged installer payload differs from its origin'
+            }
         }
     }
     $payload = $origin

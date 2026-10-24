@@ -1,0 +1,13 @@
+{
+  "comment": "Deliver the shared fixed owning-plugin installation recipe update through the existing standalone driver consumers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

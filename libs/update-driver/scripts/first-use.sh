@@ -60,6 +60,11 @@ case "$plugin" in
     agent-pull-requests) prefix=AGENT_PULL_REQUESTS ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
+[[ "$plugin" != agent-pull-requests || (
+    "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
+    "$runtime" == "$HOME/.agent-pull-requests" ) ]] || {
+    printf 'Pull Requests first use requires its canonical installed payload and legacy root.\n' >&2; exit 1;
+}
 [[ "$plugin" == agent-vault || "${#service_mode[@]}" == 0 ]] || {
     printf 'Client-only selection is unsupported by the owning installer.\n' >&2; exit 1;
 }

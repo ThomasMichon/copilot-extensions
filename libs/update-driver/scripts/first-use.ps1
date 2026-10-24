@@ -46,6 +46,12 @@ switch -CaseSensitive ($plugin) {
     'agent-pull-requests' { $prefix = 'AGENT_PULL_REQUESTS' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
+if ($plugin -ceq 'agent-pull-requests' -and (
+    [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
+        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
+    $RuntimeRoot -ine (Join-Path $env:USERPROFILE '.agent-pull-requests'))) {
+    throw 'Pull Requests first use requires its canonical installed payload and legacy root.'
+}
 if ($ServiceMode -ceq 'client-only' -and $plugin -cne 'agent-vault') {
     throw 'Client-only selection is unsupported by the owning installer.'
 }

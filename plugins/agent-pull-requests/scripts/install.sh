@@ -336,7 +336,7 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    if ! "$VENV_PYTHON" -c 'import agent_pull_requests' 2>/dev/null; then
+    if ! "$VENV_PYTHON" -I -B -m agent_pull_requests --help >/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi

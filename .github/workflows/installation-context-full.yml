@@ -108,6 +108,11 @@ jobs:
           --test-file tests/test_first_use_vault_bootstrap.py
           --test-file tests/test_first_use_pull_requests.py
           --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1080
+      - name: Qualify isolated Pull Requests CLI health before completion
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_legacy_cli_health.py
+          --test-timeout 60 --timeout 180
       - name: Qualify Vault bootstrap routing and publication admission
         run: >-
           python tools/run-plugin-tests.py agent-vault
@@ -184,6 +189,11 @@ jobs:
           --test-file tests/test_first_use_vault_bootstrap.py
           --test-file tests/test_first_use_pull_requests.py
           --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
+      - name: Qualify isolated Pull Requests CLI health before completion
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_legacy_cli_health.py
+          --test-timeout 60 --timeout 180
       - name: Qualify Vault bootstrap routing and publication admission
         run: >-
           python tools/run-plugin-tests.py agent-vault

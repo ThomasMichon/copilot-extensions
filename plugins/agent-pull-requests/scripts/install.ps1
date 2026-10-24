@@ -315,10 +315,14 @@ function Invoke-VersionedActivate {
     if (-not (Test-Path $py)) { return $true }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $VenvPython -c 'import agent_pull_requests' 2>$null
+    $nativeError = ''
+    [void](Invoke-Hidden -FilePath $VenvPython -ArgList @(
+        '-I', '-B', '-m', 'agent_pull_requests', '--help'
+    ) -ErrorOutput ([ref]$nativeError))
     $slotOk = ($LASTEXITCODE -eq 0)
     $ErrorActionPreference = $prevEAP
     if (-not $slotOk) {
+        Write-Fail "Isolated agent_pull_requests CLI health probe failed: $nativeError"
         Write-Fail "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }

@@ -40,6 +40,7 @@ class FrozenInputs:
     transaction: RetainedUVInstall | None = None
     retained_hash: str | None = None
     extras: tuple[str, ...] = ()
+    local_packages: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class ReadyCandidate:
     descriptor: int
     frozen_plugin: Path
     extras: tuple[str, ...] = ()
+    local_packages: tuple[str, ...] | None = None
 
 
 class HealthRepairRequired(RuntimeError):
@@ -81,14 +83,20 @@ def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
     return normalized
 
 
-def _construction_hash(files: tuple[Path, ...], extras: tuple[str, ...]) -> str:
+def _construction_hash(
+    files: tuple[Path, ...], extras: tuple[str, ...],
+    local_packages: tuple[str, ...] | None = None,
+) -> str:
     source_hash = runtime.fingerprint_source(files)
-    if not extras:
+    if not extras and local_packages is None:
         return source_hash
+    profile: dict[str, object] = {"source_hash": source_hash, "extras": extras}
+    if local_packages is not None:
+        profile["local_packages"] = local_packages
     # Keep source-only identities compatible; non-base admission also binds selection.
     return hashlib.sha256(json.dumps({
         "schema": "installer-engine.dependency-profile", "version": 1,
-        "source_hash": source_hash, "extras": extras,
+        **profile,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -137,6 +145,43 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
                 continue
             pending.append((child, dependency))
     return tuple(sorted(roots))
+
+
+def _package_name(root: Path) -> str:
+    name = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _selected_local_packages(
+    plugin: Path, packages: tuple[Path, ...], selection: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    if selection is None:
+        return None
+    if not isinstance(selection, tuple) or any(
+        not isinstance(name, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None
+        for name in selection
+    ):
+        raise ValueError("Local package selection must be an immutable tuple of distribution names")
+    names = tuple(re.sub(r"[-_.]+", "-", name).lower() for name in selection)
+    if len(set(names)) != len(names):
+        raise ValueError("Local package selection contains duplicate distributions")
+    unknown = set(names) - {_package_name(package) for package in packages}
+    if unknown:
+        raise ValueError(f"Local package selection is outside the source graph: {', '.join(sorted(unknown))}")
+    return tuple(sorted({_package_name(plugin), *names}))
+
+
+def _installed_packages(inputs: FrozenInputs) -> tuple[Path, ...]:
+    return tuple(
+        package for package in inputs.packages
+        if inputs.local_packages is None or _package_name(package) in inputs.local_packages
+    )
+
+
+def _excluded_packages(inputs: FrozenInputs) -> list[str]:
+    if inputs.local_packages is None:
+        return []
+    return sorted({_package_name(package) for package in inputs.packages} - set(inputs.local_packages))
 
 
 def _source_files(roots: tuple[Path, ...]) -> tuple[Path, ...]:
@@ -232,24 +277,26 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
     environment = dict(os.environ)
     for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         environment.pop(name, None)
+    selected = _installed_packages(inputs)
     with retain_uv_install(
         str(Path(_select_uv_executable(str(Path.cwd() / uv))).resolve(strict=True)),
         ["--python", str(python), "--no-editable", "--link-mode", "copy",
          *(["--reinstall"] if refresh else []),
-         *(argument for package in inputs.packages
+         *(argument for package in selected
            for argument in ("-r", str(package / "pyproject.toml"))),
          *(str(package) + (
              f"[{','.join(inputs.extras)}]" if package == inputs.plugin and inputs.extras else ""
-         ) for package in inputs.packages)],
+         ) for package in selected)],
         env=environment, cwd=inputs.plugin,
         trusted_source_roots=inputs.packages,
+        excluded_local_packages=tuple(_excluded_packages(inputs)),
     ) as transaction:
         if set(transaction.sources) != set(inputs.packages):
             raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
         if (
             _package_roots(inputs.plugin) != inputs.packages
             or _source_files(inputs.packages) != files
-            or _construction_hash(files, inputs.extras) != inputs.payload_hash
+            or _construction_hash(files, inputs.extras, inputs.local_packages) != inputs.payload_hash
         ):
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
         if not set(files) <= set(transaction.source_hashes):
@@ -269,6 +316,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
             plugin, packages, inputs.payload_hash, transaction,
             runtime.fingerprint_source(_source_files(packages)),
             inputs.extras,
+            inputs.local_packages,
         )
 
 
@@ -317,7 +365,7 @@ def _child(
 def _input_origins(inputs: FrozenInputs) -> dict[str, str]:
     return {
         tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]:
-        root.as_uri() for root in inputs.packages
+        root.as_uri() for root in _installed_packages(inputs)
     }
 
 
@@ -332,6 +380,7 @@ def _verify_installed(
             "use distinct-generation health repair, not an in-place rebuild."
         )
     origins = _input_origins(inputs)
+    excluded = _excluded_packages(inputs)
     probe = """
 import importlib, importlib.metadata, json, pathlib, sys
 slot = pathlib.Path(sys.argv[1]).resolve()
@@ -343,9 +392,11 @@ if sys.argv[4]:
     getattr(module, sys.argv[4])()
 expected_origins = json.loads(sys.argv[3])
 expected_extras = json.loads(sys.argv[6])
+expected_selection = json.loads(sys.argv[7])
+excluded_packages = json.loads(sys.argv[8])
 proof = slot / ".runtime-input-origins.json"
 assert not proof.is_symlink(), "frozen origin evidence is a symlink"
-if sys.argv[5] == "fresh" or expected_extras:
+if sys.argv[5] == "fresh" or expected_extras or expected_selection is not None:
     assert proof.is_file(), "fresh runtime has no frozen origin evidence"
 recorded_origins = None
 if proof.exists():
@@ -356,6 +407,8 @@ if proof.exists():
     recorded_origins = receipt["packages"]
     assert receipt.get("extras", []) == expected_extras, \
         "frozen origin evidence differs from the selected dependency profile"
+    assert receipt.get("local_packages") == expected_selection, \
+        "frozen origin evidence differs from the selected local packages"
     assert isinstance(recorded_origins, dict) and set(recorded_origins) == set(expected_origins), \
         "frozen origin evidence does not cover the dependency graph"
     if sys.argv[5] == "fresh":
@@ -376,12 +429,18 @@ for name, expected in expected_origins.items():
         staging = (slot.parent.parent / ".installer-inputs").as_uri() + "/frozen-"
         assert str(origin.get("url", "")).startswith(staging), \
             f"{name} has no attributable frozen installation origin"
+for name in excluded_packages:
+    try:
+        importlib.metadata.distribution(name)
+    except importlib.metadata.PackageNotFoundError:
+        continue
+    raise AssertionError(f"excluded local package is installed: {name}")
 """
     try:
         _child(
             [str(python), "-I", "-B", "-c", probe, str(slot), module, json.dumps(origins),
              health_callable or "", "fresh" if require_frozen_origin else "reuse",
-             json.dumps(inputs.extras)],
+             json.dumps(inputs.extras), json.dumps(inputs.local_packages), json.dumps(excluded)],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
@@ -479,6 +538,7 @@ def numbered_candidate(
     reuse_generations: bool = False,
     expected_source_identity: dict | None = None,
     extras: tuple[str, ...] = (),
+    local_packages: tuple[str, ...] | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance."""
@@ -491,6 +551,7 @@ def numbered_candidate(
         process_retention=process_retention, reuse_generations=reuse_generations,
         expected_source_identity=expected_source_identity,
         extras=extras,
+        local_packages=local_packages,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
     )
 
@@ -516,18 +577,21 @@ def _candidate(
     reuse_generations: bool = False,
     expected_source_identity: dict | None = None,
     extras: tuple[str, ...] = (),
+    local_packages: tuple[str, ...] | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     root = root.resolve()
     _assert_source_pin(plugin, expected_source_identity)
     extras = _selected_extras(plugin, extras)
-    if dev_owner is not None and extras:
+    if dev_owner is not None and (extras or local_packages is not None):
         raise ValueError("Dependency profiles require an immutable numbered runtime")
-    (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     packages = _package_roots(plugin)
+    local_packages = _selected_local_packages(plugin, packages, local_packages)
+    (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
     inputs = FrozenInputs(
-        plugin.resolve(strict=True), packages, _construction_hash(_source_files(packages), extras),
-        extras=extras,
+        plugin.resolve(strict=True), packages,
+        _construction_hash(_source_files(packages), extras, local_packages),
+        extras=extras, local_packages=local_packages,
     )
     with ExitStack() as retained:
         if dev_owner is not None:
@@ -565,6 +629,7 @@ def _candidate(
                 _assert_source_pin(plugin, expected_source_identity)
                 yield ReadyCandidate(
                     slot, inputs.payload_hash, True, descriptor, inputs.plugin, inputs.extras,
+                    inputs.local_packages,
                 )
             return
         with ExitStack() as construction:
@@ -595,6 +660,8 @@ def _candidate(
                         "schema": "installer-engine.frozen-input-origins", "version": 1,
                         "packages": _input_origins(inputs),
                         **({"extras": list(inputs.extras)} if inputs.extras else {}),
+                        **({"local_packages": list(inputs.local_packages)}
+                           if inputs.local_packages is not None else {}),
                     }, indent=2) + "\n", encoding="utf-8")
                     if process_retention:
                         bootstrap = slot / ".runtime-bootstrap"
@@ -638,4 +705,5 @@ def _candidate(
             _assert_source_pin(plugin, expected_source_identity)
             yield ReadyCandidate(
                 slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,
+                inputs.local_packages,
             )

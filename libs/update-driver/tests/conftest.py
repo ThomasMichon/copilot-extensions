@@ -182,4 +182,11 @@ def owning_pull_requests(owning_payload):
         '-z "${AGENT_PULL_REQUESTS_ACTION:-}" && -z "${AGENT_PULL_REQUESTS_INSTALL_DIR:-}" ]]\n'
         '[[ "$#" == 3 ]]\nmkdir -p', 1,
     ), encoding="utf-8")
-    return payload, installation.with_name(".agent-pull-requests"), project
+    installed = installation.parent / ".copilot" / "installed-plugins" / "fixture-market" / payload.name
+    shutil.copytree(payload, installed)
+    (installation.parent / ".copilot" / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "fixture-market": {"source": {"source": "github", "repo": "example/fixture-market"}},
+        },
+    }), encoding="utf-8")
+    return installed, installation.with_name(".agent-pull-requests"), project

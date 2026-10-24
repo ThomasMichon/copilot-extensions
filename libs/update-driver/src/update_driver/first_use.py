@@ -99,6 +99,11 @@ def _inspect(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
+    if plugin == "agent-pull-requests" and (
+        payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
+        or runtime_root != Path.home() / ".agent-pull-requests"
+    ):
+        raise ProvisionError("Pull Requests first use requires its canonical installed payload and legacy root")
 
     sys.path.insert(0, str(scripts))
     import installer_engine as engine
@@ -246,9 +251,16 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
 
         # Reuse the canonical complete-input copier under this request's custody.
         # Keep these files: native publication may retain a source path into them.
-        inputs = _path(root / "provision-inputs")
-        inputs.mkdir(mode=0o700, exist_ok=True)
-        frozen = engine.freeze_inputs(payload, inputs / custody.request_id)
+        inputs = _path(
+            runtime_root / ".install-stage" if admission["plugin"] == "agent-pull-requests"
+            else root / "provision-inputs"
+        )
+        inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination = inputs / custody.request_id
+        if admission["plugin"] == "agent-pull-requests":
+            # Keep legacy staging reapers off this live, queue-owned native tree.
+            destination = inputs / f"{custody.request_id}-{os.getpid()}" / payload.name
+        frozen = engine.freeze_inputs(payload, destination)
         if frozen.payload_hash != admission["input_hash"] or _inspect(
             payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
         ) != admission:
