@@ -1,0 +1,9 @@
+{
+  "comment": "Deliver canonical construction resources in independent Chat artifacts",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

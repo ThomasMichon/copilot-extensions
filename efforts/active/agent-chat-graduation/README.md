@@ -238,13 +238,12 @@ requirements.
   selection/supervision gaps. No neighboring implementation is claimed.
   #8401 merged after current-head approval and required CI. This resolves the
   derivation review, not an executable installer or any adoption gate.
-- [ ] Establish a canonical role-selective construction input before implementing
-  client-only setup; the current package-root constructor traverses all local
-  sources, including both of Chat's optional roles.
-  The authorized shared slice adds an explicit exact local-package selection
-  alongside selected extras, retaining the full admitted source graph and
-  canonical construction custody. Review and qualification must establish
-  that omitted local distributions cannot become registry fallbacks.
+- [x] Establish a canonical role-selective construction input before implementing
+  client-only setup. #8430 adds explicit `local_packages` alongside selected
+  extras, retaining the complete admitted source graph and canonical custody.
+  Final-head native Linux/Windows controls prove client/service closure,
+  omitted-distribution refusal and immutable reuse. This is a construction
+  prerequisite, not selected Chat setup or an installed command publication.
 - [ ] Implement selected manual-client setup and preserving removal through
   supported canonical custody, then qualify independently installed invocation.
   Do not turn the existing local wheel catalog into release-selection authority.
@@ -426,6 +425,64 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Deliver construction resources in Chat artifacts
+
+- The Chat-owned build now consumes the existing canonical
+  `standalone_build.py` hooks for the complete runtime family and Python
+  constructor/dependency-policy companions. Wheels contain unchanged canonical
+  bytes; sdists also carry the same helper so a subsequent wheel build needs
+  no checkout. Standalone preparation retains both canonical resource owners.
+  This is artifact delivery, not another construction engine or an executable
+  selected-installation adapter.
+- The installed wheel catalog covers all eighteen Python resources through
+  RECORD without changing its local-only evidence meaning. Source-independent
+  wheel/sdist equality, incomplete-sdist refusal, installed constructor imports
+  and resource-drift controls exercise the actual artifact boundary.
+- Native Windows qualification retained all410 parameter nodes: acceptance
+  passed371 with2 platform skips and37 explicit full-only deselections in106.28s
+  within120s; full passed408 with2 platform skips in147.40s within600s.
+  Membership digest is
+  `3ade790e12cd7539612d26b19525eb8b2e16d896389979c7480246ee87ddd5fb`.
+  An earlier acceptance attempt exhausted120s; a duration-reporting run of the
+  same unfiltered lane passed without changing its budget. A missing-helper
+  negative control was corrected to recognize the native exception type rather
+  than requiring a POSIX English diagnostic.
+- The adjacent qualification guard was stale after PR units moved to
+  `ci_pr_unit_reuse.py`; it now checks that exact CI owner and retains the
+  direct promotion producer check. No workflow or required CI matrix changes.
+  Native Linux artifact qualification and selected manual-client setup/removal
+  remain open. No runtime rollout, service activation, migration or native
+  attachment is performed by this slice.
+
+### 2026-10-24 - Reusable role-selectable construction merged
+
+- #8430 merged to `dev` as `93f4546a0d65a3b2ead03de8872886fcfdd9429c`
+  at 03:47:17Z. Current-head review approved
+  `bf7f1596c64e6e72fd832c38e8e2402afbbf525e` with no open findings;
+  both review threads were resolved and required CI passed. The managed merge
+  used only the authorized additional-CODEOWNER exception, not a CI bypass.
+  #7238 remains open.
+- The shared constructor installs the caller's exact local distribution closure
+  and declared extras while retaining/fingerprinting all admitted sources.
+  Canonical dependency policy owns generated exclusion constraints, including
+  their path canonicalization and source-layout-independent retention.
+  UV remains the resolver; no Chat installer fork, project mutation or
+  registry fallback for an omitted first-party distribution is introduced.
+  Default callers retain their previous construction/profile behavior.
+- Final-head manual acceptance run `40059200321` passed all 16 selected role
+  cases on each fresh platform: native Linux 7.91s and Windows 16.64s, with 52
+  existing unrelated candidate-engine cases explicitly deselected per lane.
+  The final local workflow/policy selection passed 69 cases, including actual
+  short-path offline builds and canonical owned-temp aliases. Required source
+  CI, install-contract checks, canonical synchronization, module-size checks
+  and focused lint also passed. These are reusable construction controls,
+  not full Chat installed-adopter, native-host or service-lifecycle proof.
+- Re-read the complete parent Plan and Validation Plan after merge. Resolve
+  only the canonical role-input prerequisite; continue independently packaged
+  Chat manual-client setup, selected invocation and preserving removal through
+  supported custody. Service supervision, host assignment/shared feed,
+  migration and live adoption remain open. No runtime rollout was performed.
 
 ### 2026-10-24 - Derive the standard Chat setup adapter
 

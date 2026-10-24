@@ -1,6 +1,8 @@
 import json
 import os
+from pathlib import Path
 import subprocess
+import tarfile
 
 import pytest
 
@@ -118,7 +120,7 @@ finally:
         "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
         "shell": "direct", "availability": "ready",
     }
-    assert len(catalog["resource_sha256s"]) == 9
+    assert len(catalog["resource_sha256s"]) == 18
     assert "hosting.py" in catalog["resource_sha256s"]
     assert "workspace.py" in catalog["resource_sha256s"]
     assert "collaboration.py" in catalog["resource_sha256s"]
@@ -145,6 +147,48 @@ print(json.dumps({
     assert outputs["version"] == result["version"]
     assert outputs["catalog"] == catalog
     assert outputs["capability"]["version"] == 1
+
+
+def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
+    tmp_path, installed_chat,
+):
+    import hashlib
+
+    root = Path(__file__).resolve().parents[3]
+    runtime = root / "libs" / "versioned-runtime"
+    installer = root / "libs" / "installer-engine"
+    expected = {
+        "_versioned_runtime.py": runtime / "versioned_runtime.py",
+        **{
+            name: runtime / name for name in (
+                "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+                "versioned_runtime_publication.py", "versioned_runtime_source.py",
+            )
+        },
+        **{
+            name: installer / name for name in (
+                "installer_engine.py", "installer_engine_process.py",
+                "installer_dependency_policy.py", "installer_dependency_config.py",
+            )
+        },
+    }
+    catalog = json.loads(installed_chat.run([
+        str(installed_chat.console), "catalog",
+    ], cwd=tmp_path))
+    with tarfile.open(installed_chat.sdist, "r:gz") as archive:
+        members = archive.getmembers()
+        for name, source in expected.items():
+            member, = (
+                item for item in members if item.name.endswith("/src/agent_chat_service/" + name)
+            )
+            with archive.extractfile(member) as stream:
+                data = stream.read()
+            assert data == source.read_bytes()
+            assert catalog["resource_sha256s"][name] == hashlib.sha256(data).hexdigest()
+        helper, = (item for item in members if item.name.endswith("/_standalone_runtime_build.py"))
+        with archive.extractfile(helper) as stream:
+            assert stream.read() == (runtime / "standalone_build.py").read_bytes()
+    assert not catalog["release_selection_verified"]
 
 
 @pytest.mark.parametrize("shadow_source", ["cwd", "pythonpath"])

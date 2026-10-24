@@ -174,3 +174,16 @@ def test_catalog_includes_collaboration_in_its_verified_closure(installation, da
     with pytest.raises(ClientError) as caught:
         catalog.installed_catalog()
     assert caught.value.code == "invalid_installation"
+
+
+@pytest.mark.parametrize("name", [
+    "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
+    "versioned_runtime_publication.py", "versioned_runtime_source.py",
+    "installer_engine.py", "installer_engine_process.py",
+    "installer_dependency_policy.py", "installer_dependency_config.py",
+])
+def test_catalog_refuses_changed_construction_resources(installation, name):
+    (installation.package / name).write_bytes(b"changed construction resource")
+    with pytest.raises(ClientError) as caught:
+        catalog.installed_catalog()
+    assert caught.value.code == "invalid_installation"

@@ -52,6 +52,7 @@ test_catalog_refuses_linked_resource_evidence
 test_catalog_includes_the_host_module_in_its_verified_closure
 test_catalog_includes_the_workspace_module_in_its_verified_closure
 test_catalog_includes_collaboration_in_its_verified_closure
+test_catalog_refuses_changed_construction_resources
 """,
     "test_cli.py": """
 test_real_cli_provider_http_store_and_independent_forward_read
@@ -84,10 +85,15 @@ test_response_json_can_be_large_without_widening_default_request_bounds
     "test_distribution.py": """
 test_source_removed_installed_transport_enforces_raw_budgets_and_strict_text
 test_source_independent_wheel
+test_wheel_and_independent_sdist_deliver_exact_canonical_construction
 test_installed_catalog_worker_preserves_isolation
 """,
     "test_host_distribution.py": """
 test_fresh_installed_host_source_removed_independent_participants_and_crash_restart
+""",
+    "test_setup_distribution.py": """
+test_independent_sdist_refuses_missing_construction_input
+test_installed_constructor_imports_only_its_delivered_resource_family
 """,
     "test_local_endpoint.py": """
 test_local_endpoint_offline_status_never_resolves_or_executes
@@ -164,7 +170,7 @@ test_artifact_helper_preserves_cwd_stdin_and_environment
 """,
 }
 
-FULL_ONLY = {"test_hosting.py", "test_host_distribution.py"}
+FULL_ONLY = {"test_hosting.py", "test_host_distribution.py", "test_setup_distribution.py"}
 EXPECTED = {
     f"{module}::{name}": "full-only" if module in FULL_ONLY else "acceptance"
     for module, names in FAMILIES.items() for name in names.split()
@@ -189,6 +195,7 @@ PARAMETER_COUNTS.update({
     "test_catalog.py::test_catalog_includes_the_workspace_module_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_includes_collaboration_in_its_verified_closure": 3,
     "test_catalog.py::test_catalog_refuses_unusable_installed_evidence": 17,
+    "test_catalog.py::test_catalog_refuses_changed_construction_resources": 9,
     "test_cli.py::test_cli_dispatch_preserves_exact_client_controls": 9,
     "test_cli.py::test_http_failures_are_not_retried_or_redirected": 4,
     "test_cli.py::test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic": 2,
@@ -201,6 +208,7 @@ PARAMETER_COUNTS.update({
     "test_client.py::test_malformed_success_objects_do_not_confirm_an_operation": 6,
     "test_client.py::test_scan_validates_body_free_returned_only_progress_without_reading": 4,
     "test_distribution.py::test_installed_catalog_worker_preserves_isolation": 2,
+    "test_setup_distribution.py::test_independent_sdist_refuses_missing_construction_input": 3,
     "test_hosting.py::test_absolute_ingress_deadline_retires_slow_input_and_releases_admission": 2,
     "test_hosting.py::test_configuration_refuses_without_echoing_values": 7,
     "test_hosting.py::test_held_wait_drain_and_health_keep_independent_requests_responsive": 2,
