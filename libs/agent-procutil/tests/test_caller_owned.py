@@ -168,6 +168,26 @@ def test_invalid_utf8_is_not_returned_as_success():
 
 
 @native_execution
+@pytest.mark.parametrize("failure", ["none", "timeout", "decode", "limit"])
+def test_native_settlement_notification_precedes_result_or_failure(failure):
+    observed = []
+    code, timeout, limit = "print('ready')", 5, 4096
+    expected = nullcontext()
+    if failure == "timeout":
+        code, timeout = "import time; time.sleep(60)", .3
+        expected = pytest.raises(subprocess.TimeoutExpired)
+    elif failure == "decode":
+        code = "import sys; sys.stdout.buffer.write(b'\\xff')"
+        expected = pytest.raises(UnicodeError)
+    elif failure == "limit":
+        code, limit = "print('too much')", 1
+        expected = pytest.raises(OutputLimitExceeded)
+    with expected:
+        _run(code, timeout=timeout, stdout=limit, on_settled=lambda: observed.append(True))
+    assert observed == [True]
+
+
+@native_execution
 @pytest.mark.parametrize("capture", [True, False])
 def test_absolute_deadline_retires_target_after_output_closes(capture):
     started = time.monotonic()
@@ -468,11 +488,25 @@ def test_all_caller_owned_cleanup_failures_retain_process(monkeypatch, boundary)
     monkeypatch.setattr(
         protocol, "_confirm_group", fail if boundary == "confirm" else lambda *a: None,
     )
+    observed = []
     with pytest.raises(OwnedCleanupError) as caught:
-        _run("pass")
+        _run("pass", on_settled=lambda: observed.append(True))
     assert caught.value.process is process
     assert caught.value.__cause__ is failure
     assert process.returncode is None
+    assert observed == []
+
+
+def test_prelaunch_refusal_notifies_without_attempting_native_spawn(monkeypatch):
+    observed = []
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid preparation attempted process creation")
+
+    monkeypatch.setattr(protocol, "_run_owned", forbidden)
+    with pytest.raises(ValueError):
+        _run("pass", timeout=0, on_settled=lambda: observed.append(True))
+    assert observed == [True]
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux group ownership")
