@@ -20,12 +20,57 @@ on:
           - codespaces-bootstrap
           - logger-recipes
           - bridge-contracts
+          - bridge-binding
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  bridge-binding-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
+    name: Bridge scoped-stamp binding (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual scoped stamps and ordinary retained commands
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bridge_first_use_publication.py
+          -k test_bridge_cell_stamp_preserves_global_ownership
+          --allow-explicit-tiers --test-timeout 60 --timeout 540
+
+  bridge-binding-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
+    name: Bridge scoped-stamp binding (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual scoped stamps and ordinary retained commands
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation
+          --test-file tests/test_bridge_first_use_publication.py
+          -k test_bridge_cell_stamp_preserves_global_ownership
+          --allow-explicit-tiers --test-timeout 60 --timeout 540
+
   bridge-contracts-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'
     name: Bridge historical source proof (Ubuntu)
