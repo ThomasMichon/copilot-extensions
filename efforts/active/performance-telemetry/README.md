@@ -285,7 +285,8 @@ For the later structured-signal slice specifically, the design merged in #8187.
 The coordinator subsequently admitted its exact functional shared API/file scope,
 including isolated port-zero SDK/wire fixtures. The admission does not permit
 collector edits, installed enrollment, reserved callers or process-custody changes.
-Actual native source Logs/Metrics receipt still awaits the collector handshake.
+The Journal records the separately admitted native source Logs/Metrics receipt.
+Independent campaign verification and installed/native-budget qualification remain open.
 
 ## Journal
 
