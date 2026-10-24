@@ -23,6 +23,7 @@ from agent_procutil import (
 )
 import httpx
 
+from . import http_auth
 from .client import AgentIndexClient
 from .config import (
     Config,
@@ -478,12 +479,6 @@ def _setup_required_payload(*, runtime_state: str = "ready") -> dict[str, Any]:
     }
 
 
-def _read_client(url: str) -> AgentIndexClient:
-    from . import http_auth
-
-    return http_auth.read_client(url) if http_auth.configured() else AgentIndexClient(url)
-
-
 def _status_payload() -> dict[str, Any]:
     from . import __version__, transport
 
@@ -506,36 +501,9 @@ def _status_payload() -> dict[str, Any]:
             "index": {"chunks": None, "available": None, "unreachable": True},
         }
     try:
-        from . import http_auth
-
-        if role == "client" and http_auth.configured():
-            remote = _read_client(url)
-            if remote.read_headers is not None:
-                health = remote.health()
-                payload = remote.status()
-                if (
-                    health.get("installationId") != remote.installation_id
-                    or payload.get("installationId") != remote.installation_id
-                    or not isinstance(payload.get("index"), dict)
-                ):
-                    raise ServiceOwnershipError("remote read installation identity mismatch")
-                ready = (
-                    health.get("status") == "ok"
-                    and payload.get("draining") is not True
-                    and payload.get("promoted") is not False
-                )
-                payload.update({
-                    "schema": "agent-index.lifecycle",
-                    "schema_version": 1,
-                    "state": "ready" if ready else "not_ready",
-                    "setup_required": False,
-                    "configured": True,
-                    "role": role,
-                    "runtime": {"state": "ready"},
-                    "running": ready,
-                    "endpoint": url,
-                })
-                return payload
+        authenticated = http_auth.status_payload(url, role)
+        if authenticated is not None:
+            return authenticated
         expected_installation = _expected_installation_id()
         route = _routing_endpoint_for_url(url)
         if expected_installation and route is None:
@@ -1217,9 +1185,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         role, _indexer = transport.plan_route()
         if role == "client":
             url = client_url()
-            if not url:
-                raise RuntimeError("configured client endpoint is unavailable")
-            payload = _read_client(url).search(
+            payload = http_auth.read_client(url, client_factory=AgentIndexClient).search(
                 args.query,
                 limit=args.limit,
                 source=args.source,
@@ -1262,9 +1228,7 @@ def cmd_similar(args: argparse.Namespace) -> int:
         role, _indexer = transport.plan_route()
         if role == "client":
             url = client_url()
-            if not url:
-                raise RuntimeError("configured client endpoint is unavailable")
-            payload = _read_client(url).similar(
+            payload = http_auth.read_client(url, client_factory=AgentIndexClient).similar(
                 args.chunk_id,
                 limit=args.limit,
                 source=args.source,
@@ -1289,9 +1253,7 @@ def cmd_clusters(args: argparse.Namespace) -> int:
         role, _indexer = transport.plan_route()
         if role == "client":
             url = client_url()
-            if not url:
-                raise RuntimeError("configured client endpoint is unavailable")
-            payload = _read_client(url).clusters(
+            payload = http_auth.read_client(url, client_factory=AgentIndexClient).clusters(
                 source=args.source,
                 bucket=args.bucket,
                 model=args.model,

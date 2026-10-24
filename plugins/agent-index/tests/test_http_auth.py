@@ -94,6 +94,8 @@ def test_unselected_native_client_stays_unchanged(monkeypatch):
         http_auth, "_credential", lambda _: pytest.fail("credentials are opt-in"),
     )
     assert http_auth.read_client("http://native").read_headers is None
+    with pytest.raises(http_auth.HttpAuthError, match="configured client endpoint is unavailable"):
+        http_auth.read_client(None)
 
 
 @pytest.mark.parametrize("status", [302, 401])
@@ -144,7 +146,7 @@ def test_remote_status_uses_remote_identity_not_local_process_ownership(monkeypa
             }
 
     remote = Remote()
-    monkeypatch.setattr(cli, "_read_client", lambda _: remote)
+    monkeypatch.setattr(http_auth, "read_client", lambda _: remote)
     result = cli._status_payload()
     assert result["state"] == "ready"
     assert result["role"] == "client"
@@ -164,7 +166,7 @@ def test_remote_status_sanitizes_credential_failure(monkeypatch):
     def fail(_):
         raise http_auth.HttpAuthError("http-auth-command-failed")
 
-    monkeypatch.setattr(cli, "_read_client", fail)
+    monkeypatch.setattr(http_auth, "read_client", fail)
     result = cli._status_payload()
     assert result["state"] == "unreachable"
     assert result["index"]["chunks"] is None

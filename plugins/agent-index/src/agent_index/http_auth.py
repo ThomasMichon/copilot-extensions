@@ -8,6 +8,7 @@ import re
 import signal
 import subprocess
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
@@ -60,11 +61,15 @@ def _credential(command: list[str]) -> str:
             process.wait(timeout=5)
 
 
-def read_client(base_url: str) -> AgentIndexClient:
+def read_client(
+    base_url: str | None, *, client_factory: type[AgentIndexClient] = AgentIndexClient,
+) -> AgentIndexClient:
     """Resolve only machine-local credential policy; never acquire a login."""
+    if not isinstance(base_url, str) or not base_url:
+        raise HttpAuthError("configured client endpoint is unavailable")
     raw = config._load_yaml(config.config_path()).get("http_auth")
     if raw is None:
-        return AgentIndexClient(base_url)
+        return client_factory(base_url)
     if (
         not isinstance(raw, dict)
         or set(raw) != {"endpoint", "token_command", "installation_id"}
@@ -115,6 +120,39 @@ def read_client(base_url: str) -> AgentIndexClient:
         raise HttpAuthError("http-auth-policy-invalid")
     scheme = "Bear" + "er "
     headers = {"Authorization": scheme + _credential(command)}
-    return AgentIndexClient(
+    return client_factory(
         base_url, installation_id=installation, read_headers=headers
     )
+
+
+def status_payload(base_url: str, role: str) -> dict[str, Any] | None:
+    if role != "client" or not configured():
+        return None
+    remote = read_client(base_url)
+    if remote.read_headers is None:
+        raise HttpAuthError("http-auth-policy-changed")
+    health = remote.health()
+    payload = remote.status()
+    if (
+        health.get("installationId") != remote.installation_id
+        or payload.get("installationId") != remote.installation_id
+        or not isinstance(payload.get("index"), dict)
+    ):
+        raise HttpAuthError("remote read installation identity mismatch")
+    ready = (
+        health.get("status") == "ok"
+        and payload.get("draining") is not True
+        and payload.get("promoted") is not False
+    )
+    payload.update({
+        "schema": "agent-index.lifecycle",
+        "schema_version": 1,
+        "state": "ready" if ready else "not_ready",
+        "setup_required": False,
+        "configured": True,
+        "role": role,
+        "runtime": {"state": "ready"},
+        "running": ready,
+        "endpoint": base_url,
+    })
+    return payload
