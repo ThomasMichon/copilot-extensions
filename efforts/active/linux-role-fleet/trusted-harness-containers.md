@@ -306,3 +306,22 @@ and live validations run only after the execution and venue gates above.
   The corrected candidate passes 26 focused tests, Ruff F/E9, both Bash syntax
   checks and AST/JSON/link/public-source checks; no native build or rollout is
   claimed by those offline results.
+- 2026-10-24: The published #8385 candidate passed an actual bounded native
+  OCI build. Manifest:
+  `sha256:1ef40cdd019db10d972897d650cbd6bf150f130ef82383c171904a14bf341dcb`;
+  config:
+  `sha256:a14166084c93fd2672af7e2528c0776d0df29e0bfb6c5a2c514603a630936fca`.
+  Native import verified the descriptor, configuration and rootfs; Docker's
+  containerd store addressed the manifest rather than the config ID.
+  The fixed tools ran successfully, and two disposable containers preserved
+  identity bytes with a 0700 home while both `vscode` and `messagebus` read the
+  public projected ID. A thin consumer built from the verified local OCI layout
+  without a registry, credentials or deployment action.
+- 2026-10-24: Native systemd boot remains blocked on the tested Docker 29.1.3
+  cgroup-v2/default-AppArmor/seccomp host profile: cgroup remount and fresh mount
+  were refused under the declared trusted capabilities. No privileged mode,
+  unconfined profile or host cgroup bind was added. Carry this as a deployment
+  profile admission/qualification gate, not a synthetic service-ready result.
+  The standalone suite now has 27 cases; 24 eligible cases are registered with
+  the existing required-CI runner. Native CI caught CRLF-versus-LF source
+  admission hashes; regenerate those bindings against committed LF bytes.

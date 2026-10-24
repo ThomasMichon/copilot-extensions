@@ -1569,10 +1569,10 @@
     "libs/installer-engine/installer_wheel_inputs.py": "9bed756f0f00f61dce1d8745800c67eb79c49fcdf81e28cb7150b00200fd3070",
     "tools/wheel_input_fixture.py": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122",
     "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",
-    "tools/promotion_unit_tests/test_trusted_harness_base.py": "7efb40abd03d986bb6367c220e4f3f6f960a2c166a320d69a407a75e8d87c1d9",
-    ".devcontainer/trusted-harness-base/tests/test_contract.py": "943b21af752a130e7548e2993199c9d421147c8c570e9496a50264e881a7a5af",
-    ".devcontainer/trusted-harness-base/build.py": "b298986a93c81007351a91d7ba8dd863dfd216f5f3a598d8de687bd2ce79df0d",
-    ".devcontainer/trusted-harness-base/install.py": "8e68a2f7e732993ae3d04eefe15d812452f03dd7d91b0caf1700cee308e0dce8"
+    "tools/promotion_unit_tests/test_trusted_harness_base.py": "9d7c287fa4e90bb485899bdd5e9eb88921a2bca690456311c5b744ed82ba3e2b",
+    ".devcontainer/trusted-harness-base/tests/test_contract.py": "4d53a3343fb169204145dc2037245e4647452f46c7af642a7b5229c75cae98ce",
+    ".devcontainer/trusted-harness-base/build.py": "147fde88b9fc4885d62b133c320b34adfa6cee45468a94427933a864ff8061bb",
+    ".devcontainer/trusted-harness-base/install.py": "9e2bd629bbd4f6fcf259009232d7f7dce5274d4625cc8d2cc8465b8477b9f6a1"
   },
   "coverage_targets": [
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py",

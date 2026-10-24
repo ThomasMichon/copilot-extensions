@@ -150,6 +150,15 @@ No output is published or considered signed. Komodo's owner separately agrees
 artifact transfer/import and activation; a local archive is not a remotely
 pullable tag. A failed/offline manager never authorizes direct worker mutation.
 
+For native import, verify the archive hash and its manifest/config chain first.
+Do not assume an engine's image ID is the config digest: Docker 29's containerd
+store can address the manifest digest instead. Verify its imported descriptor,
+configuration and rootfs against the receipt/archive before running it or
+assigning a convenience alias. A downstream build can consume the verified
+archive as an extracted OCI layout through Buildx's digest-qualified
+`--build-context name=oci-layout:///path@sha256:<manifest-digest>`, without
+inventing a registry or treating a local tag as integrity proof.
+
 Timeout or interruption terminates the caller-owned Buildx CLI (then kills
 that CLI only if it fails to exit). This requests BuildKit cancellation; it
 does not prove that remote work has quiesced. The receipt explicitly retains
@@ -218,3 +227,14 @@ Prove the real `vscode` user manager and DBus connection work, not just that
 the files exist. Also exercise foreign mount ownership, missing key halves,
 invalid IDs and symlinked persistent paths: each must refuse startup without
 adoption, identity rotation or recursive permission changes.
+
+Native candidate validation built and verified the OCI archive, then confirmed
+the pinned tools, public machine-ID reads by both unprivileged users with a
+0700 home, and unchanged canonical identity bytes across two disposable
+containers using the same mounts. These are tool/file-preservation proofs only.
+Docker 29.1.3 with cgroup v2 and its default AppArmor/seccomp confinement refused
+both the entrypoint's read/write cgroup remount and a fresh cgroup mount under
+the declared capability profile. Systemd/user-DBus service readiness is therefore
+**not qualified on that host profile**. The deployment owner must admit and
+prove a suitable confined cgroup profile; do not silently add privileged mode,
+unconfined security profiles or host cgroup binds to turn this into a pass.
