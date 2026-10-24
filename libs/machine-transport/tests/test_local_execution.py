@@ -289,6 +289,27 @@ def test_current_guest_can_use_physical_customization_without_native_authority()
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("metadata", ["none", "hostname", "physical", "both"])
+@pytest.mark.parametrize("configured", [False, True])
+def test_guest_only_entry_does_not_require_optional_host_metadata(
+    environment: str, explicit: bool, metadata: str, configured: bool,
+) -> None:
+    entry = MachineEntry(
+        "desk-wsl", "", execution_platform="wsl" if explicit else "",
+        hostname="desk" if metadata in ("hostname", "both") else "",
+        physical_host="desk" if metadata in ("physical", "both") else "",
+    )
+    execution = "desk-wsl" if environment == "wsl" else "desk"
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="desk", environment=environment,
+        configured_machine=execution if configured else None,
+    )
+    assert (context.machine, context.execution_machine) == ("desk", execution)
+    assert context.customization_key == ("desk-wsl" if environment == "wsl" else None)
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_existing_configured_binding_remains_distinct_from_observation(environment: str) -> None:
     configured = "custom-wsl" if environment == "wsl" else "custom"
     context = resolve_local_execution_context(

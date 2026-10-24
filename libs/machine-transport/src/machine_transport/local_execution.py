@@ -168,7 +168,7 @@ def resolve_local_execution_context(
         entry for entry in registry.values()
         if folded in {
             entry.key.casefold(), entry.hostname.casefold(), entry.alias.casefold(),
-            entry.physical_host.casefold(),
+            _physical(entry, observed).casefold(),
             *(alias.casefold() for alias in entry.compatibility_aliases),
         }
     ]
