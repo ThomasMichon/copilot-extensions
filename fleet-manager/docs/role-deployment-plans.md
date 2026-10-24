@@ -3,6 +3,10 @@
 Back to [fleet-manager](../README.md) and the existing
 [Linux role fleet effort](../../efforts/active/linux-role-fleet/README.md).
 
+For contributed slot templates and a named-machine CPU/memory/disk grid, use
+the separate [`fleet-manager design` command](loadouts.md). It does not change
+the role-provider compiler's contracts or add deployment authority.
+
 The installed SDK supplies `plan_role_deployment` and `verify_role_plan` in
 `fleet_manager.role_deployment`, plus the explicit module CLI:
 

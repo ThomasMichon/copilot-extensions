@@ -183,6 +183,29 @@ resource fencing, or existing standalone-service defaults.
 
 ## Features
 
+### attributed-daemon-instances
+
+Every shipped resident-service launch has attributable instance custody,
+including source-only, native-supervised and container startup paths. Instance
+identity is distinct from installed version and singleton generation. Owners
+can discover their instances across isolated state roots without depending on a
+running central service.
+
+Explicitly ephemeral host-side test instances have renewable finite leases,
+bounded maximum lifetimes and declared disposable runtime artifacts. Unattended
+tests have safe defaults; interactive tests that may wait for human input
+declare a pause-tolerant lifetime rather than inheriting an unattended deadline.
+Lifetime renewal follows the actual test owner, independently of agent-turn
+activity. Test teardown and independent expiry prevent permanent orphans;
+ordinary authorized install/update reconciliation provides a cleanup backstop.
+
+Cleanup preserves production service lifetime, election, cutover and protected
+recoverable work. It acts only on explicitly disposable, expired instances with
+verified process and artifact custody. Unknown ownership, reused process
+identities, foreign or changed paths and unsettled effects remain visible holds,
+never guessed termination or deletion. Source checkouts, installed code and
+retained proof artifacts are not disposable instance state.
+
 ### progress-aware-service-and-tool-operations
 
 Services, CLIs and tools share two independent time budgets: a **short

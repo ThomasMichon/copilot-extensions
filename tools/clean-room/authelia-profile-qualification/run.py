@@ -26,6 +26,9 @@ PROVIDER = (
     "bd97cff4fcbf715b5ff1f9ae286afbe6033afce385302520b0368122d43a6f54"
 )
 VERSION = "4.39.28"
+DEFAULT_PROFILE = "jwt-pop-v1"
+ENROLLED_PROFILE = "enrolled-pop-v1"
+PROFILES = (DEFAULT_PROFILE, ENROLLED_PROFILE)
 SIGNALS = (signal.SIGINT, signal.SIGTERM)
 PROBE_ERRORS = frozenset({
     "fixture-preparation-failed", "response-size-refused", "response-shape-refused",
@@ -35,6 +38,8 @@ PROBE_ERRORS = frozenset({
     "provider-tls-failed", "provider-unavailable", "provider-discovery-mismatch",
     "provider-jwks-failed", "provider-token-request-failed", "provider-access-token-missing",
     "provider-probe-failed",
+    "unsupported-qualification-profile", "resource-negative-check-failed",
+    "resource-identity-shape-refused",
 })
 
 
@@ -165,8 +170,9 @@ class QualifierEngine(Engine):
         self.receipt["cleanup_errors"] = errors
         return errors
 
-    def create_fixture(self, image: str, kind: str) -> str:
-        if not IMAGE_ID.fullmatch(image) or kind not in ("prepare", "provider", "probe"):
+    def create_fixture(self, image: str, kind: str, *, profile: str = DEFAULT_PROFILE) -> str:
+        if (not IMAGE_ID.fullmatch(image) or kind not in ("prepare", "provider", "probe")
+                or profile not in PROFILES):
             raise ProofError("invalid-qualifier-container")
         root = self.root
         if kind == "prepare":
@@ -176,6 +182,8 @@ class QualifierEngine(Engine):
             mounts = [(root / "qualifier", "/proof", False),
                       (root / "fixtures/client", "/credentials", False)]
             network, command = self.network, ["/proof/probe.py"]
+            if profile == ENROLLED_PROFILE:
+                command += ["--profile", ENROLLED_PROFILE]
         else:
             mounts = [(root / "fixtures/provider", "/config", False)]
             network, command = self.network, None
@@ -225,13 +233,16 @@ class QualifierEngine(Engine):
         return image
 
 
-def admit_outcome(value: dict) -> dict:
+def admit_outcome(value: dict, *, profile: str = DEFAULT_PROFILE) -> dict:
     """Allow only the finite non-secret probe vocabulary into the durable receipt."""
     common = {"result", "resource_tls_verified", "identity_error", "traits",
               "provider_tls_verified", "profile", "grant", "human_flow_exercised",
               "enrollment_qualified", "policy_qualified", "production_qualified"}
-    if (set(value) - common or value.get("result") not in ("verified", "incompatible")
-            or value.get("profile") != "jwt-pop-v1"
+    if profile == ENROLLED_PROFILE:
+        common.add("negative_checks")
+    if (profile not in PROFILES or set(value) - common
+            or value.get("result") not in ("verified", "incompatible")
+            or value.get("profile") != profile
             or value.get("grant") != "client_credentials"
             or value.get("provider_tls_verified") is not True
             or type(value.get("resource_tls_verified")) is not bool
@@ -246,7 +257,8 @@ def admit_outcome(value: dict) -> dict:
         "expired-credential", "proof-replayed", "resource-limit", "scheme-refused",
         "invalid-token-binding", "provider-token-type",
     }
-    if "identity_error" in value and value["identity_error"] not in codes:
+    if "identity_error" in value and (
+            not isinstance(value["identity_error"], str) or value["identity_error"] not in codes):
         raise ProofError("qualifier-outcome-refused")
     if value["result"] == "incompatible" and "identity_error" not in value:
         raise ProofError("qualifier-outcome-refused")
@@ -256,25 +268,43 @@ def admit_outcome(value: dict) -> dict:
         "proof_binding_present", "proof_binding_matches", "traits_are_unverified",
         "token_type_dpop",
     }
+    if profile == ENROLLED_PROFILE:
+        booleans.update(("client_id_exact", "subject_exact", "audience_allowed"))
     if (not isinstance(traits, dict) or set(traits) != booleans | {"audience_shape"}
             or any(type(traits[key]) is not bool for key in booleans)
             or traits["audience_shape"] not in ("string", "array", "other")
             or traits["traits_are_unverified"] is not True):
         raise ProofError("qualifier-traits-refused")
+    required = booleans - {"traits_are_unverified"}
+    if profile == ENROLLED_PROFILE:
+        required -= {"audience_exact", "proof_binding_present", "proof_binding_matches",
+                     "token_type_dpop"}
+        checks = value.get("negative_checks")
+        if (not isinstance(checks, dict) or set(checks) != {
+                "wrong_key_refused", "missing_proof_refused", "replay_refused"}
+                or any(type(item) is not bool for item in checks.values())):
+            raise ProofError("qualifier-negative-checks-refused")
+        if value["result"] == "verified" and not all(checks.values()):
+            raise ProofError("qualifier-success-not-established")
     if value["result"] == "verified" and (
             "identity_error" in value or value["resource_tls_verified"] is not True
-            or any(traits[key] is not True for key in booleans - {"traits_are_unverified"})
-            or traits["audience_shape"] != "string"):
+            or any(traits[key] is not True for key in required)
+            or traits["audience_shape"] not in (
+                ("string", "array") if profile == ENROLLED_PROFILE else ("string",))):
         raise ProofError("qualifier-success-not-established")
     return value
 
 
-def run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
+def run(repository: Path, ref: str, root: Path, build_timeout: int, *,
+        profile: str = DEFAULT_PROFILE) -> dict:
+    if profile not in PROFILES:
+        raise ProofError("unsupported-qualification-profile")
     receipt = {
         "version": 1, "scenario": "authelia-profile-qualification", "result": "fail",
         "cleanup": "pending", "started_at": int(time.time()),
         "host_ports_published": False, "host_socket_granted": False,
         "production_qualified": False, "human_flow_exercised": False,
+        "profile": profile,
     }
     engine = None
     previous = {number: signal.getsignal(number) for number in SIGNALS}
@@ -300,7 +330,8 @@ def run(repository: Path, ref: str, root: Path, build_timeout: int) -> dict:
         engine.create_network()
         provider = engine.create_fixture(provider_image, "provider")
         engine.start(provider)
-        outcome = admit_outcome(engine.attached(engine.create_fixture(image, "probe"), 110))
+        outcome = admit_outcome(engine.attached(
+            engine.create_fixture(image, "probe", profile=profile), 110), profile=profile)
         receipt.update(result=outcome["result"], outcome=outcome)
     except (ProofError, OSError, ValueError, KeyError, TypeError, Terminated) as exc:
         receipt["error"] = str(exc) if isinstance(exc, ProofError) else "qualification-run-failed"
@@ -330,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository", type=Path, default=BASE.parents[2])
     parser.add_argument("--results-root", type=Path, required=True)
     parser.add_argument("--build-timeout", type=int, default=900)
+    parser.add_argument("--profile", choices=PROFILES, default=DEFAULT_PROFILE)
     args = parser.parse_args(argv)
     if sys.platform != "linux":
         parser.error("requires native Linux/WSL and an existing Linux Docker engine")
@@ -342,7 +374,8 @@ def main(argv: list[str] | None = None) -> int:
         results = fresh_run(root)
     except (ProofError, OSError):
         parser.error("private results root unavailable")
-    receipt = run(args.repository, args.source_commit, results, args.build_timeout)
+    receipt = run(args.repository, args.source_commit, results, args.build_timeout,
+                  profile=args.profile)
     print(json.dumps({"results": str(results), "result": receipt["result"],
                       "cleanup": receipt["cleanup"], "error": receipt.get("error"),
                       "receipt_persistence": receipt.get("receipt_persistence", "complete")}))

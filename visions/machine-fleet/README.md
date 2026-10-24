@@ -71,6 +71,17 @@ not the portable controller. Effective configuration and both source revisions
 are inspectable. Installing connection tooling alone does not enroll a machine
 or enable background services.
 
+### Capacity-aware loadout designer
+
+Fleet-manager is the design and confirmation surface for the fleet's
+[composable loadouts](loadouts/README.md). Reusable role templates supply
+configurable slots; an adopter-owned registrar resolves them into the final
+desired composition and allocations against specific named machines.
+A resource-grid view compares that whole composition with admitted capacity,
+including its supporting control, connectivity and credential-provider roles.
+The final composition follows the knowledge repository's publication policy;
+it is not a configuration blob uploaded with an activation request.
+
 ### Logical machines and physical association
 
 Windows and WSL on one physical host are separately addressable logical
@@ -395,8 +406,12 @@ coordinates intent rather than becoming another package manager or supervisor.
 
 ### repository-backed-config-and-temporary-control
 
-Fleet-manager can edit configuration locally, inspect live state, confirm
-prepared deployments and invoke supported diagnostic/debug operations.
+Fleet-manager designs and commits desired expectations, persists the resolved
+composition in the adopted knowledge/configuration repository, inspects live
+state, confirms prepared deployments and invokes supported diagnostic/debug
+operations. The Gateway-side controller pulls published desired state and
+prepares the actual deployment against current admitted resources; the
+designing client does not become a competing runtime deployment controller.
 Temporary or preview adjustments remain distinguishable from durable desired
 state. Persistent configuration follows its owning repositories' pull-request
 review/merge flow and then propagates normally; a local edit, confirmation,
@@ -541,6 +556,28 @@ buckets should remain a useful independent fallback, accessible through existing
 machine access even when the Gateway or dashboard is unavailable. Multiple
 approved sinks may be explicitly selected without coupling their availability
 or silently widening collection.
+
+### convention-discoverable-diagnostic-logs
+
+Fleet control-plane logging has predictable, owner-resolved locations that can
+be discovered without remembering a launch command or possessing its terminal
+output. The same convention covers local services, controller/connectors,
+installers, supervisors, cutover/recovery, container output and structured
+diagnostic buckets. Discovery identifies active and historical logs and their
+owning component, rather than guessing machine-specific absolute paths.
+
+Records carry unambiguous timestamps and non-secret source attribution.
+Deployment diagnostics preserve the difference between candidate failure,
+rollback, commit, retirement and verified serving readiness; a successful
+intermediate stage never implies successful activation.
+
+Diagnostic logging uses a 30-day retention policy, enforced by elapsed age,
+not merely file count or size. Continuously running writers and quiet/restarted
+services remain within the same policy. Cleanup preserves active operations and
+their authority; protected incomplete-attempt evidence is visibly distinguished
+from ordinary retained logs rather than silently exempted. Logs never become
+task/session state or proof of permission, and diagnostic collection does not
+require a new always-on collector or off-fleet export.
 
 ## Behaviors
 

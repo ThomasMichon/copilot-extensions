@@ -94,3 +94,16 @@ The operator selected:
 ```text
 scope=implement-and-adopt
 ```
+
+## Explicit repair authorization and legacy pre-launch audit
+
+The coordinator asked whether legacy interruptions could use a separate,
+request-bound operator-audited pre-launch recovery path rather than exclusively
+machine-verifiable cleanup proof. The operator answered:
+
+> Allow the audited pre-launch recovery, but in the end if the operator says to do a repair, clean install, force reinstall, or whatever, no evidence is needed; just do it
+
+This approves the audited path without making it a prerequisite for explicit
+repair. The plan distinguishes operator authorization from native cleanup
+proof and retains the original failed outcome. The standing clarification is
+not itself a concrete request to run repair on any host.

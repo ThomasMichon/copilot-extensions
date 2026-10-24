@@ -156,6 +156,18 @@ mechanism. Confirmed text reaches that authority intact, without shell
 interpretation. An unavailable or incompatible target reports the limitation
 without losing intent or repeating an admitted creation or handoff.
 
+### durable-launch-attempts
+Each confirmed New, Resume or Open action leaves a durable machine-local
+attempt record before allocation or launch effects, including selected venue,
+options and privately retained submitted text where applicable. The operator
+can inspect the attempt through actual allocation and backend outcomes across
+local and SSH boundaries. Missing completion evidence remains unknown or
+interrupted, never a success claim or authorization to replay. Prompt contents
+remain protected private recovery data with explicit retention, omitted from
+ordinary metadata listings and shared telemetry. Read-only inspection across
+selected machines preserves unavailable sources and requires explicit prompt
+retrieval. Audit history does not replace target-owned seed or launch authority.
+
 ### worktree-search-and-filter
 A lightweight, keyboard-summoned search narrows the worktree list by substring
 match across every identifying facet an operator actually recognizes a

@@ -399,7 +399,8 @@ def test_new_definitive_refusal_does_not_leave_an_unknown_post(pair):
     assert client.status()["pending_posts"] == []
 
 
-def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path):
+@pytest.mark.parametrize("publication", ["normal", "sharing-race"])
+def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path, monkeypatch, publication):
     from agent_procutil import direct_python, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     client, _, _ = pair
@@ -423,10 +424,45 @@ def test_local_reader_lock_is_shared_and_crash_released(pair, tmp_path):
     )
     try:
         deadline = time.monotonic() + 5
-        while not ready.exists():
-            assert time.monotonic() < deadline and process.poll() is None
-            time.sleep(.01)
-        holder = json.loads(ready.read_text())
+        last_error = None
+        injected = False
+        original_read = Path.read_text
+        original_exists = Path.exists
+
+        def read_published(path, *args, **kwargs):
+            nonlocal injected
+            value = original_read(path, *args, **kwargs)
+            if path == ready and publication == "sharing-race" and not injected:
+                injected = True
+                if os.name == "nt":
+                    raise PermissionError(13, "Synthetic publication sharing race.")
+                raise FileNotFoundError("Synthetic publication visibility race.")
+            return value
+
+        with monkeypatch.context() as publication_patch:
+            publication_patch.setattr(Path, "read_text", read_published)
+            if publication == "sharing-race":
+                # A stale absence probe cannot bypass the successful-read fault.
+                publication_patch.setattr(
+                    Path, "exists",
+                    lambda path, *args, **kwargs:
+                    False if path == ready else original_exists(path, *args, **kwargs),
+                )
+            while True:
+                if time.monotonic() >= deadline or process.poll() is not None:
+                    raise AssertionError("Lock holder did not publish a readable ready record.") from last_error
+                try:
+                    holder = json.loads(ready.read_text())
+                    break
+                except FileNotFoundError as error:
+                    last_error = error
+                except PermissionError as error:
+                    # Windows replacement can publish the name before its handle retires.
+                    if os.name != "nt" or error.errno != 13:
+                        raise
+                    last_error = error
+                time.sleep(.01)
+        assert injected == (publication == "sharing-race")
         assert holder["pid"] == process.pid
         assert Path(holder["prefix"]).resolve() == Path(sys.prefix).resolve()
         with pytest.raises(ClientError) as caught:

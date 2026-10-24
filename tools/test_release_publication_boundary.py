@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from _promotion_workflow_test_support import api_response, qualification_response
+from _promotion_workflow_test_support import api_response, qualification_response, unit_profile
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/validate-and-promote.yml"
 BASE_WORKFLOW: Path | None = None
@@ -225,6 +225,8 @@ class PromotionJobAdmissionTests(_ShellFixture):
         if "needs.source-units.result" in template:
             validation = ["source-units", "python-artifacts"]
         fields = {"needs.gate.result": "success", "needs.gate.outputs.is_dev": "true"}
+        if "needs.compose-candidate.outputs.composed" in template:
+            fields["needs.compose-candidate.outputs.composed"] = "true"
         fields.update({f"needs.{name}.result": "success" for name in validation})
         scenarios = [
             ({}, True),
@@ -237,6 +239,8 @@ class PromotionJobAdmissionTests(_ShellFixture):
             ({"needs.gate.result": "SUCCESS"}, False),
             ({"needs.gate.outputs.is_dev": "True"}, False),
         ]
+        if "needs.compose-candidate.outputs.composed" in fields:
+            scenarios.append(({"needs.compose-candidate.outputs.composed": "false"}, False))
         for overrides, proceed in scenarios:
             with self.subTest(overrides=overrides):
                 values = {**fields, **overrides}
@@ -251,6 +255,7 @@ class PromotionJobAdmissionTests(_ShellFixture):
                 self.assertEqual(decisions, [f"proceed={str(proceed).lower()}"])
                 if not proceed and not overrides.keys() & {
                     "needs.gate.result", "needs.gate.outputs.is_dev",
+                    "needs.compose-candidate.outputs.composed",
                 }:
                     self.assertIn("refusing to promote", completed.stdout)
 
@@ -279,7 +284,8 @@ def environment() -> dict[str, str]:
     }
     if "  source-units:" in WORKFLOW.read_text(encoding="utf-8"):
         result.update({
-            "QUALIFICATION_PROFILE": "source-units-v2", "QUALIFICATION_RUN": "123",
+            "QUALIFICATION_PROFILE": unit_profile(jobs(WORKFLOW.read_text(encoding="utf-8"))),
+            "QUALIFICATION_RUN": "123",
             "QUALIFICATION_PROMOTION_RUN": "123-2",
             "QUALIFICATION_UNIT_JOB": "900", "QUALIFICATION_UNIT_ARTIFACT": "901",
             "QUALIFICATION_UNIT_ARTIFACT_DIGEST": "sha256:" + "a" * 64,
@@ -336,12 +342,12 @@ class Provider:
             if self.api_error:
                 raise subprocess.CalledProcessError(1, argv, stderr="qualification unavailable")
             result = {**qualification_response(), **self.changes}
-        elif argv[1] == "api" and os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2":
+        elif argv[1] == "api" and os.environ.get("QUALIFICATION_PROFILE") in ("source-units-v2", "candidate-units-v3"):
             result = json.loads(api_response(argv, []))
         elif merging:
             last = (
                 f"repos/example/project/actions/artifacts/{os.environ['QUALIFICATION_UNIT_ARTIFACT']}"
-                if os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2"
+                if os.environ.get("QUALIFICATION_PROFILE") in ("source-units-v2", "candidate-units-v3")
                 else "repos/example/project/actions/runs/789"
             )
             assert self.calls[-2][1:] == ["api", last]

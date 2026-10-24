@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import base64
 import hashlib
 import json
@@ -17,18 +18,29 @@ from joserfc import jwt
 from joserfc.errors import JoseError
 from joserfc.jwk import ECKey
 
+from fleet_manager.enrolled_identity import (
+    EnrolledBinding, EnrolledIdentity, EnrolledIdentityVerifier,
+)
 from fleet_manager.runtime_identity import IdentityError, IdentityVerifier
 
-from prepare import AUDIENCE, CLIENT, ISSUER, SIGNING_KID
+from prepare import AUDIENCE, CLIENT, ENROLLED_PRINCIPAL, ENROLLED_SUBJECT, ISSUER, SIGNING_KID
 
 ROOT = Path("/credentials")
 TOKEN_ENDPOINT = ISSUER + "/api/oidc/token"
 JWKS_ENDPOINT = ISSUER + "/jwks.json"
 MAX_BODY = 65536
+DEFAULT_PROFILE = "jwt-pop-v1"
+ENROLLED_PROFILE = "enrolled-pop-v1"
+PROFILES = (DEFAULT_PROFILE, ENROLLED_PROFILE)
 
 
 class ProbeError(ValueError):
     """Never retains provider response text or credentials."""
+
+
+def check_profile(profile: str) -> None:
+    if profile not in PROFILES:
+        raise ProbeError("unsupported-qualification-profile")
 
 
 def headers(token: str, proof: str) -> dict[str, str]:
@@ -66,8 +78,9 @@ async def document(response: aiohttp.ClientResponse) -> dict:
     return result
 
 
-def token_traits(token: str, key: ECKey) -> dict:
+def token_traits(token: str, key: ECKey, *, profile: str = DEFAULT_PROFILE) -> dict:
     """Unverified traits only; the serving verifier still checks the actual JWT."""
+    check_profile(profile)
     if len(token) > 8192:
         raise ProbeError("token-size-refused")
     try:
@@ -84,7 +97,7 @@ def token_traits(token: str, key: ECKey) -> dict:
         raise ProbeError("token-shape-refused") from None
     cnf = claims.get("cnf")
     binding = cnf.get("jkt") if isinstance(cnf, dict) else None
-    return {
+    traits = {
         "access_alg_es256": header.get("alg") == "ES256",
         "access_type_at_jwt": header.get("typ") == "at+jwt",
         "audience_shape": ("string" if isinstance(claims.get("aud"), str)
@@ -94,6 +107,15 @@ def token_traits(token: str, key: ECKey) -> dict:
         "proof_binding_matches": binding == key.thumbprint(),
         "traits_are_unverified": True,
     }
+    if profile == ENROLLED_PROFILE:
+        audience = claims.get("aud")
+        traits.update(
+            client_id_exact=claims.get("client_id") == CLIENT,
+            subject_exact=claims.get("sub") == ENROLLED_SUBJECT,
+            audience_allowed=audience == AUDIENCE or (
+                isinstance(audience, list) and len(audience) == 1 and audience[0] == AUDIENCE),
+        )
+    return traits
 
 
 def trusted_subset(value: dict) -> dict:
@@ -110,11 +132,27 @@ def trusted_subset(value: dict) -> dict:
 
 
 async def resource_check(session: aiohttp.ClientSession, key: ECKey,
-                         token: str, jwks: dict) -> dict:
-    verifier = IdentityVerifier(
-        issuer=ISSUER, audience=AUDIENCE, jwks=jwks,
-        trust_valid_until=int(time.time()) + 120, clock=lambda: int(time.time()),
-    )
+                         token: str, jwks: dict, *, profile: str = DEFAULT_PROFILE) -> dict:
+    check_profile(profile)
+    expires = int(time.time()) + 120
+    verifier: IdentityVerifier
+    if profile == ENROLLED_PROFILE:
+        # Fixed fixture approval, never an enrollment selected from token traits.
+        verifier = EnrolledIdentityVerifier(
+            issuer=ISSUER, audience=AUDIENCE, jwks=jwks,
+            trust_valid_until=expires, clock=lambda: int(time.time()),
+            allowed_audiences=(AUDIENCE,),
+            enrollments=(EnrolledBinding(
+                subject=ENROLLED_SUBJECT, client_id=CLIENT, principal=ENROLLED_PRINCIPAL,
+                kind="caller", resource=AUDIENCE, key_source="qualification-proof",
+                proof_key=key.thumbprint(), expires_at=expires,
+            ),),
+        )
+    else:
+        verifier = IdentityVerifier(
+            issuer=ISSUER, audience=AUDIENCE, jwks=jwks,
+            trust_valid_until=expires, clock=lambda: int(time.time()),
+        )
 
     async def handle(request: web.Request) -> web.Response:
         if request.transport is None or request.transport.get_extra_info("ssl_object") is None:
@@ -127,8 +165,17 @@ async def resource_check(session: aiohttp.ClientSession, key: ECKey,
         if not supplied.startswith(prefix):
             return web.json_response({"result": "refused", "code": "scheme-refused"}, status=401)
         try:
-            verifier.verify(supplied[len(prefix):], request.headers.get("DPoP", ""),
-                            method=request.method, target_uri=resource)
+            if profile == ENROLLED_PROFILE:
+                identity = verifier.verify(
+                    supplied[len(prefix):], request.headers.get("DPoP", ""),
+                    method=request.method, target_uri=resource, kind="caller")
+                if (type(identity) is not EnrolledIdentity
+                        or identity.profile != ENROLLED_PROFILE or identity.kind != "caller"
+                        or identity.subject != ENROLLED_PRINCIPAL):
+                    raise ProbeError("resource-identity-shape-refused")
+            else:
+                verifier.verify(supplied[len(prefix):], request.headers.get("DPoP", ""),
+                                method=request.method, target_uri=resource)
         except IdentityError as exc:
             return web.json_response({"result": "refused", "code": exc.code}, status=401)
         return web.json_response({"result": "verified"})
@@ -147,24 +194,58 @@ async def resource_check(session: aiohttp.ClientSession, key: ECKey,
             if response.status != 401:
                 raise ProbeError("resource-challenge-failed")
             nonce = response.headers.get("DPoP-Nonce")
-            if nonce != verifier.nonce:
+            if not isinstance(nonce, str) or nonce != verifier.nonce:
                 raise ProbeError("resource-challenge-failed")
+        authenticated = headers(token, proof(key, "GET", resource, token=token, nonce=nonce))
         async with session.get(
-            resource, headers=headers(token, proof(key, "GET", resource, token=token, nonce=nonce)),
+            resource, headers=authenticated,
             allow_redirects=False,
         ) as response:
             outcome = await document(response)
             if response.status == 200 and outcome == {"result": "verified"}:
+                if profile == ENROLLED_PROFILE:
+                    negatives = await negative_checks(
+                        session, token, resource, nonce, authenticated)
+                    return {"result": "verified", "resource_tls_verified": True,
+                            "negative_checks": negatives}
                 return {"result": "verified", "resource_tls_verified": True}
             if response.status == 401 and outcome.get("result") == "refused":
                 return {"result": "incompatible", "resource_tls_verified": True,
-                        "identity_error": outcome["code"]}
+                        "identity_error": outcome["code"],
+                        **({"negative_checks": empty_checks()} if profile == ENROLLED_PROFILE
+                           else {})}
             raise ProbeError("resource-response-refused")
     finally:
         await runner.cleanup()
 
 
-async def qualify() -> dict:
+def empty_checks() -> dict[str, bool]:
+    return dict.fromkeys(("wrong_key_refused", "missing_proof_refused", "replay_refused"), False)
+
+
+async def negative_checks(session: aiohttp.ClientSession, token: str,
+                          resource: str, nonce: str,
+                          authenticated: dict[str, str]) -> dict[str, bool]:
+    """Copied original token cannot substitute for the fixed enrolled private key."""
+    wrong_key = ECKey.generate_key("P-256")
+    checks = (
+        ("wrong_key_refused", headers(token, proof(
+            wrong_key, "GET", resource, token=token, nonce=nonce)), "invalid-key-binding"),
+        ("missing_proof_refused", headers(token, ""), "invalid-credential"),
+        ("replay_refused", authenticated, "proof-replayed"),
+    )
+    result = empty_checks()
+    for name, supplied, code in checks:
+        async with session.get(resource, headers=supplied, allow_redirects=False) as response:
+            outcome = await document(response)
+            if response.status != 401 or outcome != {"result": "refused", "code": code}:
+                raise ProbeError("resource-negative-check-failed")
+        result[name] = True
+    return result
+
+
+async def qualify(profile: str = DEFAULT_PROFILE) -> dict:
+    check_profile(profile)
     inputs = json.loads((ROOT / "inputs.json").read_bytes())
     key = ECKey.import_key(inputs["proof_key"])
     tls = ssl.create_default_context(cafile=ROOT / "ca.pem")
@@ -200,17 +281,18 @@ async def qualify() -> dict:
                 "client_secret": inputs["client_secret"], "scope": "fixture.read",
                 "audience": AUDIENCE}
         nonce = None
-        for attempt in range(2):
+        for attempt in range(1 if profile == ENROLLED_PROFILE else 2):
             async with session.post(
                 TOKEN_ENDPOINT, data=data,
-                headers={"DPoP": proof(key, "POST", TOKEN_ENDPOINT, nonce=nonce)},
+                headers={} if profile == ENROLLED_PROFILE else {
+                    "DPoP": proof(key, "POST", TOKEN_ENDPOINT, nonce=nonce)},
                 allow_redirects=False,
             ) as response:
                 result = await document(response)
                 if response.status == 200:
                     break
                 challenge = response.headers.get("DPoP-Nonce")
-                if (attempt == 0 and response.status in (400, 401)
+                if (profile == DEFAULT_PROFILE and attempt == 0 and response.status in (400, 401)
                         and result.get("error") == "use_dpop_nonce"
                         and isinstance(challenge, str) and 0 < len(challenge) <= 256):
                     nonce = challenge
@@ -219,27 +301,36 @@ async def qualify() -> dict:
         token = result.get("access_token")
         if not isinstance(token, str):
             raise ProbeError("provider-access-token-missing")
-        traits = token_traits(token, key)
+        traits = token_traits(token, key, profile=profile)
         token_type = result.get("token_type")
         traits["token_type_dpop"] = isinstance(token_type, str) and token_type.lower() == "dpop"
         try:
-            outcome = await resource_check(session, key, token, jwks)
+            if profile == DEFAULT_PROFILE:
+                outcome = await resource_check(session, key, token, jwks)
+            else:
+                outcome = await resource_check(session, key, token, jwks, profile=profile)
         except IdentityError as exc:
             outcome = {"result": "incompatible", "identity_error": exc.code,
-                       "resource_tls_verified": False}
-        if outcome["result"] == "verified" and not traits["token_type_dpop"]:
+                       "resource_tls_verified": False,
+                       **({"negative_checks": empty_checks()} if profile == ENROLLED_PROFILE
+                          else {})}
+        if (profile == DEFAULT_PROFILE and outcome["result"] == "verified"
+                and not traits["token_type_dpop"]):
             outcome.update(result="incompatible", identity_error="provider-token-type")
         return {
             **outcome, "traits": traits, "provider_tls_verified": True,
-            "profile": "jwt-pop-v1", "grant": "client_credentials",
+            "profile": profile, "grant": "client_credentials",
             "human_flow_exercised": False, "enrollment_qualified": False,
             "policy_qualified": False, "production_qualified": False,
         }
 
 
-async def main() -> int:
+async def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=PROFILES, default=DEFAULT_PROFILE)
+    args = parser.parse_args(argv)
     try:
-        result = await asyncio.wait_for(qualify(), timeout=100)
+        result = await asyncio.wait_for(qualify(args.profile), timeout=100)
     except ProbeError as exc:
         result = {"result": "fail", "code": str(exc)}
     except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError,

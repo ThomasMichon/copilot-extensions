@@ -20,6 +20,10 @@ def source_owned(jobs: dict[str, Any]) -> bool:
     return "qualify-candidate" in jobs
 
 
+def unit_profile(jobs: dict) -> str:
+    return "candidate-units-v3" if "compose-candidate" in jobs else "source-units-v2"
+
+
 def source_workflow(root: Path, name: str) -> dict[str, Any]:
     import yaml
 
@@ -62,7 +66,7 @@ def heredoc(script: str) -> str:
 
 
 def qualification_response() -> dict[str, Any]:
-    if os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2":
+    if os.environ.get("QUALIFICATION_PROFILE") in ("source-units-v2", "candidate-units-v3"):
         return {
             "id": int(os.environ["QUALIFICATION_RUN"]),
             "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
@@ -86,7 +90,7 @@ def qualification_response() -> dict[str, Any]:
 def api_response(argv: list[str], rules: list[dict[str, Any]]) -> str:
     if argv[-1].endswith("/rules/branches/main"):
         return json.dumps(rules)
-    if os.environ.get("QUALIFICATION_PROFILE") == "source-units-v2":
+    if os.environ.get("QUALIFICATION_PROFILE") in ("source-units-v2", "candidate-units-v3"):
         if argv[-1].endswith("/actions/jobs/" + os.environ["QUALIFICATION_UNIT_JOB"]):
             return json.dumps({
                 "id": int(os.environ["QUALIFICATION_UNIT_JOB"]),
@@ -133,12 +137,19 @@ def assert_source_owned_boundary(jobs: dict[str, Any]) -> None:
     assert set(qualifier["needs"]) == {"gate", "promote"} | units
     assert set(publisher["needs"]) == {"gate", "python-artifacts", "promote", "qualify-candidate"} | units
     if units:
-        assert jobs["source-units"]["needs"] == "gate"
-        assert set(jobs["build-python-artifacts"]["needs"]) == {"gate"}
+        frozen = "compose-candidate" in jobs
+        if frozen:
+            assert jobs["compose-candidate"]["needs"] == "gate"
+            assert set(jobs["source-units"]["needs"]) == {"gate", "compose-candidate"}
+        else:
+            assert jobs["source-units"]["needs"] == "gate"
+        assert set(jobs["build-python-artifacts"]["needs"]) == {"gate"} | (
+            {"compose-candidate"} if frozen else set()
+        )
         assert "source-units" in jobs["python-artifacts"]["needs"]
-        assert "source-units-v2" in merge["if"]
+        assert unit_profile(jobs) in merge["if"]
         qualify_step = next(step for step in qualifier["steps"] if step.get("id") == "qualify")
-        assert "--profile source-units-v2" in qualify_step["run"]
+        assert "--profile " + unit_profile(jobs) in qualify_step["run"]
         assert qualify_step["env"]["UNIT_PRODUCER_ATTEMPT"] == "${{ needs.source-units.outputs.attempt }}"
         assert '--promotion-run "$GITHUB_RUN_ID-$UNIT_PRODUCER_ATTEMPT"' in qualify_step["run"]
         assert not any(name in jobs for name in (
@@ -167,7 +178,7 @@ def assert_source_owned_boundary(jobs: dict[str, Any]) -> None:
         assert argument in publication["run"]
     assert "--merged-commit" not in publication["run"]
     if units:
-        assert "--qualification-profile source-units-v2" in publication["run"]
+        assert "--qualification-profile " + unit_profile(jobs) in publication["run"]
     assert not any("publish_python_artifacts.py" in step.get("run", "") for step in record["steps"])
     assert "verify_promotion_workflows.py" not in json.dumps(record)
 

@@ -217,3 +217,20 @@ fallback, resolver, download, signature verifier, profile directory, installer
 adapter, activation or runtime payload fan-out. The record API does not itself
 prove device detection, feed compatibility, approval origin or source
 provenance. Those remain prerequisite owner integrations, not success claims.
+
+### Actual-byte verification prerequisite
+
+`tools/runtime_profile_wheels.py` compares that exact record with a complete
+retained wheel set using the existing promotion wheel inspector. Archive
+digests, actual dependency/Python/extra metadata, wheel identity/tags and
+RECORD content must agree. Explicit total archive/unpacked byte budgets and
+per-metadata-file limits refuse before an oversized member is read.
+No wheel is extracted or executed. First-party promotion retains its separate
+locked-generator check; an arbitrary runtime wheel's generator is not trust.
+
+The verifier leaves binary streams and their immutable custody with the caller.
+It produces no approval or reusable admission receipt. This is one acquisition/
+admission prerequisite, not completion of that multi-part Plan item: trusted
+policy/source adapters, actual governed acquisition/seasoning/revocation,
+measured production budgets, independent target/device proof, real CPU and
+accelerator closures, offline construction and native consumers remain open.

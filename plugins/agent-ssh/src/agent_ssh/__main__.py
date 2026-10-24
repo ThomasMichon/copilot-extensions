@@ -248,6 +248,17 @@ def _cmd_copilot_config(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_session_snapshot(args: argparse.Namespace) -> int:
+    from . import session_snapshot
+
+    value = session_snapshot.capture(path=args.path, config_d=args.config_d)
+    print(json.dumps(
+        {"additionalContext": session_snapshot.guidance(value)} if args.guidance else value,
+        ensure_ascii=True,
+    ))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-ssh",
@@ -255,6 +266,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="store_true", help="Show version and exit")
     sub = parser.add_subparsers(dest="command")
+    snapshot = sub.add_parser(
+        "session-snapshot", help="Read declared topology and local profile coverage without probing.",
+    )
+    snapshot.add_argument("--path", type=Path)
+    snapshot.add_argument("--config-d", type=Path)
+    snapshot.add_argument("--json", action="store_true")
+    snapshot.add_argument("--guidance", action="store_true", help=argparse.SUPPRESS)
+    snapshot.set_defaults(func=_cmd_session_snapshot)
 
     emit = sub.add_parser(
         "emit-profile",
