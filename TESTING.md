@@ -470,6 +470,13 @@ run/attempt/job/upload/archive checks. Main's metadata-only CI supplies no test
 proof. Historical `legacy-ci-v1` verification remains separate and is never an
 implicit fallback for missing unit evidence.
 
+`tools/promotion_unit_tests/test_legacy_version_evidence.py` independently
+protects that historical raw-source boundary: stamped version-only changes,
+code or newline drift, relabeled hashes and post-test source rewrites remain
+refusals. Identical source bytes remain reusable. These unit controls do not
+claim that raw-Dev execution qualifies a transformed candidate; candidate-first
+execution and attributable coverage retain their separately owned implementation.
+
 Source PR CI has a separate exact-input reuse boundary in
 `tools/ci_pr_unit_reuse.py`. It binds the current source/merge/base, workflow,
 manifest/source closure, hosted image, Python identity, actual installed

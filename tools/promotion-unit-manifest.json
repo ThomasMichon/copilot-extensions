@@ -1,6 +1,24 @@
 {
   "profile": "copilot-extensions.promotion-units/v1",
   "nodes": [
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_identical_version_source_preserves_legacy_equivalence[plain]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_identical_version_source_preserves_legacy_equivalence[typed]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_identical_version_source_preserves_legacy_equivalence[fallback]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[version-only-plain]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[version-only-typed]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[version-only-fallback]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[version-and-code-plain]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[version-and-code-typed]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[version-and-code-fallback]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[line-endings-plain]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[line-endings-typed]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_legacy_proof_rejects_stamped_or_other_source_drift[line-endings-fallback]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_relabelling_stamped_bytes_does_not_repair_legacy_evidence[admitted-hash-plain]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_relabelling_stamped_bytes_does_not_repair_legacy_evidence[admitted-hash-typed]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_relabelling_stamped_bytes_does_not_repair_legacy_evidence[admitted-hash-fallback]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_relabelling_stamped_bytes_does_not_repair_legacy_evidence[source-after-test-plain]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_relabelling_stamped_bytes_does_not_repair_legacy_evidence[source-after-test-typed]",
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_relabelling_stamped_bytes_does_not_repair_legacy_evidence[source-after-test-fallback]",
     "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[json-bound]",
     "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[plain-bound]",
     "tools/promotion_unit_tests/test_state_root_read.py::test_state_root_read_preserves_response_without_pr_overlays[repo-override]",
@@ -1198,6 +1216,7 @@
     "tools/promotion_unit_tests/test_contract.py::test_pr_scope_uses_merge_base_while_push_scope_retains_both_tips[push-False]"
   ],
   "sources": {
+    "tools/promotion_unit_tests/test_legacy_version_evidence.py": "741716970463c8ae8bf53cbd7d046faa02450593eb13f88d46984ba821d3668d",
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "d71c64cd963d2d92d4e59581b9ec427fa5edb73d0227872f87b59cef1bd20ef2",
     "tools/promotion_unit_tests/test_state_root_read.py": "d6a76e3af9ac42c30240a94d29543a0c57f0f75a503a36e1a2a94ec0958fe228",
     "tools/artifact_source_build.py": "bd7079c5ac69199305b5aa949976ccf184e3cb6ffcf068521f17cd53cbc0e508",
