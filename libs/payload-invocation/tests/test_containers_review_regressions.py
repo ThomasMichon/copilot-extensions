@@ -23,13 +23,138 @@ from test_native_publication import _completed_slot
 pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.timeout(60)]
 
 
-def _runtime_module(fixture: dict, root: Path, output: str) -> None:
+def _runtime_module(fixture: dict, root: Path, output: str) -> Path:
     python = _completed_slot({**fixture, "legacy": root})
     site = python.parent.parent / (
         "Lib/site-packages" if os.name == "nt" else
         f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     )
     (site / "agent_containers.py").write_text(f"print({output!r})\n", encoding="utf-8")
+    return site
+
+
+EMITTERS = ["native", pytest.param(
+    "powershell", marks=pytest.mark.skipif(
+        os.name == "nt" or POWERSHELL is None, reason="POSIX compatibility emitter",
+    ),
+)]
+
+
+def _environment(fixture: dict, release: Path) -> dict:
+    environment = _adopter(fixture, "agent-containers", release)
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
+    environment["COMPUTERNAME"] = "fixture"
+    if os.name == "nt":
+        environment.pop("PSModulePath", None)
+        environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
+        environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
+    _initialize_shell_profiles(fixture, environment)
+    return environment
+
+
+def _global_command(fixture: dict, environment: dict, powershell_host):
+    path = fixture["home"] / ".local/bin/agent-containers"
+    if os.name == "nt":
+        host = powershell_host(fixture, environment)
+        try:
+            return _run(fixture, environment, [
+                POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(path.with_suffix(".ps1")), "--help",
+            ], host)
+        finally:
+            host.close()
+    return _run(fixture, environment, ["bash", str(path), "--help"], None)
+
+
+@pytest.mark.parametrize("emitter", EMITTERS)
+@pytest.mark.parametrize("spelling", ["trailing", "dot", pytest.param(
+    "symlink", marks=pytest.mark.skipif(os.name == "nt", reason="unprivileged POSIX symlink"),
+)])
+def test_equivalent_root_keeps_known_legacy_global_binding(
+    binding_fixture: dict, containers_release: Path, emitter: str, spelling: str,
+    powershell_host,
+) -> None:
+    fixture = binding_fixture
+    environment = _environment(fixture, containers_release)
+    root = fixture["legacy"]
+    _policy(fixture, root, fixture["arguments"], "standalone")
+    supplied = str(root) + (os.sep if spelling == "trailing" else os.sep + ".")
+    if spelling == "symlink":
+        alias = root.with_name("runtime-alias")
+        alias.symlink_to(root, target_is_directory=True)
+        supplied = str(alias)
+    shell = "powershell" if os.name == "nt" or emitter == "powershell" else "bash"
+    result = _run(fixture, environment, [
+        *_command(fixture, shell, "init"), "stamp",
+        "-InstallDir" if shell == "powershell" else "--install-dir", supplied,
+    ], None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    site = _runtime_module(fixture, root, "")
+    (site / "agent_containers.py").write_text(
+        "import os\nprint(os.environ['AGENT_CONTAINERS_HOME'])\n", encoding="utf-8",
+    )
+    pointer = root / "payload-dir"
+    pointer.rename(pointer.with_name("payload-dir.unavailable"))
+    fixture["payload"].rename(fixture["payload"].with_name("publisher-unavailable"))
+    result = _global_command(fixture, environment, powershell_host)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == str(root.resolve())
+
+
+@pytest.mark.parametrize("emitter", EMITTERS)
+@pytest.mark.parametrize("scope", ["legacy", "selected-cell"])
+def test_fresh_provision_publishes_binding_without_prior_stamp(
+    binding_fixture: dict, containers_release: Path, emitter: str, scope: str,
+    powershell_host,
+) -> None:
+    fixture = binding_fixture
+    environment = _environment(fixture, containers_release)
+    root, arguments = fixture["legacy"], fixture["arguments"]
+    if scope == "selected-cell":
+        root, arguments = _selected_cell(fixture, environment)
+    _policy(fixture, root, arguments, "standalone")
+    _runtime_module(fixture, root, "fresh-ready")
+    python = root / "versions/1.0.0" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = python.parent.parent / (
+        "Lib/site-packages" if os.name == "nt" else
+        f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    )
+    (site / "credential_relay.py").write_text("", encoding="utf-8")
+    scripts = fixture["payload"] / "scripts"
+    profile = scripts / "runtime_profile.py"
+    original = profile.with_name("recorded-runtime-profile.py")
+    profile.rename(original)
+    result = {
+        "profile": "base", "runtimeVersion": "1.0.0",
+        "venv": str(python.parent.parent), "python": str(python), "runtimeSource": None,
+    }
+    profile.write_text(
+        "import json,runpy,sys\n"
+        "if '--root' not in sys.argv:\n"
+        f" runpy.run_path({str(original)!r},run_name='__main__')\n"
+        "else:\n"
+        f" result={result!r}\n"
+        " print('\\t'.join(list(result.values())[:4]) if '--tsv' in sys.argv else json.dumps(result))\n",
+        encoding="utf-8",
+    )
+    tool = fixture["home"] / "test-bin" / ("uv.cmd" if os.name == "nt" else "uv")
+    tool.parent.mkdir(exist_ok=True)
+    tool.write_text("@exit /b 97\n" if os.name == "nt" else "#!/bin/sh\nexit 97\n", encoding="utf-8")
+    tool.chmod(0o755)
+    environment["PATH"] = str(tool.parent) + os.pathsep + environment["PATH"]
+    assert not (root / "payload-dir").exists()
+    shell = "powershell" if os.name == "nt" or emitter == "powershell" else "bash"
+    result = _run(fixture, environment, [
+        *_command(fixture, shell, "init"), "provision",
+        "-InstallDir" if shell == "powershell" else "--install-dir", str(root),
+    ], None)
+    assert result.returncode == 0, result.stdout + result.stderr
+    pointer = root / "payload-dir"
+    assert pointer.is_file(), "fresh provision did not publish its payload binding"
+    assert Path(pointer.read_text(encoding="utf-8-sig").strip()) == fixture["payload"].resolve()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    result = _global_command(fixture, environment, powershell_host)
+    assert result.returncode == 0 and result.stdout.strip() == "fresh-ready", result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("stamp_shell", ["native", pytest.param(
@@ -99,8 +224,9 @@ def test_cell_bound_global_never_uses_legacy_resolver_fallback(
 
 
 @pytest.mark.skipif(os.name == "nt" or POWERSHELL is None, reason="POSIX FileShare contention")
+@pytest.mark.parametrize("retry_posix", [True, False], ids=["posix-retry", "windows-only"])
 def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
-    binding_fixture: dict, containers_release: Path,
+    binding_fixture: dict, containers_release: Path, retry_posix: bool,
 ) -> None:
     import fcntl
 
@@ -111,6 +237,36 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     environment["AGENT_CONTAINERS_HOME"] = str(root)
     _policy(fixture, root, fixture["arguments"], "standalone")
     scripts = fixture["payload"] / "scripts"
+    helper = scripts / "installation-context/installation-context.ps1"
+    decisions = {}
+    for action in ("status", "probe-plugin-publication", "probe-legacy"):
+        result = _run(fixture, environment, [
+            POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(helper), action,
+            "-PayloadRoot", str(fixture["payload"]), "-PluginId", "agent-containers",
+            "-LegacyRoot", str(root),
+        ], None)
+        assert result.returncode == 0, result.stdout + result.stderr
+        decisions[action] = json.loads(result.stdout)
+    # Freeze real, unchanged policy answers outside the OS contention handshake.
+    # The first-use matrix separately exercises live admission and its refresh.
+    cases = []
+    for action, decision in decisions.items():
+        encoded = json.dumps(decision).replace("'", "''")
+        cases.append(f" '{action}' {{ [Console]::Write('{encoded}'); exit 0 }}\n")
+    helper.write_text(
+        "param([string]$Action)\n"
+        "switch($Action){\n" + "".join(cases)
+        + " default { throw 'unexpected admission action' }\n}\n", encoding="utf-8",
+    )
+    if not retry_posix:
+        gate = scripts / "runtime-gate.ps1"
+        content = gate.read_text(encoding="utf-8")
+        predicate = (
+            "$posixContention = [Environment]::OSVersion.Platform -eq [PlatformID]::Unix "
+            "-and $code -eq 11"
+        )
+        assert content.count(predicate) == 1
+        gate.write_text(content.replace(predicate, "$posixContention = $false"), encoding="utf-8")
     installer_marker = root / "installer-ran"
     (scripts / "init.ps1").write_text(
         "param([string]$Action,[string]$InstallDir)\n"
@@ -123,9 +279,11 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     quote = lambda path: "'" + str(path).replace("'", "''") + "'"
     ready = root / "contender-ready"
     proceed = root / "contender-proceed"
+    phases = root / "contender-phases"
     resolver.write_text(
         "# Trace contract: normal/read-only/ready-v1\n"
         "param([string]$TraceMode='normal')\n"
+        f"[IO.File]::AppendAllText({quote(phases)}, $TraceMode+[Environment]::NewLine)\n"
         f". {quote(real_resolver)} -TraceMode $TraceMode\n"
         "if($TraceMode -eq 'normal'){\n"
         f" [IO.File]::WriteAllText({quote(ready)},'ready')\n"
@@ -146,14 +304,21 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
             deadline = time.monotonic() + 10
             while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.01)
-            assert ready.exists(), process.communicate(timeout=5)
+            assert ready.exists(), {
+                "exit": process.poll(),
+                "phases": phases.read_text() if phases.exists() else "resolver not reached",
+            }
             fcntl.flock(lock, fcntl.LOCK_EX)
             proceed.write_bytes(b"continue")
             try:
                 stdout, stderr = process.communicate(timeout=0.5)
             except subprocess.TimeoutExpired:
-                pass
+                assert retry_posix, "negative control did not reach the contended file open"
             else:
+                if not retry_posix:
+                    assert process.returncode != 0 and "used by another process" in stderr, stdout + stderr
+                    assert not installer_marker.exists()
+                    return
                 pytest.fail(f"contender did not wait for the owner: {stdout}{stderr}")
             _runtime_module(fixture, root, "shared-ready")
             fcntl.flock(lock, fcntl.LOCK_UN)

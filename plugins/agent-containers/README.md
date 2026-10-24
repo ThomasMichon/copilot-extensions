@@ -45,8 +45,11 @@ unchanged. Standalone
 provisioning retains the exact selected root, context, installer exit code and
 stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
 
-Stamped stubs retain the exact publisher, install root and selected context
-rather than searching other marketplaces or ambient commands. Stamping reads
+Global stubs retain the exact publisher, canonical install root and selected
+context rather than searching other marketplaces or ambient commands. Equivalent
+root spellings bind to the same installation. Fresh direct provisioning publishes
+its original publisher binding before emitting the command; no prior stamp is
+required. Stamping reads
 the shared installation decision; only a positively identified legacy binding
 can use the resolver-only fallback. A cell-bound command restores its retained
 context even in an ordinary shell and revalidates activation/generation through

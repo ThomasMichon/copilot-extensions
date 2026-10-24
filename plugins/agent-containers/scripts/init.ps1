@@ -433,15 +433,25 @@ function Deploy-SelfProvisioningBinstub {
         $bindingArgs += @('-Context', $boundContext, '-DurableHome', $durable)
     }
     $nativeError = ''
-    $decisionJson = Invoke-Hidden -FilePath (Get-Process -Id $PID).Path -ArgList $bindingArgs -ErrorOutput ([ref]$nativeError)
+    $previousOutputEncoding = [Console]::OutputEncoding
+    try {
+        # The native helper's machine JSON is UTF-8, including on Windows PS5.
+        [Console]::OutputEncoding = $utf8NoBom
+        $decisionJson = Invoke-Hidden -FilePath (Get-Process -Id $PID).Path -ArgList $bindingArgs -ErrorOutput ([ref]$nativeError)
+    } finally {
+        [Console]::OutputEncoding = $previousOutputEncoding
+    }
     if ($LASTEXITCODE -ne 0) { throw "Cannot bind the global command to its installation context: $decisionJson$nativeError" }
     $decision = $decisionJson | ConvertFrom-Json -ErrorAction Stop
+    $boundRoot = [string]$decision.legacy.root
+    if (-not $boundRoot -or -not [IO.Path]::IsPathRooted($boundRoot)) {
+        throw 'Cannot bind the global command to a canonical installation root'
+    }
     if ($decision.actualMode -ceq 'namespaced' -and $decision.context -and
-        [string]::Equals([string]$decision.runtimeRoot, $InstallDir, [StringComparison]::OrdinalIgnoreCase)) {
+        [string]::Equals([string]$decision.runtimeRoot, $boundRoot, [StringComparison]::OrdinalIgnoreCase)) {
         $boundMode = 'namespaced'
         $boundContext = [string]$decision.context
-    } elseif (-not $boundContext -and -not [IO.File]::Exists((Join-Path $InstallDir 'install.json')) -and
-        [string]::Equals([string]$decision.legacy.root, $InstallDir, [StringComparison]::OrdinalIgnoreCase) -and
+    } elseif (-not $boundContext -and -not [IO.File]::Exists((Join-Path $boundRoot 'install.json')) -and
         (($decision.status -ceq 'ready' -and $decision.actualMode -ceq 'legacy' -and $decision.desiredMode -ceq 'legacy') -or
          ($decision.status -ceq 'provenance-blocked' -and $decision.policy.enabled -is [bool] -and
           -not $decision.policy.enabled -and $null -eq $decision.legacy.tombstone -and
@@ -451,7 +461,7 @@ function Deploy-SelfProvisioningBinstub {
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-containers'
         $quote = "'" + '"' + "'" + '"' + "'"
-        $rootSh = "'" + $InstallDir.Replace("'", $quote) + "'"
+        $rootSh = "'" + $boundRoot.Replace("'", $quote) + "'"
         $sourceSh = "'" + $sourceRoot.Replace("'", $quote) + "'"
         $contextSh = "'" + $boundContext.Replace("'", $quote) + "'"
         $stubContent = @'
@@ -573,7 +583,7 @@ $env:AGENT_CONTAINERS_PAYLOAD_ROOT = $_payload
 & $_gate @args
 exit $LASTEXITCODE
 '@
-    $ps1Content = $ps1Content.Replace('__ROOT__', $InstallDir.Replace("'", "''")).Replace(
+    $ps1Content = $ps1Content.Replace('__ROOT__', $boundRoot.Replace("'", "''")).Replace(
         '__SOURCE__', $sourceRoot.Replace("'", "''")).Replace('__CONTEXT__', $boundContext.Replace("'", "''")).Replace('__MODE__', $boundMode)
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, (New-Object Text.UTF8Encoding($true)))
 
@@ -856,6 +866,20 @@ $VenvDir = [string]$profileResult.venv
 $LinkDir = $VenvDir
 $VenvPython = [string]$profileResult.python
 Write-Ok "Runtime profile: $($profileResult.profile) ($($profileResult.runtimeVersion))"
+
+if (-not $SourceSelected) {
+    $publisher = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $redirectError = ''
+    $redirectOutput = Invoke-Hidden -FilePath $pythonCmd -ArgList @(
+        '-I', (Join-Path $PSScriptRoot 'versioned_runtime.py'), '--root', $InstallDir,
+        'publish-redirects', '--payload-dir', $publisher, '--version', [string]$profileResult.runtimeVersion
+    ) -ErrorOutput ([ref]$redirectError)
+    if ($redirectError) { [Console]::Error.Write($redirectError) }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Failed to publish the runtime payload binding: $redirectOutput"
+        exit 1
+    }
+}
 
 # -- 4. Deploy binstub -------------------------------------------------
 

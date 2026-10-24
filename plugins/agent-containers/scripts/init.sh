@@ -353,7 +353,7 @@ deploy_binstub() {
     mkdir -p "$LOCAL_BIN"
     deploy_resolver
     local source_root="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-    local bound_context="${COPILOT_EXTENSIONS_CONTEXT:-}" bound_mode=unknown decision="" durable=""
+    local bound_context="${COPILOT_EXTENSIONS_CONTEXT:-}" bound_mode=unknown bound_root="" decision="" durable=""
     local -a binding_args=(status --payload-root "$source_root" --plugin-id agent-containers --legacy-root "$INSTALL_DIR")
     if [[ -n "$bound_context" ]]; then
         durable="$bound_context"
@@ -368,13 +368,17 @@ deploy_binstub() {
         LC_ALL=C awk -f "$SCRIPT_DIR/installation-context/json-query.awk" \
             -v mode="${2:-get}" -v "query_path=$1" <<<"$decision"
     }
+    bound_root="$(binding_value $'legacy\034root')"
+    if [[ "$bound_root" != /* ]]; then
+        _fail 'Cannot bind the global command to a canonical installation root'
+        return 126
+    fi
     if [[ "$(binding_value actualMode)" == namespaced &&
-          "$(binding_value runtimeRoot)" == "$INSTALL_DIR" &&
+          "$(binding_value runtimeRoot)" == "$bound_root" &&
           -n "$(binding_value context)" ]]; then
         bound_mode=namespaced
         bound_context="$(binding_value context)"
-    elif [[ -z "$bound_context" && ! -e "$INSTALL_DIR/install.json" &&
-            "$(binding_value $'legacy\034root')" == "$INSTALL_DIR" ]] &&
+    elif [[ -z "$bound_context" && ! -e "$bound_root/install.json" ]] &&
          { [[ "$(binding_value status)" == ready && "$(binding_value actualMode)" == legacy &&
               "$(binding_value desiredMode)" == legacy ]] ||
            [[ "$(binding_value status)" == provenance-blocked &&
@@ -385,7 +389,7 @@ deploy_binstub() {
         bound_mode=legacy
     fi
     printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n_bound_context=%q\n_bound_mode=%q\n' \
-        "$INSTALL_DIR" "$source_root" "$bound_context" "$bound_mode" > "$STUB"
+        "$bound_root" "$source_root" "$bound_context" "$bound_mode" > "$STUB"
     cat >> "$STUB" << 'STUBEOF'
 set -euo pipefail
 export PYTHONUTF8=1
@@ -714,6 +718,15 @@ fi
 if [[ "$SOURCE_SELECTED" != 1 ]]; then _assert_source_runtime_identity || exit 1; fi
 IFS=$'\t' read -r RUNTIME_PROFILE RUNTIME_VERSION VENV_DIR VENV_PYTHON <<< "$profile_result"
 _ok "Runtime profile: $RUNTIME_PROFILE ($RUNTIME_VERSION)"
+
+if [[ "$SOURCE_SELECTED" != 1 ]]; then
+    "$PYTHON_CMD" -I "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
+        publish-redirects --payload-dir "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        --version "$RUNTIME_VERSION" || {
+        _fail 'Failed to publish the runtime payload binding'
+        exit 1
+    }
+fi
 
 # -- 4. Binstub --------------------------------------------------------
 deploy_binstub
