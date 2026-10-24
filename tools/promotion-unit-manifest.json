@@ -1282,7 +1282,7 @@
     "tools/promotion_unit_tests/test_state_root_read.py": "d6a76e3af9ac42c30240a94d29543a0c57f0f75a503a36e1a2a94ec0958fe228",
     "tools/artifact_source_build.py": "e991e7c9dfc9b9a268f392b97facecc44ba83c8bcd06b76c336fe009faee178d",
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",
-    "tools/standalone_consumers.py": "168987556a18f4820f1b4869d090306827b2587e93b392eebe25ef497db5e910",
+    "tools/standalone_consumers.py": "555286ca913069f8d54545d70d58d12293855020c763058e1f580adf01ed95c4",
     "tools/promotion_unit_tests/test_standalone_artifacts.py": "67c00b9b28e536bae913ba475f1cd26af7a0a2a3f1654f00e78a2d8d1ae4dadf",
     "services/chat/src/agent_chat_service/__init__.py": "15e8aa0cd115514aa8cddb61d9ddb1b76720dbb27c55629bc7a12218b6fa5534",
     "services/chat/src/agent_chat_service/store.py": "df3b352718213f0d606c5d96658993268266009398dcc0f7bff7db5df0c559d0",
