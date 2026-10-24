@@ -82,8 +82,19 @@ recipe. Add the action to the provider's ordinary version-1 pivot manifest:
 }
 ```
 
-A read can return `{"entries": [], "auth_status": "scope_blocked",
-"auth_account": "example-user", "banner_text": "Authorization required."}`.
+A read returns authentication state inside `summary`:
+
+```json
+{
+  "entries": [],
+  "summary": {
+    "auth_status": "scope_blocked",
+    "auth_account": "example-user",
+    "banner_text": "Authorization required."
+  }
+}
+```
+
 The explicitly activated provider can then emit:
 
 ```json
