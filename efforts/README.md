@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Bounded Passive Git Observation](active/bounded-passive-git-observation/README.md) | Draft; reviewed R1 deadline/R2 passive fsmonitor proposal, implementation admission pending | #7944/#7945; preserves roster/publication, resident-control/storage and broader #2619/#6086 ownership; no rollout |
+| [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Draft; reviewed shared launch, finite test lifetime and install/update cleanup contract before implementation | #8403; production cutover and existing custody remain authoritative; no rollout |
 | [Repository Agent Exposure Policy](active/repository-agent-exposure-policy/README.md) | Active; implementation authorized, standing-intent review first | #8332; repository-owned hosting veto, source-only workflows and external Code Review preserved |
 | [Ready Resident Prompt Receipt](active/ready-resident-prompt-receipt/README.md) | Active; delivery/control source slice, qualified backend and subject delivery remain gated | #7942; preserves receipt/roster owners and prohibits helper/lifecycle fallbacks |
 | [Bridge Retained Runtime Restoration](active/bridge-retained-runtime-restoration/README.md) | Active; DB foundation merged, inbox source in review; lossless provenance layout proposed, full Phase 1 open | #8063; specializes #7268 without substituting for Dispatch/adopter acknowledgement; no rollout |
