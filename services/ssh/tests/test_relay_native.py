@@ -88,7 +88,26 @@ async def test_native_listener_collision_is_not_accepted_as_our_readiness(config
         foreign.bind(("127.0.0.1", relay.selected["port"]))
         foreign.listen(1)
         stop, ready = asyncio.Event(), asyncio.Event()
-        with pytest.raises(SSHServiceError, match="native-relay-exited"):
+        # Procfs can refuse observation before the exiting child publishes its status.
+        with pytest.raises(SSHServiceError, match="native-relay-(exited|listener-unobservable)"):
             await asyncio.wait_for(relay.run(stop, ready), 15)
         assert not ready.is_set() and relay.process.returncode is not None
         assert foreign.getsockname()[1] == relay.selected["port"]
+
+
+@pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError])
+async def test_unobservable_live_child_refuses_and_settles_without_readiness(
+    config, tmp_path, monkeypatch, failure,
+):
+    import agent_ssh_service.relay as implementation
+
+    relay = prepare(config, tmp_path)
+
+    def unavailable(*args):
+        raise failure("synthetic native observation refusal")
+
+    monkeypatch.setattr(implementation, "owns_listener", unavailable)
+    stop, ready = asyncio.Event(), asyncio.Event()
+    with pytest.raises(SSHServiceError, match="native-relay-listener-unobservable"):
+        await asyncio.wait_for(relay.run(stop, ready), 15)
+    assert not ready.is_set() and relay.process.returncode is not None
