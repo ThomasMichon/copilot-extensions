@@ -28,6 +28,7 @@ while retaining installation, ownership, policy and health contracts.
 | Outcome/framing implementation owner | First two Phase 2 items and their focused regressions; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 | Human-progress implementation owner | Shared timing/line rendering, actual output adapters and focused proofs; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 | Bridge serving source implementer | Only #6826 in an independent managed worktree and source PR; no production update or recovery authority | Coordinator's bounded cooperating-session delegation |
+| Updater failure-boundary implementer | Only the two reached stdio hops and native-owner settlement of positively confirmed pre-spawn failure under #7743; no shared broker or installed recovery authority | Managed source handle `rusty-kiln`; public coordination on #7743 |
 
 ## Coordination
 
@@ -164,6 +165,22 @@ matrix below are _(agent-recommended)_ implementation details.
   decoration through the existing emitters, retaining deferral policy and
   admitting-parent outcomes (#7908).
 - [ ] Preserve JSON/quiet/protocol output, redaction and Windows/POSIX parity.
+
+### Bounded updater failure-boundary repair
+
+This independent, explicitly transferred slice preserves the coordinator's
+existing #6812 single-pass repair and the #8370 persistent installer logging
+owner. The [bounded plan](updater-failure-boundaries.md) closes existing
+Installer & Configurator observability and failure-accounting intent; it does
+not replace the held #6859 / #7833 lifetime repair.
+
+- [ ] Preserve both reached no-window output channels through their actual
+  subprocess owners, with interactive passthrough unchanged.
+- [ ] Settle only a positively confirmed no-launch failure through native
+  ownership and fresh predecessor/routing proof; retain uncertain custody and
+  the primary exception.
+- [ ] Qualify the actual native consumer boundaries, obtain source review and
+  normal containing release, and report installed acceptance separately.
 
 ### Phase 3 - Remove proven unnecessary work
 
