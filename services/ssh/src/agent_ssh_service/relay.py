@@ -15,7 +15,7 @@ import threading
 
 from fleet_manager.planning import canonical
 
-from .config import absolute, check
+from .config import SSHServiceError, absolute, check
 from .store import DirectoryStore
 
 
@@ -227,9 +227,14 @@ class NativeRelay:
                 self.custody.assert_owned()
                 exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
                 check(exited is None, "native-relay-exited")
-                listening = owns_listener(
-                    process.pid, self.selected["listen_host"], self.selected["port"],
-                )
+                try:
+                    listening = owns_listener(
+                        process.pid, self.selected["listen_host"], self.selected["port"],
+                    )
+                except (FileNotFoundError, PermissionError) as exc:
+                    exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    check(exited is None, "native-relay-exited")
+                    raise SSHServiceError("native-relay-listener-unobservable") from exc
                 if listening:
                     ready.set()
                 check(ready.is_set() or asyncio.get_running_loop().time() < deadline,
