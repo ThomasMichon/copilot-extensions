@@ -173,6 +173,10 @@ jobs:
           --test-file tests/test_source_removal.py
           --test-file tests/test_first_use.py
           --test-file tests/test_first_use_native.py
+          --max-files-per-sub-suite 1 --test-timeout 1200 --timeout 1380
+      - name: Qualify Python-free Windows genesis and actual Vault bootstrap
+        run: >-
+          python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_genesis.py
           --test-file tests/test_first_use_vault.py
           --test-file tests/test_first_use_vault_command.py
