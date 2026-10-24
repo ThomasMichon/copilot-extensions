@@ -4,19 +4,22 @@ $payload = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $legacy = Join-Path $env:USERPROFILE '.agent-pull-requests'
 $stageRoot = Join-Path $legacy '.install-stage'
 $stage = Split-Path -Parent $payload
-if ((Split-Path -Parent $stage) -eq $stageRoot) {
+$legacyStage = (Split-Path -Parent $stage) -eq $stageRoot
+$copiedInput = $env:COPILOT_PLUGIN_INSTALL_STAGED -ceq '1' -and
+    $env:COPILOT_PLUGIN_STAGED_FROM -and
+    -not [StringComparer]::OrdinalIgnoreCase.Equals($env:COPILOT_PLUGIN_STAGED_FROM, $payload)
+if ($legacyStage -or $copiedInput) {
     # Staging hints locate evidence, never waive native governance admission.
     if ($env:COPILOT_PLUGIN_INSTALL_STAGED -cne '1' -or
-        -not [IO.Path]::IsPathRooted([string]$env:COPILOT_PLUGIN_STAGED_FROM) -or
-        (Split-Path -Leaf $payload) -cne 'agent-pull-requests') {
+        -not [IO.Path]::IsPathRooted([string]$env:COPILOT_PLUGIN_STAGED_FROM)) {
         throw 'Staged installer provenance is incomplete'
     }
     $origin = (Resolve-Path -LiteralPath $env:COPILOT_PLUGIN_STAGED_FROM).Path
     $marketplace = Split-Path -Parent $origin
     $installed = Join-Path $env:USERPROFILE '.copilot\installed-plugins'
-    if ((Split-Path -Parent $marketplace) -ne $installed -or
+    if (($legacyStage -and (Split-Path -Parent $marketplace) -ne $installed) -or
         (Split-Path -Leaf $origin) -cne 'agent-pull-requests') {
-        throw 'Staged installer origin is not a canonical installed payload'
+        throw 'Staged installer origin is not an owning payload'
     }
     foreach ($root in @($payload, $origin)) {
         $cursor = $root
@@ -46,15 +49,13 @@ if ((Split-Path -Parent $stage) -eq $stageRoot) {
     }
     $payload = $origin
 }
-$hostExe = (Get-Process -Id $PID).Path
-$forward = @(
-    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-    (Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'),
-    'status', '-PayloadRoot', $payload, '-PluginId', 'agent-pull-requests',
-    '-LegacyRoot', $legacy
-)
+$helper = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+$forward = @{
+    Action = 'status'; PayloadRoot = $payload
+    PluginId = 'agent-pull-requests'; LegacyRoot = $legacy
+}
 if (-not (Get-Item -LiteralPath $legacy -Force -ErrorAction SilentlyContinue)) {
-    $forward += @('-LegacyProbeJson', '{"declared":true,"result":"absent","checkedAt":null}')
+    $forward.LegacyProbeJson = '{"declared":true,"result":"absent","checkedAt":null}'
 }
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     $receipt = $env:COPILOT_EXTENSIONS_CONTEXT
@@ -65,12 +66,12 @@ if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     }
     $durable = $receipt
     1..5 | ForEach-Object { $durable = Split-Path -Parent $durable }
-    $forward += @(
-        '-Context', $receipt, '-DurableHome', $durable,
-        '-ExpectedPluginId', 'agent-pull-requests', '-ExpectedPayloadRoot', $payload
-    )
+    $forward.Context = $receipt
+    $forward.DurableHome = $durable
+    $forward.ExpectedPluginId = 'agent-pull-requests'
+    $forward.ExpectedPayloadRoot = $payload
 }
-$raw = @(& $hostExe @forward)
+$raw = @(& $helper @forward)
 if ($LASTEXITCODE -ne 0) { throw 'Installation governance could not be resolved' }
 $status = ($raw -join "`n") | ConvertFrom-Json
 $legacyAllowed = (

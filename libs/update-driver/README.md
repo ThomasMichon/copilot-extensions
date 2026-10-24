@@ -656,20 +656,34 @@ stay explicit, separate boundaries. The single foundation progress snapshot
 is not durable ordinary-request history; ordinary publication adapters need
 canonical queued request receipts.
 
-### Fixed first-use handoff and Vault command adoption
+### Fixed first-use recipes and Vault command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault payload's existing legacy **direct `provision`**
-and **`stamp`** actions. Namespaced installation recipes refuse before
+support the owning Agent Vault and Agent Pull Requests payloads' existing legacy
+**direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
 selected owning source's runtime gate before taking a provisioning lock
 (the existing snapshot pointer for installed payloads).
 Vault's legacy session bootstrap also uses the fixed stamp/provision actions.
 Explicit installer entry points remain separate, unadopted callers.
-Other plugin identities and their
-snapshot-specific recipes remain unsupported rather than being inferred
+Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
+
+Pull Requests' fixed recipe is a separately qualified adapter, not adoption of
+its ordinary command, bootstrap or explicit installer publishers. It uses the
+same canonical queue and frozen-input owner, projects its own context instead of
+Vault's, and clears legacy shell action/force/root hints before invoking the
+fixed native action. Its no-self-provision control retains presence semantics.
+Its installer has no service-selection option: client-only requests refuse
+before queue or plugin writes rather than passing Vault's `NoService` flag.
+The canonical installer-engine sync owner supplies its input freezer; the
+existing native installer remains the executor and publication authority.
+Its native mode reader verifies an ordinary copied input tree against the
+declared owning source before using that source's governance; a staging hint
+alone is not admission. The Windows reader invokes its native helper with
+typed in-process parameters, preserving JSON probe bytes rather than passing
+them through another PowerShell command-line parser.
 
 Both native clients take the execution root, owning payload, addressed runtime
 root and originating project. Before creating driver state, they honor the
@@ -685,16 +699,16 @@ even to another root. Both native and Python admission refuse nested evidence
 before state creation rather than queuing behind the caller's own custody.
 This is an explicit unsupported outcome, not a second owner or inline retry.
 The optional Windows `-ServiceMode client-only`, Linux `--client-only` and
-Python `client_only=True` select only the canonical installer's existing
+Python `client_only=True` select only Vault's canonical installer's existing
 `-NoService`/`--no-service` option. This boolean participates in durable request
 and runner identity; ordinary service-enabled behavior is still the default.
 No arbitrary installer options are accepted.
 Windows `-InstallerAction stamp`, Linux `--installer-action stamp` and Python
-`installer_action="stamp"` select only Vault's existing canonical stamping
+`installer_action="stamp"` select only the owning plugin's existing canonical stamping
 action. This selection is distinct durable request identity; equivalent pending
 stamps coalesce without absorbing a provision request. The default provision
 identity is unchanged. A stamp retains source/publication and no-self-provision/
-pinned-read admission, but does not build or select a Vault venv or register its
+pinned-read admission, but does not build or select a plugin venv or register a
 service; constructing the independent driver foundation is separate. Combining
 stamp with client-only selection refuses before state creation. The recipe does
 not authorize arbitrary lifecycle actions or adopt explicit installer callers.
@@ -806,6 +820,11 @@ through the native supervisor, requires a successful ordinary queue result and
 the canonical primary/payload pointer, and proves no Vault venv, current-runtime
 selection or service artifact was created. Subsequent provisioning stays a
 separate request under the same authority.
+Pull Requests' corresponding actual-installer case uses its service-less
+canonical contract: cold stamp, provision, failed candidate preserving the
+healthy selection, and installed CLI/module origin after both source trees
+are removed. The caller-loss fixture runs with both fixed identities. The
+same portfolio does not switch any ordinary Pull Requests publisher.
 The hosted-only actual bootstrap case additionally enforces the declared hook
 deadline and output shape, closes its caller Job/group during cold construction,
 and verifies the same stamp operation/result survives. It then qualifies real

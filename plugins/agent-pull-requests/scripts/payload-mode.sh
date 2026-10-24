@@ -6,18 +6,20 @@ payload="$(cd "$here/.." && pwd)"
 legacy="${HOME:?}/.agent-pull-requests"
 stage_root="$legacy/.install-stage"
 stage="$(dirname "$payload")"
-if [[ "$(dirname "$stage")" == "$stage_root" ]]; then
+legacy_stage=0
+[[ "$(dirname "$stage")" != "$stage_root" ]] || legacy_stage=1
+if [[ "$legacy_stage" == 1 || ( "${COPILOT_PLUGIN_INSTALL_STAGED:-}" == 1 &&
+    -n "${COPILOT_PLUGIN_STAGED_FROM:-}" && "$COPILOT_PLUGIN_STAGED_FROM" != "$payload" ) ]]; then
     # Staging hints locate evidence, never waive native governance admission.
     [[ "${COPILOT_PLUGIN_INSTALL_STAGED:-}" == 1 &&
-        "${COPILOT_PLUGIN_STAGED_FROM:-}" == /* &&
-        "$(basename "$payload")" == agent-pull-requests ]] || {
+        "${COPILOT_PLUGIN_STAGED_FROM:-}" == /* ]] || {
         printf '%s\n' 'Staged installer provenance is incomplete' >&2; exit 126;
     }
     origin="$(cd -P -- "$COPILOT_PLUGIN_STAGED_FROM" && pwd)"
     marketplace="$(dirname "$origin")"
-    [[ "$(dirname "$marketplace")" == "$HOME/.copilot/installed-plugins" &&
+    [[ ( "$legacy_stage" == 0 || "$(dirname "$marketplace")" == "$HOME/.copilot/installed-plugins" ) &&
         "$(basename "$origin")" == agent-pull-requests ]] || {
-        printf '%s\n' 'Staged installer origin is not a canonical installed payload' >&2; exit 126;
+        printf '%s\n' 'Staged installer origin is not an owning payload' >&2; exit 126;
     }
     for root in "$payload" "$COPILOT_PLUGIN_STAGED_FROM"; do
         cursor="$root"

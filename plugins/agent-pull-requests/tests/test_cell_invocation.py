@@ -237,6 +237,43 @@ def test_native_mode_needs_no_python_and_never_mutates_legacy(tmp_path, enabled)
     assert not (profile / ".local").exists()
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_native_copied_input_checks_bytes_before_using_original_governance(tmp_path, changed):
+    profile = tmp_path / "profile"
+    profile.mkdir()
+    marketplace = tmp_path / "marketplace"
+    origin = marketplace / "plugins" / "agent-pull-requests"
+    shutil.copytree(
+        SCRIPTS.parent, origin,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "tests", ".pytest_cache"),
+    )
+    catalog = marketplace / ".github" / "plugin" / "marketplace.json"
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps({
+        "name": "fixture-market",
+        "plugins": [{"name": "agent-pull-requests", "source": "./plugins/agent-pull-requests"}],
+    }), encoding="utf-8")
+    copied = tmp_path / "frozen-inputs" / "request"
+    shutil.copytree(origin, copied)
+    if changed:
+        (copied / "plugin.json").write_text('{"name":"agent-pull-requests"}', encoding="utf-8")
+    environment = {
+        **os.environ, "HOME": str(profile), "USERPROFILE": str(profile),
+        "COPILOT_PLUGIN_ROOT": str(origin), "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+        "COPILOT_PLUGIN_STAGED_FROM": str(origin),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    if os.name == "nt":
+        environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+    result = native(copied / "scripts" / "payload-mode", environment=environment)
+    if changed:
+        assert result.returncode != 0 and "differs from its origin" in result.stderr
+    else:
+        assert result.returncode == 0 and result.stdout.strip() == "legacy", result.stderr
+    assert not (profile / ".agent-pull-requests").exists()
+    assert not (profile / ".local").exists()
+
+
 @pytest.mark.parametrize("overrides", ["absent", {}, {"fixture": {"enabled": True}}, None, "invalid"])
 def test_posix_legacy_admission_distinguishes_missing_and_invalid_marketplaces(tmp_path, overrides):
     from test_source_install_transactions import _host, _quote

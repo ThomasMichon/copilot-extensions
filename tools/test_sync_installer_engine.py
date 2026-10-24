@@ -526,6 +526,16 @@ def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monke
     assert sync_installer_engine.verify() == []
 
 
+def test_pull_requests_input_freezer_uses_canonical_projection_owner():
+    contract = sync_installer_engine.ier
+    consumer = REPO / "plugins" / "agent-pull-requests"
+    assert consumer in contract.python_adopter_dirs(REPO)
+    for name in (*contract.PYTHON_FILES, *contract.SUPPORT_FILES):
+        assert (consumer / "scripts" / name).read_bytes() == (
+            REPO / "libs" / "installer-engine" / name
+        ).read_bytes()
+
+
 def test_unregistered_python_engine_is_rejected(fake_repo, monkeypatch):
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     scripts = _mk_plugin_scripts(fake_repo, "agent-unregistered")

@@ -32,10 +32,11 @@ def observe(predicate, timeout, diagnostic):
     raise AssertionError(diagnostic())
 
 
+@pytest.mark.parametrize("payload_fixture", ["owning_payload", "owning_pull_requests"])
 def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
-    owning_payload, area, native_window_observation,
+    request, payload_fixture, area, native_window_observation,
 ):
-    payload, installation, project = owning_payload
+    payload, installation, project = request.getfixturevalue(payload_fixture)
     library = Path(__file__).resolve().parents[2]
     inputs = area / "foundation-source"
     for name in PACKAGES:
