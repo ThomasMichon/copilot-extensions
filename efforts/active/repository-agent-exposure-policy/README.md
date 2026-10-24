@@ -419,3 +419,10 @@ daemon or separately resolved Worktrees owner has upgraded.
   qualification candidate; updated native proof, current semantic capture,
   accepted review/merge, the repository marker, release and authorized adoption
   remain distinct completion gates.
+- Qualified that exact committed source on native Windows: Worktrees 153,
+  Bridge 439 and Dispatch 223 cases pass, including actual legacy-parser
+  refusal and current-client/old-daemon refusal. Each bounded job confirms
+  cleanup. Canonical HTTP-47 capture and no-write replay each pass 117 probes
+  against the published correction checkpoint; only the 66 owned current
+  outputs change. Both contracts and all 583 fixtures validate with unchanged
+  historical packets, independent expectations and protocol floors.
