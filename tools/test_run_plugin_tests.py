@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
@@ -938,6 +939,47 @@ def test_codespaces_plan_preserves_other_suites_platforms_and_file_groups(codesp
     ]
     other = [path for group in groups for path in group if path != target]
     assert planner("agent-codespaces", [other], windows=True) == [(other, None)]
+
+
+@pytest.mark.parametrize("filter_mode", ["keyword", "guard", "unfiltered"])
+@pytest.mark.parametrize("all_empty", [False, True])
+def test_codespaces_mixed_explicit_files_preserve_filtered_empty_groups(
+    monkeypatch, filter_mode, all_empty,
+):
+    with tempfile.TemporaryDirectory() as temporary:
+        plugin = Path(temporary)
+        tests = plugin / "tests"
+        tests.mkdir()
+        files = (runner._CODESPACES_NATIVE_FILE, Path("tests") / "test_other.py")
+        for path in files:
+            (plugin / path).write_text("def test_example(): pass\n", encoding="utf-8")
+        monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+        monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+        monkeypatch.setenv("TEMP", str(plugin))
+        planner = runner._test_group_plan
+        monkeypatch.setattr(
+            runner, "_test_group_plan",
+            lambda name, groups: planner(name, groups, windows=True),
+        )
+        codes = iter([5, 5 if all_empty else 0, 5, 5, 5, 5, 5])
+        calls = []
+
+        def execute(command, **kwargs):
+            calls.append(command)
+            return next(codes)
+
+        monkeypatch.setattr(runner, "run_contained", execute)
+        filtered = filter_mode != "unfiltered"
+        result = runner.run_plugin(
+            "agent-codespaces", "unused", reinstall=False,
+            kexpr="installer" if filter_mode == "keyword" else None,
+            guards=filter_mode == "guard", test_files=tuple(map(str, files)),
+            limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+            test_timeout=30, max_files_per_subsuite=25,
+        )
+        assert result == (0 if filtered and not all_empty else 5)
+        assert len(calls) == (7 if filtered else 1)
+        assert str(Path("tests") / "test_other.py") in calls[0]
 
 
 @pytest.mark.parametrize("include_guards", [False, True])
