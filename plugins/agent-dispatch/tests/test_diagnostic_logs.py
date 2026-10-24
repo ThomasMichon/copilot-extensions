@@ -92,7 +92,7 @@ def test_restart_prunes_archives_and_never_touches_native_handles(tmp_path):
         inherited_capture.write(b"native stderr\n")
     assert not archive.exists()
     assert native.read_bytes() == b"native stdout\nnative stderr\n"
-    assert str(native) in logs.inventory(tmp_path)["logs"][-1]["existing"]
+    assert str(native) in logs.inventory(tmp_path)["logs"][2]["existing"]
 
 
 def test_corrupt_future_and_foreign_records_are_not_guessed_away(tmp_path, capsys):
@@ -308,3 +308,93 @@ def test_failed_replacement_keeps_records_and_reports_degraded(tmp_path, monkeyp
     assert handler.path.read_bytes() == original
     assert handler.last_error == "PermissionError"
     assert not list(handler.directory.glob("*.prune-*"))
+
+
+def test_restart_reclaims_only_component_owned_abandoned_prunes(tmp_path):
+    now = datetime.now(timezone.utc)
+    directory = tmp_path / "logs" / "diagnostics"
+    directory.mkdir(parents=True)
+    abandoned = directory / (".coordinator.jsonl.prune-" + "a" * 32)
+    abandoned.write_bytes(b"interrupted retained copy")
+    archived_copy = directory / (
+        ".coordinator.20260901T000000000000Z-" + "b" * 32 + ".jsonl.prune-" + "c" * 32
+    )
+    archived_copy.write_bytes(b"interrupted archive copy")
+    other_owner = directory / (".supervisor.jsonl.prune-" + "a" * 32)
+    other_owner.write_bytes(b"other component")
+    foreign = directory / ".coordinator.jsonl.prune-operator"
+    foreign.write_bytes(b"not a recognized temporary")
+    handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
+    assert not abandoned.exists()
+    assert not archived_copy.exists()
+    assert other_owner.exists() and foreign.exists()
+    assert handler.last_error is None
+
+
+def test_unchanged_unexpired_archives_are_not_reparsed_or_copied(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc)
+    handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
+    archive = handler.directory / (
+        "coordinator.20261001T000000000000Z-" + "a" * 32 + ".jsonl"
+    )
+    seed(archive, now - timedelta(days=1))
+    scans = []
+    copies = []
+    original = handler._scan
+    original_open = type(archive).open
+
+    def scan(path):
+        scans.append(path)
+        return original(path)
+
+    def open_path(path, *args, **kwargs):
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if "x" in mode:
+            copies.append(path)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(handler, "_scan", scan)
+    monkeypatch.setattr(type(archive), "open", open_path)
+    handler.maintain(force=True)
+    assert scans == [archive]
+    assert not list(handler.directory.glob(".*.prune-*"))
+    for _ in range(3):
+        handler.maintain(force=True)
+    assert scans == [archive]
+    assert copies == []
+    now += timedelta(days=29)
+    handler.maintain(force=True)
+    assert archive.exists()  # exact cutoff equality remains
+    assert scans == [archive]
+    now += timedelta(microseconds=1)
+    handler.maintain(force=True)
+    assert not archive.exists()
+    assert scans == [archive]  # cached expiry, only the necessary rewrite/read
+
+
+def test_changed_segment_invalidates_expiry_cache(tmp_path):
+    now = datetime.now(timezone.utc)
+    handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
+    seed(handler.path, now)
+    handler.maintain(force=True)
+    seed(handler.path, now, now - timedelta(days=31))
+    handler.maintain(force=True)
+    assert len(events(handler)) == 1
+    assert datetime.fromisoformat(events(handler)[0]["ts"]) == now
+
+
+def test_discovery_honors_actual_lifecycle_routing_override(tmp_path, monkeypatch):
+    root, routing = tmp_path / "installation", tmp_path / "routing"
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(routing))
+    routing.mkdir()
+    for name in ("lifecycle.log", "lifecycle.log.1"):
+        (routing / name).write_bytes(b"synthetic")
+    report = logs.inventory()
+    location = next(item for item in report["logs"]
+                    if item["owner"].startswith("zdd lifecycle"))
+    assert location["existing"] == [
+        str(routing / "lifecycle.log"), str(routing / "lifecycle.log.1"),
+    ]
+    assert location["retention"] == "not-managed-by-application-handler"
+    assert not root.exists()

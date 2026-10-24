@@ -35,6 +35,12 @@ expiry already performed before a clock was corrected.
 The handler rolls active output at UTC date changes or 5 MB, with no backup-count
 limit replacing age retention. Each normal emission checks maintenance eligibility;
 at most once per 60 seconds it prunes records in active **and** archived files.
+Unchanged segments reuse in-memory file-identity/size/time-validated earliest
+expiry information; unexpired history is not repeatedly parsed or copied.
+Only files with expired records are rewritten, and custody is yielded between
+segments. Restart scans establish fresh information rather than trusting a
+persisted index. Strictly recognized abandoned prune copies are reclaimed under
+the component lock, which excludes an active participating pruner.
 Startup forces maintenance. The existing coordinator liveness-GC loop and
 supervisor iteration boundary also invoke maintenance, even when no new messages
 arrive and before governance backoff. Quiet-service cleanup therefore follows the
@@ -63,7 +69,8 @@ file and archives. No transparent text/JSON format compatibility is claimed.
 The same inventory exposes known native `serve-service`/`supervise-service`
 version/PID fallbacks, supervisor launcher, generation/self-deploy/successor
 captures, boot-trace (including its explicit environment override), reconcile and
-ZDD lifecycle files. They are labeled **not managed by the application handler**
+ZDD lifecycle files (including the actual `config.routing_dir()` override).
+They are labeled **not managed by the application handler**
 and are never renamed, truncated or deleted by it.
 
 These remaining boundaries stay under #8377, not silently covered here:

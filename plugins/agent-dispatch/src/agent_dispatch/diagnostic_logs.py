@@ -63,6 +63,7 @@ class DiagnosticLog(logging.Handler):
         self._warned = False
         self._last_maintenance: datetime | None = None
         self._last_monotonic = 0.0
+        self._expiry: dict[Path, tuple[tuple, datetime | None, bool]] = {}
         from .companion import process_start_token
 
         try:
@@ -105,36 +106,87 @@ class DiagnosticLog(logging.Handler):
     def _files(self) -> list[Path]:
         return _diagnostic_files(self.directory, self.component)
 
+    @staticmethod
+    def _stamp(line: bytes) -> datetime | None:
+        try:
+            return _utc(datetime.fromisoformat(json.loads(line)["ts"]))
+        except (ValueError, TypeError, KeyError, UnicodeError, OverflowError):
+            return None
+
+    @staticmethod
+    def _signature(path: Path) -> tuple:
+        info = path.stat()
+        return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+    def _scan(self, path: Path) -> tuple[datetime | None, bool]:
+        earliest = None
+        malformed = False
+        with path.open("rb") as source:
+            for line in source:
+                stamp = self._stamp(line)
+                if stamp is None:
+                    malformed = True
+                elif earliest is None or stamp < earliest:
+                    earliest = stamp
+        return earliest, malformed
+
+    def _abandoned_prunes(self) -> None:
+        pattern = re.compile(
+            rf"\.{self.component}(?:\.\d{{8}}T\d{{12}}Z-[0-9a-f]{{32}})?"
+            r"\.jsonl\.prune-[0-9a-f]{32}"
+        )
+        for path in self.directory.glob(f".{self.component}*.prune-*"):
+            if pattern.fullmatch(path.name):
+                self._plain_file(path)
+                # The component lock proves no participating pruner is active.
+                path.unlink()
+
     def _prune(self, path: Path, cutoff: datetime) -> None:
         # Compare records, not mtime or segment names: the frontier segment may
         # contain records on both sides of the exact elapsed-age cutoff.
         self._plain_file(path)
+        signature = self._signature(path)
+        cached = self._expiry.get(path)
+        if cached is not None and cached[0] == signature:
+            _, earliest, malformed = cached
+        else:
+            earliest, malformed = self._scan(path)
+            self._expiry[path] = signature, earliest, malformed
+        if malformed:
+            self._degraded(ValueError("unparseable diagnostic timestamp"))
+        if earliest is None or earliest >= cutoff:
+            return
         temporary = path.with_name(f".{path.name}.prune-{uuid.uuid4().hex}")
-        removed = False
         retained = False
+        retained_earliest = None
         try:
             with path.open("rb") as source, temporary.open("xb") as target:
                 for line in source:
-                    try:
-                        stamp = datetime.fromisoformat(json.loads(line)["ts"])
-                        expired = _utc(stamp) < cutoff
-                    except (ValueError, TypeError, KeyError, UnicodeError, OverflowError):
-                        expired = False
-                        self._degraded(ValueError("unparseable diagnostic timestamp"))
-                    if expired:
-                        removed = True
-                    else:
+                    stamp = self._stamp(line)
+                    if stamp is None or stamp >= cutoff:
                         target.write(line)
                         retained = True
-            if removed:
-                if retained or path == self.path:
-                    os.replace(temporary, path)
-                else:
-                    path.unlink()
+                        if stamp is not None and (
+                            retained_earliest is None or stamp < retained_earliest
+                        ):
+                            retained_earliest = stamp
+            if retained or path == self.path:
+                os.replace(temporary, path)
+                self._expiry[path] = self._signature(path), retained_earliest, malformed
+            else:
+                path.unlink()
+                self._expiry.pop(path, None)
         finally:
             temporary.unlink(missing_ok=True)
 
-    def _maintain_locked(self, now: datetime, *, force: bool = False) -> None:
+    def maintain(self, *, force: bool = False) -> None:
+        """Prune on startup/owner maintenance, even without new log messages."""
+        try:
+            self._maintain(_utc(self.clock()), force=force)
+        except Exception as error:
+            self._degraded(error)
+
+    def _maintain(self, now: datetime, *, force: bool = False) -> None:
         monotonic = time.monotonic()
         if (
             not force and self._last_maintenance is not None
@@ -144,24 +196,24 @@ class DiagnosticLog(logging.Handler):
         ):
             return
         self.last_error = None
-        for path in self._files():
+        with self._custody():
+            self._abandoned_prunes()
+            paths = self._files()
+            live = set(paths)
+            self._expiry = {path: cached for path, cached in self._expiry.items() if path in live}
+        for path in paths:
             try:
-                self._prune(path, now - RETENTION)
+                # Yield custody between segments, not after the whole history.
+                with self._custody():
+                    self._prune(path, now - RETENTION)
+            except FileNotFoundError:
+                self._expiry.pop(path, None)
             except Exception as error:
                 self._degraded(error)
         self._last_maintenance = now
         self._last_monotonic = monotonic
         if self.last_error is None:
             self._warned = False
-
-    def maintain(self, *, force: bool = False) -> None:
-        """Prune on startup/owner maintenance, even without new log messages."""
-        try:
-            now = _utc(self.clock())
-            with self._custody():
-                self._maintain_locked(now, force=force)
-        except Exception as error:
-            self._degraded(error)
 
     def _rollover(self, now: datetime) -> None:
         try:
@@ -215,8 +267,8 @@ class DiagnosticLog(logging.Handler):
             if record.exc_info:
                 event["exception"] = logging.Formatter().formatException(record.exc_info)
             data = (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")
+            self.maintain()
             with self._custody():
-                self._maintain_locked(now)
                 self._rollover(now)
                 with self.path.open("ab") as target:
                     target.write(data)
@@ -265,6 +317,16 @@ def inventory(root: Path | None = None) -> dict:
                             if p.is_file()}),
         "retention": "not-managed-by-application-handler",
         "protection": "never renamed, truncated or deleted by this handler",
+    })
+    from .config import routing_dir
+
+    routing = routing_dir().resolve() if root == install_paths.install_dir().resolve() else root
+    entries.append({
+        "owner": "zdd lifecycle writer (configured routing directory)",
+        "locations": [str(routing / "lifecycle.log"), str(routing / "lifecycle.log.1")],
+        "existing": [str(p) for p in (routing / "lifecycle.log", routing / "lifecycle.log.1")
+                     if p.is_file()],
+        "retention": "not-managed-by-application-handler",
     })
     override = os.environ.get("COPILOT_EXTENSIONS_BOOT_TRACE_LOG_PATH")
     if override:

@@ -141,3 +141,13 @@ installer attempts, optional spools or a deployment adapter.
   stdout/stderr framing or deployed service proof. Linux/macOS native lanes and
   live external qualification are not available in this source-only Windows
   scope; those gates remain open with the integration owner.
+- 2026-10-23 — Source PR #8415 review identified abandoned prune copies,
+  repeated full-history work and configured lifecycle routing discovery.
+  Corrections reclaim only strictly recognized component temporaries under the
+  same operation lock, cache validated unchanged-segment expiry information,
+  rewrite only expired segments and yield custody between files, and resolve
+  lifecycle locations through the actual routing-directory owner. Added restart,
+  scan/copy work-count, cache-invalidation and routing-override regressions.
+  Focused Windows diagnostics plus telemetry now pass 44 tests (17 diagnostics);
+  unchanged Bridge concurrent spool append proof passes all 7 tests from #8334.
+  No native capture, installer or live scope is promoted by these corrections.
