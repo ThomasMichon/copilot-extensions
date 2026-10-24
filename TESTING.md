@@ -2191,6 +2191,14 @@ required aggregate does not qualify this standalone portfolio or either native
 client platform. The existing periodic integration portfolio does not currently
 enroll `services/chat`.
 
+The separate `tools/test_chat_container_template.py` packet consumes Chat's
+portable container contribution through the canonical Fleet design/role-binding
+readers and source CLI. Its synthetic support graph checks exact private
+actualization, provenance, resources and refusal without installing a runtime
+or changing Fleet implementation. Run it with an existing pytest interpreter;
+it is not enrolled in the native Chat construction portfolio and does not
+qualify an image, private allocation, Gateway connector or Komodo effect.
+
 Portable SQLite, real CLI/provider/loopback HTTP contracts,
 process-crash reader-lock recovery and source-independent core/client wheel
 installation run within the existing contained standalone harness. A fresh

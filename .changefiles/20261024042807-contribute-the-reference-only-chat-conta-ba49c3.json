@@ -1,0 +1,9 @@
+{
+  "comment": "Contribute the reference-only Chat container loadout template with explicit support, resource and provenance inputs",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

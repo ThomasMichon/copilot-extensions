@@ -58,6 +58,18 @@ unchanged as required transitive bootstrap resources. This adapter still uses
 declared-source construction; delivering those companions does not select a
 wheel profile or grant artifact admission.
 
+## Optional container loadout contribution
+
+The explicitly selected [container contribution](container/README.md) supplies
+the portable `chat.service` loadout template and synthetic allocation/Komodo
+binding examples through Fleet Manager's existing data-only schemas. It requires
+explicit image, configuration, credential, retained-storage, Gateway, manager,
+network and resource inputs; it does not install or run Fleet Manager.
+Private template actualization preserves the adopter's selected provenance and
+overrides. The contribution is not a delivered image, supported Gateway
+connector, applied Stack, private configuration or deployment readiness.
+Those remain open under the reviewed container contract and parent effort.
+
 ## Callable core
 
 Install the distribution with the chosen package manager. Runtime dependencies
