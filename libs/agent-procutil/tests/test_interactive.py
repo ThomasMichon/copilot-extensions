@@ -51,6 +51,50 @@ def _read(path):
         return None
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_default_termination_restores_handlers_and_resignals_only_after_cleanup(monkeypatch, failed):
+    from agent_procutil import _interactive_terminal as terminal
+
+    custom = Mock()
+    handlers = {1: signal.SIG_IGN, 15: signal.SIG_DFL, 3: custom}
+    original = handlers.copy()
+    events = []
+
+    def install(number, handler):
+        previous = handlers[number]
+        handlers[number] = handler
+        return previous
+
+    monkeypatch.setattr(terminal, "signal", SimpleNamespace(
+        SIGHUP=1, SIGTERM=15, SIGQUIT=3, SIG_DFL=signal.SIG_DFL, SIG_IGN=signal.SIG_IGN,
+        getsignal=handlers.__getitem__, signal=install,
+    ))
+    monkeypatch.setattr(terminal, "os", SimpleNamespace(
+        getpid=lambda: 123,
+        kill=lambda pid, number: events.append(("signal", pid, number, handlers.copy())),
+    ))
+
+    def exercise():
+        with terminal._termination():
+            assert handlers[1] == signal.SIG_IGN and handlers[3] is custom
+            try:
+                handlers[15](15, None)
+            finally:
+                assert handlers[15] == signal.SIG_IGN
+                events.append("cleanup")
+                if failed:
+                    raise RuntimeError("unconfirmed cleanup")
+
+    if failed:
+        with pytest.raises(RuntimeError, match="unconfirmed cleanup"):
+            exercise()
+        assert events == ["cleanup"]
+    else:
+        exercise()
+        assert events == ["cleanup", ("signal", 123, 15, original)]
+    assert handlers == original
+
+
 @pytest.mark.parametrize("argv", [None, [], "command", [1], ["bad\0argument"]])
 def test_bad_command_never_launches(monkeypatch, argv):
     launch = Mock()

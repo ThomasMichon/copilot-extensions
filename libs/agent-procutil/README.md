@@ -289,7 +289,11 @@ Job termination. Linux and macOS use a finite guardian with a private session.
 With a caller terminal, it owns a separate PTY: bytes and resize events are
 relayed, the completion terminal-device identity changes, and redirected
 non-TTY streams remain inherited rather than entering the relay. The caller's
-terminal attributes are restored on every exit. A start gate precedes command
+terminal attributes are restored when the caller unwinds. Default SIGHUP,
+SIGTERM and SIGQUIT dispositions unwind cleanup before re-delivering the
+original signal; ignored and custom dispositions remain unchanged. An
+uncatchable SIGKILL cannot restore the caller's terminal modes, although the
+guardian still retires its descendants. A start gate precedes command
 execution and the command has its own foreground group inside that session.
 Control/status pipes remain separate from terminal data.
 Relay buffers are bounded. After owned-session settlement, terminal output

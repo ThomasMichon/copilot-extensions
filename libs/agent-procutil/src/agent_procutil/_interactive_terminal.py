@@ -21,6 +21,36 @@ _BOOTSTRAP = (
 _BUFFER = 1024 * 1024
 
 
+class _Termination(BaseException):
+    def __init__(self, signum):
+        self.signum = signum
+
+
+@contextmanager
+def _termination():
+    previous = {}
+
+    def terminate(signum, _frame):
+        for number in previous:
+            signal.signal(number, signal.SIG_IGN)
+        raise _Termination(signum)
+
+    try:
+        for signum in (signal.SIGHUP, signal.SIGTERM, signal.SIGQUIT):
+            if signal.getsignal(signum) == signal.SIG_DFL:
+                previous[signum] = signal.signal(signum, terminate)
+        try:
+            yield
+        except _Termination as error:
+            signum = error.signum
+        else:
+            return
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+    os.kill(os.getpid(), signum)
+
+
 @contextmanager
 def _ignore(signum):
     previous = signal.signal(signum, signal.SIG_IGN)
@@ -250,7 +280,7 @@ def _drain(master, terminal, output):
             pass
 
 
-def run(argv, env):
+def _run(argv, env):
     from ._caller_owned import _lifetime_lock, _lifetime_writers, _require_posix_support
 
     _require_posix_support()
@@ -319,3 +349,8 @@ def run(argv, env):
                     terminal.close()
                     for fd in descriptors:
                         os.close(fd)
+
+
+def run(argv, env):
+    with _termination():
+        return _run(argv, env)

@@ -63,9 +63,14 @@ faulthandler.dump_traceback_later(1,repeat=True,file=_stack)
 _retire=SessionCustody.retire
 def observed(self,*args,**kwargs):
     with open(os.environ['PTY_FIXTURE_GUARDIAN'],'a',encoding='utf-8') as stream:
+        stream.write('retire-enter\\n')
+        stream.flush()
         faulthandler.dump_traceback_later(1,file=stream)
         try:
-            return _retire(self,*args,**kwargs)
+            result=_retire(self,*args,**kwargs)
+            stream.write('retire-complete\\n')
+            stream.flush()
+            return result
         except BaseException:
             traceback.print_exc(file=stream)
             try:
@@ -105,6 +110,20 @@ def restore(self):
     diagnostic['restored']=termios.tcgetattr(0)
 terminal._Terminal.__init__=init
 terminal._Terminal.restore=restore
+_confirm=terminal.confirm_session
+def confirm(process):
+    started=time.monotonic()
+    try:
+        return _confirm(process)
+    finally:
+        diagnostic['confirm_elapsed']=time.monotonic()-started
+        try:
+            owner=psutil.Process(process.pid)
+            diagnostic['guardian_after_confirm']=[
+                [p.pid,p.ppid(),p.status()] for p in [owner,*owner.children(recursive=True)]]
+        except psutil.Error as error:
+            diagnostic['guardian_after_confirm']=type(error).__name__
+terminal.confirm_session=confirm
 _select=terminal.select.select
 _last=[0]
 def observe_select(*args):
@@ -191,9 +210,11 @@ def _retire_fixture(process):
     process.wait(timeout=10)
 
 
-@pytest.mark.parametrize("mode", ["normal", "caller-killed", "interrupt"])
+@pytest.mark.parametrize("mode", ["normal", "caller-killed", "interrupt", "terminate"])
 @pytest.mark.parametrize("managed", [False, True])
 def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_path, mode, managed):
+    import termios
+
     if managed and os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
         pytest.skip("managed detachment qualification runs in the explicit native workflow")
     bash = shutil.which("bash")
@@ -212,6 +233,7 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
     )
     receipt = tmp_path / "result.json"
     master, slave = os.openpty()
+    original_attributes = termios.tcgetattr(master)
     original_tty = os.ttyname(slave)
     process = subprocess.Popen(  # noqa: S603 - isolated fixture argv
         [
@@ -262,10 +284,20 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
             process.kill()
         elif mode == "interrupt":
             process.send_signal(signal.SIGINT)
+        elif mode == "terminate":
+            process.terminate()
         else:
             (tmp_path / "gate").touch()
         _wait(lambda: drain() and process.poll() is not None, "interactive caller did not finish")
-        if mode != "caller-killed":
+        if mode == "terminate":
+            assert process.returncode == -signal.SIGTERM, (
+                output.decode(errors="replace") + _diagnostics(receipt)
+            )
+            restored = termios.tcgetattr(master)
+            restored[3] &= ~getattr(termios, "PENDIN", 0)
+            original_attributes[3] &= ~getattr(termios, "PENDIN", 0)
+            assert restored == original_attributes
+        elif mode != "caller-killed":
             assert process.returncode == 0, output.decode(errors="replace") + _diagnostics(receipt)
             assert _read(receipt) == {
                 "code": 130 if mode == "interrupt" else 0,
