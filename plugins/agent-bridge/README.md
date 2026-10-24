@@ -14,6 +14,11 @@ requirements while adopters retain instance and credential-source bindings.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.md)
+is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
+requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
+original. Native qualification and installed adoption remain separate.
+
 Windows installation captures unavailable optional Python-launcher versions as
 verbose diagnostics, not install failures. Signed-base discovery stops at the
 first accepted candidate and reuses it only within that installer process,

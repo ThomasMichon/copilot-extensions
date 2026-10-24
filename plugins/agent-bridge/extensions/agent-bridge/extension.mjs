@@ -33,6 +33,7 @@ import {
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
+import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -51,6 +52,9 @@ const INBOX_POLL_MS = 2_000; // poll the bridge for messages to deliver every 2s
 const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
   process.env.AGENT_BRIDGE_DELIVERY || "",
 );
+// Selected only by an explicit consumer opt-in. Unsupported retained delivery
+// must hold the original work, never fall through to the legacy ACK path.
+const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX);
 // SDK event types we represent (Phase 5). Everything else is intentionally not
 // forwarded -- the bridge-side translator maps exactly this subset into its
 // event vocabulary; keeping the whitelist here avoids buffering noise.
@@ -148,6 +152,7 @@ function resolveToken() {
 // The endpoint re-resolves the address/token after a failed call (see
 // bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
 let endpoint = null;
+let retainedInbox = null;
 
 async function fetchBridge(method, path, body) {
   const res = await endpoint.call(method, path, body);
@@ -176,6 +181,16 @@ async function bridgeGetJson(path) {
   } catch {
     return null;
   }
+}
+
+async function retainedBridgeRequest(method, path, body) {
+  const response = await fetchBridge(method, path, body);
+  if (!response.ok) {
+    const error = new Error(`bridge ${method} ${path} refused (HTTP ${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
 }
 
 // Session metadata (machine, worktree, ...), resolved off the event loop from
@@ -281,11 +296,15 @@ async function flushEvents() {
 // correctly-arbitrated lane.
 async function pollInbox() {
   if (state.delivering) return;
-  if (!state.deliveryEnabled) return;
-  if (!state.sessionId || !state.registered) return;
+  if (!state.sessionId || !state.base || !state.token) return;
+  if (!RETAINED_INBOX && (!state.deliveryEnabled || !state.registered)) return;
   state.delivering = true;
   const sid = state.sessionId;
   try {
+    if (RETAINED_INBOX) {
+      await retainedInbox.tick(sid, { allowSend: state.deliveryEnabled && state.registered });
+      return;
+    }
     await drainInbox(sid, {
       getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight,
       mainTurn: state.mainTurn, log: extLog,
@@ -301,6 +320,7 @@ async function pollInbox() {
 // (``drainControls`` in delivery.mjs). Controls are polled apart from
 // messages, so they're never delivered as a prompt.
 async function pollControls() {
+  if (RETAINED_INBOX) return; // Control/interrupt effects have no retained recovery contract yet.
   if (state.controlling) return;
   if (!state.sessionId || !state.registered) return;
   state.controlling = true;
@@ -375,6 +395,15 @@ const session = await joinSession({
     },
   ],
 });
+
+if (RETAINED_INBOX) {
+  retainedInbox = createRetainedInbox({
+    session, request: retainedBridgeRequest, processIdentity: processIdentity(),
+    cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
+    canSend: () => state.deliveryEnabled && state.registered, log: extLog,
+  });
+  extLog("retained inbox selected explicitly; legacy message ACKs and control effects disabled");
+}
 
 // Observe-only, non-blocking: the ONLY work done on the CLI event loop. Just
 // note that the session is alive and follow its session id (a missing env var,
@@ -484,6 +513,7 @@ try {
 // --- Best-effort deregister on exit (staleness reaping is the real backstop) ---
 function shutdown() {
   try {
+    retainedInbox?.close();
     if (state.heartbeat) {
       clearInterval(state.heartbeat);
       state.heartbeat = null;
