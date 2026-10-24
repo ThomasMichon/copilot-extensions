@@ -211,7 +211,8 @@ def proof_paths(
 
 
 def source_snapshot(
-    root: Path, commit: str, registry: dict
+    root: Path, commit: str, registry: dict, *,
+    generation: int = 47, extra_paths: tuple[str, ...] = (),
 ) -> dict[str, dict[str, str]]:
     tree = {}
     for raw in git(root, "ls-tree", "-rz", commit).split(b"\0"):
@@ -221,10 +222,10 @@ def source_snapshot(
         mode, kind, blob = metadata.decode().split()
         tree[path.decode("utf-8")] = (mode, kind, blob)
     result = {}
-    metadata = baseline_snapshot(root, commit)
+    metadata = baseline_snapshot(root, commit, generation=generation)
     for path in sorted(proof_paths(
         root, registry, metadata_paths=set(metadata.inputs) - {REGISTRY},
-    )):
+    ) | set(extra_paths)):
         node = safe(root, path)
         entry = tree.get(path)
         if entry is None or entry[:2] not in {("100644", "blob"), ("100755", "blob")}:
@@ -246,7 +247,9 @@ def source_snapshot(
     return result
 
 
-def baseline_snapshot(root: Path, commit: str) -> registry_codec.Snapshot:
+def baseline_snapshot(
+    root: Path, commit: str, *, generation: int = 47,
+) -> registry_codec.Snapshot:
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("HTTP-47 capture requires a full real source commit")
     if (
@@ -259,10 +262,10 @@ def baseline_snapshot(root: Path, commit: str) -> registry_codec.Snapshot:
             git(root, "show", commit + ":" + PREFIX + "protocol.py"),
             "HTTP_PROTOCOL_VERSION",
         )
-        != 47
+        != generation
     ):
         raise ValueError(
-            "capture source commit must genuinely speak HTTP generation 47"
+            f"capture source commit must genuinely speak HTTP generation {generation}"
         )
     if (
         constant(
@@ -279,8 +282,8 @@ def baseline_snapshot(root: Path, commit: str) -> registry_codec.Snapshot:
     )
     result = snapshot.materialized
     http = next(c for c in result["contracts"] if c["id"] == "agent-bridge.http-wire")
-    if http["declared_range"]["current"] != 47:
-        raise ValueError("this capture owns only declared HTTP generation 47")
+    if http["declared_range"]["current"] != generation:
+        raise ValueError(f"capture requires declared HTTP generation {generation}")
     return snapshot
 
 

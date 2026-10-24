@@ -10,9 +10,10 @@ from . import __version__, worktree_native_resume
 from .auth import BearerAuthMiddleware
 from .auth_custody import AuthCustody, AuthCustodyMiddleware
 from .live_representation import LiveEventStore
+from .live_inbox_runtime import LiveInboxRuntime
 from .models import ServiceConfig
 from .routes import (
-    acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_sessions,
+    acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_inbox, live_sessions,
     remote, sessions, ui, worktrees,
 )
 
@@ -39,12 +40,13 @@ def configure_serving_app(
     app.state.auth_token = auth_token
     app.state.auth_custody = auth_custody if auth_custody is not None else AuthCustody()
     app.state.live_event_store = LiveEventStore()
+    app.state.live_inbox_runtime = LiveInboxRuntime()
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
     app.add_middleware(AuthCustodyMiddleware, custody=app.state.auth_custody)
     for router in (
         worktree_native_resume.router,
         acquisitions.router, health.router, ui.router, acp_ws.router,
-        sessions.router, live_sessions.router, remote.router, agents.router,
+        sessions.router, live_sessions.router, live_inbox.router, remote.router, agents.router,
         worktrees.router, admin.router, dispatch_tasks.router,
     ):
         app.include_router(router)

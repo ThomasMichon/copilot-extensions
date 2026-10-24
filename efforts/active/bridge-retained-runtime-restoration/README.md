@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; user-owned consumer/recovery refinement reviewed; consumer/SDK integration and full Phase 1 open
+- **Status:** Active; installation/current-consumer DB prerequisites merged; transport/SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -238,6 +238,76 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Close the installation-owner capture gap found in review
+- Review of #8540 identified that the initial HTTP-48 closure covered the
+  separately packaged installation module but omitted the actual payload
+  `scripts/installation-context` entrypoint and fragments used by LoopGovernance.
+  Those initial observations did not qualify this dependency. Their provenance
+  remains retained; corrected current evidence supersedes that incomplete claim.
+- The closure now pins every Python file in that payload helper directory.
+  Required execution is derived from the captured entrypoint's fragment
+  declaration: the entrypoint and all 18 fragments must execute under the
+  source/origin/code guard, including their non-`src` paths.
+- Controls refuse dirty entrypoint/fragment inputs before probes and reject
+  foreign helper locations, forged executable code, incomplete inventories and
+  missing required execution before effects or publication.
+- Genuine source `b179c886e69306bc7318c9d39e24dce6b7820b99` completed actual
+  write/no-write capture in both fixture installation modes with all 19 helper
+  executions required. The 74 current outputs preserve every HTTP-47 packet and
+  complete provenance; the checker still accepts two contracts and 656 fixtures.
+  The corrected contract/fixture consumer cohort passes 123 cases.
+- Current-head review and merge remain open. Ordinary producer/SDK integration,
+  native and deployed qualification, and the parent restoration gates are not
+  closed by this evidence repair.
+
+### 2026-10-24 - HTTP-48 adapter source qualified; review and SDK integration open
+- Added explicit `retained-inbox-v1` negotiation, predecessor-CAS enrollment,
+  original-row polling, one-shot final admission and original outcome reporting
+  through the existing installation and DB owners.
+- Ordinary startup and registration do not initialize custody. Negotiation
+  enrolls only the actual serving frontend, not the complete producer cohort.
+  The existing shared-token boundary remains; unsupported network/proxy ingress
+  refuses before enrollment or body exposure.
+- Real ASGI/installation/SQLite controls cover reply loss, reopened storage,
+  original outcome reporting after closure/retirement, wrong-context refusals,
+  stale registration and unsupported interrupts without partial handoff commits.
+  These are source controls, not SDK/native or deployed evidence.
+- Declared HTTP generation 48 and retained-inbox capability floor 48 without
+  changing the supported minimum or older floors. Independent local ASGI vectors
+  cover both installation modes; publication controls reject self-consistent
+  source/operation tampering and preserve the default HTTP-47 child portfolio.
+  Historical HTTP-47 validation retains original tree and primary/child bindings
+  without treating later source files as historical execution inputs.
+- Genuine source `56bd5bebb1de57347db8c002dd9ecd4434fcd620` completed actual
+  write and same-source no-write capture through both fixture installation
+  modes. The 74 outputs preserve every HTTP-47 packet, prior capability floor
+  and provenance prefix. The canonical checker accepts two contracts and all
+  656 fixtures against the reviewed predecessor.
+- Publication controls qualify initial capture and registered current-generation
+  refresh without replacing foreign/dirty packets or concurrent registry edits.
+  The separate original child-binding portfolio remains required; it is not
+  combined with publication tests that intentionally substitute fixture owners.
+  Replay guards explicitly distinguish additive health metadata and closed,
+  negotiated control/identity envelopes from ordinary tolerant peer models.
+- Normal review/merge remains required before this adapter is landed. Ordinary
+  message producer and actual SDK wiring remain next. These observations do not
+  qualify native execution or a deployed receiver, and close no Phase 1b or
+  parent item.
+
+### 2026-10-24 - Current-consumer DB prerequisite merged; wire the transport next
+- #8526 merged as `43117b1fbba5024372eec1a435c32d44fc6b8b7f` after
+  current-head Copilot approval `5637530050` on
+  `f093bf76b9015b507a1d74e68fb7776db069681e`, its birth-tolerance finding
+  resolved, and all three required checks passing.
+- Reread the full Plan and Validation Plan. The durable current-consumer DB
+  prerequisite is complete; actual local registration/enrollment negotiation,
+  retained polling, final SDK admission and outcome/consumption recovery remain
+  open. No Phase 1b Plan item or native/adoption gate closes from this merge.
+- Continue through the existing registration and extension helpers under
+  `consumer-recovery.md`; preserve original handoffs and visibly outstanding
+  uncertainty, without new credentials, blind resend or legacy downgrade.
+  No installed authentication, running service or network boundary changes.
 
 ### 2026-10-24 - Durable current-consumer DB prerequisite
 - Add schema-31 enrollment through the existing DB owner: exact local

@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http48-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-source-health-py-3ed03282937f.json",
+    "sha256": "ab55b78c40810e66d254a76b88e7d2c640a3d38f0669610c59d13ee5cc49f5f5"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
+    "sha256": "a279ccf250421673e63b077e9be2a5dd780dfbd99662baf35486d57dacee4729"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "b179c886e69306bc7318c9d39e24dce6b7820b99",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 48,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+    "source_git_blob": "f58c73520d31488587e80b3ebd2c8b8148d13f06",
+    "source_sha256": "0767b1371b9738c3c4b524e3e06d4610f8ceefb7c7dea80392506b72a30f474b"
+  }
+}

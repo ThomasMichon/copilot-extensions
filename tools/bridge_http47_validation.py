@@ -24,6 +24,10 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
     )
     captured = packet["captured_from"]
     commit = captured["commit"]
+    current = next(
+        contract["declared_range"]["current"] for contract in registry["contracts"]
+        if contract["id"] == "agent-bridge.http-wire"
+    )
     tree_result = evidence.git_evidence.git("ls-tree", "-r", commit)
     if tree_result.returncode == 0:
         tree = {}
@@ -67,10 +71,18 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
                     after_capture = True
                 elif after_capture:
                     raise ValueError("HTTP-47 execution closure inventory is unprovable")
-        if set(proof) != evidence.proof_paths(
-            root, metadata.materialized,
-            metadata_paths=metadata_paths,
-        ):
+        required = evidence.proof_paths(
+            root, metadata.materialized, metadata_paths=metadata_paths,
+        )
+        if current > 47:
+            # The reviewed immutable packet authenticates historical inventory
+            # when its tree is unavailable. New files cannot be old inputs.
+            required = set(evidence.AFFECTED) | set(evidence.TESTS) | {
+                evidence.INPUT, evidence.CONTROL_INPUT,
+                "plugins/agent-bridge/plugin.json", "plugins/agent-bridge/pyproject.toml",
+                evidence.CONTRACT + "registry.schema.json",
+            } | metadata_paths
+        if (current == 47 and set(proof) != required) or not required <= set(proof):
             raise ValueError("HTTP-47 execution closure inventory is unprovable")
     for path, identity in proof.items():
         evidence.safe(root, path)
@@ -110,7 +122,11 @@ def validate_closure(root: Path, packet: dict, registry: dict) -> None:
              if contract["id"] == "agent-bridge.http-wire"
              for item in contract["source_paths"] if item["path"] == source), None
         )
-        if row is None or row["semantic"] is not True or row["sha256"] != proof[source]["sha256"]:
+        if row is None or (
+            current == 47 and (
+                row["semantic"] is not True or row["sha256"] != proof[source]["sha256"]
+            )
+        ):
             raise ValueError(f"HTTP-47 affected semantic source is not bound: {source}")
     if any(captured[key] != proof[captured["source_path"]][name] for key, name in (
         ("source_git_blob", "blob"), ("source_sha256", "sha256")

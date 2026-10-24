@@ -17,7 +17,8 @@ The owner-facing methods are `initialize_runtime_epoch`, `runtime_epoch`,
 `runtime_custody_inventory`. Their installation and PID/birth/incarnation values
 are exact observations supplied by the owning caller. These methods neither
 authenticate that caller nor resolve provenance or acquire native custody.
-No public route or ordinary application startup calls them automatically.
+Ordinary application startup does not call them automatically. The explicit
+local negotiation adapter below enrolls only its serving frontend.
 
 `LoopGovernance.runtime_installation(database)` now supplies the internal
 installation binding through the daemon's existing installation owner. It
@@ -102,7 +103,9 @@ producer association, including legacy versus associated admission.
 Registration deregistration, takeover and reaping preserve associated inbox
 history even when the registration itself goes away.
 
-Qualified control handoff is not implemented. Both message insertion methods and
+Qualified control and interrupt handoff are not implemented. Retained polling
+and final admission refuse interrupt delivery without aborting or resending.
+Both message insertion methods and
 the canonical SQL guards reject custody-associated `control:` kinds, including
 case variants. Legacy control claim refuses an existing unsupported associated
 control before expiry or claim mutations; ACK and withdrawal cannot settle it.
@@ -114,13 +117,13 @@ connections restore their prior setting afterward, including on refusal.
 Unrelated event/metadata writes retain their existing `NORMAL` policy. A
 one-shot marker that could disappear after SDK acceptance would not fence replay.
 
-These are internal owner methods, **not consumer authentication or an SDK
-integration**. A future transport must authenticate/enroll the actual consumer,
-negotiate the handoff contract, bind its current native context and call the
-final primitive at its actual SDK boundary. It must not cache a true result as
-reusable permission, interpret false/timeout as non-delivery, downgrade to legacy
-delivery, or rebuild an independent outbox. No public route, ordinary extension
-poller, startup or installer currently activates these methods.
+These internal owner methods are **not consumer authentication or an SDK
+integration**. The local transport below composes them with the established
+access boundary. The ordinary extension poller and installer do not activate
+them. A future SDK integration must call the final primitive at its actual
+effect boundary, never cache a true result as reusable permission, interpret
+false/timeout as non-delivery, downgrade to legacy delivery or rebuild an
+independent outbox.
 
 ## Durable current-consumer enrollment
 
@@ -152,8 +155,59 @@ registration cleanup and participates in DB revision/inventory observations.
 Migration never fabricates enrollment for older registrations or handoffs.
 Prepared/current database validation and passive adoption require the exact
 table, current-owner index and guards; they never reconstruct missing history.
-This remains an internal DB prerequisite: no HTTP registration, ordinary
-extension poll, SDK call, installed authentication or running service is changed.
+Ordinary HTTP registration and extension polling remain separate from explicit
+retained enrollment. No SDK call or installed authentication is changed.
+
+## Explicit local transport adapter
+
+HTTP generation 48 introduces the `retained-inbox-v1` request contract under
+`/api/v1/live-sessions/{session_id}/retained-inbox`. It is a source-level
+adapter, not full runtime restoration or actual SDK qualification.
+Consumers must require `RETAINED_INBOX_PROTOCOL_VERSION` (48) before using it;
+an older or unversioned receiver is unsupported, not a legacy-delivery fallback.
+Every request passes the ordinary shared-token and request-custody middleware.
+This first adapter supports only the admitted loopback endpoint with a local
+peer and no forwarded/proxy headers. Public binds, nonlocal peers and proxy
+ingress refuse before enrollment or inbox exposure. Loopback is an additional
+scope check, not a replacement for user access controls. Container proxy
+qualification and other endpoint transports remain open.
+
+| POST suffix | Existing owner operation |
+|-------------|--------------------------|
+| `/negotiate` | Resolve the daemon's actual installation, explicitly initialize its open DB epoch if absent, enroll only its actual frontend process, and observe the current registered consumer predecessor |
+| `/enroll` | Compare-and-swap that observed predecessor through `enroll_inbox_consumer`; exact retries retain their original predecessor |
+| `/poll` | Commit original row-bound handoffs before returning associated message bodies |
+| `/begin` | Recheck installation, current frontend/consumer and open epoch; return one invocation-only admission result |
+| `/outcome` | Record the exact original handoff's SDK acceptance, attributed consumption or unknown outcome, without acquiring another send opportunity |
+
+`LiveInboxRuntime` is constructed without storage mutation. Only explicit
+negotiation initializes/enrolls the frontend; ordinary startup, registration and
+heartbeats do not. Frontend observations use this serving process's real PID,
+native birth and fresh incarnation. Subsequent operations recheck installation,
+process and the same open `Database` owner. A request echoes the server-derived
+installation/epoch only as a wrong-target/replay fence; it cannot select a
+database, installation root or producer.
+
+The consumer supplies its exact SDK-session/process/incarnation observations
+and the supported contract. Registration must already be fresh, local and exact,
+never an alias. A reloaded extension must mint a new incarnation and explicitly
+negotiate its predecessor. A lost enrollment reply is retried with the original
+request, not with a newly observed predecessor used to overwrite another owner.
+Unknown contracts, extra owner-selection fields and coerced identity values
+refuse rather than silently selecting a legacy path.
+
+Polling and final admission require a serving frontend. Original outcome
+reporting remains available through the admitted endpoint after closure,
+draining, registration cleanup or consumer retirement; it neither needs current
+enrollment nor reinitializes it. Original message, handoff and consumer identities
+must match. Lost final-admission replies remain outstanding and cannot be
+converted to a second true result by repeating `/begin`.
+
+The ordinary message-producer routes and actual SDK consumer are not switched
+to this adapter yet. Unassociated legacy inbox rows remain unqualified and
+refuse a retained batch without partial handoff commits. No SDK event,
+consumption evidence, automatic replay, proxy implementation or native behavior
+is inferred from these ASGI/installation/real-SQLite controls.
 
 ## Inventory is observation, not qualification
 
@@ -189,8 +243,9 @@ host admission epochs or verified native host receipts; they always retain
 Final acquisition/start/resume/background admission, SDK poll/send/ACK custody,
 native-send settlement, host/remote enrollment, cross-owner revision closure,
 target-declared state compatibility and continuing installer retention remain
-unimplemented beyond the internal inbox primitives above. No existing drain, SDK consumer or installer path is switched to
-this foundation. No Dispatch database or adopter effect owner is involved.
+unimplemented beyond the inbox owners and explicit local adapter above.
+No existing drain, SDK consumer or installer path is switched to this foundation.
+No Dispatch database or adopter effect owner is involved.
 
 The focused tests cover real SQLite serial ordering, queue rollback, original
 history, legacy/incomplete inventory and fresh strict host storage. They belong

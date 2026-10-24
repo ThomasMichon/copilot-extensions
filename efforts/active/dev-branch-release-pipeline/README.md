@@ -944,9 +944,10 @@ Participant: Stamped-candidate contributor; bounded tracker: #8390.)_
       and required CI: #8454, `27af9d62dc9dffae83c794e43f534957c6b90b35`.
 - [ ] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
       retaining other Phase 9 and independently governed control owners.
-- [ ] Apply the operator-authorized 128 MiB generated-evidence file bound
+- [x] Apply the operator-authorized 128 MiB generated-evidence file bound
       consistently to collection and hosted archive admission, retaining the
-      expanded coverage format and all source/context/integrity budgets.
+      expanded coverage format and all source/context/integrity budgets:
+      #8508, `60e2f720930a8f249c71c54af73e6ec91ed7955b`.
 - [ ] Retain the exact qualified packet and qualification receipt as an
       immutable, raw-read-back asset on the existing Dev-owned release,
       never in Source or generated Main; preserve exact code-artifact reuse
@@ -1464,6 +1465,35 @@ existing complete report format**. Only the generated-evidence file bound
 changes; the separate 64-asset limit and all integrity/effect/execution
 budgets remain. Final complete-packet verification, fresh review/required CI
 and the natural release gates still remain.
+
+### 2026-10-24 - Final Source repair merged; exact-helper Main adoption opened
+
+Source #8508 merged at `60e2f720930a8f249c71c54af73e6ec91ed7955b`
+at `09:58:28Z`. Its final published head
+`c81bb95181addf78701092a9b7d44c8651830947` retained all 1,467 current Dev
+nodes and added 27 pure controls, for 1,494 total. The actual frozen candidate
+passed all 1,494 with zero prohibited effects and complete packet readback in
+99.684 seconds. Its original-format report measured 68,195,293 bytes under
+134,217,728, and a synthetic full-volume serialization fixture round-tripped
+every packet byte in 1,002,845 bytes. That fixture is not hosted qualification.
+Candidate Git stayed clean and its disposable checkout was removed.
+
+Both required hosted CI packets `40083450152` and `40083561225` passed.
+Copilot approved the exact final head in review `5637823786`, with no open
+issues. The pre-upload capacity finding and stale-description finding were
+fixed, replied to and resolved. Managed completion used the repository's
+authorized Maintainer path for the separately required CODEOWNER vote; it did
+not waive Copilot assessment, required CI or open findings. The worktree was
+pulled forward only after confirming the real merge.
+
+Main #8543 now proposes the separately authorized one-line helper pin to that
+exact final Source merge, not an arbitrary descendant. Both real-controller
+contract tests and exact-byte comparison passed against the actual Main
+workspace. The Source declaration mirror carries the same reviewed pin.
+Pipeline state, budgets and runtime rollout are unchanged. Source delivery is
+complete, but natural qualification, actual durable release-asset readback,
+Main merge/tag, under-thirty-minute timing and adopter acceptance remain open.
+The overall effort remains Active with its other owners and gates retained.
 
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as
