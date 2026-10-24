@@ -433,3 +433,9 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   seeds, POSIX/current-installed qualification, retention/migration, inspection
   and original same-conversation New/cold Resume gates remain open. This
   slice is not completion of either parent issue.
+- The first review identified AHP session preparation as an earlier mutation
+  than final launcher invocation. Moved the required requested boundary ahead
+  of `ensure_session`, retained one requested event, and added direct controls
+  for write refusal before preparation, preparation failure and a normal
+  hosted launch. The affected AHP/launch/admission portfolio passes 112 cases
+  with 10 skips. Current-head review and CI remain publication gates.

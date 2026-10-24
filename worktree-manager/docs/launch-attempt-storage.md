@@ -65,7 +65,9 @@ claim that Copilot started. Direct, relocated, remote and AHP launcher calls,
 including new-window and provider handoff wrappers, commit `launch-requested`
 before invoking the existing owner, then `launcher-returned` with its exit
 code if control returns. That code may describe a wrapper or spawned-window
-handoff, not Copilot. POSIX process replacement and abrupt process exit may
+handoff, not Copilot. AHP's requested boundary precedes hosted-session
+preparation too, because preparation can create a session and persist its
+binding before the final launcher runs. POSIX process replacement and abrupt process exit may
 leave only the requested boundary. Missing completion evidence remains
 unknown; the journal never fills it in or replays the action.
 

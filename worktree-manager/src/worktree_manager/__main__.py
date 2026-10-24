@@ -1270,6 +1270,7 @@ def _execute_launch(req) -> int:
         if req.mode in {"base", "bare-resume"}:
             print("error: AHP requires an agent-worktrees-managed worktree")
             return launch_observations.refuse(attempt_id)
+        launch_observations.observe(attempt_id, "launch-requested")
         try:
             attachment = ahp_provider.ensure_session(
                 req.project,
@@ -1290,8 +1291,8 @@ def _execute_launch(req) -> int:
         # that rewrite, so AHP stays on the direct-exec path (no mux wrapping
         # for AHP attachment in this pass -- a known follow-up gap, not a
         # regression: AHP launches never went through launch-session.ps1).
-        return launch_observations.launch(
-            attempt_id, lambda: launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+        return launch_observations.returned(
+            attempt_id, launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
         )
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:

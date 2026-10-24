@@ -154,6 +154,41 @@ def test_relocated_launch_uses_same_attempt_without_claiming_native_handoff(atte
     assert events(attempt)[-1]["phase"] == "launcher-returned"
 
 
+@pytest.mark.parametrize("failure", ["none", "required-write", "preparation"])
+def test_ahp_requested_boundary_precedes_any_hosted_session_mutation(attempt, monkeypatch, failure):
+    from worktree_manager import ahp_provider
+
+    store, request = attempt
+    request = replace(request, ahp=True)
+    monkeypatch.setattr(launcher, "uses_ahp", lambda *a: True)
+    monkeypatch.setattr(engine_client, "require_agent_hosting", lambda *a: None)
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", lambda *a, **kw: plan())
+    append = store.append
+    def failing_append(*args, **kwargs):
+        if failure == "required-write" and kwargs["phase"] == "launch-requested":
+            raise LaunchAttemptError("private storage fixture")
+        return append(*args, **kwargs)
+    monkeypatch.setattr(store, "append", failing_append)
+    effects = []
+    def prepare(*a):
+        assert events(attempt)[-1]["phase"] == "launch-requested"
+        effects.append("prepare")
+        if failure == "preparation":
+            raise ahp_provider.AhpProviderError("fixture preparation failure")
+        return object()
+    monkeypatch.setattr(ahp_provider, "ensure_session", prepare)
+    monkeypatch.setattr(ahp_provider, "attach_plan", lambda value, _: value)
+    monkeypatch.setattr(launcher, "launch", lambda *a, **kw: effects.append("launch") or 0)
+    assert main._run_launch(request) == (0 if failure == "none" else 1)
+    assert effects == {
+        "none": ["prepare", "launch"], "required-write": [], "preparation": ["prepare"],
+    }[failure]
+    expected = ["confirmed", "resolution-requested", "resolved"]
+    if failure != "required-write":
+        expected += ["launch-requested", "launcher-returned" if failure == "none" else "unknown"]
+    assert [event["phase"] for event in events(attempt)] == expected
+
+
 @pytest.mark.parametrize("result", [{"ok": False}, {"ok": True}, {"ok": True, "verified": True}])
 def test_restore_boundary_precedes_remux_and_resume(attempt, monkeypatch, result):
     monkeypatch.setattr(engine_client, "project_binstub_command", lambda *a: ["fixture"])

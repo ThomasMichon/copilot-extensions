@@ -45,7 +45,10 @@ def refuse(attempt_id: str | None, code: str = "unsupported") -> int:
 
 def launch(attempt_id: str | None, work: Callable[[], int]) -> int:
     observe(attempt_id, "launch-requested")
-    result = work()
+    return returned(attempt_id, work())
+
+
+def returned(attempt_id: str | None, result: int) -> int:
     observe(attempt_id, "launcher-returned", required=False, exit_code=result)
     return result
 
