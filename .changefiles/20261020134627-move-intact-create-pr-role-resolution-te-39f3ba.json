@@ -1,9 +1,0 @@
-{
-  "comment": "Move intact create-pr role-resolution tests into their own bounded suite.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
