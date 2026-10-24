@@ -24,6 +24,7 @@ $project = $location.ProviderPath
 $scriptDir = Join-Path $payloadRoot 'scripts'
 $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps1'
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
+$runtimeEnvironment = Join-Path $scriptDir 'runtime-environment.ps1'
 $installer = Join-Path $scriptDir 'install.ps1'
 $legacyRoot = if ($env:AGENT_VAULT_HOME) {
     $env:AGENT_VAULT_HOME
@@ -33,6 +34,7 @@ $legacyRoot = if ($env:AGENT_VAULT_HOME) {
 if (
     -not (Test-Path -LiteralPath $modeRunner -PathType Leaf) -or
     -not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $runtimeEnvironment -PathType Leaf) -or
     -not (Test-Path -LiteralPath $installer -PathType Leaf)
 ) {
     [Console]::Error.WriteLine(
@@ -40,6 +42,7 @@ if (
     )
     exit 126
 }
+. $runtimeEnvironment
 if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
     [Console]::Error.WriteLine('[agent-vault] read-only runtime resolver is unavailable. Re-enable/update the plugin, then retry.')
     exit 126
@@ -204,44 +207,10 @@ function Resolve-RuntimePython {
     return $AgentRtPy
 }
 
-function Set-RuntimeEnvironment {
-    $env:AGENT_VAULT_HOME = $runtimeRoot
-    $env:AGENT_VAULT_VALIDATED_CONTEXT = $context
-    if ($installationId) {
-        $env:AGENT_VAULT_INSTALLATION_ID = $installationId
-        $env:AGENT_VAULT_RUN_DIR = Join-Path $runtimeRoot 'run'
-        $env:AGENT_VAULT_CORE_RUN_DIR = Join-Path $runtimeRoot 'core'
-        $env:AGENT_VAULT_CACHE_DIR = Join-Path $runtimeRoot 'cache'
-        $env:AGENT_VAULT_SOCKET = Join-Path (Join-Path $runtimeRoot 'run') 'agent-vault.sock'
-        $env:AGENT_VAULT_PIPE = "\\.\pipe\agent-vault-$serviceSuffix"
-        $env:AGENT_VAULT_PID = Join-Path (Join-Path $runtimeRoot 'run') 'agent-vault-service.pid'
-        $env:AGENT_VAULT_LOG = Join-Path (Join-Path $runtimeRoot 'logs') 'agent-vault-service.log'
-        $env:AGENT_VAULT_PORT = '0'
-        $env:AGENT_VAULT_SYSTEMD_UNIT = "agent-vault-$serviceSuffix.service"
-        $env:AGENT_VAULT_TASK_NAME = "AgentVault-$serviceSuffix"
-    } else {
-        Remove-Item Env:AGENT_VAULT_INSTALLATION_ID -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_RUN_DIR -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_CORE_RUN_DIR -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_CACHE_DIR -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_SOCKET -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_PIPE -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_PID -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_LOG -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_PORT -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_SYSTEMD_UNIT -ErrorAction SilentlyContinue
-        Remove-Item Env:AGENT_VAULT_TASK_NAME -ErrorAction SilentlyContinue
-    }
-    if ($context) {
-        $env:COPILOT_EXTENSIONS_CONTEXT = $context
-    } else {
-        Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
-    }
-}
-
 function Invoke-Runtime {
     param([Parameter(Mandatory)][string]$Python)
-    Set-RuntimeEnvironment
+    Set-RuntimeEnvironment -RuntimeRoot $runtimeRoot -Context $context `
+        -InstallationId $installationId -ServiceSuffix $serviceSuffix
     if (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT) {
         $validationArgs = @(
             '-I', (Join-Path $scriptDir 'validate_identity_cache_context.py'),
@@ -349,7 +318,8 @@ $previousEap = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 try {
     $nativeShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    Set-RuntimeEnvironment
+    Set-RuntimeEnvironment -RuntimeRoot $runtimeRoot -Context $context `
+        -InstallationId $installationId -ServiceSuffix $serviceSuffix
     & $nativeShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $firstUse `
         -Root $executionRoot -Payload $payloadRoot -RuntimeRoot $runtimeRoot -Project $project -Wait
     $provisionCode = $LASTEXITCODE

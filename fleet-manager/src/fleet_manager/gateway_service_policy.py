@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 from typing import NoReturn
 
+from .enrolled_identity import EnrolledIdentity, EnrolledIdentityVerifier, PROFILE
 from .gateway_manifest import ServiceSlot
 from .gateway_identity_provider import IdentityProvider
 from .gateway_service_context import (
@@ -210,11 +211,20 @@ class ServiceAuthority:
             return verifier.nonce
 
     def _verify(self, access: str, proof: str, method: str,
-                target_uri: str) -> tuple[VerifiedIdentity, IdentityVerifier]:
+                target_uri: str, kind: str) -> tuple[VerifiedIdentity, IdentityVerifier]:
         with self._lock:
             _, verifier, _ = self._active()
         try:
-            identity = verifier.verify(access, proof, method=method, target_uri=target_uri)
+            if type(verifier) is EnrolledIdentityVerifier:
+                identity = verifier.verify(
+                    access, proof, method=method, target_uri=target_uri, kind=kind)
+                require(type(identity) is EnrolledIdentity and identity.profile == PROFILE
+                        and identity.kind == kind, "invalid-credential")
+            else:
+                require(type(verifier) is IdentityVerifier, "unsupported-profile")
+                identity = verifier.verify(access, proof, method=method, target_uri=target_uri)
+                require(type(identity) is VerifiedIdentity and identity.profile == "jwt-pop-v1",
+                        "invalid-credential")
         except IdentityError as exc:
             raise ServicePolicyError(exc.code) from None
         return identity, verifier
@@ -258,7 +268,7 @@ class ServiceAuthority:
     def prepare_service(self, access: str, proof: str, *, target_uri: str,
                         slot: str) -> ServiceCandidate:
         """Prepare attachment without withdrawing a healthy active generation."""
-        identity, verifier = self._verify(access, proof, "POST", target_uri)
+        identity, verifier = self._verify(access, proof, "POST", target_uri, "service")
         with self._lock:
             context, now = self._verified_current(identity, verifier)
             selected = context.slot(slot)
@@ -358,7 +368,7 @@ class ServiceAuthority:
         remains the runtime's obligation, including at the effect checkpoint.
         """
         require(method == request_method, "method-denied")
-        identity, verifier = self._verify(access, proof, method, target_uri)
+        identity, verifier = self._verify(access, proof, method, target_uri, "caller")
         with self._lock:
             context, now = self._verified_current(identity, verifier)
             selected, caller = context.slot(slot), context.caller(identity.subject)

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Installation driver lifecycle contract: vault-stamp-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
 set -euo pipefail
 if [[ -v UPDATE_DRIVER_WITNESS ]]; then

@@ -226,6 +226,21 @@ def test_status_does_not_resolve_installation_or_enqueue(queued, monkeypatch):
     assert seen == {}
 
 
+def test_status_exposes_settlement_kind_without_executing_installation(queued, monkeypatch, capsys):
+    import json
+    import update_driver
+
+    seen, request = queued
+    request.state, request.error = "interrupted", "native scope settled after failure"
+    request.settled_at, request.settlement_kind = 1.0, "native_scope"
+    monkeypatch.setattr(update_driver, "status", lambda identifier: request)
+    assert boundary.cmd_update_request(_args(request_status=request.id, json=True)) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "interrupted" and result["exit_code"] is None
+    assert result["settlement_kind"] == "native_scope" and result["settled_at"] == 1.0
+    assert seen == {}
+
+
 def test_auth_report_stays_read_only_before_custody_resolution(queued, monkeypatch):
     seen, _request = queued
     monkeypatch.setattr(update_cli, "cmd_update", lambda args: 4)
@@ -268,6 +283,43 @@ def test_recovery_controls_work_without_resolving_or_executing_installation(queu
     assert boundary.cmd_update_request(_args(recover_after_restart=True, json=True)) == 0
     assert json.loads(capsys.readouterr().out)["replayed"] is False
     assert seen == {}
+
+
+def test_operator_repair_is_explicit_and_does_not_execute_installation(queued, monkeypatch, capsys):
+    import json
+    import update_driver
+
+    seen, request = queued
+    request.state = "interrupted"
+    request.recovery_authority, request.released_at = "operator_repair", 2.0
+    request.settled_at = request.settlement_kind = None
+    def recover(*, authorized):
+        assert authorized is True
+        return (request,)
+
+    monkeypatch.setattr(update_driver, "recover_for_repair", recover)
+    assert boundary.cmd_update_request(_args(recover_for_repair=True, json=True)) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["replayed"] is False
+    assert result["released"][0]["recovery_authority"] == "operator_repair"
+    assert result["released"][0]["settlement_kind"] is None
+    assert seen == {}
+
+
+@pytest.mark.parametrize("mode", ["auth_report", "force"])
+def test_operator_repair_rejects_installation_and_auth_options(queued, mode):
+    if mode == "auth_report":
+        with pytest.raises(SystemExit):
+            boundary.cmd_update_request(_args(recover_for_repair=True, auth_report=True))
+    else:
+        assert boundary.cmd_update_request(_args(recover_for_repair=True, force=True)) == 1
+    assert queued[0] == {}
+
+
+def test_operator_repair_routing_needs_no_project():
+    from agent_worktrees.project_routing import _is_no_project_invocation
+
+    assert _is_no_project_invocation(["update", "--recover-for-repair", "--json"])
 
 
 def test_manager_update_handoff_carries_only_explicit_scoped_capability(monkeypatch):

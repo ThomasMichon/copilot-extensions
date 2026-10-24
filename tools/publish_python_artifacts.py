@@ -390,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate-root", type=Path)
     parser.add_argument("--qualification-receipt", type=Path)
     parser.add_argument(
-        "--qualification-profile", choices=("legacy-ci-v1", "source-units-v2"), default="legacy-ci-v1",
+        "--qualification-profile", choices=("legacy-ci-v1", "source-units-v2", "candidate-units-v3"), default="legacy-ci-v1",
     )
     parser.add_argument("--unit-packet-dir", type=Path)
     parser.add_argument("--unit-manifest")
@@ -410,7 +410,7 @@ def main(argv: list[str] | None = None) -> int:
     )):
         parser.error("publish-candidate requires candidate, source, base and qualification identities")
     unit_inputs = (args.unit_packet_dir, args.unit_manifest, args.dev_root)
-    if args.qualification_profile == "source-units-v2":
+    if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
         if args.operation != "publish-candidate" or any(value is None for value in unit_inputs):
             parser.error("source-units-v2 publication requires candidate publication, unit packet, manifest and Dev checkout")
     elif any(value is not None for value in unit_inputs):
@@ -422,14 +422,14 @@ def main(argv: list[str] | None = None) -> int:
                 raise PromotionArtifactError("candidate publication requires independent consumer read authority")
             from qualify_promotion_candidate import verify_receipt
 
-            if args.qualification_profile == "source-units-v2":
+            if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
                 from promotion_unit_contract import decode_json
 
                 receipt = decode_json(args.qualification_receipt.read_bytes())
             else:
                 receipt = json.loads(args.qualification_receipt.read_text(encoding="utf-8"))
             unit_arguments = {}
-            if args.qualification_profile == "source-units-v2":
+            if args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
                 unit_arguments = {
                     "dev_root": args.dev_root, "unit_packet_dir": args.unit_packet_dir,
                     "unit_manifest": args.unit_manifest,

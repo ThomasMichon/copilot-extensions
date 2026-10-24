@@ -18,6 +18,11 @@ token types and profiles refuse; this does not advertise compatibility with a
 particular identity provider. Issuer selection and provider renewal/enrollment
 remain separate. Runtime identity trust is never release-signing trust.
 
+The separately selected service-policy
+[`enrolled-pop-v1` profile](gateway-enrolled-identity.md) reuses this engine for
+original application tokens plus independently enrolled proof keys. It does
+not change this `jwt-pop-v1` API's audience, `cnf`, errors or defaults.
+
 ## Trusted caller contract
 
 Construct one serving owner's verifier with an explicit HTTPS issuer, audience,

@@ -211,10 +211,14 @@ The same distinction applies to installation-local roots, template directories
 and index links; genuine first-touch absence remains an empty optional source.
 Unavailable optional repository integration reports a
 partial scan rather than a healthy empty result. Registered-only lookups share
-a bounded snapshot. Inventory additionally requires the repository owner's
-`repos list --strict --json` completeness marker; an older tolerant inventory
-can contribute individually verified roots but leaves discovery partial.
-Discovery never installs that integration. Only regular index/declaration
+a bounded snapshot for execution resources. Template discovery instead reads
+the repository owner's [resident repository map](../../agent-worktrees/docs/repository-map.md)
+once with `repos map --json`: registry metadata and registered local roots
+are already flattened by that producer. It does not issue a point lookup per
+repository, reconstruct the registry or launch a resolver fan-out. Missing,
+old, stale or unavailable map support leaves repository template discovery
+explicitly partial; it never turns an advisory map into current roots.
+Discovery never starts or installs that integration. Only regular index/declaration
 files are opened, so a FIFO or device cannot block the catalog. Plugin sources
 and templates share one lazily acquired current activation report, preserving
 each verified live root and its applicability.

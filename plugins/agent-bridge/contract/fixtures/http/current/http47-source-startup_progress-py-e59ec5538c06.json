@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http47-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/startup-shared-startup_progress-generation-46.json",
+    "sha256": "9a0a65fc2a431e6bb17a4af639113efc1462a300316cb3d76c93ec085ff419de"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http47-owned-cold-drain.json",
+    "sha256": "35d7a1dd4718af3d625d457f87fda17db81af9b752d2dc0d4d0721309eeab979"
+  },
+  "scope": "source bytes unchanged; previous-generation vector preserved, not a new runtime capture",
+  "captured_from": {
+    "commit": "5820a7fb022e869dbd192044561c44bbcab26144",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 47,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/startup_progress.py",
+    "source_git_blob": "99511d5e059cd68fd1d4bceb73f9b272c43049f0",
+    "source_sha256": "ac4609103287a54ba00c6aa0b65e1ce9e96bf4ea128089bb91779f254147bac8"
+  }
+}

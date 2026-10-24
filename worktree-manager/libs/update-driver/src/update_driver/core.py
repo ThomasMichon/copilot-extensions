@@ -23,7 +23,7 @@ from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import boot, foundation_state
 from ._directory import create_queue_directory
 
-SCHEMA = 2
+SCHEMA = 4
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
 _active_transaction = ContextVar("update_driver_active_transaction", default=None)
 
@@ -90,6 +90,16 @@ class Request:
     boot_id: str | None = None
     settled_boot_id: str | None = None
     settled_at: float | None = None
+    settlement_kind: str | None = None
+    recovery_authority: str | None = None
+    released_at: float | None = None
+
+    @property
+    def unresolved(self) -> bool:
+        return (
+            self.state in {"running", "interrupted", "blocked"}
+            and self.settled_at is None and self.released_at is None
+        )
 
 
 def default_root() -> Path:
@@ -217,14 +227,42 @@ def _json(value: object) -> str:
 
 
 def _validate_db(db: sqlite3.Connection) -> None:
-    if db.execute("PRAGMA user_version").fetchone()[0] != SCHEMA:
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version not in {2, 3, SCHEMA}:
         raise StateError("unsupported update-driver schema")
     columns = {row[1] for row in db.execute("PRAGMA table_info(requests)")}
-    if columns != {
+    expected = {
         "id", "identity", "spec", "runner", "state", "exit_code", "error",
         "created_at", "started_at", "finished_at", "boot_id", "settled_boot_id", "settled_at",
-    }:
+    }
+    if version >= 3:
+        expected.add("settlement_kind")
+    if version >= 4:
+        expected.update({"recovery_authority", "released_at"})
+    if columns != expected:
         raise StateError("malformed update-driver schema")
+
+
+def _upgrade_schema(db: sqlite3.Connection, root: Path, custody: OperationLock) -> None:
+    """Migrate only under installation custody and the caller's SQLite transaction."""
+    if custody.path != root / "execution.lock" or not db.in_transaction:
+        raise StateError("schema migration requires installation custody and a transaction")
+    custody.assert_owned()
+    _validate_db(db)
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version == SCHEMA:
+        return
+    for row in db.execute("SELECT * FROM requests"):
+        _request(row, root)
+    if version == 2:
+        db.execute("ALTER TABLE requests ADD COLUMN settlement_kind TEXT")
+        db.execute(
+            "UPDATE requests SET settlement_kind='kernel_restart' WHERE settled_at IS NOT NULL",
+        )
+    db.execute("ALTER TABLE requests ADD COLUMN recovery_authority TEXT")
+    db.execute("ALTER TABLE requests ADD COLUMN released_at REAL")
+    db.execute(f"PRAGMA user_version={SCHEMA}")
+    _validate_db(db)
 
 
 def _assert_database_identity(path: Path, expected: os.stat_result) -> None:
@@ -269,7 +307,8 @@ def _database(
                       CHECK(state IN ('pending','running','completed','interrupted','blocked')),
                     exit_code INTEGER, error TEXT, created_at REAL NOT NULL,
                     started_at REAL, finished_at REAL, boot_id TEXT,
-                    settled_boot_id TEXT, settled_at REAL)"""
+                    settled_boot_id TEXT, settled_at REAL, settlement_kind TEXT,
+                    recovery_authority TEXT, released_at REAL)"""
                 )
                 db.execute(
                     "CREATE UNIQUE INDEX pending_identity ON requests(identity) WHERE state='pending'"
@@ -311,13 +350,41 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
                 raise StateError("malformed request timestamp")
         if row["error"] is not None and not isinstance(row["error"], str):
             raise StateError("malformed request error")
-        if row["settled_at"] is not None and (
-            row["state"] not in {"interrupted", "blocked"}
-            or not boot.valid_boot_identity(row["boot_id"])
-            or not boot.valid_boot_identity(row["settled_boot_id"])
-            or row["boot_id"] == row["settled_boot_id"]
+        kind = (
+            row["settlement_kind"] if "settlement_kind" in row.keys()
+            else ("kernel_restart" if row["settled_at"] is not None else None)
+        )
+        settled = row["settled_at"] is not None
+        if (
+            settled != (row["settled_boot_id"] is not None)
+            or settled != (kind is not None)
+            or (settled and (
+                row["state"] not in {"interrupted", "blocked"}
+                or not boot.valid_boot_identity(row["boot_id"])
+                or not boot.valid_boot_identity(row["settled_boot_id"])
+                or row["boot_id"].split(":", 1)[0] != row["settled_boot_id"].split(":", 1)[0]
+                or kind not in {"kernel_restart", "native_scope"}
+                or (kind == "kernel_restart" and row["boot_id"] == row["settled_boot_id"])
+                or (kind == "native_scope" and (
+                    row["boot_id"] != row["settled_boot_id"] or row["state"] != "interrupted"
+                    or row["finished_at"] is None or not row["error"]
+                ))
+            ))
         ):
             raise StateError("malformed positive-settlement evidence")
+        authority = row["recovery_authority"] if "recovery_authority" in row.keys() else None
+        released = row["released_at"] if "released_at" in row.keys() else None
+        if (
+            (authority is None) != (released is None)
+            or (authority is not None and (
+                authority != "operator_repair" or settled
+                or row["state"] not in {"interrupted", "blocked"}
+                or row["finished_at"] is None or not row["error"]
+                or type(released) not in (int, float)
+                or not math.isfinite(released) or released < 0
+            ))
+        ):
+            raise StateError("malformed recovery-authorization evidence")
         expected = hashlib.sha256(
             (_json(asdict(spec)) + "\n" + _json(asdict(runner))).encode(),
         ).hexdigest()
@@ -326,7 +393,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
         return Request(
             identifier, spec, runner, row["state"], code, row["error"], row["created_at"],
             row["started_at"], row["finished_at"], root / f"{identifier}.log",
-            row["boot_id"], row["settled_boot_id"], row["settled_at"],
+            row["boot_id"], row["settled_boot_id"], row["settled_at"], kind, authority, released,
         )
     except (ValueError, TypeError, InvalidRequestError) as error:
         raise StateError("malformed durable request") from error
@@ -347,7 +414,7 @@ def enqueue(
     _assert_foundation_clear(root)
     with _database(root, create=True) as db:
         db.execute("BEGIN IMMEDIATE")
-        if _has_fence(db):
+        if _has_fence(db, root):
             raise InterruptedError("installation queue fenced; explicit positive settlement required")
         row = None
         if coalesce_running:
@@ -388,20 +455,29 @@ def status(
         return tuple(_request(row, root) for row in db.execute("SELECT * FROM requests ORDER BY rowid"))
 
 
-def _outcome(root: Path, request_id: str, state: str, code=None, error=None) -> None:
+def _outcome(
+    root: Path, request_id: str, state: str, code=None, error=None, *,
+    settled_boot_id: str | None = None,
+) -> None:
     with _database(root, create=True) as db:
         with db:
             db.execute(
-                "UPDATE requests SET state=?,exit_code=?,error=?,finished_at=? WHERE id=?",
-                (state, code, error, time.time(), request_id),
+                """UPDATE requests SET state=?,exit_code=?,error=?,finished_at=?,
+                settled_boot_id=?,settled_at=?,settlement_kind=? WHERE id=?""",
+                (state, code, error, time.time(), settled_boot_id,
+                 time.time() if settled_boot_id is not None else None,
+                 "native_scope" if settled_boot_id is not None else None, request_id),
             )
 
 
-def _has_fence(db: sqlite3.Connection) -> bool:
-    return db.execute(
-        """SELECT 1 FROM requests WHERE state IN ('interrupted','blocked')
-        AND settled_at IS NULL LIMIT 1""",
-    ).fetchone() is not None
+def _has_fence(db: sqlite3.Connection, root: Path) -> bool:
+    requests = tuple(_request(row, root) for row in db.execute(
+        "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
+    ))
+    return any(
+        request.state in {"interrupted", "blocked"} and request.unresolved
+        for request in requests
+    )
 
 
 def foundation_status(*, root: Path | None = None) -> foundation_state.FoundationOperation | None:
@@ -446,6 +522,8 @@ def _reconcile_lost_owner(root: Path) -> None:
             return
         with _database(root, create=True) as db:
             with db:
+                db.execute("BEGIN IMMEDIATE")
+                _has_fence(db, root)
                 db.execute(
                     """UPDATE requests SET state='interrupted',error=?,finished_at=?
                     WHERE state='running'""",
@@ -473,7 +551,7 @@ def ensure_worker(
     _reconcile_lost_owner(root)
     _assert_foundation_clear(root)
     if any(
-        row.state in {"interrupted", "blocked"} and row.settled_at is None
+        row.state in {"interrupted", "blocked"} and row.unresolved
         for row in status(root=root)
     ):
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
@@ -530,6 +608,11 @@ class Transaction:
         self.request, self.root, self.log_path = request, root, request.log_path
         self._lock = lock
         self._witness = None
+        self._native_settled = False
+
+    def _confirm_native_settlement(self) -> None:
+        self.assert_owned()
+        self._native_settled = True
 
     def assert_owned(self) -> None:
         self._lock.assert_owned()
@@ -563,6 +646,7 @@ def _execute(transaction: Transaction) -> int:
     result = run_caller_owned(
         command, timeout=request.runner.timeout,
         max_stdout_bytes=65536, max_stderr_bytes=65536,
+        on_settled=transaction._confirm_native_settlement,
     )
     if result.stdout or result.stderr:
         with transaction.log_path.open("ab", buffering=0) as logfile:
@@ -618,24 +702,29 @@ def drain(
         except OperationLockedError:
             time.sleep(.05)
     try:
+        with _database(root, writable=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            _upgrade_schema(db, root, lock)
+            db.commit()
         _reconcile_foundation(root, lock)
         with _database(root, create=True) as db:
             with db:
+                db.execute("BEGIN IMMEDIATE")
+                _has_fence(db, root)
                 db.execute(
                     """UPDATE requests SET state='interrupted',error=?,finished_at=?
                     WHERE state='running'""",
                     ("previous owner lost custody; descendant settlement unconfirmed", time.time()),
                 )
-            if db.execute(
-                """SELECT 1 FROM requests WHERE state IN ('interrupted','blocked')
-                AND settled_at IS NULL LIMIT 1""",
-            ).fetchone():
+            if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced by unsettled prior transaction")
         while True:
             lock.assert_owned()
             _reconcile_foundation(root, lock)
             with _database(root, create=True) as db:
                 db.execute("BEGIN IMMEDIATE")
+                if _has_fence(db, root):
+                    raise InterruptedError("installation queue fenced by unsettled prior transaction")
                 row = db.execute(
                     "SELECT * FROM requests WHERE state='pending' ORDER BY rowid LIMIT 1",
                 ).fetchone()
@@ -653,8 +742,13 @@ def drain(
                 db.commit()
             transaction = Transaction(request, root, lock)
             scope = _active_transaction.set(transaction)
+            settled_failure = False
             try:
-                code = (executor or _execute)(transaction)
+                try:
+                    code = (executor or _execute)(transaction)
+                except BaseException:
+                    settled_failure = executor is None and transaction._native_settled
+                    raise
                 transaction._close()
                 transaction.assert_owned()
                 _reconcile_foundation(root, lock)
@@ -671,12 +765,18 @@ def drain(
             except BaseException as error:
                 try:
                     transaction._close()
+                    transaction.assert_owned()
+                except BaseException:
+                    settled_failure = False
+                    raise
                 finally:
-                    # All exceptions are uncertain unless the trusted executor
-                    # returned a canonical exit code after its cleanup boundary.
                     _outcome(
                         root, request.id, "interrupted",
-                        error=f"executor interrupted: {type(error).__name__}; settlement required",
+                        error=(
+                            f"executor interrupted: {type(error).__name__}; "
+                            + ("native scope settled" if settled_failure else "settlement required")
+                        ),
+                        settled_boot_id=request.boot_id if settled_failure else None,
                     )
                 raise
             finally:
@@ -721,7 +821,7 @@ def wait(
         if request.state == "pending" and request.error:
             raise SpawnError(request.error)
         if request.state == "pending" and any(
-            item.state in {"interrupted", "blocked"} and item.settled_at is None
+            item.state in {"interrupted", "blocked"} and item.unresolved
             for item in status(root=root)
         ):
             raise InterruptedError("installation queue fenced by unsettled prior transaction")
@@ -753,7 +853,7 @@ def _observe_pending_worker_exit(root: Path, request_id: str, code: int) -> None
             request = _request(row, root)
             if request.state != "pending":
                 return
-            if _has_fence(db):
+            if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced by unsettled prior transaction")
             error = f"worker exited before claiming request: exit {code}"
             db.execute("UPDATE requests SET error=? WHERE id=?", (error, request_id))

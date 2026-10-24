@@ -16,7 +16,7 @@ import stat
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from promotion_unit_contract import (
-    PROFILE, UnitEvidenceError, admit_manifest, decode_json, manifest_digest,
+    CANDIDATE_PROFILE, UnitEvidenceError, admit_manifest, decode_json, manifest_digest,
     relative_file, source_sha, verify_observations, verify_sources,
 )
 
@@ -102,7 +102,15 @@ def _verify_coverage(coverage: dict, manifest: dict) -> None:
     if any(not isinstance(coverage.get(key), dict) for key in ("meta", "files", "totals")):
         raise UnitEvidenceError("coverage must contain meta, files and totals objects")
     files = coverage["files"]
-    if set(files) != set(manifest["coverage_targets"]):
+    candidate = manifest["profile"] == CANDIDATE_PROFILE
+    if (
+        (not candidate and set(files) != set(manifest["coverage_targets"]))
+        or (candidate and (
+            not set(files) <= set(manifest["coverage_targets"])
+            or {manifest["composition"]["origins"][name] for name in files}
+            != set(manifest["composition"]["required_coverage_origins"])
+        ))
+    ):
         raise UnitEvidenceError("coverage files differ from the exact admitted production targets")
     valid_contexts = {""} | {f"{node}|{phase}" for node in manifest["nodes"] for phase in _PHASES}
     calls = {f"{node}|call": node for node in manifest["nodes"]}
@@ -136,6 +144,7 @@ def _verify_coverage(coverage: dict, manifest: dict) -> None:
 def verify_packet(
     directory: Path, *, expected_source_sha: str, expected_manifest: dict,
     source_root: Path | None = None,
+    development_root: Path | None = None,
 ) -> dict:
     """Verify a packet against caller-owned source and manifest expectations."""
     if not isinstance(directory, Path) or (source_root is not None and not isinstance(source_root, Path)):
@@ -158,7 +167,7 @@ def verify_packet(
         raise UnitEvidenceError("packet manifest differs from the trusted canonical manifest")
     coverage_digest = hashlib.sha256(coverage_raw).hexdigest()
     if (
-        set(proof) != _PROOF_FIELDS or proof["profile"] != PROFILE
+        set(proof) != _PROOF_FIELDS or proof["profile"] != manifest["profile"]
         or not isinstance(proof["source_sha"], str)
         or source_sha(proof["source_sha"]) != expected_source_sha
         or proof["manifest_sha256"] != expected_digest
@@ -186,13 +195,34 @@ def verify_packet(
     _verify_coverage(coverage, manifest)
     if source_root is not None:
         verify_sources(source_root.resolve(), manifest["sources"])
+    if manifest["profile"] == CANDIDATE_PROFILE:
+        if source_root is None or development_root is None:
+            raise UnitEvidenceError("candidate packet requires both authoritative source roots")
+        from promotion_candidate_units import _bytes
+        from promotion_development_map import project_coverage, verify_mapping
+
+        composition = manifest["composition"]
+        if composition["dev_sha"] != expected_source_sha:
+            raise UnitEvidenceError("candidate packet has a different Dev anchor")
+        verify_sources(development_root.resolve(), composition["development_sources"])
+        origins = {name: composition["origins"][name] for name in coverage["files"]}
+        mapping = verify_mapping(
+            coverage.get("development_mapping"),
+            dev_sha=expected_source_sha, candidate_tree=composition["candidate_tree"],
+            sources=_bytes(development_root, set(origins.values())),
+            candidate_sources=_bytes(source_root, origins), origins=origins,
+        )
+        raw = {key: value for key, value in coverage.items()
+               if key not in ("development_mapping", "development_projection")}
+        if coverage.get("development_projection") != project_coverage(raw, mapping):
+            raise UnitEvidenceError("development coverage projection differs from verified raw hits")
     raw_digests = {
         "manifest_file_sha256": hashlib.sha256(manifest_raw).hexdigest(),
         "proof_sha256": hashlib.sha256(proof_raw).hexdigest(),
         "coverage_sha256": coverage_digest,
     }
     return {
-        "profile": PROFILE, "source_sha": expected_source_sha, "manifest_sha256": expected_digest,
+        "profile": manifest["profile"], "source_sha": expected_source_sha, "manifest_sha256": expected_digest,
         **raw_digests, "packet_sha256": manifest_digest(raw_digests),
         "manifest": manifest, "proof": proof,
     }

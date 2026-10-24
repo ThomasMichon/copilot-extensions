@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -33,6 +33,7 @@ _SESSIONS_ENSURE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("successor_id", "TEXT"),
     ("handoff_at", "REAL"),
     ("background_recovery_enabled", "INTEGER NOT NULL DEFAULT 1"),
+    ("cold_recovery_stop_token", "TEXT"),
 )
 
 # A live interactive session is kept alive by the extension's 30s heartbeat
@@ -137,9 +138,33 @@ CREATE TABLE IF NOT EXISTS sessions (
     successor_id TEXT,
     handoff_at REAL,
     background_recovery_enabled INTEGER NOT NULL DEFAULT 1,
+    cold_recovery_stop_token TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS cold_outages (
+    outage_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    native_session_id TEXT,
+    target_json TEXT NOT NULL,
+    previous_status TEXT NOT NULL,
+    owner_generation TEXT NOT NULL,
+    execution_json TEXT NOT NULL,
+    interrupted_turns_json TEXT NOT NULL,
+    state TEXT NOT NULL,
+    error TEXT,
+    recovery_generation TEXT,
+    recovery_pid INTEGER,
+    recovery_start_time TEXT,
+    recovery_phase TEXT,
+    replacement_json TEXT,
+    reconnect_evidence_json TEXT,
+    created_at REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cold_outage_unresolved
+ON cold_outages(session_id) WHERE state != 'reconnected';
+CREATE INDEX IF NOT EXISTS idx_cold_outage_session ON cold_outages(session_id);
 
 CREATE TABLE IF NOT EXISTS workspace_embodiments (
     key_digest TEXT PRIMARY KEY,
@@ -331,8 +356,10 @@ class _CoreMixin:
                         "supported writable preparation or migration is needed"
                     )
                 from .runtime_custody import validate_schema
+                from .db_schema import validate_cold_recovery_schema
 
                 validate_schema(self._get_conn())
+                validate_cold_recovery_schema(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                     raise ValueError("Read-only database changed during preparation")

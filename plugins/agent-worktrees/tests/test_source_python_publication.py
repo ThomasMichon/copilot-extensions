@@ -161,6 +161,9 @@ def publication_case(tmp_path, monkeypatch, request, publication_transform):
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     monkeypatch.syspath_prepend(str(content / "scripts"))
+    # Track both first import and replacement so teardown restores the prior module.
+    monkeypatch.setitem(sys.modules, "runtime_install_governance", None)
+    monkeypatch.delitem(sys.modules, "runtime_install_governance")
     driver = load(content / "scripts" / "runtime_install.py", "source_publication_driver")
     source = driver.runtime_source
     digest = source.assembly_hash(content)
@@ -210,6 +213,13 @@ def publication_case(tmp_path, monkeypatch, request, publication_transform):
         })},
     })
     return driver, root, slot, owner, content, identity
+
+
+def test_publication_governance_uses_current_fixture(publication_case):
+    driver, _root, _slot, _owner, content, _identity = publication_case
+    governance = sys.modules[driver.Governance.__module__]
+    assert Path(governance.__file__).resolve().parent == content / "scripts"
+    assert governance.SCRIPTS == content / "scripts"
 
 
 @contextmanager
@@ -313,6 +323,50 @@ def test_actual_native_callback_preserves_owner_and_selected_runtime(
                 assert lease.owner.get("payloadRoot", str(owner)) == str(owner)
             for lock in governance.publication_locks:
                 lock.assert_owned()
+
+
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
+@pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+def test_native_callback_retains_project_only_source(
+    publication_case, monkeypatch, shell, executable,
+):
+    driver, root, slot, original_owner, content, _identity = publication_case
+    home = root.parent
+    owner = home / ".copilot/installed-plugins/example/agent-worktrees"
+    shutil.copytree(original_owner, owner)
+    project = home / "launch-project"
+    settings = project / ".github/copilot/settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Project/Plugins"}},
+        },
+    }), encoding="utf-8")
+    binding = load(content / "scripts/command_binding.py", "project_callback_binding")
+    helper = load(
+        content / "scripts/installation-context/installation_context.py", "project_callback_context",
+    )
+    lifecycle = binding._load_lifecycle()
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), helper, payload_root=owner, plugin_id="agent-worktrees",
+        legacy_root=root, project_root=project,
+    ) as lease:
+        monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
+        monkeypatch.setenv("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", str(project))
+        monkeypatch.chdir(home)
+        governance = driver.Governance(root, owner)
+        with driver.runtime.retention_custody(
+            root, slot.name, payload_hash="candidate",
+        ) as (_slot, descriptor):
+            transaction = driver._publish_helpers(
+                governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
+                content, slot, descriptor, timeout=20,
+                base_python=Path(sys._base_executable),
+            )
+            transaction.keep()
+        assert lease.owner["source"]["canonical"] == "github:project/plugins"
+        for name in ("resolve-runtime.sh", "resolve-runtime.ps1"):
+            assert (root / "bin" / name).read_bytes() == (content / "scripts" / name).read_bytes()
 
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())

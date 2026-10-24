@@ -138,9 +138,22 @@ def test_find_shadowed_aliases_flags_alias_duplicated_in_root_config(
     assert str(ssh_config) in finding.remedy
 
     payload = fragment_registry.doctor_payload(report, config_d, ssh_config=ssh_config)
-    assert any(f["reason"] == "shadowed-alias" for f in payload["findings"])
+    assert payload == {
+        "registry": fragment_registry.REGISTRY_NAME,
+        "path": str(config_d),
+        "authority": report.snapshot.authority.value,
+        "active": [entry.to_dict() for _, entry in sorted(report.entries.items())],
+        "findings": [item.to_dict() for item in (*report.findings, *shadow_findings)],
+        "fix_available": False,
+        "active_basis": "current-evidence-only",
+        "retention_possible": False,
+        "unscoped_blocking": False,
+    }
     rendered = fragment_registry.format_doctor(report, config_d, ssh_config=ssh_config)
     assert "[WARN]" in rendered
+    assert f"    registry: {registry}" in rendered
+    assert f"    module: {module_path}" in rendered
+    assert rendered.endswith("Cleanup is report-only; no --fix operation is available.")
 
 
 def test_find_shadowed_aliases_is_empty_when_no_collision(tmp_path: Path) -> None:

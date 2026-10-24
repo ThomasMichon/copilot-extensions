@@ -461,6 +461,97 @@ def test_v2_cli_writes_canonical_receipt_and_explicit_producer_outputs(unit_case
     assert fields["qualification_digest"] == qualification.receipt_digest(value)
 
 
+def _candidate_packet(case):
+    from promotion_candidate_units import derive_manifest
+    from promotion_development_map import build_mapping, project_coverage
+
+    source, candidate = case["args"]["dev_root"], case["args"]["candidate_root"]
+    target = "tools/unit_feature.py"
+    original = b'__version__ = "0.1.0-dev1"\ndef value(): return 1\n'
+    (source / target).write_bytes(original)
+    (candidate / target).write_bytes(original.replace(b"0.1.0-dev1", b"0.1.20-dev1"))
+    case["manifest"]["sources"][target] = hashlib.sha256(original).hexdigest()
+    for root in (source, candidate):
+        _write_json(root / MANIFEST, case["manifest"])
+    manifest, development, composed = derive_manifest(
+        case["manifest"], development_root=source, candidate_root=candidate,
+        dev_sha=DEV, candidate_tree=TREE,
+    )
+    mapping = build_mapping(
+        dev_sha=DEV, candidate_tree=TREE, sources={target: development[target]},
+        candidate_sources={target: composed[target]}, origins={target: target},
+    )
+    raw = case["coverage"]
+    raw["files"][target]["executed_lines"] = [1, 2]
+    raw["files"][target]["contexts"] = {"1": [""], "2": [NODE + "|call"]}
+    raw["development_projection"] = project_coverage(raw, mapping)
+    raw["development_mapping"] = mapping
+    directory = case["args"]["unit_packet_dir"]
+    digest = hashlib.sha256(_write_json(directory / "coverage.json", raw)).hexdigest()
+    _write_json(directory / "unit-manifest.json", manifest)
+    case["proof"].update(
+        profile=manifest["profile"], manifest_sha256=manifest_digest(manifest), coverage_sha256=digest,
+    )
+    _write_json(directory / "unit-proof.json", case["proof"])
+    case["reseal"]()
+    return mapping
+
+
+def test_v3_qualifies_stamped_bytes_and_verified_projection_without_retesting(unit_case):
+    _candidate_packet(unit_case)
+    value = qualification.qualify_units(
+        **unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE,
+    )
+    assert value["version"] == 3 and value["profile"] == "candidate-units-v3"
+    assert _verify_units(
+        unit_case, value, expected_profile=qualification.CANDIDATE_UNIT_PROFILE,
+    ) == qualification.receipt_digest(value)
+    assert unit_case["downloads"] == [789, 789]
+    projected = unit_case["coverage"]["development_projection"]
+    assert set(unit_case["coverage"]["development_mapping"]["files"]) == set(unit_case["coverage"]["files"])
+    assert projected["copies"]["tools/unit_feature.py"]["unmapped"]["1"]["reason"] == "changed-version-statement"
+    assert projected["coverage"]["tools/unit_feature.py"] == {"2": [NODE + "|call"]}
+
+
+@pytest.mark.parametrize("change", ["candidate-mutation", "dev-mutation", "forged-map", "forged-projection", "wrong-tree"])
+def test_v3_refuses_mutated_bytes_or_forged_development_attribution(unit_case, change):
+    _candidate_packet(unit_case)
+    target = "tools/unit_feature.py"
+    if change in ("candidate-mutation", "dev-mutation"):
+        root = unit_case["args"]["candidate_root" if change == "candidate-mutation" else "dev_root"]
+        (root / target).write_bytes(b"def value(): return 2\n")
+    else:
+        coverage = unit_case["coverage"]
+        if change == "forged-map":
+            coverage["development_mapping"]["files"][target]["lines"]["1"] = 1
+        elif change == "forged-projection":
+            coverage["development_projection"]["coverage"][target]["1"] = [NODE + "|call"]
+        else:
+            coverage["development_mapping"]["candidate_tree"] = "f" * 40
+        directory = unit_case["args"]["unit_packet_dir"]
+        unit_case["proof"]["coverage_sha256"] = hashlib.sha256(
+            _write_json(directory / "coverage.json", coverage),
+        ).hexdigest()
+        _write_json(directory / "unit-proof.json", unit_case["proof"])
+        unit_case["reseal"]()
+    with pytest.raises((ValueError, VerificationError)):
+        qualification.qualify_units(**unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE)
+    assert not unit_case["downloads"]
+
+
+def test_raw_dev_packet_cannot_be_reinterpreted_as_candidate_execution(unit_case):
+    with pytest.raises(ValueError, match="manifest"):
+        qualification.qualify_units(**unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE)
+    assert not unit_case["downloads"]
+
+
+def test_candidate_packet_is_not_accepted_under_historical_source_profile(unit_case):
+    _candidate_packet(unit_case)
+    with pytest.raises(ValueError, match="manifest"):
+        qualification.qualify_units(**unit_case["args"])
+    assert not unit_case["downloads"]
+
+
 @pytest.mark.parametrize("mutation", ["missing-job", "failed-job", "wrong-control", "missing-artifact", "archive-tamper"])
 def test_valid_packet_cannot_hide_wrong_provider_or_archive(unit_case, mutation):
     producer = unit_case["producer"]

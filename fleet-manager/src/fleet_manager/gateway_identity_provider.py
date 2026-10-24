@@ -50,7 +50,7 @@ class IdentityProvider:
 
 
 def prepare_identity(value: object, provider: IdentityProvider | None,
-                     clock: Callable[[], int]
+                     clock: Callable[[], int], *, profile: str = PROFILE,
                      ) -> tuple[dict[str, object], IdentityVerifier, int]:
     """Normalize trust without admitting a plugin-created authenticated identity."""
     if not isinstance(value, dict):
@@ -59,7 +59,7 @@ def prepare_identity(value: object, provider: IdentityProvider | None,
         raise IdentityError("invalid-trust")
     if provider is None or value["provider"] != provider.name:
         raise IdentityError("unsupported-identity-provider")
-    if value["profile"] != PROFILE:
+    if value["profile"] != profile:
         raise IdentityError("unsupported-profile")
     if not isinstance(value["configuration"], dict):
         raise IdentityError("invalid-trust")
@@ -80,6 +80,6 @@ def prepare_identity(value: object, provider: IdentityProvider | None,
     expires = trust["trust_valid_until"]
     assert type(expires) is int
     return {
-        "provider": provider.name, "profile": PROFILE,
+        "provider": provider.name, "profile": profile,
         "configuration": value["configuration"], "trust": normalized,
     }, verifier, expires

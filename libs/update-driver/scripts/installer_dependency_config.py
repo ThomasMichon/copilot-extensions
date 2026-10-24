@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
 import re
@@ -133,6 +134,79 @@ def temporary_inputs(parent):
                 report_cleanup_error(exc)
             else:
                 raise RetainedInputCleanupError(str(exc)) from exc
+
+
+@contextmanager
+def retain_local_exclusions(retain, uv, arguments, *, excluded_local_packages, error_type, **options):
+    if not isinstance(excluded_local_packages, tuple) or any(
+        not isinstance(name, str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name) is None
+        for name in excluded_local_packages
+    ):
+        raise error_type("excluded local packages must be an immutable tuple of names")
+    names = tuple(re.sub(r"[-_.]+", "-", name).lower() for name in excluded_local_packages)
+    if len(set(names)) != len(names):
+        raise error_type("excluded local packages contain duplicate names")
+    if not names:
+        with retain(uv, arguments, **options) as transaction:
+            yield transaction
+        return
+    with temporary_inputs(None) as temporary:
+        constraint = (Path(temporary) / "excluded-local-packages.txt").resolve()
+        constraint.write_text(
+            "".join(f"{name}<0,>=0\n" for name in sorted(names)), encoding="utf-8",
+        )
+        with retain(
+            uv, [*arguments, "--constraint", str(constraint)],
+            _generated_constraints=(constraint,), **options,
+        ) as transaction:
+            yield transaction
+
+
+def retained_source_layout(
+    root, projects, files, resources, base, arguments, environment, editables, *,
+    argument_pairs, file_options, toml, config_inputs, generated_constraints=(),
+):
+    context_project = dict(argument_pairs(arguments)).get("--project") or environment.get("UV_PROJECT")
+    pairs = list(argument_pairs(arguments))
+    operands = [value for option, value in pairs if not option]
+    layout_files = files - set(generated_constraints)
+    compact = (
+        projects and operands and not layout_files and not editables and not context_project
+        and not any(
+            option in file_options | {"--group"}
+            and (option == "--group" or (base / value).resolve() not in generated_constraints)
+            for option, value in pairs
+        )
+        and not any(environment.get(key) for key in (
+            "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE", "UV_EXCLUDE",
+        ))
+        and all(Path(value).is_absolute() for value in operands)
+        and not any(metadata_needs_caller_layout(toml(project / "pyproject.toml")) for project in projects)
+        and not any(metadata_needs_caller_layout(toml(path))
+                    for path, _ in config_inputs(arguments, environment, base))
+    )
+    # Generated absolute constraints must not widen the caller-relative source layout.
+    paths = [*projects, *layout_files, *resources]
+    if not compact:
+        paths.append(base)
+    if context_project:
+        paths.append((base / context_project).resolve())
+    anchors = {}
+    for path in paths:
+        anchor = path.anchor.lower()
+        members = [str(member) for member in paths if member.anchor.lower() == anchor]
+        common = Path(os.path.commonpath(members))
+        anchors[anchor] = common.parent if common.is_file() else common
+
+    def mirror(path):
+        path = Path(path).resolve()
+        if path in generated_constraints:
+            return root / "generated" / path.name
+        anchor = hashlib.sha256(path.anchor.encode()).hexdigest()[:12]
+        return root / anchor / path.relative_to(anchors[path.anchor.lower()])
+
+    return anchors, mirror
 
 
 def config_inputs(arguments, environment, base, *, argument_pairs, toml, error_type):
