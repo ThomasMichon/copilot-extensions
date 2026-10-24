@@ -493,6 +493,30 @@ All entries are **agent-recommended implementation gates**, not completed tests.
 
 ## Journal
 
+### 2026-10-24 - Real silent broker renewal observed
+
+- The resource-continuity clarification actually merged in #8441 as
+  `38c581f99c24dfa3237188918cdffa5f13dd05f5`, after exact-head approval
+  and required CI. Reconciled terminal PR tracking before the ordinary
+  managed pull-forward; no branch reset, force push or lifecycle change.
+- Completed the bounded real-provider observation rather than interpreting
+  `force_refresh` or cache reuse as a newly issued credential. Eight samples
+  each passed the same 26 maintained-verifier expectations. As the prior
+  token approached expiry, a verified token with both a later issue time
+  and later expiry replaced it: the last old sample had 368 seconds
+  remaining; the renewed sample had 4,927 seconds remaining.
+- Acquisition used the same explicitly selected native credential owner and
+  configured account, with no interactive acquisition API. This proves one
+  actual silent provider renewal for the selected API, not a weekly MFA
+  allowance, universal resource policy or installed responder continuity.
+  The observer exited successfully and left no resident process or new
+  service registration.
+- Linux application/TLS interoperability, actual challenge/revocation,
+  separately governed source resources, redundant producer delivery,
+  production profile selection and installed lifecycle remain open.
+  No remaining parent Plan or Validation Plan item is closed by this
+  bounded local result.
+
 ### 2026-10-24 - Actual broker compatibility and resource-specific continuity
 
 - Captured the operator's independent fleet/source-resource session boundary
