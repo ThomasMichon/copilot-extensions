@@ -330,6 +330,8 @@ def test_pty_relay_preserves_redirected_json_stdout(tmp_path):
     try:
         _wait(ready, "redirected completion did not reach its terminal")
         os.write(master, b"answer\n")
+        # Keep the terminal consumer alive through BSD's final TTY close.
+        _wait(lambda: ready() and process.poll() is not None, "redirected caller did not exit")
         stdout, _ = process.communicate(timeout=10)
         assert process.returncode == 0, output.decode(errors="replace") + _diagnostics(receipt)
         assert stdout == b'{"ok":true}\n'
