@@ -61,6 +61,9 @@ arbitrary declared commands. Missing or outdated owners remain unavailable;
 the candidate does not repair them or fabricate a healthy empty result.
 Admitted read subprocesses use the existing caller-owned process-group/Windows
 Job boundary, so timeouts and exit also clean up their synchronous descendants.
+Session teardown cancels and drains pending bootstrap/catalog reads before
+removing transient state, and refuses late reads. The POSIX adapter preserves
+piped owner diagnostics, including older-owner bootstrap compatibility errors.
 
 Contributed actions, form submissions/previews, shared draft writes, streaming
 actions, worktree/session launches, profile apply, updates and maintenance are

@@ -81,9 +81,17 @@ The admitted-read lifecycle packet also exercised the existing process-group/
 Windows Job owner. Its native descendant fixture now establishes observable
 grandchild readiness before the same three-second timeout; the cleanup/review
 packet passed all 38 tests without increasing a production deadline.
+Exit-during-read regressions now exercise actual pending bootstrap/catalog
+descendants, cancellation and draining before transient-state removal, refusal
+of late reads, the normal shutdown-safe source entry, and older-owner bootstrap
+fallback through the POSIX owned adapter. The Windows packet passed 157 tests
+with three native POSIX skips. A separate native Linux adapter check preserved
+340,000 stderr bytes without pipe deadlock and cancelled/drained an active
+read with its grandchild heartbeat stopped and temporary state removed.
 
 This developer mode does not change installation/bootstrap, so a fresh-machine
 installation lane is not applicable; absent-owner refusal is tested instead.
-Real local owner/UI integration was exercised. Remote venue and physical
+Real local owner/UI integration and native Windows/Linux process-adapter
+lifecycle were exercised. Full Linux UI, remote venue and physical
 keyboard/display qualification are not claimed: this initial lane is local-only
-and the automated native captures use Textual's production compositor headlessly.
+and the automated UI captures use Textual's production compositor headlessly.

@@ -9,6 +9,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from worktree_manager.picker_review_cli import main  # noqa: E402
+from worktree_manager._shutdown_exit import run_and_exit  # noqa: E402
 
 if __name__ == "__main__":
     args = sys.argv[1:]
@@ -20,4 +21,4 @@ if __name__ == "__main__":
             digest.update(b"\0")
             digest.update(path.read_bytes())
         args += ["--candidate", "source-" + digest.hexdigest()[:12]]
-    raise SystemExit(main(args))
+    run_and_exit(lambda: main(args))

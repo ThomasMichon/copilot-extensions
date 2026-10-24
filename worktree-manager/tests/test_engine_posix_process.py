@@ -60,6 +60,17 @@ def test_group_owner_is_not_reaped_before_descendant_sweep(monkeypatch, outcome)
     assert events[-2:] == [("sweep", 123, 9), ("reap", 5)]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX stderr capture")
+def test_real_stderr_capture_does_not_fill_a_pipe():
+    detail = "owner-diagnostic\n" * 20000
+    result = pp.run(
+        [sys.executable, "-c", "import sys;sys.stderr.write('owner-diagnostic\\n'*20000);sys.exit(2)"],
+        timeout=10, text=True, env=dict(os.environ), stderr=subprocess.PIPE,
+    )
+    assert result.returncode == 2
+    assert result.stderr == detail
+
+
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX group lifetime")
 def test_real_spawn_failure_preserves_the_engine_error(tmp_path):
     with pytest.raises(OSError, match="No such file"):

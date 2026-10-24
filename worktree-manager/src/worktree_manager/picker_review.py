@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 
 MESSAGE = "Read-only candidate: live actions, launches and maintenance are disabled."
 
@@ -16,11 +17,38 @@ class ReadOnlyError(RuntimeError):
     pass
 
 
+class _Reads:
+    def __init__(self):
+        self.cancelled = threading.Event()
+        self._condition = threading.Condition()
+        self._active = 0
+
+    @contextmanager
+    def operation(self):
+        with self._condition:
+            if self.cancelled.is_set():
+                raise ReadOnlyError("Read-only candidate: review session is closed.")
+            self._active += 1
+        try:
+            yield
+        finally:
+            with self._condition:
+                self._active -= 1
+                self._condition.notify_all()
+
+    def close(self):
+        with self._condition:
+            self.cancelled.set()
+            if not self._condition.wait_for(lambda: self._active == 0, timeout=10):
+                raise ReadOnlyError("Read-only candidate: admitted reads did not drain.")
+
+
 @dataclass(frozen=True)
 class Review:
     state_dir: Path
     owner_root: Path
     candidate: str
+    reads: _Reads = field(default_factory=_Reads)
 
 
 _review: Review | None = None
@@ -61,7 +89,9 @@ def run_read(argv, **kwargs):
 
     if kwargs.pop("capture_output", False):
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    return engine_process.run(argv, **kwargs)
+    reads = current().reads
+    with reads.operation():
+        return engine_process.run(argv, cancelled=reads.cancelled, **kwargs)
 
 
 def refuse(screen) -> bool:
@@ -86,7 +116,10 @@ def session(candidate: str):
     prefix = "worktree-manager-review-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-")
     with tempfile.TemporaryDirectory(prefix=prefix) as directory:
         _review = Review(Path(directory), slot.parent.parent, candidate)
-        yield _review
+        try:
+            yield _review
+        finally:
+            _review.reads.close()
     # Do not clear _review: surviving daemon threads must never regain writes.
 
 
@@ -113,17 +146,22 @@ def worktree_rows(project: str, *, worktree_id: str | None = None) -> list[dict]
     from .worktree_feed_contract import CurrentFeed, FeedUnavailable
 
     feed = CurrentFeed()
-    stream = frames(current().owner_root, project, alive=lambda: True, startup_timeout=2.0)
-    try:
-        for frame in stream:
-            rows = feed.receive(frame)
-            if rows is not None:
-                if worktree_id is None:
-                    return rows
-                matches = [row for row in rows if row["id"].endswith(worktree_id)]
-                return matches if len(matches) == 1 else []
-    finally:
-        stream.close()
+    state = current()
+    with state.reads.operation():
+        stream = frames(
+            state.owner_root, project,
+            alive=lambda: not state.reads.cancelled.is_set(), startup_timeout=2.0,
+        )
+        try:
+            for frame in stream:
+                rows = feed.receive(frame)
+                if rows is not None:
+                    if worktree_id is None:
+                        return rows
+                    matches = [row for row in rows if row["id"].endswith(worktree_id)]
+                    return matches if len(matches) == 1 else []
+        finally:
+            stream.close()
     raise FeedUnavailable("Read-only candidate: owner feed closed before publication")
 
 
