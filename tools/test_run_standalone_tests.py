@@ -234,7 +234,7 @@ def test_manager_preparation_retains_source_payload_layout(tmp_path, monkeypatch
 
 @pytest.mark.parametrize("component", [
     "fleet-manager", "worktree-manager", "services/index", "services/dispatch",
-    "services/chat", "services/pr",
+    "services/chat", "services/pr", "services/ssh",
 ])
 def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch, component):
     projects = {
@@ -244,6 +244,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         "services/dispatch": "agent-dispatch-service",
         "services/chat": "agent-chat-service",
         "services/pr": "agent-pull-requests-service",
+        "services/ssh": "agent-ssh-service",
         "plugins/agent-index": "agent-index",
         "plugins/agent-dispatch": "agent-dispatch",
         "plugins/agent-pull-requests": "agent-pull-requests",
@@ -274,7 +275,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             'agent-procutil = {path="../../libs/agent-procutil", editable=true}\n',
         )
     (tmp_path / "libs" / "versioned-runtime").mkdir()
-    if component in {"fleet-manager", "services/pr"}:
+    if component in {"fleet-manager", "services/pr", "services/ssh"}:
         (tmp_path / "libs" / "installer-engine").mkdir()
         (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil").mkdir()
     monkeypatch.setattr(runner, "REPO", tmp_path)
@@ -287,7 +288,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     def prepare(uv, arguments, **kwargs):
         assert kwargs["trusted_source_roots"] == (tmp_path,)
         expected_resources = (tmp_path / "libs" / "versioned-runtime",)
-        if component in {"fleet-manager", "services/pr"}:
+        if component in {"fleet-manager", "services/pr", "services/ssh"}:
             expected_resources += (
                 tmp_path / "libs" / "installer-engine",
                 tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",
@@ -316,7 +317,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
     extra = "[test]" if component == "services/index" else "[dev]"
     assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
-    if component in ("services/index", "services/dispatch", "services/pr"):
+    if component in ("services/index", "services/dispatch", "services/pr", "services/ssh"):
         assert "--override" in installs[0]
 
 
@@ -341,6 +342,7 @@ def test_prepare_rejects_host_interpreter_before_admission(tmp_path, monkeypatch
     ("agent-dispatch-service", "services/dispatch"),
     ("agent-chat-service", "services/chat"),
     ("agent-pull-requests-service", "services/pr"),
+    ("agent-ssh-service", "services/ssh"),
 ])
 def test_service_alias_uses_canonical_preparation_lease_and_tests(
     tmp_path, monkeypatch, legacy, canonical,
