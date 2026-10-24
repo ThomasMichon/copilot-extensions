@@ -483,6 +483,63 @@ shared-multiplex contracts above.
 
 ## Journal
 
+### 2026-10-24 - Selected manual-client implementation and recovery qualification
+
+- Implemented the Chat-owned installed setup module over the existing exact
+  client constructor and canonical created-file publication. One installation
+  journal binds explicit identity, role, source/slot and configuration to
+  canonical selectors; the selected catalog derives retained argv from the
+  verified installed slot. No second command registry, installer engine,
+  service supervisor, PATH adoption or automatic enrollment is introduced.
+- Explicit recovery consumes canonical durable receipt prefixes only for
+  reversal. Published operations still require complete receipts. Exact
+  captured context bindings and physical output proofs protect foreign
+  replacements, including replacements with identical bytes. Preserving
+  removal is resumable and retains slots, configuration, data and evidence.
+- Focused native Windows policy and qualification controls passed, including
+  context drift, configuration drift, wrong identity and unsafe-root refusal.
+  Canonical copy publication passed 50 cases, including actual producer death,
+  strict-default prefix refusal and explicit recovery with foreign targets.
+  An independently installed artifact exercised fresh/repeat setup,
+  different-code update, candidate refusal, real publication/recovery/removal
+  death, source-removed invocation and preserving removal.
+- The full local diagnostic completed within the unchanged 600-second bound.
+  It exposed a stale exact-membership count, corrected for the added nodes,
+  and a slow-start-sensitive HTTP trickle assertion. Both unchanged HTTP
+  deadline cases passed the focused rerun. Final artifact acceptance/full
+  qualification, native matrix and review remain outstanding; no timeout
+  threshold, portfolio member or skip policy is relaxed.
+- Documentation impact: updated the installed Chat API and canonical prefix
+  recovery reference. This closes part of the already-reviewed standard-setup
+  derivation, not a new vision or plugin surface. Service lifecycle, Manager
+  discovery, private allocation, container image/Komodo execution and the full
+  parent Plan/Validation Plan remain open. No runtime rollout is authorized.
+- Direct pre-publication review identified a capture race: a foreign selector
+  could appear after initial validation but before canonical baseline capture.
+  The before-effects boundary now rechecks existing created-object ownership,
+  or complete selector absence on first setup. Both fresh/update race controls
+  and the expanded exact portfolio inventory passed without overwriting the
+  replacement. The final inventory contains 478 nodes.
+
+### 2026-10-24 - Canonical retained settlement reviewed and merged
+
+- #8589 merged as `880e4bf16540defa639936522985ce2580b265dd`
+  at12:45:36Z after the full current-head Copilot approval of
+  `c49381cf4b29df658a4b42c97d46f2fb61b30af9`, resolved threads and all
+  required checks. Managed completion used only the existing additional
+  CODEOWNER exception; there was no CI bypass or runtime rollout.
+- The final Windows packet reports156 passed and3 explicit POSIX skips
+  in50.39s, including valid context/receipt drift refusal, real writer
+  exclusion, producer-exit recovery and non-owned normalized no-ops.
+  Canonical generation, install-contract, documentation and effort guards,
+  focused lint and whitespace checks pass. This qualifies the publication
+  primitive, not selected Chat installation or another native platform.
+- Re-read the full Plan and Validation Plan. No selected setup, removal,
+  service, private allocation, container execution, native or adoption item
+  closes from this prerequisite. Continue the Chat-owned selected-client
+  adapter and explicit recovery qualification without a second command
+  ledger or neighboring lifecycle implementation.
+
 ### 2026-10-24 - Durable canonical publication settlement
 
 - The selected-client trace found that `CopyPublication.keep()` deliberately

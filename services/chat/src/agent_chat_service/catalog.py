@@ -17,7 +17,7 @@ MAX_RESOURCE_BYTES = 1024 * 1024
 PACKAGE_FILES = (
     "__init__.py", "catalog.py", "cli.py",
     "client.py", "store.py", "transport.py", "hosting.py", "workspace.py", "collaboration.py",
-    "construction.py",
+    "construction.py", "setup.py",
     "_versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_publication.py", "versioned_runtime_source.py",
     "installer_engine.py", "installer_engine_process.py",

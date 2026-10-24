@@ -120,6 +120,60 @@ p.CopyPublication(root,workspace,bindings).publish().retain()
     assert {path: path.read_bytes() for path in before} == before
 
 
+@pytest.mark.parametrize("foreign", [False, True])
+def test_explicit_prefix_recovery_after_real_producer_death(tmp_path, foreign):
+    transaction, before = case(tmp_path)
+    baseline = {path: publication.state_path(path) for path in before}
+    script = """
+import hashlib,json,os,pathlib,sys
+sys.path.insert(0,sys.argv[1])
+import versioned_runtime_publication as p
+root,workspace,sources=map(pathlib.Path,sys.argv[2:5])
+targets=list(map(pathlib.Path,json.loads(sys.argv[5])))
+bindings=[p.CopyBinding(sources/str(i),target,
+    hashlib.sha256((sources/str(i)).read_bytes()).hexdigest())
+    for i,target in enumerate(targets)]
+original=os.replace
+def replace(source,target):
+    original(source,target)
+    if pathlib.Path(target)==targets[0]:
+        os._exit(73)
+p.os.replace=replace
+p.CopyPublication(root,workspace,bindings).publish()
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(LIBRARY),
+         str(transaction.root), str(transaction.workspace),
+         str(transaction.bindings[0].source.parent), json.dumps(list(map(str, before)))],
+        capture_output=True, text=True, timeout=30, creationflags=HEADLESS,
+    )
+    assert result.returncode == 73, result.stdout + result.stderr
+    targets = list(before)
+    assert targets[0].read_bytes() != before[targets[0]]
+    with pytest.raises(publication.PublicationProofError, match="incomplete"):
+        publication.recover_uncontested(
+            transaction.context, transaction.receipts, transaction.workspace / "refused.jsonl",
+            transaction.expected, baseline,
+        )
+    assert not (transaction.workspace / "refused.jsonl").exists()
+    if foreign:
+        peer = targets[0].with_name("peer-replacement")
+        peer.write_bytes(targets[0].read_bytes())
+        os.replace(peer, targets[0])
+    observed = publication.state_path(targets[0])
+    refused = publication.recover_uncontested(
+        transaction.context, transaction.receipts, transaction.workspace / "explicit.jsonl",
+        transaction.expected, baseline, recovery_only=True,
+    )
+    if foreign:
+        assert refused == [targets[0]]
+        assert publication.state_path(targets[0]) == observed
+    else:
+        assert refused == []
+        assert {path: path.read_bytes() for path in targets} == before
+    assert all(path.exists() for path in [transaction.context, *transaction.receipts])
+
+
 @pytest.mark.parametrize("damage", ["target", "backup", "context", "receipt"])
 def test_retained_settlement_refuses_drift_without_releasing_custody(tmp_path, damage):
     transaction, _before = case(tmp_path)

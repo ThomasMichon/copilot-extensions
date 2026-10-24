@@ -360,6 +360,17 @@ Ordinary readers, registration reuse, `check_owned` and `recover_owned` retain
 their complete-receipt requirement. This is not restoration authority for an
 older runtime or a generic repair of missing evidence.
 
+`recover_uncontested(context, receipts, output, expected, baseline,
+recovery_only=True)` exposes that same narrow prefix admission for **explicit
+reversal** after producer death. It reacquires the normal target-writer leases,
+validates the caller's complete context/baseline and declared bytes, restores
+only physically proven uncontested outputs, and returns foreign targets without
+overwriting them. The default remains `False`: ordinary complete-receipt
+admission is unchanged. The lifecycle owner journals its intent and exact
+receipt/output locators before effects, retains recovery-created proofs across
+another interruption, and decides when its operation has settled. A prefix,
+an empty recovery or a returned foreign target is never publication success.
+
 ## Claim-owned development generations
 
 An explicit development refresh uses a new `dev-<32 lowercase hex digits>`

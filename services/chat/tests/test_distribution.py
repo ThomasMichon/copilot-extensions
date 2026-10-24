@@ -130,7 +130,7 @@ finally:
         "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
         "shell": "direct", "availability": "ready",
     }
-    assert len(catalog["resource_sha256s"]) == 22
+    assert len(catalog["resource_sha256s"]) == 23
     assert "hosting.py" in catalog["resource_sha256s"]
     assert "workspace.py" in catalog["resource_sha256s"]
     assert "collaboration.py" in catalog["resource_sha256s"]
