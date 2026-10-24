@@ -19,7 +19,7 @@ while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --client-only) service_mode=(--client-only); shift ;;
         --installer-action)
-            [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp || "$2" == stamp-provision ) ]] || exit 2
+            [[ "$#" -ge 2 && ( "$2" == provision || "$2" == stamp || "$2" == stamp-provision || "$2" == install ) ]] || exit 2
             installer_action="$2"; shift 2 ;;
         --wait) wait_for_owner=1; shift ;;
         --run-owner)
@@ -66,6 +66,16 @@ case "$plugin" in
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
     printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
+fi
+if [[ "$installer_action" == install && "$plugin" != agent-logger ]]; then
+    printf 'Fixed install action requires Logger.\n' >&2; exit 1
+fi
+if [[ "$plugin" == agent-logger ]]; then
+    for helper in command_binding.py command_lifecycle.py; do
+        [[ -f "$payload/scripts/$helper" ]] || {
+            printf 'Logger first use requires its canonical lifecycle helpers.\n' >&2; exit 1;
+        }
+    done
 fi
 if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces

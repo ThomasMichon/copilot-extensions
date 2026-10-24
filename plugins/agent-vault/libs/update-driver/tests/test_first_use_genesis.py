@@ -32,11 +32,13 @@ def observe(predicate, timeout, diagnostic):
     raise AssertionError(diagnostic())
 
 
-@pytest.mark.parametrize("payload_fixture", [
-    "owning_payload", "owning_pull_requests", "owning_ssh", "owning_codespaces", "owning_logger",
+@pytest.mark.parametrize(("payload_fixture", "installer_action"), [
+    ("owning_payload", "provision"), ("owning_pull_requests", "provision"),
+    ("owning_ssh", "provision"), ("owning_codespaces", "provision"),
+    ("owning_logger", "provision"), ("owning_logger", "install"),
 ])
 def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
-    request, payload_fixture, area, native_window_observation,
+    request, payload_fixture, installer_action, area, native_window_observation,
 ):
     payload, installation, project = request.getfixturevalue(payload_fixture)
     library = Path(__file__).resolve().parents[2]
@@ -84,7 +86,7 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
                 [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                  str(source / "scripts" / "first-use.ps1"), "-Root", str(root),
                  "-Payload", str(payload), "-RuntimeRoot", str(installation),
-                 "-Project", str(project)],
+                 "-Project", str(project), "-InstallerAction", installer_action],
                 env=env, require_job=True, allow_breakaway=False,
                 stdin=subprocess.DEVNULL, stdout=caller_log, stderr=caller_log,
                 **agent_procutil.no_window_kwargs(),
@@ -111,7 +113,8 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
             caller = subprocess.Popen(
                 [str(tools / "bash"), "-c", '"$@" ; code=$?; [[ "$code" == 0 ]] || exit "$code"; sleep 900',
                  "first-use-caller", str(tools / "bash"), str(source / "scripts" / "first-use.sh"),
-                 str(root), str(payload), str(installation), str(project)],
+                 str(root), str(payload), str(installation), str(project),
+                 "--installer-action", installer_action],
                 env=env, start_new_session=True, stdin=subprocess.DEVNULL,
                 stdout=caller_log, stderr=caller_log,
             )
@@ -145,6 +148,8 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
         assert len(requests) == 1 and requests[0].state == "running", diagnostic()
         request = requests[0]
         assert request.spec.backend == "owning-plugin-provision"
+        assert json.loads(request.spec.source).get("installer_action", "provision") == installer_action
+        assert (installation / "executed").read_text() == installer_action
         # The old native snapshot is not the receipt for this ordinary transaction.
         assert foundation_status(root=root).state == "completed"
         assert foundation_status(root=root).operation_id == operation.operation_id

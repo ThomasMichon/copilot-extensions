@@ -29,6 +29,7 @@ while retaining installation, ownership, policy and health contracts.
 | Human-progress implementation owner | Shared timing/line rendering, actual output adapters and focused proofs; no Git, PR or host lifecycle writes | Coordinator's bounded code delegation |
 | Bridge serving source implementer | Only #6826 in an independent managed worktree and source PR; no production update or recovery authority | Coordinator's bounded cooperating-session delegation |
 | Updater failure-boundary implementer | Only the two reached stdio hops and native-owner settlement of positively confirmed pre-spawn failure under #7743; no shared broker or installed recovery authority | Managed source handle `rusty-kiln`; public coordination on #7743 |
+| Directory-evidence cost implementer | Only #8679's repeated directory-marketplace parsing in native source admission and directly dependent generated consumers; no policy, provider, archival or runtime lifecycle redesign | Managed source handle `eager-widget`; public coordination on #8679 |
 
 ## Coordination
 
@@ -215,6 +216,46 @@ not replace the held #6859 / #7833 lifetime repair.
   failed and uncertain-state behavior rather than adding success-shaped
   fallbacks.
 - [ ] Measure before/after execution count and cost for the same scenarios.
+
+### Bounded directory-evidence parsing reduction
+
+The #8679 diagnostic reached the actual Bridge history HTTP request and its
+registered Logger cold-store child. The provider remained in the native
+installation-context `status` command, reparsing the whole directory marketplace
+for each plugin name/type lookup, before entering its Python runtime. The
+standalone provider also exceeded its caller's deadline. This is measured
+source-admission cost, not proof that every history, bootstrap or allocation
+failure shares one cause.
+
+The implementation details below are _(agent-recommended)_. This slice closes
+the existing Phase 3 repeated-probing reduction and the installation contract's
+dependency-light, attributable default-legacy path. It does not change standing
+installation intent, require cells, weaken provenance, or transfer #1096's
+Phase 8 or universal-coexistence acceptance. The #7743 marker-only hook no-op,
+#4195 hook admission and stale-owner recovery, #6812 Manager startup, and
+held #6859 / #7833 lifetime work remain independently owned.
+
+- [ ] Obtain review of this bounded plan before implementation.
+- [ ] Reuse the canonical shell/awk parser to obtain directory-marketplace
+  candidate entries in one parse, rather than reparsing all entries per
+  lookup. Retain the shell-only bootstrap and its supported native
+  interpreters; add no Python/jq prerequisite or persistent readiness cache.
+- [ ] Preserve strict JSON and schema behavior, duplicate/ambiguous match
+  refusal, metadata.pluginRoot, source normalization, path containment and
+  selected-snapshot ownership. Missing, unsupported or invalid evidence must
+  remain an explicit refusal, never an inferred source or legacy bypass.
+- [ ] Synchronize only the canonical helper's existing generated consumers.
+  Preserve publication consent, source ownership, runtime selection, health,
+  structured output and all original deadlines.
+- [ ] Qualify real native resolver/wrapper calls with small and large directory
+  marketplaces, valid and refused identities, and actual parser/child counts.
+  Record equivalent before/after timing, not a mocked runtime or a wider budget.
+- [ ] Source-redeploy into the isolated full-plugin playground and exercise the
+  same history consumer after caller exit. A faster source probe alone is not
+  successful archival retrieval; retain any subsequent availability,
+  configuration or lifecycle failure as its own unresolved gate.
+- [ ] Drive required review, CI and normal containing release; keep authorized
+  installed rollout and parent-effort completion separate from source merge.
 
 ### Phase 4 - Land, prove and finish
 

@@ -97,3 +97,29 @@ This closes part of existing Installer/Plugin Service Model intent using the
 single-owner, thin-adapter and cross-platform patterns; it changes no standing
 vision. Documentation impact is this bounded plan and parent row; as-is runtime
 documentation changes with implementation, not this proposal.
+
+## Journal
+
+The [dated Logger journal](<journal/2026/10.24 logger-first-use.md#logger-install-action-prerequisite>)
+records reviewed intent, actual qualification and failures. Current scope and
+the completion gate remain above.
+
+## Implementation and qualification in progress
+
+The fixed Python and both native front doors now admit `install` only for
+Logger. The existing executor supplies the action to the canonical frozen
+installer; no queue, schema, service option or ordinary publisher changed.
+Tests preserve distinct action identity, own context and native arguments,
+other-plugin refusal and no-write controls. The existing manual native
+portfolio now also exercises actual registration code through isolated
+ScheduledTasks/`systemctl` adapters, reuse/reconciliation, fatal failures and
+Windows' tolerated access-denied warning. Caller-loss qualification includes
+the fixed `install` action.
+
+Local bounded action/identity/other-plugin checks passed 12 cases. A full
+local Logger-file attempt reached its 480-second aggregate wall budget after
+38 cases without an assertion failure; it is not a complete passing run.
+All 13 install contracts, canonical helper synchronization and touched Python
+lint pass. Final native cold/registration qualification and implementation
+review/merge remain pending. No host task/unit registration, personal
+processing, ordinary publisher adoption or rollout occurred.
