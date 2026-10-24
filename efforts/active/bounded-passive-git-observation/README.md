@@ -142,6 +142,11 @@ from admitted mutation without introducing another authority or cache.
 Prefer invocation-local `-c core.fsmonitor=false` for passive classifier
 status reads over a new session-lifetime configuration policy.
 
+The blocking POSIX per-probe census finding has an
+[observation-scoped confirmation proposal](posix-confirmation-proposal.md).
+It is a design-only request for narrow shared-owner agreement, not admission
+to alter procutil or a waiver of the Medium finding.
+
 ## Journal
 
 ### 2026-10-23 — Bounded planning
@@ -178,3 +183,12 @@ status reads over a new session-lifetime configuration policy.
 - Requested checkpoint precedes actual isolated consumer/shim, held-pipe and
   native cleanup expansion. R1b, R2, installed proof and root acceptance remain
   unadmitted/open; no service or production fixture was changed.
+- Source review #8458 identified three High cleanup/capability faults and a
+  blocking Medium per-probe global-census cost. Seven pure regression cases
+  failed before the admitted High fixes; all 90 combined targeted cases then
+  passed, with 99 unrelated/native cases deselected. Full capability preflight,
+  failed-Job custody and cleanup-error propagation are corrected in R1a-owned
+  hunks only. Legacy non-observation paths remain unchanged.
+- The Medium stays blocking. Its observation-scoped API proposal is documentation
+  only and requires coordinator/shared-owner agreement before any implementation.
+  No procutil/shared API, native fixture, service or production deadline changed.

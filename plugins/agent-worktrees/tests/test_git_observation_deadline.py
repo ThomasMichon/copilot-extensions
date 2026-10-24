@@ -210,6 +210,7 @@ def test_bounded_runner_reserves_cleanup_inside_total(monkeypatch, clock, cancel
         def terminate_and_wait(self, timeout):
             calls.append(("terminate", timeout))
             clock.now += 1
+            self.close()
 
         def close(self):
             calls.append(("close-job", clock.now))
@@ -289,3 +290,100 @@ def test_legacy_timeout_still_has_its_original_cleanup_allowance(monkeypatch):
     with pytest.raises(subprocess.TimeoutExpired):
         pt.run_bounded(["git"], cwd=".", env={}, timeout=180)
     assert waits == [180, 5]
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("unsupported"), PermissionError("denied"), OSError("no proc")])
+def test_full_posix_capability_failure_prevents_spawn(monkeypatch, clock, failure):
+    from agent_procutil import owned_process
+
+    calls = []
+
+    def require_support():
+        calls.append("preflight")
+        raise failure
+
+    monkeypatch.setattr(pt.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(pt, "detached_kwargs", lambda: {"start_new_session": True})
+    monkeypatch.setattr(owned_process, "_require_posix_execution_support", lambda: None)
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", require_support)
+    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail("spawn before support"))
+    with pytest.raises(pt.ObservationUnavailable) as error:
+        pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=115)
+    assert error.value.__cause__ is failure
+    assert calls == ["preflight"]
+
+
+def test_failed_job_cleanup_retains_handle_for_confirmation_retry(monkeypatch, clock):
+    class Process:
+        stdin = stdout = stderr = None
+        returncode = 0
+
+        def communicate(self, **options):
+            return "", ""
+
+    class Job:
+        handle = object()
+        attempts = 0
+        closes = 0
+
+        def terminate_and_wait(self, timeout):
+            assert self.handle is not None
+            self.attempts += 1
+            if self.attempts == 1:
+                raise TimeoutError("still active")
+            self.close()
+
+        def close(self):
+            self.closes += 1
+            self.handle = None
+
+    process, job = Process(), Job()
+    monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pt, "no_window_kwargs", lambda: {})
+    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (process, job))
+    with pytest.raises(pt.ObservationCleanupError) as error:
+        pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=115)
+    assert error.value.process is process and error.value.job is job
+    assert job.handle is not None and job.closes == 0
+    # This is explicit owner cleanup, not a new observation or renewed D.
+    error.value.job.terminate_and_wait(1)
+    assert job.handle is None and job.attempts == 2 and job.closes == 1
+
+
+def test_default_cleanup_failure_does_not_probe_fallback(monkeypatch, clock):
+    monkeypatch.setattr(sb, "_core_helper", lambda name, local: local)
+    calls = []
+    failure = pt.ObservationCleanupError("unconfirmed child")
+
+    def git(*args, **options):
+        calls.append(args[0])
+        if args[0] == "ls-remote":
+            raise failure
+        if len(calls) > 3:
+            pytest.fail("fallback after unconfirmed cleanup")
+        return subprocess.CompletedProcess(args, 1, "", "")
+
+    monkeypatch.setattr(go, "git", git)
+    with pytest.raises(pt.ObservationCleanupError) as error:
+        sb._resolve_remote_default_branch(".", "origin", config_default="main", allow_remote=True)
+    assert error.value is failure
+    assert calls == ["rev-parse", "symbolic-ref", "ls-remote"]
+
+
+@pytest.mark.parametrize("surface", ["render", "json"])
+def test_segment_preserves_cleanup_failure_custody(monkeypatch, checkout, clock, surface):
+    monkeypatch.setattr(sb, "_core_helper", lambda name, local: local)
+    failure = pt.ObservationCleanupError("retained ownership")
+    failure.process, failure.job = object(), object()
+
+    def observation(*args):
+        raise failure
+
+    monkeypatch.setattr(sb, "_segment_git_observation", observation)
+    with pytest.raises(pt.ObservationCleanupError) as error:
+        if surface == "render":
+            sb._render_status_segment(checkout, plain=True, no_title=True)
+        else:
+            sb._status_segment_json(checkout)
+    assert error.value is failure
+    assert error.value.process is failure.process and error.value.job is failure.job

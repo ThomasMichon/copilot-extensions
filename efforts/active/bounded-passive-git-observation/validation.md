@@ -40,6 +40,22 @@ ceiling was retained, not widened. Unit clocks/process doubles are not native
 consumer/shim or descendant-survival evidence. Those tiers below remain open;
 no native window, live fixture or timing retry was used for this checkpoint.
 
+### Three High source-review corrections
+
+Seven pure fail-first cases reproduced missing full POSIX capability preflight
+(unsupported/access/OS failures before spawn), invalidated failed-Job custody,
+and swallowed cleanup failures in default fallback and both segment surfaces.
+After the admitted corrections, the same combined selection passed **90 tests**
+with 99 unrelated/native cases deselected. The explicit retained-handle retry
+settles a failed cleanup obligation; it is not a renewed observation deadline.
+Existing legacy binary/input, inherited-group and 180-plus-five behavior remains
+covered without changing those paths.
+
+The Medium per-probe census finding remains blocking and is not covered by
+these High fixes. [Its scoped proposal](posix-confirmation-proposal.md) is not
+an implemented API. No shared procutil change, native execution, production
+deadline growth or expanded qualification is claimed.
+
 Extend `test_git_ops.py` and `test_status_segment.py`:
 
 - Stall the very first branch call; non-active returns UNKNOWN with no

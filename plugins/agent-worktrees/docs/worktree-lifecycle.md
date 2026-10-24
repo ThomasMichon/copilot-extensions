@@ -286,7 +286,10 @@ with unavailable branch metadata; missing checkouts remain `GONE`. A fetch
 counts as requested evidence only after an actual attempt. The observation
 runner requires its own Windows Job or unreaped POSIX group custody; an
 inherited contained-test group is refused rather than swept. Cleanup failure
-is an explicit error, not a successful observation. General Git calls and
+is an explicit error, not a successful observation. Full capability/access
+checks precede launch; failed cleanup retains native custody for the owner
+to settle, and does not permit default-branch fallback or another Git probe.
+General Git calls and
 foreground push timeout/binary-input/inherited-group behavior are unchanged.
 Monitor admission-lock separation and passive fsmonitor restart prevention
 remain separately gated work; this local deadline does not establish them.
