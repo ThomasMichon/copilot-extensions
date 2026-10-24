@@ -2487,7 +2487,7 @@ def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
     asyncio.run(run())
 
 
-def test_resume_prompt_offered_only_for_local_cold_resume_rows():
+def test_resume_prompt_offered_only_for_local_or_remote_cold_resume_rows():
     """Live and sessionless Open never offer a Resume prompt."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
@@ -2513,7 +2513,7 @@ def test_resume_prompt_offered_only_for_local_cold_resume_rows():
     acts = M._session_action_verbs(local_resumable)
     assert "Resume" in acts
     assert "Resume prompt…" in acts
-    assert "Resume prompt…" not in M._session_action_verbs(
+    assert "Resume prompt…" in M._session_action_verbs(
         dict(local_resumable, is_local=False))
     assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, sessionless=True))
@@ -5136,7 +5136,7 @@ def test_new_worktree_modifiers_can_be_combined():
 
 
 def test_remote_new_worktree_options_hide_ahp():
-    """Remote targets hide unsupported prompts and same-machine-only AHP."""
+    """Remote targets offer native prompts but hide same-machine-only AHP."""
     src = _fixture_source()
 
     async def run():
@@ -5150,7 +5150,7 @@ def test_remote_new_worktree_options_hide_ahp():
             assert dlg is not None
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "AHP" not in labels
-            assert dlg._show_prompt is False
+            assert dlg._show_prompt is True
 
     asyncio.run(run())
 
@@ -5194,8 +5194,8 @@ def test_new_worktree_anchor_option_shows_selected_state():
 
 
 @pytest.mark.parametrize("target", ["remote", "cross-environment"])
-def test_new_worktree_remote_target_remains_seedless(monkeypatch, target):
-    """Unsupported targets never offer a prompt; ordinary launches remain valid."""
+def test_new_worktree_remote_target_retains_prompt_and_selected_venue(monkeypatch, target):
+    """Both SSH and cross-environment New use negotiated target admission."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
@@ -5213,13 +5213,16 @@ def test_new_worktree_remote_target_remains_seedless(monkeypatch, target):
             assert dlg is not None
             from worktree_manager.production_picker.picker_tui.engine import FocusGroup
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
-            assert dlg._show_prompt is False
+            assert dlg._show_prompt is True
+            from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
+            dlg.query_one(SeedPromptField).load_text("remote fixture prompt")
             await pilot.press("enter")
             await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["machine"] == machine
-        assert app.result["options"]["seed_prompt"] == ""
+        assert app.result["env"] == environment and app.result["is_local"] is False
+        assert app.result["options"]["seed_prompt"] == "remote fixture prompt"
         from worktree_manager.seed_launch import require_supported_seed
         require_supported_seed(types.SimpleNamespace(
             mode="new", machine=machine, environment=environment,

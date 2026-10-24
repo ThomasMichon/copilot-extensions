@@ -342,21 +342,27 @@ def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, m
     asyncio.run(run())
 
 
-def test_remote_resume_refuses_before_composer_or_history_opens(monkeypatch):
+def test_remote_resume_opens_composer_for_selected_target(monkeypatch):
     from types import SimpleNamespace
     from worktree_manager.production_picker.picker_tui import resume_prompt_actions
 
-    monkeypatch.setattr(
-        resume_prompt_actions, "PromptDlgScreen",
-        lambda *args, **kwargs: pytest.fail("unsupported target opened prompt history"),
-    )
+    dialogs = []
+    def compose(*args, **kwargs):
+        dialogs.append(kwargs)
+        return SimpleNamespace(launch_decision=kwargs["launch_decision"])
+    monkeypatch.setattr(resume_prompt_actions, "PromptDlgScreen", compose)
     record = {"is_local": False, "raw": {"id": "wt-a"}}
+    decision = {"action": "resume", "is_local": False, "machine": "target", "env": "wsl"}
+    opened = []
     screen = SimpleNamespace(
         debug="", _find_internal_worktree=lambda *args: (record, None),
         _session_action_verbs=lambda _: ["Resume prompt…"],
+        _resume_decision=lambda *a, **kw: decision,
+        app=SimpleNamespace(push_screen=lambda scr, callback: opened.append(scr)),
     )
     resume_prompt_actions.open_resume_prompt(screen, record)
-    assert "local native target" in screen.debug
+    assert len(opened) == 1 and dialogs[0]["launch_decision"] is decision
+    assert dialogs[0]["seed_refusal"] is None
 
 
 @pytest.mark.parametrize("leg,ahp,reason", [
@@ -420,7 +426,6 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
     ({"mode": "base"}, None),
     ({"mode": "bare-resume"}, None),
     ({"mode": "new", "ahp": True}, None),
-    ({"mode": "resume", "machine": "remote"}, None),
     ({"mode": "resume", "environment": "WSL"}, None),
     ({"mode": "resume"}, {"provider": "ahp", "state": "active"}),
     ({"mode": "resume"}, {"provider": "ahp", "state": "unknown"}),

@@ -1008,6 +1008,15 @@ are rejected before SSH rather than omitted from the request. Staged seed IDs
 and launch-request admission/status options remain target-local, not selectors
 to forward through `--machine`.
 
+`--require-native-seed` on a non-preview remote JSON prompt negotiates version-2
+target admission and remains on the identity-only second-hop launch. Optional
+`--launch-attempt-id <32-lowercase-hex>` binds the Manager's saved attempt to the
+target receipt; it requires that remote native-prompt path. Local, seedless and
+preview uses refuse before mutation. Old receivers or mismatched receipts fail
+visibly without stripping capability flags or automatically repeating New.
+See [the engine-Picker contract](engine-picker-contract.md#ssh-launch-prompt-admission)
+for the envelope, persisted receipt and read-only status fields.
+
 ## Keeping worktrees current
 
 The picker keeps idle worktrees aligned with the default branch, fast-forward

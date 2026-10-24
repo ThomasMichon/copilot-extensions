@@ -337,7 +337,10 @@ def test_remote_prompt_cli_routes_same_seed_selectors_and_no_mux(monkeypatch, tm
     assert resolve_cli.cmd_resolve(args) == 0
     route, keywords = called[0]
     assert route[:3] == (config, "example-host", "WSL")
-    assert route[3] == (["--new", "--no-mux"] if new else ["--worktree-id", "wt-a", "--no-mux"])
+    assert route[3] == (
+        ["--new", "--no-mux", "--require-agent-hosting"] if new
+        else ["--worktree-id", "wt-a", "--no-mux", "--require-agent-hosting"]
+    )
     assert keywords == {"seed": args.seed}
 
 

@@ -473,8 +473,7 @@ class PickerScreenMaintenanceActionsMixin:
                "verb": "New worktree", "confirm": "Create",
                "prompt": f"Creates on {tm} {te} · options (none required):",
                "opts": opts}
-        # Prompt recovery currently supports only this execution environment.
-        show_prompt = _SEED_PROMPT_ENABLED and (tm, te) == self.src.LOCAL
+        show_prompt = _SEED_PROMPT_ENABLED
         scr = ScopeDlgScreen(
             dlg, show_prompt=show_prompt, launch_local=(tm, te) == self.src.LOCAL,
             journal_enabled=self.real_ops,

@@ -100,9 +100,27 @@ def test_journaled_unicode_worktree_identity_reaches_launch_unchanged(
 
 def test_seed_guard_refusal_precedes_engine(attempt, monkeypatch):
     monkeypatch.setattr(engine_client, "resolve_launch_plan", lambda *a, **kw: pytest.fail("engine"))
-    request = replace(attempt[1], machine="remote-host", environment="linux", seed_prompt="fixture")
+    request = replace(attempt[1], machine="remote-host", environment="linux",
+                      seed_prompt="fixture", ahp=True)
     assert main._run_launch(request) == 1
     assert [event["phase"] for event in events(attempt)] == ["confirmed", "refused"]
+
+
+@pytest.mark.parametrize("mode", ["new", "resume"])
+def test_remote_prompt_passes_saved_attempt_without_inspecting_local_leg(attempt, monkeypatch, mode):
+    monkeypatch.setattr(engine_client, "execution_leg_get", lambda *a, **kw: pytest.fail("local leg"))
+    request = replace(attempt[1], mode=mode, worktree_id="worktree-a" if mode == "resume" else None,
+                      machine="remote-host", environment="linux", seed_prompt="fixture")
+    def resolve(*args, **kwargs):
+        assert kwargs["launch_attempt_id"] == request.attempt_id
+        assert kwargs["target_machine"] == request.machine and kwargs["seed"] == "fixture"
+        return plan("remote")
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", resolve)
+    monkeypatch.setattr(launcher, "launch", lambda *a, **kw: 0)
+    assert main._run_launch(request) == 0
+    assert [event["phase"] for event in events(attempt)] == [
+        "confirmed", "resolution-requested", "resolved", "launch-requested", "launcher-returned",
+    ]
 
 
 def test_resolution_error_is_unknown_not_evidence_of_no_allocation(attempt, monkeypatch):
