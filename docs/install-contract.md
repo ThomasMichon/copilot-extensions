@@ -3148,6 +3148,11 @@ members, unsafe paths, encryption, links, malformed headers and changed source
 files. It neither extracts package contents nor runs package code or a backend.
 Promotion uses the same archive verifier while preserving its additional
 source/toolchain identity checks.
+Stored and raw DEFLATE streams are consumed independently of `ZipExtFile`'s
+declared-size truncation, checking full length, CRC and end-of-stream before
+metadata parsing or hash acceptance. Trailing-dot/space path components refuse
+as Windows aliases; decompression failures remain structured integrity errors.
+On Windows, reserved device names and invalid filename characters also refuse.
 
 Compressed tags are deduplicated and bounded before Cartesian expansion,
 including the selected filename's tags. Member ancestry uses a deadline-checked

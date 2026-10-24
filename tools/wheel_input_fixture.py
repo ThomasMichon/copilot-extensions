@@ -8,7 +8,8 @@ import zipfile
 PREFIX = "demo_pkg-1.0.dist-info/"
 
 
-def wheel_bytes(*, metadata=None, wheel=None, extra=None, record_mutator=None):
+def wheel_bytes(*, metadata=None, wheel=None, extra=None, record_mutator=None,
+                compression=zipfile.ZIP_DEFLATED):
     entries = {
         "demo_pkg/__init__.py": b"VALUE = 1\n",
         PREFIX + "METADATA": metadata if metadata is not None else (
@@ -33,7 +34,7 @@ def wheel_bytes(*, metadata=None, wheel=None, extra=None, record_mutator=None):
     csv.writer(record, lineterminator="\n").writerows(rows)
     entries[PREFIX + "RECORD"] = record.getvalue().encode()
     result = io.BytesIO()
-    with zipfile.ZipFile(result, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    with zipfile.ZipFile(result, "w", compression=compression) as archive:
         for name, data in entries.items():
             archive.writestr(name, data)
     return result.getvalue()

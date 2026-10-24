@@ -1,8 +1,10 @@
 """Real archive controls for the dependency-free wheel inspection boundary."""
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 import hashlib
+import io
 import itertools
 import os
 from pathlib import Path
@@ -12,6 +14,7 @@ import sys
 import time
 from types import SimpleNamespace
 import zipfile
+import zlib
 
 import pytest
 
@@ -154,6 +157,8 @@ def test_invalid_or_exhausted_deadline_refuses_before_open(tmp_path, limits, dea
 @pytest.mark.parametrize("name", [
     "../escape", "/absolute", "C:drive", "a\\b", "a//b", "a/./b",
     "a/../b", "other-1.0.dist-info/METADATA", "a\0tail",
+    "demo_pkg/__init__.py.", "demo_pkg/__init__.py ",
+    "demo_pkg./module.py", "demo_pkg /module.py", "trailing//",
 ])
 def test_unsafe_and_ambiguous_members_refuse(wheel_path, limits, name):
     data = wheel_bytes(extra={name: b"bad"})
@@ -163,6 +168,16 @@ def test_unsafe_and_ambiguous_members_refuse(wheel_path, limits, name):
     wheel_path.write_bytes(data)
     with pytest.raises(inspection.WheelError):
         inspect(wheel_path, limits)
+
+
+@pytest.mark.parametrize("name", ["NUL.py", "folder/COM1.txt", "folder/conout$", "a?b", "control\x01"])
+def test_windows_device_and_invalid_components_follow_the_receiving_host(wheel_path, limits, name):
+    wheel_path.write_bytes(wheel_bytes(extra={name: b"not extracted"}))
+    if os.name == "nt":
+        with pytest.raises(inspection.WheelError, match="unsafe"):
+            inspect(wheel_path, limits)
+    else:
+        assert inspect(wheel_path, limits).name == "demo-pkg"
 
 
 def test_duplicate_members_refuse(wheel_path, limits):
@@ -211,6 +226,81 @@ def test_unbounded_or_unsupported_compression_refuses_before_decoding(wheel_path
         data[start + offset:start + offset + 2] = compression.to_bytes(2, "little")
     wheel_path.write_bytes(data)
     with pytest.raises(inspection.WheelError, match="unsafe"):
+        inspect(wheel_path, limits)
+
+
+def forge_member_size(data, name, prefix, *, compressed_size=None):
+    result = bytearray(data)
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        local_offset = archive.getinfo(name).header_offset
+    crc = zlib.crc32(prefix)
+    struct.pack_into("<L", result, local_offset + 14, crc)
+    struct.pack_into("<L", result, local_offset + 22, len(prefix))
+    if compressed_size is not None:
+        struct.pack_into("<L", result, local_offset + 18, compressed_size)
+    end = result.rfind(b"PK\x05\x06")
+    position = struct.unpack_from("<L", result, end + 16)[0]
+    while result[position:position + 4] == b"PK\x01\x02":
+        lengths = struct.unpack_from("<3H", result, position + 28)
+        if result[position + 46:position + 46 + lengths[0]] == name.encode():
+            struct.pack_into("<L", result, position + 16, crc)
+            struct.pack_into("<L", result, position + 24, len(prefix))
+            if compressed_size is not None:
+                struct.pack_into("<L", result, position + 20, compressed_size)
+            return bytes(result)
+        position += 46 + sum(lengths)
+    raise AssertionError("fixture member not found")
+
+
+@pytest.mark.parametrize("compression", [zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED])
+@pytest.mark.parametrize("name,prefix", [("payload.bin", b"prefix"), ("empty/", b"")])
+def test_complete_stream_must_match_declared_prefix(wheel_path, limits, name, prefix, compression):
+    def record_prefix(rows):
+        if name.endswith("/"):
+            rows[:] = [row for row in rows if row[0] != name]
+        else:
+            row = next(row for row in rows if row[0] == name)
+            row[1] = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(prefix).digest()).rstrip(b"=").decode()
+            row[2] = str(len(prefix))
+
+    data = wheel_bytes(
+        extra={name: prefix + b"hidden" * 5000}, record_mutator=record_prefix,
+        compression=compression,
+    )
+    wheel_path.write_bytes(forge_member_size(data, name, prefix))
+    with zipfile.ZipFile(wheel_path) as archive:
+        assert archive.read(name) == prefix
+    with pytest.raises(inspection.WheelError):
+        inspect(wheel_path, replace(limits, max_archive_bytes=200_000))
+
+
+def test_corrupt_deflate_is_a_structured_refusal(wheel_path, limits):
+    data = bytearray(wheel_path.read_bytes())
+    with zipfile.ZipFile(wheel_path) as archive:
+        offset = archive.getinfo("demo_pkg/__init__.py").header_offset
+    lengths = struct.unpack_from("<2H", data, offset + 26)
+    start = offset + 30 + sum(lengths)
+    data[start] |= 0x06
+    wheel_path.write_bytes(data)
+    with pytest.raises(inspection.WheelError) as refusal:
+        inspect(wheel_path, limits)
+    assert isinstance(refusal.value.__cause__, zlib.error)
+    with pytest.raises(runtime_profile.ProfileError):
+        runtime_profile.inspect_profile_wheel(
+            wheel_path, selected_record(wheel_path), limits=limits, deadline=time.monotonic() + 10,
+        )
+
+
+def test_missing_deflate_end_marker_refuses_even_when_prefix_crc_matches(wheel_path, limits):
+    name = "demo_pkg/__init__.py"
+    data = wheel_path.read_bytes()
+    with zipfile.ZipFile(wheel_path) as archive:
+        original = archive.read(name)
+        truncated = archive.getinfo(name).compress_size - 1
+    wheel_path.write_bytes(forge_member_size(data, name, original, compressed_size=truncated))
+    with zipfile.ZipFile(wheel_path) as archive:
+        assert archive.read(name) == original
+    with pytest.raises(inspection.WheelError, match="incomplete"):
         inspect(wheel_path, limits)
 
 

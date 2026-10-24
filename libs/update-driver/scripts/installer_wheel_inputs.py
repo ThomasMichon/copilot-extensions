@@ -19,10 +19,24 @@ import time
 from types import MappingProxyType
 from typing import BinaryIO, Mapping
 import zipfile
+import zlib
 
 
 class WheelError(ValueError):
     """An unreadable, inconsistent, unsafe or over-budget wheel."""
+
+
+_WINDOWS_DEVICES = {
+    "con", "prn", "aux", "nul", "conin$", "conout$",
+    *(f"{kind}{number}" for kind in ("com", "lpt") for number in "123456789\u00b9\u00b2\u00b3"),
+}
+
+
+def _unsafe_windows_component(part: str) -> bool:
+    return (
+        part.partition(".")[0].rstrip(" ").casefold() in _WINDOWS_DEVICES
+        or any(ord(char) < 32 or char in '<>"|?*' for char in part)
+    )
 
 
 @dataclass(frozen=True)
@@ -109,18 +123,6 @@ def bounded_tag(text: str, *, limit: int, deadline: float) -> tuple[str, int]:
     return "-".join(canonical), count
 
 
-def _read(stream: BinaryIO, *, limit: int, deadline: float) -> bytes:
-    data = bytearray()
-    while True:
-        _check_deadline(deadline)
-        chunk = stream.read(min(1 << 20, limit - len(data) + 1))
-        if not chunk:
-            return bytes(data)
-        data.extend(chunk)
-        if len(data) > limit:
-            raise WheelError("wheel metadata limit exceeded")
-
-
 def preflight_archive(archive: BinaryIO, *, limits: WheelLimits, deadline: float) -> None:
     """Bound the actual central directory before ZipFile allocates its index."""
     def read_at(offset: int, size: int) -> bytes:
@@ -197,6 +199,71 @@ def preflight_archive(archive: BinaryIO, *, limits: WheelLimits, deadline: float
     archive.seek(0)
 
 
+def _member_chunks(
+    archive: BinaryIO, bundle: zipfile.ZipFile, member: zipfile.ZipInfo, *,
+    limit: int, deadline: float,
+):
+    _check_deadline(deadline)
+    # ZipFile checks local names and overlap, but ZipExtFile can truncate output
+    # to a forged file_size before reaching the actual DEFLATE end marker.
+    with bundle.open(member):
+        pass
+    archive.seek(member.header_offset)
+    header = archive.read(30)
+    if len(header) != 30 or header[:4] != b"PK\x03\x04":
+        raise WheelError("invalid wheel local header")
+    if struct.unpack_from("<H", header, 8)[0] != member.compress_type:
+        raise WheelError("ambiguous wheel compression")
+    archive.seek(member.header_offset + 30 + sum(struct.unpack_from("<2H", header, 26)))
+    if member.compress_type == zipfile.ZIP_STORED and member.compress_size != member.file_size:
+        raise WheelError("wheel stored member size mismatch")
+    decoder = zlib.decompressobj(-15) if member.compress_type == zipfile.ZIP_DEFLATED else None
+    remaining = member.compress_size
+    output_limit = min(limit, member.file_size)
+    total = 0
+    crc = 0
+
+    def measured(chunk: bytes) -> bytes:
+        nonlocal total, crc
+        total += len(chunk)
+        if total > output_limit:
+            raise WheelError("wheel member output limit or declared size exceeded")
+        crc = zlib.crc32(chunk, crc)
+        return chunk
+
+    while remaining:
+        _check_deadline(deadline)
+        data = archive.read(min(1 << 16, remaining))
+        if not data:
+            raise WheelError("truncated wheel compressed member")
+        remaining -= len(data)
+        if decoder is None:
+            yield measured(data)
+            continue
+        while data:
+            _check_deadline(deadline)
+            length = len(data)
+            output = decoder.decompress(data, min(1 << 16, output_limit - total + 1))
+            data = decoder.unconsumed_tail
+            if decoder.unused_data or (decoder.eof and remaining):
+                raise WheelError("trailing wheel compressed data")
+            if output:
+                yield measured(output)
+            if data and len(data) == length and not output:
+                raise WheelError("wheel decompression made no progress")
+    if decoder is not None:
+        while not decoder.eof:
+            _check_deadline(deadline)
+            output = decoder.decompress(b"", min(1 << 16, output_limit - total + 1))
+            if not output:
+                raise WheelError("incomplete wheel DEFLATE stream")
+            yield measured(output)
+        if decoder.unused_data or decoder.unconsumed_tail:
+            raise WheelError("trailing wheel compressed data")
+    if total != member.file_size or crc != member.CRC:
+        raise WheelError("wheel member length or CRC mismatch")
+
+
 def inspect_archive(
     archive: BinaryIO, *, limits: WheelLimits, deadline: float,
 ) -> WheelFacts:
@@ -216,13 +283,15 @@ def inspect_archive(
             for member in members:
                 _check_deadline(deadline)
                 name = member.orig_filename
-                parts = name.rstrip("/").split("/")
+                parts = (name[:-1] if member.is_dir() else name).split("/")
                 kind = stat.S_IFMT(member.external_attr >> 16)
                 if (
                     member.flag_bits & 1 or "\\" in name or "\0" in name
                     or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
                     or name.startswith("/") or ":" in name
                     or any(part in ("", ".", "..") for part in parts)
+                    or any(part.endswith((".", " ")) for part in parts)
+                    or (os.name == "nt" and any(_unsafe_windows_component(part) for part in parts))
                     or kind not in (0, stat.S_IFREG, stat.S_IFDIR)
                     or (kind == stat.S_IFDIR and not member.is_dir())
                     or (member.is_dir() and member.file_size)
@@ -252,6 +321,10 @@ def inspect_archive(
                     or member.file_size > limits.max_member_bytes
                 ):
                     raise WheelError("wheel expanded/member limit exceeded")
+            for member in members:
+                if member.is_dir():
+                    for _ in _member_chunks(archive, bundle, member, limit=0, deadline=deadline):
+                        pass
             if len(prefixes) != 1:
                 raise WheelError("ambiguous or missing wheel dist-info")
             prefix = prefixes.pop()
@@ -264,8 +337,9 @@ def inspect_archive(
                 member_limit = min(remaining, limits.max_metadata_member_bytes)
                 if bundle.getinfo(name).file_size > member_limit:
                     raise WheelError("wheel metadata limit exceeded")
-                with bundle.open(name) as stream:
-                    metadata[name] = _read(stream, limit=member_limit, deadline=deadline)
+                metadata[name] = b"".join(_member_chunks(
+                    archive, bundle, bundle.getinfo(name), limit=member_limit, deadline=deadline,
+                ))
                 remaining -= len(metadata[name])
             package = _headers(metadata[prefix + "METADATA"])
             wheel = _headers(metadata[prefix + "WHEEL"])
@@ -311,16 +385,12 @@ def inspect_archive(
                     continue
                 digest = hashlib.sha256()
                 size = 0
-                with bundle.open(name) as stream:
-                    while True:
-                        _check_deadline(deadline)
-                        chunk = stream.read(min(1 << 20, limits.max_member_bytes - size + 1))
-                        if not chunk:
-                            break
-                        size += len(chunk)
-                        if size > limits.max_member_bytes:
-                            raise WheelError("wheel member limit exceeded")
-                        digest.update(chunk)
+                for chunk in _member_chunks(
+                    archive, bundle, bundle.getinfo(name),
+                    limit=limits.max_member_bytes, deadline=deadline,
+                ):
+                    size += len(chunk)
+                    digest.update(chunk)
                 encoded = base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode("ascii")
                 if (
                     recorded_hash != f"sha256={encoded}" or recorded_size != str(size)
@@ -337,7 +407,7 @@ def inspect_archive(
             )
     except (
         OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, NotImplementedError,
-        csv.Error, EOFError,
+        csv.Error, EOFError, zlib.error,
     ) as exc:
         raise WheelError(f"invalid wheel archive: {exc}") from exc
 

@@ -348,6 +348,8 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                         for chunk in iter(lambda: stream.read(1 << 20), b""):
                             digest.update(chunk)
                             archive.write(chunk)
+                    if f"sha256:{digest.hexdigest()}" != wheel["sha256"]:
+                        raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
                     archive.seek(0)
                     validate_wheel(
                         archive, wheel,
@@ -355,8 +357,6 @@ def validate_bundle(path: Path, entry: dict, *, candidate_root: Path | None = No
                         component=entry.get("component") if wheel["role"] == primary_role else None,
                         candidate_root=candidate_root,
                     )
-                if f"sha256:{digest.hexdigest()}" != wheel["sha256"]:
-                    raise PromotionArtifactError(f"{path.name}: wheel digest mismatch")
             return manifest
     except (
         OSError, UnicodeDecodeError, json.JSONDecodeError, zipfile.BadZipFile,
