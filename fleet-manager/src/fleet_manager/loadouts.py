@@ -6,7 +6,10 @@ import copy
 import math
 
 from .loadout_templates import builtin_templates
-from .planning import MAX_ITEMS, PlanError, boolean, canonical, digest, identifier, integer, record
+from .planning import (
+    MAX_BYTES, MAX_ITEMS, PlanError, boolean, canonical, configuration_capacity,
+    digest, identifier, integer, record,
+)
 from .role_bindings import fields, reference, references
 
 DIMENSIONS = ("cpu_millis", "memory_bytes", "disk_bytes")
@@ -19,17 +22,35 @@ def resources(value: object) -> dict[str, int]:
     return dict(entry)
 
 
-def _expand(value: object, slots: dict, definitions: dict) -> object:
+class _ExpansionBudget:
+    def __init__(self) -> None:
+        self.remaining = MAX_BYTES
+
+    def take(self, size: int) -> None:
+        if size > self.remaining:
+            raise PlanError("loadout expansion exceeds byte budget")
+        self.remaining -= size
+
+    def mapping(self, value: dict) -> None:
+        self.take(2 + max(0, len(value) - 1)
+                  + sum(len(canonical(key)) + 1 for key in value))
+
+
+def _expand(value: object, slots: dict, definitions: dict, budget: _ExpansionBudget) -> object:
     if isinstance(value, dict):
         if "slot" in value:
             fields(value, {"slot"})
             name = reference(value["slot"], "slot reference")
             if name not in definitions:
                 raise PlanError("template refers to an undeclared slot")
+            budget.take(len(canonical(slots[name])))
             return copy.deepcopy(slots[name])
-        return {key: _expand(child, slots, definitions) for key, child in value.items()}
+        budget.mapping(value)
+        return {key: _expand(child, slots, definitions, budget) for key, child in value.items()}
     if isinstance(value, list):
-        return [_expand(child, slots, definitions) for child in value]
+        budget.take(2 + max(0, len(value) - 1))
+        return [_expand(child, slots, definitions, budget) for child in value]
+    budget.take(len(canonical(value)))
     return value
 
 
@@ -122,12 +143,7 @@ def design_loadout(config: object, inventory: object, catalog: object | None = N
         canonical(value)
     record(config, "fleet-manager.config", {"fleet_id", "revision", "capacity", "roles"}, {"template", "extensions"})
     identifier(config["fleet_id"], "fleet id")
-    identifier(config["revision"], "config revision")
-    if not isinstance(config["roles"], dict):
-        raise PlanError("roles must be an object")
-    capacity = fields(config["capacity"], {"machine_limit", "execution_hosts"})
-    integer(capacity["machine_limit"], "machine limit", minimum=1, maximum=MAX_ITEMS)
-    integer(capacity["execution_hosts"], "execution hosts", maximum=MAX_ITEMS)
+    capacity = configuration_capacity(config, fleet_id=config["fleet_id"])
     extensions = config.get("extensions")
     if not isinstance(extensions, dict) or "loadouts" not in extensions:
         raise PlanError("config requires an explicit loadouts registrar")
@@ -147,6 +163,7 @@ def design_loadout(config: object, inventory: object, catalog: object | None = N
     if sum(host["owned"] for host in hosts.values()) > capacity["machine_limit"]:
         blockers.append("existing-capacity-exceeds-budget-retained")
     actual, runner_owners = {}, set()
+    budget = _ExpansionBudget()
     for name, raw in sorted(allocations.items()):
         identifier(name, "allocation id")
         entry = fields(raw, {"template", "target", "slots"})
@@ -157,14 +174,15 @@ def design_loadout(config: object, inventory: object, catalog: object | None = N
         slots = _slots(template["slots"], entry["slots"])
         if not isinstance(template["requires"], dict):
             raise PlanError("template requirements must map capabilities to allocations")
-        requirements = {key: _expand(value, slots, template["slots"])
+        budget.mapping(template["requires"])
+        requirements = {key: _expand(value, slots, template["slots"], budget)
                         for key, value in template["requires"].items()}
         for capability, dependency in requirements.items():
             reference(capability, "required capability")
             reference(dependency, "allocation dependency")
         required = tuple(sorted(set(requirements.values())))
         target = reference(entry["target"], "allocation target")
-        demand = fields(_expand(template["resources"], slots, template["slots"]),
+        demand = fields(_expand(template["resources"], slots, template["slots"], budget),
                         {"units", "reservation", "limit"})
         integer(demand["units"], "allocation units", minimum=1, maximum=MAX_ITEMS)
         reservation, limit = resources(demand["reservation"]), resources(demand["limit"])
@@ -174,7 +192,7 @@ def design_loadout(config: object, inventory: object, catalog: object | None = N
             for key in DIMENSIONS:
                 values[key] *= demand["units"]
                 integer(values[key], "total allocation resource")
-        configuration = _expand(template["configuration"], slots, template["slots"])
+        configuration = _expand(template["configuration"], slots, template["slots"], budget)
         if not isinstance(configuration, dict):
             raise PlanError("actualized configuration must be an object")
         if selected["id"] == "actions.arc":

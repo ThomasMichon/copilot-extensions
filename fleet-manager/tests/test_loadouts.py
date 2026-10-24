@@ -125,6 +125,68 @@ def test_publication_config_must_fit_normal_reload_bounds_not_only_output_bounds
         compute(*args)
 
 
+def test_slot_expansion_refuses_before_copying_an_oversized_intermediate(monkeypatch):
+    args = inputs()
+    template = args[2]["templates"][0]
+    template["slots"] = {"refs": {"type": "references"}}
+    template["configuration"] = {
+        "chunks": [[{"slot": "refs"} for _ in range(256)] for _ in range(16)],
+    }
+    values = [f"r{index:03d}" + "x" * 124 for index in range(256)]
+    allocation(args[0], "support")["slots"] = {"refs": values}
+    original = copy.deepcopy
+    copies = 0
+
+    def tracked(value, *positional, **keywords):
+        nonlocal copies
+        if value is values:
+            copies += 1
+            assert copies < 32, "oversized substitution must be refused before materialization"
+        return original(value, *positional, **keywords)
+
+    monkeypatch.setattr("fleet_manager.loadouts.copy.deepcopy", tracked)
+    for value in args:
+        canonical(value)
+    with pytest.raises(PlanError, match="expansion exceeds byte budget"):
+        compute(*args)
+    assert 0 < copies < 32
+
+
+def test_expansion_budget_is_shared_across_allocations_not_reset_per_template():
+    args = inputs()
+    args[2]["templates"][0]["configuration"] = {"large": ["x" * 60000] * 8}
+    for name in ("support-two", "support-three"):
+        args[0]["extensions"]["loadouts"]["allocations"][name] = copy.deepcopy(
+            allocation(args[0], "support"),
+        )
+        args[1]["baseline_excludes"].append(name)
+    for value in args:
+        canonical(value)
+    with pytest.raises(PlanError, match="expansion exceeds byte budget"):
+        compute(*args)
+
+
+@pytest.mark.parametrize("change", [
+    "role-value", "role-id", "template-shape", "template-fields", "template-id", "template-revision",
+])
+def test_existing_adopter_contract_matches_the_normal_planner(change):
+    args = inputs()
+    if change == "role-value":
+        args[0]["roles"]["custom"] = 7
+    elif change == "role-id":
+        args[0]["roles"]["invalid name"] = {}
+    elif change == "template-shape":
+        args[0]["template"] = 7
+    elif change == "template-fields":
+        args[0]["template"] = {"id": "default", "revision": "r1", "unexpected": 1}
+    elif change == "template-id":
+        args[0]["template"] = {"id": "invalid name", "revision": "r1"}
+    else:
+        args[0]["template"] = {"id": "default", "revision": False}
+    with pytest.raises(PlanError):
+        compute(*args)
+
+
 def test_two_scale_sets_share_support_once_and_charge_both_runner_envelopes():
     args = inputs()
     second = copy.deepcopy(allocation(args[0]))

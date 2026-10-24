@@ -141,6 +141,9 @@ resource vector has exactly `cpu_millis`, `memory_bytes`, and `disk_bytes`;
 numeric values may come from integer slots. Units is 1-256. All arithmetic
 uses nonnegative bounded integers, never floating CPU fractions or implicit
 unit conversion.
+Expansion has one shared 1 MiB JSON-byte budget across allocations, consumed
+before copying a slot value or building each container. Repeated references
+cannot materialize an unbounded intermediate before final validation.
 
 ## Named-machine inventory and the grid
 
@@ -222,6 +225,8 @@ configuration; this command never guesses or writes that repository.
 The suggested configuration must itself fit the normal bounded-input contract
 (1 MiB, nesting depth 12), not merely the larger output envelope; otherwise
 design refuses rather than offering configuration that subsequent reads reject.
+Existing role IDs, role-object declarations and optional template provenance
+use the same configuration validator as the normal planner.
 Template provenance/content digests and exact named placements remain in the
 composition. Neither a digest nor a saved reviewable result grants authority.
 
