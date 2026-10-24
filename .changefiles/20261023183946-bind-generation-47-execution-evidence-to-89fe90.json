@@ -1,0 +1,9 @@
+{
+  "comment": "Bind generation-47 execution evidence to reachable merged source while preserving every historical record and capture guard.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

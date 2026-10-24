@@ -91,7 +91,7 @@
       "status": 401
     }
   },
-  "execution_closure_sha256": "956298ce62b1c9e45a6f466ce0242ddc4d38cbb773de719395e3334583e5aef7",
+  "execution_closure_sha256": "856141377d97cae40844099b048a1afc41b19d98caf89a7f894b1d82f3b759e9",
   "execution_closure": {
     "libs/agent-procutil/src/agent_procutil/__init__.py": {
       "blob": "055e20131efdc966b58de8ad46699d9ba31305b2",
@@ -2549,6 +2549,10 @@
       "blob": "36a7d0e231eb689f2af63cdd219cab374e5b818c",
       "sha256": "836d41979b72c09ff5799d0f0daa67843cafdc2fe1929e8d520472e960a8f658"
     },
+    "tools/prepare_bridge_contract_evidence.py": {
+      "blob": "6cfa34d357092e8c5364fc523b679de07a76748b",
+      "sha256": "825750349a6b487d81451ebb5e8b372e43adbd1cad2f10c5d9f3eeb775bd16fd"
+    },
     "tools/prepare_runtime_source.py": {
       "blob": "4fb1580f996577f399201a8758e07e1f1ef13fba",
       "sha256": "396546ad264c16b0cf8d739fd847f236171fc9d7c5f77c2a7a765efa273bd3c6"
@@ -3001,6 +3005,10 @@
       "blob": "4ce9f03f48a3722fd607078963b5e619766c58e0",
       "sha256": "02c9a104035beeecee3f3b26f7ee0819be94a5ca27df1b57075224650c560613"
     },
+    "tools/test_prepare_bridge_contract_evidence.py": {
+      "blob": "24ad3fda97b16917ee1a82a52c939105f5d9b56c",
+      "sha256": "5ee3127d1454a82bcfc80ac69bce30aa825abcaf0878e4e49259c69ad84eebf9"
+    },
     "tools/test_preview_release.py": {
       "blob": "c6573976240f2bb0de98775d1ba15a558e20b6e9",
       "sha256": "77f06930f88cbdf8c9737e54eb24fd976647e7780a6468fed9eb082a69c3d43e"
@@ -3272,7 +3280,7 @@
   },
   "scope": "model-free ASGI and owned stdio fixtures; not real Copilot, deployment or host qualification",
   "captured_from": {
-    "commit": "ebbe3df23ca744e70a52ebaad81b5b0aec3482eb",
+    "commit": "006a01a6b2a887503fae717cd4804306bd5db58c",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 47,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
