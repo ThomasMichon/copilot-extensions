@@ -61,7 +61,7 @@ Do not modify another contributor's open candidate/profile PR to obtain inputs.
 
 ## Validation and completion
 
-- [ ] Actual wheel fixtures match the full selected record; independently
+- [x] Actual wheel fixtures match the full selected record; independently
   changed hash, name/version, tags, dependency metadata, extras and Python
   requirement refuse before construction.
 - [ ] Duplicate/ambiguous metadata, unsafe ZIP paths, oversized/compressed
@@ -85,3 +85,22 @@ Do not modify another contributor's open candidate/profile PR to obtain inputs.
 This slice is complete only when its component and integration checks pass or
 an explicit named receiving objective accepts a residual. The parent effort
 retains all acquisition, platform, fallback, retention and rollout obligations.
+
+### Component validation, 2026-10-23
+
+The shared stdlib archive verifier and repository-only semantic profile facade
+are implemented without enabling a consumer. Targeted native wheel/profile/
+promotion selectors pass (139 tests), and installer-contract controls pass;
+the promotion/standalone regression cohort
+passes (268 tests before the final bootstrap/purity additions). Five synthetic
+wheel controls pass inside the actual no-actor collector. A real native Windows
+bootstrap child uses no site packages. Vendoring and touched-Python lint pass.
+
+Retained exact-set count/total limits, frozen assembly, authenticated acquisition,
+receipts/reuse/fallback and installed health remain open. Linux hosted required
+CI must pass before merging this component; no local POSIX lane is available.
+The full packet's native Windows diagnostic does not pass: an activation
+preservation case attempts a forbidden native-loader operation, and the
+dropin-registry FIFO case skips on Windows. These are not credited as unit
+proof; the inspector's five-node diagnostic preserves the unchanged no-actor
+guard and does not replace the complete hosted packet.

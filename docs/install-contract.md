@@ -3103,8 +3103,10 @@ by an installer. Its [reviewed contract](../efforts/active/governed-python-artif
 defines the schema and explicit boundary: canonical whole-record identities,
 release/target/mode compatibility, complete asserted wheel metadata graphs
 with extras/markers, and externally supplied whole-record approval references.
-It does not authenticate approvals, verify a source release, inspect/download
-wheels, detect hardware, resolve dependencies or activate a generation.
+Record validation/selection does not authenticate approvals, verify a source
+release, download wheels, detect hardware, resolve dependencies or activate a
+generation. Its separate `inspect_profile_wheel` facade compares inspected
+wheel facts with the selected record using the same packaging semantics.
 
 Actual consumers still need adapters from the existing installation authority
 and verified release/configuration channels, followed by admitted byte/metadata
@@ -3135,6 +3137,25 @@ a path, feed, release or record. The caller still owes authenticated approval,
 source/feed/seasoning/revocation evidence, real device eligibility and the
 existing constructor integration. Explicit test budgets are not production
 acquisition defaults or permission to enable a consumer.
+### Bounded wheel inspection
+
+`libs/installer-engine/installer_wheel_inputs.py` is a stdlib-only input
+inspector, vendored with the Python engine. Callers supply explicit positive
+archive, expanded/member, aggregate metadata and member-count limits, plus a
+finite monotonic deadline. It streams the archive digest and every RECORD
+member digest, bounds metadata before parsing, and refuses duplicate/ambiguous
+members, unsafe paths, encryption, links, malformed headers and changed source
+files. It neither extracts package contents nor runs package code or a backend.
+Promotion uses the same archive verifier while preserving its additional
+source/toolchain identity checks.
+
+The repository-only profile facade compares actual name/version, dist-info
+identity, Python requirement, dependency requirements, extras and compatibility
+tags against the asserted exact record. Neither facts nor a matching digest
+authenticate the profile, admit a feed or authorize cached input. A successful
+inspection is not a retained snapshot: construction must still own immutable
+input custody and obtain authenticated selection/acquisition evidence. No
+installer selects or activates this preparation API automatically.
 
 ### Shared engine delivery
 

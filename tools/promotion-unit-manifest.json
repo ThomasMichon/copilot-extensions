@@ -1385,7 +1385,12 @@
     "tools/promotion_unit_tests/test_frozen_candidate.py::test_promotion_message_keeps_its_existing_public_api",
     "tools/promotion_unit_tests/test_frozen_candidate.py::test_frozen_consumers_validate_the_content_index_not_the_full_commit[publication]",
     "tools/promotion_unit_tests/test_frozen_candidate.py::test_frozen_consumers_validate_the_content_index_not_the_full_commit[attestation-validation]",
-    "tools/promotion_unit_tests/test_frozen_candidate.py::test_self_consistent_transport_cannot_replace_the_admitted_candidate"
+    "tools/promotion_unit_tests/test_frozen_candidate.py::test_self_consistent_transport_cannot_replace_the_admitted_candidate",
+    "tools/promotion_unit_tests/test_wheel_inputs.py::test_wheel_bytes_are_inspected_without_running_package_code[valid]",
+    "tools/promotion_unit_tests/test_wheel_inputs.py::test_wheel_bytes_are_inspected_without_running_package_code[record]",
+    "tools/promotion_unit_tests/test_wheel_inputs.py::test_wheel_bytes_are_inspected_without_running_package_code[metadata]",
+    "tools/promotion_unit_tests/test_wheel_inputs.py::test_wheel_bytes_are_inspected_without_running_package_code[path]",
+    "tools/promotion_unit_tests/test_wheel_inputs.py::test_wheel_bytes_are_inspected_without_running_package_code[limit]"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -1512,7 +1517,10 @@
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",
     "tools/test_check_docs_consistency.py": "60577ce827514cc996a23c7e654a66286b83c202daea2f25e806dcb4315ba494",
     "tools/validate_materialized_candidate.py": "47935f3988182f1e8762bef1894c2e829fa2f27b81bd962a731e6b04f25f3661",
-    "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990"
+    "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
+    "libs/installer-engine/installer_wheel_inputs.py": "5a69f516fd6896347dc9e7c5a274ae21bb6d7a0dbc6b7d9670a1c992c21ffe28",
+    "tools/wheel_input_fixture.py": "21196f6e62a76be0714181b74b794465c8d20c83277bea309e5946488f3f8131",
+    "tools/promotion_unit_tests/test_wheel_inputs.py": "8fdfccd141f7e41c5e1ba90f15c9d771a28cb91577166d55c4a34d1f811c5a53"
   },
   "coverage_targets": [
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py",
@@ -1573,7 +1581,8 @@
     "tools/promotion_candidate_units.py",
     "tools/promotion_development_map.py",
     "tools/promotion_frozen_candidate.py",
-    "tools/promotion_candidate.py"
+    "tools/promotion_candidate.py",
+    "libs/installer-engine/installer_wheel_inputs.py"
   ],
   "max_seconds": 300
 }

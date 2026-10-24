@@ -10,7 +10,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+from pathlib import Path
 import re
+import sys
 from typing import Any, Iterable, Mapping
 
 from packaging.requirements import InvalidRequirement, Requirement
@@ -18,6 +20,9 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.tags import parse_tag
 from packaging.utils import canonicalize_name, parse_wheel_filename
 from packaging.version import InvalidVersion, Version
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
+from installer_wheel_inputs import InspectedWheel, WheelError, WheelLimits, inspect_wheel
 
 SCHEMA = "copilot-extensions.exact-runtime-profile"
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -31,6 +36,40 @@ _ENVIRONMENT = frozenset({
 
 class ProfileError(ValueError):
     """A malformed, incompatible, unapproved or ambiguous selection."""
+
+
+def inspect_profile_wheel(
+    path: Path, entry: dict, *, limits: WheelLimits, deadline: float,
+) -> InspectedWheel:
+    """Compare byte facts with an asserted record; never authenticate that record."""
+    try:
+        if Path(path).name != entry["filename"]:
+            raise ProfileError("wheel filename differs from selected record")
+        inspected = inspect_wheel(path, sha256=entry["sha256"], limits=limits, deadline=deadline)
+        name, version, _, tags = parse_wheel_filename(entry["filename"])
+        prefix_name, prefix_version = inspected.prefix.removesuffix(".dist-info/").rsplit("-", 1)
+        actual_tags = {tag for text in inspected.tags for tag in parse_tag(text)}
+        actual_extras = {canonicalize_name(extra, validate=True) for extra in inspected.provides_extras}
+        actual_requirements = {_requirement(text) for text in inspected.requires_dist}
+        if (
+            canonicalize_name(inspected.name, validate=True) != name
+            or canonicalize_name(entry["name"], validate=True) != name
+            or canonicalize_name(prefix_name, validate=True) != name
+            or Version(inspected.version) != version or Version(entry["version"]) != version
+            or Version(prefix_version) != version
+            or actual_tags != tags
+            or SpecifierSet(inspected.requires_python) != SpecifierSet(entry["requires_python"])
+            or actual_extras != _extras(entry["provides_extras"], "provided extras")
+            or len(actual_extras) != len(inspected.provides_extras)
+            or actual_requirements != {_requirement(text) for text in entry["requires_dist"]}
+            or len(actual_requirements) != len(inspected.requires_dist)
+        ):
+            raise ProfileError("wheel bytes differ from selected metadata record")
+        return inspected
+    except (WheelError, KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, ProfileError):
+            raise
+        raise ProfileError(f"invalid selected wheel: {exc}") from exc
 
 
 def _fields(value: Any, keys: set[str], label: str) -> dict:

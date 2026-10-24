@@ -28,7 +28,10 @@ FILES = ("installer-engine.ps1", "installer-engine.sh")
 SUPPORT_FILES = ("installer_dependency_policy.py", "installer_dependency_config.py")
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
-PYTHON_FILES = ("installer_engine.py", "installer_engine_process.py", "runtime_launcher.py")
+PYTHON_FILES = (
+    "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_wheel_inputs.py",
+)
 PYTHON_ADOPTERS = ("agent-worktrees", "agent-vault", "agent-pull-requests")
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)

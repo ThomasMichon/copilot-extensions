@@ -54,6 +54,26 @@ matrix or required release enforcement. The
 [feed-construction effort](efforts/active/feed-construction-release-gate/README.md)
 retains those open acceptance gates.
 
+## Wheel-input inspection
+
+`python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
+synthetic wheel archives, streamed digest/RECORD checks, independent selected
+metadata mutations, ambiguous/linked/encrypted members, compressed metadata
+limits, deadlines and source mutation/replacement. A real isolated `-I -S`
+interpreter proves the canonical inspector needs no site packages. The
+five byte-only cases in `tools/promotion_unit_tests/test_wheel_inputs.py`
+join the required no-actor packet; native filesystem/bootstrap and semantic
+profile checks remain in the development suite. Existing promotion and
+standalone artifact suites exercise the shared verifier's trusted-source
+import closure and source/toolchain checks. The optional
+`installation-context-acceptance.yml` selector `wheel_inputs=true` runs the
+native inspector, existing exact-profile controls, promotion wheel refusals
+and trusted CLI import-closure check on Linux and Windows. It does not expand
+the required unit-only CI packet to include native processes.
+
+These are inspector-component tests, not proof of authenticated profile/feed
+admission, retained offline assembly or installed runtime activation.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py

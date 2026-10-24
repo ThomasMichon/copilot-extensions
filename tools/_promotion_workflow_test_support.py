@@ -191,6 +191,9 @@ def reviewed_helpers(repo: Path, source: Path) -> tuple[Path, str]:
         for name in ("promote_release.py", "promotion_python_artifacts.py",
                      "promotion_control.py", "promotion_candidate.py"):
             shutil.copyfile(source / "tools" / name, helpers / "tools" / name)
+        inspector = Path("libs") / "installer-engine" / "installer_wheel_inputs.py"
+        (helpers / inspector).parent.mkdir(parents=True)
+        shutil.copyfile(source / inspector, helpers / inspector)
         for argv in (
             ["init", "-q", "-b", "main"], ["add", "-A"],
             ["-c", "user.name=Test", "-c", "user.email=test@example.com",
