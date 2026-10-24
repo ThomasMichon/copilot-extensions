@@ -244,6 +244,8 @@ def _drain(master, terminal, output):
         try:
             count = os.write(terminal.fd, output[:65536])
             del output[:count]
+            if count:
+                deadline = time.monotonic() + 2
         except BlockingIOError:
             pass
 

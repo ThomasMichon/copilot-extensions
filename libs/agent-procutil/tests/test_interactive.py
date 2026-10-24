@@ -161,6 +161,38 @@ def test_a_recycled_group_in_another_session_is_never_signalled(monkeypatch):
     kill.assert_not_called()
 
 
+@pytest.mark.parametrize("progress", [True, False])
+def test_terminal_tail_has_an_idle_deadline_not_a_total_output_deadline(monkeypatch, progress):
+    from agent_procutil import _interactive_terminal as terminal
+
+    elapsed = [0.0]
+    written = bytearray()
+    source = Mock(side_effect=[b"a", b"b", b"c", None] if progress else [b"abc", None])
+
+    def write(_fd, data):
+        elapsed[0] += 1.5 if progress else 1.1
+        if progress:
+            written.extend(data)
+            return len(data)
+        return 0
+
+    monkeypatch.setattr(terminal, "_read_pty", source)
+    monkeypatch.setattr(terminal, "time", SimpleNamespace(monotonic=lambda: elapsed[0]))
+    monkeypatch.setattr(terminal, "os", SimpleNamespace(write=write))
+    monkeypatch.setattr(
+        terminal, "select",
+        SimpleNamespace(select=lambda _read, writable, _error, _timeout: ([], writable, [])),
+    )
+    output = bytearray()
+    if progress:
+        terminal._drain(17, SimpleNamespace(fd=19), output)
+        assert written == b"abc" and not output and elapsed[0] > 2
+    else:
+        with pytest.raises(TimeoutError, match="did not drain"):
+            terminal._drain(17, SimpleNamespace(fd=19), output)
+        assert output == b"abc" and elapsed[0] < 3
+
+
 @pytest.mark.skipif(not SUPPORTED, reason="native ownership support required")
 @pytest.mark.parametrize("mode", [
     "completed", "signalled", "stopped-without-tty", "owner-killed", "interrupt",
@@ -291,9 +323,15 @@ faulthandler.dump_traceback_later(6)
 before=termios.tcgetattr(0)
 code=run_interactive([sys.executable,'-c',sys.argv[1]])
 faulthandler.cancel_dump_traceback_later()
-Path(sys.argv[2]).write_text(json.dumps({
+after=termios.tcgetattr(0)
+result={
     'code':code,'foreground':os.tcgetpgrp(0)==os.getpgrp(),
-    'attributes':termios.tcgetattr(0)==before}))
+    'attributes':after==before}
+if after!=before:
+    result['attribute_delta']=[
+        [index,old,new] for index,(old,new) in enumerate(zip(before,after))
+        if old!=new]
+Path(sys.argv[2]).write_text(json.dumps(result,default=lambda value:value.hex()))
 """
     master, slave = pty.openpty()
     process = subprocess.Popen(  # noqa: S603 - fixed fixture argv

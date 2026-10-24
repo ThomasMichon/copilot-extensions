@@ -55,18 +55,94 @@ signal.signal(signal.SIGHUP,signal.SIG_IGN)
 while not Path(sys.argv[1]).exists():
     time.sleep(.01)
 """
+_GUARD_DIAGNOSTICS = """
+import faulthandler,os,traceback
+from agent_procutil._interactive_groups import SessionCustody
+_retire=SessionCustody.retire
+def observed(self,*args,**kwargs):
+    with open(os.environ['PTY_FIXTURE_GUARDIAN'],'a',encoding='utf-8') as stream:
+        faulthandler.dump_traceback_later(1,file=stream)
+        try:
+            return _retire(self,*args,**kwargs)
+        except BaseException:
+            traceback.print_exc(file=stream)
+            try:
+                stream.write('groups='+repr(self.census.groups(exclude_pid=os.getpid()))+'\\n')
+            except BaseException:
+                traceback.print_exc(file=stream)
+            stream.flush()
+            raise
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+SessionCustody.retire=observed
+"""
 _CALLER = """
-import fcntl,json,os,sys,termios
+import copy,faulthandler,fcntl,json,os,sys,termios
 from pathlib import Path
+from agent_procutil import _interactive_terminal as terminal
 from agent_procutil.interactive import run_interactive
 os.setsid()
 fcntl.ioctl(0,termios.TIOCSCTTY,0)
 before=termios.tcgetattr(0)
-code=run_interactive(sys.argv[2:])
-Path(sys.argv[1]).write_text(json.dumps({
-    'code':code,'attributes':termios.tcgetattr(0)==before,
-    'foreground':os.tcgetpgrp(0)==os.getpgrp()}))
+diagnostic={}
+_init=terminal._Terminal.__init__
+_restore=terminal._Terminal.restore
+def init(self,*args):
+    _init(self,*args)
+    diagnostic['snapshot']=copy.deepcopy(getattr(self,'attributes',None))
+def restore(self):
+    diagnostic['restore_foreground']=os.tcgetpgrp(0)
+    _restore(self)
+    diagnostic['restored']=termios.tcgetattr(0)
+terminal._Terminal.__init__=init
+terminal._Terminal.restore=restore
+os.environ['PTY_FIXTURE_GUARDIAN']=str(Path(sys.argv[1]).with_suffix('.guardian.txt'))
+terminal._BOOTSTRAP=terminal._BOOTSTRAP.replace(
+    'from agent_procutil._interactive_session import main;main()',
+    'exec('+repr(""" + repr(_GUARD_DIAGNOSTICS) + """)+');'
+    'from agent_procutil._interactive_session import main;main()')
+with Path(sys.argv[1]).with_suffix('.stack.txt').open('w') as stack:
+    faulthandler.dump_traceback_later(6,file=stack)
+    try:
+        code=run_interactive(sys.argv[2:])
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+        Path(sys.argv[1]).with_suffix('.diagnostic.json').write_text(
+            json.dumps(diagnostic,default=lambda value:value.hex()))
+after=termios.tcgetattr(0)
+result={
+    'code':code,'attributes':after==before,
+    'foreground':os.tcgetpgrp(0)==os.getpgrp()}
+if after!=before:
+    result['before']=before
+    result['after']=after
+    result['diagnostic']=diagnostic
+Path(sys.argv[1]).write_text(json.dumps(result,default=lambda value:value.hex()))
 """
+
+
+def _diagnostics(path):
+    values = []
+    for suffix in (".guardian.txt", ".stack.txt", ".diagnostic.json"):
+        try:
+            values.append(path.with_suffix(suffix).read_text()[:12000])
+        except OSError:
+            pass
+    return "\n".join(values)
+
+
+def _retire_fixture(process):
+    children = []
+    if process.poll() is None:
+        try:
+            children = psutil.Process(process.pid).children(recursive=True)
+        except psutil.NoSuchProcess:
+            pass
+        process.kill()
+    for child in reversed(children):
+        if not _gone(child):
+            child.kill()
+    process.wait(timeout=10)
 
 
 @pytest.mark.parametrize("mode", ["normal", "caller-killed", "interrupt"])
@@ -143,7 +219,7 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
             (tmp_path / "gate").touch()
         _wait(lambda: drain() and process.poll() is not None, "interactive caller did not finish")
         if mode != "caller-killed":
-            assert process.returncode == 0, output.decode(errors="replace")
+            assert process.returncode == 0, output.decode(errors="replace") + _diagnostics(receipt)
             assert _read(receipt) == {
                 "code": 130 if mode == "interrupt" else 0,
                 "attributes": True, "foreground": True,
@@ -161,10 +237,11 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
 
             before = _wait(count, "managed workload did not publish a heartbeat")
             _wait(lambda: (count() or 0) > before, "managed workload stopped progressing")
+    except BaseException:
+        print(_diagnostics(receipt))
+        raise
     finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=10)
+        _retire_fixture(process)
         for pin in [*pins, *([detached] if detached is not None else [])]:
             if not _gone(pin):
                 pin.kill()
@@ -203,12 +280,14 @@ def test_pty_relay_preserves_redirected_json_stdout(tmp_path):
         _wait(ready, "redirected completion did not reach its terminal")
         os.write(master, b"answer\n")
         stdout, _ = process.communicate(timeout=10)
-        assert process.returncode == 0, output.decode(errors="replace")
+        assert process.returncode == 0, output.decode(errors="replace") + _diagnostics(receipt)
         assert stdout == b'{"ok":true}\n'
         assert _read(receipt) == {"code": 0, "attributes": True, "foreground": True}
+    except BaseException:
+        print(_diagnostics(receipt))
+        raise
     finally:
-        if process.poll() is None:
-            process.kill()
+        _retire_fixture(process)
         process.communicate(timeout=10)
         os.close(master)
 
@@ -249,12 +328,15 @@ def test_pty_relay_drains_output_beyond_its_buffer_without_losing_the_tail(tmp_p
             if not data:
                 break
             output.extend(data)
-        assert process.returncode == 0, output[-4096:].decode(errors="replace")
+        assert process.returncode == 0, (
+            output[-4096:].decode(errors="replace") + _diagnostics(receipt)
+        )
         assert output.count(b"x") == size
         assert output.endswith(b"last-output\r\n")
         assert _read(receipt) == {"code": 0, "attributes": True, "foreground": True}
+    except BaseException:
+        print(_diagnostics(receipt))
+        raise
     finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=10)
+        _retire_fixture(process)
         os.close(master)

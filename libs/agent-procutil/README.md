@@ -292,6 +292,9 @@ non-TTY streams remain inherited rather than entering the relay. The caller's
 terminal attributes are restored on every exit. A start gate precedes command
 execution and the command has its own foreground group inside that session.
 Control/status pipes remain separate from terminal data.
+Relay buffers are bounded. After owned-session settlement, terminal output
+drains under a two-second no-progress deadline rather than a total-output
+deadline; continuous progress does not discard a large command's tail.
 
 Retirement covers every ordinary job group in the private session, not just
 the initial group. Kernel `setpgroup` admission places owned child anchors only
