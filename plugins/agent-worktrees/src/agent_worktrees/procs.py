@@ -734,6 +734,8 @@ def processes_with_cwd_under(
     system = platform.system()
     if require_available and system not in {"Windows", "Linux"}:
         raise OSError(f"cwd inspection unsupported on {system}")
+    if require_available:
+        root = os.path.realpath(root, strict=True)
     excluded = {os.getpid()}
     if exclude_pids:
         excluded |= exclude_pids
@@ -754,14 +756,16 @@ def processes_with_cwd_under(
                 cwd, name = _win_read_cwd(k32, pid)
             except OSError:
                 continue
-            if _is_under(cwd, root):
+            candidate = os.path.realpath(cwd) if require_available and cwd else cwd
+            if _is_under(candidate, root):
                 hits.append({"pid": pid, "name": name})
     else:
         processes = _iter_processes_posix(strict=True) if require_available else _iter_processes_posix()
         for pid, cwd, name in processes:
             if pid in excluded:
                 continue
-            if _is_under(cwd, root):
+            candidate = os.path.realpath(cwd) if require_available and cwd else cwd
+            if _is_under(candidate, root):
                 hits.append({"pid": pid, "name": name})
     return hits
 

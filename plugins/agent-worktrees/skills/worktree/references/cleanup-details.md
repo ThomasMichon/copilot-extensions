@@ -50,6 +50,8 @@ Unavailable inspection also defers removal; the current cwd reader supports
 Windows and Linux, not macOS. A deferred single-item cleanup reports
 `removed: false`, `skipped: true` and its reason in JSON and text, rather than
 claiming the checkout was removed.
+Strict retirement inspection resolves the checkout root and observed cwd paths
+before matching, so symlinked ancestors do not hide a live holder.
 
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving

@@ -12,6 +12,26 @@ import pytest
 from agent_worktrees import cleanup_reap, permissions, sessions
 
 
+def test_strict_holder_inspection_resolves_symlinked_checkout_root(tmp_path, monkeypatch):
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    checkout = physical / "checkout"
+    checkout.mkdir()
+    alias = tmp_path / "worktree-root"
+    try:
+        alias.symlink_to(physical, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks unavailable")
+    procs = cleanup_reap.procs
+    monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        procs, "_iter_processes_posix",
+        lambda **kwargs: iter([(12345, str(checkout.resolve()), "holder")]),
+    )
+    holders = procs.processes_with_cwd_under(str(alias / "checkout"), require_available=True)
+    assert holders == [{"pid": 12345, "name": "holder"}]
+
+
 @pytest.mark.parametrize("removed", [False, True])
 def test_cleanup_trust_follows_actual_directory_removal(
     tmp_path, monkeypatch, sample_record, removed,
@@ -139,10 +159,20 @@ def test_cleanup_defers_when_cwd_inspection_is_unavailable(
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
 @pytest.mark.skipif(sys.platform not in {"win32", "linux"}, reason="native cwd reader unavailable")
+@pytest.mark.parametrize("aliased_root", [False, True])
 def test_cleanup_waits_for_real_checkout_holder_to_exit(
-    tmp_path, monkeypatch, sample_record,
+    tmp_path, monkeypatch, sample_record, aliased_root,
 ):
-    checkout = tmp_path / "checkout"
+    root = tmp_path
+    if aliased_root:
+        physical = tmp_path / "physical"
+        physical.mkdir()
+        root = tmp_path / "worktree-root"
+        try:
+            root.symlink_to(physical, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory symlinks unavailable")
+    checkout = root / "checkout"
     checkout.mkdir()
     ready = tmp_path / "ready"
     record = replace(sample_record, worktree_path=str(checkout))
