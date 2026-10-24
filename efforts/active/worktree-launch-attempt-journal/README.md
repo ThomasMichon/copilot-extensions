@@ -249,3 +249,11 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   private-history five-second contention convention instead; the required UI
   acknowledgement remains asynchronous and separate. The focused storage
   portfolio passes 46 cases with three platform/privilege skips.
+- A further review found schema-name collisions, safe inherited Windows sidecar
+  ACLs and WAL-reader initialization effects. Schema comparison now retains
+  every type/name/definition row; read-only verification accepts private
+  inherited sidecar ACEs only while directory/main requirements remain strict;
+  a pre-connection header check refuses WAL without creating sidecars.
+  Regressions include the actual colliding expiry trigger, a concurrent Windows
+  journal read without ACL repair and whole-directory comparison on refused WAL
+  reads. The focused storage portfolio passes 49 cases with three skips.

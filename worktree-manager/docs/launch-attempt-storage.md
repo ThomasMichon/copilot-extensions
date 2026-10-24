@@ -42,9 +42,16 @@ events or input refuse rather than returning a success-shaped substitute.
 
 Reads open SQLite in read-only mode and verify, rather than repair, private
 permissions. Missing storage stays missing. Windows requires the protected
-owner/SYSTEM DACL; POSIX requires the current owner and `0700` directory /
-`0600` file modes. Writers use the existing `private_state` protection helper.
-SQLite sidecars are protected and checked along with the main file.
+owner/SYSTEM DACL on the directory and main database. SQLite-created sidecars
+may safely inherit those same owner/SYSTEM ACEs from the verified private parent
+without their own protected-DACL flag. POSIX requires the current owner and
+`0700` directory / `0600` file modes. Writers use the existing `private_state`
+protection helper; readers never replace a concurrent writer's sidecar ACL.
+
+The SQLite header is inspected before opening a connection, so an unsupported
+WAL-mode database is refused without creating WAL/shared-memory bookkeeping.
+Schema validation compares every object row, including its type; a trigger
+cannot hide behind an index with the same name.
 
 `expire` physically clears expired input using SQLite secure deletion while
 retaining metadata and observations. Reads hide expired input even before

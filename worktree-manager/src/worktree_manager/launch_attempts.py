@@ -140,19 +140,38 @@ class LaunchAttempts:
             sidecar = self.path.with_name(self.path.name + suffix)
             reject_links(sidecar)
             try:
-                verify_private(sidecar)
+                verify_private(sidecar, allow_inherited=True)
             except FileNotFoundError:
                 pass
 
+    def _verify_header(self) -> None:
+        # SQLite mode=ro can still create WAL bookkeeping. Inspect before opening it.
+        with self.path.open("rb") as stream:
+            header = stream.read(100)
+        if len(header) != 100 or header[:16] != b"SQLite format 3\0":
+            raise LaunchAttemptError("Launch journal has an incompatible database header.")
+        if header[18:20] != b"\x01\x01":
+            raise LaunchAttemptError("Launch journal requires DELETE journaling.")
+        if (
+            int.from_bytes(header[60:64], "big") != 1
+            or int.from_bytes(header[68:72], "big") != _APPLICATION_ID
+        ):
+            raise LaunchAttemptError("Launch journal has an incompatible database schema.")
+
     @staticmethod
     def _schema(connection: sqlite3.Connection) -> None:
-        objects = dict(connection.execute(
-            "SELECT name, sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*'"
-        ))
+        objects = [tuple(row) for row in connection.execute(
+            "SELECT type, name, sql FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' "
+            "ORDER BY type, name, sql"
+        )]
+        expected = sorted([
+            *(("table", name, sql) for name, sql in _TABLES.items()),
+            *(("index", name, sql) for name, sql in _INDEXES.items()),
+        ])
         if (
             connection.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID
             or connection.execute("PRAGMA user_version").fetchone()[0] != 1
-            or objects != {**_TABLES, **_INDEXES}
+            or objects != expected
         ):
             raise LaunchAttemptError("Launch journal has an incompatible database schema.")
 
@@ -190,6 +209,7 @@ class LaunchAttempts:
             self._protect()
         else:
             self._verify_private()
+        self._verify_header()
         mode = "rw" if write else "ro"
         with closing(sqlite3.connect(
             self.path.absolute().as_uri() + f"?mode={mode}", uri=True, timeout=5,

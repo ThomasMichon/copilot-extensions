@@ -59,7 +59,9 @@ def protect(path: Path, *, directory: bool = False) -> None:
         kernel.LocalFree(descriptor)
 
 
-def verify_private(path: Path, *, directory: bool = False) -> None:
+def verify_private(
+    path: Path, *, directory: bool = False, allow_inherited: bool = False,
+) -> None:
     """Read-only verification for private evidence readers, never ACL repair."""
     import stat
 
@@ -107,7 +109,17 @@ def verify_private(path: Path, *, directory: bool = False) -> None:
         inheritance = "OICI" if directory else ""
         owner = f"(A;{inheritance};FA;;;OW)"
         system = f"(A;{inheritance};FA;;;SY)"
-        if text.value not in {"D:P" + owner + system, "D:P" + system + owner}:
-            raise OSError("Private storage requires a protected owner/SYSTEM DACL.")
+        if text.value in {"D:P" + owner + system, "D:P" + system + owner}:
+            return
+        if allow_inherited and not directory:
+            import re
+
+            # SQLite sidecars inherit the already-verified private parent's ACEs.
+            match = re.fullmatch(
+                r"D:(?:P|AI|AR)*((?:\(A;(?:ID)?;FA;;;(?:OW|SY)\)){2})", text.value or "",
+            )
+            if match and set(re.findall(r";;;(OW|SY)\)", match[1])) == {"OW", "SY"}:
+                return
+        raise OSError("Private storage requires a protected owner/SYSTEM DACL.")
     finally:
         kernel.LocalFree(text)

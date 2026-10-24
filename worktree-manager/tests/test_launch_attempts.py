@@ -230,6 +230,45 @@ def test_wal_mode_is_refused_instead_of_retaining_a_second_prompt_copy(tmp_path)
         store.expire()
 
 
+def test_refused_wal_reads_do_not_initialize_sidecars_or_change_storage(tmp_path):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    before = {path.name: path.read_bytes() for path in store.path.parent.iterdir()}
+    assert set(before) == {store.path.name}
+    for operation in (
+        store.entries, lambda: store.detail(attempt_id),
+        lambda: store.detail(attempt_id, include_input=True),
+    ):
+        with pytest.raises(journal.LaunchAttemptError, match="DELETE"):
+            operation()
+        assert {path.name: path.read_bytes() for path in store.path.parent.iterdir()} == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows inherited sidecar ACL")
+def test_private_inherited_sidecar_allows_concurrent_committed_reads_without_acl_repair(
+    tmp_path, monkeypatch,
+):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    def no_repair(*_args, **_kwargs):
+        pytest.fail("concurrent evidence reads must not repair the writer's sidecar ACL")
+    with sqlite3.connect(store.path) as writer:
+        writer.execute(
+            "INSERT INTO events(attempt_id, observed_at, owner, phase, details) "
+            "VALUES (?, ?, 'manager', 'unknown', '{}')", (attempt_id, journal.time.time()),
+        )
+        sidecar = store.path.with_name(store.path.name + "-journal")
+        assert sidecar.exists()
+        with monkeypatch.context() as patch:
+            patch.setattr(journal, "protect", no_repair)
+            assert store.entries()[0]["attempt_id"] == attempt_id
+            assert len(store.detail(attempt_id)["events"]) == 1
+            assert sidecar.exists()
+    assert len(store.detail(attempt_id)["events"]) == 2
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX read-only permission verification")
 def test_unsafe_permissions_refuse_read_without_repairing_them(tmp_path):
     store = journal.LaunchAttempts(tmp_path)
@@ -330,6 +369,29 @@ def test_lookalike_archive_trigger_cannot_copy_expiring_private_input(tmp_path, 
         store.expire()
     with sqlite3.connect(store.path) as connection:
         assert connection.execute("SELECT count(*) FROM sqlitex_archive").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT inputs IS NOT NULL FROM attempts WHERE attempt_id=?", (attempt_id,),
+        ).fetchone()[0] == 1
+
+
+def test_trigger_cannot_hide_behind_a_recreated_index_with_the_same_name(tmp_path, monkeypatch):
+    store = journal.LaunchAttempts(tmp_path)
+    clock = 2_000_000_000.0
+    monkeypatch.setattr(journal.time, "time", lambda: clock)
+    attempt_id = record(store)
+    with sqlite3.connect(store.path) as connection:
+        connection.execute("DROP INDEX attempts_time")
+        connection.execute(
+            "CREATE TRIGGER attempts_time AFTER UPDATE OF inputs ON attempts BEGIN "
+            "INSERT INTO events(attempt_id, observed_at, owner, phase, details) "
+            "VALUES (OLD.attempt_id, 1, 'manager', 'unknown', OLD.inputs); END"
+        )
+        connection.execute("CREATE INDEX attempts_time ON attempts(submitted_at)")
+    clock += journal.RETENTION_SECONDS
+    with pytest.raises(journal.LaunchAttemptError, match="schema"):
+        store.expire()
+    with sqlite3.connect(store.path) as connection:
+        assert connection.execute("SELECT count(*) FROM events").fetchone()[0] == 1
         assert connection.execute(
             "SELECT inputs IS NOT NULL FROM attempts WHERE attempt_id=?", (attempt_id,),
         ).fetchone()[0] == 1
