@@ -208,6 +208,7 @@ _VERB_MODULES: tuple[str, ...] = (
     "agent_worktrees.launch_request",
     "agent_worktrees.launch_attempt",
     "agent_worktrees.launch_execution",
+    "agent_worktrees.launch_native_observation",
 )
 
 _verb_modules_loaded = False

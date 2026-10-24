@@ -167,6 +167,15 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-24** -- #8627 merged prompt-free deferred execution receipts with
+  current-head approval and required CI. Attempt/resolution/parent IDs now
+  reach the cooperative backend boundary; OS spawn, seed claim and observed
+  return remain distinct from native conversation/accepted-turn evidence.
+  Review fixes preserve settlement and waits through interruption and avoid
+  repeated boot waits on proven live incompatible owners. Re-read both plans
+  after merge. Native association, containing release, authorized rollout,
+  installed local/SSH same-conversation proof and cleanup remain open; the
+  source process checks do not close those acceptance gates.
 - **2026-10-24** -- #8615 merged local/seedless resolution receipts and saved
   attempt propagation through both launch hops, with current-head approval,
   no findings and required CI passing. Target prompted admission retains its

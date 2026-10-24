@@ -60,8 +60,13 @@ def _details(value: object) -> dict:
     return value
 
 
-def _path(directory: Path, attempt_id: str, operation_id: str, *, execution: bool = False) -> Path:
-    suffix = ".execution.json" if execution else ".json"
+def _path(
+    directory: Path, attempt_id: str, operation_id: str, *,
+    execution: bool = False, native: bool = False,
+) -> Path:
+    if execution and native:
+        raise ValueError("Conflicting launch receipt kinds")
+    suffix = ".native.json" if native else ".execution.json" if execution else ".json"
     path = directory / "launch-attempts" / identity(attempt_id) / (identity(operation_id) + suffix)
     for item in (path, *path.parents):
         try:

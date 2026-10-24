@@ -431,9 +431,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     linked_handoff = None
     from . import native_lifecycle_source
 
-    source_identity = native_lifecycle_source.start_identity(
-        session_id, native_lifecycle_source.witness(payload, resident=resident_environment),
-    )
+    native_witness = native_lifecycle_source.witness(payload, resident=resident_environment)
+    source_identity = native_lifecycle_source.start_identity(session_id, native_witness)
     try:
         linked_handoff = tracking.register_session(
             wt_id,
@@ -471,6 +470,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
+    from . import launch_native_observation
+
+    launch_native_observation.observe_registration(
+        tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml",
+        session_id, source_identity, payload=payload, witness=native_witness,
+        resident=resident_environment,
+    )
     try:
         from . import handoff_diagnostics
         registration_project = cfg.active_project()

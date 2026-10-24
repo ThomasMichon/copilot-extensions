@@ -12,7 +12,7 @@ import stat
 import sys
 from uuid import uuid4
 
-from . import launch_attempt, locks, tracking, tracking_write
+from . import launch_attempt, locks, native_source_context, tracking, tracking_write
 
 _SCHEMA = "worktree-launch-execution"
 _PHASES = {"execution-requested", "seed-claimed", "process-spawned", "execution-returned", "unknown"}
@@ -21,6 +21,35 @@ _FIELDS = {
     "worktree_id", "creation_nonce", "events",
 }
 _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome)
+NATIVE_HINT_ENV = "AGENT_WORKTREES_LAUNCH_EXECUTION"
+
+
+def validate_epoch(value: object) -> None:
+    if value is None:
+        return
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"platform", "environment_id", "boot_id"}
+        or value["platform"] not in ("linux", "wsl")
+        or not isinstance(value["environment_id"], str)
+        or re.fullmatch(r"[0-9a-f]{32}", value["environment_id"]) is None
+        or not isinstance(value["boot_id"], str)
+        or re.fullmatch(
+            r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"
+            + (r":(?:0|[1-9][0-9]{0,31})" if value["platform"] == "wsl" else ""),
+            value["boot_id"],
+        ) is None
+    ):
+        raise ValueError("Invalid launch execution epoch")
+
+
+def _epoch() -> dict | None:
+    try:
+        value = native_source_context.epoch()
+        validate_epoch(value)
+        return value
+    except (ValueError, OSError, IndexError):
+        return None
 
 
 @dataclass(frozen=True)
@@ -101,13 +130,16 @@ def read(directory: Path, attempt_id: str, operation_id: str) -> dict:
 
 def _validate(value: object, attempt_id: str, operation_id: str) -> dict:
     if (
-        not isinstance(value, dict) or set(value) != _FIELDS
-        or value["schema"] != _SCHEMA or type(value["version"]) is not int or value["version"] != 1
+        not isinstance(value, dict) or type(value.get("version")) is not int
+        or value["version"] not in (1, 2)
+        or set(value) != (_FIELDS | ({"native_epoch"} if value["version"] == 2 else set()))
+        or value["schema"] != _SCHEMA
         or value["attempt_id"] != attempt_id or value["operation_id"] != operation_id
         or not isinstance(value["events"], list) or not 1 <= len(value["events"]) <= 4
     ):
         raise ValueError("Invalid launch execution state")
     Correlation(value["attempt_id"], value["resolution_id"], value["parent_id"])
+    validate_epoch(value.get("native_epoch"))
     launch_attempt.identity(value["operation_id"])
     launch_attempt._details({"worktree_id": value["worktree_id"]})
     nonce = value["creation_nonce"]
@@ -144,7 +176,9 @@ def _apply(args: dict) -> dict:
             raise ValueError("Invalid launch execution append")
         value, phase, details = args["subject"], args["phase"], args["details"]
         if (
-            not isinstance(value, dict) or set(value) != _FIELDS - {"events"}
+            not isinstance(value, dict) or type(value.get("version")) is not int
+            or value["version"] not in (1, 2)
+            or set(value) != (_FIELDS - {"events"} | ({"native_epoch"} if value["version"] == 2 else set()))
             or not isinstance(phase, str) or phase not in _PHASES
         ):
             raise ValueError("Invalid launch execution append")
@@ -178,10 +212,11 @@ class Execution:
         record = tracking.load_record(record_path)
         self.directory = record_path.parent
         self.subject = {
-            "schema": _SCHEMA, "version": 1, "attempt_id": correlation.attempt_id,
+            "schema": _SCHEMA, "version": 2, "attempt_id": correlation.attempt_id,
             "resolution_id": correlation.resolution_id, "operation_id": uuid4().hex,
             "parent_id": correlation.parent_id, "worktree_id": record.worktree_id,
             "creation_nonce": record.creation_nonce,
+            "native_epoch": _epoch(),
         }
         self.failed = False
         self.process_exit_code: int | None = None
@@ -194,7 +229,7 @@ class Execution:
         result = _dispatch("launch_attempt_execution", {
             "tracking_dir": str(self.directory), "subject": self.subject,
             "phase": phase, "details": details,
-        }, min_version=1)
+        }, min_version=2)
         if result != {"recorded": True}:
             raise ValueError("Could not retain launch execution receipt")
 
@@ -209,6 +244,16 @@ class Execution:
         return Correlation(
             self.subject["attempt_id"], self.subject["resolution_id"], self.subject["operation_id"],
         )
+
+    def environment(self, *, invoke: bool) -> dict[str, str]:
+        environment = os.environ.copy()
+        environment.pop(NATIVE_HINT_ENV, None)
+        if invoke:
+            environment[NATIVE_HINT_ENV] = json.dumps({
+                key: self.subject[key]
+                for key in ("attempt_id", "resolution_id", "operation_id")
+            }, separators=(",", ":"))
+        return environment
 
     def spawned(self, pid: int, *, invoke: bool) -> None:
         try:
@@ -239,4 +284,4 @@ def run(record_path: Path, correlation: Correlation, work) -> int:
     return result if result or not execution.failed else 3
 
 
-tracking_write.register_verb("launch_attempt_execution", _apply, version=1)
+tracking_write.register_verb("launch_attempt_execution", _apply, version=2)
