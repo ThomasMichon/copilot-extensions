@@ -4,15 +4,18 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import partial
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import selectors
 import signal
 import subprocess
 import sys
 import tarfile
+import time
 
 ROOT = Path(__file__).resolve().parent
 CONTEXT = ("Dockerfile", "dependencies.lock.json", "install.py", "build.py",
@@ -87,6 +90,10 @@ def validate_age(lock: dict, now: datetime | None = None) -> None:
 CLEANUP_TIMEOUT = 1
 
 
+class ChildCustodyError(subprocess.SubprocessError):
+    """The CLI outcome or invocation-owned cleanup cannot be confirmed."""
+
+
 @contextmanager
 def windows_job():
     """Contain only this invocation, before its gated launcher can spawn the CLI."""
@@ -136,7 +143,48 @@ def windows_job():
         kernel.CloseHandle(job)
 
 
-def execute(argv: list[str], *, timeout: float = 30) -> str:
+def observe_unreaped(process):
+    if signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL or process.returncode is not None:
+        raise ChildCustodyError("CLI child custody was released")
+    try:
+        status = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except OSError as error:
+        raise ChildCustodyError("CLI child custody is unconfirmed") from error
+    if status is not None and status.si_pid != process.pid:
+        raise ChildCustodyError("CLI child identity changed")
+    return status
+
+
+def communicate_unreaped(process, argv, timeout):
+    deadline = time.monotonic() + timeout
+    output = [bytearray(), bytearray()]
+
+    def remaining():
+        duration = deadline - time.monotonic()
+        if duration <= 0:
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return duration
+
+    with selectors.DefaultSelector() as selector:
+        for index, stream in enumerate((process.stdout, process.stderr)):
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, index)
+        while selector.get_map():
+            for key, _ in selector.select(remaining()):
+                try:
+                    chunk = os.read(key.fd, 65536)
+                except BlockingIOError:
+                    continue
+                if chunk:
+                    output[key.data].extend(chunk)
+                else:
+                    selector.unregister(key.fileobj)
+    while observe_unreaped(process) is None:
+        time.sleep(min(0.01, remaining()))
+    return tuple(bytes(data).decode().replace("\r\n", "\n").replace("\r", "\n") for data in output)
+
+
+def execute(argv: list[str], *, timeout: float = 30, env=None) -> str:
     if os.name == "nt":
         with windows_job() as (assign, terminate):
             # The job assignment precedes the byte that allows any CLI descendant.
@@ -149,10 +197,13 @@ def execute(argv: list[str], *, timeout: float = 30) -> str:
             return execute_contained(
                 [sys.executable, "-B", "-c", launcher, json.dumps(argv)], argv,
                 timeout, assign, terminate, creationflags=subprocess.CREATE_NO_WINDOW,
-                stdin=subprocess.PIPE,
+                stdin=subprocess.PIPE, env=env,
             )
+    if (not hasattr(os, "waitid") or not hasattr(os, "WNOWAIT")
+            or signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL):
+        raise ChildCustodyError("CLI child requires exclusive unreaped POSIX custody")
     return execute_contained(argv, argv, timeout, lambda p: None, None,
-                             start_new_session=True, stdin=subprocess.DEVNULL)
+                             start_new_session=True, stdin=subprocess.DEVNULL, env=env)
 
 
 def execute_contained(command, argv, timeout, assign, terminate, **flags):
@@ -163,43 +214,51 @@ def execute_contained(command, argv, timeout, assign, terminate, **flags):
         if terminate is not None:
             terminate()
         else:
+            # WNOWAIT plus exclusive Popen ownership pins this group leader's PID.
+            observe_unreaped(process)
             try:
                 os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
             except ProcessLookupError:
                 pass
 
+    def communicate(duration):
+        if terminate is None:
+            return communicate_unreaped(process, argv, duration)
+        return process.communicate(input="1" if process.stdin and not process.stdin.closed else None,
+                                   timeout=duration)
+
     try:
         assign(process)
         try:
-            stdout, stderr = process.communicate(
-                input="1" if terminate is not None else None, timeout=timeout,
-            )
+            stdout, stderr = communicate(timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
             stop()
             try:
-                process.communicate(timeout=CLEANUP_TIMEOUT)
+                communicate(CLEANUP_TIMEOUT)
             except subprocess.TimeoutExpired:
                 stop(force=True)
                 try:
-                    process.communicate(timeout=CLEANUP_TIMEOUT)
+                    communicate(CLEANUP_TIMEOUT)
                 except subprocess.TimeoutExpired:
                     pass
             raise
-        if process.returncode:
-            raise subprocess.CalledProcessError(process.returncode, argv, stdout, stderr)
-        return stdout
     finally:
-        stop(force=True)
-        if process.poll() is None:
-            process.kill()
+        failed = sys.exc_info()[0] is not None
         try:
+            stop(force=True)
+            if terminate is not None and process.poll() is None:
+                process.kill()
             process.wait(timeout=CLEANUP_TIMEOUT)
         except subprocess.TimeoutExpired:
-            pass
+            if not failed:
+                raise ChildCustodyError("CLI child cleanup is unconfirmed")
         finally:
             for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
+    if process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, argv, stdout, stderr)
+    return stdout
 
 
 def fsync_directory(path: Path) -> None:
@@ -221,6 +280,75 @@ def create_output(path: Path) -> None:
         fsync_directory(directory.parent)
     if not missing:
         raise FileExistsError(path)
+
+
+BUILDKIT_IMAGE = ("moby/buildkit@sha256:"
+                  "2be0a5be7ae3cd9268f6836782e9690cce7bc4124142f7700f1641af5ccca8de")
+
+
+def validate_driver_options(options, selected: dict) -> None:
+    if (not isinstance(options, dict) or set(options) != {
+            "image", "memory", "memory-swap", "cpu-period", "cpu-quota",
+    } or any(not isinstance(value, str) for value in options.values())
+            or options["image"] != BUILDKIT_IMAGE):
+        raise ValueError("Only the digest-pinned, explicitly bounded BuildKit driver is supported")
+
+    def memory(value):
+        match = re.fullmatch(r"([1-9][0-9]{0,15})([kmg]?)", value)
+        if not match:
+            raise ValueError("Unsupported BuildKit memory bound")
+        return int(match[1]) * {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3}[match[2]]
+
+    limit = memory(options["memory"])
+    if not 134217728 <= limit <= selected["max_memory_bytes"] or memory(options["memory-swap"]) != limit:
+        raise ValueError("BuildKit driver memory/swap exceeds admission")
+    for key in ("cpu-period", "cpu-quota"):
+        if not re.fullmatch(r"[1-9][0-9]{0,8}", options[key]):
+            raise ValueError("Unsupported BuildKit CPU bound")
+    period, quota = int(options["cpu-period"]), int(options["cpu-quota"])
+    if not 1000 <= period <= 1000000 or not 1000 <= quota <= selected["max_cpus"] * period:
+        raise ValueError("BuildKit driver CPU bound exceeds admission")
+
+
+def docker_environment(selected: dict, output: Path) -> dict[str, str]:
+    ambient = dict(os.environ)
+    home = Path(ambient.get("USERPROFILE" if os.name == "nt" else "HOME") or Path.home())
+    docker = Path(ambient.get("DOCKER_CONFIG") or home / ".docker")
+    buildx = Path(ambient.get("BUILDX_CONFIG") or docker / "buildx")
+    with (buildx / "instances" / selected["name"]).open("rb") as stream:
+        raw = stream.read(65537)
+    if len(raw) > 65536:
+        raise ValueError("Selected builder metadata exceeds the bounded local schema")
+    metadata = json.loads(raw)
+    if not isinstance(metadata, dict) or set(metadata) != {"Name", "Driver", "Dynamic", "Nodes"}:
+        raise ValueError("Selected builder metadata has unsupported fields")
+    nodes = metadata.get("Nodes", [])
+    if (metadata.get("Name") != selected["name"] or metadata.get("Driver") != "docker-container"
+            or metadata.get("Dynamic", False) is not False
+            or not isinstance(nodes, list) or len(nodes) != 1 or not isinstance(nodes[0], dict)):
+        raise ValueError("Only one explicitly selected static local builder may be copied")
+    node = nodes[0]
+    if (set(node) != {"Name", "Endpoint", "DriverOpts", "Files", "Flags", "Platforms"}
+            or not isinstance(node.get("Name"), str)
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", node["Name"])
+            or node.get("Endpoint") not in ("default", "unix:///var/run/docker.sock")
+            or node["Files"] not in (None, {}) or node["Platforms"] not in (None, [])
+            or node["Flags"] not in ([], ["--allow-insecure-entitlement=network.host"])):
+        raise ValueError("Selected builder metadata has unsupported endpoint or options")
+    validate_driver_options(node["DriverOpts"], selected)
+    snapshot = metadata
+    client = output / "docker-client"
+    for directory in (client, client / "buildx", client / "buildx" / "instances"):
+        directory.mkdir(mode=0o700)
+        fsync_directory(directory.parent)
+    # A nonempty, credential-free auth map also disables Docker's native helper autodetection.
+    (client / "config.json").write_text(json.dumps({"auths": {"": {}}}))
+    (client / "buildx" / "instances" / selected["name"]).write_text(json.dumps(snapshot))
+    environment = {key: value for key, value in ambient.items()
+                   if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"}}
+    environment.update(HOME=str(client), USERPROFILE=str(client), DOCKER_CONFIG=str(client),
+                       BUILDX_CONFIG=str(client / "buildx"))
+    return environment
 
 
 def verify_builder(engine: str, selected: dict, runner) -> dict:
@@ -327,7 +455,7 @@ def oci_identity(archive: Path) -> dict[str, str]:
     return {"manifest_digest": manifest_digest, "config_digest": config_digest}
 
 
-def build(inputs: object, output: Path, engine: str = "docker", runner=execute,
+def build(inputs: object, output: Path, engine: str = "docker", runner=None,
           root: Path = ROOT, now: datetime | None = None) -> dict:
     files = context_files(root)
     approval = validate_inputs(inputs, context_digest(files))
@@ -339,8 +467,9 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=execute,
     # BuildKit CSV output options cannot represent an unescaped comma safely.
     if "," in str(output) or "\n" in str(output) or "\r" in str(output):
         raise ValueError("Unsupported artifact path")
-    bounds = verify_builder(engine, approval["builder"], runner)
     create_output(output)
+    runner = partial(runner or execute, env=docker_environment(approval["builder"], output))
+    bounds = verify_builder(engine, approval["builder"], runner)
     context = output / "context"
     context.mkdir()
     for name, content in files.items():
@@ -374,7 +503,7 @@ def build(inputs: object, output: Path, engine: str = "docker", runner=execute,
         receipt.update(oci_identity(archive))
         receipt["archive_sha256"] = file_sha256(archive)
         receipt["status"] = "built-not-runtime-validated"
-    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+    except (subprocess.TimeoutExpired, KeyboardInterrupt, ChildCustodyError):
         receipt["status"] = "cancellation-requested-builder-outcome-unconfirmed"
         raise
     except BaseException:

@@ -1480,7 +1480,14 @@
     "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_cleanup_bounds_final_pipe_drain_and_child_wait]",
     "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_failed_directory_sync_never_launches_buildx]",
     "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_final_receipt_sync_failure_does_not_claim_durable_success]",
-    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_output_and_receipt_directory_entries_sync_before_buildx]"
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_output_and_receipt_directory_entries_sync_before_buildx]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_bounded_buildx_metadata_preserves_admitted_real_shape]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_job_docker_config_snapshots_only_selected_local_builder]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_job_docker_metadata_fails_closed_on_unknown_or_foreign_builder]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_lost_or_reused_posix_custody_never_signals]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_posix_leader_stays_unreaped_until_group_retirement]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_unconfirmed_cleanup_cannot_return_success]",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py::test_trusted_harness_contract_unit[ContractTests.test_unsafe_bounded_metadata_refused_before_any_cli_command]"
   ],
   "sources": {
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
@@ -1611,16 +1618,16 @@
     "libs/installer-engine/installer_wheel_inputs.py": "9bed756f0f00f61dce1d8745800c67eb79c49fcdf81e28cb7150b00200fd3070",
     "tools/wheel_input_fixture.py": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122",
     "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",
-    "tools/promotion_unit_tests/test_trusted_harness_base.py": "aae0a1abf0c969b80d87d75ff482f5e9585c3a8ddaea6d4e6a7b9e278c9406e9",
-    ".devcontainer/trusted-harness-base/tests/test_contract.py": "9f94fb4847d7ff6f56b9047deeb45fc2b0b8be76e8b402d9298a78f9742beeec",
-    ".devcontainer/trusted-harness-base/build.py": "ddd033d2945542b2a6f0718d3e06bfe2389861ad558673e2b3e9b46abcbbdf29",
+    "tools/promotion_unit_tests/test_trusted_harness_base.py": "0019cf90310ebcc13d6b06f459a20f56f6070886e7f620f54794522d4b993f60",
+    ".devcontainer/trusted-harness-base/tests/test_contract.py": "700caef26790d95fb90836d38d17ab778fda9fe470d5a44b9db246aac2971e46",
+    ".devcontainer/trusted-harness-base/build.py": "3191bab7f4cecfc70281fe255716b5f642e6735db40e764ef11abf03ee28ae41",
     ".devcontainer/trusted-harness-base/install.py": "5818d4f7a7dad564cb28496b42a3774d4f924afb95f91d65e1d46629bd05c845",
     "tools/promotion_unit_tests/test_host_profile.py": "ca3d73defc1d0588aa88bf27696b1f1c10e2084e3396db8a7e4a678f5a796b97",
     "fleet-manager/src/fleet_manager/__init__.py": "77743b7e007c45bfd4b89c830ddc8ca3030758f739d3451f6efb7e1f20eca02d",
     "fleet-manager/src/fleet_manager/planning.py": "2f5f85665490121a1a8ffdd9c8d5f0bbdf08fadbeb858dd86035f138f6a6f4f5",
     "fleet-manager/src/fleet_manager/host_profile.py": "c73fc15bb1e98b5a731dc2e8834daaedac9ca764da005584a24da8a928455c50",
     "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
-    "fleet-manager/tests/test_host_profile.py": "87789b0c9da7f0f93522c42f61033a46641148108fdce8be5fa2b6e5a8e022da",
+    "fleet-manager/tests/test_host_profile.py": "cc7b0999c082454ce8fd88b2b7b403393efd37b1db7d0a02409f4fedfc1078e4",
     "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354"
   },
   "coverage_targets": [

@@ -21,6 +21,7 @@ specification.loader.exec_module(original)
 NATIVE_CASES = {
     "test_actual_descendant_pipe_timeout_is_bounded_and_contained",
     "test_actual_directory_fsync",
+    "test_actual_job_docker_environment_isolated_at_cli_boundary",
     "test_actual_subprocess_timeout_is_bounded",
     "test_real_cli_describe",
     "test_real_subprocess_preserves_metacharacters",

@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import time
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 import uuid
@@ -77,6 +78,26 @@ class ContractTests(unittest.TestCase):
                        "builder": {"name": "image-proof", "container_id": "b" * 64,
                                    "max_memory_bytes": 1073741824, "max_cpus": 2}}
         self.lock = json.loads(self.files["dependencies.lock.json"])
+        self.docker_config = self.work / "ambient-docker"
+        self.buildx_config = self.work / "ambient-buildx"
+        (self.buildx_config / "instances").mkdir(parents=True)
+        self.metadata = {"Name": "image-proof", "Driver": "docker-container", "Dynamic": False,
+                         "Nodes": [{"Name": "image-proof0", "Endpoint": "default", "Files": {},
+                                    "Platforms": None,
+                                    "Flags": ["--allow-insecure-entitlement=network.host"],
+                                    "DriverOpts": {
+                                        "image": "moby/buildkit@sha256:"
+                                                 "2be0a5be7ae3cd9268f6836782e9690cce7bc4124142f7700f1641af5ccca8de",
+                                        "memory": "1g", "memory-swap": "1g",
+                                        "cpu-period": "100000", "cpu-quota": "200000",
+                                    }}]}
+        self.instance = self.buildx_config / "instances" / "image-proof"
+        self.instance.write_text(json.dumps(self.metadata))
+        environment = mock.patch.dict(os.environ, {
+            "DOCKER_CONFIG": str(self.docker_config), "BUILDX_CONFIG": str(self.buildx_config),
+        })
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def inspect(self, argv):
         self.assertEqual(argv[1:3], ["--context", "default"])
@@ -183,46 +204,39 @@ class ContractTests(unittest.TestCase):
             "exec('while not path.exists(): time.sleep(0.01)')"
         )
         started = time.monotonic()
-        try:
-            with self.assertRaises(subprocess.TimeoutExpired):
-                builder.execute([sys.executable, "-B", "-c", parent, descendant, str(pid_file)],
-                                timeout=1)
-            self.assertLess(time.monotonic() - started, 5)
-            pid = int(pid_file.read_text())
-            if os.name == "nt":
-                import ctypes
-                from ctypes import wintypes
-                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-                kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-                kernel.OpenProcess.restype = wintypes.HANDLE
-                kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
-                kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-                handle = kernel.OpenProcess(0x00100000, False, pid)
-                if handle:
-                    try:
-                        self.assertEqual(kernel.WaitForSingleObject(handle, 2000), 0)
-                    finally:
-                        kernel.CloseHandle(handle)
-            else:
-                deadline = time.monotonic() + 2
-                while time.monotonic() < deadline:
-                    try:
-                        os.kill(pid, 0)
-                    except ProcessLookupError:
-                        break
-                    # An orphan awaiting its system reaper is no longer executing.
-                    stat = Path("/proc") / str(pid) / "stat"
-                    if stat.exists() and stat.read_text().split(") ", 1)[1].startswith("Z "):
-                        break
-                    time.sleep(0.01)
-                else:
-                    self.fail("Invocation-owned descendant survived cleanup")
-        finally:
-            if pid_file.exists() and os.name != "nt":
+        with self.assertRaises(subprocess.TimeoutExpired):
+            builder.execute([sys.executable, "-B", "-c", parent, descendant, str(pid_file)],
+                            timeout=1)
+        self.assertLess(time.monotonic() - started, 5)
+        pid = int(pid_file.read_text())
+        if os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel.OpenProcess(0x00100000, False, pid)
+            if handle:
                 try:
-                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                    self.assertEqual(kernel.WaitForSingleObject(handle, 2000), 0)
+                finally:
+                    kernel.CloseHandle(handle)
+        else:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(pid, 0)
                 except ProcessLookupError:
-                    pass
+                    break
+                # An orphan awaiting its system reaper is no longer executing.
+                stat = Path("/proc") / str(pid) / "stat"
+                if stat.exists() and stat.read_text().split(") ", 1)[1].startswith("Z "):
+                    break
+                time.sleep(0.01)
+            else:
+                self.fail("Invocation-owned descendant survived cleanup")
 
     def test_cleanup_bounds_final_pipe_drain_and_child_wait(self):
         process = mock.Mock()
@@ -242,6 +256,265 @@ class ContractTests(unittest.TestCase):
                          [0.1, builder.CLEANUP_TIMEOUT, builder.CLEANUP_TIMEOUT])
         process.wait.assert_called_once_with(timeout=builder.CLEANUP_TIMEOUT)
 
+    def test_lost_or_reused_posix_custody_never_signals(self):
+        for disposition, returncode, status in (
+            (signal.SIG_DFL, None, ChildProcessError()),
+            (signal.SIG_DFL, None, SimpleNamespace(si_pid=456)),
+            (signal.SIG_DFL, 0, None),
+            (signal.SIG_IGN, None, None),
+        ):
+            with self.subTest(disposition=disposition, returncode=returncode, status=status):
+                process = mock.Mock(pid=123, returncode=returncode)
+                waitid = mock.Mock()
+                if isinstance(status, BaseException):
+                    waitid.side_effect = status
+                else:
+                    waitid.return_value = status
+                with (mock.patch.multiple(builder.os, P_PID=1, WEXITED=4, WNOHANG=1,
+                                          WNOWAIT=0x1000000, waitid=waitid,
+                                          killpg=mock.Mock(), create=True),
+                      mock.patch.multiple(builder.signal, SIGCHLD=17, SIGKILL=9,
+                                          getsignal=mock.Mock(return_value=disposition), create=True),
+                      mock.patch.object(builder.subprocess, "Popen", return_value=process),
+                      mock.patch.object(builder, "communicate_unreaped",
+                                        side_effect=subprocess.TimeoutExpired(["fixture"], 0.1))):
+                    with self.assertRaisesRegex(builder.ChildCustodyError, "custody|identity"):
+                        builder.execute_contained(["fixture"], ["fixture"], 0.1, mock.Mock(), None)
+                    builder.os.killpg.assert_not_called()
+                process.communicate.assert_not_called()
+                process.poll.assert_not_called()
+                process.kill.assert_not_called()
+                process.wait.assert_not_called()
+                process.stdout.close.assert_called_once()
+                process.stderr.close.assert_called_once()
+
+    def test_posix_leader_stays_unreaped_until_group_retirement(self):
+        process = mock.Mock(pid=123, returncode=None)
+        events = []
+
+        def drain(*args):
+            self.assertIsNone(process.returncode)
+            process.wait.assert_not_called()
+            events.append("drain")
+            return "captured", ""
+
+        def observe(*args):
+            events.append("observe")
+            self.assertIsNone(process.returncode)
+            return SimpleNamespace(si_pid=123)
+
+        def retire(pid, sig):
+            self.assertEqual((pid, sig), (123, 9))
+            self.assertIsNone(process.returncode)
+            process.wait.assert_not_called()
+            events.append("retire")
+
+        def wait(*, timeout):
+            self.assertEqual(timeout, builder.CLEANUP_TIMEOUT)
+            events.append("wait")
+            process.returncode = 0
+
+        process.wait.side_effect = wait
+        with (mock.patch.multiple(builder.os, P_PID=1, WEXITED=4, WNOHANG=1, WNOWAIT=0x1000000,
+                                  waitid=observe, killpg=retire, create=True),
+              mock.patch.multiple(builder.signal, SIGCHLD=17, SIGKILL=9,
+                                  getsignal=mock.Mock(return_value=signal.SIG_DFL), create=True),
+              mock.patch.object(builder.subprocess, "Popen", return_value=process),
+              mock.patch.object(builder, "communicate_unreaped", side_effect=drain)):
+            self.assertEqual(
+                builder.execute_contained(["fixture"], ["fixture"], 1, mock.Mock(), None),
+                "captured",
+            )
+        self.assertEqual(events, ["drain", "observe", "retire", "wait"])
+        process.communicate.assert_not_called()
+        process.poll.assert_not_called()
+        process.kill.assert_not_called()
+
+    def test_unconfirmed_cleanup_cannot_return_success(self):
+        process = mock.Mock(returncode=0)
+        process.communicate.return_value = ("completed", "")
+        process.wait.side_effect = subprocess.TimeoutExpired(["fixture"], builder.CLEANUP_TIMEOUT)
+        with mock.patch.object(builder.subprocess, "Popen", return_value=process):
+            with self.assertRaisesRegex(builder.ChildCustodyError, "cleanup is unconfirmed"):
+                builder.execute_contained(["fixture"], ["fixture"], 1, mock.Mock(), mock.Mock())
+
+    def test_job_docker_config_snapshots_only_selected_local_builder(self):
+        self.docker_config.mkdir()
+        (self.docker_config / "config.json").write_text(json.dumps({
+            "auths": {"registry.invalid": {"auth": "synthetic-credential"}},
+            "credsStore": "synthetic-helper", "credHelpers": {"registry.invalid": "helper"},
+            "proxies": {"default": {"httpProxy": "http://synthetic-proxy.invalid"}},
+            "currentContext": "foreign",
+        }))
+        output = self.work / "isolated"
+        output.mkdir()
+        ambient = {"HOME": str(self.work / "ambient-home"),
+                   "USERPROFILE": str(self.work / "ambient-home"),
+                   "HTTP_PROXY": "http://synthetic-proxy.invalid",
+                   "https_proxy": "http://synthetic-proxy.invalid",
+                   "ALL_PROXY": "http://synthetic-proxy.invalid", "NO_PROXY": "private.invalid",
+                   "DOCKER_HOST": "tcp://foreign.invalid", "DOCKER_CONTEXT": "foreign",
+                   "DOCKER_AUTH_CONFIG": "synthetic-credential",
+                   "DOCKER_TLS_VERIFY": "1", "DOCKER_CERT_PATH": "synthetic-certs",
+                   "BUILDX_BUILDER": "foreign", "BUILDX_BAKE_GIT_AUTH_TOKEN": "synthetic-credential",
+                   "XDG_CONFIG_HOME": str(self.work / "ambient-xdg")}
+        with mock.patch.dict(os.environ, ambient):
+            environment = builder.docker_environment(self.inputs["builder"], output)
+        client = output / "docker-client"
+        self.assertEqual(json.loads((client / "config.json").read_text()), {"auths": {"": {}}})
+        snapshot = json.loads((client / "buildx" / "instances" / "image-proof").read_text())
+        self.assertEqual(snapshot, dict(self.metadata, Dynamic=False))
+        self.instance.write_text("mutated after snapshot")
+        self.assertEqual(json.loads((client / "buildx" / "instances" / "image-proof").read_text()),
+                         snapshot)
+        self.assertEqual({p.relative_to(client).as_posix() for p in client.rglob("*") if p.is_file()},
+                         {"config.json", "buildx/instances/image-proof"})
+        for name in ambient:
+            if name not in ("HOME", "USERPROFILE"):
+                self.assertNotIn(name, environment)
+        self.assertEqual(environment["HOME"], str(client))
+        self.assertEqual(environment["USERPROFILE"], str(client))
+        self.assertEqual(environment["DOCKER_CONFIG"], str(client))
+        self.assertEqual(environment["BUILDX_CONFIG"], str(client / "buildx"))
+        self.assertNotIn("synthetic", json.dumps(environment))
+
+    def test_job_docker_metadata_fails_closed_on_unknown_or_foreign_builder(self):
+        for patch in ({"Name": "foreign"}, {"Driver": "remote"}, {"Dynamic": True},
+                      {"Nodes": []}, {"Nodes": [{"Name": "node", "Endpoint": "ssh://foreign.invalid"}]},
+                      {"Nodes": [{"Name": "node", "Endpoint": "default", "Files": {"key": "value"}}]},
+                      {"Nodes": [{"Name": "node", "Endpoint": "default", "DriverOpts": {"key": "v"}}]},
+                      {"Nodes": [{"Name": "node", "Endpoint": "default", "Flags": ["--debug"]}]}):
+            with self.subTest(patch=patch):
+                self.instance.write_text(json.dumps(dict(self.metadata, **patch)))
+                with self.assertRaises(ValueError):
+                    builder.docker_environment(self.inputs["builder"], self.work)
+                self.assertFalse((self.work / "docker-client").exists())
+
+    def test_bounded_buildx_metadata_preserves_admitted_real_shape(self):
+        inputs = deepcopy(self.inputs)
+        inputs["builder"].update(max_memory_bytes=8 * 1024**3, max_cpus=4)
+        metadata = deepcopy(self.metadata)
+        metadata["Nodes"][0]["Endpoint"] = "unix:///var/run/docker.sock"
+        metadata["Nodes"][0]["DriverOpts"].update(
+            memory="8g", **{"memory-swap": "8g", "cpu-quota": "400000"},
+        )
+        self.instance.write_text(json.dumps(metadata))
+        output = self.work / "bounded-build"
+        calls = []
+
+        def runner(argv, *, timeout, env):
+            calls.append(argv)
+            client = Path(env["DOCKER_CONFIG"])
+            copied = json.loads((Path(env["BUILDX_CONFIG"]) / "instances" / "image-proof").read_text())
+            self.assertEqual(copied, metadata)
+            self.assertEqual(json.loads((client / "config.json").read_text()), {"auths": {"": {}}})
+            if argv[3:5] == ["buildx", "build"]:
+                archive(output / "image.oci.tar")
+                return ""
+            inspected = json.loads(self.inspect(argv))
+            if argv[3] == "inspect":
+                inspected[0]["HostConfig"].update(
+                    Memory=8 * 1024**3, MemorySwap=8 * 1024**3, NanoCpus=4_000_000_000,
+                )
+            return json.dumps(inspected)
+
+        receipt = builder.build(inputs, output, runner=runner, now=NOW)
+        self.assertEqual(receipt["resource_bounds"],
+                         {"memory_bytes": 8 * 1024**3, "cpus": 4, "swap_disabled": True})
+        self.assertEqual(receipt["status"], "built-not-runtime-validated")
+        self.assertEqual(len(calls), 9)
+        self.assertEqual(sum(argv[3] == "inspect" for argv in calls), 2)
+
+    def test_unsafe_bounded_metadata_refused_before_any_cli_command(self):
+        cases = []
+        for patch in (
+            {"env.HTTP_PROXY": "http://synthetic-proxy.invalid"},
+            {"env.HTTPS_PROXY": "http://synthetic-proxy.invalid"},
+            {"unknown-option": "value"}, {"network": "host"},
+            {"image": "moby/buildkit:latest"},
+            {"image": "moby/buildkit@sha256:" + "0" * 64},
+            {"image": "synthetic-user:synthetic-password@registry.invalid/buildkit"},
+            {"memory": "2g"}, {"memory": "0"}, {"memory": "1g "}, {"memory": True},
+            {"memory-swap": "-1"}, {"memory-swap": "2g"}, {"memory-swap": "512m"},
+            {"cpu-period": "0"}, {"cpu-period": "1000001"}, {"cpu-period": "1000.0"},
+            {"cpu-quota": "200001"}, {"cpu-quota": "-1"}, {"cpu-quota": "unbounded"},
+        ):
+            metadata = deepcopy(self.metadata)
+            metadata["Nodes"][0]["DriverOpts"].update(patch)
+            cases.append(metadata)
+        for patch in (
+            {"Flags": ["--debug"]},
+            {"Flags": ["--allow-insecure-entitlement=security.insecure"]},
+            {"Flags": ["--allow-insecure-entitlement=network.host"] * 2},
+            {"Flags": "--allow-insecure-entitlement=network.host"},
+            {"Files": {"buildkitd.toml": "synthetic-sensitive"}},
+            {"Files": []}, {"Endpoint": "ssh://foreign.invalid"},
+            {"Platforms": ["linux/amd64"]}, {"DriverOpts": {}},
+            {"DriverOpts": []}, {"Unknown": "synthetic-sensitive"},
+        ):
+            metadata = deepcopy(self.metadata)
+            metadata["Nodes"][0].update(patch)
+            cases.append(metadata)
+        missing_bound = deepcopy(self.metadata)
+        del missing_bound["Nodes"][0]["DriverOpts"]["cpu-quota"]
+        cases.append(missing_bound)
+        cases.append(dict(self.metadata, Unknown="synthetic-sensitive"))
+        for index, metadata in enumerate(cases):
+            with self.subTest(index=index):
+                self.instance.write_text(json.dumps(metadata))
+                output = self.work / ("refused-" + str(index))
+                with mock.patch.object(builder, "execute") as cli:
+                    with self.assertRaises(ValueError):
+                        builder.build(self.inputs, output, now=NOW)
+                    cli.assert_not_called()
+                self.assertFalse((output / "build-receipt.json").exists())
+
+    def test_actual_job_docker_environment_isolated_at_cli_boundary(self):
+        self.docker_config.mkdir()
+        (self.docker_config / "config.json").write_text(json.dumps({
+            "auths": {"registry.invalid": {"auth": "synthetic-sensitive"}},
+            "credsStore": "synthetic-helper", "credHelpers": {"registry.invalid": "synthetic-helper"},
+            "proxies": {"default": {"httpProxy": "http://synthetic-sensitive.invalid"}},
+        }))
+        output = self.work / "artifact"
+        fixture = (
+            "import json,os,pathlib; "
+            "assert 'synthetic-sensitive' not in json.dumps(dict(os.environ)); "
+            "client=pathlib.Path(os.environ['DOCKER_CONFIG']); "
+            "assert os.environ['HOME']==os.environ['USERPROFILE']==str(client); "
+            "assert json.loads((client/'config.json').read_text())=={'auths':{'':{}}}; "
+            "node=json.loads((pathlib.Path(os.environ['BUILDX_CONFIG'])/'instances'/'image-proof')"
+            ".read_text()); "
+            "assert node['Name']=='image-proof' and node['Nodes'][0]['Endpoint']=='default'; "
+            "assert not any(k in os.environ for k in "
+            "['HTTP_PROXY','https_proxy','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_AUTH_CONFIG']); "
+            "print('isolated')"
+        )
+        calls = []
+        real_execute = builder.execute
+
+        def runner(argv, *, timeout, env):
+            # A later ambient mutation cannot alter the already-selected snapshot.
+            self.instance.write_text("unsafe later replacement")
+            self.assertEqual(real_execute([sys.executable, "-B", "-c", fixture],
+                                          timeout=timeout, env=env).strip(), "isolated")
+            calls.append(argv)
+            if argv[3:5] != ["buildx", "build"]:
+                return self.inspect(argv)
+            archive(output / "image.oci.tar")
+            return ""
+
+        ambient = {"HTTP_PROXY": "http://synthetic-sensitive.invalid",
+                   "https_proxy": "http://synthetic-sensitive.invalid",
+                   "DOCKER_HOST": "tcp://synthetic-sensitive.invalid", "DOCKER_CONTEXT": "foreign",
+                   "DOCKER_AUTH_CONFIG": "synthetic-sensitive"}
+        with (mock.patch.dict(os.environ, ambient),
+              mock.patch.object(builder, "execute", side_effect=runner) as default_runner):
+            receipt = builder.build(self.inputs, output, now=NOW)
+        self.assertEqual(receipt["status"], "built-not-runtime-validated")
+        self.assertEqual(default_runner.call_count, 9)
+        self.assertEqual(len(calls), 9)
+
     def test_output_and_receipt_directory_entries_sync_before_buildx(self):
         output = self.work / "new-parent" / "new-child" / "artifact"
         events = []
@@ -254,11 +527,12 @@ class ContractTests(unittest.TestCase):
         def sync_directory(path):
             events.append(path)
 
-        def runner(argv, *, timeout):
+        def runner(argv, *, timeout, env):
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             self.assertEqual(events, [self.work, output.parent.parent, output.parent,
-                                      "file", output])
+                                      output, output / "docker-client",
+                                      output / "docker-client" / "buildx", "file", output])
             self.assertEqual(json.loads((output / "build-receipt.json").read_text())["status"],
                              "build-started-outcome-unconfirmed")
             archive(output / "image.oci.tar")
@@ -276,10 +550,11 @@ class ContractTests(unittest.TestCase):
                 build_calls = []
 
                 def sync_directory(path):
-                    if (failure == "ancestor" and path == self.work) or path == output:
+                    if ((failure == "ancestor" and path == self.work)
+                            or path == output and (output / "build-receipt.json").exists()):
                         raise OSError("directory durability unavailable")
 
-                def runner(argv, *, timeout):
+                def runner(argv, *, timeout, env):
                     if argv[3:5] == ["buildx", "build"]:
                         build_calls.append(argv)
                         self.fail("Buildx launched without a durable initial receipt")
@@ -301,12 +576,12 @@ class ContractTests(unittest.TestCase):
 
         def sync_directory(path):
             nonlocal syncs
-            if path == output:
+            if path == output and (output / "build-receipt.json").exists():
                 syncs += 1
                 if syncs == 2:
                     raise OSError("final receipt sync failed")
 
-        def runner(argv, *, timeout):
+        def runner(argv, *, timeout, env):
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             archive(output / "image.oci.tar")
@@ -323,7 +598,7 @@ class ContractTests(unittest.TestCase):
     def test_build_stages_only_approved_bytes_and_inspects_archive(self):
         output = self.work / "artifact directory"
 
-        def runner(argv, *, timeout):
+        def runner(argv, *, timeout, env):
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             self.assertEqual(timeout, 60)
@@ -350,7 +625,7 @@ class ContractTests(unittest.TestCase):
     def test_failed_engine_keeps_failure_receipt_without_success_claim(self):
         output = self.work / "failed"
 
-        def runner(argv, *, timeout):
+        def runner(argv, *, timeout, env):
             if argv[3:5] != ["buildx", "build"]:
                 return self.inspect(argv)
             raise subprocess.CalledProcessError(1, argv)
@@ -409,10 +684,11 @@ class ContractTests(unittest.TestCase):
                                         self.inputs["context_sha256"])
 
     def test_cancelled_build_retains_unknown_outcome(self):
-        for error in (subprocess.TimeoutExpired(["fixture"], 60), KeyboardInterrupt()):
+        for error in (subprocess.TimeoutExpired(["fixture"], 60), KeyboardInterrupt(),
+                      builder.ChildCustodyError("CLI child identity changed")):
             with self.subTest(error=type(error).__name__):
                 output = self.work / type(error).__name__
-                def runner(argv, *, timeout):
+                def runner(argv, *, timeout, env):
                     if argv[3:5] != ["buildx", "build"]:
                         return self.inspect(argv)
                     raise error

@@ -74,12 +74,14 @@ class HostProfileTests(unittest.TestCase):
     def fstat(self, fd):
         return self.metadata(self.raw_fstat(fd), self.fd_paths[fd])
 
-    def open(self, path, flags, mode=0o777):
+    def open(self, path, flags, mode=0o777, *, dir_fd=None):
         path = Path(path)
-        fd = self.raw_open(path, flags, 0o600)
-        self.fd_paths[fd] = path
+        options = {} if dir_fd is None else {"dir_fd": dir_fd}
+        fd = self.raw_open(path, flags, 0o600, **options)
+        physical = self.fd_paths[dir_fd] / path if dir_fd is not None and not path.is_absolute() else path
+        self.fd_paths[fd] = physical
         if flags & os.O_CREAT:
-            self.modes[path] = mode
+            self.modes[physical] = mode
         return fd
 
     def receipt(self):

@@ -88,6 +88,15 @@ Python 3.11+ and an already-available Docker CLI with Buildx are required.
 No dependency installation or registry selection occurs in the host wrapper.
 Gateway is the initial builder; future CI uses exactly this interface.
 
+The initial client-metadata contract is Buildx 0.30.1's static single-node
+`docker-container` shape, with the digest-pinned `BUILDKIT_IMAGE` in `build.py`.
+Driver options must explicitly supply that image, memory, equal memory-swap,
+CPU period and quota within the approved ceilings. Only the default
+`--allow-insecure-entitlement=network.host` daemon flag (or no flag), empty
+platform overrides and no embedded files are accepted. This does not add a
+client-side insecure entitlement or allow a host-network build. Other metadata
+versions/options fail closed rather than inheriting an unqualified setup.
+
 The builder owner must first admit an isolated, running, single-node
 `docker-container` Buildx builder for this job, with verifiable hard memory and
 CPU limits and no additional swap. The wrapper checks the selected Buildx node
@@ -104,6 +113,13 @@ context or the exact local Unix endpoint. Foreign contexts, sockets, TCP/SSH
 endpoints and missing node endpoint evidence are refused. Effective context,
 node binding and actual limits are checked before and after building; an
 ambient local container cannot supply bounds for a worker on another daemon.
+
+Every CLI call uses a private job Docker configuration and filtered environment.
+Only the admitted builder's bounded metadata is snapshotted; registry auth,
+credential helpers, proxy settings and the caller's remaining Docker/Buildx
+environment are not inherited. The job configuration is outside the allowlisted
+image context. A refusal can leave preflight artifacts, but never launches
+Buildx's image build or grants permission to retry an unknown operation.
 
 1. Start from the approved source candidate. Inspect its allowlisted context:
 
@@ -172,8 +188,10 @@ archive as an extracted OCI layout through Buildx's digest-qualified
 `--build-context name=oci-layout:///path@sha256:<manifest-digest>`, without
 inventing a registry or treating a local tag as integrity proof.
 
-Timeout or interruption terminates the caller-owned Buildx CLI (then kills
-that CLI only if it fails to exit). This requests BuildKit cancellation; it
+Timeout or interruption terminates only the invocation-owned CLI/plugin process
+group or Windows Job, with bounded final pipe drain and child wait. On POSIX the
+leader remains unreaped until group cleanup; missing exclusive custody refuses
+numeric-PID signaling and retains the unconfirmed outcome. This requests BuildKit cancellation; it
 does not prove that remote work has quiesced. The receipt explicitly retains
 that unknown outcome. The builder owner checks the selected job/worker before
 reuse and cleans up only this job's artifact directory and owned builder
