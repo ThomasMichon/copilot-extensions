@@ -145,3 +145,12 @@ class-name text from per-line coverage contexts; every test body/decorator and
 the packet limit remain intact. All 82 cases pass locally. The next CI run must
 prove the resulting packet actually fits; this is not a test-selection or
 admission exception.
+
+The subsequent approval still listed a Medium ZIP32-boundary finding and a Low
+stale API reference, so merge remained blocked. The 65,534/65,535/65,536-entry
+stdlib regression reproduced only the exact ZIP32 maximum failure. Count-only
+`0xffff` now permits actual-directory verification without a ZIP64 locator;
+size/offset sentinels still require ZIP64 and all three over-budget counts
+refuse. The four derived copies are synchronized, the removed facade reference
+now names complete-profile verification, and 243 component/bootstrap/profile
+checks pass. Fresh final-head native/CI/review gates remain required.

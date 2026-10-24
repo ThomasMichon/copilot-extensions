@@ -3105,8 +3105,8 @@ release/target/mode compatibility, complete asserted wheel metadata graphs
 with extras/markers, and externally supplied whole-record approval references.
 Record validation/selection does not authenticate approvals, verify a source
 release, download wheels, detect hardware, resolve dependencies or activate a
-generation. Its separate `inspect_profile_wheel` facade compares inspected
-wheel facts with the selected record using the same packaging semantics.
+generation. `runtime_profile_wheels.verify_profile_wheels` separately checks
+the complete retained wheel set against the exact record, as described below.
 
 Actual consumers still need adapters from the existing installation authority
 and verified release/configuration channels, followed by admitted byte/metadata

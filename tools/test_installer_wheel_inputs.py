@@ -160,6 +160,24 @@ def test_ordinary_zip64_directory_is_inspected(wheel_path, limits):
     assert inspect(wheel_path, limits).name == "demo-pkg"
 
 
+@pytest.mark.parametrize("count", [65_534, 65_535, 65_536])
+def test_stdlib_directory_count_boundaries_allow_zip32_and_zip64(limits, count):
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_STORED) as archive:
+        for index in range(count):
+            archive.writestr(f"entry{index}", b"")
+    limits = replace(
+        limits, max_archive_bytes=20 << 20, max_metadata_bytes=20 << 20,
+        max_members=count,
+    )
+    inspection.preflight_archive(stream, limits=limits, deadline=time.monotonic() + 20)
+    assert stream.tell() == 0
+    with pytest.raises(inspection.WheelError, match="count limit"):
+        inspection.preflight_archive(
+            stream, limits=replace(limits, max_members=count - 1), deadline=time.monotonic() + 20,
+        )
+
+
 @pytest.mark.parametrize("offset", [2**63, 2**64 - 1])
 def test_zip64_local_offset_is_bounded_before_member_open(wheel_path, limits, monkeypatch, offset):
     target = "demo_pkg/__init__.py"

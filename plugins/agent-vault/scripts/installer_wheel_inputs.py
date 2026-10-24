@@ -153,7 +153,6 @@ def preflight_archive(archive: BinaryIO, *, limits: WheelLimits, deadline: float
     end = size - tail_size + index
     if disk or start_disk or disk_count != count or len(tail) - index != 22 + comment_size:
         raise WheelError("ambiguous or multi-disk wheel directory")
-    sentinel = count == 0xffff or directory_size == 0xffffffff or offset == 0xffffffff
     locator = read_at(end - 20, 20) if end >= 20 else b""
     if locator.startswith(b"PK\x06\x07"):
         _, disk64, record_offset, disks = struct.unpack("<4sLQL", locator)
@@ -171,7 +170,8 @@ def preflight_archive(archive: BinaryIO, *, limits: WheelLimits, deadline: float
         ):
             raise WheelError("ambiguous wheel ZIP64 directory")
         count, directory_size, offset, end = count64, size64, offset64, record_offset
-    elif sentinel:
+    # ZIP32 permits exactly 0xffff entries without a ZIP64 locator.
+    elif directory_size == 0xffffffff or offset == 0xffffffff:
         raise WheelError("missing wheel ZIP64 directory locator")
     if count > limits.max_members:
         raise WheelError("wheel member count limit exceeded")

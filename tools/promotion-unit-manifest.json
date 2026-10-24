@@ -1539,7 +1539,7 @@
     "tools/test_check_docs_consistency.py": "60577ce827514cc996a23c7e654a66286b83c202daea2f25e806dcb4315ba494",
     "tools/validate_materialized_candidate.py": "47935f3988182f1e8762bef1894c2e829fa2f27b81bd962a731e6b04f25f3661",
     "tools/verify_promotion_workflows.py": "ca25386904c1337d781fd9b6524701e2278cb6f15be229da8b3252a0faba1990",
-    "libs/installer-engine/installer_wheel_inputs.py": "3e6fbf2765262a2e4648fc2782fa2d952b04b3a0c5176fd2edf7a68aadacc519",
+    "libs/installer-engine/installer_wheel_inputs.py": "4bb4a363479d76498bb027f81fe9f66f9798c051c59d36081db9fb1b3592a8fb",
     "tools/wheel_input_fixture.py": "ed58b3876bcf48c89e6d327b8d5550246f626f79e68b7b77812eaf0fe606c122",
     "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b"
   },
