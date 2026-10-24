@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -652,6 +652,21 @@ security need, not become redundant attestation chains that obstruct legitimate
 communication. Authorization, consent, privacy, safe destructive operations,
 wrong-owner and stale-process protection, corruption/race prevention, and
 release/review/CI gates should remain intact.
+
+### user-owned-coordination-boundary
+Bridge and Dispatch cooperate within the user's own execution and access
+boundary, not a multi-tenant identity service. Equally privileged participants
+inside that established boundary should not require per-agent tokens or
+cryptographic attestation chains to perform authorized coordination. Local
+reachability alone does not establish that boundary. Cross-container access
+should authenticate at the container network bridge's proxy wrapper, with
+the underlying service inaccessible through an unauthenticated bypass.
+Other host and trust-boundary crossings retain their secured transport.
+Ownership, incarnation and revision checks should prevent wrong-target effects
+and stale replay. Hashing and durable receipts should primarily protect data
+integrity, recovery and reconciliation after interruption, not duplicate the
+boundary's access controls. Disconnects and timeouts must not silently lose
+accepted work or manufacture permission to repeat an uncertain effect.
 
 ### collision-free-endpoints
 Two plugin services — and the *same* service running on both sides of a shared

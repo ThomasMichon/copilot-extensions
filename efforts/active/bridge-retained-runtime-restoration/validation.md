@@ -22,6 +22,12 @@ complete lossless provenance, immutable artifact integrity and all canonical
 reader/writer entry points must pass before returning to the inbox source PR.
 It does not change the native, custody, installer or adoption gates below.
 
+The [consumer enrollment and recovery refinement](consumer-recovery.md) defines
+the next C-slice prerequisite: user-owned local trust, authenticated
+cross-container proxy ingress and lossless original-message recovery. Its
+validation obligations refine C7-C9 and C13 without adding per-consumer
+authentication or weakening actual SDK outcome evidence.
+
 Do not edit another contributor's uncommitted work or assume an adjacent
 lifecycle fix has landed. The Integration owner supplies reviewed committed
 dependencies and resolves content conflicts before each slice. Shared library

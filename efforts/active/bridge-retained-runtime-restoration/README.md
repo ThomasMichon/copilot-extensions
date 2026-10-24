@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; internal inbox owner and lossless provenance qualification merged; authenticated consumer/SDK integration and full Phase 1 open
+- **Status:** Active; user-owned consumer/recovery refinement proposed; consumer/SDK integration and full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -99,6 +99,18 @@ surface and normal review. The bounded
 [provenance layout proposal](provenance-layout.md) is a Phase-4 prerequisite
 for the existing inbox source PR #8389; it grants no runtime operation.
 
+Later operator direction, quoted verbatim:
+
+> In the end, we're keeping agent-dispatch and agent-bridge within user-owned bounds, so we can walk back heavy token authentication. We'll only need such a thing between containers, for which we can use authenticated proxy wrappers in the container network bridges.
+
+> Right. Focus hashing and other safety-focused things on data recovery and robustness against accidental replay in the face of disconnects and timeouts. We don't want to drop messages.
+
+The [consumer enrollment and recovery refinement](consumer-recovery.md)
+replaces the proposed per-consumer authentication prerequisite with that
+user-owned trust boundary. It retains exact custody associations and lossless
+recovery. This is a source-design review, not permission to remove installed
+authentication, change network/proxy configuration or qualify a running cohort.
+
 All decomposition, proposed API/storage names and test cases below and in the
 linked contracts are **agent-recommended design**. The existing custody and
 installer plan cleared proposal review; the provenance contract cleared its
@@ -132,6 +144,19 @@ require their own review and qualification.
       registration cleanup, closure and restart; preserve legacy uncertainty.
 - [x] Validate the bounded owner methods and normal migration/passive adoption.
       This slice does not close actual transport/SDK integration or Phase 1.
+
+### Phase 1b - User-owned consumer enrollment and recovery
+- [ ] Review [consumer-recovery.md](consumer-recovery.md) before implementing
+      its local enrollment/poll/SDK integration; no per-consumer token or
+      independent native-authentication prerequisite.
+- [ ] Bind the existing installation and current SDK consumer through the
+      established user-owned boundary; keep cross-container ingress under
+      authenticated proxy owners and reject unsupported exposure.
+- [ ] Preserve original durable messages, handoffs and outcomes across
+      disconnect, timeout, restart and lost replies; reconcile uncertainty
+      without dropping work or blindly resending it.
+- [ ] Qualify the actual consumer/SDK boundaries and explicit unsupported cases
+      in the refinement's validation matrix before claiming this slice complete.
 
 ### Phase 2 - Reconcile custody and negotiate state compatibility
 - [ ] Settle or transfer accepted work under its original identity, including
@@ -177,6 +202,10 @@ require their own review and qualification.
       legacy uncertainty and partial inventory never disappear.
 - [ ] Lost replies, crashes and handback retain original identities and
       monotonic epochs without duplicate SDK/native sends.
+- [ ] Local enrollment uses the established user-owned access boundary, not a
+      new per-agent token/attestation chain; cross-container ingress has no
+      unauthenticated bypass and accepted messages survive every recovery case
+      in [consumer-recovery.md](consumer-recovery.md#validation-obligations).
 - [ ] Target compatibility, immutable assembly and actual platform/route
       convergence are independently proved, including negative controls.
 - [ ] Unsettled effects retain a continuing custodian and real slot protection;
@@ -209,6 +238,21 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, authenticated consumer/SDK integration and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Refine the trust boundary around message recovery
+- Traced the actual shared-token middleware, registration, extension process
+  metadata and SDK send path. Request quiescence is not consumer identity;
+  caller fields alone are not a new security boundary.
+- Operator direction explicitly keeps Bridge and Dispatch within user-owned
+  bounds, with authentication at cross-container proxy wrappers. Do not add
+  per-consumer tokens or independent native authentication as a local
+  enrollment prerequisite. Exact incarnation checks remain correctness guards.
+- Hashing and retained outcomes serve corruption detection, data recovery and
+  accidental-replay prevention. A timeout or disconnect cannot drop an accepted
+  message or turn unknown SDK acceptance into automatic resend permission.
+- Submit the linked refinement through normal architecture review before
+  implementation. Runtime, proxy deployment, native qualification and the
+  complete restoration effort remain open.
 
 ### 2026-10-23 - Inbox owner merged; continue at the real consumer boundary
 - #8389 merged as `d9363f0fd16539ebbd10fdf6a4ad724be4629023` after
