@@ -82,6 +82,51 @@ def test_crash_between_intent_and_first_event_does_not_leave_partial_confirmatio
     assert [row["attempt_id"] for row in store.entries()] == [recovery_id]
 
 
+@pytest.mark.parametrize("boundary", ["resolve", "launch"])
+def test_manager_crash_leaves_boundary_evidence_without_invented_completion(tmp_path, boundary):
+    attempt_id = uuid4().hex
+    result = _run(_WRITER, str(tmp_path), attempt_id, "after-commit")
+    assert result.returncode == 71, result.stderr
+    script = """
+import os, sys
+from worktree_manager import __main__ as main, engine_client, launcher
+from worktree_manager.picker_app import LaunchRequest
+root, attempt_id, boundary = sys.argv[1:]
+os.environ["WORKTREE_MANAGER_ROOT"] = root
+main._relocated_launch_script = lambda: None
+launcher.uses_ahp = lambda *a: False
+def resolve(*a, **kw):
+    if boundary == "resolve":
+        os._exit(73)
+    return engine_client.launch_plan_from_dict({
+        "action": "exec", "cmd": ["fixture"], "worktree_id": "worktree-fixture",
+    })
+engine_client.resolve_launch_plan = resolve
+launcher.launch = lambda *a, **kw: os._exit(73)
+main._run_launch(LaunchRequest(
+    project="example", worktree_id=None, mode="new", attempt_id=attempt_id,
+))
+"""
+    result = _run(script, str(tmp_path), attempt_id, boundary)
+    assert result.returncode == 73, result.stderr
+    reader = """
+import json, pathlib, sys
+from worktree_manager.launch_attempts import LaunchAttempts
+detail = LaunchAttempts(pathlib.Path(sys.argv[1])).detail(sys.argv[2], include_input=True)
+assert detail["input"]["prompt"] == "  native exact text\\nsecond line\\n"
+print(json.dumps({"phases": [e["phase"] for e in detail["events"]],
+                  "attempt_id": detail["attempt_id"], "exact_input": True}))
+"""
+    result = _run(reader, str(tmp_path), attempt_id)
+    assert result.returncode == 0, result.stderr
+    expected = ["confirmed", "resolution-requested"]
+    if boundary == "launch":
+        expected += ["resolved", "launch-requested"]
+    assert json.loads(result.stdout) == {
+        "phases": expected, "attempt_id": attempt_id, "exact_input": True,
+    }
+
+
 @pytest.mark.parametrize("boundary", ["before-first-event", "after-commit"])
 def test_v1_upgrade_crash_retains_original_and_never_leaves_partial_unknown_intent(
     tmp_path, boundary,
@@ -295,3 +340,58 @@ def test_native_commit_latency_samples_are_complete_and_reported(tmp_path, capsy
     # Measurements, not an invented latency threshold or a UI responsiveness claim.
     with capsys.disabled():
         print("LAUNCH_JOURNAL_NATIVE_MEASUREMENT " + json.dumps(report))
+
+
+def test_manager_observation_chain_latency_is_measured_without_engine_or_launch_work(
+    tmp_path, monkeypatch, capsys,
+):
+    from worktree_manager import __main__ as main, engine_client, launch_observations, launcher
+    from worktree_manager.picker_app import LaunchRequest
+
+    store = journal.LaunchAttempts(tmp_path)
+    monkeypatch.setattr(launch_observations, "LaunchAttempts", lambda: store)
+    monkeypatch.setattr(main, "_relocated_launch_script", lambda: None)
+    monkeypatch.setattr(launcher, "uses_ahp", lambda *a: False)
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", lambda *a, **kw: engine_client.launch_plan_from_dict({
+        "action": "exec", "cmd": ["fixture"], "worktree_id": "fixture-worktree",
+    }))
+    monkeypatch.setattr(launcher, "launch", lambda *a, **kw: 0)
+    samples = []
+    for _ in range(101):
+        identity = uuid4().hex
+        store.record_intent(
+            identity, action="new", project="example", surface="native", is_local=True,
+        )
+        start = time.perf_counter_ns()
+        assert main._run_launch(LaunchRequest(
+            project="example", worktree_id=None, mode="new", attempt_id=identity,
+        )) == 0
+        samples.append((time.perf_counter_ns() - start) / 1_000_000)
+        assert [event["phase"] for event in store.detail(identity)["events"]] == [
+            "confirmed", "resolution-requested", "resolved", "launch-requested", "launcher-returned",
+        ]
+    warm = sorted(samples[1:])
+    disabled = []
+    for _ in range(101):
+        start = time.perf_counter_ns()
+        assert main._run_launch(LaunchRequest(
+            project="example", worktree_id=None, mode="new",
+        )) == 0
+        disabled.append((time.perf_counter_ns() - start) / 1_000_000)
+    baseline = sorted(disabled[1:])
+    report = {
+        "boundary": "manager-four-observation-chain-after-confirmation",
+        "platform": sys.platform, "attempts": 101, "events": 505, "failures": 0,
+        "first_chain_ms": samples[0], "warm_samples_ms": samples[1:],
+        "quantile": "nearest-rank", "warm_p50_ms": warm[49],
+        "warm_p95_ms": warm[94], "warm_p99_ms": warm[98], "warm_max_ms": warm[-1],
+        "engine_and_launcher": "synthetic-no-process-network-work",
+        "disabled_first_chain_ms": disabled[0], "disabled_warm_samples_ms": disabled[1:],
+        "disabled_p50_ms": baseline[49], "disabled_p95_ms": baseline[94],
+        "disabled_p99_ms": baseline[98], "disabled_max_ms": baseline[-1],
+        "comparison": "same-workload-sequential-101-enabled-then-101-disabled",
+        "tail_qualification": "insufficient-samples",
+    }
+    assert all(math.isfinite(value) and value >= 0 for value in samples)
+    with capsys.disabled():
+        print("MANAGER_OBSERVATION_NATIVE_MEASUREMENT " + json.dumps(report))

@@ -731,3 +731,9 @@ do not establish that later transport fences preserve installed parity.
   crash checks pass. This is pending review, not a release or installed proof.
   Continue outcome/target receipt correlation and negotiated target-owned SSH;
   both efforts and all original delivered acceptance gates remain Active.
+- **2026-10-24** -- Linked-journal unknown-locality refusal slice #8574 merged
+  after final-head approval and green required CI. Confirmed refusals now retain
+  truthful unknown locality, target and options without launch or new replay
+  authority. Continue Phase 3 outcome correlation through existing owners and
+  restore the negotiated target-owned SSH native fence. No containing release,
+  authorized rollout or installed conversation acceptance is implied.

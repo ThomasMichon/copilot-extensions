@@ -23,7 +23,8 @@ _UNKNOWN_LOCALITY = -1
 _APPLICATION_ID = 0x574C4131
 _ACTIONS = {"new", "resume", "open", "restore", "base", "bare-resume", "open-venue"}
 _PHASES = {
-    "confirmed", "refused", "resolved", "launch-requested", "launcher-returned",
+    "confirmed", "refused", "resolution-requested", "resolved", "launch-requested", "launcher-returned",
+    "restore-requested", "restore-returned", "embodiment-requested", "embodiment-returned",
     "target-admitted", "allocated", "copilot-started", "prompt-handoff", "unknown",
 }
 _OWNERS = {"manager", "engine", "daemon", "native"}

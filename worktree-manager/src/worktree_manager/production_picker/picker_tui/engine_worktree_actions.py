@@ -833,6 +833,7 @@ class PickerScreenWorktreeActionsMixin:
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
     def _embody_task_cli(self, ctx):
         """Persist the task Open before off-thread embodiment and normal resume."""
+        from ... import launch_observations
         from . import tasks as _tasks
 
         task_id = str(ctx.get("task_id") or ctx.get("id") or "").strip()
@@ -940,7 +941,7 @@ class PickerScreenWorktreeActionsMixin:
             worktree_id = str(payload.get("worktree") or "").strip()
             if not worktree_id:
                 return False, "embody returned no worktree id"
-            return True, payload
+            return True, {**payload, "worktree": worktree_id}
 
         def _done(result):
             ok, payload = result
@@ -960,12 +961,13 @@ class PickerScreenWorktreeActionsMixin:
                 attempt_id=attempt_id,
             )
             if not ok2:
+                self._run_bg("Recording launch refusal", lambda: launch_observations.observe(attempt_id, "refused", required=False, code="unsupported"), quiet=True)
                 self.debug = f"Open into a CLI session failed · {msg2 or 'see command output'}"
 
         def launch(confirmed):
             nonlocal attempt_id
             attempt_id = confirmed.get("attempt_id")
-            self._run_bg("Open into a CLI session", _work, _done)
+            self._run_bg("Open into a CLI session", lambda: launch_observations.embody(attempt_id, _work), _done)
 
         if getattr(self, "real_ops", False):
             from ...launch_confirmation import confirm_before_effect
