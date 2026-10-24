@@ -214,6 +214,12 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 - These are synthetic source-contract/process checks, not installed Copilot
   acceptance or a composed hook latency qualification. The latter measurements
   remain with #7935 and this effort's installed acceptance gates.
+- Review follow-through covers entirely missing execution/attempt receipts as
+  unknown without hiding corruption. The native fixture now forbids direct
+  fallback in the backend subprocess as well as the driver, with separate
+  unavailable-registration and unavailable-observation negative controls.
+  The expanded focused packet passed 73 checks and all three native Linux/WSL
+  controls passed. No accepted-turn or installed-acceptance gate is closed.
 
 ### 2026-10-24 -- Deferred execution slice merged; native association next
 

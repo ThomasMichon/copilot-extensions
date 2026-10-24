@@ -157,6 +157,33 @@ def test_missing_observation_does_not_create_or_repair_state(case):
     assert sorted(p.name for p in case.path.parent.rglob("*")) == before
 
 
+def test_missing_execution_keeps_existing_observation_unknown_without_writes(case):
+    _observe(case)
+    observation = native.read(case.path.parent, case.attempt, case.operation)
+    launch_attempt._path(case.path.parent, case.attempt, case.operation, execution=True).unlink()
+    before = sorted(p.name for p in case.path.parent.rglob("*"))
+    assert _join(case) == {"status": "unknown", "reason": "execution-receipt-missing"}
+    assert native.read(case.path.parent, case.attempt, case.operation) == observation
+    assert sorted(p.name for p in case.path.parent.rglob("*")) == before
+
+
+def test_entirely_missing_attempt_is_unknown_and_never_created(tmp_path):
+    directory = tmp_path / "absent"
+    assert native.joined(directory, uuid4().hex, uuid4().hex) == {
+        "status": "unknown", "reason": "execution-receipt-missing",
+    }
+    assert not directory.exists()
+
+
+def test_corrupt_execution_still_raises_instead_of_becoming_unknown(case):
+    path = launch_attempt._path(case.path.parent, case.attempt, case.operation, execution=True)
+    path.write_text('{"schema":"foreign"}', encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        _join(case)
+    assert path.read_bytes() == before
+
+
 def test_resident_never_uses_ambient_execution_hint(case, monkeypatch):
     monkeypatch.setenv(execution.NATIVE_HINT_ENV, case.receipt.environment(invoke=True)[execution.NATIVE_HINT_ENV])
     case.payload = {"_agentWorktrees": {"nativeSource": case.witness}}

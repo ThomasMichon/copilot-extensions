@@ -104,7 +104,10 @@ def read(directory: Path, attempt_id: str, operation_id: str) -> dict:
 
 def joined(directory: Path, attempt_id: str, operation_id: str) -> dict:
     """A historical evidence join, not a current liveness or accepted-turn verdict."""
-    execution = launch_execution.read(directory, attempt_id, operation_id)
+    try:
+        execution = launch_execution.read(directory, attempt_id, operation_id)
+    except FileNotFoundError:
+        return {"status": "unknown", "reason": "execution-receipt-missing"}
     try:
         observation = read(directory, attempt_id, operation_id)
     except FileNotFoundError:
