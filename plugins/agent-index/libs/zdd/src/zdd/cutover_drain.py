@@ -20,11 +20,24 @@ def _drain_old(
 ) -> None:
     from .cutover import CutoverError
 
+    graceful_only = self.drain_before_publish or conditional is not None
+    if graceful_only and force:
+        raise CutoverError("graceful-only predecessor drain cannot force")
     self._emit(lifecycle.DRAIN, lifecycle.BEGIN, port=old.port)
     if conditional:
         drain_res = conditional.drain_predecessor(drain_timeout)
     else:
-        drain = self.make_client(old.base_url).drain
+        client = self.make_client(old.base_url)
+        drain = client.drain
+        if graceful_only or getattr(self, "expected_old", None) is not None:
+            strict_drain = getattr(client, "drain_gracefully", None)
+            if strict_drain is not None:
+                if not callable(strict_drain):
+                    raise CutoverError("graceful-only drain capability is invalid")
+                if force:
+                    raise CutoverError("graceful-only predecessor drain cannot force")
+                graceful_only = True
+                drain = strict_drain
         if on_drain is not None:
             on_drain()
         drain_res = drain(timeout=drain_timeout, poll=1.0, force=force)
@@ -33,10 +46,11 @@ def _drain_old(
         f"old drained clean={drain_res.get('clean')} forced={drain_res.get('forced')}"
     )
     if not drain_res.get("drained") or (
-        self.drain_before_publish and (
+        graceful_only and (
             drain_res.get("drained") is not True
             or drain_res.get("clean") is not True
             or drain_res.get("forced") is not False
+            or drain_res.get("mode") == "incompatible-contract-cold"
         )
     ):
         busy_work = drain_res.get(

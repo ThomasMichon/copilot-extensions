@@ -81,6 +81,7 @@ class _SessionDrainGateMixin:
         auto_at = (
             since + self._drain_auto_release_s
             if since is not None and self._drain_auto_release_s > 0
+            and self._drain_watchdog is not None
             and not self._drain_private else None
         )
         return {
