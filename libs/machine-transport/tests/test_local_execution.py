@@ -387,6 +387,49 @@ def test_execution_normalization_keeps_original_customization_key(key: str) -> N
     assert (context.machine, context.execution_machine, context.customization_key) == ("desk", "desk-wsl", key)
 
 
+@pytest.mark.parametrize("hostname", ["literal-wsl", "literal(WSL)"])
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("configured", [False, True])
+def test_registry_whitespace_cannot_change_a_literal_observed_identity(
+    hostname: str, environment: str, configured: bool,
+) -> None:
+    key = f" {hostname} "
+    entry = MachineEntry(key, "", hostname=hostname)
+    context = resolve_local_execution_context(
+        {key: entry}, hostname=hostname, environment=environment,
+        configured_machine=hostname if configured else None,
+    )
+    assert context.machine == hostname
+    assert context.execution_machine == (f"{hostname}-wsl" if environment == "wsl" else hostname)
+    assert context.customization_key == key
+
+
+@pytest.mark.parametrize(("environment", "first_key", "second_key"), [
+    ("windows", "desk (Windows)", "desk(Win)"),
+    ("wsl", "desk (WSL)", "desk(WSL)"),
+])
+@pytest.mark.parametrize("host", ["host-a", "host-b"])
+def test_different_physical_entries_cannot_share_a_canonicalized_execution_key(
+    environment: str, first_key: str, second_key: str, host: str,
+) -> None:
+    entries = {
+        first_key: MachineEntry(first_key, "", hostname="host-a", physical_host="physical-a"),
+        second_key: MachineEntry(second_key, "", hostname="host-b", physical_host="physical-b"),
+    }
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(entries, hostname=host, environment=environment)
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+def test_unrelated_legacy_display_like_key_does_not_require_local_enrollment(environment: str) -> None:
+    entry = MachineEntry("Other Legacy Computer", "", hostname="other-host")
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="local-host", environment=environment,
+    )
+    assert context.machine == "local-host"
+    assert context.execution_machine == ("local-host-wsl" if environment == "wsl" else "local-host")
+
+
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
 def test_existing_configured_binding_remains_distinct_from_observation(environment: str) -> None:
     configured = "custom-wsl" if environment == "wsl" else "custom"

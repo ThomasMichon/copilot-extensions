@@ -387,15 +387,16 @@ def normalize_machine_entries(
     for entry in result.values():
         literal = (
             observed_hostname is not None and not entry.execution_platform
-            and entry.hostname.casefold() == observed_hostname.casefold()
+            and entry.hostname.strip().casefold() == observed_hostname.casefold()
         )
         names = machine_identity_names(entry, include_metadata=not literal)
         if literal:
+            hostname = entry.hostname.strip()
             guest = (
-                entry.key.casefold() != observed_hostname.casefold()
+                entry.key.strip().casefold() != observed_hostname.casefold()
                 and split_machine_environment(entry.key).environment == "wsl"
             )
-            names += (f"{entry.hostname}-wsl" if guest else entry.hostname,)
+            names += (f"{hostname}-wsl" if guest else hostname,)
         for name in names:
             prior = owners.setdefault(name.casefold(), entry.key)
             if prior != entry.key:

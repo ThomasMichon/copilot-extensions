@@ -41,21 +41,21 @@ def _name(value: str, label: str) -> str:
 
 def _physical(entry: MachineEntry, observed: str) -> str:
     if entry.physical_host:
-        return entry.physical_host
+        return entry.physical_host.strip()
     if entry.execution_platform:
-        return entry_physical_host(entry)
-    if entry.key.casefold() == observed.casefold() and (
-        not entry.hostname or entry.hostname.casefold() == observed.casefold()
+        return entry_physical_host(entry).strip()
+    if entry.key.strip().casefold() == observed.casefold() and (
+        not entry.hostname or entry.hostname.strip().casefold() == observed.casefold()
     ):
-        return entry.key
+        return entry.key.strip()
     return split_machine_environment(entry.key).machine
 
 
 def _platform(entry: MachineEntry, observed: str) -> str:
     if entry.execution_platform:
         return entry.execution_platform
-    if entry.key.casefold() == observed.casefold() and (
-        not entry.hostname or entry.hostname.casefold() == observed.casefold()
+    if entry.key.strip().casefold() == observed.casefold() and (
+        not entry.hostname or entry.hostname.strip().casefold() == observed.casefold()
     ):
         return ""
     return split_machine_environment(entry.key).environment
@@ -69,7 +69,7 @@ def _entry_execution(entry: MachineEntry, observed: str) -> str:
     )
     if presentation:
         execution = split_machine_environment(execution).logical_machine
-    return _name(execution, "execution machine")
+    return execution
 
 
 def _context(
@@ -80,14 +80,18 @@ def _context(
     physical = _name(physical, "physical machine")
     execution = (
         _entry_execution(selected, observed) if selected is not None and execution == selected.key
-        else _name(execution, "execution machine")
+        else execution
     )
+    execution = _name(execution, "execution machine")
     for collision in registry.values():
-        if execution.casefold() in {
+        canonical_key = _entry_execution(collision, observed)
+        names = {
             name.strip().casefold() for name in machine_identity_names(collision, include_metadata=False)
-        } and (
+        }
+        names.add(canonical_key.casefold())
+        if execution.casefold() in names and (
             collision.key != customization_key
-            or _entry_execution(collision, observed).casefold() != execution.casefold()
+            or canonical_key.casefold() != execution.casefold()
             or collision.execution_platform not in ("", platform)
         ):
             raise IdentityError(f"local execution identity {execution!r} conflicts with a registered machine")
@@ -121,7 +125,7 @@ def _literal_binding(
                     raise IdentityError("configured machine conflicts with the current execution environment")
                 return True
     return (
-        len(direct) == 1 and direct[0].key.casefold() == observed.casefold()
+        len(direct) == 1 and direct[0].key.strip().casefold() == observed.casefold()
         and not direct[0].execution_platform and not _platform(direct[0], observed)
     )
 
@@ -159,7 +163,7 @@ def resolve_local_execution_context(
         # Keep the OS observation out of target-shaped suffix inference; keys,
         # aliases and display labels still use the shared selector.
         target_registry = {
-            key: replace(entry, hostname="") if entry.hostname.casefold() == observed.casefold() else entry
+            key: replace(entry, hostname="") if entry.hostname.strip().casefold() == observed.casefold() else entry
             for key, entry in registry.items()
         }
         if _literal_binding(target_registry, configured, observed, platform):
@@ -182,9 +186,9 @@ def resolve_local_execution_context(
     matches = [
         entry for entry in registry.values()
         if folded in {
-            entry.key.casefold(), entry.hostname.casefold(), entry.alias.casefold(),
+            entry.key.strip().casefold(), entry.hostname.strip().casefold(), entry.alias.strip().casefold(),
             _physical(entry, observed).casefold(),
-            *(alias.casefold() for alias in entry.compatibility_aliases),
+            *(alias.strip().casefold() for alias in entry.compatibility_aliases),
         }
     ]
     families = {_physical(entry, observed) for entry in matches}
@@ -197,7 +201,7 @@ def resolve_local_execution_context(
     scoped = [entry for entry in candidates if _platform(entry, observed) == platform]
     if scoped:
         candidates = scoped
-    exact = [entry for entry in candidates if entry.key.casefold() == folded]
+    exact = [entry for entry in candidates if entry.key.strip().casefold() == folded]
     if exact:
         candidates = exact
     if len(candidates) > 1:

@@ -110,7 +110,10 @@ exists. This local adapter handles the registry's specific
 refuses the missing logical target. Both configured and observed results check
 execution-key collisions against keys, compatibility names and profile aliases.
 Execution names are normalized before checking every colliding entry; trimming
-or presentation conversion cannot bypass that check. An unnamed legacy SSH
+or presentation conversion cannot bypass that check. The scan includes other
+entries' projected execution keys, not just their original presentation labels.
+Registry-key whitespace does not change a literal OS observation.
+An unnamed legacy SSH
 profile does not assert a contradictory environment.
 Aliases of a literal observed host retain the same naming facts; an explicit
 profile/environment conflict is still a refusal. Actual-platform entries take precedence over
