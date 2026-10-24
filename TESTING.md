@@ -833,6 +833,15 @@ that host rejects the standalone `-` argument before executing a `-File` script.
 Only the fixture-owned command/arguments are encoded; the quoted multiline
 prompt remains raw stdin. Framed carrier cases still exercise `-File` directly.
 
+Bridge's `tests/test_worktree_owner_launch.py` separately checks the owner
+trampoline's exact Windows argv, sanitized environment, inherited stream objects,
+no-window flags and exit status. Its native pipe cases deploy the real resolver
+into a temporary profile, construct a private versioned peer and run the actual
+isolated trampoline with an empty PATH. They require Unicode/spaced stdin and
+arguments, separate stdout/stderr, scrubbed caller routing and exact exits 0/7.
+Select that file with the same contained runner; existing native deadlines and
+platform skips remain unchanged, with no new required-unit CI enrollment.
+
 The source and candidate Linux full-suite declarations use exactly two
 work-stealing pytest workers for Worktrees only. Both workers remain inside the
 same runner-owned containment boundary and unchanged 30-second item,
