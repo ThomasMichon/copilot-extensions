@@ -368,6 +368,7 @@ os._exit(0)
         [sys.executable, "-c", child, json.dumps(asdict(owner)), admission.document(),
          json.dumps(consumer.document()), str(row["id"]), row["handoff"]["id"]],
         check=True, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
     assert begin(inbox, row) is False
     assert poll(inbox)[0]["handoff_stage"] == "sending"
