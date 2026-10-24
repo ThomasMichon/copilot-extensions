@@ -221,6 +221,22 @@ adapter, activation or runtime payload fan-out. The record API does not itself
 prove device detection, feed compatibility, approval origin or source
 provenance. Those remain prerequisite owner integrations, not success claims.
 
+### Release approval adapter prerequisite
+
+`tools/runtime_profile_release.py` extends the existing promotion index and its
+pinned hosted Main attestation verifier, not installation-mode or deployment
+publication permission. Its optional versioned `runtime_profiles` extension is
+validated against the exact first-party manifest before signing. The adapter
+authenticates retained subject bytes before deriving whole-record approvals and
+matches independently selected release, manifest, capability and target facts.
+It exposes no raw approval map as user configuration.
+
+This is only the release-channel adapter. Real profile generation/publication,
+composition with #8494's existing `resolve_runtime_profile_policy` baseline,
+governed acquisition and independent
+source-mode selection/locking remain open. No installer or engine is enabled,
+and the authority-integration Plan item above is not complete.
+
 ### Actual-byte verification prerequisite
 
 `tools/runtime_profile_wheels.py` compares that exact record with a complete

@@ -190,6 +190,17 @@ The large-closure control constructs and reuses 97 actual wheels: its complete
 receipt exceeds 32 KiB, while each real health-child command stays below
 16,000 characters using digest-bound evidence read from the owned receipt.
 
+`tools/test_runtime_profile_release.py` exercises the release authority adapter
+and pre-signing validation through the existing promotion index and attestation
+verifier. It checks exact producer/workflow pins, full manifest/first-party
+bindings, wrong selection facts, forged approval origins, byte limits,
+replacement races and private-input cleanup after failure or cancellation.
+It joins the same optional native lane, not the required no-actor packet.
+Synthetic attestation responses test the actual verifier's command boundary;
+there is not yet a published runtime-profile subject or a production consumer.
+These controls do not qualify adopting-policy defaults, governed acquisition,
+source fallback or live release approval.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py

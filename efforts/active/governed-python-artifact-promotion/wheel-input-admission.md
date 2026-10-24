@@ -91,6 +91,17 @@ retains all acquisition, platform, fallback, retention and rollout obligations.
 
 ## Journal
 
+### Component merged; authority/acquisition integration remains open, 2026-10-24
+
+#8534 merged as `bd4c5539a3336b02c828e26e3d1a3e8ccf1cef5d` after
+current-head approval with no findings or open threads, required CI and all six
+Windows/Linux wheel-input, source-profile and real artifact jobs passed.
+The bounded constructor/receipt mechanism is delivered. This sub-plan still
+retains authenticated admission, supplied revocation, measured acquisition
+defaults and enabled consumer/source-fallback acceptance; the parent effort
+remains Active. No record, receipt digest or temporary snapshot becomes an
+approval adapter, and no production mode is enabled by this merge.
+
 ### Closed transaction and installed receipt integration, 2026-10-24
 
 Implementation now composes the complete-profile verifier and retained snapshot
