@@ -323,13 +323,19 @@ def test_single_use_worker_enters_caller_cwd_before_binding(pool, tmp_path, monk
 
 
 @pytest.mark.parametrize("loss", ["dead", "replaced", "cancelled"])
-def test_owner_loss_after_binding_never_publishes_a_decision(pool, monkeypatch, tmp_path, loss):
+@pytest.mark.parametrize("retained_evidence", [False, True])
+def test_owner_loss_after_binding_never_publishes_a_decision(
+    pool, monkeypatch, tmp_path, loss, retained_evidence,
+):
     from zdd import diagnostics
     from worktree_manager import resident_picker, warm_picker_worker as worker
     from worktree_manager.production_picker import runner
 
     directory = tmp_path / "session"
     directory.mkdir()
+    evidence = directory / "evidence.keep"
+    if retained_evidence:
+        evidence.write_text("retain unknown files")
     (directory / "request.json").write_text(json.dumps(request()))
     (directory / "attached").touch()
     monkeypatch.chdir(tmp_path)
@@ -353,6 +359,9 @@ def test_owner_loss_after_binding_never_publishes_a_decision(pool, monkeypatch, 
     monkeypatch.setattr(runner, "run", run)
     assert worker.main(directory, os.getpid(), "first") == 130
     assert not (directory / "result.json").exists()
+    assert directory.exists() is (retained_evidence or loss == "cancelled")
+    if retained_evidence:
+        assert evidence.read_text() == "retain unknown files"
 
 
 def test_private_resident_state_is_not_inherited_by_a_spare(pool):
@@ -518,7 +527,8 @@ def test_selected_nondefault_mux_socket_is_used_for_spawn_probe_cleanup_and_atta
     assert commands and all(command[:3] == [value.mux, "-S", socket] for command in commands)
 
 
-def test_legacy_warm_client_uses_the_admitted_socket_command(pool, tmp_path, monkeypatch):
+@pytest.mark.parametrize("owner_lost", [False, True])
+def test_legacy_warm_client_uses_the_admitted_socket_command(pool, tmp_path, monkeypatch, owner_lost):
     import sys
     from types import SimpleNamespace
     from work_coalescing_singleton import client
@@ -543,13 +553,24 @@ def test_legacy_warm_client_uses_the_admitted_socket_command(pool, tmp_path, mon
         return result
 
     commands = []
+    released = []
     monkeypatch.setattr(client, "request", admit)
-    monkeypatch.setattr(client, "release", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        warm.subprocess, "run",
-        lambda command, **kwargs: commands.append(command) or subprocess.CompletedProcess(command, 0),
-    )
-    assert warm_picker_client.run({"bootstrap": {"project": "sample", "headless": False}}) == (True, None)
+    monkeypatch.setattr(client, "release", lambda *_a, **_k: released.append(True))
+
+    def attach(command, **kwargs):
+        commands.append(command)
+        if owner_lost:
+            warm.shutil.rmtree(slot.directory)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(warm.subprocess, "run", attach)
+    handoff = {"bootstrap": {"project": "sample", "headless": False}}
+    if owner_lost:
+        with pytest.raises(RuntimeError, match="detached without a completed decision"):
+            warm_picker_client.run(handoff)
+    else:
+        assert warm_picker_client.run(handoff) == (True, None)
+    assert released == [True]
     assert commands == [[value.mux, "-S", "/fixture/tmux-selected.sock", "attach-session", "-t", slot.session]]
 
 

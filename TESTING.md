@@ -152,6 +152,17 @@ managed detached workload remains live. Managed-detachment cases skip inside
 the contained local runner rather than bypassing its suppression; they run in
 the explicit disposable native workflow.
 
+The same Linux job also runs Manager's
+`tests/native/test_warm_picker_lifetime.py` through its isolated plugin runner.
+That packet uses an unmodified warm worker on a private tmux TTY, hard-kills
+its birth-pinned owner before and after project binding, and verifies UI,
+engine-child, mux-session and slot retirement. Its audited engine contract
+double records every child state root; the fixture allowlists the environment
+and isolates home, app-data, provider, Manager, temp and mux paths. This is
+not full engine/daemon or performance qualification. Run that selector locally
+on Windows with psmux and PowerShell available; platforms without supported
+warm-worker birth identity retain the cold path and skip this packet.
+
 ## Optional candidate dependency profiles
 
 The installation-context Python `runtime-profile-policy` reader has no

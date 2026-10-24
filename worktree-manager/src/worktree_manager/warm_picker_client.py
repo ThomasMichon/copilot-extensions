@@ -78,5 +78,8 @@ def run(handoff: dict) -> tuple[bool, dict | None]:
             raise RuntimeError("warm Picker failed; no decision was executed")
         return True, outcome.get("decision")
     finally:
-        (directory / "consumed").touch()
+        try:
+            (directory / "consumed").touch()
+        except FileNotFoundError:
+            pass  # An ownerless worker can already have retired its slot.
         release()

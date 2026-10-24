@@ -565,6 +565,10 @@ the attaching caller; cancellation and abandoned attachment are owner-cleaned.
 Final resident shutdown retires every owned UI session, including attached
 ones, rather than abandoning its cleanup deadlines; changed mux incarnations
 are refused instead of targeting a replacement.
+The UI also checks its owner's process birth while mounted. Abrupt owner loss
+ends both pending and bound UIs without publishing a decision, and retires
+only its known protocol files and empty slot directories. Unknown files remain
+for diagnosis rather than being recursively deleted.
 A retirement refusal is isolated to its slot so another completed session can
 still expire or be consumed. On POSIX, the selected tmux socket is explicit in
 creation, probes, attachment and cleanup commands; attachment does not switch

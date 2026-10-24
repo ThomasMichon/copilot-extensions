@@ -364,6 +364,14 @@ jobs:
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil
           python -m pytest -q libs/agent-procutil/tests/test_interactive.py libs/agent-procutil/tests/test_interactive_session_native.py
+      - name: Qualify warm UI lifetime in a private native mux
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          if ! command -v tmux; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          fi
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_warm_picker_lifetime.py
 
   interactive-completion-macos:
     if: ${{ inputs.interactive_completion }}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import time
@@ -91,6 +92,23 @@ def main(directory: Path, owner_pid: int, owner_start: str) -> int:
             return 130
         publish(directory / "result.json", {"ok": False, "error": type(error).__name__})
         return 1
+    finally:
+        if not owner_live():
+            try:
+                for name in (
+                    "startup.json", "startup.tmp", "ready.json", "ready.tmp",
+                    "request.json", "request.tmp", "result.json", "result.tmp",
+                    "attached", "consumed", "cancel",
+                ):
+                    (directory / name).unlink(missing_ok=True)
+                directory.rmdir()
+                if directory.parent.parent.name == "picker-sessions":
+                    try:
+                        directory.parent.rmdir()
+                    except OSError:
+                        pass  # Another UI from the same owner can still be exiting.
+            except OSError:
+                logging.getLogger(__name__).exception("Orphan warm UI files could not be retired")
 
 
 if __name__ == "__main__":
