@@ -299,6 +299,51 @@ def test_complete_wire_budget_older_writer_keeps_full_v1_capacity(tmp_path):
     assert publication_tables(store.db_path) == before
 
 
+@pytest.mark.parametrize("computed_at", [None, "2026-10-24T01:00:01Z"])
+def test_closure_observation_reconstruction_drops_removed_timestamp(
+    tmp_path, manager_contract, computed_at,
+):
+    owner = WorktreesRuntime(tmp_path / "closure.sqlite3")
+    owner.activate()
+    first = {**row(), "closure": {"eligible": False, "computed_at": "2026-10-24T01:00:00Z"}}
+    current = {**row(), "closure": {"eligible": False}}
+    if computed_at is not None:
+        current["closure"]["computed_at"] = computed_at
+    try:
+        owner.publish("project", [first], observed_at=10)
+        previous = {version: owner.handle(request(version)) for version in (1, 2)}
+        retained = owner.store._projects["project"].rows["one"]
+        audit_semantic_writes(owner.store.db_path)
+        owner.publish("project", [current], observed_at=11)
+        publications = {version: owner.handle(request(version)) for version in (1, 2)}
+        assert owner.store._projects["project"].rows["one"] == retained
+        assert writes(owner.store.db_path) == []
+        assert publications[2]["worktrees"][0]["semantic_revision"] == 1
+        for result in (
+            publications[1], read_advisory(owner.store.db_path, "project", contract_version=1),
+        ):
+            assert result["worktrees"] == [current]
+        for version in (1, 2):
+            engine, manager = FeedReceiver(request(version)), manager_contract[0]()
+            collect(engine, previous[version])
+            frames = collect(engine, publications[version], previous[version])
+            assert sum(frame["type"] == "worktree" for frame in frames) == (version == 1)
+            for value, old in ((previous[version], None),
+                               (publications[version], previous[version])):
+                for frame in publication_frames(value, old):
+                    manager.receive(json.loads(json.dumps(frame)))
+            assert engine.current["worktrees"][0]["closure"] == (
+                current["closure"] if version == 1 else {"eligible": False}
+            )
+            assert manager.rows[0]["closure"] == engine.current["worktrees"][0]["closure"]
+        observations = publications[2]["observations"][0]
+        assert ("derivations" in observations) == (computed_at is not None)
+        if computed_at is not None:
+            assert observations["derivations"]["closure"]["computed_at"] == computed_at
+    finally:
+        owner.shutdown()
+
+
 @pytest.mark.timeout(180)
 def test_real_producer_thousand_rows_ten_observations_and_one_title(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"

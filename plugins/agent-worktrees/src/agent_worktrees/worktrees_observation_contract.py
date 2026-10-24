@@ -166,7 +166,7 @@ def validate_rows(rows: list[dict], observations: list[dict], revision: int) -> 
 
 def with_observation(row: dict, value: dict) -> dict:
     """Reconstruct truthful v1 facts without changing the durable semantic row."""
-    result = dict(row)
+    result = semantic_row(row)
     if value["facts"]:
         result["fact_provenance"] = {
             name: {"quality": fact["quality"], "observed_at": fact["observed_at"]}

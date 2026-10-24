@@ -608,7 +608,7 @@ affected `test_worktrees_projection.py` module and the new cases in
 `test_worktrees_observations.py`: **192 passed, 11 deselected**. It retains
 the exclusions `actual_cli`, `real_transport`,
 `cross_real_authenticated_control_socket` and `real_producer`. Manager's
-same pure parser/feed selector reports **92 passed, 3,903 deselected**, with
+same parser/feed selector reports **92 passed, 3,903 deselected**, with
 the eight previously recorded marker warnings still visible. Both actual
 JUnit files were located and parsed: 192/92 cases, zero failures/errors,
 including all 23 new boundary cases. No missing XML is inferred as success.
@@ -630,3 +630,47 @@ The correction still requires ordinary draft publication, resolution of its
 specific thread only after the real fix is published, fresh accepted review
 and required current-head CI. The coordinator retains the independent
 unchanged two-second native hold; no ready/merge/rollout action is authorized.
+
+### Closure observation removal and the actual Manager selector
+
+The complete-wire correction `6dce27dc` was actually published on draft #8217.
+Required CI run `40050507451` passed against that exact head. Fresh Copilot
+review `5636246760` confirms the wire finding resolved, but its overview
+contains a substantive previously missed Medium despite saying “No open
+issues”: copying retained raw payload can restore a removed optional
+`closure.computed_at` in live/advisory v1 reads. That is not a passing clean
+review and was not dismissed because it lacked a separate inline thread.
+
+The removal regression failed first; the timestamp-refresh control passed.
+The one-line correction starts v1 reconstruction from `semantic_row(row)`
+before overlaying current observations. Two regression cases cover live and
+advisory output, actual v1/v2 feed reconstruction through Manager, retained
+stored payload, unchanged semantic revision, and zero semantic writes/deltas.
+The existing scoped Worktrees packet now reports **194 passed, 11 deselected**.
+
+The same existing Manager selector now reports **87 passed, 5 failed,
+3,903 deselected**, with its eight visible marker warnings. This selector
+matches `test_current_worktrees_feed_deadlines.py` as well as the parser/feed
+modules, so it includes real subprocess startup/deadline controls. Earlier
+“pure”/“unit-only” descriptions of the 92-case selection were inaccurate;
+the earlier 92-pass executions remain historical results, not evidence that
+the selection had no native effects.
+
+The failed cases are:
+
+- `test_feed_process_startup_uses_source_budget_not_publication_budget`,
+  both local/source variants.
+- `test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite`,
+  startup, initial-publication and partial-frame variants.
+
+No causal attribution or accepted-flake claim is made. The failure logs and
+actual JUnit are retained. No unchanged retry, threshold relaxation, skip or
+out-of-scope loader/test repair was performed. This is an additional explicit
+qualification blocker, not the shared CI HTTP47 issue and not a waiver from
+the separate unchanged Worktrees two-second native gate.
+
+The correction remains in the admitted review-fix scope, with no new durable
+schema, writer, entrypoint or installed behavior. Documentation now states
+that v1 output is reconstructed from semantic fields plus current observation
+metadata. Draft review/required-CI publication may proceed under the explicit
+qualification holds; source completion, readiness, merge and rollout may not.

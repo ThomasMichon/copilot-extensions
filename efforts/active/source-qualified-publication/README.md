@@ -154,6 +154,22 @@ it does not expand F1 into launch, installer or owner-side effects.
 
 ## Journal
 
+### 2026-10-24 — Closure-observation review correction; qualification still blocked
+- `6dce27dc` is actually published on draft #8217 with required green CI.
+  Fresh review confirmed the complete-wire budget correction but identified
+  stale optional closure timestamps in reconstructed v1 output.
+- Reproduced removal failing while timestamp refresh passed. Reconstruction
+  now starts from semantic fields before applying current observations; the
+  stored semantic payload, row version and zero-write behavior remain intact.
+- The affected Worktrees packet passes 194 cases. The same 92-case Manager
+  selector reports 87 passes and five native startup/deadline failures.
+  That selector includes native controls; earlier descriptions of it as
+  purely in-process were inaccurate. No unchanged retry, relaxed deadline
+  or loader change followed.
+- Draft publication and fresh review/required CI remain required for this
+  review correction. Native and Manager deadline qualification remain blocked;
+  no readiness, merge or rollout is authorized.
+
 ### 2026-10-24 — Complete v2 wire-row budget correction
 - Draft #8217 published `b5ab565a` with required green CI. Fresh review
   confirmed the two earlier findings resolved but found that engine admission

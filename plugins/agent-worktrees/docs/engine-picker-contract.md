@@ -161,6 +161,11 @@ ingress. V1 row capacity and the schema-1 storage limit remain unchanged;
 a compatible older writer's row that cannot fit v2 is refused explicitly on
 that v2 read, not truncated or rewritten.
 
+V1 reconstruction starts from semantic fields and overlays only the current
+observation entry. Removing an optional closure observation therefore removes
+its `computed_at` from live and advisory v1 output, even when the unchanged
+semantic payload is retained without a row write.
+
 ```json
 {
   "id": "tree",
