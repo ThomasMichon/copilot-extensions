@@ -12,12 +12,91 @@ on:
           - context
           - foundation
           - pull-requests-commands
+          - pull-requests-bootstrap
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  pull-requests-bootstrap-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-bootstrap'
+    name: Pull Requests bootstrap (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual hook deadline, caller loss, refusal and healthy re-entry
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_pull_requests_bootstrap.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify bootstrap routing and retained independent hook behavior
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_bootstrap_admission_windows.py
+          --test-timeout 60 --timeout 180
+      - name: Qualify retained namespaced admission and exact hook response
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-explicit-tiers --allow-host-state --test-file tests/test_cell_invocation.py
+          -k "session_start_never or bootstrap_admission_always"
+          --test-timeout 60 --timeout 180
+  pull-requests-bootstrap-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-bootstrap'
+    name: Pull Requests bootstrap (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual hook deadline, caller loss, refusal and healthy re-entry
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_pull_requests_bootstrap.py
+          --test-timeout 900 --timeout 1080
+      - name: Qualify bootstrap routing and retained independent hook behavior
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_bootstrap_admission_windows.py
+          --test-timeout 60 --timeout 180
+      - name: Qualify retained namespaced admission and exact hook response
+        env:
+          APR_NATIVE_OS_ACCOUNT_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-pull-requests
+          --allow-explicit-tiers --allow-host-state --test-file tests/test_cell_invocation.py
+          -k "session_start_never or bootstrap_admission_always"
+          --test-timeout 60 --timeout 180
   pull-requests-command-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pull-requests-commands'
     name: Pull Requests commands (Ubuntu)

@@ -88,6 +88,43 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-FINAL existing imports retain separate S and F ownership
+
+This settles only `src/agent_worktrees/finalize_ref.py:1`. Its exact header is:
+
+```text
+@@ -5,9 +5,10 @@ Split out of ``finalize.py`` (module-size guard) -- see ``resolve_finalize_ref``
+```
+
+Full original hunk SHA256:
+`256d56179603dac9a0f417b0af15bdeee7fe6854a4b7458fd74097efb47eed4d`.
+Its only changed subspans are `import re` (S) and the added relative
+`git_tree_diff` import (F); surrounding imports and probe identity are
+unchanged context, not additional ownership.
+
+Actual #7830 merge `86945bf1c3c514640c9613597075098f4e3c97c4`
+introduced the unaliased `re` import for ordered squash-tree validation.
+Actual #7842 merge `b921cd03708bb5aa38453ab5e8d16aaee32168ff`
+introduced `git_tree_diff` for upstream blob comparison while retaining
+`re`. Each original import is present exactly once in accepted comparison
+`e049c2d2114e5e80f3a414bdd3f77cd53a7da833` by AST.
+Current S validation still checks both complete
+object-ID widths; F still calls the actual relative tree-diff reader and
+object-map helpers. G's separate use of `re` does not make its behavior
+depend on S, and later unrelated imports are not credited to this key.
+
+The existing real-Git no-ref-movement squash probe, ordered-ID controls
+and changed-object file/deletion/directory-replacement cases pass all
+10 native Windows variants without skips: 34.83 pytest seconds,
+74.02 seconds including preparation and cleanup, exactly two contained
+workers with all existing marks, deadlines and resource bounds.
+This is focused import-consumer evidence only. It neither repeats nor
+qualifies a timed-out normal landing group or the complete plugin.
+
+No code/test edit or combined finalization implementation is needed.
+This accounts for both changed import spans, not any other S/F/G hunk,
+fixture, mixed partition or repeated complete same-head qualification.
+
 ### N-UTF8-LAUNCH explicit encoded-intent child mode
 
 This settles only `tests/test_launch_request.py:1`, header

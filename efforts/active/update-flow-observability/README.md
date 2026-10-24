@@ -221,7 +221,7 @@ not replace the held #6859 / #7833 lifetime repair.
 - [x] Land #8411's bounded source-only compatibility repair in #8462,
   retaining exact unit evidence, normal Main-derived allocation and the
   existing release owner's authority.
-- [ ] Prove #8411's exact gate through a subsequent natural promotion
+- [x] Prove #8411's exact gate through a subsequent natural promotion
   containing #8462 before closing the issue or completing its repair claim.
 - [ ] Update source-owned documentation and per-plugin changefiles, then drive
   each implementation through required review, CI, merge and source-worktree
@@ -299,6 +299,50 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-24 - Containing release verified; installed gates remain held
+
+- Natural run `40085094788` qualified Dev
+  `442c9d38c8826bbb59947b225367e85a884f2fa1`, which contains #8462 and the
+  independently owned evidence repair #8508. Every required release job
+  succeeded, including exact immutable-candidate reuse, publication/readback
+  and Main merge. Generated PR #8550 actually merged at
+  `e549f040e3e3f7b82cfeade3f1446fb000aed162`; the annotated
+  `promote-dev-442c9d38c8826bbb59947b225367e85a884f2fa1` tag resolves to
+  that landed commit. The complete run took 9m29s, not an installed-update
+  or equivalent before/after performance measurement.
+- The profile actually exercised was `candidate-units-v3`, not retired
+  `source-units-v2`. All 1,494 admitted units passed with zero prohibited
+  effects in 39.424 seconds under the unchanged 300-second unit budget.
+  Main/helper adoption remained with #3336's owner: #8543 selected the
+  reviewed #8508 merge `60e2f720930a8f249c71c54af73e6ec91ed7955b`.
+  This session neither changed Main nor dispatched or retried the run.
+- The operator-selected finite bound is 128 MiB per generated evidence
+  file, distinct from the unchanged 64 supplementary-asset inventory
+  limit. The actual complete expanded version-1 coverage report is
+  68,424,911 bytes, below 134,217,728 bytes. No test, context, source,
+  phase, effect rule or execution deadline was omitted or waived.
+  Independent final-head controls passed all 36 affected packet and
+  publisher cases, including real byte thresholds, capacity-before-upload
+  refusal, existing-at-capacity readback/reuse and failure-before-success
+  output.
+- Independently downloaded the durable evidence asset from the existing
+  Dev-owned GitHub Release: 1,006,225 bytes, SHA-256
+  `59eb13263259a34b2ae6cae3c07107b5018e241a8569b4c7a628105cd68e7252`.
+  Its qualification bytes exactly match the producing Actions receipt.
+  The unchanged frozen-candidate importer validated the actual bundle;
+  a fresh manifest derived from both authoritative source roots and the
+  full packet verifier independently accepted all three retained files.
+  Deterministic archive reconstruction matched the downloaded bytes,
+  including the actual qualification, not a synthetic receipt.
+- This satisfies #8411's containing-release gate and permits completing
+  its discussion-only repair claim. It does not complete this effort or
+  parent #6600. Installed update, healthy no-op, normal-load, remaining
+  output boundaries and equivalent cost measurements remain open. Prior
+  authorized host windows are exhausted; no further update, verification
+  or recovery is inferred from publication. A fresh bounded operator
+  authorization and safe native ownership are required before another
+  live host operation. The active effort worktree is retained.
 
 ### 2026-10-24 - Metadata repair merged; containing release still required
 

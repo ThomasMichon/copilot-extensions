@@ -84,8 +84,20 @@ The fixed recipe requires the default legacy root, canonical installed payload
 or selected snapshot, native staging layout and existing installer. It accepts
 neither a service option nor an arbitrary source/root. Cold custom-root and
 namespaced command provisioning require explicit installation management;
-healthy namespaced dispatch remains supported. Session bootstrap and explicit
-installer callers are separate, not migrated by command adoption.
+healthy namespaced dispatch remains supported. Explicit installer callers
+remain separate from driver adoption.
+
+The legacy session bootstrap submits first stamping and drift provisioning
+through those same fixed native actions and queue. It does not install inline,
+write a reconcile PID lock, or reap an installer by age. The hook captures the
+supervisor launch acknowledgement and emits only its empty JSON response;
+stderr names the diagnostics and makes clear that launch is not durable request
+acceptance. Its healthy-runtime, namespaced and active-killswitch branches remain
+no-ops. No-self-provision presence and pinned reads defer cold publication;
+nested custody, missing support and publication-policy failures refuse visibly.
+The POSIX hook retains its existing Python metadata-reader prerequisite (and
+read-only no-op without it); only the native command path claims Python-free
+genesis. The separate guidance hook is unchanged.
 
 ## Verbs
 

@@ -31,53 +31,18 @@ _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
 # only to prove a stale leftover key from before this gate's removal is
 # now inert (see test_sh_reconciles_even_with_stale_opt_in_key_present).
 _OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
-
-
-def _resolve_bash() -> str | None:
-    """Resolve a REAL bash, not Windows' WSL-launcher `bash.exe` shim.
-
-    On Windows, ``shutil.which("bash")`` can resolve to a WSL launcher stub
-    under ``WindowsApps`` or the classic ``C:\\Windows\\System32\\bash.exe``
-    -- neither is a real POSIX bash for this test's purposes (the System32
-    launcher invokes an actual WSL distro, which runs this script in a
-    different environment than the one under test). Prefer the real Git
-    Bash location when present, then fall back to a PATH-resolved bash with
-    both known WSL-launcher locations excluded.
-    """
-    git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
-    if git_bash.is_file():
-        return str(git_bash)
-    path = os.environ.get("PATH")
-    if path:
-        filtered = os.pathsep.join(
-            part for part in path.split(os.pathsep)
-            if "WindowsApps" not in part
-            and part.rstrip("\\").lower() != r"c:\windows\system32"
-        )
-        bash = shutil.which("bash", path=filtered)
-        if bash:
-            return bash
-    bash = shutil.which("bash")
-    if bash and "WindowsApps" not in bash and "\\system32\\" not in bash.lower():
-        return bash
-    return None
-
-
-_BASH = _resolve_bash()
-
-
-def _bash_env_path(path: Path) -> str:
-    text = str(path)
-    if not (_BASH and len(text) >= 2 and text[1] == ":"):
-        return text
-    suffix = text[2:].replace("\\", "/")
-    bash_lower = _BASH.lower()
-    if bash_lower.endswith("bash.exe") and "\\git\\" in bash_lower:
-        # Git Bash (MSYS2) uses `/c/...`, not WSL's `/mnt/c/...`.
-        return f"/{text[0].lower()}{suffix}"
-    if bash_lower.endswith("bash.exe"):
-        return f"/mnt/{text[0].lower()}{suffix}"
-    return text
+# Resolve bash to its FULL path rather than invoking the bare command name: on
+# Windows, a Windows App Execution Alias can intercept a bare "bash.exe"
+# process-creation call (routing it to WSL) even when shutil.which() finds
+# Git Bash first on PATH -- the alias interception happens below PATH search,
+# at CreateProcess time, unless the explicit resolved path is used.
+_BASH = shutil.which("bash")
+if (
+    os.name == "nt" and _BASH and os.environ.get("SystemRoot")
+    and Path(_BASH).resolve().is_relative_to(Path(os.environ["SystemRoot"]).resolve())
+):
+    # The Windows WSL launcher cannot execute these native Windows fixture paths.
+    _BASH = None
 
 
 def test_hook_scripts_exist():
@@ -124,17 +89,53 @@ def _make_fake_install(home: Path, name: str) -> Path:
 
 
 def _make_fake_plugin(root: Path, name: str) -> Path:
-    """An isolated copy of the plugin dir shape bootstrap-check.sh expects,
-    with a harmless stub installer so a spawned reconcile does no real work
-    (never invoke the REAL install.sh from a test -- it does a live install)."""
+    """Record fixed-driver handoff, never install a real runtime or service."""
     plugin_dir = root / "plugin"
     scripts_dir = plugin_dir / "scripts"
     scripts_dir.mkdir(parents=True)
     (plugin_dir / "plugin.json").write_text(json.dumps({"name": name}), encoding="utf-8")
     (plugin_dir / "pyproject.toml").write_text('version = "1.0.1"\n', encoding="utf-8")
-    shutil.copyfile(_SH, scripts_dir / "bootstrap-check.sh")
+    for filename in (
+        "bootstrap-check.sh", "bootstrap-check.ps1",
+        "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
+    ):
+        shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
     (scripts_dir / "install.sh").write_text(
-        "#!/usr/bin/env bash\necho stub-install-ran\n", encoding="utf-8"
+        '#!/usr/bin/env bash\nprintf inline >"$(dirname "$0")/inline-entered"\nexit 99\n',
+        encoding="utf-8",
+    )
+    (scripts_dir / "init.ps1").write_text(
+        "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'inline-entered'), 'inline')\nexit 99\n",
+        encoding="utf-8",
+    )
+    driver = plugin_dir / "libs" / "update-driver" / "scripts"
+    driver.mkdir(parents=True)
+    (driver / "first-use.sh").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Installation driver lifecycle contract: vault-stamp-v1\n"
+        '[[ "$5" == --installer-action ]] || exit 91\n'
+        'printf "%s\\n" "$1" "$2" "$3" "$4" "$6" >"$4/handoff"\n'
+        'if [[ -z "${BOOTSTRAP_TEST_NO_ACK:-}" ]]; then\n'
+        '  ack_root="$1"; [[ -z "${BOOTSTRAP_TEST_FOREIGN_ACK:-}" ]] || ack_root="$4"\n'
+        '  printf "launched:424242 log:%s/first-use-00000000-0000-0000-0000-000000000000.log\\n" "$ack_root"\n'
+        'fi\n'
+        'exit "${BOOTSTRAP_TEST_DRIVER_EXIT_CODE:-0}"\n',
+        encoding="utf-8",
+    )
+    (driver / "first-use.ps1").write_text(
+        "# Installation driver lifecycle contract: vault-stamp-v1\n"
+        "param([string]$Root,[string]$Payload,[string]$RuntimeRoot,[string]$Project,"
+        "[string]$InstallerAction)\n"
+        "[IO.File]::WriteAllLines((Join-Path $Project 'handoff'), "
+        "[string[]]@($Root,$Payload,$RuntimeRoot,$Project,$InstallerAction), "
+        "(New-Object Text.UTF8Encoding($false)))\n"
+        "if (-not $env:BOOTSTRAP_TEST_NO_ACK) {\n"
+        "$ackRoot = if ($env:BOOTSTRAP_TEST_FOREIGN_ACK) { $Project } else { $Root }\n"
+        "[Console]::Out.WriteLine((@{launched=$true;project=$Project;pid=424242;created=1;"
+        "log=(Join-Path $ackRoot 'first-use-00000000000000000000000000000000.log')} | ConvertTo-Json -Compress))\n"
+        "}\n"
+        "exit ([int]$env:BOOTSTRAP_TEST_DRIVER_EXIT_CODE)\n",
+        encoding="utf-8",
     )
     (scripts_dir / "install.sh").chmod(0o755)
     (scripts_dir / "bootstrap-check.sh").chmod(0o755)
@@ -148,6 +149,12 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     ``command -v python3`` resolve to a dud and silently short-circuit this
     hook before it ever reaches the gate under test."""
     env = dict(os.environ)
+    for key in (
+        "COPILOT_EXTENSIONS_CONTEXT", "AGENT_PULL_REQUESTS_NO_SELFPROVISION",
+        "AGENT_PULL_REQUESTS_PINNED_CONTEXT", "UPDATE_DRIVER_WITNESS", "BOOTSTRAP_TEST_DRIVER_EXIT_CODE",
+        "BOOTSTRAP_TEST_NO_ACK", "BOOTSTRAP_TEST_FOREIGN_ACK",
+    ):
+        env.pop(key, None)
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
         env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
@@ -155,7 +162,7 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     return env
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(os.name == "nt" or _BASH is None, reason="POSIX bootstrap; Windows uses PowerShell")
 def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     """No .copilot-extensions/config.yaml at all -- reconcile must still
     proceed unconditionally now that the opt-in gate is gone."""
@@ -166,27 +173,28 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
     plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
     _make_fake_install(home, _PLUGIN_NAME)
 
-    env = _clean_env(
-        {
-            "HOME": _bash_env_path(home),
-            "COPILOT_PROJECT_DIR": _bash_env_path(project),
-        }
-    )
-    script = plugin_dir / "scripts" / "bootstrap-check.sh"
+    env = _clean_env({
+        "HOME": str(home), "COPILOT_PROJECT_DIR": str(project),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
 
     result = subprocess.run(
-        [_BASH, os.path.basename(script)],
-        cwd=str(script.parent),
+        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
+        cwd=str(project),
         env=env,
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {}
+    assert "bootstrap provision supervision launched" in result.stderr, result.stderr
+    assert (project / "handoff").read_text().splitlines()[4] == "provision"
+    assert not (plugin_dir / "scripts" / "inline-entered").exists()
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
+@pytest.mark.skipif(os.name == "nt" or _BASH is None, reason="POSIX bootstrap; Windows uses PowerShell")
 def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     """A leftover `background_reconcile_<plugin>: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is
@@ -199,30 +207,27 @@ def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
         f"{_OPT_IN_KEY}: false\n", encoding="utf-8"
     )
     plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
-    (plugin_dir / "scripts" / ".copilot-extensions").mkdir(parents=True, exist_ok=True)
-    (plugin_dir / "scripts" / ".copilot-extensions" / "config.yaml").write_text(
-        f"{_OPT_IN_KEY}: false\n", encoding="utf-8"
-    )
     _make_fake_install(home, _PLUGIN_NAME)
 
-    env = _clean_env(
-        {
-            "HOME": _bash_env_path(home),
-            "COPILOT_PROJECT_DIR": _bash_env_path(project),
-        }
-    )
-    script = plugin_dir / "scripts" / "bootstrap-check.sh"
+    env = _clean_env({
+        "HOME": str(home), "COPILOT_PROJECT_DIR": str(project),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
 
     result = subprocess.run(
-        [_BASH, os.path.basename(script)],
-        cwd=str(script.parent),
+        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
+        cwd=str(project),
         env=env,
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {}
+    assert "bootstrap provision supervision launched" in result.stderr, result.stderr
+    assert (project / "handoff").read_text().splitlines()[4] == "provision"
+    assert not (plugin_dir / "scripts" / "inline-entered").exists()
 
 
 if __name__ == "__main__":
