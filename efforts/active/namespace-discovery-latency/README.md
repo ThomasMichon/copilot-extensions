@@ -107,6 +107,24 @@ owner, use normal authorized local rollout, and continue bounded source
 diagnosis and isolated container qualification. This does not authorize a
 timeout waiver, installed-code patch, control takeover or fleet-wide change.
 
+Subsequent operator direction, captured verbatim:
+
+> Identify what takes up 8 seconds; break down the architecture and figure out what we can spare
+
+**Direction summary:** Attribute the complete call chain and distinguish
+necessary authority checks from removable startup or unrelated configuration
+work before selecting another implementation. This is not approval to remove
+the validation process boundary.
+
+Subsequent operator direction, captured verbatim:
+
+> Great. Build out an effort plan and tackle it
+
+**Authorization summary:** Develop and execute the measured startup-headroom
+follow-up below through reviewed source changes. Reuse this canonical effort;
+retain the unchanged eight-second requirement, process isolation and existing
+release, installation and lifetime ownership.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -153,6 +171,13 @@ timeout waiver, installed-code patch, control takeover or fleet-wide change.
 - [x] Confirm qualified promotion to `main` separately from the `dev` merge.
   Natural #8287 contains the source repair; #8302 separately contains the
   registered-Manager launcher repair.
+- [x] Land the bounded state-root follow-up through review and required CI.
+  #8414 merged as `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7`.
+- [ ] Land the reviewed [startup-headroom follow-up](startup-headroom.md)
+  before its implementation; preserve existing source and control owners.
+- [ ] Execute that follow-up in independently reviewable source slices:
+  omit unused state-root preferences first, then qualify the canonical
+  fresh-process evaluator selection without weakening bootstrap admission.
 - [ ] Requalify the remaining installed reader latency after a reviewed
   state-root follow-up, preserving complete discovery within eight seconds.
 - [ ] Retain release/rollout responsibility explicitly. Apply a local rollout
@@ -190,6 +215,9 @@ All items are agent-recommended means of proving the requested repair.
   runtime changes.
 - [ ] Promotion and authorized running-state proof are distinct receipts; an
   installed selector version alone is not evidence of a running repaired daemon.
+- [ ] The startup follow-up's [qualification matrix](startup-headroom.md#validation-plan)
+  proves equivalent source/installation refusals, first-touch behavior and
+  complete native discovery; a faster status microbenchmark alone is not a pass.
 
 ## Proposal
 
@@ -199,6 +227,107 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Architecture attribution before selecting the next repair
+
+- The actual path is Bridge's registered command, a CMD/PowerShell launcher,
+  a separate canonical installation-context PowerShell evaluator, Containers
+  Python, a second CMD/PowerShell/Worktrees Python stack to locate the state
+  root, then Docker version/list queries. Most wall time precedes Docker.
+- A correlated, low-overhead diagnostic took 7.438 seconds: launcher and
+  runtime selection 0.841; installation-mode validation 2.336; Containers
+  runtime initialization before the peer read 0.802; the complete Worktrees
+  peer read 2.890; backend/serialization/exit remainder 0.569. These are
+  non-overlapping intervals of one invocation, not a sum of unrelated
+  profiles. The observer used 0.031 seconds of thread CPU. A preceding
+  low-overhead 8.437-second result remains an over-budget result.
+- Frequent process-tree polling was rejected for latency attribution: it
+  used 6.703 seconds of observer CPU and stretched its diagnostic to 14.360
+  seconds. It established nesting and verified the private candidate
+  interpreter was actually reached, but its wall times are not credited.
+- Three alternating fresh-process controls of the existing canonical status
+  implementations returned identical complete JSON: PowerShell took
+  2.141/1.797/1.797 seconds; isolated no-site Python took
+  0.687/0.406/0.453. The roughly 1.34-1.45-second difference is a more
+  promising candidate than removing process isolation. This is only a
+  positive legacy-mode comparison: trusted bootstrap selection, native
+  refusal/parity cases and the real consumer still need qualification.
+- The state-root result uses launch policy, the machine-local knowledge
+  binding and canonical registry checks. Its current full config loader also
+  resolves portable launch preferences (`copilot_profiles`,
+  `profile_assignment`, `headless`, `auto_fast_forward`) that this result
+  does not consume. That unrelated preference read and unrelated eager CLI
+  imports are narrower candidates; the existing approximately one-second
+  configuration and 1.14-second import profiles include required work too,
+  so their whole totals are not claimed as removable savings.
+- The separate Docker version preflight is another small candidate because
+  the subsequent list operation already observes daemon availability.
+  Preserve actionable missing-provider/daemon errors, source and installation
+  ownership, binding refusal, native holder accounting and incomplete-roster
+  semantics. No candidate from this attribution is implemented or deployed.
+
+### 2026-10-24 - Full native boundary still misses the unchanged deadline
+
+- The merged #8414 state-root source was built through the canonical native
+  developer installer into an isolated profile. Its monitor transition was a
+  no-op with no predecessor. The executing `context_cli.py` hash matches the
+  reviewed source; the complete state-root JSON matches the installed reader,
+  including the knowledge binding. Shared runtime selectors and deployment
+  manifests remained unchanged.
+- With that candidate reader behind the selected Containers command, five
+  fresh full PowerShell invocations took 7.421, 6.968, 6.672, 6.922 and
+  8.031 seconds. All returned the actual empty container inventory without
+  stderr. The fifth result fails the eight-second requirement; neither its
+  small overrun nor the four faster results is a waiver.
+- The exact registered CMD command was then exercised through Bridge's real
+  namespace resolver and native CPU/lifetime observer. One fresh process
+  completed in 7.875 seconds with native success, both holders settled and
+  five consistent warm reads. The first process of the required fresh
+  five-process cohort instead reached the unchanged eight-second foreground
+  timeout and reported incomplete enumeration. The cohort stopped there and
+  is not credited as passing. An earlier fixture that supplied a PowerShell
+  script as a native executable was invalid and is not acceptance evidence.
+- Read-only profiling still attributes 3.891 seconds of the provider core to
+  its nested state-root command. The candidate Worktrees core takes 3.187
+  seconds wall time in that diagnostic sample, including roughly 1.14 seconds
+  of import work and 1.00 second of layered configuration reads. Existing
+  per-load committed-config snapshot reuse is already present; no second
+  cache, skipped committed policy read or native-command shortcut was added.
+- A separate read-only control of the canonical installation-context status
+  script returned identical JSON and exit codes through separate-host and
+  scoped invocation, taking 2.152 and 1.567 seconds respectively. This is only
+  a potential startup-cost observation, not approval to remove a process
+  isolation boundary or a qualified invocation change. All canonical
+  validation, publication and installed code remains untouched.
+- Release remains independently blocked by #8411's active `ticking-forge`
+  source-only repair. The #3336/#6237 control owner retains reviewed helper
+  adoption; #7743's `rusty-kiln` owner retains its explicitly assigned stdio
+  and confirmed-no-launch settlement repair. #6859 and held #7833 retain
+  lifetime ownership. Coordination supplied the real initializer import and
+  exact-byte refusal boundary without opening a competing repair.
+- Complete native discovery, qualified containing release, authorized normal
+  rollout and the parent consumer task remain open. This effort is Active.
+
+### 2026-10-23 - State-root follow-up merged; native consumption still open
+
+- #8414 merged to Dev as
+  `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7` after actual Copilot
+  approval of final head `f36181de7165b2400b5ec87801b05c3da1909390`,
+  empty complete feedback/thread reads and all required green checks.
+  Normal repository-authorized Maintainer handling omitted only the separate
+  CODEOWNER vote; no CI or blocking-feedback gate was bypassed.
+- Publication preserved the concurrent contributor's additional unit:
+  final-head admission has 1,156 nodes, 51 targets and the unchanged
+  300-second bound. Required CI qualified that actual source head.
+- The owned review waiter was stopped after its fresh cursor revealed that
+  the passing review had already arrived. No review or build was cancelled.
+  The merged worktree was pulled forward only after exact-head, clean-tree
+  and merged-ancestor checks, retaining its accepted-head backup.
+- This is source merged, not a containing qualified Main release or actual
+  complete eight-second running discovery. Follow the normal release and
+  authorized consumer path next. Existing control adoption and installer
+  integration scopes, broader #5761 outcomes and the parent guidance task
+  remain open.
 
 ### 2026-10-23 - State-root continuation and fresh-container qualification
 
