@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse private released-lease history in the dry-run/apply regression without changing test identities or assertions.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
