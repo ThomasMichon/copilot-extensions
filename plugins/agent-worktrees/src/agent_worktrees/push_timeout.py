@@ -22,8 +22,11 @@ holding a lock/mutex) after the caller has already given up and returned.
 from __future__ import annotations
 
 import os
+import math
 import platform
+import selectors
 import subprocess
+import time
 from typing import Literal, overload
 
 from agent_procutil import (
@@ -36,6 +39,126 @@ from agent_procutil import (
 #: 180s covers the documented worst-case provisioning ETA (120s) plus buffer
 #: for a contended provisioning mutex.
 DEFAULT_PUSH_TIMEOUT = 180.0
+OBSERVATION_CLEANUP_SECONDS = 5.0
+
+
+class ObservationUnavailable(subprocess.SubprocessError):
+    """The observation cannot acquire its own descendant containment."""
+
+
+class ObservationCleanupError(subprocess.SubprocessError):
+    """An owned observation did not confirm complete cleanup."""
+
+
+def _observation_wait(cmd: list[str], deadline: float, reserve: float = 0) -> float:
+    remaining = deadline - time.monotonic() - reserve
+    if remaining <= 0:
+        error = subprocess.TimeoutExpired(cmd, 0)
+        error.observation_started = False
+        raise error
+    return remaining
+
+
+def _read_observation(proc, cmd: list[str], deadline: float) -> tuple[str, str]:
+    """Read POSIX pipes without reaping the group leader or reader threads."""
+    from agent_procutil.owned_process import _observe_unreaped
+
+    output = (bytearray(), bytearray())
+    try:
+        with selectors.DefaultSelector() as selector:
+            for index, stream in enumerate((proc.stdout, proc.stderr)):
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, index)
+            while selector.get_map():
+                for key, _ in selector.select(_observation_wait(cmd, deadline)):
+                    try:
+                        chunk = os.read(key.fd, 65536)
+                    except BlockingIOError:
+                        continue
+                    if chunk:
+                        output[key.data].extend(chunk)
+                    else:
+                        selector.unregister(key.fileobj)
+            while _observe_unreaped(proc) is None:
+                time.sleep(min(.01, _observation_wait(cmd, deadline)))
+    except subprocess.TimeoutExpired as error:
+        error.stdout, error.stderr = (
+            data.decode("utf-8", errors="replace") for data in output
+        )
+        raise
+    return tuple(
+        data.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+        for data in output
+    )
+
+
+def _run_observation(cmd: list[str], *, cwd, env: dict, timeout, deadline: float):
+    wait = _observation_wait(cmd, deadline, OBSERVATION_CLEANUP_SECONDS)
+    if timeout is not None:
+        wait = min(wait, timeout)
+    if wait <= 0:
+        error = subprocess.TimeoutExpired(cmd, 0)
+        error.observation_started = False
+        raise error
+    command_deadline = min(deadline - OBSERVATION_CLEANUP_SECONDS, time.monotonic() + wait)
+    windows = platform.system() == "Windows"
+    spawn_options = no_window_kwargs() if windows else detached_kwargs()
+    if not windows:
+        from agent_procutil.owned_process import require_caller_owned_support
+
+        if not spawn_options.get("start_new_session"):
+            raise ObservationUnavailable("independent observation group unavailable")
+        try:
+            require_caller_owned_support()
+        except (RuntimeError, OSError) as error:
+            raise ObservationUnavailable(str(error)) from error
+    _observation_wait(cmd, command_deadline)
+    try:
+        proc, job = spawn_sync_in_kill_on_close_job(
+            cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            require_job=windows, allow_breakaway=False, **spawn_options,
+        )
+    except RuntimeError as error:
+        raise ObservationUnavailable(str(error)) from error
+    stdout = stderr = ""
+    try:
+        try:
+            if windows:
+                if job is None:
+                    raise ObservationUnavailable("observation Job unavailable")
+                stdout, stderr = proc.communicate(
+                    timeout=_observation_wait(cmd, command_deadline),
+                )
+            else:
+                stdout, stderr = _read_observation(proc, cmd, command_deadline)
+        except subprocess.TimeoutExpired as error:
+            error.observation_started = True
+            raise
+    finally:
+        try:
+            if job is not None:
+                job.terminate_and_wait(_observation_wait(cmd, deadline))
+                # Join Popen's pipe readers within the same remaining deadline.
+                proc.communicate(timeout=_observation_wait(cmd, deadline))
+            else:
+                from agent_procutil._caller_owned import _confirm_group
+                from agent_procutil.owned_process import _retire_posix_group
+
+                _retire_posix_group(proc)
+                if _observation_wait(cmd, deadline) < 2:
+                    raise ObservationCleanupError("insufficient time to confirm observation group")
+                _confirm_group(proc)
+            proc.wait(timeout=_observation_wait(cmd, deadline))
+            for stream in (proc.stdin, proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+        except BaseException as error:
+            failure = ObservationCleanupError("observation cleanup was not confirmed")
+            failure.process, failure.job = proc, job
+            raise failure from error
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -89,6 +212,7 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
     inherit_process_group: bool = False, binary: Literal[False] = False, input: None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[str]: ...
 
 
@@ -96,12 +220,14 @@ def run_bounded(
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
     inherit_process_group: bool = False, binary: Literal[True], input: bytes | None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[bytes]: ...
 
 
 def run_bounded(
     cmd: list[str], *, cwd: str | os.PathLike | None, env: dict, timeout: float | None,
     inherit_process_group: bool = False, binary: bool = False, input: bytes | None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run *cmd*, capturing output; on a stall past *timeout*, kill its
     ENTIRE process tree (see module docstring) before re-raising
@@ -112,9 +238,19 @@ def run_bounded(
     ``inherit_process_group`` is for unbounded foreground work inside the
     Manager's owned group; the outer owner retains descendant cleanup.
     ``binary`` retains opaque bytes, with optional bytes supplied on stdin.
+    ``observation_deadline`` opts text-only, independent observations into a
+    single absolute monotonic ceiling, reserving cleanup inside that ceiling.
     """
     if input is not None and not binary:
         raise ValueError("bytes input requires binary capture")
+    if observation_deadline is not None:
+        if type(observation_deadline) not in (float, int) or not math.isfinite(observation_deadline):
+            raise ValueError("observation_deadline must be a finite monotonic instant")
+        if binary or input is not None or inherit_process_group:
+            raise ValueError("observation requires text capture and independent containment")
+        return _run_observation(
+            cmd, cwd=cwd, env=env, timeout=timeout, deadline=observation_deadline,
+        )
     windows = platform.system() == "Windows"
     proc, job = spawn_sync_in_kill_on_close_job(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

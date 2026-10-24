@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** plan-only PR, then independent dependency-ordered PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees/README.md`, derived status and resident authority; `visions/plugin-services/README.md`, service-scaled process ownership
 - **Umbrella issue:** #7944
 - **Sub-issues:** #7945
@@ -26,7 +26,8 @@ performance-measurement, headless-launch and process-containment patterns.
 |-------------|---------------------|-------------|
 | Plan author | Source trace, bounded proposal, plan PR only | #7944/#7945 and this effort |
 | Integration coordinator | Independent admission of exact implementation hunks | Reviewed proposal and the two tracking issues |
-| R1 implementer (unassigned) | Initial/default deadline and observation-lock separation | Separate managed worktree after admission |
+| R1a implementer | Admitted local deadline and opt-in cleanup only | `buzzing-clasp`; #7944 |
+| R1b implementer (unassigned) | Observation-lock separation after shared-owner admission | Separate managed worktree after admission |
 | R2 implementer (unassigned) | Invocation-local passive fsmonitor suppression | Separate managed worktree after R1 API admission |
 | Existing owners | Roster/feed publication, resident control and receipt storage | Existing issue/effort reservations; no reassignment |
 
@@ -98,8 +99,9 @@ or additional operator authorization.
 - [x] Specify separate R1/R2 contracts, exclusions and test-tier obligations.
 - [x] Address a fresh independent review and land the docs-only plan through
   source review and required CI.
-- [ ] Return exact plan/head/claims to the integration coordinator; obtain
-  independent admission before any functional edit.
+- [x] Return exact plan/head/claims to the integration coordinator; obtain
+  independent admission before any functional edit. R1a only is admitted;
+  R1b and R2 remain gated.
 
 ### R1 — One deadline and unlocked observation
 - [ ] Implement R1a local deadline propagation and contained cleanup from
@@ -119,7 +121,7 @@ or additional operator authorization.
 
 ## Validation Plan
 
-- [ ] Complete the plan-only checks in [validation.md](validation.md).
+- [x] Complete the plan-only checks in [validation.md](validation.md).
 - [ ] Exercise all R1 unit and real-process cases, including concurrent
   unrelated admission/publication and stale observation rejection.
 - [ ] Exercise all R2 policy tests and supported-native cycles; preserve
@@ -140,6 +142,16 @@ from admitted mutation without introducing another authority or cache.
 Prefer invocation-local `-c core.fsmonitor=false` for passive classifier
 status reads over a new session-lifetime configuration policy.
 
+The blocking POSIX per-probe census finding has an
+[observation-scoped confirmation proposal](posix-confirmation-proposal.md).
+It is a design-only request for narrow shared-owner agreement, not admission
+to alter procutil or a waiver of the Medium finding.
+
+The [caller-custody and Windows-first design](caller-custody-and-platform-slice.md)
+maps the exact cache/background/roster/owner-loss gates. It rejects implementing
+the unproved POSIX anchor-lifetime candidate and proposes an explicitly
+review-gated platform slice, not disabling ordinary POSIX classification.
+
 ## Journal
 
 ### 2026-10-23 — Bounded planning
@@ -158,3 +170,45 @@ status reads over a new session-lifetime configuration policy.
   green CI. Its two Low findings prompted a discoverability-row follow-up
   and repair of a multiline PR-description transport loss. No contract,
   implementation or rollout authority was expanded.
+- Follow-up #8379 merged after the existing #8392 repair, preserved repair
+  bytes, fresh source approval and green required CI. The coordinator
+  admitted only R1a. First targeted units exercise local deadlines, failure
+  semantics and cleanup composition; actual native consumers and broader
+  concurrency/fsmonitor qualification remain open.
+- R1a first source checkpoint: 83 targeted new/existing contracts passed,
+  with 99 unrelated/native cases deselected. Focused Ruff, unchanged module
+  ceilings, install contract, effort structure, docs consistency and whitespace
+  checks passed. New cases cover one deadline, initial/default failures,
+  actual fetch attempts, UNKNOWN versus finalized display, reserved cleanup,
+  cancellation and unchanged legacy binary/input/timeout behavior.
+- The initial Python 3.9 invocation lacked `tomllib`; validation used an
+  already available modern interpreter and the normal isolated test wrapper.
+  Two failing test adapters/schema assertions were corrected and the combined
+  selection rerun green. No native timing/process qualification is inferred.
+- Requested checkpoint precedes actual isolated consumer/shim, held-pipe and
+  native cleanup expansion. R1b, R2, installed proof and root acceptance remain
+  unadmitted/open; no service or production fixture was changed.
+- Source review #8458 identified three High cleanup/capability faults and a
+  blocking Medium per-probe global-census cost. Seven pure regression cases
+  failed before the admitted High fixes; all 90 combined targeted cases then
+  passed, with 99 unrelated/native cases deselected. Full capability preflight,
+  failed-Job custody and cleanup-error propagation are corrected in R1a-owned
+  hunks only. Legacy non-observation paths remain unchanged.
+- The Medium stays blocking. Its observation-scoped API proposal is documentation
+  only and requires coordinator/shared-owner agreement before any implementation.
+  No procutil/shared API, native fixture, service or production deadline changed.
+- Fresh review confirmed all three original High findings resolved, and raised
+  a new High for resident callback loops discarding cleanup custody. The scoped
+  proposal records those separately owned caller gates and the unresolved
+  caller-death/lifetime boundary. Neither that High nor the Medium is waived;
+  no unadmitted callback or shared-library implementation was changed.
+- Bounded follow-up design traced the actual segment cache, snapshot, bundle
+  request/background cache, classify, warm-roster/list and drain continuations.
+  The concrete common carrier is the monitor's existing segment-cache instance,
+  with frame-local custody for the standalone updater. The design names exact
+  typed catches, next-tick settlement, stale-data/fallback gates and lifecycle
+  amendments rather than treating two callback catches as a complete fix.
+- No proved universal POSIX outer-lifetime boundary was established. Do not
+  implement the anchor candidate. The proposed Windows-first amendment retains
+  ordinary POSIX behavior and its open #7944 work; neither alternative nor
+  caller/native-API hunk is implemented or admitted by this design checkpoint.
