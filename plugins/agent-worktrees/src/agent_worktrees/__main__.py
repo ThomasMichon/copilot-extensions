@@ -6470,7 +6470,7 @@ def main(argv: list[str] | None = None) -> int:
         args_list[0] not in {
             "state-root", "coordination-readiness", "config-root", "knowledge",
         }
-        and args_list[:2] != ["repos", "list"]
+        and args_list[:2] not in (["repos", "list"], ["repos", "map"])
     ):
         _ensure_cluster_loaded()
 

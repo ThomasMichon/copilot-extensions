@@ -252,6 +252,13 @@ uses a source-root discovery fallback. Invalid or duplicate registry mappings,
 missing registrations and unavailable checkouts are explicit errors. Acquisition
 and adoption remain separate owner operations; this read never clones a repo.
 
+For a whole registered inventory, use
+[`agent-worktrees repos map --json`](docs/repository-map.md). The existing
+resident flattens registry metadata and local-root availability before the
+request. One bounded read returns the map without per-repository subprocesses;
+unready, stale and unavailable maps are explicit rather than healthy empty
+inventories. Point-of-use execution and mutation admission remain separate.
+
 Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
 uses the native read/preview/apply CLI to inspect registration, routes, state
 binding and tracked pairs. Its only editable setting is the machine-local

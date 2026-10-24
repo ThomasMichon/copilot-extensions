@@ -28,21 +28,21 @@ election, routing and drain ownership; do not add a service, port or scheduler.
 The exact wire names and metadata below are agent-recommended implementation
 details, not additional operator requests.
 
-- [ ] Land this amendment and the standing repository-map intent before implementation.
-- [ ] Add one producer-owned repository-map projection to the existing resident. Read the strict registry once per refresh; resolve registered local roots in process, preserving management classes, registered-only authority and explicit per-entry unavailability.
-- [ ] Publish complete immutable snapshots with contract version, owner generation, source revision and observation time. Malformed or unreadable registry state must not publish a healthy empty map. Preserve last-good data only as explicitly stale/advisory.
-- [ ] Expose a bounded authenticated `repos map --json` read through the existing resident control plane. Request handlers serve the published map without scanning registries, probing repositories, launching children or starting another daemon. Missing, incompatible, draining and unready service states remain explicit.
-- [ ] Refresh the map through the existing producer lifecycle, including registry changes and periodic root-availability reconciliation. Preserve election, supersession, shutdown and drain behavior.
-- [ ] Replace Workers template discovery's list-plus-point-resolution loop with one map read. Do not import the Worktrees domain runtime into Dispatch, copy its registry, fall back to directory discovery, or mistake a read-only root for execution authority.
-- [ ] Document the read contract and run the validation below, then resume the parent installed acceptance and closure gates.
+- [x] Land this amendment and the standing repository-map intent before implementation. #8359 merged after current-head approval and green required CI.
+- [x] Add one producer-owned repository-map projection to the existing resident. Read the strict registry once per refresh; resolve registered local roots in process, preserving management classes, registered-only authority and explicit per-entry unavailability.
+- [x] Publish complete immutable snapshots with contract version, owner generation, source revision and observation time. Malformed or unreadable registry state must not publish a healthy empty map. Preserve last-good data only as explicitly stale/advisory.
+- [x] Expose a bounded authenticated `repos map --json` read through the existing resident control plane. Request handlers serve the published map without scanning registries, probing repositories, launching children or starting another daemon. Missing, incompatible, draining and unready service states remain explicit.
+- [x] Refresh the map through the existing producer lifecycle, including registry changes and periodic root-availability reconciliation. Preserve election, supersession, shutdown and drain behavior.
+- [x] Replace Workers template discovery's list-plus-point-resolution loop with one map read. Do not import the Worktrees domain runtime into Dispatch, copy its registry, fall back to directory discovery, or mistake a read-only root for execution authority.
+- [x] Document and source-validate the read contract. Publication, normal promotion, authorized rollout and the parent installed acceptance/closure gates remain required.
 
 ## Validation
 
-- [ ] Producer controls cover empty, malformed and duplicate registry input; all supported management classes; absent, relative and unavailable local roots; source changes; and root disappearance without a registry edit.
-- [ ] Reader controls prove one whole-map response, bounded unknown/unavailable outcomes, stale labeling, generation/scope validation, and no request-time registry/filesystem computation or child process.
-- [ ] Real local control-server/client tests exercise authentication, map publication, independent readers, invalidation and shutdown without touching the operator's service.
-- [ ] Dispatch tests preserve healthy peers, deterministic ordering and findings while proving one map read and zero per-repository resolution calls.
-- [ ] A lightweight real consumer-boundary check covers the installed-style CLI/JSON seam and fresh isolated state on the available native platform; record the reason for any unavailable platform or external lane.
+- [x] Producer controls cover empty, malformed and duplicate registry input; all supported management classes; absent, relative and unavailable local roots; source changes; and root disappearance without a registry edit.
+- [x] Reader controls prove one whole-map response, bounded unknown/unavailable outcomes, stale labeling, generation/scope validation, and no request-time registry/filesystem computation or child process.
+- [x] Real local control-server/client tests exercise authentication, map publication, independent readers, invalidation and shutdown without touching the operator's service.
+- [x] Dispatch tests preserve healthy peers, deterministic ordering and findings while proving one map read and zero per-repository resolution calls.
+- [x] A lightweight real consumer-boundary check covers the actual CLI/JSON seam and fresh isolated state on Windows. Linux/macOS native and external-venue execution were not exercised by this local lane; no platform-specific census, termination or installer behavior changed. This is source qualification, not installed rollout.
 - [ ] After normal promotion and authorized rollout, repeat the real installed Configuration/Workers test with the unchanged 20-second provider deadline. Save-only, edit, cancel and explicit activation receipts remain required; no operator worker activation is permitted by this test.
 
 ## Boundaries

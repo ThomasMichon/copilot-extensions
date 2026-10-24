@@ -4211,7 +4211,7 @@ def test_status_monitor_does_not_acknowledge_failed_authority_and_retries_before
             assert health["worktrees"]["status"] == "unavailable"
             elected[0] = True
 
-        def current_read_count(self):
+        def current_read_count(self, action="worktrees-read"):
             return 0
 
         def close(self):
@@ -4289,13 +4289,16 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
         def start(self):
             assert handles[0]("promote", {})["adopted"]
 
-        def current_read_count(self):
+        def current_read_count(self, action="worktrees-read"):
             return int(len(waits) < 2)
 
         def close(self):
             elected[0] = None
             assert handles[0](
                 "worktrees-read", {"contract_version": 1, "project": "test"},
+            )["ok"] is False
+            assert handles[0](
+                "repos-map-read", {"repository_map_version": 1, "scope": str(tmp_path.resolve())},
             )["ok"] is False
             assert handles[0]("health", {})["worktrees"]["status"] == "shutdown"
             assert smc._predecessor_health_check("127.0.0.1", 12345) is False
@@ -4314,6 +4317,11 @@ def test_status_monitor_shutdown_cannot_recover_or_promote_admission(
 
     def sweep(*args, **kwargs):
         sweeps.append(True)
+        repository_map = handles[0](
+            "repos-map-read", {"repository_map_version": 1, "scope": str(tmp_path.resolve())},
+        )
+        assert repository_map["ok"] and repository_map["inventory_authority"] == "complete"
+        assert "repos-map-v1" in handles[0]("health", {})["capabilities"]
         if shutdown_mode == "interrupted":
             return 1
         assert handles[0]("shutdown", {}) == {"shutdown": True}

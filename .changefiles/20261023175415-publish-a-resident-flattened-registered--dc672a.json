@@ -1,0 +1,9 @@
+{
+  "comment": "Publish a resident-flattened registered repository map through one bounded metadata read",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

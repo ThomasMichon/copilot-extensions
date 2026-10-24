@@ -2030,6 +2030,16 @@ it retains the usual containment and time budgets and fails if no selected
 tests run. Combine it with `-k` to preserve a diagnostic lane's exact test
 roster without collecting the full plugin suite.
 
+The resident repository-map native lane uses
+`agent-worktrees --allow-explicit-tiers --test-file tests/test_repository_map.py
+--test-file tests/native/test_repository_map_native.py` with this runner.
+Set `REPOSITORY_MAP_DISPATCH_PYTHON` to the separately prepared Dispatch
+interpreter for the real cross-distribution catalog case. It uses a private
+local server, fresh registry and actual CLI/JSON boundary, with one whole-map
+call and no per-repository lookup. Missing that interpreter explicitly skips
+only the cross-distribution case. This on-demand native lane does not add a
+process matrix to required unit CI or qualify an installed rollout.
+
 Explicit out-of-plugin targets use the same bounded runner and admission lease:
 `worktree-manager` selects that product's tests, `payload-invocation` selects
 `libs/payload-invocation/tests`, and `runtime-source` selects the source
