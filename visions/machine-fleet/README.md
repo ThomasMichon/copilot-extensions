@@ -3,7 +3,7 @@
 - **Subject:** A driver-based fleet of machines and services coordinated through an optional central Gateway controller.
 - **Scope:** branch (cross-cutting child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md), [`docs/configuration.md`](../../docs/configuration.md)
 
 ## Purpose & Intent
@@ -21,6 +21,9 @@ Gateway. A roaming operator client is not required to keep remote work alive.
 The same fabric can grow into a scalable fleet of Linux hosts running explicit,
 containerized roles from the existing service ecosystem, without making one
 container manager or a private infrastructure provider its required substrate.
+Trusted agent-cluster containers scope that cluster’s agent-* services and
+state so they are not host-global. Clusters still federate through the Gateway.
+The physical machine remains the fleet’s security boundary for that posture.
 
 A fleet belongs to exactly one operator. Its machines, services, state and
 credentials form that operator's control boundary, not a multi-tenant hosting
@@ -213,6 +216,11 @@ placement or movement; a healthy replacement process is not proof that its
 data and authority are safe to activate. Adopter-specific provisioning remains
 outside the portable fleet core.
 
+A trusted agent-cluster container exists to give that cluster its own scoped
+agent-* services and state, not to invent a host-security product. Those
+scoped globals remain local to the cluster; Gateway federation is how clusters
+meet. The hosting physical machine is the security boundary.
+
 ### Scoped credential relay
 
 The fleet composes the existing auth-relay provider model. Machine enrollment,
@@ -274,6 +282,14 @@ Generalized capabilities can move from an adopter implementation into the shared
 product, while private policy, inventories and presentation remain extensions.
 Convergence replaces duplicated responsibilities deliberately, preserving
 accepted work and existing consumers rather than installing a second authority.
+
+### cluster-scoped-agent-globals
+
+Trusted agent-cluster containers give each cluster its own agent-* service and
+state scope. They are for tidiness, control and scale-out. They federate
+through the Gateway. The physical machine remains the security boundary for
+this posture; restricted sandboxes, where they exist, remain a separate
+containment mode.
 
 ### single-operator-fleet
 
