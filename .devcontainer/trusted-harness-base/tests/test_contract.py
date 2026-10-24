@@ -325,7 +325,11 @@ class ContractTests(unittest.TestCase):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "run"
         ]
         self.assertIn(
-            ("systemctl", "mask", "apt-daily.service", "apt-daily.timer",
+            ("/usr/bin/systemctl", "--root=/", "enable", "ssh.service"),
+            calls,
+        )
+        self.assertIn(
+            ("/usr/bin/systemctl", "--root=/", "mask", "apt-daily.service", "apt-daily.timer",
              "apt-daily-upgrade.service", "apt-daily-upgrade.timer"),
             calls,
         )

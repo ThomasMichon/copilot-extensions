@@ -213,8 +213,9 @@ def main() -> None:
     reference.parent.mkdir(parents=True, exist_ok=True)
     reference.unlink(missing_ok=True)
     reference.symlink_to(machine)
-    run("systemctl", "enable", "ssh.service")
-    run("systemctl", "mask", "apt-daily.service", "apt-daily.timer",
+    # The inherited devcontainer PATH shim is a no-op until systemd is running.
+    run("/usr/bin/systemctl", "--root=/", "enable", "ssh.service")
+    run("/usr/bin/systemctl", "--root=/", "mask", "apt-daily.service", "apt-daily.timer",
         "apt-daily-upgrade.service", "apt-daily-upgrade.timer")
     run("apt-get", "clean")
 

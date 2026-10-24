@@ -74,6 +74,9 @@ Systemd's later namespace-local propagation changes do not authorize host-shared
 mounts. Image-root APT update services/timers are masked: root package changes
 come from the admitted image build/update path, while explicit compatible
 home-runtime updates retain their own owners.
+Build-time unit enable/mask operations use Debian's absolute systemctl binary
+with `--root=/`, not the inherited devcontainer PATH shim that reports a no-op
+before systemd is running.
 
 ## Approved local build interface
 
