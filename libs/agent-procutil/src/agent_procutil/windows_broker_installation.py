@@ -1,0 +1,76 @@
+"""Fixed installed-runtime identity, shared by adoption and read-only launch."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import stat
+from dataclasses import replace
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .windows_task_broker import Registration
+
+
+def installation_identity(root: Path) -> str:
+    """Bind identity to an exact durable root, not an ambient owner hint."""
+    root = Path(root)
+    if not root.is_absolute() or root.resolve() != root:
+        raise ValueError("broker installation requires an absolute unlinked root")
+    digest = hashlib.sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()
+    return "runtime/" + digest
+
+
+def registration(root: Path, slot: Path) -> Registration:
+    """Describe only a complete immutable canonical Windows action generation."""
+    from .windows_broker_retention import runtime_component
+    from .windows_task_broker import Registration, _metadata, _refuse, native
+    from . import windowless_python, windowless_python_env
+
+    if os.name != "nt":
+        raise _refuse("Windows prerequisite unavailable")
+    root, slot = Path(root), Path(slot)
+    identity = installation_identity(root)
+    if (
+        not slot.is_absolute() or slot.resolve() != slot
+        or slot.parent != root / "versions"
+    ):
+        raise _refuse("broker action requires an immutable runtime generation")
+    config = Registration(
+        identity, str(root), str(slot / "Scripts" / "pythonw.exe"),
+        str(slot / "Lib" / "site-packages" / "agent_procutil" / "windows_broker_entry.py"),
+        native().current_sid(),
+    )
+    config.validate_files()
+    runtime = runtime_component(config, "versioned_runtime")
+    if (
+        slot.name.casefold() == runtime.DEV_VERSION or runtime.is_dev_generation(slot.name)
+        or runtime.validate_marker(_metadata(slot / ".install-complete.json"), slot.name) is None
+    ):
+        raise _refuse("broker action requires a complete immutable runtime generation")
+    launcher = slot / "Scripts" / "python.exe"
+    venv = slot / "pyvenv.cfg"
+    info = venv.lstat()
+    if (
+        not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 16384
+        or getattr(info, "st_file_attributes", 0) & 0x400
+        or not launcher.is_file()
+    ):
+        raise _refuse("broker runtime interpreter binding refused")
+    pythonw = windowless_python(launcher, require_windowless=True)
+    if windowless_python_env(launcher) != {"__PYVENV_LAUNCHER__": str(launcher)}:
+        raise _refuse("broker runtime requires its direct base interpreter")
+    # The entrypoint explicitly imports only its installed package directory.
+    # Do not schedule the venv redirector or persist a process environment.
+    config = replace(config, pythonw=pythonw)
+    config.validate_files()
+    return config
+
+
+def load(root: Path) -> Registration:
+    """Read adoption by canonical installation identity without repairing it."""
+    from .windows_task_broker import load as load_registration
+
+    identity = installation_identity(root)
+    return load_registration(Path(root) / "windows-launch-broker.json", identity)

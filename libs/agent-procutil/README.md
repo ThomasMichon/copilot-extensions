@@ -513,6 +513,18 @@ launches never install or repair it. Update drains finite accepted transactions
 without stopping them; stop/uninstall disable admission and report that already
 transferred child control remains the consumer's responsibility.
 
+`windows_broker_installation.registration(root, slot)` is the fixed numbered
+installation factory: identity derives from the normalized durable root, and
+the action uses that complete immutable slot's direct base `pythonw.exe` and
+installed `agent_procutil/windows_broker_entry.py`. The canonical interpreter
+selector bypasses the Windows venv redirector; the fixed entrypoint supplies its
+own installed import directory without a saved environment. The slot's canonical
+completion validator is used; mutable dev slots, missing helpers and linked
+paths refuse. `load(root)` reads that root's adoption without trusting ambient
+owner/config hints or repairing it. Installation adapters use
+`update_driver.windows_broker.adopt` under actual inherited execution custody;
+this does not yet switch `spawn_daemon` from its held legacy fallback.
+
 `reconcile` records credential-free publication intent before changing the Task
 or adopted configuration. While that record exists, ordinary launches refuse
 with `installer recovery required`; they never repair it. The next explicitly

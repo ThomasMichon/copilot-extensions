@@ -836,3 +836,35 @@ repository history.
   and isolated acceptance before considering an authorized rollout; do not
   convert a receipt, version, metadata probe or successful source test into
   running-state evidence. The independent broker repair remains held.
+
+### 2026-10-24 - Broker foundation adoption, source only
+
+- Added a fixed canonical numbered-runtime registration factory and a
+  driver-owned adoption adapter. The factory derives installation identity
+  from its durable root, validates immutable completion with the installed
+  canonical helper, and selects the direct base GUI interpreter rather than
+  a Windows venv redirector. No environment hint grants installation identity.
+- Foundation construction adopts only after settled selection and outside
+  publication custody, while still borrowing the same execution owner.
+  Its fixed Python/PowerShell/Linux input inventory now includes the private
+  native transport. Existing PowerShell witnesses support nested execution
+  scopes and refuse successful disposal after an abandoned scope. No second
+  installation lock or queue was added.
+- Unit/integration evidence: 142 focused factory, retention, driver and
+  fixture-refusal cases passed; the real copied venv action qualified without
+  Task registration. Separately, 55 foundation state/native cases, 15 native
+  source-inventory/progress cases and all 26 actual PowerShell witness cases
+  passed. Two gated progress cases were skipped. Install contracts and changed
+  Python checks passed. Larger aggregate runs hit their existing wall limits;
+  one aggregate failure lacked a traceback, although all its partitioned
+  selections subsequently passed. This does not establish its root cause or
+  license a deadline increase.
+- Clean-room/external qualification remains open. The hosted-only protocol
+  fixture now constructs real venv actions and routes successful adoption
+  through the actual queue/default native executor, but that changed fixture
+  still needs its exact-candidate hosted run. It refuses shared-host execution
+  before construction or imports. Ordinary consumer installers, normal-launch
+  selection, desktop observation, maintenance-consumer qualification and
+  native POSIX regression remain open under #6859/#7833.
+- The PR remains draft/held. No shared-host Task, installed runtime, service,
+  updater, rollout or lifetime policy was changed.

@@ -35,6 +35,25 @@ def test_protocol_caller_refuses_shared_host_before_loading_runtime(monkeypatch,
     protocol_probe.imports.assert_not_called()
 
 
+@pytest.mark.parametrize("entry", ["adopt_action", "adopt_generation"])
+def test_driver_adoption_fixture_refuses_shared_host_before_loading_runtime(
+    monkeypatch, tmp_path, entry,
+):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(protocol_probe, "imports", Mock())
+    with pytest.raises(RuntimeError, match="ephemeral Windows CI consent"):
+        getattr(protocol_probe, entry)(tmp_path, tmp_path, "first")
+    protocol_probe.imports.assert_not_called()
+
+
+def test_action_construction_fixture_refuses_shared_host_before_creating_venv(monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    builder = Mock(side_effect=AssertionError("shared host venv"))
+    monkeypatch.setattr(protocol_probe.venv, "EnvBuilder", builder)
+    with pytest.raises(RuntimeError, match="ephemeral Windows CI consent"):
+        protocol_probe.prepare_action(tmp_path, tmp_path, "first", None)
+    builder.assert_not_called()
+
 def test_publication_crash_fixture_refuses_shared_host_before_loading_runtime(monkeypatch, tmp_path):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     monkeypatch.setattr(protocol_probe, "imports", Mock())

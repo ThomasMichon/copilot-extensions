@@ -9,9 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PACKAGES = {
-    "update-driver": ("agent-update-driver", {"agent-procutil", "agent-single-instance-lease"}),
+    "update-driver": ("agent-update-driver", {
+        "agent-procutil", "agent-single-instance-lease", "agent-zdd; sys_platform == 'win32'",
+    }),
     "agent-procutil": ("agent-procutil", set()),
     "single-instance-lease": ("agent-single-instance-lease", set()),
+    "zdd": ("agent-zdd", set()),
 }
 SUPPORT = (
     "installer-engine.ps1", "installer-engine.sh",
@@ -65,7 +68,7 @@ def inspect(plugin: Path) -> FoundationInputs:
         if project.get("name") != name or set(project.get("dependencies", [])) != dependencies:
             raise FoundationInputError("foundation runtime dependency closure differs from its fixed recipe")
         sources = data.get("tool", {}).get("uv", {}).get("sources", {})
-        if set(sources) != dependencies:
+        if set(sources) != {dependency.split(";", 1)[0].strip() for dependency in dependencies}:
             raise FoundationInputError("foundation requires exactly its declared local dependency sources")
         for dependency, source in sources.items():
             target = next(key for key, value in PACKAGES.items() if value[0] == dependency)
@@ -126,6 +129,18 @@ def check_health() -> None:
     ):
         if any(not files(package).joinpath(name).is_file() for name in names):
             raise FoundationInputError("foundation is missing native custody assets")
+    if os.name == "nt":
+        from agent_procutil import windows_broker_installation, windows_task_broker
+        import zdd
+
+        if (
+            not callable(windows_broker_installation.registration)
+            or not callable(windows_task_broker.reconcile)
+            or not files(agent_procutil).joinpath("windows_broker_entry.py").is_file()
+            or not files(agent_procutil).joinpath("windows_broker_task.ps1").is_file()
+            or not files(zdd).joinpath("private_windows_native.py").is_file()
+        ):
+            raise FoundationInputError("foundation is missing Windows broker assets")
 
 
 if __name__ == "__main__":

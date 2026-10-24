@@ -20,6 +20,33 @@ def _generation(config: Registration) -> str | None:
     return relative.parts[1]
 
 
+def runtime_component(config: Registration, name: str):
+    """Load only the action generation's installed canonical runtime helpers."""
+    if name not in {"versioned_runtime", "versioned_runtime_leases"}:
+        raise ValueError("unsupported broker runtime component")
+    generation = _generation(config)
+    if generation is None:
+        raise ValueError("broker action requires an immutable runtime generation")
+    source = Path(config.root) / "versions" / generation / ".runtime-bootstrap" / (name + ".py")
+    for path in (source, *source.parents):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("broker runtime helper must not be linked")
+    if not source.is_file():
+        raise ValueError("broker runtime helper is unavailable")
+    spec = importlib.util.spec_from_file_location("_broker_" + name, source)
+    if spec is None or spec.loader is None:
+        raise ValueError("broker runtime helper is unavailable")
+    runtime = importlib.util.module_from_spec(spec)
+    if name == "versioned_runtime":
+        runtime._retained_runtime_components = {
+            "versioned_runtime_leases": runtime_component(config, "versioned_runtime_leases"),
+        }
+    # Do not create bytecode or mutate the qualified immutable helper.
+    exec(compile(source.read_bytes(), str(source), "exec"), runtime.__dict__)
+    return runtime
+
+
 def replace(config: Registration, registrations: list[Registration]) -> None:
     """Persist before external mutation; release only after recovery settles.
 
@@ -41,18 +68,6 @@ def replace(config: Registration, registrations: list[Registration]) -> None:
         if retained is None:
             raise ValueError("broker transition mixes runtime ownership models")
         generations.append(retained)
-    source = root / "versions" / generation / ".runtime-bootstrap" / "versioned_runtime_leases.py"
-    for path in (source, *source.parents):
-        info = path.lstat()
-        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
-            raise ValueError("broker runtime retention helper must not be linked")
-    if not source.is_file():
-        raise ValueError("broker runtime retention helper is unavailable")
-    spec = importlib.util.spec_from_file_location("_broker_runtime_retention", source)
-    if spec is None or spec.loader is None:
-        raise ValueError("broker runtime retention helper is unavailable")
-    runtime = importlib.util.module_from_spec(spec)
-    # Do not create bytecode or mutate the qualified immutable helper.
-    exec(compile(source.read_bytes(), str(source), "exec"), runtime.__dict__)
+    runtime = runtime_component(config, "versioned_runtime_leases")
     expected = runtime.read_runtime_references(root).get(config.owner, [])
     runtime.replace_runtime_references(root, config.owner, generations, expected=expected)

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+import venv
 from pathlib import Path
 
 
@@ -31,6 +32,59 @@ def admit(root: Path, consent: bool) -> None:
 
 def imports(package_root: Path) -> None:
     sys.path.insert(0, str(package_root))
+
+
+def adopt_action(package_root: Path, root: Path, generation: str) -> int:
+    admit(root, True)
+    if generation not in {"first", "replacement"}:
+        raise ValueError("fixture action generation refused")
+    imports(package_root)
+    from update_driver.windows_broker import adopt
+
+    adopt(root, root / "versions" / generation, root=root / "execution")
+    return 0
+
+
+def adopt_generation(package_root: Path, root: Path, generation: str):
+    """Exercise the actual default executor and its native owned process tree."""
+    admit(root, True)
+    if generation not in {"first", "replacement"}:
+        raise ValueError("fixture action generation refused")
+    imports(package_root)
+    from update_driver import RequestSpec, TrustedRunner, drain, enqueue, status
+    from agent_procutil.windows_broker_installation import load
+
+    execution = root / "execution"
+    request = enqueue(
+        RequestSpec("windows-broker-fixture", source=generation, cwd=str(root)),
+        runner=TrustedRunner((
+            str(Path(sys.base_prefix) / "python.exe"), "-I", str(Path(__file__).resolve()),
+            "adopt", str(package_root), str(root), generation,
+        ), str(root)),
+        root=execution,
+    )
+    drain(root=execution)
+    completed = status(request.id, root=execution)
+    if completed.state != "completed" or completed.exit_code != 0:
+        raise RuntimeError("fixture driver-owned adoption failed: " + completed.log_path.read_text())
+    return load(root)
+
+
+def prepare_action(package_root: Path, root: Path, generation: str, runtime) -> Path:
+    admit(root, True)
+    if generation not in {"first", "replacement"}:
+        raise ValueError("fixture action generation refused")
+    slot = root / "versions" / generation
+    venv.EnvBuilder(with_pip=False).create(slot)
+    packages = slot / "Lib" / "site-packages"
+    for package in package_root.iterdir():
+        if package.is_dir():
+            shutil.copytree(package, packages / package.name)
+    shutil.copytree(
+        root / "controller" / ".runtime-bootstrap", slot / ".runtime-bootstrap",
+    )
+    runtime.mark_complete(root, generation)
+    return packages
 
 
 def fixture_environment(source: dict[str, str], *, control: bool) -> dict[str, str]:
@@ -209,15 +263,18 @@ def inspect(root: Path) -> dict[str, object]:
     source = Path(__file__).resolve().parents[1]
     controller = root / "controller" / "site-packages"
     controller.mkdir(parents=True)
-    for library, package in (("agent-procutil", "agent_procutil"), ("zdd", "zdd")):
-        shutil.copytree(source / "libs" / library / "src" / package, controller / package)
-    packages = root / "versions" / "first" / "site-packages"
-    shutil.copytree(controller, packages)
-    for generation in ("controller", "versions/first", "versions/replacement"):
-        bootstrap = root / generation / ".runtime-bootstrap"
-        bootstrap.mkdir(parents=True)
-        for helper in (source / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
-            shutil.copyfile(helper, bootstrap / helper.name)
+    for library, package in (
+        ("agent-procutil", "agent_procutil"), ("zdd", "zdd"),
+        ("update-driver", "update_driver"), ("single-instance-lease", "single_instance_lease"),
+    ):
+        shutil.copytree(
+            source / "libs" / library / "src" / package, controller / package,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    bootstrap = root / "controller" / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    for helper in (source / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copyfile(helper, bootstrap / helper.name)
     runtime_source = root / "controller" / ".runtime-bootstrap" / "versioned_runtime.py"
     spec = importlib.util.spec_from_file_location("fixture_runtime_gc", runtime_source)
     if spec is None or spec.loader is None:
@@ -226,6 +283,7 @@ def inspect(root: Path) -> dict[str, object]:
     sys.modules[spec.name] = runtime
     exec(compile(runtime_source.read_bytes(), str(runtime_source), "exec"), runtime.__dict__)
     imports(controller)
+    packages = prepare_action(controller, root, "first", runtime)
     import agent_procutil as pu
     from agent_procutil import windows_task_broker as task_adapter
     from agent_procutil.daemon_broker import _outside_job
@@ -240,11 +298,9 @@ def inspect(root: Path) -> dict[str, object]:
     from zdd.private_protocol import Deadline
     from zdd.private_windows_native import native
 
-    pythonw = Path(sys.base_prefix) / "pythonw.exe"
-    config = Registration(
-        "synthetic-protocol-" + root.name, str(root), str(pythonw),
-        str(packages / "agent_procutil" / "windows_broker_entry.py"), native().current_sid(),
-    )
+    from agent_procutil.windows_broker_installation import registration
+
+    config = registration(root, root / "versions" / "first")
     (root / "resident.py").write_text(
         "import ctypes,json,os,sys,time\n"
         "k=ctypes.WinDLL('kernel32');u=ctypes.WinDLL('user32')\n"
@@ -266,9 +322,11 @@ def inspect(root: Path) -> dict[str, object]:
     jobs = []
     adopted = False
     try:
-        reconcile(config)
+        config = adopt_generation(controller, root, "first")
         adopted = True
-        reconcile(config)
+        config = adopt_generation(controller, root, "first")
+        result["driver_owned_adoption"] = True
+        result["canonical_installed_action"] = True
         first_status = task_operation("status", config, Deadline(10))
         if first_status.get("configured") is not True:
             raise RuntimeError("fixture adoption was not configured")
@@ -297,14 +355,8 @@ def inspect(root: Path) -> dict[str, object]:
                     or json.loads(config.config_path.read_text(encoding="utf-8")) != config.frame()
                 ):
                     raise RuntimeError("fixture unhealthy action changed active adoption")
-                replacement = root / "versions" / "replacement" / "site-packages"
-                shutil.copytree(packages, replacement)
-                config = Registration(
-                    previous.installation, previous.root, previous.pythonw,
-                    str(replacement / "agent_procutil" / "windows_broker_entry.py"),
-                    previous.principal,
-                )
-                reconcile(config, previous=previous)
+                prepare_action(controller, root, "replacement", runtime)
+                config = adopt_generation(controller, root, "replacement")
                 if task_operation("status", config, Deadline(10)).get("configured") is not True:
                     raise RuntimeError("fixture replacement registration refused")
                 original_publish = task_adapter._publish
@@ -372,7 +424,7 @@ def inspect(root: Path) -> dict[str, object]:
                 task_operation("stop", config, Deadline(15))
                 if task_operation("status", config, Deadline(10)).get("accepting") is not False:
                     raise RuntimeError("fixture stop still accepts work")
-                reconcile(config, previous=config)
+                config = adopt_generation(controller, root, "replacement")
                 result["lifecycle"] = {
                     "first_and_repeat_adoption": True, "update": True,
                     "unhealthy_action_refused": True, "failed_publication_rollback": True,
@@ -498,6 +550,8 @@ def inspect(root: Path) -> dict[str, object]:
 
 def main() -> int:
     args = sys.argv[1:]
+    if len(args) == 4 and args[0] == "adopt":
+        return adopt_action(Path(args[1]), Path(args[2]), args[3])
     if len(args) == 3 and args[0] == "caller":
         return caller(Path(args[1]), Path(args[2]))
     if len(args) == 6 and args[0] == "crash-publication":
