@@ -20,6 +20,21 @@ This closes existing bounded-observation and service-ownership intent; it
 does not extend the vision or authorize implementation. Follow the existing
 performance-measurement, headless-launch and process-containment patterns.
 
+### Current admitted slice
+
+The implementation amendment is **Windows first; keep POSIX work open**.
+The draft #8458 now includes the exact instance-owned caller-custody and
+nonblocking Windows Job settlement design in
+[caller-custody-and-platform-slice.md](caller-custody-and-platform-slice.md).
+This supersedes the planning-only status of those named hunks, not the wider
+R1b/R2 or campaign gates. Ordinary POSIX classification/default probes retain
+their baseline behavior; explicit Windows bounded APIs refuse POSIX before
+launch. No POSIX containment substitute, global census or helper is introduced.
+
+The current checkpoint is pure/injected source validation only. Native child,
+held-pipe, caller-death, shutdown and installed qualification remain open.
+Keep #8458 draft, the implementation task active, and #7944/#7945 open.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -276,3 +291,29 @@ review-gated platform slice, not disabling ordinary POSIX classification.
   implement the anchor candidate. The proposed Windows-first amendment retains
   ordinary POSIX behavior and its open #7944 work; neither alternative nor
   caller/native-API hunk is implemented or admitted by this design checkpoint.
+
+### 2026-10-24 — Admitted Windows-first source checkpoint
+
+- Implemented the admitted same-instance segment-cache carrier and explicit
+  bundle/classify/request/background/snapshot/served/warm-roster continuations.
+  The standalone updater retains frame custody and its existing native lease.
+  Project/config/title effects remain under their existing locks.
+- Added the narrow canonical `JobHandle.try_terminate_and_confirm_empty` API.
+  False/error retains the actual handle; successful emptiness alone does not
+  release root/readers. The legacy positive-timeout contract is unchanged.
+- Closing rejects new observations, not late cleanup transfer. Invalidation
+  and record removal cannot discard tickets or refresh stale evidence. Lost
+  served-path hints consult retained ownership before activation; unresolved
+  unknown scopes defer while independent known projects continue.
+- Fail-first regressions reproduced capability/handle/fallback, carrier and
+  actual continuation failures. Two additional fail-first served-path cases
+  exposed discovery before custody gating; a POSIX network-timeout case
+  exposed and corrected a compatibility regression. Actual updater/monitor
+  negative controls detect discarded custody or premature release.
+- Latest bounded selection: **124 passed, 99 deselected**; canonical shared
+  Job tests: **22 passed, 1 real-process case deselected**. See
+  [validation.md](validation.md) for commands, receipts and exclusions.
+- No native run, service/installed update, deadline growth, ready marker,
+  merge or issue closure is claimed. Source review must reassess the new High
+  and blocking Medium against this amendment; local units do not resolve
+  either review obligation on their own.

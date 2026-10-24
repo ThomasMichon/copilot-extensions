@@ -1,10 +1,14 @@
 # Caller custody and bounded Windows-first alternative
 
-Back to [the effort](README.md). **Design only; not amended implementation
-admission.** This answers the new High `discussion_r4366058208` and the blocking
+Back to [the effort](README.md). **Amended admission: Windows first; keep POSIX
+work open.** The exact caller/native hunks below are implemented at a
+pure/injected source checkpoint, not native-qualified or ready to merge.
+This answers the new High `discussion_r4366058208` and the blocking
 Medium `discussion_r4365960075` on #8458. The three earlier High fixes remain
 accepted source corrections. No caller, shared native API or platform dispatch
-is implemented by this document.
+was authorized merely by the earlier design document. The explicit amendment
+now admits the existing-owner carrier, updater lease and narrow shared Job
+method; it does not admit R1b, R2, an alternative POSIX boundary or rollout.
 
 ## 1. Actual continuation paths at the inspected head
 

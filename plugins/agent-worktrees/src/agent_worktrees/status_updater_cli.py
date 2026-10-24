@@ -9,6 +9,7 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from . import config as cfg
@@ -359,6 +360,92 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         return False
 
 
+def _with_updater_lease(session, compute):
+    from . import git_ops
+    if not git_ops._windows_observation():
+        return compute()
+    import hashlib
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+    from .status_monitor_runtime import _aw_runtime_home
+
+    name = hashlib.sha256(session.encode("utf-8")).hexdigest()
+    lease = SingleInstance(
+        _aw_runtime_home(), service="status-updater", lock_name=f"status-updater-{name}.lock",
+    )
+    try:
+        lease.acquire()
+    except AlreadyRunningError:
+        return 0
+    try:
+        return compute()
+    finally:
+        lease.release()
+
+
+def _run_status_updater_loop(path, interval, session_state, owns, runtime_superseded, set_option):
+    from .push_timeout import ObservationCleanupError
+
+    pending = None
+    retiring = False
+    interrupted = None
+    strikes = 0
+
+    def settle():
+        try:
+            return pending.try_settle()
+        except Exception:
+            return False
+
+    try:
+        while True:
+            if pending is not None:
+                if settle():
+                    pending = None
+                else:
+                    time.sleep(interval)
+                    continue
+            if retiring:
+                break
+            state = "gone" if retiring else session_state()
+            if not retiring:
+                if state == "gone":
+                    retiring = True
+                elif state == "unknown":
+                    strikes += 1
+                    retiring = strikes >= 20
+                else:
+                    strikes = 0
+                    retiring = not owns() or runtime_superseded()
+            if retiring:
+                break
+            if state == "unknown":
+                time.sleep(interval)
+                continue
+            try:
+                segment = _render_status_segment(
+                    path, fetch=False, plain=False, no_title=False, persist_title=True,
+                )
+            except ObservationCleanupError as error:
+                pending = error
+                cause = getattr(error, "operation_error", None)
+                if isinstance(cause, (KeyboardInterrupt, SystemExit)):
+                    interrupted, retiring = cause, True
+                segment = "UNKNOWN (cleanup pending)"
+            except Exception:
+                segment = ""
+            set_option("@aw_seg", segment)
+            time.sleep(interval)
+    finally:
+        while pending is not None:
+            if settle():
+                pending = None
+            else:
+                time.sleep(interval)
+    if interrupted is not None:
+        raise interrupted
+    return 0
+
+
 @daemon_entrypoint("agent-worktrees-status-updater", source=__file__, purpose="production")
 def cmd_status_updater(args: argparse.Namespace) -> int:
     """Keep a session's status-bar vars fresh without per-render spawns.
@@ -381,7 +468,6 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     """
     import shutil
     import subprocess
-    import time
 
     sess = args.session
     if not sess:
@@ -493,59 +579,18 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
             return True  # can't read the token -> assume ownership, keep serving
         return r.stdout.strip() == token
 
-    _set("@aw_updater", token)
-    # Publish this updater's runtime slot (``sys.prefix``) alongside the pid
-    # token so a later spawn can distinguish a live *current* owner (defer to it)
-    # from a live but superseded one (replace it) -- see the debounce above.
-    _set("@aw_updater_prefix", os.path.realpath(sys.prefix))
-
-    # Identity (machine | env | repo:id4) is static for the session's life:
-    # render once, push to @aw_ctx, never poll it again.
-    try:
-        _set("@aw_ctx", _render_status_context(path, plain=False))
-    except Exception:
-        pass
-
-    # Disposition (DIRTY/FINAL/WIP/CONVO/...) changes as work happens: refresh
-    # @aw_seg on the interval until the session ends, a newer updater takes
-    # over, or a newer runtime supersedes this one (dotfiles #911).  The bar
-    # itself does zero process work between updates -- the mux only re-runs the
-    # strftime %H:%M clock.
-    #
-    # Transient mux failures (``_session_state() == "unknown"``) are tolerated:
-    # they do NOT retire the updater, they only skip that tick's liveness proof.
-    # The loop exits only on a definitive ``gone``, a lost ownership token, a
-    # superseding runtime, or ``_MAX_TRANSIENT_STRIKES`` consecutive unknowns
-    # (a genuinely wedged mux -- ~strikes*interval seconds of silence), so a
-    # busy-TUI timeout can no longer silently kill the bar (dotfiles #915).
-    _MAX_TRANSIENT_STRIKES = 20
-    strikes = 0
-    while True:
-        state = _session_state()
-        if state == "gone":
-            break
-        if state == "unknown":
-            strikes += 1
-            if strikes >= _MAX_TRANSIENT_STRIKES:
-                break
-            time.sleep(interval)
-            continue
-        strikes = 0  # a live answer resets the transient run
-        if not _owns() or _runtime_superseded():
-            break
+    def publish_and_run():
+        _set("@aw_updater", token)
+        _set("@aw_updater_prefix", os.path.realpath(sys.prefix))
         try:
-            seg = _render_status_segment(
-                path,
-                fetch=False,
-                plain=False,
-                no_title=False,
-                persist_title=True,
-            )
+            _set("@aw_ctx", _render_status_context(path, plain=False))
         except Exception:
-            seg = ""
-        _set("@aw_seg", seg)
-        time.sleep(interval)
-    return 0
+            pass
+        return _run_status_updater_loop(
+            path, interval, _session_state, _owns, _runtime_superseded, _set,
+        )
+
+    return _with_updater_lease(sess, publish_and_run)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

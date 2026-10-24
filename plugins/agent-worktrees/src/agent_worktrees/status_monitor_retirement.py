@@ -12,6 +12,7 @@ def retire_monitor(
     *, close_admission, repositories_runtime, worktrees_runtime,
     close_request_surfaces, control_server, receipts, worktree_status_runtime,
     managed_mux_runtime, lock, original_error, allocation_linker=None,
+    finish_observation_custody=None,
 ) -> None:
     error = original_error
     traceback = error.__traceback__ if error is not None else None
@@ -41,6 +42,8 @@ def retire_monitor(
     # This domain method guarantees settlement before resurfacing its error.
     # Earlier failures must neither skip it nor replace the original failure.
     attempt(worktree_status_runtime.shutdown_and_wait, retry=False)
+    if finish_observation_custody is not None:
+        attempt(finish_observation_custody)
     attempt(managed_mux_runtime.shutdown_and_wait, retry=False)
 
     # Failed intake/authority cleanup is unknown, not a successful zero count.
