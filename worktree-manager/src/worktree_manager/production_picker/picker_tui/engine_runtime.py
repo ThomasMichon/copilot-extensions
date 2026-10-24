@@ -60,6 +60,12 @@ class _SetupPayload:
 
 
 class PickerScreenRuntimeMixin:
+    def _wait_for_initial_local(self):
+        from ... import resident_picker
+
+        cancel = getattr(self, "_bg_cancel", None)
+        return resident_picker.wait_for_local(None, cancel.is_set if cancel else lambda: False)
+
     def _poll_update_state(self):
         """Refresh ``self.update_state`` from the engine's stage-update
         indicator -- throttled and OFF the render thread
@@ -101,6 +107,8 @@ class PickerScreenRuntimeMixin:
         self._update_state_poll_pending = True
 
         def _work():
+            if not self._wait_for_initial_local():
+                return None
             try:
                 return update_stage.indicator_state()
             except Exception:
@@ -135,6 +143,8 @@ class PickerScreenRuntimeMixin:
             return
 
         def _work():
+            if not self._wait_for_initial_local():
+                return None
             try:
                 _muc.check_now()
                 return _muc.indicator_state()
@@ -183,6 +193,8 @@ class PickerScreenRuntimeMixin:
         self._orphans_poll_generation = generation
 
         def _work():
+            if not force and not self._wait_for_initial_local():
+                return None
             try:
                 return fetch()
             except Exception:
@@ -354,6 +366,7 @@ class PickerScreenRuntimeMixin:
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
             self._apply_loader_records()
+            self._settle_initial_local_after_refresh()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0
             self._maybe_repoll()

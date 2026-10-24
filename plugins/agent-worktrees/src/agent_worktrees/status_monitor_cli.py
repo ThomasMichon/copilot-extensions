@@ -703,6 +703,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             }
         if action == receipt_control.ACTION:
             return receipts.handle(payload)
+        if action == "picker-bootstrap":
+            return worktrees_runtime.picker_bootstrap(payload)
         if action == READ_ACTION:
             if status_monitor_cutover.active_generation_for_pid(os.getpid()) is None:
                 worktrees_runtime.close_admission("superseded")

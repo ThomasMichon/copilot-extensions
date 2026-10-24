@@ -250,6 +250,10 @@ def _expected_control_plane_provider_manifest(
         _provider_manifest_template_path(payload_dir).read_text(encoding="utf-8")
     )
     template["command"] = [str((local_bin() / _primary_binstub_name()).resolve())]
+    template["resident_picker"] = {
+        "version": 1, "command": [*template["command"], "--resident-picker"],
+        "session": {"version": 1, "root": str((root or default_root()).resolve())},
+    }
     template["provider_root"] = str((root or default_root()).resolve())
     return template
 

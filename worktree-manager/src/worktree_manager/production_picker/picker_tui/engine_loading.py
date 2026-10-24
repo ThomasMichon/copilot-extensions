@@ -274,6 +274,9 @@ class PickerScreenLoadingMixin:
 
     def _setup_live_async(self):
         """Enroll the current feed without a redundant advisory one-shot read."""
+        from .frame_health import append_launch_event
+
+        append_launch_event("picker_live_setup_start")
         threading.Thread(
             target=self._setup_live_pivots,
             name="picker-pivots",
@@ -293,6 +296,7 @@ class PickerScreenLoadingMixin:
                 snapshot_fn = getattr(self.src, "source_snapshot", None)
                 snapshot = snapshot_fn() if callable(snapshot_fn) else None
                 prepared = self._prepare_live_source(snapshot)
+            append_launch_event("picker_live_sources_prepared")
             loader = (
                 self.src.make_loader(snapshot)
                 if snapshot is not None
@@ -309,6 +313,7 @@ class PickerScreenLoadingMixin:
             # loading everything (focus_keys=None below).
             local = prepared.get("local") if prepared else None
             start_loader(loader, focus_keys={local} if local else None)
+            append_launch_event("picker_live_loader_started")
         except Exception as exc:
             err = exc
 
@@ -325,6 +330,11 @@ class PickerScreenLoadingMixin:
         self._apply_from_worker(apply)
     def _setup_live_pivots(self):
         """Scan contributed pivots without delaying local or fleet rows."""
+        from ... import resident_picker
+
+        cancelled = getattr(self, "_bg_cancel", None)
+        if not resident_picker.wait_for_local(None, cancelled.is_set if cancelled else lambda: False):
+            return
         # Prewarm FIRST, before the (potentially slow) registry scan below --
         # same reasoning as the non-live setup-reload ordering fix: this thread is
         # already off the render thread, but the prewarm's own purpose is to
@@ -536,6 +546,32 @@ class PickerScreenLoadingMixin:
         prewarm = getattr(self, "_prewarm_machine_key_map", None)
         if callable(prewarm) and getattr(self, "is_mounted", False):
             prewarm()
+        self._settle_initial_local_after_refresh()
+    def _settle_initial_local_after_refresh(self):
+        if getattr(self, "_local_settlement_scheduled", False) or self.loader is None:
+            return
+        local = next((tab for tab in getattr(self, "source_tabs", []) if tab.get("local")), None)
+        if local is None or not local.get("source_id"):
+            return
+        source_id = local["source_id"]
+        state_fn = getattr(self.loader, "state_for_source", None)
+        authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
+        if not callable(state_fn) or not callable(authoritative_fn):
+            return
+        state = state_fn(source_id)
+        authoritative = authoritative_fn()
+        if state != "failed" and not (state == "ready" and source_id in authoritative):
+            return
+        self._local_settlement_scheduled = True
+
+        def release():
+            cancel = getattr(self, "_bg_cancel", None)
+            if cancel is None or not cancel.is_set():
+                from ... import resident_picker
+
+                resident_picker.settle_local()
+
+        self.call_after_refresh(release)
     def _apply_loader_records(self):
         """Merge incomplete stream prefixes over cached rows."""
         if self.loader is None:

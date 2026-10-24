@@ -1,0 +1,13 @@
+{
+  "comment": "Add authenticated resident Picker bootstrap, direct atomic current-feed transport and bounded isolated Manager-owned UI sessions with caller-cwd and actual-worker environment admission, optional thin terminal handoff and exclusive retained decision consumption. Defer optional startup work until the initial current or failed local state has visibly refreshed.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -97,6 +97,15 @@ class LazyLoadMixin:
         cancellation in play)."""
         if gen is None:
             gen = self._gen.get(source.cache_key, 0)
+        from ... import resident_picker
+        from .data_ssh import _project
+
+        if not resident_picker.wait_for_local(
+            _project(),
+            lambda: self._cancelled.is_set() or source.cache_key not in self._pinged_only
+            or self._gen.get(source.cache_key, 0) != gen,
+        ):
+            return
         try:
             if self._cancelled.is_set():
                 return
