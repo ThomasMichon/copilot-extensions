@@ -186,6 +186,43 @@ generation-46 fixture paths plus the registry. It does not edit old captures,
 production source, capability floors or the checker. Stage its new outputs
 before the final snapshot-based replay. Missing history is never fetched.
 
+### Qualifying the historical capture owner
+
+The current checkout advertises HTTP-47 and must not be rewritten as HTTP-46
+to exercise this older writer. On Linux, explicitly qualify it with a locally
+available, genuine HTTP-46 source commit:
+
+```text
+python plugins/agent-bridge/tests/qualify_http46_capture.py --historical-source <full-local-http46-commit>
+```
+
+Run under the caller's bounded test supervisor. The launcher archives the
+complete historical source/dependency cohort locally, overlays only current
+metadata owners and qualification tests, and uses that cohort's existing
+devcontainer wrapper. Dependency preparation precedes network disconnection.
+The wrapper's supported `-k` selector avoids combining an explicit file selector
+with historical dependency preparation. No history is fetched. A private
+OS-temp scratch directory is used by default; an explicit `AGENT_SCRATCH_ROOT`
+must be a real, current-user-owned mode-0700 directory.
+
+The opt-in T3 probe owns another disposable source fixture and a separate copy
+of its prepared environment, avoiding nested use of a leased environment.
+Actual `--write` and no-write entrypoints run the real contained startup replay
+against both inline history and losslessly converted, real immutable chunks.
+Replay imports are hash-bound to the historical cohort. Conversion lowers only
+a test-local planning threshold, restored before either actual capture; the
+production 1 MiB guard is unchanged. The probe checks retained history, chunk
+bytes/references, foreign/pre-46 packets, capability floors, and no-write byte
+stability including the publication journal. Default-tier controls cover archive
+escapes/aliases, full commit input and incomplete receipts; the actual probe is
+not added to required unit-only CI.
+
+A positive `HTTP46_CAPTURE_QUALIFIED` receipt must name both completed cases.
+Its source commits are genuine **composed test-fixture commits**, not the
+original historical capture commit. This qualifies the updated writer with a
+retained source cohort; it does not reproduce unavailable history, publish
+fixture packets into this corpus, or qualify an installed/native receiver.
+
 The client and CLI keyed-send vectors reference that shared new-operation
 evidence explicitly; they are not independent captures or legacy re-attestations.
 Prompt admission also retains linked native-bound and managed-drain predecessor

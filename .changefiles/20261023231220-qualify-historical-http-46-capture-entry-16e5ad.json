@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify historical HTTP-46 capture entrypoints with complete inline and chunked provenance",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

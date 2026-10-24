@@ -109,14 +109,16 @@ cannot qualify an unknown runtime target or settle outstanding SDK/native work.
 - [x] Exercise missing/corrupt/foreign/linked chunks, count/version/field errors,
       concurrent input changes and interrupted publication without data loss or
       partial-history success.
-- [ ] Exercise prior inline input, every canonical capture generation, source
+- [x] Exercise prior inline input, every canonical capture generation, source
       snapshot/closure, preparation and replay through the actual updated entry
       points. Preserve unrelated historical packets and capability floors.
 - [x] Run the canonical checker and genuine committed-source capture/no-write
       reproduction in the bounded development lane. Preserve unit-only,
       impact-scoped required CI; do not add native/process matrices to it.
-- [ ] Review and merge the implementation, then return to the same #8389 source
-      PR for reconciliation, fresh qualification and actual current-head review.
+- [x] Review and merge the implementation through #8469.
+- [ ] Review and merge the historical HTTP-46 qualification helpers.
+- [ ] Return to the same #8389 source PR for reconciliation, fresh qualification
+      and actual current-head review after the remaining capture-owner gate.
 
 No source, native or operational completion is claimed by this proposal.
 The full effort's Plan and Validation Plan remain the parent completion gate.
@@ -191,6 +193,24 @@ actually converted inline history to version 2: 73 declared outputs, five
 chunks, a 228,258-byte index and a largest chunk of 261,917 bytes. All 1,786
 prior records remain exact ordered prefixes of the complete 1,853-record
 history, with every artifact below the original cap. The canonical checker
-again accepts both contracts and all 583 fixtures. A passing current-head
-review and the remaining historical capture-owner gate are still required;
-this source evidence does not qualify a running receiver.
+again accepts both contracts and all 583 fixtures. The implementation cleared
+current-head review and merged in #8469. The remaining historical capture-owner
+gate and dependent-source qualification are still required; this source evidence
+does not qualify a running receiver.
+
+The remaining HTTP-46 capture-owner control now has a positive isolated Linux
+run against locally retained HTTP-46 source
+`c0b0dbba0f639344c5e4b384ccffe7b7ede1cc02`. The complete historical runtime and
+library cohort is preserved; only current metadata owners and qualification
+tests are overlaid. Both inline and actual chunked inputs completed the real
+write/no-write entrypoints and their contained startup replay. Existing chunks,
+ordered history, foreign/pre-46 packets, floors and the unchanged size guard
+were retained. Replay imports were checked against the historical source
+hashes. The source IDs in the receipt are genuine composed fixture commits,
+not a reproduction of the unavailable original capture checkpoint.
+
+The focused launcher is documented in the
+[contract evidence guide](../../../plugins/agent-bridge/contract/README.md#qualifying-the-historical-capture-owner).
+Qualification helper review/landing and the return to the dependent #8389
+source integration remain open. No native, release, installed or serving-route
+qualification is implied.

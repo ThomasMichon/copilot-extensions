@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; DB foundation merged, inbox source in review; provenance review repairs and chunked capture qualified, current review pending, full Phase 1 open
+- **Status:** Active; DB foundation and provenance implementation merged; historical capture-owner qualification and inbox source remain open, full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -191,9 +191,44 @@ The proposal merged through normal repository review in
 This establishes the reviewed plan, not implementation or running adoption.
 The later [provenance layout](provenance-layout.md) cleared normal review in
 [#8420](https://github.com/ThomasMichon/copilot-extensions/pull/8420).
-Its source implementation and qualification remain open.
+The source-format implementation merged in
+[#8469](https://github.com/ThomasMichon/copilot-extensions/pull/8469);
+historical capture-owner closure and dependent-source qualification remain open.
 
 ## Journal
+
+### 2026-10-23 - Qualify the historical HTTP-46 capture owner
+- The actual updated writer completed inline and chunked `--write`/no-write
+  cases through its existing contained startup replay. The locally retained
+  HTTP-46 source is `c0b0dbba0f639344c5e4b384ccffe7b7ede1cc02`; the complete
+  historical runtime/library source remains unchanged in composed disposable
+  fixtures. Actual replay imports are hash-bound to that cohort.
+- Three existing chunks, complete ordered history, foreign/pre-46 packet bytes,
+  floors and the unchanged artifact cap survive. No-write preserves the complete
+  contract tree, including publication-journal bytes. The canonical current
+  corpus still validates both contracts and all 583 fixtures.
+- Eighteen default-tier safety/receipt controls pass. The real T3 qualification
+  stays explicitly opt-in and outside required unit-only CI; dependency
+  preparation precedes network disconnection. The two collection-time skips
+  are unrelated to the selected positive case; all four inner replays must
+  pass without skipped cases.
+- Qualification helper review/merge remains open. Then return to the same
+  #8389 source integration for complete-history reconciliation, fresh source
+  qualification and current-head review. Full custody, native START, release,
+  installation and running adoption remain separate open gates.
+
+### 2026-10-23 - Provenance implementation merged; finish capture-owner closure
+- #8469 merged to `dev` as `b24b71a93df87e8d976a6aed4ee6b099e5c17471`,
+  with sole parent `e75ca8ed86212e8dcc50b4256ec47c7a5164275d`.
+  The actual review on head `1315adac7e2212074b0e5f25e1bc5a8d9a631708`
+  had no open findings; required CI passed before managed completion.
+- Source implementation, normal review and genuine generation-47 chunked
+  publication are established. Historical generation-46 capture-owner
+  qualification remains the next explicit source gate before returning to
+  the same #8389 continuation.
+- Full Phase 4a, custody/restore implementation, native/platform qualification
+  and adoption remain open. A merged source-format prerequisite is not
+  running receiver recovery.
 
 ### 2026-10-23 - Validate consumers after actual version-2 publication
 - The converted canonical registry exposed two test-fixture assumptions:
