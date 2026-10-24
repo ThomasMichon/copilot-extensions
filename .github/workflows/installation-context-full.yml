@@ -95,14 +95,14 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_logger_bootstrap.py
           --test-file tests/test_first_use_logger.py
-          --test-timeout 900 --timeout 1200
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
       - name: Qualify retained bootstrap and independent hooks
         run: >-
           python tools/run-plugin-tests.py agent-logger
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_install_binstub.py
-          --test-timeout 180 --timeout 420
+          --max-files-per-sub-suite 1 --test-timeout 180 --timeout 420
   logger-bootstrap-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-bootstrap'
     name: Logger bootstrap (Windows)
@@ -126,14 +126,14 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_logger_bootstrap.py
           --test-file tests/test_first_use_logger.py
-          --test-timeout 900 --timeout 1200
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
       - name: Qualify retained bootstrap and independent hooks
         run: >-
           python tools/run-plugin-tests.py agent-logger
           --test-file tests/test_bootstrap_check_reconcile_always_on.py
           --test-file tests/test_bootstrap_driver.py
           --test-file tests/test_install_binstub.py
-          --test-timeout 180 --timeout 420
+          --max-files-per-sub-suite 1 --test-timeout 180 --timeout 420
   bridge-contracts-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'
     name: Bridge historical source proof (Ubuntu)
