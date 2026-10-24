@@ -59,7 +59,7 @@ def test_proposed_keyed_input_replays_through_production_admission(proposed_keye
         manager._run_prompt.assert_awaited_once()
 
 
-@pytest.mark.parametrize("representation", ["inline", "chunked"])
+@pytest.mark.parametrize("representation", ["inline", "chunked", "retained"])
 def test_capture_rejects_tampered_proposed_keyed_before_write(
     monkeypatch, tmp_path, proposed_keyed, representation,
 ):
@@ -100,6 +100,11 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(
         destination = snapshot / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / path, destination)
+    if representation != "retained":
+        baseline = snapshot / capture.registry_codec.REGISTRY
+        baseline.write_bytes(capture.registry_codec.encode(registry))
+        metadata = capture.registry_codec.load(snapshot)
+        assert metadata.index["schema_version"] == 1
     with monkeypatch.context() as bounds:
         if representation == "chunked":
             bounds.setattr(capture.registry_codec, "MAX_ARTIFACT_BYTES", 350000)
@@ -109,6 +114,9 @@ def test_capture_rejects_tampered_proposed_keyed_before_write(
         destination = snapshot / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
+    seeded = capture.registry_codec.load(snapshot)
+    assert seeded.materialized == registry
+    assert seeded.index["schema_version"] == (1 if representation == "inline" else 2)
     shutil.copyfile(ROOT / "plugins/agent-bridge/plugin.json",
                     snapshot / "plugins/agent-bridge/plugin.json")
     for source in registry["contracts"][0]["source_paths"]:

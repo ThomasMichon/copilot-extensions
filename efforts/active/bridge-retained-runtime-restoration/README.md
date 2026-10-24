@@ -195,6 +195,23 @@ Its source implementation and qualification remain open.
 
 ## Journal
 
+### 2026-10-23 - Validate consumers after actual version-2 publication
+- The converted canonical registry exposed two test-fixture assumptions:
+  an existing archived prefix does not imply a plan creates new chunks, and
+  incremental plan outputs do not include unchanged retained chunks.
+- HTTP-45 replay fixtures now distinguish explicit inline input, new conversion
+  and retained chunks. The real-history round trip seeds complete snapshot
+  inputs before applying the incremental plan and checks retained chunk bytes.
+  Both original failures were reproduced before correction.
+- The bounded post-conversion consumer cohort passed 218 cases with two
+  capability skips, including publication, captures, fixture maintenance and
+  complete registry consumers. The canonical checker still accepts two
+  contracts and 583 fixtures. Only plugin tests and effort prose changed:
+  captured executable/closure inputs and checkpoint `5820a7fb` remain unchanged.
+- Source review/merge and the remaining historical capture-owner gate remain
+  open. No new capture observation or operational effect was fabricated to
+  refresh the review.
+
 ### 2026-10-23 - Tighten provenance publication and capture recovery
 - Initial source review identified output-consistency, interrupted journal and
   hardlink recovery, captured-inventory and host-code-page defects. The source

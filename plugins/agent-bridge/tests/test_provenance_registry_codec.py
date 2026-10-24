@@ -183,9 +183,13 @@ def test_provenance_codec_real_history_fits_without_any_record_change(tmp_path: 
     rows = updated["contracts"][0]["provenance"]
     rows.extend(copy.deepcopy(rows))
     assert len(codec.encode(updated)) > 1 << 20
+    publish(tmp_path, snapshot.inputs)
     outputs = codec.plan(tmp_path, snapshot, updated)
     assert all(len(data) <= 1 << 20 for data in outputs.values())
     publish(tmp_path, outputs)
     actual = codec.load(tmp_path)
     assert actual.materialized == updated
+    for path, data in snapshot.inputs.items():
+        if path != codec.REGISTRY:
+            assert actual.inputs[path] == data
     assert codec.plan(tmp_path, actual, updated) == {codec.REGISTRY: outputs[codec.REGISTRY]}
