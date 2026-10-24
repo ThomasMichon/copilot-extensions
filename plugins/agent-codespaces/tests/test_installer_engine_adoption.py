@@ -349,6 +349,7 @@ def _prelude(ext: str, engine: Path = ENGINE) -> str:
         "function Write-ServiceWarn { param($Msg) [Console]::Error.WriteLine($Msg) }\n"
         "function Write-ServiceErr { param($Msg) [Console]::Error.WriteLine($Msg) }\n"
         "function Write-ServiceOk { param($Msg) }\n"
+        "function Write-Step { param($Msg) }\n"
         "function Write-Warn { param($Msg) Write-ServiceWarn $Msg }\n"
         "function Write-Ok { param($Msg) }\nfunction Start-Sleep { param($Seconds) }\n"
         f". '{engine / 'installer-engine.ps1'}'\n"
