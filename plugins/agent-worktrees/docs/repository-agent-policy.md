@@ -110,6 +110,11 @@ The audit never executes those actions or selects a replacement harness.
 Adding a repository denial marker changes future admission. It does not
 reconcile existing registrations, validate the installation, or authorize
 destructive cleanup.
+Retained venue delivery journals may still reconcile their original idempotent
+operation and settle its receipt without a new hosting grant. This recovery
+cannot launch a replacement agent; if the journal is gone, normal fresh launch
+admission applies again. Preservation does not exempt a newly requested managed
+`embody` or resume, even when a mux session already exists.
 
 ## Allocation is not launch
 

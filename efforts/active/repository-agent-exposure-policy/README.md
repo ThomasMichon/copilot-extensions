@@ -378,3 +378,14 @@ machine metadata/project enumeration with hosting eligibility.
   Bridge (286 cases) cohorts. Its newly published source checkpoint passes all
   117 canonical capture probes and the no-write replay; only current-generation
   owned evidence changes, retaining the upstream immutable provenance chunks.
+- Trusted container ACP launch now validates and wraps the original native
+  command for process-only authentication before applying the repository guard.
+  The real authentication validator remains strict; the restricted transport
+  retains its separate guard. The coupled container cohort passes 134 cases.
+- Retained container and CodeSpace delivery journals reconcile their original
+  idempotent operation before new-launch admission. A vanished journal must
+  pass fresh admission before any new launch. This preserves receipts and
+  custody without permitting a new managed embodiment in a denied repository;
+  the strict Worktrees denial before mux probing remains unchanged.
+  The CodeSpace cohort passes 146 cases; both venue cohorts include a
+  journal-disappearance race proving recovery cannot become launch authority.

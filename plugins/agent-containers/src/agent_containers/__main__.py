@@ -1011,8 +1011,8 @@ def _launch_container_agent(
     container_id: str | None = None,
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
-    acp_command = hosting_policy.guarded_launch(acp_command, fleet.workspace_folder or config.workspace_folder)
     if actual_profile == RESTRICTED_PROFILE:
+        acp_command = hosting_policy.guarded_launch(acp_command, fleet.workspace_folder or config.workspace_folder)
         spawn_cmd = build_restricted_acp_spawn_command(
             container_id or args.name,
             user,
@@ -1099,7 +1099,9 @@ def _launch_container_agent(
     try:
         ssh_config = prepare_ssh_config(args.name, user)
         copilot_auth_env = process_auth.prepare_launch(config, fleet, args.name, user)
-        acp_command = process_auth.wrap_command(acp_command, copilot_auth_env)
+        acp_command = hosting_policy.guarded_launch(
+            process_auth.wrap_command(acp_command, copilot_auth_env), fleet.workspace_folder or config.workspace_folder,
+        )
         remote_command = build_remote_command(acp_command, remote_env)
         spawn_cmd = build_ssh_command(
             ssh_config,

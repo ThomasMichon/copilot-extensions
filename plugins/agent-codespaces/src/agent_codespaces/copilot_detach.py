@@ -52,6 +52,7 @@ from venue_copilot import (
 
 from .model_launch import model_copilot_args
 from . import copilot_detach_startup
+from .copilot_detach_startup import ssh_namespace as _ssh_namespace
 from venue_copilot.resume_claim import resume_target, settle_resumed_claim
 from venue_copilot.supervisor import with_supervisor
 
@@ -419,27 +420,6 @@ def _local_forwards_ready(
     return ready
 
 
-def _ssh_namespace(args: argparse.Namespace, remote_cmd: str, *, timeout: float) -> argparse.Namespace:
-    return argparse.Namespace(
-        name=args.name,
-        stdio=False,
-        remote_cmd=remote_cmd,
-        timeout=timeout,
-        connect_timeout=None,
-        no_provision=False,
-        no_relay=False,
-        auth_cache_warmup=True,
-        repo=None,
-        effort=getattr(args, "effort", None),
-        session_id=None,
-        stage_plugins=list(getattr(args, "stage_plugins", []) or []),
-        plugin_roots=list(getattr(args, "plugin_roots", []) or []),
-        skip_plugin_preparation=bool(getattr(args, "stop", False)),
-        force=getattr(args, "force", False),
-        force_claim=getattr(args, "force_claim", False),
-    )
-
-
 def _commands(plan: dict[str, Any], session_id: str, effort: str | None = None) -> dict[str, str]:
     cs = plan["codespace"]
     # Attach and stop connect, so they must name the same claim owner the
@@ -548,11 +528,12 @@ def cmd_detach(
     # recheck repository policy if the child exits before the request arrives.
     from .hosting_policy import admit_detached_launch
 
+    recovering = owner.get_pending_delivery(args.name, plan["tenant"]) is not None
     try:
-        rejoining = admit_detached_launch(args, plan)
+        rejoining = False if recovering else admit_detached_launch(args, plan)
     except (RuntimeError, OSError) as exc:
         return _fail(str(exc), plan)
-    claim_rc = claim_or_exit_code(args, launch_policy=not rejoining)
+    claim_rc = claim_or_exit_code(args, launch_policy=not (rejoining or recovering))
     if claim_rc is not None:
         return claim_rc
     daemon_port = resolve_daemon_port()
@@ -580,6 +561,11 @@ def cmd_detach(
             remote=_remote, release_cli_mode=release_cli_mode, busy_exit=_BUSY_EXIT,
             await_forward=await_owner_bridge_forward, bridge_path_ok=_bridge_path_ok,
         )
+    if recovering:
+        try:
+            rejoining = admit_detached_launch(args, plan)
+        except (RuntimeError, OSError) as exc:
+            return _fail(str(exc), plan)
     prior_forwards = dict(getattr(held, "reverse_forwards", None) or {})
     prior_local = dict(getattr(held, "local_forwards", None) or {})
     prior_assigned_local = dict(getattr(held, "assigned_local_forwards", None) or {})

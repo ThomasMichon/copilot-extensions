@@ -2,10 +2,34 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import shlex
 import asyncio
 import uuid
+
+
+def ssh_namespace(
+    args: argparse.Namespace, remote_cmd: str, *, timeout: float,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        name=args.name,
+        stdio=False,
+        remote_cmd=remote_cmd,
+        timeout=timeout,
+        connect_timeout=None,
+        no_provision=False,
+        no_relay=False,
+        auth_cache_warmup=True,
+        repo=None,
+        effort=getattr(args, "effort", None),
+        session_id=None,
+        stage_plugins=list(getattr(args, "stage_plugins", []) or []),
+        plugin_roots=list(getattr(args, "plugin_roots", []) or []),
+        skip_plugin_preparation=bool(getattr(args, "stop", False)),
+        force=getattr(args, "force", False),
+        force_claim=getattr(args, "force_claim", False),
+    )
 
 
 def recover_pending_delivery(
