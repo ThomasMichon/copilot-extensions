@@ -68,7 +68,9 @@ that namespace before dispatch:
   returns HTTP 204. At most six notification waits are admitted, reserving two
   of the existing channel's eight request slots for enrollment and finite reads.
   Additional watchers retry only those read-side availability refusals with
-  bounded, logged backoff; they catch up from the same directory revision.
+  bounded, logged backoff until their lifetime owner stops them; they catch up
+  from the same directory revision. Capacity pressure does not permanently
+  retire a connected machine's notification consumer.
   No cursor or
   per-client event queue is stored; reconnect reads the current snapshot and
   cannot miss a machine merely because a transient notification was lost.

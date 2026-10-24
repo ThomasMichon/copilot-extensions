@@ -1,6 +1,7 @@
 import asyncio
 import time
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,6 +10,7 @@ from agent_ssh_service.store import DirectoryStore
 from agent_ssh_service.config import SSHServiceError
 from agent_ssh_service.hosting import run
 from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest
+from fleet_manager.gateway_service_channel import TransportError
 from fleet_manager.planning import canonical, decode
 from fleet_manager.ssh_directory import DirectoryUpdate, SSHDirectoryClient
 
@@ -115,6 +117,99 @@ async def test_fleet_watch_consumes_actual_service_updates_and_stops_owned_wait(
     finally:
         stop.set()
         await asyncio.gather(owner, return_exceptions=True)
+
+
+@pytest.mark.parametrize("status", [429, 503])
+async def test_fleet_watch_recovers_after_sustained_notification_capacity_refusals(
+    config, monkeypatch, status,
+):
+    service = SSHService(DirectoryStore(config))
+    stop, delays, accepted = asyncio.Event(), [], []
+    original_wait_for = asyncio.wait_for
+
+    async def fast_backoff(awaitable, timeout):
+        if timeout <= 4:
+            delays.append(timeout)
+            awaitable.close()
+            await asyncio.sleep(0)
+            raise asyncio.TimeoutError
+        return await original_wait_for(awaitable, timeout)
+
+    class Caller:
+        calls = 0
+
+        async def request(self, method, target, *, response_limit):
+            assert method == "GET" and response_limit == 32768
+            self.calls += 1
+            if self.calls <= 12:
+                return SimpleNamespace(status=status, body=b"")
+            return await service.handle(request(
+                "principal-worker-a", method, target.removeprefix("/ssh")))
+
+    caller = Caller()
+    monkeypatch.setattr(asyncio, "wait_for", fast_backoff)
+
+    def accept(update):
+        accepted.append(update.revision)
+        stop.set()
+
+    await original_wait_for(SSHDirectoryClient(caller).watch(stop, accept), 2)
+    assert caller.calls == 13 and accepted == [1]
+    assert delays == [1, 2, 3] + [4] * 9
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_fleet_watch_preserves_fatal_authentication_refusals(status):
+    class Caller:
+        calls = 0
+
+        async def request(self, method, target, *, response_limit):
+            self.calls += 1
+            return SimpleNamespace(status=status, body=b"")
+
+    caller, accepted = Caller(), []
+    with pytest.raises(TransportError) as error:
+        await SSHDirectoryClient(caller).watch(asyncio.Event(), accepted.append)
+    assert error.value.status == status and caller.calls == 1 and accepted == []
+
+
+async def test_fleet_watch_can_stop_while_capacity_is_unavailable(monkeypatch):
+    stop, accepted = asyncio.Event(), []
+    original_wait_for = asyncio.wait_for
+
+    async def stop_during_backoff(awaitable, timeout):
+        if timeout <= 4:
+            stop.set()
+        return await original_wait_for(awaitable, timeout)
+
+    class Caller:
+        calls = 0
+
+        async def request(self, method, target, *, response_limit):
+            self.calls += 1
+            return SimpleNamespace(status=503, body=b"")
+
+    caller = Caller()
+    monkeypatch.setattr(asyncio, "wait_for", stop_during_backoff)
+    await original_wait_for(SSHDirectoryClient(caller).watch(stop, accepted.append), 2)
+    assert stop.is_set() and caller.calls == 1 and accepted == []
+
+
+async def test_fleet_watch_does_not_retry_a_failed_local_consumer(config):
+    service, calls = SSHService(DirectoryStore(config)), []
+
+    class Caller:
+        async def request(self, method, target, *, response_limit):
+            calls.append(target)
+            return await service.handle(request(
+                "principal-worker-a", method, target.removeprefix("/ssh")))
+
+    def accept(update):
+        raise RuntimeError("synthetic local convergence failure")
+
+    with pytest.raises(RuntimeError, match="local convergence failure"):
+        await SSHDirectoryClient(Caller()).watch(asyncio.Event(), accept)
+    assert len(calls) == 1
 
 
 async def test_cancelled_handler_settles_its_disk_worker_before_returning(config, monkeypatch):

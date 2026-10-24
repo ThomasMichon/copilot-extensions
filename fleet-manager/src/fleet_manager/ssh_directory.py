@@ -94,7 +94,7 @@ class SSHDirectoryClient:
         """
         from .gateway_service_channel import TransportError
 
-        after, failures = 0, 0
+        after, backoff = 0, 0
         while not stop.is_set():
             pending = asyncio.create_task(self.wait(after))
             stopped = asyncio.create_task(stop.wait())
@@ -107,17 +107,17 @@ class SSHDirectoryClient:
                     update = await pending
                 except (TransportError, asyncio.TimeoutError) as exc:
                     if (isinstance(exc, TransportError)
-                            and exc.status not in (429, 502, 503, 504)) or failures >= 8:
+                            and exc.status not in (429, 502, 503, 504)):
                         raise
-                    failures += 1
+                    backoff = min(4, backoff + 1)
                     logging.getLogger(__name__).warning(
                         "ssh-directory-wait-retry code=service-unavailable")
                     try:
-                        await asyncio.wait_for(stop.wait(), min(4, failures))
+                        await asyncio.wait_for(stop.wait(), backoff)
                     except asyncio.TimeoutError:
                         pass
                     continue
-                failures = 0
+                backoff = 0
                 if update is not None:
                     accept(update)
                     after = update.revision

@@ -1,5 +1,5 @@
 {
-  "comment": "Project admitted Gateway SSH public bindings and add authenticated service-directory enrollment, bounded notifications and reconnect catch-up through the existing service caller",
+  "comment": "Project admitted Gateway SSH public bindings and add authenticated service-directory enrollment, bounded notifications and reconnect catch-up through the existing service caller; keep notification consumers recoverable through sustained capacity pressure",
   "changes": [
     {
       "plugin": "fleet-manager",
