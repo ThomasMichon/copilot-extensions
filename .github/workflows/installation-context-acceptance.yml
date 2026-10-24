@@ -196,6 +196,7 @@ jobs:
           python - <<'PY'
           import os
           from pathlib import Path
+          import shutil
           import sys
           import tempfile
 
@@ -203,21 +204,25 @@ jobs:
           sys.path.insert(0, str(root / "tools"))
           from plugin_test_containment import Limits, isolated_environment, run_contained
 
-          with tempfile.TemporaryDirectory(prefix=".guardian-caller-", dir=root) as raw:
-              sandbox = Path(raw)
-              env = isolated_environment(os.environ, sandbox)
-              env["PYTHONPATH"] = os.pathsep.join((
-                  str(root / "tools"), str(root / "libs/agent-procutil/src"),
-              ))
-              result = run_contained(
-                  [
-                      sys.executable, "-m", "pytest", "-q", "--durations=15",
-                      "-p", "pytest_portfolio_guard", "--timeout=30",
-                      f"--basetemp={sandbox / 'pytest'}",
-                      "libs/agent-procutil/tests/test_caller_owned.py",
-                  ],
-                  cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=300),
-              )
+          sandbox = Path(tempfile.mkdtemp(prefix=".guardian-caller-", dir=root))
+          print(
+              f"Caller-owned sandbox (retained unless containment returns normally): {sandbox}",
+              flush=True,
+          )
+          env = isolated_environment(os.environ, sandbox)
+          env["PYTHONPATH"] = os.pathsep.join((
+              str(root / "tools"), str(root / "libs/agent-procutil/src"),
+          ))
+          result = run_contained(
+              [
+                  sys.executable, "-m", "pytest", "-q", "--durations=15",
+                  "-p", "pytest_portfolio_guard", "--timeout=30",
+                  f"--basetemp={sandbox / 'pytest'}",
+                  "libs/agent-procutil/tests/test_caller_owned.py",
+              ],
+              cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=300),
+          )
+          shutil.rmtree(sandbox)
           raise SystemExit(result)
           PY
       - name: Full installer guardian controls

@@ -14,6 +14,8 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
+from tools import plugin_test_containment as containment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = yaml.safe_load(
@@ -208,6 +210,34 @@ def test_actual_caller_packet_uses_containment_and_propagates_failure(
         exec(_python_body(CALLER), {})
     assert caught.value.code == result
     assert len(calls) == 1 and not calls[0].exists()
+
+
+def test_actual_caller_packet_retains_workspace_when_teardown_is_unverified(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    failure = containment.UnreapedProcessError("synthetic unsettled teardown")
+    sandboxes = []
+
+    def unsettled(command, **kwargs):
+        sandbox = kwargs["sandbox"]
+        (sandbox / "owner-state").write_text("still owned", encoding="utf-8")
+        sandboxes.append(sandbox)
+        raise failure
+
+    monkeypatch.setattr(containment, "run_contained", unsettled)
+    monkeypatch.setitem(sys.modules, "plugin_test_containment", containment)
+    with pytest.raises(containment.UnreapedProcessError) as caught:
+        exec(_python_body(CALLER), {})
+    assert caught.value is failure
+    assert len(sandboxes) == 1
+    sandbox = sandboxes[0]
+    assert sandbox.is_dir()
+    assert (sandbox / "owner-state").read_text("utf-8") == "still owned"
+    output = capsys.readouterr()
+    assert str(sandbox) in output.out + output.err
+    assert "retained" in output.out + output.err
 
 
 def test_exact_packet_has_no_broad_suite_or_timeout_override():
