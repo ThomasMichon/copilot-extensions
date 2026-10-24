@@ -3265,6 +3265,32 @@ contract and lifecycle; this seam does not select a machine's desired profile,
 activate a runtime, provision sibling environments or qualify a native platform.
 Mutable `dev_candidate()` does not accept non-base profiles.
 
+For an independently declared role, `numbered_candidate(local_packages=(...),
+extras=(...))` additionally selects the exact local distribution closure to
+install. Names are normalized and must belong to the admitted source graph;
+the primary distribution is always included. The caller supplies every required
+transitive local distribution, not paths or replacement project metadata.
+UV remains the dependency resolver: an incomplete closure fails resolution,
+rather than fetching an omitted first-party distribution from a registry.
+Installer-owned contradictory constraints forbid those omitted names, including
+prereleases. Selected roots alone supply runtime requirements and package
+operands; unselected roots do not contribute unconditional dependencies.
+This does not modify `pyproject.toml`, infer a machine role or duplicate a
+PEP 508 resolver.
+
+The complete local source graph is still validated, snapshotted and fingerprinted
+under the canonical retained transaction, including build/ownership helpers and
+unused roles. The selected extras and local names additionally bind candidate
+identity and installed-origin evidence. Fresh and reused health require selected
+non-editable installed origins and refuse any omitted local distribution that
+is actually present. `ReadyCandidate.local_packages` reports the normalized
+selection. An explicit empty tuple selects only the primary distribution;
+`None` preserves the existing all-local-input behavior and its identity/receipt
+compatibility. Mutable `dev_candidate()` refuses explicit local selections.
+The caller owns the named role, distinct immutable slot, role-specific health
+and ordinary publication/removal lifecycle; this construction seam does not
+make an installer, service supervisor or selected command catalog by itself.
+
 Reused installed-health failures request distinct-generation repair when the
 probe exits unsuccessfully, cannot create its child, or reaches its deadline
 after every owned writer has settled. Process creation is distinguished by

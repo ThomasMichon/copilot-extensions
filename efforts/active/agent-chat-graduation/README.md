@@ -44,7 +44,7 @@ Use #7238 to accept a slice and record its source boundary before editing it.
 | Proposal editor | Sole shared vision/effort/service-lifecycle writer; `services/chat` core, client and hosting integration | #7238 and the proposal PR |
 | Plugin contributor | Disjoint `plugins/agent-chat` connection/native contribution; exact paths claimed before edits | #7238; input integrated by the proposal editor |
 | Collaboration contributor | Claimed continuation of the linked collaboration/thread/attention specification and its coordinated service/client slice; no transport or lifecycle takeover | [Bounded continuation claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6358796470) |
-| Chat setup adapter contributor | Derive the Chat-owned standard setup adapter through scoped changes; consume canonical construction and existing service lifecycle without taking their source | The operator's direction below and this reviewed effort |
+| Chat setup adapter contributor | Derive the Chat-owned standard setup adapter and the explicitly authorized reusable role-selectable construction seam; preserve existing service lifecycle ownership | The operator's direction below and this reviewed effort |
 | Qualification contributor | Installed-consumer, native lifecycle and platform-boundary cases | #7238; input integrated by the proposal editor |
 | Conduct contributor | Generic scoped-peer ambient policy and discoverable rules-of-engagement skill, after the intent amendment clears review; no Chat/Bridge/Logger source | [Accepted disjoint scope](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6303930285) |
 | Process utility contributor | Canonical `libs/agent-procutil` caller-bounded cross-OS source, tests and library docs | [Public source claim](https://github.com/ThomasMichon/copilot-extensions/issues/7238#issuecomment-6274245326) |
@@ -136,6 +136,16 @@ This extends the source derivation, not deployment authority or another
 component's implementation ownership. The proposed realization is in
 [Standard Chat setup adapter](architecture.md#standard-chat-setup-adapter).
 
+After the construction trace identified the all-local-package admission
+boundary, the operator explicitly authorized its narrow shared prerequisite:
+
+> Let's provide a reusable role-selectable install flow.
+
+This permits a canonical installer-engine extension and its generated
+consumer copies, not a Chat-specific engine or a takeover of service
+supervision, Fleet, Gateway or SSH. The no-outreach/no-comment coordination
+boundary and the absence of runtime rollout authority remain unchanged.
+
 ## Plan
 
 All implementation details below are **agent-recommended realization**, to be
@@ -223,12 +233,18 @@ requirements.
 
 #### Standard Chat setup adapter
 
-- [ ] Review the [Chat-owned adapter derivation](architecture.md#standard-chat-setup-adapter),
+- [x] Review the [Chat-owned adapter derivation](architecture.md#standard-chat-setup-adapter),
   including the standard Manager baseline and the exact current construction/
   selection/supervision gaps. No neighboring implementation is claimed.
+  #8401 merged after current-head approval and required CI. This resolves the
+  derivation review, not an executable installer or any adoption gate.
 - [ ] Establish a canonical role-selective construction input before implementing
   client-only setup; the current package-root constructor traverses all local
   sources, including both of Chat's optional roles.
+  The authorized shared slice adds an explicit exact local-package selection
+  alongside selected extras, retaining the full admitted source graph and
+  canonical construction custody. Review and qualification must establish
+  that omitted local distributions cannot become registry fallbacks.
 - [ ] Implement selected manual-client setup and preserving removal through
   supported canonical custody, then qualify independently installed invocation.
   Do not turn the existing local wheel catalog into release-selection authority.
@@ -413,6 +429,13 @@ shared-multiplex contracts above.
 
 ### 2026-10-24 - Derive the standard Chat setup adapter
 
+- #8401 merged to `dev` as `e7a4b2f349cd7042522d566e236501d387df9e49`
+  at02:09:40Z. Current-head Copilot review approved with no findings, all
+  review threads were clear and required CI passed. The managed merge used
+  the authorized Maintainer exception for the additional CODEOWNER vote,
+  not a CI bypass. Re-read the full parent Plan/Validation after merge and
+  resolve only derivation review. Continue role-selective canonical input
+  before executable setup; the effort remains Active with no rollout.
 - The operator extends this slice to the Chat-owned adapter, with coordination
   through scoped changes only and no direct agent outreach or PR/issue comments.
   The [derivation](architecture.md#standard-chat-setup-adapter) is proposed

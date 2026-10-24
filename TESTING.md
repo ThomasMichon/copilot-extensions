@@ -16,6 +16,16 @@ UV construction, installed-origin health, immutable profile reuse and refusal of
 an unavailable extra dependency before completion. They also retain the original
 base fingerprint and preserve an existing active selector on failure. These are
 on-demand construction controls, not additions to the eligible-unit packet.
+The same file exercises explicit `local_packages` role closures against real
+UV and fresh interpreters: client-only omission, a service's transitive local
+closure, complete source retention, immutable reuse without construction tools,
+receipt drift and excluded installed-distribution refusal. Incomplete direct or
+transitive selections must fail even when prereleases are enabled; they must
+not complete a candidate or change the active selector. The caller supplies
+role policy; these controls do not add a second dependency resolver.
+The manual `installation-context-acceptance.yml` selector
+`candidate_profiles=true` runs those focused real-UV profile controls on fresh
+Linux and Windows runners without enlarging required PR CI.
 They do not prove a production extra graph, hosted feed access, a native support
 matrix or required release enforcement. The
 [feed-construction effort](efforts/active/feed-construction-release-gate/README.md)

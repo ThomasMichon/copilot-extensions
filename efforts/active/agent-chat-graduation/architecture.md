@@ -337,13 +337,19 @@ issuance, listener or enrollment. The service role adds its declared hosting
 dependencies and existing foreground entry point, not an implicit plugin or
 Gateway. Bind the selected role and exact source/dependency inputs into candidate
 identity; different roles cannot reuse an incompatible completed slot.
-Current `installer_engine.numbered_candidate()` accepts a package root and
-traverses every local `tool.uv.sources` entry. Chat currently declares both
-client and service sources there. Passing that project unchanged therefore does
-not prove client-only construction. Establish a supported role-selective input
-through the canonical construction owner before using that path; do not delete
+`installer_engine.numbered_candidate()` already accepts declared extras, but
+its default install graph includes every local `tool.uv.sources` entry.
+Chat declares both client and service sources there, so an extra alone does
+not establish client-only construction. The explicitly authorized reusable
+extension accepts an exact local distribution closure alongside extras;
+the primary distribution is always included, omitted first-party names
+cannot resolve from a registry, and UV still owns dependency resolution.
+The complete source graph remains retained and fingerprinted even when only
+one role is installed. Selected origins, excluded distributions and profile
+evidence are checked before completion and on reuse. This canonical seam
+must clear review and qualification before Chat adoption; do not delete
 dependencies from an admitted project, mutate a completed slot, or copy the
-constructor into Chat to work around the missing seam.
+constructor into Chat.
 
 **One lifecycle, explicit outcomes.** Normal `install` and `update` converge
 the declared role through the same adapter. Construction and isolated health
