@@ -92,6 +92,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
     companions = {}
     if component == "fleet-manager":
         companions = {
+            "_runtime_launcher.py": Path("libs/installer-engine/runtime_launcher.py"),
             "_installer_process.py": Path("libs/installer-engine/installer_engine_process.py"),
             "_construction_procutil.py": Path("libs/agent-procutil/src/agent_procutil/__init__.py"),
         }
