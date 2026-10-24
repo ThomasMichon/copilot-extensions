@@ -180,3 +180,14 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   native-seed refusal; no executable safety fence was removed.
 - Claimed #8375 and prepared reviewed intent before implementation. Original
   crash-loss cause and installed SSH acceptance are still open, not solved.
+
+### 2026-10-24 -- Documentation CI detour
+
+- The operator requested that Markdown-only changes select no executable
+  coverage tests or code-contract scans, while retaining lint. Reviewed fixes
+  #8406 and #8439 preserve release changefile enforcement and required outcomes,
+  and use the pinned PR merge-base change set so advancing upstream code cannot
+  create false overlap.
+- This proposal remains documentation-only. Its next normal CI execution is
+  the live check of explicit unit/source-scan skips and retained Markdown lint;
+  no journal implementation, crash-loss repair or SSH capability is implied.
