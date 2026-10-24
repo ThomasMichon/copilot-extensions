@@ -10,7 +10,7 @@ import re
 import stat
 import zipfile
 
-from promotion_unit_contract import admit_manifest, decode_json, manifest_digest
+from promotion_unit_contract import MAX_PACKET_FILE_BYTES, admit_manifest, decode_json, manifest_digest
 
 SCHEMA = "copilot-extensions.candidate-qualification"
 UNIT_PROFILE = "source-units-v2"
@@ -21,7 +21,6 @@ UNIT_UPLOAD_STEP = "Upload promotion unit evidence"
 UNIT_ARTIFACT = "promotion-unit-evidence"
 WORKFLOW = ".github/workflows/validate-and-promote.yml"
 PACKET_FILES = ("unit-manifest.json", "unit-proof.json", "coverage.json")
-MAX_PACKET_FILE_BYTES = 16 * 1024 * 1024
 MAX_PACKET_BYTES = len(PACKET_FILES) * MAX_PACKET_FILE_BYTES
 MAX_ARCHIVE_BYTES = MAX_PACKET_BYTES + 64 * 1024
 _SHA = re.compile(r"[0-9a-f]{40}")

@@ -162,8 +162,31 @@ or functions executed.
 The manifest binds the entire admitted closure, but coordinate maps cover
 observed production files only, not every unexecuted vendor copy or test file.
 
-This is Source support, not Main activation. The existing governed Main
-controller retains `source-units-v2` until its independent reviewed activation.
+Coverage is generated evidence, not checked-in source. The collector and hosted
+archive verifier share a 128 MiB per-file bound; exact packet membership, source
+hashes, context completeness and the five-minute execution budget are unchanged.
+The complete expanded version-1 coverage projection is retained without a
+new report encoding merely to fit the former 16 MiB bound.
+
+After qualification, the existing publisher attaches the exact three packet
+files and canonical `qualification.json` in one deterministic ZIP to the same
+Dev-owned `python-artifacts-<Dev SHA>` GitHub Release. Its immutable filename
+binds Dev, candidate and archive SHA-256. Upload never clobbers an asset; an
+existing or newly uploaded asset must pass consumer-authority raw-byte readback
+before the publication receipt can enable Main merge. The receipt also binds
+the retained evidence identity. No generated report, packet or archive is
+added to the Source or generated Main tree.
+
+Readiness and frozen-code reuse recognize only the bounded, hash-named
+supplementary evidence namespace for that same Dev release (at most 64
+retained candidate-evidence assets). It grants no code-execution or
+qualification authority. The separately attested code/index inventory remains
+exact; foreign, malformed, duplicate or arbitrary extra assets are refused.
+Actions artifacts remain the original producing-job evidence, while the
+release copy retains the verified packet after Actions retention expires.
+
+Source support does not itself activate Main. Its independently reviewed
+controller and immutable helper pin select the active qualification contract.
 Historical raw-source and legacy-CI packets retain their original verification;
 neither can be relabeled as candidate execution.
 

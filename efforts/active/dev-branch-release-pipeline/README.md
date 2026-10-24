@@ -115,6 +115,21 @@ rewrite)._
 
 > We need to enforce an ordering between version-stamping and testing. It probably makes most sense to test on vendored-and-stamped code, which basically acts as the "release candidate". Of course, doing so risks mangling code-coverage collection, unless we carefully source-map it back to original dev code.
 
+**2026-10-24 generated-evidence placement and size clarification (verbatim):**
+
+> Coverage files should be aracts in release, not checked-in source, ht?
+>
+> Either waythe 16 MB cap can be increased as long as it is not checked in
+
+The operator explicitly selected durable GitHub Release retention in the
+follow-up form, rather than Actions-only storage. After the current Dev
+portfolio's complete report exceeded the initial 64 MiB allowance, the operator
+explicitly selected a 128 MiB per-generated-evidence-file bound while retaining
+the complete expanded format. This supersedes the earlier unchanged-16-MiB
+constraint only; complete raw evidence, source/candidate bindings, unit/effect
+and execution budgets, the existing release owner and governed activation stay
+intact.
+
 **Scope:** Phase 9c below proposes the composed-candidate execution boundary and
 development-coverage attribution for #8390. It preserves the unit-only policy,
 existing test budgets, development-owned release identity, and separately
@@ -925,8 +940,17 @@ _(Agent-recommended realization of the 2026-10-23 operator direction.
 Participant: Stamped-candidate contributor; bounded tracker: #8390.)_
 
 - [x] Review this ordering and coverage amendment before runtime/helper changes.
+- [x] Land the Source implementation and regressions through current-head review
+      and required CI: #8454, `27af9d62dc9dffae83c794e43f534957c6b90b35`.
 - [ ] Execute the [bounded ordering and coverage plan](promotion-burndown.md#stamped-candidate-ordering-and-coverage),
       retaining other Phase 9 and independently governed control owners.
+- [ ] Apply the operator-authorized 128 MiB generated-evidence file bound
+      consistently to collection and hosted archive admission, retaining the
+      expanded coverage format and all source/context/integrity budgets.
+- [ ] Retain the exact qualified packet and qualification receipt as an
+      immutable, raw-read-back asset on the existing Dev-owned release,
+      never in Source or generated Main; preserve exact code-artifact reuse
+      and independently governed Main activation.
 
 ## Validation Plan
 
@@ -1262,6 +1286,184 @@ creation-time propagation. Their first deeply nested Windows fixture path
 exceeded Git's path limit; the same cases pass in the verified private short
 scratch root without changing production behavior or any deadline. These tests
 remain outside promotion dependencies.
+
+### 2026-10-24 - Phase 9c Source delivery merged; activation remains separate
+
+Source #8454 merged at `27af9d62dc9dffae83c794e43f534957c6b90b35`.
+The exact published head `3636376d3be503c7ae0763def7cba33e7536f8f0`
+completed hosted CI with 1,385 units in 19.751 seconds, single-pass coverage
+and all guards green. Its current-head Copilot review retained no concrete
+findings; the owner-authored clean-Comment rule satisfied review, and the
+managed Maintainer completion path confirmed the actual merge. The worktree
+was pulled forward only after verifying that exact merge upstream.
+
+Source delivery is complete, not Phase 9c or release completion. The next
+slice is an explicitly authorized, independently reviewed workflow-only Main
+activation selecting the merged helpers while preserving pause state. No
+implicit resume, publisher replacement or runtime update is authorized by
+this Source merge. Natural qualified release, mapped-coverage readback,
+under-thirty-minute timing and the parent adopter/cleanup gates remain open.
+
+### 2026-10-24 - Authorized Main activation opened
+
+The operator explicitly authorized the workflow-only Main transaction.
+Main PR #8497 projects the reviewed Source controller with its helper pin
+set to `27af9d62dc9dffae83c794e43f534957c6b90b35`; its managed publication
+confirmed the `main` base and exactly one changed workflow. The task-local
+configuration changes only the target branch, not repository review or
+publication policy. Both real-controller contract tests passed against the
+actual Main workspace, and byte comparison confirmed that the only departure
+from the reviewed Source file is the immutable helper pin. Release-pipeline
+state was not edited (the admitted Main snapshot reports `paused: false`).
+
+The Main source gate and identifier checks are green; current-head Copilot
+review was explicitly requested. This is an open PR, not activation or
+release completion. The stopped-session pause and runtime-rollout boundary
+are unchanged. Natural candidate qualification, mapped coverage, publication,
+landed tag and end-to-end timing remain the next live proof.
+
+### 2026-10-24 - Main activation merged after current-head approval
+
+Main #8497 merged as `8d72bfbc878925f6300aee36579cf4abdeb8f09a`
+at `06:06:40Z`. Copilot approved the exact published head
+`17882577cf316e132b9a0aa81c19e9f0f90f7dec`, with no findings or
+review threads; hosted Main gates passed, and managed completion confirmed
+the actual merge without bypassing the review gate. The release controller
+now selects frozen-candidate helpers from the reviewed Source merge.
+
+This is controller activation, not a qualified release or installed-runtime
+claim. Natural qualification, mapped-coverage readback and the complete
+under-thirty-minute release remain open; no pipeline-state or runtime
+mutation was performed.
+
+### 2026-10-24 - First natural candidate run exposed an evidence-size regression
+
+Natural run `40068926968`, created at `06:07:08Z` on activated Main
+`8d72bfbc878925f6300aee36579cf4abdeb8f09a`, admitted Dev
+`80027cc33b9730be14825059f690012a35b11a62` and froze candidate content
+tree `55e45843356c9de96048b8c0f3f91530a67e495c` in 34 seconds. The
+unsigned artifact build succeeded. All 1,385 candidate units passed in
+18.23 seconds, but packet verification refused `coverage.json` at the
+unchanged 16 MiB file bound. Qualification, attestation, publication and
+Main merge correctly remained gated. This is a genuine evidence-format
+regression, not a flake or permission to retry around admission.
+
+The projection redundantly embedded the raw report and repeated its long
+context strings in per-copy and union lists. The fix-forward keeps raw
+candidate coverage unchanged, replaces only derived contexts with canonical
+indices and binds the existing raw report by digest. Legacy expanded
+projections remain accepted under their original semantics. Targeted tests
+passed (238 cases), including exact reconstruction, packet-limit regression
+and refusals of resealed type aliases, foreign context tables and forged
+digests. Complete-candidate packet measurement and hosted qualification
+remain required; a smaller earlier cohort did not establish that size gate.
+
+### 2026-10-24 - Full frozen-candidate packet measured below the unchanged cap
+
+The complete disposable Linux proof used Source
+`4604092c810fe59448268749ec1fc5bd89dea6c8`, admitted Main
+`8d72bfbc878925f6300aee36579cf4abdeb8f09a` and actual frozen tree
+`25ada4a00a91a4b862cb28f36325e079733d46eb`. It composed once, imported the
+Git bundle and ran all 1,403 admitted candidate nodes with zero prohibited
+effects on Python 3.12.15, pytest 9.1.1 and coverage 7.16.2. Execution plus
+evidence generation took 73.905 seconds; the full collector process took
+76.236 seconds, and an independent packet readback verified both source roots.
+
+The final context-set-index projection measured 16,342,312 bytes for the
+whole coverage file, versus 62,937,168 bytes for the expanded representation.
+The unchanged 16,777,216-byte limit therefore retains 434,904 bytes of
+headroom. Raw file records account for 15,706,075 bytes, the byte-bound map
+199,031 and the derived projection 436,815. Further portfolio growth must
+still satisfy the bound; no raw data is omitted to make it fit. The first
+context-only experiment passed but left just 84 KB, so the correction also
+interns repeated derived context sets. The final 243 targeted tests cover
+lossless legacy reconstruction and resealed type/table/digest forgeries.
+
+The disposable fixture was removed without a push, tag, signing or publication
+operation. A Windows composition attempt could not reach Git commit because
+its generated argv exceeded the Windows command-line limit; it is not claimed
+as a passing lane. This local Linux check establishes the complete-candidate
+packet contract, not a hosted qualification or release. Source review/CI,
+independently authorized Main helper-pin adoption and natural release proof
+remain open.
+
+### 2026-10-24 - Operator chose a larger bound and durable release evidence
+
+PR #8508 had current-head approval and green CI for the compact experiment,
+but the later operator decision above changes its final scope. It is draft
+while that proposal is replaced by the existing expanded version-1 report
+format and a shared 64 MiB file limit in collection, qualification and hosted
+archive admission. Its old approval cannot authorize the revised head.
+
+The same Dev-owned Python artifact release will retain one immutable,
+content-addressed ZIP containing the exact three qualified packet files and
+canonical qualification receipt. Publication uses the existing owner and
+consumer-authority raw-byte readback before producing the Main-enabling
+publication receipt. Readiness and frozen-code reuse admit only the bounded,
+same-source supplemental evidence namespace; the attested executable
+index/bundle set stays exact. No report enters Source or generated Main, and
+no parallel release owner, deadline increase or runtime rollout is introduced.
+
+The first targeted pass passed 203 controls, including an actual 64 MiB
+file/archive boundary, 64 MiB + 1 refusal, deterministic exact archive content,
+foreign/duplicate/digest metadata refusal, existing-release upload/readback
+failure paths and unchanged code-only reuse. Complete candidate, final Source
+review/CI, the specifically authorized final-helper Main pin/mirror and natural
+release/readback remain required.
+
+### 2026-10-24 - Revised complete-candidate proof retains expanded coverage
+
+The final policy proof composed Source
+`0b819583c24cd2ac40d5545c0de425b06c60653f` against admitted Main
+`8d72bfbc878925f6300aee36579cf4abdeb8f09a`, imported the frozen candidate
+and verified its exact tree `6658bd89160a96dc2d56138fb113ef3e1e66176a`.
+All 1,408 admitted units passed (every original 1,385 retained, 23 new pure
+controls) with zero prohibited effects. Pytest took 68.19 seconds; execution
+and evidence took 77.398 seconds, and the whole collector process took
+84.000 seconds, below the unchanged 300-second budget.
+
+The complete expanded version-1 report measured 58,650,552 bytes against
+the shared 67,108,864-byte limit. An independent packet readback verified
+both source roots and all hashes/context evidence. A full-volume ZIP
+serialization round-trip retained every packet byte in 898,101 bytes.
+Its qualification record was explicitly a synthetic local serialization
+fixture, not hosted qualification or publication evidence. The actual
+existing-release upload/readback and code-only reuse boundaries were tested
+separately with bounded provider fixtures, including failure paths.
+
+The candidate's Git status stayed clean after collection: no report, packet
+or archive entered the immutable candidate or Source tree. The disposable
+Linux fixture was removed, and no tag, release or deployed runtime was
+changed. Fresh review/CI on the revised Source head and actual natural
+qualified release-asset publication/readback remain open.
+
+### 2026-10-24 - Current Dev integration, pre-upload refusal and revised file bound
+
+The owned rebase integrated Dev `43117b1fbba5024372eec1a435c32d44fc6b8b7f`,
+including its 29 new shared-wheel controls, without dropping any of its
+1,414 admitted nodes. Four more pure retention-capacity cases bring this
+correction to 27 new controls and the combined portfolio to 1,441.
+
+Review finding `4366545939` correctly identified that an absent archive could
+be uploaded as the 65th evidence asset before the post-upload check refused it.
+The repair preflights the complete supplementary count and the wanted archive's
+presence before mutation, rather than counting the filtered code-asset result.
+It refuses an absent archive at 64, permits 63-to-64 upload and permits exact
+existing-archive readback/reuse at 64. Thirteen focused pure and bounded
+publisher/reuse controls passed, including unchanged inventory on refusal.
+Code readiness loss also refuses before evidence publication.
+
+The complete rebased frozen-candidate run at Source
+`79f81c2c52498471c45add72e8c6943884e832d5` passed all 1,441 units in
+75.23 seconds, but its expanded report measured 67,530,492 bytes, exceeding
+the 67,108,864-byte bound by 421,628. Admission correctly failed; this is
+not recorded as a passing packet. No tests or coverage were omitted.
+Presented the concrete choice of a larger finite bound versus a lossless
+storage encoding, and the operator explicitly chose **128 MiB with the
+existing complete report format**. Only the generated-evidence file bound
+changes; the separate 64-asset limit and all integrity/effect/execution
+budgets remain. Final complete-packet verification, fresh review/required CI
+and the natural release gates still remain.
 
 ### 2026-10-21 - Expanded first cohort released in 12m12s
 - Source #7554 merged as

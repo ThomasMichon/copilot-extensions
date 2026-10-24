@@ -492,6 +492,16 @@ def main(argv: list[str] | None = None) -> int:
                 "index_digest": hashlib.sha256((args.directory / INDEX_NAME).read_bytes()).hexdigest(),
                 "artifacts": index["artifacts"],
             }
+            if source_candidate and args.qualification_profile in ("source-units-v2", "candidate-units-v3"):
+                from promotion_release_evidence import publish_evidence
+
+                publication["unit_evidence"] = publish_evidence(
+                    args.directory, packet_directory=args.unit_packet_dir,
+                    repository=args.repository, tag=tag, dev_sha=args.dev_head,
+                    candidate_sha=args.candidate_commit, index=index, receipt=receipt,
+                    qualification_digest=qualification_digest,
+                )
+                print(f"unit-evidence-published: {tag}/{publication['unit_evidence']['filename']}")
             digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
             if args.github_output is not None:
                 with args.github_output.open("a", encoding="utf-8") as output:

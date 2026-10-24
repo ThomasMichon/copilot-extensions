@@ -16,11 +16,10 @@ import stat
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from promotion_unit_contract import (
-    CANDIDATE_PROFILE, UnitEvidenceError, admit_manifest, decode_json, manifest_digest,
+    CANDIDATE_PROFILE, MAX_PACKET_FILE_BYTES, UnitEvidenceError, admit_manifest, decode_json, manifest_digest,
     relative_file, source_sha, verify_observations, verify_sources,
 )
 
-MAX_PACKET_FILE_BYTES = 16 * 1024 * 1024
 _FILES = {"unit-manifest.json", "unit-proof.json", "coverage.json"}
 _PROOF_FIELDS = {
     "profile", "source_sha", "manifest_sha256", "elapsed_seconds", "collected",

@@ -217,6 +217,12 @@ Bounded tracker: #8390. The complete operator direction is captured verbatim
 in the parent Request. The following mechanisms and validation decomposition
 are **agent-recommended**; the existing unit-only policy remains governing.
 
+**Source milestone:** #8454 merged as
+`27af9d62dc9dffae83c794e43f534957c6b90b35` after current-head review and
+required CI (1,385 units, 19.751 seconds, coverage once). This delivers the
+mechanisms and regressions below, not activation or a containing qualified
+release. Combined runtime gates remain open until their live readback.
+
 - [ ] Reuse the release composer to freeze version state, vendoring, governed
       control inputs and the candidate before authoritative release tests.
       Dev remains the release owner; candidate content identity describes
@@ -247,20 +253,20 @@ are **agent-recommended**; the existing unit-only policy remains governing.
 
 ### Stamped-candidate validation
 
-- [ ] Reproduce the version-fallback mismatch through composition, unit-input
+- [x] Reproduce the version-fallback mismatch through composition, unit-input
       and qualification decision boundaries using eligible units. Test changed
       stamped bytes rather than stripping them during source comparison.
 - [ ] Prove execution loads candidate and vendored inputs, not ambient installs
       or raw Dev. Missing/extra nodes, sources, targets, outcomes and prohibited
       effects remain refusals.
-- [ ] Reject post-test mutation, changed stamping/materialization inputs,
+- [x] Reject post-test mutation, changed stamping/materialization inputs,
       incorrect Dev anchoring, incompatible profiles/control and mismatched
       archives before qualification reuse or publication.
-- [ ] Cover exact-copy vendoring, multiple copies of an origin, explicit
+- [x] Cover exact-copy vendoring, multiple copies of an origin, explicit
       version transforms, line shifts and unsupported/generated regions.
       Validate both sides of each map, preserve raw hits, and refuse forged or
       unsupported development attribution.
-- [ ] Preserve historical coverage/receipt admission without claiming projected
+- [x] Preserve historical coverage/receipt admission without claiming projected
       coverage executed raw Dev. Different candidate contents sharing a Dev
       anchor cannot collide or reuse incompatible evidence.
 - [ ] Keep effectful composition/import/installed checks in their admitted

@@ -659,6 +659,67 @@ def test_v2_publisher_consumes_the_real_packet_verifier_with_explicit_profile(un
     assert writes == [CANDIDATE]
 
 
+@pytest.mark.parametrize("failed_evidence", [False, True])
+def test_source_owned_unit_publication_requires_retained_evidence_before_success(
+    unit_case, tmp_path, monkeypatch, failed_evidence,
+):
+    import promotion_artifact_readiness as readiness
+    import promotion_release_evidence as release_evidence
+
+    _candidate_packet(unit_case)
+    value = qualification.qualify_units(
+        **unit_case["args"], profile=qualification.CANDIDATE_UNIT_PROFILE,
+    )
+    receipt_path = tmp_path / "qualification.json"
+    receipt_path.write_bytes(qualification.receipt_bytes(value))
+    directory, output = tmp_path / "artifacts", tmp_path / "outputs"
+    directory.mkdir()
+    index = {"schema_version": 2, "artifacts": []}
+    index_raw = _write_json(directory / publisher.INDEX_NAME, index)
+    monkeypatch.setenv("ARTIFACT_VERIFY_TOKEN", "synthetic-independent-read-authority")
+    monkeypatch.setattr(publisher, "verify_attestations", lambda *a, **k: {"schema_version": 2})
+    observed = []
+
+    def ready(*args, **kwargs):
+        observed.append("code-readback")
+        return f"python-artifacts-{DEV}", index
+
+    retained = {"filename": "qualified-evidence.zip", "sha256": "e" * 64, "asset_id": 20}
+
+    def retain(path, **kwargs):
+        assert observed == ["code-readback"] and path == directory
+        assert kwargs["packet_directory"] == unit_case["args"]["unit_packet_dir"]
+        assert kwargs["receipt"] == value
+        assert kwargs["qualification_digest"] == qualification.receipt_digest(value)
+        assert kwargs["dev_sha"] == DEV and kwargs["candidate_sha"] == CANDIDATE
+        observed.append("evidence-readback")
+        if failed_evidence:
+            raise ValueError("evidence readback failed")
+        return retained
+
+    monkeypatch.setattr(readiness, "verify_ready_artifact_set", ready)
+    monkeypatch.setattr(release_evidence, "publish_evidence", retain)
+    result = publisher.main([
+        *_publish_arguments(unit_case, directory, receipt_path),
+        "--qualification-profile", qualification.CANDIDATE_UNIT_PROFILE,
+        "--unit-packet-dir", str(unit_case["args"]["unit_packet_dir"]),
+        "--unit-manifest", MANIFEST, "--dev-root", str(unit_case["args"]["dev_root"]),
+        "--github-output", str(output),
+    ])
+    assert result == (1 if failed_evidence else 0)
+    assert observed == ["code-readback", "evidence-readback"]
+    if failed_evidence:
+        assert not output.exists()
+    else:
+        publication = {
+            "dev_head": DEV, "candidate": CANDIDATE, "qualification": qualification.receipt_digest(value),
+            "index_digest": hashlib.sha256(index_raw).hexdigest(), "artifacts": [],
+            "unit_evidence": retained,
+        }
+        digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
+        assert f"publication_digest={digest}\n" in output.read_text()
+
+
 def test_v2_publisher_missing_packet_does_not_fall_back_to_legacy(unit_case, tmp_path):
     with pytest.raises(SystemExit) as error:
         publisher.main([

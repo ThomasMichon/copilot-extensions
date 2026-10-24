@@ -258,12 +258,12 @@ class HostedRelease:
                 assert name not in self.assets
                 if self.failure == "upload" and name != artifacts.INDEX_NAME:
                     return result(code=1, error="bundle upload unavailable")
-                payload = (self.directory / name).read_bytes()
+                payload = Path(path).read_bytes()
                 self.assets[name] = {
                     "id": max((asset["id"] for asset in self.assets.values()), default=0) + 1,
                     "name": name,
                     "state": "uploaded", "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
-                    "payload": payload,
+                    "payload": payload, "size": len(payload),
                 }
             return result()
         if argv[0] != "api":
