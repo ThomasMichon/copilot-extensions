@@ -686,6 +686,11 @@ identity, `payload-dir`, `stamped-version` and canonical source fingerprint.
 It revalidates live publication policy and selection before queue acceptance
 and again under execution custody; changing selection never silently replaces
 the accepted snapshot with a newer installed payload.
+Native restamping omits the old legacy snapshot sidecar from its private
+candidate and publishes fresh provenance for the new selection through the
+existing publisher. Version-2 source receipts therefore remain valid inputs
+without being mistaken for the candidate's version-1 receipt; the selected
+source's bytes are not rewritten.
 It freezes beneath that installation's existing `.install-stage` layout under
 the same outer queue custody. Arbitrary copied/out-of-layout directory payloads or custom-root
 recipes refuse before acquisition or queue/plugin writes. The native mode

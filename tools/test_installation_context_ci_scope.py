@@ -234,7 +234,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert set(inputs) == {
         "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
-        "candidate_profiles", "ssh_snapshot",
+        "candidate_profiles", "ssh_snapshot", "wheel_inputs",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -252,13 +252,14 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "dependency-compile-linux", "dependency-compile-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
+        "wheel-inputs-linux", "wheel-inputs-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
         assert job["if"] == (
             "${{ !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
-            "&& !inputs.ssh_snapshot }}"
+            "&& !inputs.ssh_snapshot && !inputs.wheel_inputs }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -292,7 +293,8 @@ def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:
         assert step["env"] == {"APR_NATIVE_OS_ACCOUNT_ACCEPTANCE": "1"}
         assert step["run"].split() == [
             "python", "tools/run-plugin-tests.py", "agent-pull-requests",
-            "--allow-host-state", "--test-file", "tests/test_cell_invocation.py",
+            "--allow-explicit-tiers", "--allow-host-state",
+            "--test-file", "tests/test_cell_invocation.py",
             "-k", '"native_staged_snapshot', "or", "legacy_staging_reentry", "or", 'frozen_input"',
             "--test-timeout", "60", "--timeout", "300",
         ]

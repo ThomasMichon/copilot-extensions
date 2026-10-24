@@ -623,6 +623,7 @@ if [[ "$ACTION" == "stamp" ]]; then
         [[ "$snapshot_identity" == "$SOURCE_RUNTIME_IDENTITY" ]] || { _fail 'Stamped source snapshot identity changed'; exit 1; }
     else
         rm -rf -- "$snap_tmp/.git" "$snap_tmp/.venv" "$snap_tmp/__pycache__" "$snap_tmp/build" "$snap_tmp/dist" "$snap_tmp/node_modules" "$snap_tmp/tests" "$snap_tmp/.pytest_cache" "$snap_tmp/.mypy_cache"
+        rm -f -- "$snap_tmp/snapshot-provenance.json"
     fi
     _source_runtime_unchanged || exit 1
     mkdir -p "$(dirname "$snap_dir")"

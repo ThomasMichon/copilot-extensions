@@ -278,8 +278,23 @@ def materialized_pull_requests(owning_pull_requests, area):
     return payload, installation, project
 
 
+def select_version_two_snapshot(snapshot, installation):
+    selected = snapshot.with_name(snapshot.name + "-retained")
+    shutil.copytree(snapshot, selected)
+    receipt = selected / "snapshot-provenance.json"
+    document = json.loads(receipt.read_text(encoding="utf-8"))
+    document.update(
+        version=2, snapshotId=selected.name,
+        payloadVersion=(installation / "stamped-version").read_text(encoding="utf-8").strip(),
+    )
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    (installation / "payload-dir").write_text(str(selected), encoding="utf-8")
+    return selected
+
+
+@pytest.mark.parametrize("receipt_version", [1, 2])
 def test_actual_pull_requests_materialized_admission_and_owned_stamp(
-    materialized_pull_requests, area,
+    materialized_pull_requests, area, receipt_version,
 ):
     payload, installation, project = materialized_pull_requests
     cache = payload / "__pycache__"
@@ -307,6 +322,9 @@ def test_actual_pull_requests_materialized_admission_and_owned_stamp(
     assert not list((installation / "versions").glob("*/pyvenv.cfg"))
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == before
     payload.rename(payload.with_name("unavailable-installed-payload"))
+    if receipt_version == 2:
+        pointer = select_version_two_snapshot(pointer, installation)
+    source_receipt = (pointer / "snapshot-provenance.json").read_bytes()
     retained = provision.enqueue(
         pointer, installation, project, root=root, installer_action="stamp",
     )
@@ -314,7 +332,10 @@ def test_actual_pull_requests_materialized_admission_and_owned_stamp(
     result = status(retained.id, root=root)
     assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
     assert json.loads(result.spec.source)["payload"] == str(pointer)
+    if receipt_version == 2:
+        assert (pointer / "snapshot-provenance.json").read_bytes() == source_receipt
     selected = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    assert json.loads((selected / "snapshot-provenance.json").read_text())["version"] == 1
     assert provision.inspect(selected, installation, project)["source_fingerprint"] == (
         admission["source_fingerprint"]
     )
@@ -366,6 +387,7 @@ def test_actual_pull_requests_cold_provision_preserves_selection_and_source_inde
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr + diagnostic()
     assert not (installation / "current-version").exists()
     snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    snapshot = select_version_two_snapshot(snapshot, installation)
     removed = payload.rename(payload.with_name("unavailable-installed-payload"))
     installed = run_request("provision", snapshot)
     assert installed.returncode == 0, installed.stdout + installed.stderr + diagnostic()
