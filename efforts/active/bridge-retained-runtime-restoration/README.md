@@ -302,6 +302,22 @@ historical capture-owner closure and dependent-source qualification remain open.
   validation obligations before implementation. This plan does not alter
   runtime protocols, installation, active custody or operational permission.
 
+### 2026-10-23 - Repair reviewed producer and durability boundaries
+- Source review identified mixed-producer batch refusal, non-durable final
+  admission under WAL/NORMAL, keyed retry association mismatch and legacy
+  exposure before handoff. Each now has a focused regression.
+- Poll/final admission validates each original row's enrolled producer in the
+  current installation/epoch, independently of the polling frontend. Keyed
+  retries must match the original association, including legacy versus enrolled.
+- Associated rows stay out of legacy poll/ACK/consumption from insertion onward.
+  Custody and associated inbox insertion commit with connection-local FULL
+  synchronization before returning, then restore the previous setting. Normal
+  event/metadata writes retain their existing policy.
+- The affected isolated cohort passed 323 cases with two unrelated collection
+  skips, including normal/adopted commit-setting observations, rollback-policy
+  restoration and the original process-exit/race controls. Actual power-loss,
+  authenticated SDK and native platform qualification remain open.
+
 ### 2026-10-23 - Assign the internal inbox custody owner slice
 - #8203 merged the bounded DB/storage foundation to `dev` as
   `ca1602f0f9e4717fc3836bc164966ca44b900ed2`. Full Phase 1 remains open.

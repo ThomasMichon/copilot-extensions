@@ -744,12 +744,13 @@ class _LiveSessionsMixin(LiveControlsMixin):
         appropriately.
         """
         delivery = _validate_live_message_delivery(delivery)
-        cur = self.execute_write(
+        cur = self._execute_runtime_admitted_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
             "kind, delivery, idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
             (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now,
              admission_document(runtime_admission)),
+            runtime_admission,
         )
         return int(cur.lastrowid or 0)
 
@@ -797,7 +798,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         """
         delivery = _validate_live_message_delivery(delivery)
         cutoff = now - stale_seconds
-        cur = self.execute_write(
+        cur = self._execute_runtime_admitted_write(
             "INSERT OR IGNORE INTO live_messages "
             "(session_id, sender, body, reply_to, kind, delivery, "
             "idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
@@ -830,6 +831,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 expected_session_id, expected_session_id, expected_session_id,
                 require_idle,
             ),
+            runtime_admission,
         )
         if cur.rowcount == 1:
             return int(cur.lastrowid or 0), None
@@ -843,7 +845,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                 "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
             )
             existing = self.execute_read(
-                "SELECT id, sender, body, reply_to, kind, delivery, "
+                "SELECT id, sender, body, reply_to, kind, delivery, runtime_custody_json, "
                 f"{msg_canon} = {_CANON} AS same_target, "
                 f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
                 "FROM live_messages WHERE idempotency_key = ?",
@@ -859,6 +861,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                     and original["reply_to"] == reply_to
                     and original["kind"] == kind
                     and original["delivery"] == delivery
+                    and original["runtime_custody_json"] == admission_document(runtime_admission)
                     and bool(original["same_expected"])
                 )
                 if same_request:
@@ -900,7 +903,8 @@ class _LiveSessionsMixin(LiveControlsMixin):
         rows = self.execute_read(
             "SELECT * FROM live_messages "
             f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
-            "AND consumed_at IS NULL AND handoff_json IS NULL ORDER BY id ASC",
+            "AND consumed_at IS NULL AND handoff_json IS NULL "
+            "AND runtime_custody_json IS NULL ORDER BY id ASC",
             (session_id, session_id),
         )
         return [dict(r) for r in rows]
@@ -938,7 +942,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=? "
                 f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
-                "AND handoff_json IS NULL "
+                "AND handoff_json IS NULL AND runtime_custody_json IS NULL "
                 f"AND id IN ({placeholders})",
                 (now, session_id, session_id, *ids),
             )

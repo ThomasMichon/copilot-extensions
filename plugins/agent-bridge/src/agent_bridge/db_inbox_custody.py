@@ -93,15 +93,17 @@ class _InboxCustodyMixin:
             ).fetchall()
             result = []
             for row in rows:
-                if row["runtime_custody_json"] != admission.document():
+                if row["runtime_custody_json"] is None:
                     raise RuntimeCustodyError("Legacy or foreign inbox admission remains unqualified")
+                original_admission = RuntimeAdmission.parse(row["runtime_custody_json"])
+                self._inbox_admission(conn, identity, original_admission)
                 raw = row["handoff_json"]
                 if raw is None:
                     if row["delivered_at"] is not None or row["claimed_at"] is not None:
                         raise RuntimeCustodyError("Prior inbox delivery remains unqualified")
                     raw = encode({
                         "version": 1, "id": uuid.uuid4().hex, "message_id": row["id"],
-                        "consumer": consumer.document(), "admission": admission.document(),
+                        "consumer": consumer.document(), "admission": row["runtime_custody_json"],
                     })
                     conn.execute("UPDATE live_messages SET handoff_json=? WHERE id=?",
                                  (raw, row["id"]))
@@ -127,9 +129,8 @@ class _InboxCustodyMixin:
             self._inbox_admission(conn, identity, admission)
             self._current_inbox_consumer(conn, consumer, now)
             row = self._original_handoff(conn, message_id, consumer, handoff_id)
-            if row["session_id"] != consumer.session_id or (
-                row["runtime_custody_json"] != admission.document()
-            ):
+            self._inbox_admission(conn, identity, RuntimeAdmission.parse(row["runtime_custody_json"]))
+            if row["session_id"] != consumer.session_id:
                 raise RuntimeCustodyError("Inbox handoff cannot move to another native context")
             if handoff_stage(row) != "offered":
                 return False

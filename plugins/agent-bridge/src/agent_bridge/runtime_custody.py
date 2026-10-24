@@ -81,6 +81,25 @@ class RuntimeAdmission:
     def document(self) -> str:
         return encode(asdict(self))
 
+    @classmethod
+    def parse(cls, raw: str) -> RuntimeAdmission:
+        """Decode an original association without losing duplicate fields."""
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise RuntimeCustodyError("Duplicate producer association field")
+                result[key] = value
+            return result
+
+        try:
+            value = json.loads(raw, object_pairs_hook=unique)
+            if type(value) is not dict or set(value) != {"installation", "epoch", "producer"}:
+                raise RuntimeCustodyError("Unknown producer association")
+            return cls(**value)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeCustodyError("Malformed retained producer association") from exc
+
 
 @dataclass(frozen=True)
 class RuntimeEpoch:

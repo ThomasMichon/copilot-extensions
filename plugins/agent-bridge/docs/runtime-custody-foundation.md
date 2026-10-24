@@ -56,11 +56,14 @@ writable open reject missing/changed inbox fields or guards instead of repairing
 away possible handoff history. Migrated legacy rows retain null associations;
 they do not acquire evidence that an earlier poll returned no body.
 
-`poll_live_message_handoffs` requires the original installation/producer
+`poll_live_message_handoffs` requires the owner's current installation/producer
 admission and exact native-session, consumer-incarnation and process-birth
 observations. In one short DB transaction it retains a single immutable handoff
 on each original message before returning its body. An unassociated/foreign
-message or consumer refuses the whole batch. Repeated polls observe the original
+message or consumer refuses the whole batch. Each row retains its original
+enrolled producer independently of the polling frontend, so multiple producers
+in the same open epoch do not block each other or rewrite old associations.
+Repeated polls observe the original
 attempt and outcome; they never renew send permission.
 
 `begin_live_message_handoff` is the DB owner's one-shot final-admission primitive.
@@ -77,8 +80,17 @@ and consumption retain separate timestamps; neither certifies semantic
 completion. An unknown attempt cannot return to an offered state. Handoff
 identity/input and recorded timestamps cannot be erased to mint a retry.
 Legacy poll/ACK/consumption methods do not send or settle retained handoffs.
+Associated messages are excluded from those legacy paths from insertion onward,
+not just after a handoff exists. An identical keyed retry must match the retained
+producer association, including legacy versus associated admission.
 Registration deregistration, takeover and reaping preserve associated inbox
 history even when the registration itself goes away.
+
+Custody transactions, including associated inbox insertion, commit with
+connection-local `synchronous=FULL` before returning. Both normal and adopted
+connections restore their prior setting afterward, including on refusal.
+Unrelated event/metadata writes retain their existing `NORMAL` policy. A
+one-shot marker that could disappear after SDK acceptance would not fence replay.
 
 These are internal owner methods, **not consumer authentication or an SDK
 integration**. A future transport must authenticate/enroll the actual consumer,

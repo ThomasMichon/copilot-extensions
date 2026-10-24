@@ -173,7 +173,10 @@ def test_legacy_and_partially_claimed_batches_roll_back_without_fabricating_cust
     with pytest.raises(RuntimeCustodyError, match="Legacy or foreign"):
         poll(inbox)
     assert [row["handoff_json"] for row in db.execute_read("SELECT * FROM live_messages")] == [None, None]
-    assert [row["id"] for row in db.list_pending_live_messages("native-a")] == [associated, legacy]
+    assert [row["id"] for row in db.execute_read("SELECT id FROM live_messages ORDER BY id")] == [
+        associated, legacy,
+    ]
+    assert [row["id"] for row in db.list_pending_live_messages("native-a")] == [legacy]
 
 
 @pytest.mark.parametrize("change", [
@@ -234,7 +237,7 @@ def test_registration_cleanup_preserves_associated_and_handed_off_rows(inbox, cl
     rows = db.runtime_custody_inventory(owner)["rows"]["live_messages"]
     assert {item["id"] for item in rows} == {row["id"], second_id}
     assert outcome(inbox, row, "sdk_accepted") == "sdk_accepted"
-    assert db.list_pending_live_messages(consumer.session_id)[0]["id"] == second_id
+    assert db.list_pending_live_messages(consumer.session_id) == []
 
 
 @pytest.mark.parametrize("sql", [
@@ -405,3 +408,117 @@ def test_frozen_legacy_migration_preserves_returned_body_uncertainty(tmp_path):
                    for item in db.runtime_custody_inventory(owner)["blockers"])
     finally:
         db.close()
+
+
+def test_legacy_poll_and_lost_ack_cannot_expose_an_associated_body_before_handoff(inbox):
+    db, _, _, _, consumer = inbox
+    message_id = enqueue(inbox)
+    assert db.list_pending_live_messages(consumer.session_id) == []
+    assert db.ack_live_messages(consumer.session_id, [message_id], 11.0) == 0
+    assert db.consume_live_message(consumer.session_id, message_id, 11.0) == 0
+    original = db.execute_read("SELECT * FROM live_messages WHERE id=?", (message_id,))[0]
+    assert original["handoff_json"] is None
+    assert original["delivered_at"] is None and original["consumed_at"] is None
+    row, = poll(inbox)
+    assert row["id"] == message_id and begin(inbox, row)
+
+
+def test_mixed_enrolled_producers_preserve_each_original_association(inbox):
+    db, owner, _, admission, consumer = inbox
+    first_id = enqueue(inbox)
+    replacement = db.enroll_runtime_producer(
+        owner, admission.epoch, RuntimeProducer("frontend-b", 103, "birth-b"),
+    )
+    second_id = db.enqueue_live_message(
+        consumer.session_id, "second sender", "second body", 10.0,
+        runtime_admission=replacement,
+    )
+    rows = poll(inbox)
+    assert [row["id"] for row in rows] == [first_id, second_id]
+    assert [row["handoff"]["admission"] for row in rows] == [
+        admission.document(), replacement.document(),
+    ]
+    repeated = db.poll_live_message_handoffs(owner, replacement, consumer, now=11.0)
+    assert [row["handoff"] for row in repeated] == [row["handoff"] for row in rows]
+    assert db.begin_live_message_handoff(
+        owner, replacement, consumer, first_id, rows[0]["handoff"]["id"], now=12.0,
+    )
+    assert begin(inbox, rows[0]) is False
+    assert begin(inbox, rows[1]) is True
+
+
+def test_unknown_original_producer_refuses_the_entire_mixed_batch(inbox):
+    db, owner, _, admission, consumer = inbox
+    enqueue(inbox)
+    missing = db.enroll_runtime_producer(
+        owner, admission.epoch, RuntimeProducer("frontend-b", 103, "birth-b"),
+    )
+    db.enqueue_live_message(
+        consumer.session_id, "second sender", "second body", 10.0, runtime_admission=missing,
+    )
+    db.execute_write("DELETE FROM bridge_runtime_producers WHERE id=?", (missing.producer,))
+    with pytest.raises(RuntimeCustodyError, match="not enrolled"):
+        poll(inbox)
+    assert [row["handoff_json"] for row in db.execute_read("SELECT * FROM live_messages")] == [None, None]
+
+
+@pytest.mark.parametrize("original,retry", [
+    ("legacy", "first"), ("first", "legacy"), ("first", "second"), ("first", "first"),
+])
+def test_keyed_retry_requires_the_same_original_custody_association(inbox, original, retry):
+    db, owner, _, admission, consumer = inbox
+    second = db.enroll_runtime_producer(
+        owner, admission.epoch, RuntimeProducer("frontend-b", 103, "birth-b"),
+    )
+    admissions = {"legacy": None, "first": admission, "second": second}
+    def keyed(value):
+        return db.enqueue_live_message_if_fresh(
+            consumer.session_id, sender="sender", body="same body", now=10.0,
+            idempotency_key="original-key", report_duplicate=True,
+            runtime_admission=admissions[value],
+        )
+    original_id, reason = keyed(original)
+    assert original_id is not None and reason is None
+    replay_id, reason = keyed(retry)
+    if original == retry:
+        assert replay_id == original_id and reason == "duplicate"
+    else:
+        assert replay_id is None and reason == "idempotency_conflict"
+    row, = db.execute_read("SELECT * FROM live_messages")
+    expected = admissions[original]
+    assert row["runtime_custody_json"] == (expected.document() if expected else None)
+
+
+@pytest.mark.parametrize("adopted", [False, True])
+def test_custody_commit_is_full_sync_and_ordinary_writes_keep_normal_policy(inbox, adopted):
+    original, owner, producer, admission, consumer = inbox
+    passive = Database(original.db_path, read_only=True) if adopted else None
+    db = open_existing_writable(passive) if passive else original
+    selected = (db, owner, producer, admission, consumer)
+    conn = db._get_conn()
+    observed = []
+    def trace(statement):
+        if statement == "COMMIT":
+            observed.append(conn.execute("PRAGMA synchronous").fetchone()[0])
+    assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1
+    conn.set_trace_callback(trace)
+    try:
+        enqueue(selected)
+        row, = poll(selected)
+        assert begin(selected, row)
+        close(selected)
+        assert outcome(selected, row, "sdk_accepted") == "sdk_accepted"
+        db.execute_write("UPDATE live_sessions SET latest_progress='ordinary metadata'")
+        assert observed == [2, 2, 2, 1, 2, 2, 1]
+        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1
+        with pytest.raises(RuntimeCustodyError, match="observations changed"):
+            db.record_live_message_handoff(
+                replace(consumer, incarnation="not-the-original"), row["id"],
+                row["handoff"]["id"], outcome="consumed", now=14.0,
+            )
+        assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1
+    finally:
+        conn.set_trace_callback(None)
+        if adopted:
+            db.close()
+            passive.close()
