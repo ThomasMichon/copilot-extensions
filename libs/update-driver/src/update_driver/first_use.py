@@ -34,7 +34,7 @@ LOGGER_COMMANDS = (
     ("session-sync", "agent_logger.sync.engine"),
 )
 PROTOCOL = 1
-INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision")
+INSTALLER_ACTIONS = ("provision", "stamp", "stamp-provision", "install")
 CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID",
@@ -118,6 +118,8 @@ def _inspect(
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
         raise ProvisionError("stamp-to-selected-snapshot provisioning requires SSH")
+    if installer_action == "install" and plugin != "agent-logger":
+        raise ProvisionError("fixed install action requires Logger")
     prefix = RECIPES[plugin]
     no_self = prefix + "_NO_SELFPROVISION"
     if (

@@ -97,3 +97,38 @@ This closes part of existing Installer/Plugin Service Model intent using the
 single-owner, thin-adapter and cross-platform patterns; it changes no standing
 vision. Documentation impact is this bounded plan and parent row; as-is runtime
 documentation changes with implementation, not this proposal.
+
+## Reviewed intent and execution
+
+Proposal #8665 merged as `7681947aeb4e25e9c1e6a6bfbb62116492f5987c`
+at 2026-10-24T20:33:30Z after current-head approval `5639850337` and
+required checks. All review bodies, inline/PR comments and the complete
+conversation inventory were read. The documentation-impact observation was
+addressed in the published description, read back, replied to transparently
+and resolved; no conversation content was deleted or hidden. The revised
+plan explicitly retains Windows' access-denied warning compatibility.
+
+Managed completion reconciled only confirmed merged local commits and retained
+its backup. The complete current ROOT was read after merge; its Active status,
+global Validation, retained families and all incumbent owners remain unchanged.
+Execution begins with only this fixed action and isolated qualification.
+
+## Implementation and qualification in progress
+
+The fixed Python and both native front doors now admit `install` only for
+Logger. The existing executor supplies the action to the canonical frozen
+installer; no queue, schema, service option or ordinary publisher changed.
+Tests preserve distinct action identity, own context and native arguments,
+other-plugin refusal and no-write controls. The existing manual native
+portfolio now also exercises actual registration code through isolated
+ScheduledTasks/`systemctl` adapters, reuse/reconciliation, fatal failures and
+Windows' tolerated access-denied warning. Caller-loss qualification includes
+the fixed `install` action.
+
+Local bounded action/identity/other-plugin checks passed 12 cases. A full
+local Logger-file attempt reached its 480-second aggregate wall budget after
+38 cases without an assertion failure; it is not a complete passing run.
+All 13 install contracts, canonical helper synchronization and touched Python
+lint pass. Final native cold/registration qualification and implementation
+review/merge remain pending. No host task/unit registration, personal
+processing, ordinary publisher adoption or rollout occurred.
