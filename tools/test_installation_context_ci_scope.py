@@ -231,23 +231,23 @@ def test_bridge_binding_remains_an_explicit_bounded_native_portfolio() -> None:
     )
     trigger = workflow.get("on", workflow.get(True))
     assert "bridge-binding" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
-    job = workflow["jobs"]["bridge-binding"]
-    assert job["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'"
-    )
-    assert job["runs-on"] == "${{ matrix.os }}" and job["timeout-minutes"] == 10
-    assert job["strategy"] == {
-        "fail-fast": False, "matrix": {"os": ["ubuntu-latest", "windows-latest"]},
-    }
-    executions = [step["run"].split() for step in job["steps"] if "run" in step]
-    assert executions == [[
-        "python", "tools/run-plugin-tests.py", "payload-invocation",
-        "--test-file", "tests/test_bridge_first_use_publication.py",
-        "-k", "test_bridge_cell_stamp_preserves_global_ownership",
-        "--allow-explicit-tiers", "--test-timeout", "60", "--timeout", "540",
-    ]]
     required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
-    assert "bridge-binding" not in required["jobs"]
+    for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        name = f"bridge-binding-{platform}"
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 10
+        assert "strategy" not in job
+        executions = [step["run"].split() for step in job["steps"] if "run" in step]
+        assert executions == [[
+            "python", "tools/run-plugin-tests.py", "payload-invocation",
+            "--test-file", "tests/test_bridge_first_use_publication.py",
+            "-k", "test_bridge_cell_stamp_preserves_global_ownership",
+            "--allow-explicit-tiers", "--test-timeout", "60", "--timeout", "540",
+        ]]
+        assert name not in required["jobs"]
 
 
 def test_codespaces_bootstrap_remains_an_explicit_bounded_native_portfolio() -> None:
