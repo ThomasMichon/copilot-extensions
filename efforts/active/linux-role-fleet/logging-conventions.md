@@ -236,9 +236,9 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   with bounded producer work and truthful loss/storage counters.
 - [x] Expose an explicit, separate retained-spool Python API with owner-provided
   new namespace/maintenance, no parent creation and unchanged legacy factories.
-- [ ] Complete native Windows source validation and normal review/required CI;
-  qualify unavailable platform/live lanes separately.
-- [ ] Record the accepted source merge and retain all remaining logging-owner,
+- [x] Complete native Windows source validation and normal review/required CI;
+  retain unavailable platform/live lanes as separate qualification obligations.
+- [x] Record the accepted source merge and retain all remaining logging-owner,
   installer/native, deployment and released/running gates under #8377.
 
 ### Continuation journal
@@ -364,3 +364,74 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   Native managed source validation passes 31 Bridge diagnostic tests and 49
   Dispatch diagnostic/telemetry tests; touched-code Ruff F/E9 and whitespace
   checks pass.
+- 2026-10-24 UTC — Accepted shared-source continuation: #8495 received explicit
+  approval at `229c12413306e7419be43550b02630f8c02caa5a` (review
+  `5637930380`), with zero open findings and all required checks passing.
+  Required PR gate run `40085817128` and attribution/lockdown run `40085815747`
+  qualify that exact head, not an earlier green revision. The managed provider
+  confirmed squash merge to `dev` at
+  `77067a7f9e8eb05deddb5e24422f99e998c484e3`, at 10:32:04 UTC.
+  Re-read this plan and the parent amendment after merge. Resolve only these
+  bounded source validation/publication gates; #8377 and the parent stay open.
+  Latest native validation is 31 Bridge diagnostic tests and 49 Dispatch
+  diagnostic/telemetry tests, plus Ruff F/E9, install-contract (13 plugins),
+  immutable Bridge contracts (2 contracts, 583 fixtures) and whitespace checks.
+  Earlier broader portfolios remain recorded above, not rerun or represented as
+  latest-head full-suite results. Linux/macOS and live deployment remain unproved.
+  Retain the clean source worktree for the integration owner; no rollout or
+  finalization follows from source acceptance.
+
+### Accepted API and next adapter boundary
+
+There is **no delivered retained `telemetry.json` configuration**. Existing Bridge
+and Dispatch loaders still read `"sink": "module:factory"`, call `factory()` with
+zero arguments, then register it synchronously with `set_telemetry_sink`.
+The legacy `"spool"` factory/path and its append behavior are unchanged. Adding a
+directory beside that declaration does not make the mandatory-argument retained
+factory work and does not arrange quiet maintenance or shutdown.
+
+The accepted explicit Python interface, separately available in either plugin:
+
+```python
+from agent_bridge import telemetry as t  # alternatively: agent_dispatch
+
+sink = t.make_retained_spool_sink(directory)
+writer = t.set_buffered_telemetry_sink(
+    sink,
+    on_start=lambda: sink.maintain(force=True),
+    on_iteration=sink.maintain,
+)
+locations = sink.inventory()
+# At the owning process's shutdown or sink replacement boundary:
+t.clear_telemetry_sink()
+```
+
+The existing owner must provision a new exclusive `directory/retained` namespace
+first, without nonparticipating legacy writers. The factory never creates
+parents; construction and direct maintenance are synchronous and belong off the
+serving event loop. The existing owned buffer runs startup and busy/idle
+maintenance, and slot clear/replacement closes it without joining a blocked
+writer. `inventory()` is read-only discovery, not maintenance. The active names
+are `agent-bridge-telemetry.jsonl` and `agent-dispatch-telemetry.jsonl` in that
+namespace. Existing fields/`ts` remain producer-shaped; missing `ts` defaults to
+epoch milliseconds. Unsupported or out-of-range timestamps are preserved as
+unknown/degraded, never falsely represented as age-qualified.
+
+**Next-phase recommendation, not implemented or accepted configuration:** add
+one explicit alternative top-level `retained_spool` object with a mandatory
+`directory`, mutually exclusive with legacy `sink`/`spool` configuration. Preserve
+the old branch byte-for-byte in meaning and reject ambiguous mixed declarations.
+The existing configuration/lifecycle owner, not a side-effecting zero-argument
+factory, should resolve/provision the exclusive bucket, construct the retained
+sink, call `set_buffered_telemetry_sink` with the hooks above, and expose its
+inventory through the same owner's local discovery. That owner must close/clear
+on shutdown and replacement. Returning a self-registered buffer from the old
+factory path is incorrect: its subsequent `set_telemetry_sink` closes that owned
+buffer. The adopter helper and actual configuration loaders must adopt this
+boundary before configuration-only retained activation or quiet-retention proof.
+
+Native stdout/stderr, installer attempts (#8370), lifecycle/bootstrap/session
+diagnostics and Fleet/container deployment adapters remain with the named owners
+in **Remaining acceptance transferred to integration** above. No retained-spool
+configuration, native adapter, platform qualification or live state is supplied by
+this Python API or by the application-handler merge.

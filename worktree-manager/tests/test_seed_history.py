@@ -22,6 +22,15 @@ from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import P
 from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
 
 
+async def _await_confirmation(pilot):
+    from worktree_manager.launch_confirmation import _SavingLaunch
+
+    async with asyncio.timeout(10):
+        while any(isinstance(screen, _SavingLaunch) for screen in pilot.app.screen_stack):
+            await pilot.pause(0.01)
+    await pilot.pause()
+
+
 def test_history_persists_exact_multiline_text_without_launch(tmp_path):
     history = seed_history.SeedHistory("demo", tmp_path)
     assert history.entries() == []
@@ -291,7 +300,7 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
         dialog.on_focus_group_activated(
             FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
         )
-        await pilot.pause()
+        await _await_confirmation(pilot)
         assert outcomes == [True]
         retry = PromptDlgScreen("Retry", "Prompt")
         app.push_screen(retry)
@@ -305,7 +314,7 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
 
 
 @pytest.mark.parametrize("option", ["Anchor repo", "Bare", "AHP", "Local model", "resume-ahp"])
-def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch, option):
+def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, monkeypatch, option):
     async def run():
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
         context.set_project("demo")
@@ -326,7 +335,7 @@ def test_unsupported_composer_keeps_text_without_recording(tmp_path, monkeypatch
             dialog.on_focus_group_activated(
                 FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
             )
-            await pilot.pause()
+            await _await_confirmation(pilot)
             assert app.screen is dialog
             assert field.text == "unsubmitted draft" and outcomes == []
             assert seed_history.SeedHistory("demo", tmp_path).entries() == []
@@ -372,8 +381,11 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
             app=app, debug="",
             _find_internal_worktree=lambda *args: (record, None),
             _session_action_verbs=lambda _: ["Resume prompt…"],
-            _resume_decision=lambda *args, **kwargs: outcomes.append(kwargs),
-            _decide=lambda _: None,
+            _resume_decision=lambda *args, **kwargs: {
+                "action": "resume", "is_local": True, "worktree_id": "wt-a",
+                "options": {"no_mux": kwargs.get("no_mux"), "ahp": kwargs.get("ahp")},
+            },
+            _decide=outcomes.append,
         )
         async with app.run_test() as pilot:
             open_resume_prompt(screen, record, ahp=ahp)
@@ -381,12 +393,12 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
             dialog = app.screen
             field = dialog.query_one(SeedPromptField)
             notices = []
-            monkeypatch.setattr(field, "notify", lambda message, **kwargs: notices.append(message))
+            monkeypatch.setattr(dialog, "notify", lambda message, **kwargs: notices.append(message))
             field.load_text("retained draft")
             dialog.on_focus_group_activated(
                 FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
             )
-            await pilot.pause()
+            await _await_confirmation(pilot)
             assert app.screen is dialog and field.text == "retained draft"
             assert len(notices) == 1 and reason in notices[0]
             if not ahp:
@@ -397,8 +409,10 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
             dialog.on_focus_group_activated(
                 FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
             )
-            await pilot.pause()
-            assert outcomes == [{"no_mux": False, "ahp": ahp, "seed_prompt": ""}]
+            await _await_confirmation(pilot)
+            assert len(outcomes) == 1
+            assert outcomes[0]["options"] == {"no_mux": False, "ahp": ahp, "seed_prompt": ""}
+            assert outcomes[0]["attempt_id"]
     asyncio.run(run())
 
 
@@ -536,7 +550,7 @@ async def _failed_history_save_keeps_composer_open(tmp_path, monkeypatch):
         dialog.on_focus_group_activated(
             FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
         )
-        await pilot.pause()
+        await _await_confirmation(pilot)
         assert app.screen is dialog
         assert field.text == "do not lose this"
         assert outcomes == []

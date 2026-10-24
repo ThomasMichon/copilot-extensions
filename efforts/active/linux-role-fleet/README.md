@@ -58,8 +58,8 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 - **Logging slice:** `spinning-sprocket` owns Dispatch application diagnostics,
   local discovery and existing-owner idle maintenance under #8377. It does not
   modify #8370's installer-attempt capture or #6812's progress formatter.
-  Native capture, Bridge/telemetry, controller/container mappings and actual
-  released/running qualification remain explicit integration acceptance.
+  Native capture, telemetry configuration adoption, controller/container mappings
+  and actual released/running qualification remain explicit integration acceptance.
   The bounded application source merged as #8415 after approval and required
   CI; the [logging sub-plan](logging-conventions.md) records its exact merge,
   validation and transferred remaining interfaces. None of the broad logging
@@ -68,6 +68,11 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   Bridge application logging with bounded producer work; native capture and
   installer/lifecycle/deployment owners remain separate. Its source validation
   and acceptance are tracked in the same logging sub-plan, not a competing effort.
+  Shared policy and Bridge application source merged as #8495 after exact-head
+  approval and required CI. Explicit retained spools are Python-API-only:
+  configuration-loader/helper adoption and owned quiet maintenance are not yet
+  delivered. The sub-plan records the accepted API and next adapter boundary;
+  the parent and #8377 remain open.
 - **Trusted image slice:** #8352 owns the bounded
   [trusted harness container plan](trusted-harness-containers.md) under #6030.
   Its proposed `.devcontainer/trusted-harness-base/` reservation does not transfer

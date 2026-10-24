@@ -17,6 +17,13 @@ from subprocess import CompletedProcess
 
 import pytest
 
+from promotion_unit_tests.test_installer_retention import (
+    retention_policy as retention_policy,
+    test_retained_metadata_remapping_work_is_independent_of_scalar_count as test_retained_metadata_remapping_work_is_independent_of_scalar_count,
+    test_retained_overlapping_projects_compare_each_file_pair_once as test_retained_overlapping_projects_compare_each_file_pair_once,
+    test_retained_remapping_preserves_nested_native_uri_and_escaped_forms as test_retained_remapping_preserves_nested_native_uri_and_escaped_forms,
+)
+
 PATH = Path(__file__).resolve().parents[1] / "libs" / "installer-engine" / "installer_dependency_policy.py"
 SPEC = importlib.util.spec_from_file_location("installer_dependency_policy", PATH)
 policy = importlib.util.module_from_spec(SPEC)
@@ -1540,105 +1547,6 @@ def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, m
             env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
         ):
             pytest.fail("mutated input cannot reach the admitted execution boundary")
-
-
-def test_retained_overlapping_projects_compare_each_file_pair_once(tmp_path, monkeypatch):
-    parent = source_project(tmp_path / "parent", name="fixture-parent")
-    child = source_project(parent / "child", name="fixture-child")
-    read_bytes = Path.read_bytes
-    reads = {}
-
-    def observe(path):
-        if path.name == "fixture_backend.py":
-            key = Path(str(path).removeprefix("\\\\?\\"))
-            reads[key] = reads.get(key, 0) + 1
-        return read_bytes(path)
-
-    monkeypatch.setattr(Path, "read_bytes", observe)
-    monkeypatch.setattr(
-        policy.subprocess, "run",
-        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
-    )
-    with policy.retain_uv_install(
-        "attributed-uv", ["--no-config", str(parent), str(child)],
-        env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(parent, child),
-    ) as transaction:
-        for project in (parent, child):
-            original = project / "fixture_backend.py"
-            retained = transaction.sources[project] / original.name
-            assert reads[original] == 1
-            assert reads[retained] == 1
-            assert transaction.source_hashes[original] == hashlib.sha256(read_bytes(original)).hexdigest()
-
-
-def test_retained_metadata_remapping_work_is_independent_of_scalar_count(tmp_path, monkeypatch):
-    layout = policy._configuration.retained_source_layout
-    monkeypatch.setattr(
-        policy.subprocess, "run",
-        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
-    )
-
-    def count_mirrors(scalars):
-        source = source_project(tmp_path / f"source-{scalars}")
-        manifest = source / "pyproject.toml"
-        manifest.write_text(
-            manifest.read_text(encoding="utf-8")
-            + "keywords=" + json.dumps([f"keyword-{index}" for index in range(scalars)]) + "\n",
-            encoding="utf-8",
-        )
-        calls = []
-
-        def observe(*args, **kwargs):
-            anchors, mirror = layout(*args, **kwargs)
-
-            def counted(path):
-                calls.append(path)
-                return mirror(path)
-
-            return anchors, counted
-
-        with monkeypatch.context() as patch:
-            patch.setattr(policy._configuration, "retained_source_layout", observe)
-            with policy.retain_uv_install(
-                "attributed-uv", ["--no-config", str(source)],
-                env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(source,),
-            ) as transaction:
-                assert transaction.source_hashes[source / "fixture_backend.py"]
-        return len(calls)
-
-    assert count_mirrors(64) == count_mirrors(1)
-
-
-def test_retained_remapping_preserves_nested_native_uri_and_escaped_forms(tmp_path, monkeypatch):
-    parent = source_project(tmp_path / "parent", name="fixture-parent")
-    child = source_project(parent / "child", name="fixture-child")
-    forms = [
-        str(child / "fixture_backend.py"),
-        child.as_uri() + "/fixture_backend.py",
-        child.as_posix() + "/fixture_backend.py",
-        json.dumps(str(child))[1:-1],
-    ]
-    manifest = parent / "pyproject.toml"
-    manifest.write_text(
-        manifest.read_text(encoding="utf-8") + "\n[tool.fixture]\npaths=" + json.dumps([forms]) + "\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        policy.subprocess, "run",
-        lambda command, **_kwargs: CompletedProcess(command, 0, settings(), ""),
-    )
-    with policy.retain_uv_install(
-        "attributed-uv", ["--no-config", str(parent), str(child)],
-        env={}, cwd=tmp_path, now=NOW, trusted_source_roots=(parent, child),
-    ) as transaction:
-        retained = transaction.sources[child]
-        data = policy._toml(transaction.sources[parent] / "pyproject.toml")
-        assert data["tool"]["fixture"]["paths"] == [[
-            str(retained / "fixture_backend.py"),
-            retained.as_uri() + "/fixture_backend.py",
-            retained.as_posix() + "/fixture_backend.py",
-            json.dumps(str(retained))[1:-1],
-        ]]
 
 
 @pytest.mark.parametrize("outcome", ["nonzero", "checked", "success", "admission"])

@@ -1061,6 +1061,8 @@ def test_run_launch_rejects_crafted_remote_ahp_before_launch(
 def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
     from worktree_manager import ahp_provider, engine_client, launcher
 
+    admitted = []
+    monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
     plan = type(
         "Plan",
         (),
@@ -1110,6 +1112,7 @@ def test_run_launch_selects_ahp_after_plan_resolution(monkeypatch, tmp_path):
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, True)]
+    assert admitted == [str(tmp_path)]
 
 
 def test_run_launch_selects_ahp_without_mux_when_both_requested(
@@ -1120,6 +1123,8 @@ def test_run_launch_selects_ahp_without_mux_when_both_requested(
     ``want_mux=False`` to the launcher."""
     from worktree_manager import ahp_provider, engine_client, launcher
 
+    admitted = []
+    monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
     plan = type(
         "Plan",
         (),
@@ -1169,6 +1174,7 @@ def test_run_launch_selects_ahp_without_mux_when_both_requested(
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, False)]
+    assert admitted == [str(tmp_path)]
 
 
 def test_run_launch_delegates_to_relocated_script_on_windows(monkeypatch, tmp_path):
@@ -1728,10 +1734,17 @@ class TestRunLaunchNewWindow:
         rc = entrypoint._run_launch(self._request(machine="dev6", environment="prod"))
         assert rc == 1
 
-    def test_new_window_rejects_ahp(self, monkeypatch):
-        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (self._plan(), 0))
+    def test_new_window_rejects_ahp(self, monkeypatch, tmp_path):
+        from worktree_manager import engine_client
+
+        plan = self._plan()
+        plan.work_dir = str(tmp_path)
+        admitted = []
+        monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request, **kw: (plan, 0))
         rc = entrypoint._run_launch(self._request(ahp=True))
         assert rc == 1
+        assert admitted == [str(tmp_path)]
 
     def test_new_window_rejects_missing_relocated_script(self, monkeypatch):
         from worktree_manager import ahp_provider
@@ -1778,6 +1791,8 @@ def test_run_launch_forces_persisted_active_or_unknown_ahp_binding(
 ):
     from worktree_manager import ahp_provider, engine_client, launcher
 
+    admitted = []
+    monkeypatch.setattr(engine_client, "require_agent_hosting", admitted.append)
     plan = type(
         "Plan",
         (),
@@ -1836,6 +1851,7 @@ def test_run_launch_forces_persisted_active_or_unknown_ahp_binding(
 
     assert entrypoint._run_launch(request) == 0
     assert calls == [(hosted, True)]
+    assert admitted == [str(tmp_path)]
 
 
 def test_run_launch_allows_direct_after_disposed_binding(monkeypatch):

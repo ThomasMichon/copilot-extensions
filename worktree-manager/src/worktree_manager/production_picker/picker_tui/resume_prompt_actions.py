@@ -29,6 +29,10 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
 
     if not _eligible():
         return
+    decision = screen._resume_decision(rec, no_mux=no_mux, ahp=ahp)
+    if decision.get("deferred"):
+        screen._decide(decision)
+        return
     leg = rec.get("execution_leg") or (rec.get("raw") or {}).get("execution_leg")
     refusal: str | None = None
     if ahp:
@@ -43,6 +47,8 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
         f"Resume prompt · {title}",
         "Prompt (optional; saved for retry until Copilot takes this cold resume):",
         seed_refusal=refusal,
+        launch_decision=decision,
+        journal_enabled=getattr(screen, "real_ops", True),
     )
 
     def _after(confirmed):
@@ -50,7 +56,5 @@ def open_resume_prompt(screen, rec, *, no_mux=False, ahp=False) -> None:
             return
         # Preserve an accepted intent even if the row became live while the
         # composer was open. The engine stages it, then refuses a live launch.
-        decision = screen._resume_decision(
-            rec, no_mux=no_mux, ahp=ahp, seed_prompt=scr.seed_prompt)
-        screen._decide(decision)
+        screen._decide(scr.launch_decision)
     screen.app.push_screen(scr, _after)

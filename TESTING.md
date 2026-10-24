@@ -504,6 +504,16 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+The three retained-input cardinality/remapping controls live in
+`tools/promotion_unit_tests/test_installer_retention.py` and are shared with
+the on-demand dependency-policy suite. They exercise the real retention
+transaction with synthetic files inside the packet's owned temporary root;
+only UV settings/executable selection and native privacy/path adapters are
+substituted. They prove one comparison per overlapping file pair, remapping
+work independent of metadata scalar count, and preservation of nested native,
+URI and escaped paths. Native privacy, installer subprocesses and real package
+construction remain separate development-suite controls.
+
 The exact-profile wheel cases in
 `tools/promotion_unit_tests/test_runtime_profile_wheels.py` inspect complete
 synthetic ZIP/RECORD bytes in memory, including executable-looking payloads

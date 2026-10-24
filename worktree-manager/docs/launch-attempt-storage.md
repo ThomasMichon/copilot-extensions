@@ -1,10 +1,49 @@
-# Launch-attempt storage foundation
+# Launch-attempt storage and confirmation
 
 `worktree_manager.launch_attempts.LaunchAttempts` is an internal, local evidence
-store. It is not yet wired to Picker confirmation, launch execution, inspection
-commands or a machine sweep. Installing this foundation does not fix prompt
-loss or enable remote prompts. The implementation and remaining integration are
+store. Current source wires Picker confirmation before effects; execution
+outcome correlation, inspection commands and machine sweeps remain incomplete.
+This does not enable remote prompts or qualify an installed prompt-loss repair.
+The implementation and remaining integration are
 tracked by the [launch-attempt effort](../../efforts/active/worktree-launch-attempt-journal/README.md).
+
+## Picker confirmation boundary
+
+The production New and cold Resume composers save exact original field text,
+options, project and selected venue before dismissing. Ordinary Open/Resume,
+Bare Resume, Restore, new-window launches, compact Picker launches, task Open
+before embodiment, and provider venue Open use the same confirmation gate.
+These paths require resolved target locality. A locality-resolution refusal
+still precedes persistence; representing unknown locality without inventing
+a local/remote claim remains an explicit effort follow-up.
+The attempt ID remains on the Manager decision and `LaunchRequest`; it is not
+yet an engine or native-receipt correlation contract.
+
+Confirmation immediately shows a saving modal. The existing Picker
+`Inbox`/background-worker mechanism performs private storage work off the
+Textual message/render thread. The original composer remains mounted beneath
+the modal, so neither its text/options nor another confirmation can change
+the in-flight snapshot. Allocation, remux preparation, provider handoff and
+launch are released only after the save completes and the original mounted
+owner is still current. An application exit or removed owner cannot release
+that continuation later.
+
+Empty prompts are recorded. Unsupported prompt/option combinations retain
+`confirmed` and `refused` observations without dismissing the original composer
+or creating a legacy history entry. Cancellation before confirmation records
+nothing. Explicit Picker mock mode disables confirmation persistence for both
+New and cold Resume; it creates neither journal nor legacy-history entries.
+A save failure reports a sanitized error, preserves the draft and
+prevents launch; explicitly retrying identical failed input reuses its attempt
+ID. A later separate action after a successful confirmation gets a new ID.
+The journal preserves raw text independently of existing execution-text
+normalization.
+
+Legacy `SeedHistory` writes still occur, off-thread, after successful journal
+persistence and before composer dismissal. This preserves existing history
+navigation while migration is pending; it is **not** complete 90-day retention
+across all prompt copies. No pending daemon intent is migrated or deleted by
+this confirmation gate.
 
 ## API and durability
 
@@ -58,7 +97,7 @@ cannot hide behind an index with the same name.
 
 `expire` physically clears expired input using SQLite secure deletion while
 retaining metadata and observations. Reads hide expired input even before
-maintenance. The foundation does not schedule expiry or migrate existing
+maintenance. The store does not schedule expiry or migrate existing
 `SeedHistory`; production maintenance, legacy-copy expiry and UI integration
 remain required before claiming a delivered retention feature. It never deletes
 pending engine/daemon prompt state.
@@ -73,7 +112,10 @@ python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-
 ```
 
 It exercises abrupt writer exit and an independent reader, interrupted
-transactions, actual Windows ACL inspection and cold/warm commit measurements.
+transactions, actual composer-process exit before save and after commit but
+before dismissal, Windows ACL inspection and cold/warm commit measurements.
+Its confirmation-handler check imposes slow storage while enforcing a 100ms
+handler budget; this is not an end-to-end physical-key latency measurement.
 Measurements identify an in-process storage boundary, not a UI gesture or an
 installed launch. Storage work can exceed the Picker's acknowledgement budget
 under load: confirmation integration must remain responsive while awaiting

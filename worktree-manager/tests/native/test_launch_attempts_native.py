@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import os
@@ -78,6 +79,129 @@ def test_crash_between_intent_and_first_event_does_not_leave_partial_confirmatio
         recovery_id, action="open", project="example", surface="native", is_local=True,
     )
     assert [row["attempt_id"] for row in store.entries()] == [recovery_id]
+
+
+_UI_WRITER = """
+import asyncio, os, pathlib, sys
+from uuid import UUID
+from textual.app import App
+from worktree_manager import launch_confirmation
+from worktree_manager.launch_attempts import LaunchAttempts
+from worktree_manager.production_picker import context
+from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
+from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
+from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
+root, attempt_id, boundary = sys.argv[1:]
+os.environ["WORKTREE_MANAGER_ROOT"] = root
+context.set_project("example")
+launch_confirmation.uuid4 = lambda: UUID(attempt_id)
+record = LaunchAttempts.record_intent
+def interrupted(store, ident, **intent):
+    if boundary == "before-save":
+        os._exit(72)
+    record(store, ident, **intent)
+    os._exit(72)
+LaunchAttempts.record_intent = interrupted
+async def run():
+    app = App()
+    dialog = PromptDlgScreen("Resume", "Prompt", launch_decision={
+        "action": "resume", "is_local": True, "worktree_id": "native-worktree",
+        "options": {"no_mux": True},
+    })
+    async with app.run_test() as pilot:
+        app.push_screen(dialog, lambda _: pathlib.Path(root, "effect").write_text("launched"))
+        await pilot.pause()
+        dialog.query_one(SeedPromptField).load_text("  native exact text\\nsecond line\\n")
+        dialog.on_focus_group_activated(
+            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"))
+        await asyncio.sleep(15)
+asyncio.run(run())
+raise SystemExit("confirmation worker never reached the selected crash boundary")
+"""
+
+_UI_READER = """
+import json, pathlib, sys
+from worktree_manager.launch_attempts import LaunchAttempts
+store = LaunchAttempts(pathlib.Path(sys.argv[1]))
+detail = store.detail(sys.argv[2], include_input=True)
+assert detail["action"] == "resume" and detail["worktree_id"] == "native-worktree"
+assert detail["surface"] == "resume-prompt"
+assert detail["input"]["prompt"] == "  native exact text\\nsecond line\\n"
+assert detail["input"]["options"] == {"no_mux": True, "title": None}
+assert [event["phase"] for event in detail["events"]] == ["confirmed"]
+assert not pathlib.Path(sys.argv[1], "effect").exists()
+print(json.dumps({"exact_input": True, "launch_effect": False}))
+"""
+
+
+@pytest.mark.parametrize("boundary", ["before-save", "after-save-before-dismiss"])
+def test_native_ui_crash_boundary_never_replays_or_dismisses_early(tmp_path, boundary):
+    attempt_id = uuid4().hex
+    result = _run(_UI_WRITER, str(tmp_path), attempt_id, boundary)
+    assert result.returncode == 72, result.stderr
+    assert not (tmp_path / "effect").exists()
+    if boundary == "before-save":
+        assert journal.LaunchAttempts(tmp_path).entries() == []
+    else:
+        result = _run(_UI_READER, str(tmp_path), attempt_id)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"exact_input": True, "launch_effect": False}
+
+
+def test_native_confirmation_handler_acknowledges_before_slow_storage(
+    tmp_path, monkeypatch, capsys,
+):
+    from textual.app import App
+    from worktree_manager.production_picker import context
+    from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
+    from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
+
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    context.set_project("example")
+    record = journal.LaunchAttempts.record_intent
+
+    def slow(store, attempt_id, **intent):
+        time.sleep(0.2)
+        record(store, attempt_id, **intent)
+
+    monkeypatch.setattr(journal.LaunchAttempts, "record_intent", slow)
+    samples = []
+
+    async def run():
+        app = App()
+        async with app.run_test() as pilot:
+            for _ in range(20):
+                dialog = PromptDlgScreen("Resume", "Prompt")
+                completed = []
+                app.push_screen(dialog, completed.append)
+                await pilot.pause()
+                start = time.perf_counter_ns()
+                dialog.on_focus_group_activated(
+                    FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"),
+                )
+                samples.append((time.perf_counter_ns() - start) / 1_000_000)
+                assert completed == [] and dialog.is_mounted
+                async with asyncio.timeout(10):
+                    while not completed:
+                        await pilot.pause(0.01)
+                assert completed == [True]
+
+    try:
+        asyncio.run(run())
+    finally:
+        context.reset()
+    assert len(journal.LaunchAttempts(tmp_path).entries()) == 20
+    ordered = sorted(samples)
+    report = {
+        "boundary": "confirmation-handler-not-end-to-end-key-or-storage",
+        "platform": sys.platform, "samples_ms": samples, "count": len(samples),
+        "p50_ms": ordered[9], "p95_ms": ordered[18], "p99_ms": ordered[19],
+        "max_ms": ordered[-1], "failures": 0,
+        "storage_delay_ms": 200, "handler_budget_ms": 100,
+    }
+    with capsys.disabled():
+        print("LAUNCH_CONFIRMATION_NATIVE_MEASUREMENT " + json.dumps(report))
+    assert ordered[-1] < 100
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows DACL contract")

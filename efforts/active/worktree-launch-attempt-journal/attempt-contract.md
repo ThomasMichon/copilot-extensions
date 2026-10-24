@@ -8,7 +8,7 @@ an assertion that the journal or SSH repair is installed.
 
 | Boundary | Current owner | What it can attest |
 |----------|---------------|--------------------|
-| New confirmation | Manager `ScopeDlgScreen.on_focus_group_activated`, then `PickerScreenMaintenanceActionsMixin._confirm_new_worktree` | Exact field text, selected target and options before dialog dismissal |
+| New confirmation | Manager `ScopeDlgScreen.on_focus_group_activated`, shared `launch_confirmation`, then `_decide` | Exact field text, selected target and options before dialog dismissal |
 | Cold Resume confirmation | Manager `PromptDlgScreen`, then `resume_prompt_actions.open_resume_prompt` | Exact text, selected worktree and New/Resume provenance before dismissal |
 | Ordinary Resume/Open, Bare Resume | Manager `_decide` and `_resume_decision` | Explicit selection and options before the Picker exits; Open is prompt-free |
 | New-window Open/Resume | Manager `headed_actions.open_worktree_cli_headed` | Selection while the Picker remains open; it bypasses `_decide` |

@@ -1015,6 +1015,7 @@ def _run_production_picker(project: str) -> int:
                 machine=machine,
                 environment=environment,
                 seed_prompt=str(opts.get("seed_prompt") or "") or None,
+                attempt_id=decision.get("attempt_id"),
             ))
         if action == "restore":
             worktree_id = decision.get("worktree_id")
@@ -1022,12 +1023,13 @@ def _run_production_picker(project: str) -> int:
                 print("error: Picker returned a restore decision with no worktree id.")
                 return 1
             return _restore_production_picker_session(
-                project,
+                str(decision.get("project") or project),
                 str(worktree_id),
                 title=str(decision.get("title") or "") or None,
                 is_local=bool(decision.get("is_local", True)),
                 machine=str(decision.get("machine") or "") or None,
                 environment=str(decision.get("env") or "") or None,
+                attempt_id=decision.get("attempt_id"),
             )
         if action == "dispose-hosted-session":
             worktree_id = decision.get("worktree_id")
@@ -1072,7 +1074,7 @@ def _run_production_picker(project: str) -> int:
                 return 1
             machine, environment = _remote_machine_env(decision)
             return _run_launch(picker_app.LaunchRequest(
-                project=project,
+                project=str(decision.get("project") or project),
                 worktree_id=None,
                 mode="base" if opts.get("anchor") else "new",
                 no_mux=bool(opts.get("no_mux")),
@@ -1080,6 +1082,7 @@ def _run_production_picker(project: str) -> int:
                 machine=machine,
                 environment=environment,
                 seed_prompt=str(opts.get("seed_prompt") or "") or None,
+                attempt_id=decision.get("attempt_id"),
             ))
         if action in ("refresh", "manager-update"):
             # Apply the update, then loop back to reopen the Picker rather
@@ -1101,6 +1104,7 @@ def _restore_production_picker_session(
     is_local: bool,
     machine: str | None,
     environment: str | None,
+    attempt_id: str | None = None,
 ) -> int:
     """Run platform remux prep, then immediately launch/attach through mux."""
     from . import engine_client, picker_app
@@ -1165,6 +1169,7 @@ def _restore_production_picker_session(
         no_mux=False,
         machine=None if is_local else machine,
         environment=None if is_local else environment,
+        attempt_id=attempt_id,
     )
     return _run_launch(request)
 

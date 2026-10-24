@@ -1,6 +1,9 @@
 {
   "profile": "copilot-extensions.promotion-units/v1",
   "nodes": [
+    "tools/promotion_unit_tests/test_installer_retention.py::test_retained_overlapping_projects_compare_each_file_pair_once",
+    "tools/promotion_unit_tests/test_installer_retention.py::test_retained_metadata_remapping_work_is_independent_of_scalar_count",
+    "tools/promotion_unit_tests/test_installer_retention.py::test_retained_remapping_preserves_nested_native_uri_and_escaped_forms",
     "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_identical_version_source_preserves_legacy_equivalence[plain]",
     "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_identical_version_source_preserves_legacy_equivalence[typed]",
     "tools/promotion_unit_tests/test_legacy_version_evidence.py::test_identical_version_source_preserves_legacy_equivalence[fallback]",
@@ -1497,6 +1500,8 @@
     "tools/promotion_unit_tests/test_release_evidence.py::test_evidence_capacity_preflight_distinguishes_new_upload_from_existing_readback[64-True]"
   ],
   "sources": {
+    "libs/installer-engine/installer_dependency_policy.py": "08d1cb67e30cae123d6597666973f946ab68c21da76a649bdfc21f0395327ffd",
+    "libs/installer-engine/installer_dependency_config.py": "6952c12c3c9550217953b4dce99d4d84baf62c2f42e3d74edc0cbbc08c3e1609",
     "libs/config-migrate/src/config_migrate/__init__.py": "b5ea92049705890fe244b494af00955592e56337a71d981a24d419f25a34f0dc",
     "libs/config-migrate/src/config_migrate/core.py": "77d2469a245ee27ff80a1f24a236f38b896c23d011e2c8e4720a77df19a748c6",
     "libs/config-migrate/src/config_migrate/registry.py": "e542436a67d0ca488261e5fd17f921d2947296bc2aa04a46d46611a57c7a1f42",
@@ -1616,6 +1621,7 @@
     "tools/promotion_unit_tests/test_effects.py": "2fbb5d87e781f3a9acc83e6194d2f0c9822e46d6d6b37a907a92a8367e9d0007",
     "tools/promotion_unit_tests/test_fleet_contracts.py": "3600994bd34df5cd249d6cd3ad3389b7568f4ba599d4786da455dcc8db3bbc01",
     "tools/promotion_unit_tests/test_frozen_candidate.py": "7d0d46ff5ec6f1df4bc20540a5218f9de914f2a259db0c17155c016afb5a488a",
+    "tools/promotion_unit_tests/test_installer_retention.py": "0b945b4f7debecd7f26eef90a77526de7d950afcba3e8bef6fc8e41df55d2535",
     "tools/promotion_unit_tests/test_lazy_dispatch.py": "7a206f98c1f7686b83ad5c8fe11a3f801d93e3939c1b8d75294fe4deef5040dd",
     "tools/promotion_unit_tests/test_legacy_version_evidence.py": "741716970463c8ae8bf53cbd7d046faa02450593eb13f88d46984ba821d3668d",
     "tools/promotion_unit_tests/test_lifecycle.py": "b002067cfec30fda962f3a9546371abfe87957dd9f940593264860b52bcbd728",
@@ -1649,6 +1655,8 @@
     "tools/promotion_release_evidence.py": "85e870143e58e673719e7ee34e34cc581c93c2f5d888d74e546fffc18d3f1996"
   },
   "coverage_targets": [
+    "libs/installer-engine/installer_dependency_policy.py",
+    "libs/installer-engine/installer_dependency_config.py",
     "plugins/agent-worktrees/src/agent_worktrees/context_cli.py",
     "tools/artifact_source_build.py",
     "tools/standalone_python_artifacts.py",

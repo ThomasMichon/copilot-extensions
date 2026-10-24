@@ -35,11 +35,18 @@ class PromptDlgScreen(ModalScreen[bool]):
         Binding("q", "cancel", show=False),
     ]
 
-    def __init__(self, title: str, hint: str, *, seed_refusal: str | None = None) -> None:
+    def __init__(
+        self, title: str, hint: str, *, seed_refusal: str | None = None,
+        launch_decision: dict | None = None, journal_enabled: bool = True,
+    ) -> None:
         super().__init__()
         self._title = title
         self._hint = hint
         self._seed_refusal = seed_refusal
+        self._launch_decision = launch_decision or {"action": "resume", "is_local": True}
+        self._journal_enabled = journal_enabled
+        self.attempt_id: str | None = None
+        self.launch_decision: dict | None = None
         self.seed_prompt = ""            # set on Confirm
         self._prompt_widgets, self._prompt_rec = compose_seed_prompt()
 
@@ -74,10 +81,29 @@ class PromptDlgScreen(ModalScreen[bool]):
     def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         confirmed = event.value == "confirm"
         if confirmed:
-            if not self._prompt_rec["primary"].remember(refusal_reason=self._seed_refusal):
-                return
-            self.seed_prompt = self._collect_prompt()
-        self.dismiss(confirmed)
+            from copy import deepcopy
+            from ...launch_confirmation import confirm_before_effect
+            from .. import context
+
+            field = self._prompt_rec["primary"]
+            decision = deepcopy(self._launch_decision)
+            decision.setdefault("options", {})["seed_prompt"] = self._collect_prompt()
+
+            def saved(result):
+                self.attempt_id = result.get("attempt_id")
+                self.launch_decision = result
+                self.seed_prompt = result["options"]["seed_prompt"]
+                self.dismiss(True)
+
+            confirm_before_effect(
+                self, context.project(), decision, surface="resume-prompt", saved=saved,
+                prompt=str(field.text), refusal=field.refusal(refusal_reason=self._seed_refusal),
+                history=field.seed_store,
+                enabled=self._journal_enabled,
+            )
+        else:
+            self.action_cancel()
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        if self.app.screen is self:
+            self.dismiss(False)

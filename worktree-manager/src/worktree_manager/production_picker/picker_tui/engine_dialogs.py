@@ -649,9 +649,7 @@ class ScopeDlgScreen(ModalScreen[bool]):
     Enter to activate). Tab moves between the two (three, with
     ``show_prompt`` -- see below). Esc/q cancel via ``BINDINGS``.
 
-    ``show_prompt`` (picker-new-session-prompt-and-composer Phase A, folded
-    into this one dialog rather than a second screen the operator must step
-    through): when set, an optional free-text prompt field is composed
+    ``show_prompt``: when set, an optional free-text prompt field is composed
     ABOVE the options list -- the dialog's full content stack is then
     *header -> prompt -> options -> buttons*, with exactly three focus
     stops (prompt box, options list, buttons), Tab cycling between them and
@@ -712,11 +710,18 @@ class ScopeDlgScreen(ModalScreen[bool]):
         Binding("q", "cancel", show=False),
     ]
 
-    def __init__(self, dlg, impact_fn=None, *, show_prompt: bool = False) -> None:
+    def __init__(
+        self, dlg, impact_fn=None, *, show_prompt: bool = False,
+        launch_local: bool | None = None, journal_enabled: bool = True,
+    ) -> None:
         super().__init__()
         self._dlg = dlg
         self._impact_fn = impact_fn      # (ids:set) -> list[(id4, machine_env, title)]
         self._show_prompt = show_prompt
+        self._launch_local = launch_local
+        self._journal_enabled = journal_enabled
+        self.attempt_id: str | None = None
+        self.launch_decision: dict | None = None
         self.seed_prompt = ""            # set on Confirm when show_prompt is True
         if show_prompt:
             from .seed_prompt_field import compose_seed_prompt
@@ -830,15 +835,36 @@ class ScopeDlgScreen(ModalScreen[bool]):
 
     def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
         confirmed = event.value == "confirm"
-        if confirmed and self._show_prompt:
+        if confirmed and (self._show_prompt or self._launch_local is not None):
+            from ...launch_confirmation import confirm_before_effect, new_decision
+            from .. import context
+
+            field = self._prompt_rec["primary"] if self._prompt_rec else None
             options = [o["label"] for o in self._dlg["opts"] if o["on"]]
-            if not self._prompt_rec["primary"].remember(options=options):
-                return
-            self.seed_prompt = self._collect_prompt()
+            decision = new_decision(
+                self._dlg, self._collect_prompt(), is_local=self._launch_local is not False,
+            )
+            def saved(result):
+                self.attempt_id = result.get("attempt_id")
+                self.launch_decision = result
+                self.seed_prompt = result["options"]["seed_prompt"]
+                self.dismiss(True)
+
+            confirm_before_effect(
+                self, context.project(), decision, surface="new-dialog", saved=saved,
+                prompt=str(field.text) if field is not None else "",
+                refusal=field.refusal(options=options) if field is not None else None,
+                history=field.seed_store if field is not None else None,
+                enabled=self._journal_enabled,
+            )
+            return
+        if self.app.screen is not self:
+            return
         self.dismiss(confirmed)
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        if self.app.screen is self:
+            self.dismiss(False)
 
 class CfgMenuScreen(ModalScreen[int]):
     """Native modal ⚙ Configuration menu (#88 F4; native-focus internals #88 NF1).

@@ -23,17 +23,24 @@ class SeedPromptField(_AutoExpandTextArea):
         except SeedHistoryError as exc:
             self.notify(str(exc), severity="error")
 
-    def remember(
+    def refusal(
         self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
-    ) -> bool:
+    ) -> str | None:
+        """Validate a snapshot without persisting or changing the draft."""
         unsupported = {"Anchor repo", "Bare", "AHP", "Local model"} & set(options)
         if unsupported and not refusal_reason:
             refusal_reason = (
                 "Prompt launch is unsupported with " + ", ".join(sorted(unsupported))
                 + "; clear the prompt or change the options."
             )
-        if refusal_reason and self.text.strip():
-            self.notify(refusal_reason, severity="error")
+        return refusal_reason if self.text.strip() else None
+
+    def remember(
+        self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
+    ) -> bool:
+        reason = self.refusal(options=options, refusal_reason=refusal_reason)
+        if reason:
+            self.notify(reason, severity="error")
             self.focus()
             return False
         try:

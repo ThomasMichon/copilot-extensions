@@ -399,7 +399,9 @@ class PickerScreenWorktreeActionsMixin:
             self._open_worker_row(workers[cur])
             return
         if cur == "Open":
-            self._decide(self._resume_decision(rec, no_mux=no_mux, ahp=ahp))
+            decision = self._resume_decision(rec, no_mux=no_mux, ahp=ahp)
+            decision["journal_action"] = "open"
+            self._decide(decision)
         elif cur == "Resume":
             # #4043: No-Mux now rides Resume too (a stopped worktree can be
             # resumed without the mux wrapper for troubleshooting), not just
@@ -471,6 +473,7 @@ class PickerScreenWorktreeActionsMixin:
         elif cur == "Restore":
             decision = self._resume_decision(rec)
             decision["action"] = "restore"
+            decision["journal_action"] = "restore"
             self._decide(decision)
         elif cur == "Repair":
             # Reconcile the mux+stray-orphan double-binding: reap the bare
@@ -788,13 +791,9 @@ class PickerScreenWorktreeActionsMixin:
         return False, f"unknown internal action: {verb}"
     def _resume_embodied_worktree_cli(
         self, wid, *, machine=None, env=None, title=None, source_id=None,
-        source_kind=None, project=None, embodied=False
+        source_kind=None, project=None, embodied=False, attempt_id=None,
     ):
-        """Resume an embodied worktree using its loaded row or a synthetic row.
-
-        Unknown locality refuses without exit, result mutation or success.
-        A synthetic row carries the stable id and resolved host identity.
-        """
+        """Open a loaded or synthetic row; unknown locality refuses before effects."""
         row, error = self._find_internal_worktree(wid, source_id)
         if row is not None:
             if row.get("source_kind") != "machine-ssh":
@@ -802,10 +801,14 @@ class PickerScreenWorktreeActionsMixin:
             # A successful embodiment transaction already owns a fresh binding.
             if not embodied and row.get("managed_child") and not row.get("mux_live"):
                 return False, "workspace has no session here; navigate to its controller or Refresh"
-            if self._decide(self._resume_decision(row)) is False:
-                return False, self.debug
+            decision = self._resume_decision(row)
+            decision["journal_action"] = "open"
             if project:
-                self.app.result["project"] = project
+                decision["project"] = project
+            if attempt_id:
+                decision["attempt_id"] = attempt_id
+            if self._decide(decision) is False:
+                return False, self.debug
             return True, f"opening …{str(wid)[-4:]} into a CLI session"
         if source_kind and source_kind != "machine-ssh":
             return False, "provider-backed worktrees are read-only"
@@ -820,19 +823,16 @@ class PickerScreenWorktreeActionsMixin:
             "env": env,
             "title": title,
         })
+        decision["journal_action"] = "open"
+        if project:
+            decision["project"] = project
+        if attempt_id:
+            decision["attempt_id"] = attempt_id
         if self._decide(decision) is False:
             return False, self.debug
-        if project:
-            self.app.result["project"] = project
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
     def _embody_task_cli(self, ctx):
-        """Run ``agent-dispatch embody --interactive`` for one task, then exit
-        the picker into the returned worktree's normal resume flow.
-
-        The embody command is a real subprocess, so it runs off-thread via
-        ``_run_bg`` just like any other blocking action; a failure reports a
-        clear status-line message rather than raising through action dispatch.
-        """
+        """Persist the task Open before off-thread embodiment and normal resume."""
         from . import tasks as _tasks
 
         task_id = str(ctx.get("task_id") or ctx.get("id") or "").strip()
@@ -845,6 +845,7 @@ class PickerScreenWorktreeActionsMixin:
         if source_kind == "all":
             source_kind = None
         title = str(ctx.get("title") or task_id or "").strip() or None
+        attempt_id = None
         if not task_id:
             return False, "no task id"
         if not machine:
@@ -955,37 +956,33 @@ class PickerScreenWorktreeActionsMixin:
                 source_kind=source_kind,
                 project=str(payload.get("project") or "").strip() or None,
                 embodied=True,
+                attempt_id=attempt_id,
             )
             if not ok2:
                 self.debug = f"Open into a CLI session failed · {msg2 or 'see command output'}"
 
-        self._run_bg("Open into a CLI session", _work, _done)
+        def launch(confirmed):
+            nonlocal attempt_id
+            attempt_id = confirmed.get("attempt_id")
+            self._run_bg("Open into a CLI session", _work, _done)
+
+        if getattr(self, "real_ops", False):
+            from ...launch_confirmation import confirm_before_effect
+            from .. import context
+
+            confirm_before_effect(self, context.project(), {
+                "action": "open", "machine": machine, "env": env,
+                "is_local": not remote, "title": title, "options": {"task_id": task_id},
+            }, surface="task-open", saved=launch)
+        else:
+            launch({})
         return True, f"launching interactive CLI session for {task_id}"
     def _open_worktree_cli(self, wid, source_id=None):
-        """#2253: open the worktree ``wid`` into a CLI session, the same way
-        selecting its Worktrees row + Open does.
-
-        Resolves the row by **stable worktree id** across loaded machines, builds
-        the standard resume decision, and exits the picker so ``__main__`` maps it
-        onto the resume/launch path (which, for a task pinned to that worktree,
-        surfaces the handoff via ``/resume-handoff`` in the opened session). The
-        launch-decision plumbing -- not a subprocess -- so a remote worktree still
-        routes through the normal SSH handoff. Returns ``(ok, message)``; on
-        success the caller's post-action re-anchor is a harmless no-op since the
-        app is already exiting."""
+        """Open a stable worktree id through the ordinary local/remote decision."""
         return self._resume_embodied_worktree_cli(wid, source_id=source_id)
 
     def _open_venue(self, ctx):
-        """picker-venue-pivots Phase 3: open a CodeSpaces/Containers pivot row
-        into a live/dormant Copilot session via the venue's own ``copilot``
-        verb (``agent-codespaces copilot <name>`` / ``agent-containers copilot
-        <name>``) -- the same reserve/ensure-mux/attach-or-embody contract
-        either provider already implements for a live *or* dormant venue
-        (embody-or-attach is uniform; there is no separate "live-only" case
-        to gate on). Exits the picker so ``__main__`` can hand the operator a
-        real TTY (the venue command needs one for its interactive SSH
-        session) -- the same exit-and-launch plumbing ``open-cli`` uses for a
-        local worktree, just with a different provider on the other end."""
+        """Hand the TTY to the selected provider's own venue session contract."""
         provider = ctx.get("provider")
         venue = ctx.get("id")
         if not provider or not venue:
@@ -994,6 +991,7 @@ class PickerScreenWorktreeActionsMixin:
             "action": "open-venue",
             "provider": str(provider),
             "venue": str(venue),
+            "is_local": False,
             "title": ctx.get("title"),
         })
         return True, f"opening {venue} into a Copilot session"
