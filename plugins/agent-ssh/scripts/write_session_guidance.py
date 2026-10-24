@@ -97,6 +97,7 @@ def _run_contributor(
             check=False,
             env={**os.environ, "PYTHONPATH": ""},
             cwd=cwd,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -128,10 +129,11 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
     root = _plugin_root()
     raw_payload = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     cwd = _validated_payload_cwd(raw_payload)
+    catalog = _run_contributor(root, "emit-command-catalog", raw_payload, cwd=cwd)
     contexts = [
         context
         for context in (
-            _run_contributor(root, "emit-command-catalog", raw_payload, cwd=cwd),
+            catalog,
             _run_contributor(
                 root,
                 "emit-mesh-pointer",
@@ -151,7 +153,11 @@ def write_session_guidance(payload: dict, *, home: Path | None = None) -> bool:
             "guidance as unavailable for this session-start invocation.\n"
         )
     if contexts and len(content.encode("utf-8")) > _GUIDANCE_MAX_BYTES:
-        content = (
+        catalog_only = (
+            _GUIDANCE_HEADER + catalog
+            + "\n\nSSH snapshot omitted: combined delivery exceeded the bounded file budget.\n"
+        )
+        content = catalog_only if catalog and len(catalog_only.encode("utf-8")) <= _GUIDANCE_MAX_BYTES else (
             _GUIDANCE_HEADER
             + "Current agent-ssh session guidance was omitted because it "
             "exceeded the bounded file budget. Treat guidance as unavailable "

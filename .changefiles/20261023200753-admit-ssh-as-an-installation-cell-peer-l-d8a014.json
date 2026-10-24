@@ -1,0 +1,9 @@
+{
+  "comment": "Admit SSH as an installation-cell peer-launch owner.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

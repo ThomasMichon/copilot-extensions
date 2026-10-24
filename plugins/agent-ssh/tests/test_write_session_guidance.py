@@ -5,10 +5,12 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -74,6 +76,17 @@ def test_over_budget_content_writes_explicit_status(monkeypatch, tmp_path):
     )
     assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
     assert "omitted because" in _target(tmp_path).read_text(encoding="utf-8")
+
+
+def test_combined_budget_preserves_fitting_catalog(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        writer, "_run_contributor",
+        lambda root, stem, payload, **kwargs: "catalog" if stem == "emit-command-catalog" else "x" * 5000,
+    )
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    content = _target(tmp_path).read_text()
+    assert "catalog" in content and "SSH snapshot omitted" in content
+    assert len(content.encode()) <= 4096
 
 
 @pytest.mark.parametrize("session_id", ("", "../escape", "slash/value", "a" * 129))
@@ -186,6 +199,9 @@ def test_mesh_pointer_is_invoked_with_require_cwd_flag(monkeypatch, tmp_path):
         {"sessionId": "session-1"}, home=tmp_path
     )
     require_flags = {stem: require for stem, _cwd, require in calls}
+    assert [stem for stem, _cwd, _require in calls] == [
+        "emit-command-catalog", "emit-mesh-pointer",
+    ]
     assert require_flags["emit-mesh-pointer"] is True
     assert require_flags["emit-command-catalog"] is False
 
@@ -264,8 +280,103 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     content = _target(home).read_text(encoding="utf-8")
     assert content.startswith("# Agent SSH session guidance\n\n")
     assert "## agent-ssh session command catalog" in content
-    assert "## SSH machine mesh available for this repo" in content
+    assert "## SSH snapshot unavailable" in content
+    assert not (home / ".agent-ssh").exists()
     assert len(content.encode("utf-8")) <= writer._GUIDANCE_MAX_BYTES
+
+
+def test_actual_writer_and_cli_replace_snapshot_without_actuation(tmp_path):
+    """Use a ready test interpreter, not an installer or the operator's runtime."""
+    shell = (shutil.which("pwsh") or shutil.which("powershell.exe")) if os.name == "nt" else shutil.which("bash")
+    if not shell:
+        pytest.skip("native shell is unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(
+        ["git", "init", "-q", str(repo)], check=True,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    payload_root = tmp_path / "payload"
+    scripts = payload_root / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "write_session_guidance.py", "write-session-guidance.ps1",
+        "emit-command-catalog.ps1", "emit-mesh-pointer.ps1",
+        "write-session-guidance.sh", "emit-command-catalog.sh", "emit-mesh-pointer.sh",
+    ):
+        shutil.copyfile(_PLUGIN / "scripts" / name, scripts / name)
+    (scripts / "install.ps1").write_text("throw 'installer must not run'", encoding="utf-8")
+    (scripts / "install.sh").write_text("exit 91\n", encoding="utf-8")
+    source_root = _PLUGIN.parents[1]
+    source_paths = [str(_PLUGIN / "src"), *(
+        str(path) for path in (source_root / "libs").glob("*/src")
+    )]
+    entry = payload_root / "ready-runtime.py"
+    entry.write_text(
+        "import os,runpy,sys\n"
+        "assert os.environ.get('AGENT_SSH_NO_SELFPROVISION') == '1'\n"
+        f"sys.path[:0] = {source_paths!r}\n"
+        "runpy.run_module('agent_ssh',run_name='__main__')\n",
+        encoding="utf-8",
+    )
+    binary = payload_root / "bin"
+    binary.mkdir()
+    quote = lambda text: "'" + str(text).replace("'", "''") + "'"
+    (binary / "agent-ssh.ps1").write_text(
+        f"& {quote(sys.executable)} {quote(entry)} @args\nexit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    (binary / "agent-ssh").write_text(
+        f'#!/usr/bin/env bash\nexec {shlex.quote(sys.executable)} {shlex.quote(str(entry))} "$@"\n',
+        encoding="utf-8",
+    )
+    (binary / "agent-ssh").chmod(0o755)
+    environment = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload_root), "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "COPILOT_EXTENSIONS_CONTEXT"):
+        environment.pop(name, None)
+    samples = []
+    for alias in ("first-host", "second-host"):
+        (repo / "machines.yaml").write_text(json.dumps({"machines": {"host": {
+            "ssh": {"ready": True, "environments": [{"name": "linux", "alias": alias}]},
+        }}}), encoding="utf-8")
+        command = (
+            [shell, "-NoProfile", "-File", str(scripts / "write-session-guidance.ps1")]
+            if os.name == "nt" else [shell, str(scripts / "write-session-guidance.sh")]
+        )
+        started = time.monotonic()
+        completed = subprocess.run(
+            command,
+            cwd=home, env=environment,
+            input=json.dumps({"sessionId": "session-1", "cwd": str(repo)}),
+            capture_output=True, text=True, timeout=40,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        samples.append(time.monotonic() - started)
+        assert completed.returncode == 0 and completed.stdout == "{}"
+        content = _target(home).read_text(encoding="utf-8")
+        assert "## agent-ssh session command catalog" in content
+        assert "## SSH topology and local profile snapshot" in content
+        data = json.loads(content.rsplit("```json\n", 1)[1].split("\n```", 1)[0])
+        assert data["aliases"][0]["alias"] == alias
+        assert data["aliases"][0]["profile"] == "missing"
+        assert data["connectivity"] == data["effective_routes"] == "unobserved"
+        assert len(content.encode()) <= 4096
+    assert "first-host" not in content
+    assert not (home / ".ssh").exists()
+    assert not (home / ".agent-ssh").exists()
+    print(json.dumps({
+        "measurement": "ready-test-interpreter-native-writer",
+        "platform": sys.platform, "samples_seconds": samples,
+        "sessions": ["fresh", "resumed"], "aliases": 1, "fragments": 0,
+        "boundary": "native-wrapper-to-exit", "model_admission": "unobserved",
+        "cache": "not-controlled", "tail_qualification": "insufficient-samples",
+        "cpu_and_child_spawn_counts": "unmeasured",
+    }))
 
 
 def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_path):
@@ -309,7 +420,8 @@ def test_powershell_wrapper_skips_mesh_pointer_without_valid_payload_cwd(tmp_pat
     assert result.returncode == 0
     assert result.stdout == "{}"
     content = _target(home).read_text(encoding="utf-8")
-    assert "## SSH machine mesh available for this repo" not in content
+    assert "## SSH topology and local profile snapshot" not in content
+    assert "## SSH snapshot unavailable" not in content
 
 
 def test_hook_and_projection_contracts():

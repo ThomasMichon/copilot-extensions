@@ -137,7 +137,7 @@ Additional operator direction, captured without downstream-specific identifiers:
 
 Execution structure below is agent-recommended:
 
-- [ ] Review and merge this additive plan before implementing #7527.
+- [x] Review and merge this additive plan before implementing #7527 (#7530).
 - [ ] Add a read-only snapshot using the existing topology parser and managed
   fragment classifier. Resolve the caller's conventional source and, when the
   authoritative optional Worktrees peer declares an external state root, compose
@@ -244,3 +244,12 @@ execution structure for the requested outcome, not authorization to implement.
 - Proposed consuming the reviewed conventional-source contract and this
   client's generated fragments without activating transports or changing
   profiles. This amendment does not claim runtime implementation or rollout.
+
+### 2026-10-24 - Session snapshot plan accepted
+
+- #7530 merged at `6feef3baeea32ea111e34d2e4f799510035aaa6f` after exact-head
+  approval and passing required checks. Only the additive plan-review gate is
+  complete; no runtime, profile, service or configuration change was performed.
+- Re-read this complete effort after merge. Snapshot implementation and its
+  isolated writer/CLI validation remain open under #7527; the wider campaign
+  and separately authorized rollout remain open.

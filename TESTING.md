@@ -7,6 +7,23 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional SSH session snapshot
+
+The manual `installation-context-acceptance.yml` selector `ssh_snapshot=true`
+runs snapshot, session writer, mesh and fragment-registry tests on Linux and
+Windows. The native writer control uses a ready test interpreter and the actual
+CLI on fresh/resumed session files; it does not qualify installed-runtime
+readiness. It verifies replacement, the 4 KiB bound, preserved catalog, and no
+profile/runtime creation. Dispatch's existing real-venv peer fixture also
+exercises SSH-to-Worktrees same-cell selection and foreign receipt refusal.
+These process boundaries stay outside required unit-only CI.
+
+For a focused local run, select `tests/test_session_snapshot.py` and
+`tests/test_write_session_guidance.py` with `tools/run-plugin-tests.py agent-ssh`.
+The separate real peer control uses `tools/run-plugin-tests.py agent-dispatch
+--test-file tests/test_procutil.py -k "ssh_snapshot or (namespaced_sibling_resolution
+and agent-ssh)"`. No production credentials, remote hosts or capacity are needed.
+
 ## Optional candidate dependency profiles
 
 `python tools/run-plugin-tests.py agent-worktrees --test-file
