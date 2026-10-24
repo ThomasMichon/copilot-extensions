@@ -1611,6 +1611,15 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > pending changefile naming that consumer. Use its registered name with
 > `--plugin`; absence from the marketplace plugin roster is not an exemption.
 >
+> **Shared-library release versions also use changefiles.** Address the
+> canonical project explicitly, for example
+> `python tools/changefile.py add --plugin libs/agent-procutil --type dev --comment "Release shared process helpers"`.
+> Promotion seeds its version from the last shipped Main, applies the
+> requested bump to canonical and physical copies, and then materializes
+> editable pointers. This is separate from consumer changefiles: source
+> changes still require the consumer entries described above. Do not
+> hand-edit library manifests or weaken a consumer's minimum dependency.
+>
 > **Before editing a shared lib, find every consumer first — two commands,
 > not one.** `python tools/check-vendored-libs-sync.py --list` enumerates
 > every REAL, physical vendored copy (`plugins/*/libs/*` and a standalone

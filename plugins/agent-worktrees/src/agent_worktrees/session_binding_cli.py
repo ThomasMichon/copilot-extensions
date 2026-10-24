@@ -6,7 +6,7 @@ import argparse
 import os
 import sys
 
-from . import activity, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity, worktree_trust
+from . import activity, launch_native_observation, native_lifecycle_source, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity, worktree_trust
 from . import config as cfg, hook_ipc, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 from .session_title import capture_session_title as _capture_session_title
@@ -429,11 +429,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     candidate_associated = False
     candidate_predecessor = None
     linked_handoff = None
-    from . import native_lifecycle_source
-
-    source_identity = native_lifecycle_source.start_identity(
-        session_id, native_lifecycle_source.witness(payload, resident=resident_environment),
-    )
+    native_witness = native_lifecycle_source.witness(payload, resident=resident_environment)
+    source_identity = native_lifecycle_source.start_identity(session_id, native_witness)
     try:
         linked_handoff = tracking.register_session(
             wt_id,
@@ -471,6 +468,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
+    launch_native_observation.observe_registration(
+        tracking._owning_tracking_dir(wt_id) / f"{wt_id}.yaml",
+        session_id, source_identity, payload=payload, witness=native_witness,
+        resident=resident_environment,
+    )
     try:
         from . import handoff_diagnostics
         registration_project = cfg.active_project()
@@ -657,7 +659,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             candidate_before_ack = None
 
     try:
-        from . import native_lifecycle_source, tracking_write
+        from . import tracking_write
 
         linked_handoff = tracking.register_session(
             wt_id,
@@ -966,8 +968,6 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     if not wt_id:
         return 0
     try:
-        from . import native_lifecycle_source
-
         record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         source_identity = native_lifecycle_source.end_identity(
             session_id,

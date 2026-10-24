@@ -162,14 +162,14 @@ Copilot conversation or prompt acceptance.
 
 Before publishing a journaled plan, the resolver places its attempt and exact
 resolution-operation IDs in the existing deferred command's private wrapper
-arguments. It does not add them to ambient session environment or use a
+arguments. Resolution does not set ambient session environment or use a
 per-worktree "current attempt" pointer. Each executing wrapper gets a distinct
 execution-operation ID, with an explicit parent ID for a cooperative setup's
 backend wrapper. Concurrent launches cannot inherit another attempt merely
 because they share a worktree.
 
 The existing tracking-write owner retains prompt-free
-`worktree-launch-execution` version-1 files alongside resolution receipts as
+`worktree-launch-execution` version-2 files alongside resolution receipts as
 `launch-attempts/<attempt-id>/<execution-id>.execution.json`. Each is bounded
 to 16 KiB and four events: `execution-requested`, optional `seed-claimed`,
 optional `process-spawned`, and `execution-returned` or `unknown`.
@@ -182,6 +182,11 @@ An interrupted post-effect receipt write or process-identity probe is likewise
 unconfirmed, not permission to unwind past an already-started child. Interrupted
 seed settlement retains its existing uncertainty fence while child waiting
 continues.
+Version 2 also records the native execution epoch when the existing Linux/WSL
+source owner can qualify it. Unsupported platforms/environments retain a null
+epoch; version-1 receipts remain readable but cannot qualify native association.
+The execution-write verb advertises version 2 so an older resident cannot
+silently accept a subject it cannot retain.
 
 Each write rechecks the advertised verb/version. A published incompatible
 endpoint with a confirmed live PID/birth owner is not a starting monitor:
@@ -206,8 +211,8 @@ never manufactures success or grants automatic replay.
 
 Record-backed seedless/custom launchers expose only the wrapper process unless
 their backend boundary supplies its own evidence. Base plans without a record
-retain resolution evidence only. Native conversation/turn association, joined
-Manager history, retention and sweeps remain separate work. In particular,
+retain resolution evidence only. Joined Manager history, retention, sweeps and
+accepted-turn evidence remain separate work. In particular,
 the optional resident prompt-receipt adapter's missing qualified backend is
 unavailable, not evidence that a prompt was absent or accepted.
 
@@ -218,6 +223,47 @@ Set `COPILOT_EXTENSIONS_NATIVE_WINDOWS=1` on an interactive Windows desktop to
 also observe two consoleless-parent backend cycles for visible windows and
 foreground changes. These are synthetic backend checks, not installed Copilot
 acceptance or local/SSH same-conversation qualification.
+
+### Original native-session observations
+
+Only an executing backend wrapper puts its exact attempt, resolution and
+execution IDs in the child-scoped `AGENT_WORKTREES_LAUNCH_EXECUTION` hint.
+Parent environment is unchanged; a launcher or unjournaled wrapper clears an
+inherited hint. This is correlation metadata, not a grant of native ownership,
+prompt consumption or retry permission.
+
+The original hook already transports its captured environment and bounded
+process ancestry to session registration. After successful registration, the
+observation path consumes that original hint and the existing source-aware
+native identity; a resident never substitutes its own environment or ancestry.
+The existing tracking-write owner checks the exact UUID's open hold, canonical
+registered activation, worktree incarnation and execution epoch before retaining
+one immutable, prompt-free `worktree-launch-native-observation` version-1 file
+at `launch-attempts/<attempt-id>/<execution-id>.native.json`, capped at 16 KiB.
+Identical repeats are idempotent; a changed observation is reported, not replaced.
+The hook does not boot a monitor or wait for one to start. Its optional warm
+write uses the registration path's 1.5-second request budget; ambiguous writes
+are never replayed. The observation's sidecar lock is nonblocking. Audit
+uncertainty is diagnostic and does not undo registration.
+
+The observation may precede the parent's `process-spawned` fsync. Retaining it
+independently allows the bounded read-only join to become qualified once that
+exact process receipt arrives, without polling, reacquiring a session or
+replaying a launch. The join requires the same attempt/resolution/execution,
+worktree nonce and physical epoch, plus the backend PID/birth at or above the
+qualified native holder in the original ancestry. A launcher-only boundary,
+PID reuse, missing receipt or unqualified/legacy epoch stays unknown. Corrupt
+or linked artifacts are errors, not an empty or successful history.
+
+`native-session-observed` proves only that original source's session was observed
+under the recorded backend process. It explicitly reports
+`prompt_acceptance: unknown`; it does not prove a delivered turn, current
+liveness, New/Resume parity or same-conversation installed acceptance.
+Windows, macOS and containers remain outside the native source owner's
+qualification. The separate native source lane
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_native_observation_native.py`
+uses a synthetic Linux/WSL open hold, an actual original-hook subprocess and the
+resident write transport. It is not a real Copilot acceptance test.
 
 ## SSH launch-prompt admission
 
