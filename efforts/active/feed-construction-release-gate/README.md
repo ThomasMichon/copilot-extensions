@@ -169,6 +169,8 @@ cutover is activated by the reviewed documentation.
 |----------|------------------|
 | Checked-in policy | #7655 merged the construction/first-launch exception and canonical effort; implementation is permitted within that reviewed scope. |
 | Inventory implementation | #8304 merged the source-owner diagnostic and engine declaration. Every tracked Python project is classified against canonical rosters; complete construction environments and the native/profile matrix are still unqualified. |
+| Checked-in selected-extra constructor | #8393 merged at `e618cb2a44c1129139ffe5b2ae869f5c3c273540`: declared primary-package extras participate in the canonical transaction, admission identity and installed-origin evidence. Local constructor contracts passed with an explicit contention allowance (55 passed; one existing symlink-privilege skip), and the rebased base/profile integration controls passed again. This is not default-budget performance proof or an active gate. |
+| Released selected-extra constructor | The latest observed Main release `bc361f7fa05201e3869eb9021d26d30c85805fc3` does not contain the profile-aware canonical engine. No deployment or running-state qualification is claimed. |
 | Checked-in gate | No complete environment inventory, construction qualifier or required CI/promotion admission gate is active for this effort. |
 | Released gate | None: the existing release pipeline does not yet enforce this effort's configured-feed construction and first-launch contract. |
 | Installed evidence | Earlier consumer-specific Manager capture/origin results remain bounded observations, not full environment/profile coverage. The launch-maintenance effort separately records current selected-slot observations. |
@@ -383,3 +385,169 @@ cutover is activated by the reviewed documentation.
   started. Continue by declaring actual environment/profile/constructor and
   installed-launch bindings, then implement complete source/candidate-bound
   results and the accepted trusted-control integration.
+
+### 2026-10-23 - Bind selected extras inside the existing constructor
+
+- The existing candidate engine now accepts an immutable selection of declared
+  primary-package extras. Selection is normalized and bound to non-base
+  admission identity; base source fingerprints remain compatible. The same
+  retained UV transaction installs the selected closure before installed health
+  and completion. Reuse checks the recorded profile rather than treating a base
+  or another-extra runtime as equivalent.
+- This does not introduce an installer or change any owner's profile lifecycle.
+  Containers retains its existing base/provider-exec coordinator. Native Index
+  keeps a base CLI, a required host `[store,server]` sibling and its separately
+  managed embedding engine. Engine and sibling composition require their actual
+  owner bindings; selecting an extra on the primary package does not construct
+  them automatically.
+- The bounded metadata reconciliation also identifies production groups on
+  Dispatch (`mcp`, `replay`), Pull Requests (`fleet`) and Vault (`cache`, `kek`),
+  alongside the standalone products' declared groups. Presence of a group is
+  not a declaration that it is selected or owns an independent venv. Missing
+  environment/profile selection and native architecture/ABI declarations remain
+  explicit inventory gaps, never permission to skip a release row.
+- No host selector, runtime, service, feed configuration or controller is
+  activated. Full construction results, hosted execution, accepted integration
+  seams and negative enforcement proof remain open.
+- Native validation is blocked, not successful. Windows runs exercised the new
+  selection/refusal controls but the full constructor file encountered native
+  health/marker-access deadlines and copied-interpreter write/cleanup access
+  errors. A second interpreter family did not produce a clean full result.
+  The cause has not been established; no security or production deadline was
+  weakened, and unsuccessful fixture-mutation experiments were discarded.
+- A minimal POSIX source fixture passed forty-four controls, but missing fixture
+  graph inputs caused ten setup errors and one failure. Complete-graph
+  preparation then exhausted its deadline. Neither run qualifies the native
+  constructor file, and neither can substitute for hosted feed evidence.
+  Preserve the implementation locally until complete validation and review pass;
+  do not publish, deploy or waive the outstanding failures.
+
+### 2026-10-23 - Narrow native access and lifetime diagnosis
+
+- Subsequent read and write-open probes changed no retained candidate bytes.
+  The interpreter, completion marker, lease file and origin receipt all opened
+  successfully. No matching Python or UV process was observed. A separate
+  framework-owned temporary-directory control also completed creation,
+  replacement, readback, deletion and cleanup. These observations do not
+  establish why earlier access failed or exclude a transient holder.
+- With an existing native Windows ARM64 Python 3.13.15 interpreter, the exact
+  previously failing executable-corruption control passed under its unchanged
+  thirty-second item watchdog. The base-construction control and both real-UV
+  selected-extra controls also passed. These are focused source controls, not a
+  passing full native file or a production profile/feed qualification.
+- The construction/preparation/reused-health control still exhausted the
+  unchanged item watchdog in a separate focused run. Its stack was waiting for
+  the retained health guardian during completed-runtime reuse. A diagnostic
+  phase-timed run subsequently completed that case in about eighteen seconds;
+  an unchanged-watchdog traced run passed both preparation outcomes. Individual
+  observed child phases settled, with no single persistent hang identified.
+  Timing variability and the earlier access failure remain unexplained.
+- A lower-overhead, source-bound trace completed the same successful outcome in
+  about twenty-three seconds under the unchanged watchdog. Five owned child
+  calls consumed about fourteen seconds; initial retained-input preparation
+  consumed about seven and a half seconds. Within those inclusive measurements,
+  the two policy probes consumed about one second and twenty-nine retained file
+  copies about half a second. UV reported three local packages resolved in
+  59 milliseconds, prepared in 1.44 seconds and installed in 1.29 seconds, with
+  the synthetic fixture's index and cache disabled. This local failure does not
+  establish a configured-feed wait. The remaining startup, metadata, ownership
+  and scheduling costs require attribution rather than a speculative operating-
+  system or security diagnosis. A broader profiling attempt also timed out and
+  is not counted as passing evidence.
+- No source behavior, test deadline, operating-system policy, feed setting,
+  controller or installed runtime was changed by these probes. Keep the native
+  validation hold and the parent effort Active; isolated successful retries
+  cannot erase an observed failure or authorize publication.
+
+### 2026-10-23 - Explicit local contention allowance
+
+- The operator authorized a bounded local trial using the existing runner's
+  timeout overrides, not a persistent runner policy or production change.
+  The full constructor file ran with sixty-second default item, six-hundred-
+  second group and eighteen-hundred-second plugin watchdogs. Existing explicit
+  per-test markers remained unchanged; CI and production deadlines did not move.
+- The run failed after about 213 seconds. The real Worktrees dependency-graph
+  freezing control reached its own existing 180-second marker while rereading
+  source content for the post-copy fingerprint. It did not exhaust the new
+  sixty-second default or reach the previously failing installed-health case.
+  This attempt therefore does not qualify the full constructor file or prove
+  that a doubled default resolves the local failures.
+- This failure is in source snapshot verification, before UV construction or
+  installed launch. It supplies a more specific local I/O boundary to
+  investigate, not proof of contention, a defective constructor or a feed
+  outage. No additional timeout increase, test-only machine allocation,
+  security exception or publication is implied.
+
+### 2026-10-23 - Complete the local constructor contracts under bounded load allowance
+
+- The operator subsequently authorized the necessary local validation and
+  continuation through the upstream PR flow. A process-local pytest adapter
+  doubled both default and explicit item watchdogs: sixty-second default,
+  240-second marked construction controls and 360-second real-graph freezing
+  control. Group/plugin ceilings were 1,200/1,800 seconds. No tracked runner,
+  test assertion, production child deadline, CI policy or cleanup behavior
+  changed, and no test-only machine was allocated.
+- The complete constructor file finished in about 694 seconds: 55 passed and
+  one existing skip. A focused readback identified that skip as unavailable
+  Windows symlink-creation privilege, not an omitted construction/profile
+  control. The native interpreter was Windows ARM64 Python 3.13.15.
+  Executable-corruption, preparation/reuse, selected-profile success/refusal,
+  immutable origins and owned-child cleanup controls passed in that full run.
+- This clears the local code-slice validation hold for PR review; it does not
+  establish the cause of prior variability or default-budget performance.
+  Earlier unsuccessful runs remain recorded above rather than relabeled.
+  The portable source/contract and generated-consumer checks also passed.
+- The existing required PR workflow checks source guards and its positively
+  admitted unit packet. It does not execute this full native constructor file
+  or qualify the configured feed. Keep complete environment/native inventory,
+  hosted-feed evidence, trusted-controller integration and negative enforcement
+  proof open under the parent effort. No release protection or host rollout is
+  activated by this constructor slice.
+
+### 2026-10-23 - Land the selected-extra constructor prerequisite
+
+- #8393 merged as `e618cb2a44c1129139ffe5b2ae869f5c3c273540` after an actual
+  current-head Copilot approval, complete review/thread reads with no open
+  findings, and the required source CI and workflow-lockdown checks. The parent
+  issue remains open and has no closing reference from that partial slice.
+- The managed publication rebase included newer dependency-policy and process
+  helpers. Three real base/selected-profile construction controls passed again
+  against the exact reviewed head in about 67 seconds under the bounded local
+  allowance. This is integration evidence for those changed dependencies, not
+  a claim that the complete earlier native file ran again after the rebase.
+- The active source worktree was pulled forward through the managed flow.
+  The observed Main release still has the earlier canonical engine; source
+  merge is not release, deployment or active configured-feed enforcement.
+- Continue with the actual environment/profile/constructor/installed-launch
+  bindings and complete fail-closed coverage/result contract. The accepted
+  trusted-controller consumer seam remains an explicit prerequisite to CI and
+  promotion wiring; existing control ownership is unchanged.
+
+### 2026-10-23 - Separate readiness from pure qualification-result admission
+
+- The continued MCP trace confirms its existing readiness declaration names
+  platform installers and installed configuration validation, not an exact
+  interpreter architecture/ABI matrix or source/candidate-bound construction
+  evidence. A successful empty bridge configuration is valid module readiness,
+  but cannot establish release construction coverage.
+- Added a pure, versioned expected-plan/result admission library. Independently
+  supplied expected inputs bind source, composed candidate, package policy,
+  every declared environment/profile/extra selection, native interpreter and
+  canonical construction/launch specification digests. Exact row coverage,
+  actual native identity and complete successful check evidence are required;
+  failed, skipped, unavailable and timed-out results cannot qualify.
+- This is structural admission, not producer authentication or proof that a
+  self-reported digest is genuine. Complete authoritative environment/platform
+  declarations, authenticated evidence acquisition and referenced-artifact
+  verification remain prerequisites to a trusted consumer. No report-supplied
+  expected plan, inferred support matrix or readiness-only shortcut is added.
+- The implementation closes a bounded part of the reviewed result-contract
+  intent without changing existing installers, CI, promotion, credentials or
+  installed runtimes. The accepted #6237/#3336 consumer seam and all actual
+  hosted/native/negative-enforcement gates remain open.
+- Thirteen focused in-process controls passed with source lint. They cover
+  every plan/native binding dimension, exact row/check coverage, malformed and
+  unsuccessful outcomes, evidence references and order-independent profiles.
+  No additional native installation or clean-room run is applicable to this
+  pure data-contract slice. Actual feed/native execution still belongs to the
+  unimplemented producer and complete-plan integration, not this test result.

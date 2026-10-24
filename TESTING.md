@@ -7,6 +7,20 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional candidate dependency profiles
+
+`python tools/run-plugin-tests.py agent-worktrees --test-file
+tests/test_python_installer_engine.py` covers the canonical candidate engine,
+including explicit declared extras. Its offline synthetic packages exercise real
+UV construction, installed-origin health, immutable profile reuse and refusal of
+an unavailable extra dependency before completion. They also retain the original
+base fingerprint and preserve an existing active selector on failure. These are
+on-demand construction controls, not additions to the eligible-unit packet.
+They do not prove a production extra graph, hosted feed access, a native support
+matrix or required release enforcement. The
+[feed-construction effort](efforts/active/feed-construction-release-gate/README.md)
+retains those open acceptance gates.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py
@@ -212,6 +226,48 @@ for its local contracts. The real CLI control creates a private Git fixture and
 checks the actual tracked-tree invocation and nonzero unknown-owner result.
 That native subprocess control is separate from eligible-unit promotion
 evidence; this change does not add it to the admitted unit packet or alter CI.
+
+## Construction-result contract
+
+`tools/construction_qualification.py` is a pure result-admission library, not a
+runner or an active release gate. Its `assess_qualification(expected_plan,
+report)` API requires an independently derived expected plan. The version-one
+`copilot-extensions.construction-plan` binds the source commit, exact composed
+candidate digest, effective package-policy digest and nonempty environment
+matrix. Each row names its source project, profile, normalized sorted extras,
+exact native OS/interpreter patch/architecture/ABI, and digests of its canonical
+construction and installed-launch specifications. Those opaque specification
+digests bind the existing owners' actions; they are not a new execution format.
+`plan_digest` canonically orders rows without making different profiles,
+constructors, launch actions or native targets interchangeable.
+
+A `copilot-extensions.construction-results` report names that plan digest and
+one result per row. Every result records the observed native identity, elapsed
+seconds, terminal status and five check records: `construction`,
+`installed_origin`, `installed_launch`, `feed_policy` and `cold_environment`.
+Each check needs `passed` and its evidence digest. Missing/extra rows, stale
+bindings, another native interpreter, failed/skipped/timed-out/unavailable rows
+or incomplete evidence yield `qualified: false` with explicit reasons.
+Malformed schemas, duplicate rows, nonfinite/negative durations and invalid
+digests raise `QualificationError`; callers must surface these as failures.
+There is no successful skip or empty-matrix qualification.
+
+**Trust boundary:** matching self-reported hashes do not authenticate a producer
+or prove execution. The future trusted consumer must derive the complete plan
+from authoritative source/profile/platform declarations, bind actual policy and
+candidate inputs, acquire authenticated evidence from the expected producer and
+verify referenced artifacts before calling this library. It must not accept an
+expected plan supplied by the result producer. No complete environment catalog,
+feed resolver, native executor, artifact verifier, CI check, promotion consumer
+or publication authority is introduced here. Existing source-owner inventory
+and installer-readiness declarations alone are not that complete plan.
+
+Run `python -m unittest discover -s tools -p test_construction_qualification.py -v`
+for the in-process contract controls. These tests perform no installation,
+network or native-process work and are not yet added to the admitted unit
+packet. Hosted feed, native construction/launch and required negative
+CI/promotion enforcement remain open in the
+[feed-construction effort](efforts/active/feed-construction-release-gate/README.md).
 
 ## Native file-link prerequisites
 
@@ -1616,6 +1672,14 @@ All diagnostics remain inside the unchanged test and subprocess deadlines.
 
 ### Native Agent Machines lifecycle boundaries
 
+`tools/run-plugin-tests.py agent-machines --test-file tests/test_registry_native.py`
+checks DWORD/QWORD convergence against real `reg.exe` hexadecimal output.
+It reads the existing Windows `InstallDate`/`InstallTime` values independently
+with `winreg`, then exercises dry-run and apply through a query-only runner.
+No registry value is created, changed or deleted. Missing Windows prerequisites
+skip explicitly; a skip is not native convergence proof. Pure injected-runner
+controls remain in `tests/test_resources.py`; required unit CI is unchanged.
+
 `plugins/agent-machines/tests/test_payload_installer_lifecycle_powershell.py`
 likewise gives each cleanup outcome, staging/watchdog outcome and output
 encoding its own function-scoped sandbox and pytest item. The default remains
@@ -1843,6 +1907,32 @@ its sleeping descendant and the console ancestry alive, then requires them all
 to exit before outer observer cleanup and before the existing held-read
 watchdog. The test dependency does not enter the core/client runtime wheels.
 
+Typed collaboration adds pure normalization and captured-view-control contracts
+to `tools/promotion_unit_tests/test_chat_collaboration.py`, with the exact
+five-file import/test closure and production coverage targets enrolled in the
+existing unit manifest. These units create no store, provider, process or
+listener. Database atomicity, non-consuming pending/thread pages, unchanged
+reader progress, strict receipts, lost-response recovery and actual source-removed
+installed commands stay in the existing Chat acceptance/full portfolio.
+Its family and parameter inventory expands additively; neither the 120/600-second
+allowances nor any original family is relaxed.
+The empty-inbox and sparse-thread regressions compare actual SQLite instruction
+counts with100 versus5000 unrelated questions/messages, including the viewer's
+own ambient traffic and correspondence in another channel. They allow at most1000 extra instructions
+while retaining correct pending/page results and unchanged semantic progress.
+Pending-backlog cases additionally require the same bound with100 versus5000
+unanswered questions and mixed answer/question attention. Settled-history cases
+retain the bound for answered, resolved and superseded conversations, proving
+candidate examination is limited before retirement filtering. The client follows
+empty scan-progress pages within the captured boundary without skipping pending
+entries or consuming semantic progress, and rejects stalled/out-of-bound
+continuations and mismatched returned counts.
+
+The sharing-race control injects its transient error only after the first
+successful real readiness-file read. A stale negative existence probe cannot
+bypass injection. Both normal and fault cases retain actual child birth/prefix
+checks, crash-before-outer-Job-cleanup proof and the original five-second bound.
+
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
 separate the full222-case snapshot from explicit42/221-case candidates measured
@@ -1912,6 +2002,20 @@ must run from their own attributable payload or isolated working directory so
 UV does not discover unrelated checkout metadata. Retained-path assertions
 validate source identity, private ownership and content at the physical UV
 boundary before normalizing paths for ordering or retry comparisons.
+Vault's offline UV fixture builds its native PE directly with the Windows
+.NET Framework compiler, preferring Framework64 and falling back to Framework.
+Its existing preflight contract forces fresh compilation and executes the real
+provider, then proves byte-identical reuse without another compiler invocation.
+Headless execution and the 20-second native child deadline remain unchanged.
+This fixture does not alter snapshot copying or the separate NoService contract.
+
+Vault's NoService snapshot fixture invokes the actual installer and isolated
+runtime root through a PowerShell wrapper with throwing scheduled-task mutation
+controls. The existing stamp case proves all five controls refuse mutation,
+preserves arguments containing spaces and verifies exact nonzero exit forwarding.
+Real snapshot provisioning and compatibility launch retain their original
+assertions and deadlines; installer/runtime code and host services are unchanged.
+
 Vault's two snapshot-provisioning integration cases explicitly allow 60 seconds
 per item: fixture setup performs one complete four-package installation,
 health gate and publication transaction. The remaining items keep the default
@@ -1947,6 +2051,14 @@ task-specific scratch folder and pass its absolute path as
 synthetic read/write tokens and an in-memory HTTP adapter; it makes no live API
 requests or review writes. This catches bundled dependency/import differences
 that an injected unit-test client cannot reproduce.
+
+CI first runs `tools/prepare_bridge_contract_evidence.py` against its explicitly
+selected repository URL. If the exact HTTP-47 capture checkpoint is absent, this
+bounded preparation retains it without moving a branch or changing capture
+evidence. Full ordinary history does not include every squash-orphaned commit.
+Missing or malformed checkpoints fail rather than waiving closure validation.
+The targeted tests cover existing and missing objects, exact remote/revision
+selection, failed preparation and a real unreferenced Git commit.
 
 The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
 requires Git 2.45+ for enforced `GIT_NO_LAZY_FETCH` support; older versions
@@ -1988,6 +2100,16 @@ only existing, unlinked Python test files inside that plugin's `tests` tree;
 it retains the usual containment and time budgets and fails if no selected
 tests run. Combine it with `-k` to preserve a diagnostic lane's exact test
 roster without collecting the full plugin suite.
+
+The resident repository-map native lane uses
+`agent-worktrees --allow-explicit-tiers --test-file tests/test_repository_map.py
+--test-file tests/native/test_repository_map_native.py` with this runner.
+Set `REPOSITORY_MAP_DISPATCH_PYTHON` to the separately prepared Dispatch
+interpreter for the real cross-distribution catalog case. It uses a private
+local server, fresh registry and actual CLI/JSON boundary, with one whole-map
+call and no per-repository lookup. Missing that interpreter explicitly skips
+only the cross-distribution case. This on-demand native lane does not add a
+process matrix to required unit CI or qualify an installed rollout.
 
 Explicit out-of-plugin targets use the same bounded runner and admission lease:
 `worktree-manager` selects that product's tests, `payload-invocation` selects

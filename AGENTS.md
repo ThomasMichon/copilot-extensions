@@ -287,6 +287,8 @@ public face:
   worktree's assigned codename, decodes to nothing on its own) or `false`
   (fully anonymous); never publish raw machine, worktree, or session
   identifiers in a PR title, body, commit message, label, or generated marker.
+  The standard `Copilot-Session` commit trailer is the narrow provenance
+  exception documented in `CONTRIBUTING.md`; preserve it when supplied.
   Closed-circuit repos may opt in to full raw source attribution
   (`pr.source_attribution: true`) in their own config.
 

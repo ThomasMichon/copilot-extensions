@@ -713,3 +713,269 @@ streams, DEVNULL input, distinct exit statuses and window/focus observation.
 That source merge does not retroactively turn the failed field verification
 into success; containing release and newly authorized installed suite
 completion are still required.
+
+The bounded bootstrap-owned presentation follow-up merged in #8020. Its own
+explicit progress, warnings and diagnostics now go to UTC-correlated stderr
+text: PowerShell reports elapsed time from an in-process stopwatch without
+host-information duplication, while Bash labels elapsed timing unavailable
+before a portable provider exists. Actual native capture and local-Git fixture
+coverage qualified those producers without running an installed update.
+Prerequisite child output and thrown shell errors remain separate producers.
+The following Manager `update_bootstrap.prepare_update` repair also precedes
+`UpdateRun`. A locally qualified candidate frames that prefix's own messages
+and exact repair exit without capturing its children. A redirected native
+Windows control also found that the existing `_wait` lost child output while
+preserving its exit; explicit existing standard descriptors corrected that
+source boundary. The wait loop, flags, source and ownership rules are unchanged.
+The focused 88-case cohort passed on both platforms, but additional optional
+native-policy cases still exceeded their original item deadline and the
+candidate remains unpublished. These are retained source boundaries, not
+evidence of completed installed acceptance or permission for another update.
+
+### Native self-stage copy cost
+
+The optional Windows repair-policy timeout was attributed beyond initial
+lifecycle admission to the shared PowerShell self-stage `Copy-Item`. A stack
+sample reached the native-child wait within one second; native progress then
+stopped at copying, with 245 of 684 files staged at the original outer item
+deadline. This does not attribute that entire elapsed interval to copying.
+
+A separate bounded comparison used the exact same 684-file input and fresh
+private destinations. Provider copying reached its 20-second command deadline
+at 659 files. The candidate source's native copier finished all 684 in 2.281
+seconds, retaining equal file bytes, modification times and modes. The provider
+duration is censored, so no exact completed-run speedup is claimed.
+
+The source candidate uses the existing native-copy pattern in all 13
+byte-identical PowerShell self-stage blocks. It retains complete inputs and
+uses the old provider for reparse points; native 5.1/7 controls establish
+special-file, metadata and error parity. Staging location, re-exec, CWD,
+watchdog, ownership and deadlines are unchanged. #5820 still owns the separate
+version-slot/whole-lifecycle redesign.
+
+After that correction and native cleanup of the exact private fixture root,
+the first actual repair-policy case passed within its original 30-second
+limit. The optional two-cycle provision/update case still exceeds that limit;
+the full native lane and installed no-op proof remain open. Neither the
+bounded copy improvement nor the 35 passing staging/CWD/watchdog cases proves
+a faster complete host update, fewer required installation checks or healthy
+installed no-op behavior.
+
+### Explicit context-reader hints
+
+The scoped-repair preflight still has to validate the receipt, resolve current
+governance and check publication at the same boundaries. Those checks were
+re-entering native shell readers even when Manager supplied an exact existing
+interpreter for the canonical SDK. POSIX now honors that existing hint before
+early reads; Windows uses it through the existing hidden-process transport.
+Unsupplied-interpreter readers are retained. No owner, source, activation,
+publication or generation assertion is omitted.
+
+The original Linux scoped call exceeded its 30-second item limit; its corrected
+call completed in 10.10 seconds and all 20 scoped/routing cases passed. Windows
+additionally reused native copying for the structured payload; its first actual
+scoped case completed in 26.31 seconds including setup and cleanup. These are
+bounded fixture results, not equivalent whole-host measurements. PowerShell
+transport controls retain complete arguments, Unicode, native fallback,
+diagnostic stderr and exact failure exits without inventing an empty stdout
+record.
+The complete current Windows scoped cohort passed 28 cases in 196.04 seconds;
+the shared staging/CWD/watchdog cohort passed 35 with one platform skip in
+136.09 seconds. Neither result relaxes the still-failing legacy two-cycle gate.
+
+The operator retained the native publication gate. The remaining legacy
+two-cycle case still exceeds its item budget, including after a rejected
+bootstrap-locator forwarding experiment that was reverted. Its original
+ordinary native arguments, signed construction-base selection and child-custody
+contract remain unchanged. Complete current native qualification and installed
+healthy/no-op proof are still required.
+
+### Accepted-source legacy repair and fixture cost
+
+Synchronizing the accepted #8010 capture fix did not clear the Windows
+provision/update two-cycle gate. A passive original-command measurement
+recorded 5.272 seconds of setup and a 16.563-second first native cycle before
+the second exceeded the original item budget. A later passive diagnostic
+completed two native cycles at 10.922 and 11.172 seconds, then exceeded the
+same item budget during fixture cleanup. The variation is not evidence
+that output capture alone causes the gap: instrumented native phases also
+expanded across admission, interpreter selection and construction.
+
+Sparse copied-script markers locate work but change the scripts and are
+not acceptance measurements. One such trace measured full staging copies
+at 2.304 and 1.931 seconds, with prior-stage cleanup at 0.049 and 0.646
+seconds. This does not establish an EOF hang, dominant cleanup cost or
+permission to remove a repeated admission check. An independent same-input
+experiment found directory-info enumeration slower (2.907 versus 2.500
+seconds over all 685 files); that alternative was not retained.
+
+Windows fixture preparation has a separately measured, bounded correction:
+four native-copy workers copied all 685 files in 0.828 seconds versus 1.968
+seconds sequentially, preserving file bytes, times and modes. The fixture
+still uses complete separate trees and normal link/ignore/overwrite
+semantics, waits for all workers, surfaces native errors and restores
+directory metadata after copying. Targeted controls additionally cover
+empty directories, linked targets and independent copied files. This only
+reduces fixture work. The unchanged two-cycle native gate still fails;
+publication and installed healthy/no-op qualification remain blocked.
+
+The accepted source also adds an automatic-cell historical-snapshot case.
+Its fixture's remaining ordinary `shutil.copytree` consumed 14.500 seconds
+before native repair. Reusing the full-input fixture copier reduced that
+operation to 0.719 seconds; the original case passed in 24.34 seconds
+including setup and cleanup. This changes only fixture copying, not snapshot
+provenance or selection of current executable repair code.
+
+The synchronized Linux repair/scoped/staging selection passed 70 cases with
+25 platform skips in 177.60 seconds. Windows staging/CWD/watchdog passed
+35 with one platform skip in 160.44 seconds. Its current 30-case scoped
+cohort is not fully accepted: an independent run still exceeded the
+unchanged item limit during an earlier automatic-cell case's fixture
+cleanup. The older 28-case pass precedes the accepted added source cases.
+All seven current Windows historical-snapshot cases passed in 137.90 seconds.
+The final snapshot/automatic-snapshot selection also passed eight cases on
+native Linux in 40.73 seconds.
+
+A separate diagnostic profile of actual scoped runtime work before the
+existing construction fence recorded 395,969 calls in 2.043 seconds.
+Its nested work included 28 receipt validations, 1,657 canonical path calls
+and 3,812 native final-path queries; native final-path lookup accounted for
+0.535 seconds of self time. These are instrumented internal counts, not
+unmodified wall-clock acceptance, independent governance boundaries or
+whole-update savings. They identify further source work to account for;
+they do not authorize receipt/path caching, skipped validation, changed
+publication custody or a competing admission algorithm.
+
+### Scoped publication cost follows nested custody checks
+
+The follow-up source audit maps that profile to the actual Worktrees
+`Governance` consumer rather than treating internal call counts as separate
+authority boundaries:
+
+| Reached operation | Required work and boundary |
+|---|---|
+| `Governance.read`, initially and in `held`'s recheck | Validate the receipt, resolve effective installation mode and compare the selected root, context and install generation; then check publication policy and custody. |
+| `Governance.held` before the recheck | Borrow the existing management-owned namespace locks when a publication ticket is present; do not acquire replacement locks or release the borrowed locks. |
+| Each `borrow_runtime_publication` | Resolve publication identity before inspecting the ticket; validate both lock owners, matching publication purpose, native process birth and common owner PID; resolve identity again; then recheck owner records and native process birth. |
+| Each publication-identity resolution | Resolve effective deployment policy, validate the explicit receipt and root/generation agreement, and resolve payload provenance for the deployment owner. The mode and policy resolvers themselves call receipt/provenance helpers. |
+
+Thus the three profiled custody borrows are the initial publication check,
+the held-admission borrow and the later publication recheck. Each borrow's
+two identity resolutions surround observations that can change. Receipt
+validation inside mode, activation and namespace resolution accounts for
+additional nested work. The existing validation scope shares file digests
+only within its owned call scope; it does not cache physical path identity,
+deployment policy or custody decisions across these boundaries.
+
+The physical-path helpers also perform nested canonicalization, including
+canonicalization inside equality and containment checks. That identifies
+implementation cost, not proof that a fresh filesystem observation is
+dispensable. No publication, receipt, canonical-path or lock algorithm was
+changed in this audit. Any shared-SDK optimization needs its owning
+foundation work to preserve replacement, reparse-point, receipt-generation
+and live-custody refusal behavior. The Windows two-cycle and full current
+scoped gates remain blocked; no unchanged native retry was used as evidence
+of progress.
+
+A separate disposable Windows comparison tested whether compiling the
+ordinary-file traversal would pay for itself at this boundary. It copied
+all 684 files and 47 directories selected by the repair fixture's existing
+ignore rules, with equal bytes, file times and modes. The retained
+PowerShell helper took 1.513 seconds before and 1.329 seconds after the
+comparison. Sequential compiled traversal took 1.415 seconds; four-worker
+compiled traversal took 0.661 seconds, but cold compilation itself took
+0.728 seconds. Its 1.389-second cold cost did not beat the later retained
+helper, before adding the unimplemented link/provider compatibility work.
+The compiler-based alternative was not adopted. This is a staging
+microbenchmark, not native repair qualification or whole-update savings.
+
+### Payload-only startup and fixture-state blockers
+
+The actual interpreter's paired contained startup control measured a
+0.500-second median with site initialization and 0.359 seconds without it.
+That identifies avoidable work in payload-only admission and canonical SDK
+queries, not the cost of an installed runtime. Five new actual adapter
+controls failed because site initialization was enabled; the complete
+corrected admission/reader selection passed 39 cases on Windows. The
+readers retain their original native fallback, arguments, stdout/stderr
+and exit status. No-site startup is not applied to installed package
+loading or used to bypass interpreter selection or governance checks.
+
+Windows fixture cleanup now joins four native file-removal workers in an
+isolated Python child, retaining the previous 10-second child deadline.
+Its CWD and temporary directory are outside the deleted tree. Positive
+link-target/root-link and negative missing-root/read-only-file controls
+exercise the real removal boundary; production cleanup is untouched.
+
+After cleanup, the full Windows scoped selection reached additional cases
+and exposed six early failures. Acquisition referred to a temporary
+directory inside an earlier, deleted fixture. Environment-variable changes
+alone do not reset Python's process-wide temporary-directory cache. Two
+ordered regressions failed before the fixture explicitly scoped that cache
+to its own existing temporary directory. The containing bootstrap/fixture
+selection then passed 36 cases.
+
+The native timing discrepancy remains independent of those corrections.
+One unmodified-command scoped case passed in 28.78 seconds: 4.062 seconds
+setup, 23.393 seconds call (19.547 seconds native) and 0.947 seconds cleanup.
+The corrected full cohort subsequently still reached the original item
+limit in native execution. A diagnostic parent profile separates about
+4.76 seconds of Python-side test work from a 19.922-second native command;
+1.12 seconds of the parent work was the complete acquisition fixture copy.
+These figures do not justify dropping the surrounding ownership checks.
+The legacy two-cycle gate is also still open. Its copied-script diagnostic
+places work in initial CLI admission and native startup, parent and child
+admission, complete staging, signed-base selection and the canonical
+runtime before the existing construction fence. Neither a dominant EOF
+hang nor permission to change custody, signing, deadlines or rollout was
+established.
+
+### Replace a duplicate repair lifecycle, not its deadline
+
+The missing-bin legacy repair selected provision followed by update. Both
+actions enter the canonical lifecycle, stage the complete payload and call
+the runtime handler. The second pass need not rebuild an admitted current
+slot, but still repeats admission, staging and runtime admission. Ordinary
+update's missing-bin refusal was the reason to run provision first.
+
+The operator approved replacing that two-lifecycle contract with one full
+admitted update. A private opt-in from Manager's captured legacy
+installation allows the native update to create its missing ordinary bin
+after the existing lifecycle checks, retaining the Git prerequisite and
+refusing files/reparse points. It does not mint a ticket or relax the
+canonical publication policy. Ordinary update without the opt-in remains
+refusing, and Manager rejects an exit-zero repair without a runtime bin.
+The existing full update body still owns construction, publication and
+integration.
+
+The Windows selection passed 11 native controls in 125.29 seconds, including
+PowerShell 5.1/7, single-pass routing, malformed/absent admission, wrong
+action/context/root, normal-update refusal and substituted-bin protection.
+The complete single-pass call took 14.68 seconds. After explicitly carrying
+the Git prerequisite forward, its coupled selection passed seven cases in
+30.68 seconds, with a 12.88-second single-pass call. The old assertion of
+two native lifecycles was intentionally revised with that design approval;
+neither item nor group limits changed.
+
+### Pair consecutive read-only transport without caching governance
+
+Windows' hinted initial receipt validation and status read now share one
+finite interpreter process. The payload-local adapter calls canonical
+`main` with the original validate arguments, then with the original status
+arguments, preserving each raw response. SDK validation scopes remain
+separate, there is no decision cache, and the first failed action stops the
+transport with its SDK failure. The native caller retains its original
+receipt/root/status/generation checks and failure classification.
+Publication probes, reads across staging and construction, and subsequent
+revalidation are not combined or reused. Neither the canonical SDK nor its
+custody algorithm changed.
+
+The 24 reader/parser controls passed in 19.56 seconds. They check both SDK
+invocations, stop-on-failure, UTF-8, no-site/isolated startup, exact native
+errors, existing fallbacks and actual PowerShell 5.1/7 transport. The
+complete current Windows scoped cohort passed all 41 cases in 234.85
+seconds, with the original 30-second item and 300-second group bounds.
+Its slowest policy call was 22.32 seconds; all original source, activation,
+generation and publication refusal scenarios remain represented. These
+figures qualify that source selection, not a whole-host no-op or installed
+release.

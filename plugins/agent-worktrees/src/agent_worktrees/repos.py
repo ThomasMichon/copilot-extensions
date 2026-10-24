@@ -258,6 +258,12 @@ def resolve_registered_repo(name: str) -> tuple[RepoEntry, Path]:
             f"repository {name!r} is not registered; use repos add or repos clone "
             "through the repository owner's acquisition/adoption flow"
         )
+    return entry, registered_entry_root(entry)
+
+
+def registered_entry_root(entry: RepoEntry) -> Path:
+    """Resolve an already-read registry entry without another registry read."""
+    name = entry.name
     raw = entry.local_path()
     if not raw:
         raise RepositoryResolutionError(
@@ -280,7 +286,7 @@ def resolve_registered_repo(name: str) -> tuple[RepoEntry, Path]:
             f"repository {name!r} registered local root is unavailable: {exc}; "
             "use its standard repos clone/adoption flow, not fallback discovery"
         ) from exc
-    return entry, root
+    return root
 
 
 def inrepo_declared_default_branch(path: str) -> str:
