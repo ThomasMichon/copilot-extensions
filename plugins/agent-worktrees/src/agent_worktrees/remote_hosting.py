@@ -74,7 +74,9 @@ def shell_command(
         launch = "& " + " ".join(_quote_powershell(value) for value in [project, *args])
         script = (
             "$ErrorActionPreference='Stop'; "
-            f"$raw={probe}; if($LASTEXITCODE -ne 0){{exit $LASTEXITCODE}}; "
+            f"$raw={probe}; if($LASTEXITCODE -ne 0)"
+            "{$status=$LASTEXITCODE; [Console]::Error.WriteLine("
+            "($raw -join [Environment]::NewLine)); exit $status}; "
             "$p=$raw|ConvertFrom-Json; "
             "$absolute={param($v) $v -is [string] -and "
             "-not [string]::IsNullOrWhiteSpace($v) -and [IO.Path]::IsPathRooted($v)}; "
@@ -103,7 +105,9 @@ def shell_command(
     script = (
         f"HOSTING_RESULT=$({probe}) || "
         "{ HOSTING_STATUS=$?; printf '%s\\n' \"$HOSTING_RESULT\" >&2; exit \"$HOSTING_STATUS\"; }; "
-        f"printf '%s\\n' \"$HOSTING_RESULT\" | python3 -c {shlex.quote(_VALIDATE)} "
+        "HOSTING_PYTHON=$(command -v python3 || command -v python) || "
+        "{ printf '%s\\n' 'Remote hosting validation requires Python on PATH' >&2; exit 3; }; "
+        f"printf '%s\\n' \"$HOSTING_RESULT\" | \"$HOSTING_PYTHON\" -I -S -B -c {shlex.quote(_VALIDATE)} "
         f"&& {launch}"
     )
     return wrap_remote_command(shell, script)

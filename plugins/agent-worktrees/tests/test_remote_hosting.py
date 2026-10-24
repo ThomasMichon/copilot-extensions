@@ -7,7 +7,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -76,6 +78,45 @@ def test_real_remote_launch_refuses_before_any_effect(
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="native Bash")
+@pytest.mark.parametrize("interpreter", ["python3", "python", None])
+def test_remote_launch_respects_available_python_names(
+    tmp_path: Path, interpreter: str | None,
+) -> None:
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    if interpreter is not None:
+        (binary / interpreter).symlink_to(sys.executable)
+    if interpreter == "python":
+        assert shutil.which("python3", path=str(binary)) is None
+    target = tmp_path / "target"
+    effects = tmp_path / "effects"
+    payload = json.dumps({
+        "version": 1, "repository": str(tmp_path), "expose_agent": None,
+        "sources": [], "denied_by": [], "allowed": True,
+    })
+    target.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = agent-policy ]; then\n"
+        f" printf '%s\\n' {shlex.quote(payload)}\n"
+        f"else printf launch > {shlex.quote(str(effects))}; fi\n",
+        encoding="utf-8",
+    )
+    target.chmod(0o700)
+    command = remote_hosting.shell_command("bash", str(target), ["--new"])
+    shell = shutil.which("bash")
+    assert shell is not None
+    process = subprocess.run(
+        [shell, "-c", shlex.split(command)[-1]],
+        env={**os.environ, "PATH": str(binary)}, capture_output=True,
+        text=True, check=False, timeout=15,
+    )
+    assert (process.returncode == 0) is (interpreter is not None), process.stderr
+    assert effects.exists() is (interpreter is not None)
+    if interpreter is None:
+        assert "requires Python on PATH" in process.stderr
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="native Bash")
 @pytest.mark.parametrize("selector", [["--new"], ["--worktree-id", "retained"]])
 def test_real_seed_preparation_refuses_legacy_owner_before_allocation_or_staging(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selector: list[str],
@@ -124,7 +165,13 @@ def test_real_native_remote_launch_checks_before_any_effect(
         "version": 1, "repository": str(tmp_path), "expose_agent": None,
         "sources": [], "denied_by": [], "allowed": True,
     }).replace("'", "''")
-    output = policy if reply == "allowed" else "{}"
+    if reply == "allowed":
+        output = policy
+    elif reply == "denied":
+        output = ('{"version":1,"code":"repository-agent-exposure-denied",'
+                  '"error":"expose_agent: false"}')
+    else:
+        output = "{}"
     code = 2 if reply == "legacy" else 3 if reply == "denied" else 0
     target.write_text(
         "if ($args[0] -eq 'agent-policy') {\n"
@@ -135,11 +182,12 @@ def test_real_native_remote_launch_checks_before_any_effect(
         encoding="utf-8",
     )
     command = remote_hosting.shell_command("pwsh", str(target), ["resolve", "--new"])
-    import shlex
-
     process = subprocess.run(
         shlex.split(command), capture_output=True, text=True, check=False, timeout=30,
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert (process.returncode == 0) is (reply == "allowed")
     assert effects.exists() is (reply == "allowed")
+    if reply == "denied":
+        assert process.returncode == 3
+        assert "expose_agent: false" in process.stderr
