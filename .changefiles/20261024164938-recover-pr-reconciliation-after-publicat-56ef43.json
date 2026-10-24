@@ -1,0 +1,9 @@
+{
+  "comment": "Recover PR reconciliation after publication authority contention and report actionable retry guidance",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
