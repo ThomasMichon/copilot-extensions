@@ -78,6 +78,16 @@ The scope stores the exact supplied monotonic `D`, never a fresh per-call
 allowance. Any retained-cleanup exception owns the scope and its still-valid
 custody/handles so the recipient can explicitly settle that obligation.
 
+**Unresolved lifetime dependency:** an exited/unreaped Git anchor pins an
+identity but is not a living cleanup executor and cannot watch a caller-lifetime
+pipe. The inspected caller-owned implementation supplies that lifetime behavior
+through an execution helper; silently adding another helper here is not
+admitted. The procutil owner must establish an existing compatible outer
+owner-lifetime boundary for the proposed group, including caller death, or
+reject this option and return the architecture decision. Neither same-session
+membership nor an open pidfd alone proves caller-death cleanup. This proposal
+does not assert that the new primitive already exists or is qualification-ready.
+
 Plugin integration is an explicit optional `observation_scope` keyword on the
 already proposed R1a functions and `run_bounded`. The outer segment Git phase
 or independent classifier/resolver creates one scope. Nested default,
@@ -109,6 +119,18 @@ cleanup failure is never converted to an ordinary missing ref or retried
 observation. Retain the error's scope/custody; no fallback to another group.
 An explicit later owner cleanup attempt does not renew D or turn the original
 failed observation into a passing one.
+
+Fresh review `discussion_r4366058208` also identified existing resident callers
+that discard the error and begin again on the next tick:
+`status_updater_cli.py:540-551` and `__main__.py:3171-3178` at the reviewed head.
+Those caller changes are **not admitted** to this R1a proposal owner. Their
+existing lifecycle owners must retain the cleanup object across ticks and
+gate the affected observation pipeline until explicit settlement; logging or
+rendering an empty row is not settlement. Unrelated independently owned work
+must not be serialized behind a new global lock or global pending cache.
+Shutdown/owner loss must settle or retain responsibility through that owner's
+existing lifecycle, not silently discard native custody. The new High and the
+Medium both remain blocking; this is a dependency, not a transfer/waiver.
 
 ## Deadline, capability and platform boundaries
 
@@ -142,6 +164,7 @@ failed observation into a passing one.
 | R1a owner | `push_timeout.py`: accept/use the explicit scope instead of confirming each POSIX probe; no new legacy behavior |
 | R1a owner | `git_ops.py` and the two `status_bar_cli.py` Git prefixes: create/forward the scope explicitly, defer successful return until `finish`, preserve D and failure propagation |
 | R1a owner | Focused scope/work-count tests and documentation/changefile; no monitor, producer, roster, receipt or fsmonitor hunk |
+| Existing resident caller/lifecycle owners, separately admitted | The two identified callback catch boundaries: retain failed custody across ticks, settle before observing again, and test the actual caller loop; no lock split or new global cleanup framework |
 
 Shared-owner agreement and the coordinator's API/containment decision are
 prerequisites, not approvals supplied by this document. If this narrow primitive

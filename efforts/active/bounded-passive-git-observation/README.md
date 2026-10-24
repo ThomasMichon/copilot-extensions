@@ -256,3 +256,8 @@ to alter procutil or a waiver of the Medium finding.
 - The Medium stays blocking. Its observation-scoped API proposal is documentation
   only and requires coordinator/shared-owner agreement before any implementation.
   No procutil/shared API, native fixture, service or production deadline changed.
+- Fresh review confirmed all three original High findings resolved, and raised
+  a new High for resident callback loops discarding cleanup custody. The scoped
+  proposal records those separately owned caller gates and the unresolved
+  caller-death/lifetime boundary. Neither that High nor the Medium is waived;
+  no unadmitted callback or shared-library implementation was changed.
