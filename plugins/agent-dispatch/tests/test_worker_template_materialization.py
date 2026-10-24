@@ -627,3 +627,22 @@ def test_policy_inspection_checks_selected_script_without_running_it(tmp_path):
     })
     assert save(row)["persisted"]
     assert not marker.exists() and not active_dir().exists()
+
+
+@pytest.mark.parametrize("cwd", [None, "."])
+def test_file_script_policy_cannot_validate_against_the_cli_working_directory(tmp_path, cwd):
+    script = tmp_path / "policy.py"
+    script.write_text("print('never-executed')", encoding="utf-8")
+    value = {"scripts": {"policy": [sys.executable, str(script)]}}
+    if cwd is not None:
+        value["cwd"] = cwd
+    policy = tmp_path / "policy.json"
+    policy.write_text(json.dumps(value), encoding="utf-8")
+    _, row = provider({
+        "kind": "evaluator", "spec": {
+            "repo": "example/project", "evaluator_ref": "policy", "evaluator": str(policy),
+        },
+    })
+    with pytest.raises(RegistrarError, match="explicit absolute or named working directory"):
+        save(row, activate=True)
+    assert not instance_dir().exists() and not active_dir().exists()

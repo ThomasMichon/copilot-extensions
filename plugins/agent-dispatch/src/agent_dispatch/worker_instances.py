@@ -6,7 +6,7 @@ import contextlib
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import time
@@ -181,6 +181,13 @@ def _validate_evaluator_dependency(declaration, resources) -> None:
             raise RegistrarError("file-backed evaluator does not support named repository resources")
         evaluator = load_registration_evaluator(spec)
         if isinstance(evaluator, ScriptEvaluator):
+            if not evaluator.cwd or not (
+                evaluator.cwd.startswith("repo:")
+                or any(cls(evaluator.cwd).is_absolute() for cls in (Path, PurePosixPath, PureWindowsPath))
+            ):
+                raise RegistrarError(
+                    "evaluator script dependencies require an explicit absolute or named working directory"
+                )
             command = [resources.resolve(part) for part in evaluator.argv]
             directory = Path(resources.resolve(
                 evaluator.cwd, directory=True,

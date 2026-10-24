@@ -229,6 +229,9 @@ The shared dependency validator uses the actual evaluator loader to inspect
 absolute policy files and the selected script's executable, script path and
 explicit working directory read-only, without evaluating a task or executing
 the script. Unselected script entries do not become required dependencies.
+Script policies, including file-backed ones, require an explicit absolute or
+named working directory; the CLI's current directory is not evidence of the
+future evaluator process's context.
 Effort-loop identity relocation also refuses until its
 expansion owner can preserve a distinct defining context.
 A `composite` fragment without a supported
