@@ -2348,7 +2348,8 @@ first-use provisioning around the installer call in unadopted wrappers.
 The canonical version-1 payload shim and Bridge/Dispatch retained command gates
 serialize stale PID-link revalidation with `.provision.reap.mutex` when `flock`
 is unavailable. They install cleanup before acquisition, release only a mutex
-they acquired, and exit 130/143 on INT/TERM rather than continuing provisioning.
+they acquired, relinquishing custody before directory removal so a signal cannot
+remove a peer's replacement. They exit 130/143 on INT/TERM rather than continuing provisioning.
 An unowned mutex is never removed automatically: after 30 one-second retries,
 the caller exits 126 with an explicit repair diagnostic. This also bounds refusal
 after an untrappable interruption or death between `mkdir` and ownership recording.

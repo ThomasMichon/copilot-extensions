@@ -237,6 +237,34 @@ def test_unowned_reaper_mutex_refuses_within_bounded_attempts(
 
 
 @pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
+@pytest.mark.parametrize(("signal", "exit_code"), [("TERM", 143), ("INT", 130)])
+def test_reaper_release_signal_preserves_reacquired_peer_mutex(
+    tmp_path: Path, entry: str, signal: str, exit_code: int,
+) -> None:
+    hooks = (
+        'before_read() { :; }\nafter_read() { :; }\n'
+        'rmdir() {\n'
+        '    _count releases >/dev/null\n'
+        '    command rmdir "$@" || return\n'
+        '    if [[ ! -e "$STATE/peer" ]]; then\n'
+        '        : > "$STATE/peer"\n'
+        '        command mkdir "$1"\n'
+        '        printf 7171 > "$LINK"; echo 7171 > "$STATE/live"\n'
+        f'        command kill -s {signal} "$$"\n'
+        '    fi\n'
+        '}\n'
+    )
+    harness, root, state = _lock_harness(tmp_path, entry, hooks)
+    result = _run_harness(harness)
+    assert result.returncode == exit_code, result.stderr
+    assert (root / ".provision.reap.mutex").is_dir()
+    assert (root / ".provision.lock.pid").read_bytes() == b"7171"
+    assert (state / "releases").read_text().strip() == "1"
+    assert not (state / "violations").exists()
+    assert "acquired" not in result.stdout
+
+
+@pytest.mark.parametrize("entry", ["shim", "dispatch", "bridge"])
 def test_live_provision_holder_wait_is_not_reaper_timeout(
     tmp_path: Path, entry: str,
 ) -> None:

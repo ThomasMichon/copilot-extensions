@@ -208,8 +208,8 @@ REAP_OWNED=0
 BOOT_FILE=""
 unlock() {
     if [[ "$REAP_OWNED" == 1 ]]; then
-        rmdir "$REAP_MUTEX" 2>/dev/null || true
         REAP_OWNED=0
+        rmdir "$REAP_MUTEX" 2>/dev/null || true
     fi
     if [[ -n "$LOCK_LINK" ]]; then
         [[ "$(readlink "$LOCK_LINK" 2>/dev/null || true)" != "$$" ]] || rm -f -- "$LOCK_LINK"
@@ -264,8 +264,8 @@ else
                 *) kill -0 "$owner2" 2>/dev/null || rm -f -- "$LOCK_LINK" ;;
             esac
         fi
-        rmdir "$REAP_MUTEX" 2>/dev/null || true
         REAP_OWNED=0
+        rmdir "$REAP_MUTEX" 2>/dev/null || true
     done
 fi
 resolve_runtime

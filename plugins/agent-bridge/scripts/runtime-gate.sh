@@ -243,8 +243,8 @@ _lock_link=""
 _reap_owned=0
 _unlock_provision() {
     if [[ "$_reap_owned" == 1 ]]; then
-        rmdir "$_reap_mutex" 2>/dev/null || true
         _reap_owned=0
+        rmdir "$_reap_mutex" 2>/dev/null || true
     fi
     if [[ -n "$_lock_link" ]]; then
         _owner="$(readlink "$_lock_link" 2>/dev/null || true)"
@@ -296,8 +296,8 @@ else
                 *) kill -0 "$_owner2" 2>/dev/null || rm -f -- "$_lock_link" ;;
             esac
         fi
-        rmdir "$_reap_mutex" 2>/dev/null || true
         _reap_owned=0
+        rmdir "$_reap_mutex" 2>/dev/null || true
     done
 fi
 resolve_runtime
