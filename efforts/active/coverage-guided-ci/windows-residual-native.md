@@ -68,8 +68,8 @@ copier changes instead belong to B6909, not an already-merged claim.
 At Dev `0f5b38374525c7dfbc11b47212a7a9905a9b6ec8`, the following eight
 independent contracts have actually merged. Their **22 exact census keys**
 now carry the corresponding merged code below, not their former retained
-batch label. The canonical effort's dated merge journals retain the complete
-review and validation history. This is a semantic contract disposition, not
+batch label. The linked merged PRs retain their scoped implementation, review,
+checks and validation context. This is a semantic contract disposition, not
 an assertion that historical patches were replayed byte-for-byte.
 
 | Code | Former batch | Keys | Actual PR and merge commit |
