@@ -156,6 +156,7 @@ def test_successful_shared_repair_uses_new_selection_not_inherited_old_argv(
     ["update", "--request-status=synthetic-request"],
     ["update", "--recovery-status"],
     ["update", "--recover-after-restart"],
+    ["update", "--recover-for-repair"],
 ])
 def test_native_inspection_does_not_enter_fresh_installation(
     repair_case, arguments,

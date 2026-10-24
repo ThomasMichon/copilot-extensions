@@ -47,6 +47,27 @@ def _gate_source(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.mark.parametrize("regression", ["missing", "drift"])
+def test_shared_payload_copy_contract_is_enforced(monkeypatch, capsys, regression):
+    extract = checker._extract_marker
+    changed = False
+
+    def extract_regression(text, start, end):
+        nonlocal changed
+        block = extract(text, start, end)
+        if start == "# === install-contract:v4 payload-copy" and not changed:
+            assert block is not None
+            changed = True
+            return None if regression == "missing" else block + "\n# changed"
+        return block
+
+    monkeypatch.setattr(checker, "_extract_marker", extract_regression)
+    assert checker.check() == 1
+    assert changed
+    output = capsys.readouterr()
+    assert "install-contract:v4 payload-copy (ps1)" in output.out + output.err
+
+
 def test_actual_update_machine_gate_contract() -> None:
     source = REPO / "plugins" / "agent-worktrees" / "src" / "agent_worktrees"
     assert checker.check_machine_gate(source) == []

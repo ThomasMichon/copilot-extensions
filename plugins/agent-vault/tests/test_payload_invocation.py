@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -45,8 +46,11 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
 
 
 def test_runtime_gates_scope_namespaced_service_environment() -> None:
-    posix = (PLUGIN / "scripts" / "runtime-gate.sh").read_text(encoding="utf-8")
-    powershell = (PLUGIN / "scripts" / "runtime-gate.ps1").read_text(encoding="utf-8")
+    for suffix in ("sh", "ps1"):
+        gate = (PLUGIN / "scripts" / ("runtime-gate." + suffix)).read_text(encoding="utf-8")
+        assert "runtime-environment." + suffix in gate
+    posix = (PLUGIN / "scripts" / "runtime-environment.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "runtime-environment.ps1").read_text(encoding="utf-8")
 
     for text in (posix, powershell):
         assert "AGENT_VAULT_INSTALLATION_ID" in text
@@ -60,6 +64,69 @@ def test_runtime_gates_scope_namespaced_service_environment() -> None:
         assert "AGENT_VAULT_PORT" in text
         assert "AGENT_VAULT_SYSTEMD_UNIT" in text
         assert "AGENT_VAULT_TASK_NAME" in text
+
+
+@pytest.mark.parametrize("namespaced", [False, True])
+def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, namespaced) -> None:
+    keys = (
+        "AGENT_VAULT_HOME", "AGENT_VAULT_VALIDATED_CONTEXT", "COPILOT_EXTENSIONS_CONTEXT",
+        "AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_RUN_DIR", "AGENT_VAULT_CORE_RUN_DIR",
+        "AGENT_VAULT_CACHE_DIR", "AGENT_VAULT_SOCKET", "AGENT_VAULT_PIPE",
+        "AGENT_VAULT_PID", "AGENT_VAULT_LOG", "AGENT_VAULT_PORT",
+        "AGENT_VAULT_SYSTEMD_UNIT", "AGENT_VAULT_TASK_NAME",
+    )
+    root = tmp_path / "runtime"
+    context = str(tmp_path / "context.json") if namespaced else ""
+    identity = "fixture-market/agent-vault" if namespaced else ""
+    suffix = "fixture-suffix" if namespaced else ""
+    env = {**os.environ, **dict.fromkeys(keys, "foreign")}
+    if os.name == "nt":
+        shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        helper = PLUGIN / "scripts" / "runtime-environment.ps1"
+        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        listed = ",".join(quote(key) for key in keys)
+        code = (
+            f". {quote(helper)}; Set-RuntimeEnvironment -RuntimeRoot {quote(root)} "
+            f"-Context {quote(context)} -InstallationId {quote(identity)} -ServiceSuffix {quote(suffix)}; "
+            f"$result=@{{}}; foreach ($key in @({listed})) {{ "
+            "$result[$key]=[Environment]::GetEnvironmentVariable($key, 'Process') }; "
+            "[Console]::Out.WriteLine(($result | ConvertTo-Json -Compress))"
+        )
+        command = [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", code]
+    else:
+        shell = shutil.which("bash")
+        if shell is None:
+            pytest.skip("Bash is unavailable")
+        helper = PLUGIN / "scripts" / "runtime-environment.sh"
+        code = "import os,json;print(json.dumps({key:os.environ.get(key) for key in " + repr(keys) + "}))"
+        command = [
+            shell, "-c", '. "$1"; apply_runtime_env "$2" "$3" "$4" "$5"; exec "$6" -I -c "$7"',
+            "runtime-environment", str(helper), str(root), context, identity, suffix, sys.executable, code,
+        ]
+    result = subprocess.run(
+        command, env=env, capture_output=True, text=True, encoding="utf-8",
+        timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual = json.loads(result.stdout)
+    assert actual["AGENT_VAULT_HOME"] == str(root)
+    if namespaced:
+        expected = {
+            "AGENT_VAULT_VALIDATED_CONTEXT": context, "COPILOT_EXTENSIONS_CONTEXT": context,
+            "AGENT_VAULT_INSTALLATION_ID": identity, "AGENT_VAULT_RUN_DIR": str(root / "run"),
+            "AGENT_VAULT_CORE_RUN_DIR": str(root / "core"), "AGENT_VAULT_CACHE_DIR": str(root / "cache"),
+            "AGENT_VAULT_SOCKET": str(root / "run" / "agent-vault.sock"),
+            "AGENT_VAULT_PIPE": r"\\.\pipe\agent-vault-fixture-suffix",
+            "AGENT_VAULT_PID": str(root / "run" / "agent-vault-service.pid"),
+            "AGENT_VAULT_LOG": str(root / "logs" / "agent-vault-service.log"),
+            "AGENT_VAULT_PORT": "0", "AGENT_VAULT_SYSTEMD_UNIT": "agent-vault-fixture-suffix.service",
+            "AGENT_VAULT_TASK_NAME": "AgentVault-fixture-suffix",
+        }
+        assert {key: actual[key] for key in expected} == expected
+    else:
+        assert not actual["AGENT_VAULT_VALIDATED_CONTEXT"]
+        assert all(actual[key] is None for key in keys[2:])
+    assert not root.exists()
 
 
 def test_installers_scope_service_identity_by_install_root() -> None:

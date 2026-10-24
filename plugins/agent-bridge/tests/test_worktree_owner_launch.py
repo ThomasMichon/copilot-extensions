@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -78,6 +79,24 @@ def test_native_windows_never_launches_a_bash_or_wsl_fallback(tmp_path, monkeypa
     launch.assert_not_called()
 
 
+def test_windows_owner_forwards_stdio_and_exit_status(monkeypatch):
+    from agent_bridge import worktree_owner_launch as launcher
+
+    monkeypatch.setattr(launcher, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(launcher.sys, "argv", ["launcher", "owner", "--json"])
+    monkeypatch.setattr(launcher, "_legacy_worktrees_runtime_prefix", lambda root: ["peer"])
+    monkeypatch.setattr(launcher, "_agent_worktrees_environment", lambda: {"SAFE": "1"})
+    monkeypatch.setattr(launcher, "no_window_kwargs", lambda: {"creationflags": 0x08000000})
+    call = Mock(return_value=7)
+    monkeypatch.setattr(launcher.subprocess, "call", call)
+    assert launcher.main() == 7
+    call.assert_called_once_with(
+        ["peer", "--json"], env={"SAFE": "1"},
+        stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+        creationflags=0x08000000,
+    )
+
+
 @pytest.fixture(params=["bash", "powershell"])
 def installation(tmp_path, monkeypatch, request):
     executable = "pwsh" if request.param == "powershell" else "bash"
@@ -138,6 +157,50 @@ def complete_slot(peer, version="1.0.0", *, interpreter=True):
     )
     (peer / "current-version").write_text(version, encoding="utf-8")
     return python
+
+
+@pytest.mark.parametrize("code", [0, 7])
+def test_actual_owner_forwards_native_pipes_and_exit_status(tmp_path, monkeypatch, code):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    own = tmp_path / ".agent-bridge"
+    deploy_installed_layout(own, "powershell" if _NATIVE_WINDOWS else "bash")
+    python = complete_slot(tmp_path / ".agent-worktrees", interpreter=False)
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--without-pip", str(python.parent.parent)],
+        check=True, capture_output=True, timeout=20, **no_window_kwargs(),
+    )
+    query = subprocess.run(
+        [str(python), "-I", "-c",
+         "import sysconfig; print(sysconfig.get_path('purelib'))"],
+        check=True, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    package = Path(query.stdout.strip()) / "agent_worktrees"
+    package.mkdir()
+    (package / "__main__.py").write_text(
+        "import json, os, sys\n"
+        "assert 'AGENT_HOME' not in os.environ\n"
+        "assert 'COPILOT_PLUGIN_ROOT' not in os.environ\n"
+        "print(json.dumps({'argv': sys.argv[1:], 'stdin': sys.stdin.read()}))\n"
+        "print('peer stderr', file=sys.stderr)\n"
+        "raise SystemExit(int(sys.argv[1]))\n",
+        encoding="utf-8",
+    )
+    environment = {
+        **os.environ, "PATH": "", "AGENT_HOME": "caller-registry",
+        "COPILOT_PLUGIN_ROOT": "caller-payload",
+    }
+    arguments = [str(code), "argument with spaces", "unicode-\u2603"]
+    payload = "stdin with spaces and unicode-\u2603\n"
+    result = subprocess.run(
+        [sys.executable, "-I", "-X", "utf8", "-m",
+         "agent_bridge.worktree_owner_launch", str(own), *arguments],
+        env=environment, input=payload, capture_output=True, text=True,
+        encoding="utf-8", timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == code, result.stderr
+    assert json.loads(result.stdout) == {"argv": arguments, "stdin": payload}
+    assert result.stderr == "peer stderr\n"
 
 
 def test_completed_installed_owner_precedes_path(installation):

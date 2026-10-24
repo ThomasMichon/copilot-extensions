@@ -277,19 +277,22 @@ public class OfflineUv {
 '''.replace("PYTHON", json.dumps(sys._base_executable)),
             encoding="utf-8",
         )
-        compiler = (
-            Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell"
-            / "v1.0" / "powershell.exe"
+        compilers = (
+            Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework
+            / "v4.0.30319" / "csc.exe"
+            for framework in ("Framework64", "Framework")
         )
+        compiler = next((path for path in compilers if path.is_file()), None)
+        assert compiler is not None, "Windows .NET Framework C# compiler is unavailable"
         compilation = subprocess.run(
-            [str(compiler), "-NoProfile", "-Command",
-             "Add-Type -TypeDefinition ([IO.File]::ReadAllText($env:FIXTURE_LAUNCHER_SOURCE)) "
-             "-OutputAssembly $env:FIXTURE_LAUNCHER_EXE -OutputType ConsoleApplication"],
-            env={**env, "FIXTURE_LAUNCHER_SOURCE": str(launcher), "FIXTURE_LAUNCHER_EXE": str(provider)},
+            [str(compiler), "/nologo", "/target:exe", f"/out:{provider}", str(launcher)],
+            env=env,
             capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-        assert compilation.returncode == 0 and provider.is_file(), compilation.stderr
+        assert compilation.returncode == 0 and provider.is_file(), (
+            compilation.stdout + compilation.stderr
+        )
         _UV_LAUNCHER_BYTES = provider.read_bytes()
     elif os.name == "nt":
         provider = directory / "uv.exe"
@@ -354,12 +357,37 @@ def test_stamp_uv_guard_rejects_and_records_any_invocation(tmp_path: Path) -> No
     assert _uv_events(env) == [{"phase": "unexpected-stamp-uv"}]
 
 
-def test_offline_uv_settings_preflight_is_read_only(tmp_path: Path) -> None:
+def test_offline_uv_settings_preflight_is_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    global _UV_LAUNCHER_BYTES
+    compilations = []
+    run = subprocess.run
+
+    def observe(command, **kwargs):
+        if os.name == "nt" and Path(command[0]).name.casefold() == "csc.exe":
+            compilations.append(command)
+            assert command[1:3] == ["/nologo", "/target:exe"]
+            assert kwargs["timeout"] == _HARNESS_TIMEOUT_SECONDS == 20
+            assert kwargs["creationflags"] == subprocess.CREATE_NO_WINDOW
+        return run(command, **kwargs)
+
+    if os.name == "nt":
+        _UV_LAUNCHER_BYTES = None
+        monkeypatch.setattr(subprocess, "run", observe)
     env = _isolated_install_env(tmp_path / "home")
     provider = _offline_uv(tmp_path, env)
+    if os.name == "nt":
+        assert provider.read_bytes().startswith(b"MZ")
+        reused_root = tmp_path / "reused"
+        reused_root.mkdir()
+        reused = _offline_uv(reused_root, env.copy())
+        assert reused.read_bytes() == provider.read_bytes()
+        assert len(compilations) == 1
     result = subprocess.run(
         [str(provider), "pip", "install", "--show-settings", "unused-artifact"],
         env=env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
+        **agent_procutil.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     policy = runpy.run_path(str(_PLUGIN_ROOT / "scripts" / "installer_dependency_policy.py"))
@@ -383,6 +411,7 @@ def test_offline_uv_is_native_discoverable(tmp_path: Path) -> None:
          "if (-not $uv) { throw 'Offline provider was not resolved' }; "
          "[Console]::WriteLine($uv); & $uv --version; exit $LASTEXITCODE"],
         env=env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
+        **agent_procutil.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     lines = result.stdout.strip().splitlines()
@@ -402,6 +431,7 @@ def test_offline_uv_policy_preflight_preserves_final_quiet(tmp_path: Path) -> No
          "'uv',['--python',sys.executable,'unused-artifact','--quiet'])))",
          str(_PLUGIN_ROOT / "scripts" / "installer_dependency_policy.py")],
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
+        **agent_procutil.no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     admitted = json.loads(result.stdout)
@@ -611,12 +641,57 @@ def stamped_snapshot(tmp_path_factory):
     )
 
 
+def _no_service_provision_command(home: Path, installer: Path, pwsh: str) -> list[str]:
+    runner = home / "tmp" / "provision.ps1"
+    runner.write_text(
+        "param($Installer, $InstallRoot)\n"
+        "function Get-ScheduledTask {}\n"
+        "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Start-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Register-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Set-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "function Unregister-ScheduledTask { throw 'unexpected service mutation' }\n"
+        "& $Installer provision -NoService -InstallDir $InstallRoot\n"
+        "exit $LASTEXITCODE\n",
+        encoding="utf-8",
+    )
+    return [
+        pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+        str(runner), str(installer), str(home / ".agent-vault"),
+    ]
+
+
 def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snapshot) -> None:
     state = stamped_snapshot
     assert (state.snapshot / "scripts" / "installer-engine.ps1").is_file()
     assert (state.snapshot / "scripts" / "installer-engine.sh").is_file()
     # Capture stamp status before provisioning so contract order is irrelevant.
     assert state.stamp_status == {"selected": False, "venvs": [], "events": []}
+    installer = state.fixture_root / "refusal control.ps1"
+    installer.write_text(
+        "param($Action, [switch]$NoService, $InstallDir)\n"
+        "if ($Action -ne 'provision' -or -not $NoService "
+        "-or $InstallDir -ne $env:AGENT_VAULT_HOME) { exit 1 }\n"
+        "if (@(Get-ScheduledTask).Count -ne 0) { exit 2 }\n"
+        "$commands = 'Stop-ScheduledTask', 'Start-ScheduledTask', "
+        "'Register-ScheduledTask', 'Set-ScheduledTask', 'Unregister-ScheduledTask'\n"
+        "foreach ($name in $commands) {\n"
+        "  if ((Get-Command $name).CommandType -ne 'Function') { exit 3 }\n"
+        "  try { & $name; exit 4 } catch {\n"
+        "    if ($_.Exception.Message -ne 'unexpected service mutation') { exit 5 }\n"
+        "  }\n"
+        "}\n"
+        "[Console]::WriteLine('all scheduled-task mutations refused')\n"
+        "exit 37\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        _no_service_provision_command(state.home, installer, state.pwsh),
+        env=state.env, capture_output=True, text=True, timeout=_HARNESS_TIMEOUT_SECONDS,
+        **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 37, result.stdout + result.stderr
+    assert result.stdout.strip() == "all scheduled-task mutations refused"
 
 
 @pytest.fixture(scope="module")
@@ -628,24 +703,14 @@ def provisioned_snapshot(stamped_snapshot):
     # and retain the entire consumer UV graph rather than its own inputs.
     if os.name == "nt":
         provision = subprocess.run(
-            [
-                pwsh,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(snapshot / "scripts" / "install.ps1"),
-                "provision",
-                "-NoService",
-                "-InstallDir",
-                str(home / ".agent-vault"),
-            ],
+            _no_service_provision_command(home, snapshot / "scripts" / "install.ps1", pwsh),
             env=env,
             cwd=state.fixture_root,
             capture_output=True,
             text=True,
             timeout=420,
             check=False,
+            **agent_procutil.no_window_kwargs(),
         )
         assert provision.returncode == 0, provision.stdout + provision.stderr
         assert "Releasing legacy .venv" not in provision.stdout

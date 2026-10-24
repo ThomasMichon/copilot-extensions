@@ -7,7 +7,7 @@ import pytest
 from agent_bridge import __main__ as cli
 from agent_bridge.client import BridgeClientError
 from agent_bridge.models import PhasedTimeouts
-from agent_bridge.session_start_cli import _sender_repo_for_target, _start_agent_session
+from agent_bridge.session_start_cli import _CallerContext, _sender_repo_for_target, _start_agent_session
 from agent_bridge.session_targeting_cli import _resolve_target
 
 
@@ -167,6 +167,93 @@ def test_force_takeover_keeps_existing_session_when_preflight_fails(monkeypatch)
     assert events == []
 
 
+@pytest.fixture
+def known_remote_force(monkeypatch):
+    events, requests = [], []
+    client = SimpleNamespace(
+        resolve_live_session=lambda _target: None,
+        get_session=lambda _target: {
+            "session_id": "busy", "agent_name": "remote-acp:example", "status": "running",
+        },
+        list_agents=lambda: [],
+        daemon_supports=lambda _version: True,
+        end_session=lambda _sid: events.append("end"),
+        start_session=lambda **kwargs: requests.append(kwargs) or {
+            "session_id": "replacement", "name": "example", "status": "idle",
+        },
+    )
+    monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
+    monkeypatch.setattr(cli, "_get_client", lambda: client)
+    monkeypatch.setattr(cli, "_get_caller_id", lambda: pytest.fail("explicit caller was lost"))
+    monkeypatch.setattr(cli, "_get_caller_session_id", lambda: "new")
+    monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli, "_submit_and_stream", lambda *a, **kw: events.append("prompt"))
+    args = cli.build_parser().parse_args([
+        "send", "busy", "hello", "--force", "--caller", "explicit-controller",
+    ])
+    return client, args, events, requests
+
+
+@pytest.mark.parametrize(("owner", "supported", "status"), [
+    (None, True, 422), ("not-qualified", True, 422), ("host/harness/wt#new", False, 426),
+])
+def test_known_remote_force_refusal_preserves_existing_session(
+    monkeypatch, known_remote_force, owner, supported, status,
+):
+    client, args, events, requests = known_remote_force
+    monkeypatch.setattr(cli, "_worktrees_get", lambda _key: owner)
+    client.daemon_supports = lambda _version: supported
+
+    with pytest.raises(BridgeClientError) as refused:
+        cli._cmd_send(args)
+
+    assert refused.value.status == status
+    assert events == requests == []
+
+
+def test_known_remote_force_reuses_preflighted_caller_facts(monkeypatch, known_remote_force):
+    _client, args, events, requests = known_remote_force
+    reads = []
+
+    def owner(_key):
+        reads.append("owner")
+        return "host/harness/wt#new" if len(reads) == 1 else None
+
+    monkeypatch.setattr(cli, "_worktrees_get", owner)
+    cli._cmd_send(args)
+
+    assert events == ["end", "prompt"]
+    assert reads == ["owner"]
+    assert requests[0]["caller_id"] == "explicit-controller"
+    assert requests[0]["caller_owner_ref"] == "host/harness/wt#new"
+    assert requests[0]["caller_session_id"] == "new"
+
+
+def test_known_force_without_replacement_agent_preserves_session(monkeypatch, known_remote_force):
+    client, args, events, requests = known_remote_force
+    client.get_session = lambda _target: {"session_id": "busy", "status": "running"}
+
+    with pytest.raises(SystemExit) as refused:
+        cli._cmd_send(args)
+
+    assert refused.value.code == 1
+    assert events == requests == []
+
+
+@pytest.mark.parametrize(("agent", "caller"), [
+    ("remote-acp:other", "explicit-controller"), ("remote-acp:example", "different-controller"),
+])
+def test_preflighted_caller_cannot_cross_request(known_remote_force, agent, caller):
+    client, _args, events, requests = known_remote_force
+    context = _CallerContext("remote-acp:example", "explicit-controller", "new", "host/harness/wt#new")
+
+    with pytest.raises(SystemExit) as refused:
+        _start_agent_session(client, agent, caller_id=caller, caller_context=context)
+
+    assert refused.value.code == 2
+    assert events == requests == []
+
+
 @pytest.mark.parametrize("target", [
     "remote-acp:assistant", "https://example.com/acp", "wss://example.com/acp",
     "https://example.com/acp@agent",
@@ -176,7 +263,7 @@ def test_remote_cli_start_supplies_explicit_project_to_request(monkeypatch, targ
 
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "demo")
     monkeypatch.setattr(cli, "_get_caller_id", lambda: None)
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/wt#new")
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     requests = []
     client = BridgeClient.__new__(BridgeClient)
@@ -198,7 +285,7 @@ def test_remote_cli_reuse_and_takeover_require_daemon_binding_resolution(monkeyp
 
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
     monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/wt#new")
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     requests = []
     client = BridgeClient.__new__(BridgeClient)
@@ -215,13 +302,13 @@ def test_remote_cli_reuse_and_takeover_require_daemon_binding_resolution(monkeyp
     assert requests[0][2][0]["caller_id"] == "caller"
 
 
-@pytest.mark.parametrize("version", [38, 39, 40, 41])
-def test_named_remote_reuse_keeps_legacy_daemon_continuity(monkeypatch, version):
+@pytest.mark.parametrize("version", [38, 39, 40, 41, 43])
+def test_named_remote_reuse_requires_ownership_capability(monkeypatch, version):
     from agent_bridge.client import BridgeClient
 
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", "selected")
     monkeypatch.setattr(cli, "_get_caller_id", lambda: "caller")
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/wt#new")
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     requests = []
     client = BridgeClient.__new__(BridgeClient)
@@ -238,9 +325,10 @@ def test_named_remote_reuse_keeps_legacy_daemon_continuity(monkeypatch, version)
         return {"session_id": "validated", "name": "example", "status": "idle"}
 
     client._request = request
-    assert _start_agent_session(client, "remote-acp:example") == (
-        "validated" if version == 41 else "legacy"
-    )
-    assert requests == [(
-        "POST" if version == 41 else "GET", "/api/v1/sessions",
-    )]
+    if version < 43:
+        with pytest.raises(BridgeClientError, match="retained remote host ownership"):
+            _start_agent_session(client, "remote-acp:example")
+        assert requests == []
+    else:
+        assert _start_agent_session(client, "remote-acp:example") == "validated"
+        assert requests == [("POST", "/api/v1/sessions")]
