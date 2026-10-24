@@ -134,6 +134,8 @@ new package feeds.
   automatically authorized governed source fallback, optional overrides only.
   Do not require users to assemble an approval map or wait for artifact
   publication before source installation.
+  Configuration-intent resolution merged in #8494; authenticated selection,
+  governed closure and constructor acceptance remain open.
 - [x] Make restricted-SSH Paramiko provisioning genuinely opt-in.
   _(agent-recommended)_
 - [x] Replace full-table pandas statistics materialization with projected
@@ -213,6 +215,12 @@ API merged in #7044, not approval-source integration, a loader, publication or
 acquisition. The repository-only actual-wheel verifier merged in #8399; it
 closes the byte/metadata comparison prerequisite, not authority, governed
 acquisition, reusable admission or native engine integration.
+The bounded shared inspector (#8419) and invocation-owned exact wheel snapshots
+(#8523) now supply the underlying byte and custody primitives. Neither approves
+a profile, authorizes acquisition or supplies an admitted reuse receipt.
+The existing-owner configuration-intent reader merged in #8494, including
+management publication holds and policy invalidation. It does not close the
+authenticated adopting-policy/source adapter or its actual governed closure.
 #6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
@@ -225,7 +233,11 @@ policy reaches the same authority seam for release and source modes; hand-built
 adopter approval files are not the default integration. The amended intent and
 plan merged in #7066. The next implementation boundary is the authenticated
 adopting-policy/source adapter and its actual governed closure, not another
-profile-record API or a competing admission constructor.
+profile-record API or a competing admission constructor. Direct invocation of
+the trusted setup by a user or authorized agent is the dependency-operation
+authority for the selected configuration. Carry it through the existing
+installation/custody owner rather than introducing a separate package approver;
+configuration reads and candidate discovery alone do not establish invocation.
 
 ## Journal
 
@@ -868,3 +880,45 @@ profile-record API or a competing admission constructor.
   The corrected local slice passes 53 actor-observed units with coverage in
   22.047 seconds and all 20 actual owner-policy/isolated-CLI cases in
   30.83 seconds; source closure and fatal lint also pass.
+
+### 2026-10-24 - Configuration input merged; continue authority composition
+- #8494 merged as `d1f60ea72fbf5023496269fe98795aff2f2cad2a`.
+  Genuine review approved exact head `2c3e3ca9e`; required CI `40081349938`
+  passed the complete 1467-unit packet and all required guards. Hosted native
+  acceptance `40081362042` passed actual Linux and stock Windows reader,
+  management-custody and compatibility checks on that same head.
+- Re-read the parent Plan and Validation Plan and the zero-configuration
+  sub-plan after merge. Close only configuration-intent input: no authentic
+  runtime closure, acquisition/admission receipt, offline reuse or native engine
+  construction is claimed. All aggregate Phase 4 and corresponding validation
+  items remain open; the parent worktree remains active.
+- Consume the separately merged bounded inspector (#8419,
+  `90663eab5b44d2d63032fa8a0ac95cf016ce8d6d`) and exact input snapshots
+  (#8523, `1c386200b`) rather than duplicating those primitives. Their contracts
+  explicitly leave authority, acquisition and reusable admission to the caller.
+  Continue the existing adopting-policy/source-adapter and actual governed
+  closure stretch, preserving #8367 release-authentication and #6941 candidate
+  input ownership. No production rollout, engine activation or model/corpus
+  mutation follows from these preparation components.
+
+### 2026-10-24 - Setup invocation is the dependency-operation authority
+- Clarified the existing authority boundary: a user or authorized agent
+  directly invokes trusted harness setup, which installs its selected
+  configurator and plugin suite. That operation authorizes their required
+  dependency closure; no separate package approver, per-package consent or
+  operator-authored exact-lock approval file is needed.
+- Preserve the distinction between operation authorization, authenticated
+  producer release metadata and admission of actual bytes. Source mode can
+  resolve and freeze its own complete lock under that invocation and its
+  selected configuration after source, constraints and acquisition checks.
+  Invocation does not waive integrity, seasoning, revocation or source policy,
+  nor authorize unrelated configuration, activation or model/corpus changes.
+- The retained UV path already preserves resolver configuration, source inputs
+  and stronger seasoning. Its settings projection is not an invocation grant;
+  the existing build-toolchain trust allowlist is not a runtime approval
+  authority. Compose the actual setup-to-component installation/custody
+  boundary instead of adding an unrelated approval mechanism.
+- This is an intent/contract clarification, not consumer implementation or a
+  permitted CPU-closure result. Parent Plan and Validation Plan remain open.
+  Next bind the invoked setup and selected configuration at the existing owner,
+  then prove real source resolution and exact retained-byte admission.
