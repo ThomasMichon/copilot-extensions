@@ -41,11 +41,16 @@ def test_logger_fixed_action_keeps_own_context_native_options_and_result(owning_
     assert request.runner.context_keys == tuple(sorted(provision.LOGGER_CONTEXT_KEYS))
     for key in ("ACTION", "DRY_RUN", "PAYLOAD_ROOT", "VALIDATED_CONTEXT", "NO_SELFPROVISION"):
         monkeypatch.setenv("AGENT_LOGGER_" + key, "foreign")
+    foreign = area / "foreign-project"
+    foreign.mkdir()
+    for key in ("COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"):
+        monkeypatch.setenv(key, str(foreign))
     drain(root=root)
     result = status(request.id, root=root)
     assert result.state == "completed" and result.exit_code == 7, result.log_path.read_text()
     assert (installation / "executed").read_text() == action
     assert (installation / "client-only").read_text().strip() == "0"
+    assert Path((installation / "project-path").read_text()) == project
     frozen = Path((installation / "source-path").read_text().strip()).parent
     assert frozen.name == "agent-logger"
     assert frozen.parent.parent == installation / ".install-stage"
@@ -296,6 +301,9 @@ def test_actual_logger_cold_concurrent_install_keeps_selection_and_six_installed
     env = cold_environment(installation, project, area)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_LOGGER_HOME"] = str(installation)
+    foreign = area / "foreign-project"
+    foreign.mkdir()
+    env["COPILOT_PROJECT_DIR"] = env["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(foreign)
     if os.name == "nt":
         module = Path(env["PSModulePath"]) / "ScheduledTasks"
         module.mkdir()

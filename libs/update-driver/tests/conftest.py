@@ -102,6 +102,7 @@ def owning_context(area, monkeypatch):
         "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
         "AGENT_LOGGER_VALIDATED_CONTEXT", "AGENT_LOGGER_PAYLOAD_ROOT",
         "AGENT_LOGGER_ACTION", "AGENT_LOGGER_DRY_RUN",
+        "COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("HOME", str(profile))
@@ -139,9 +140,11 @@ def owning_payload(owning_context):
         "param([string]$Action,[string]$InstallDir,[switch]$NoService)\n"
         "if ($Action -cnotin @('provision', 'stamp')) { exit 90 }\n"
         "if ($env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }\n"
+        "if ($env:COPILOT_PROJECT_DIR -or $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) { exit 93 }\n"
         "[IO.Directory]::CreateDirectory($InstallDir) | Out-Null\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'executed'), $Action)\n"
         "[IO.File]::WriteAllText((Join-Path $InstallDir 'source-path'), $PSScriptRoot)\n"
+        "[IO.File]::WriteAllText((Join-Path $InstallDir 'project-path'), $PWD.Path)\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'client-only'), "
         "([string][int][bool]$NoService + [Environment]::NewLine))\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'downgrade-history'), "
@@ -151,8 +154,10 @@ def owning_payload(owning_context):
     (scripts / "install.sh").write_text(
         '#!/usr/bin/env bash\nset -eu\n[[ ( "$1" == provision || "$1" == stamp ) && "$2" == --install-dir ]]\n'
         '[[ -z "${UPDATE_DRIVER_WITNESS:-}" && -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]\n'
+        '[[ -z "${COPILOT_PROJECT_DIR:-}" && -z "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-}" ]]\n'
         'mkdir -p -- "$3"\nprintf "%s" "$1" >>"$3/executed"\n'
         'dirname -- "${BASH_SOURCE[0]}" >"$3/source-path"\n'
+        'printf "%s" "$PWD" >"$3/project-path"\n'
         'if [[ "${4:-}" == --no-service ]]; then echo 1; else echo 0; fi >>"$3/client-only"\n'
         'printf "[%s]\\n" "${AGENT_VAULT_ALLOW_DOWNGRADE:-}" >>"$3/downgrade-history"\n'
         'exit 7\n',

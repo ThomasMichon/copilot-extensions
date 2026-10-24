@@ -82,6 +82,7 @@ def _environment(payload: Path) -> dict[str, str]:
     # An unrelated ambient payload cannot replace the explicitly owning source.
     for key in (
         "COPILOT_PLUGIN_INSTALL_STAGED", "COPILOT_PLUGIN_STAGED_FROM",
+        "COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
         "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "UPDATE_DRIVER_WITNESS",
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
