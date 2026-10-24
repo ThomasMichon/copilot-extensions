@@ -18,7 +18,7 @@ from .db_live_session_aliases import (
     register_live_session_atomic,
 )
 from .db_live_controls import LiveControlsMixin
-from .runtime_custody import RuntimeAdmission, admission_document
+from .runtime_custody import RuntimeAdmission, RuntimeCustodyError, admission_document
 
 LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
 
@@ -28,6 +28,12 @@ def _validate_live_message_delivery(delivery: str | None) -> str:
     if value not in LIVE_MESSAGE_DELIVERIES:
         raise ValueError(f"unsupported live-message delivery: {value!r}")
     return value
+
+
+def _live_message_association(kind: str, admission: RuntimeAdmission | None) -> str | None:
+    if admission is not None and kind.casefold().startswith("control:"):
+        raise RuntimeCustodyError("Associated controls require qualified control handoff admission")
+    return admission_document(admission)
 
 
 class _LiveSessionsMixin(LiveControlsMixin):
@@ -744,12 +750,13 @@ class _LiveSessionsMixin(LiveControlsMixin):
         appropriately.
         """
         delivery = _validate_live_message_delivery(delivery)
+        association = _live_message_association(kind, runtime_admission)
         cur = self._execute_runtime_admitted_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
             "kind, delivery, idempotency_key, created_at, consumption_tracked, runtime_custody_json) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
             (session_id, sender, body, reply_to, kind, delivery, idempotency_key, now,
-             admission_document(runtime_admission)),
+             association),
             runtime_admission,
         )
         return int(cur.lastrowid or 0)
@@ -797,6 +804,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
         with ``"duplicate"`` when ``report_duplicate`` is set.
         """
         delivery = _validate_live_message_delivery(delivery)
+        association = _live_message_association(kind, runtime_admission)
         cutoff = now - stale_seconds
         cur = self._execute_runtime_admitted_write(
             "INSERT OR IGNORE INTO live_messages "
@@ -826,7 +834,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             ")",
             (
                 session_id, session_id, sender, body, reply_to, kind, delivery,
-                idempotency_key, now, admission_document(runtime_admission),
+                idempotency_key, now, association,
                 session_id, session_id, cutoff, cutoff,
                 expected_session_id, expected_session_id, expected_session_id,
                 require_idle,
@@ -861,7 +869,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
                     and original["reply_to"] == reply_to
                     and original["kind"] == kind
                     and original["delivery"] == delivery
-                    and original["runtime_custody_json"] == admission_document(runtime_admission)
+                    and original["runtime_custody_json"] == association
                     and bool(original["same_expected"])
                 )
                 if same_request:
@@ -935,6 +943,7 @@ class _LiveSessionsMixin(LiveControlsMixin):
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=?, outcome=? "
                 f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind LIKE 'control:%' "
+                "AND runtime_custody_json IS NULL AND handoff_json IS NULL "
                 f"AND claimed_at IS NOT NULL AND id IN ({placeholders})",
                 (now, outcome or "applied", session_id, session_id, *ids),
             )

@@ -82,6 +82,15 @@ def handoff_stage(row: sqlite3.Row | dict) -> str:
 
 def schema_triggers() -> dict[str, tuple[str, str]]:
     triggers = operation_triggers(("live_messages",))
+    for operation in ("INSERT", "UPDATE"):
+        name = f"live_messages_control_{operation.lower()}_unsupported"
+        triggers[name] = (
+            "live_messages",
+            f"CREATE TRIGGER IF NOT EXISTS {name} BEFORE {operation} ON live_messages "
+            "WHEN NEW.kind LIKE 'control:%' AND "
+            "(NEW.runtime_custody_json IS NOT NULL OR NEW.handoff_json IS NOT NULL) "
+            "BEGIN SELECT RAISE(ABORT,'bridge_inbox_control_custody_unsupported'); END",
+        )
     triggers["live_messages_handoff_immutable"] = (
         "live_messages",
         "CREATE TRIGGER IF NOT EXISTS live_messages_handoff_immutable "

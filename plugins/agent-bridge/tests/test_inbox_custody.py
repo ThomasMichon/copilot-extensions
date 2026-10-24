@@ -522,3 +522,65 @@ def test_custody_commit_is_full_sync_and_ordinary_writes_keep_normal_policy(inbo
         if adopted:
             db.close()
             passive.close()
+
+
+@pytest.mark.parametrize("method", ["ordinary", "fresh"])
+@pytest.mark.parametrize("kind", ["control:mode", "CONTROL:MODE"])
+def test_associated_controls_refuse_before_either_enqueue_can_admit(inbox, method, kind):
+    db, _, _, admission, consumer = inbox
+    with pytest.raises(RuntimeCustodyError, match="qualified control handoff"):
+        if method == "ordinary":
+            db.enqueue_live_message(
+                consumer.session_id, "sender", "control body", 10.0,
+                kind=kind, runtime_admission=admission,
+            )
+        else:
+            db.enqueue_live_message_if_fresh(
+                consumer.session_id, sender="sender", body="control body", now=10.0,
+                kind=kind, runtime_admission=admission,
+            )
+    assert db.execute_read("SELECT id FROM live_messages") == []
+
+
+@pytest.mark.parametrize("kind", ["control:mode", "CONTROL:MODE"])
+def test_sql_owner_cannot_admit_an_associated_control(inbox, kind):
+    db, _, _, admission, consumer = inbox
+    with pytest.raises(sqlite3.IntegrityError, match="control_custody_unsupported"):
+        db.execute_write(
+            "INSERT INTO live_messages "
+            "(session_id,sender,body,kind,created_at,runtime_custody_json) VALUES (?,?,?,?,?,?)",
+            (consumer.session_id, "sender", "control body", kind, 10.0, admission.document()),
+        )
+    assert db.execute_read("SELECT id FROM live_messages") == []
+
+
+def test_associated_prompt_cannot_be_reclassified_as_a_legacy_control(inbox):
+    db, _, _, _, _ = inbox
+    message_id = enqueue(inbox)
+    with pytest.raises(sqlite3.IntegrityError, match="control_custody_unsupported"):
+        db.execute_write("UPDATE live_messages SET kind='control:mode' WHERE id=?", (message_id,))
+    assert db.execute_read("SELECT kind FROM live_messages")[0]["kind"] == "prompt"
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_legacy_controls_cannot_settle_unsupported_retained_custody(inbox, claimed):
+    db, _, _, _, consumer = inbox
+    message_id = enqueue(inbox)
+    ordinary_id = db.enqueue_live_message(
+        consumer.session_id, "sender", "ordinary control", 10.0, kind="control:mode",
+    )
+    # Model an older owner that admitted a control before the new guard existed.
+    db.execute_write("DROP TRIGGER live_messages_control_update_unsupported")
+    db.execute_write(
+        "UPDATE live_messages SET kind='control:mode',claimed_at=? WHERE id=?",
+        (9.0 if claimed else None, message_id),
+    )
+    close(inbox)
+    with pytest.raises(RuntimeCustodyError, match="qualified control handoff"):
+        db.claim_live_controls(consumer.session_id, 100.0, 1.0)
+    assert db.ack_live_messages(consumer.session_id, [message_id], 100.0, controls=True) == 0
+    assert not db.withdraw_live_control(consumer.session_id, message_id, 100.0)
+    rows = db.execute_read("SELECT id,claimed_at,delivered_at,outcome FROM live_messages ORDER BY id")
+    assert [row["id"] for row in rows] == [message_id, ordinary_id]
+    assert all(row["delivered_at"] is None and row["outcome"] is None for row in rows)
+    assert rows[1]["claimed_at"] is None

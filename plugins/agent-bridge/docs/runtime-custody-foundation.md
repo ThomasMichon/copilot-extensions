@@ -86,6 +86,12 @@ producer association, including legacy versus associated admission.
 Registration deregistration, takeover and reaping preserve associated inbox
 history even when the registration itself goes away.
 
+Qualified control handoff is not implemented. Both message insertion methods and
+the canonical SQL guards reject custody-associated `control:` kinds, including
+case variants. Legacy control claim refuses an existing unsupported associated
+control before expiry or claim mutations; ACK and withdrawal cannot settle it.
+Ordinary unassociated control behavior is unchanged.
+
 Custody transactions, including associated inbox insertion, commit with
 connection-local `synchronous=FULL` before returning. Both normal and adopted
 connections restore their prior setting afterward, including on refusal.
