@@ -444,7 +444,7 @@ def run_side_load(
     if not side_load:
         raise EmitterError(f"emitter {spec['id']!r} does not declare side_load")
     command, cwd = resolve_execution_resources(
-        _render_command(side_load["command"], change_ref=change_ref), spec.get("cwd"),
+        _render_command(side_load["command"], change_ref=change_ref), spec.get("cwd"), bind_relative_executable=True,
     )
     completed = runner(
         command,
@@ -571,7 +571,7 @@ def run_tick(
             }
         task_output_json = spec.get("task_output") == "json"
         command, command_cwd = resolve_execution_resources(
-            _render_command(spec["command"]), spec.get("cwd"),
+            _render_command(spec["command"]), spec.get("cwd"), bind_relative_executable=True,
         )
         completed = runner(
             command,

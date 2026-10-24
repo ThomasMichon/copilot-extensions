@@ -6,7 +6,7 @@ import contextlib
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import shutil
 import time
@@ -152,25 +152,129 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
     return data, declarations
 
 
+def _is_python_interpreter(executable: str) -> bool:
+    return re.fullmatch(
+        r"(?:pythonw?|pypy)(?:\d+(?:\.\d+)*)?(?:_d)?(?:\.exe)?",
+        Path(executable).name, re.IGNORECASE,
+    ) is not None
+
+
+def _command_script_operand(command: list[str]) -> str | None:
+    suffixes = {".py", ".sh", ".ps1"}
+    if not _is_python_interpreter(command[0]):
+        if len(command) > 1 and Path(command[1]).suffix.lower() in suffixes:
+            return command[1]
+        if len(command) > 1 and command[1].startswith("-") and any(
+            Path(value).suffix.lower() in suffixes for value in command[2:]
+        ):
+            raise RegistrarError("script dependencies after non-Python options cannot yet be validated safely")
+        return None
+    arguments = iter(command[1:])
+    for value in arguments:
+        if value == "-" or value.startswith(("-c", "-m")):
+            return None  # Inline code/module operands and their arguments are not script files.
+        if value == "--":
+            operand = next(arguments, None)
+            return None if operand == "-" else operand
+        if value in {"-W", "-X", "--check-hash-based-pycs"}:
+            if next(arguments, None) is None:
+                raise RegistrarError("missing Python interpreter option value")
+        elif value.startswith(("-W", "-X", "--check-hash-based-pycs=")):
+            continue
+        elif value in {"--help", "--help-env", "--help-xoptions", "--help-all", "--version"}:
+            return None
+        elif value.startswith("-"):
+            if not re.fullmatch(r"-[bBdEhiIOPqRsSuvVx]+", value):
+                raise RegistrarError("Python interpreter options cannot yet be validated safely")
+            if "h" in value or "V" in value:
+                return None
+        else:
+            return value
+    return None
+
+
+def _validate_command_dependency(command: list[str], directory: Path, *, explicit_cwd: bool) -> None:
+    if explicit_cwd and not directory.is_dir():
+        raise RegistrarError(f"missing working directory dependency: {directory}")
+    executable = command[0]
+    path_command = Path(executable).is_absolute() or any(
+        separator in executable for separator in (os.sep, os.altsep) if separator
+    )
+    available = (directory / executable).is_file() if path_command else bool(shutil.which(executable))
+    if not available:
+        raise RegistrarError(f"missing command dependency: {executable}")
+    script = _command_script_operand(command)
+    if script is not None:
+        target = directory / script
+        if not target.is_file() and not (
+            _is_python_interpreter(executable) and target.is_dir()
+            and any((target / name).is_file() for name in ("__main__.py", "__main__.pyc"))
+        ):
+            raise RegistrarError(f"missing script dependency: {script}")
+    if not explicit_cwd and (
+        (path_command and not Path(executable).is_absolute())
+        or (script is not None and not Path(script).is_absolute())
+    ):
+        raise RegistrarError("relative command/script dependencies require an explicit working directory")
+
+
+def _validate_evaluator_dependency(declaration, resources) -> None:
+    from .producers.evaluator import ScriptEvaluator, load_registration_evaluator
+
+    if declaration.kind == "evaluator":
+        spec = dict(declaration.spec)
+    elif declaration.kind == "supervised-lane" and declaration.evaluator:
+        spec = {"evaluator": declaration.evaluator}
+    else:
+        return
+    try:
+        policy = spec.get("evaluator") if spec.get("evaluator_spec") is None else None
+        if isinstance(policy, str) and policy.startswith("repo:"):
+            raise RegistrarError("file-backed evaluator does not support named repository resources")
+        if isinstance(policy, str) and not Path(policy).expanduser().is_file():
+            raise RegistrarError("missing or nonregular evaluator policy dependency")
+        evaluator = load_registration_evaluator(spec)
+        if isinstance(evaluator, ScriptEvaluator):
+            if not evaluator.cwd or not (
+                evaluator.cwd.startswith("repo:")
+                or any(cls(evaluator.cwd).is_absolute() for cls in (Path, PurePosixPath, PureWindowsPath))
+            ):
+                raise RegistrarError(
+                    "evaluator script dependencies require an explicit absolute or named working directory"
+                )
+            command = [resources.resolve(part) for part in evaluator.argv]
+            directory = Path(resources.resolve(
+                evaluator.cwd, directory=True,
+            )) if evaluator.cwd else Path.cwd()
+            _validate_command_dependency(command, directory, explicit_cwd=bool(evaluator.cwd))
+    except (OSError, ValueError) as exc:
+        raise RegistrarError(f"missing or invalid evaluator dependency: {exc}") from exc
+
+
 def _validate_dependencies(
     declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
 ) -> None:
     from .registrations import RegistrationKind
+    from .repository_resources import RepositoryResourceSnapshot
+
+    resources = RepositoryResourceSnapshot(execution=False)
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
             raise RegistrarError("missing fleet dependency: ssh transport")
+        _validate_evaluator_dependency(declaration, resources)
         command = declaration.spec.get("command")
         if isinstance(command, list) and command:
-            executable = command[0]
-            directory = Path(declaration.spec.get("cwd") or repo_root or active_dir())
-            if not shutil.which(executable) and not (
-                (Path(executable).is_absolute() or Path(executable).parent != Path("."))
-                and (directory / executable).is_file()
-            ):
-                raise RegistrarError(f"missing command dependency: {executable}")
-            if len(command) > 1 and Path(command[1]).suffix in {".py", ".sh", ".ps1"}:
-                if not (directory / command[1]).is_file():
-                    raise RegistrarError(f"missing script dependency: {command[1]}")
+            if declaration.kind == RegistrationKind.EMITTER:
+                from .producers.emitter import _render_command
+
+                command = _render_command(command)
+            command = [resources.resolve(part) for part in command]
+            directory = Path(resources.resolve(
+                str(declaration.spec.get("cwd") or repo_root or active_dir()), directory=True,
+            ))
+            _validate_command_dependency(
+                command, directory, explicit_cwd=bool(declaration.spec.get("cwd")),
+            )
         if declaration.kind == RegistrationKind.SUPERVISED_LANE:
             # The registrar validates named identities on composed issue loops.
             # A basic lane may name a custom body agent; do not fabricate a
@@ -272,7 +376,15 @@ def save_instance(
     if not isinstance(repo_root, str):
         raise RegistrarError("repo_root must be text")
     source = source_id.removeprefix("template:")
-    if source_id.startswith("template:"):
+    provider = None
+    if source_id.startswith("template:provider:"):
+        from .worker_template_materialization import materialize_template, selected_template
+
+        provider = selected_template(source_id, revision)
+        if not isinstance(document, dict):
+            raise RegistrarError("declaration: expected a JSON object")
+        document = materialize_template(provider, document, name, repo_root)
+    elif source_id.startswith("template:"):
         if source not in templates() or revision != digest(templates()[source]):
             raise RegistrarError("template is absent or changed; refresh the catalog")
         if not isinstance(document, dict):
@@ -306,11 +418,19 @@ def save_instance(
             ):
                 raise RegistrarError("stale or missing instance; refresh before editing")
         _check_collisions(name, declarations, existing)
+        if provider is not None:
+            # Recheck source closure/activation after validation and collision reads.
+            selected_template(source_id, revision)
         record = {
             "id": f"instance:{name}", "name": name, "configuration": configuration,
             "revision": wanted_revision,
             "source": existing["source"] if existing else {
-                "id": source_id, "revision": revision, "provider": "agent-dispatch",
+                "id": source_id, "revision": revision,
+                **({
+                    "provider": provider["row"]["provenance"],
+                    "context": provider["row"]["source"],
+                    "declaration": str(provider["path"]),
+                } if provider is not None else {"provider": "agent-dispatch"}),
             },
             "last_request": {"id": source_id, "revision": revision},
             "saved_at": existing["saved_at"] if retry else time.time(),
