@@ -4261,7 +4261,7 @@ function Invoke-Uninstall {
 
     foreach ($n in @(
         'agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch',
-        'agent-dispatch-board.cmd'
+        'agent-dispatch-board.cmd', 'agent-dispatch-board.ps1'
     )) {
         $p = Join-Path $LocalBin $n
         if (Test-Path $p) {

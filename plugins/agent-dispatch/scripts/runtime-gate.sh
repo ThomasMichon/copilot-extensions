@@ -49,6 +49,15 @@ fail_context() {
     printf '[agent-dispatch] installation context blocks invocation: %s\n' "$*" >&2
     exit 126
 }
+legacy_invocation_allowed() {
+    [[ "$(value "$1" status)" == ready && "$(value "$1" actualMode)" == legacy &&
+       "$(value "$1" desiredMode)" == legacy ]] ||
+    [[ "$(value "$1" status)" == provenance-blocked && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
+       "$(value "$1" $'policy\034enabled' type)" == boolean &&
+       "$(value "$1" $'policy\034enabled')" == false &&
+       "$(value "$1" $'legacy\034disposition')" == active &&
+       -z "$(value "$1" $'legacy\034tombstone')" ]]
+}
 CONTEXT=""
 RUNTIME_ROOT="$LEGACY_ROOT"
 STATUS_ARGS=(status --payload-root "$PAYLOAD_ROOT" --plugin-id agent-dispatch --legacy-root "$LEGACY_ROOT")
@@ -61,12 +70,7 @@ RESOLUTION="$(bash "$MODE_RUNNER" "${STATUS_ARGS[@]}")" || fail_context 'status 
 STATUS="$(value "$RESOLUTION" status)"
 ACTUAL_MODE="$(value "$RESOLUTION" actualMode)"
 INSTALL_GENERATION="$(value "$RESOLUTION" installGeneration)"
-if [[ "$STATUS" == ready && "$ACTUAL_MODE" == legacy &&
-      "$(value "$RESOLUTION" desiredMode)" == legacy ]] ||
-   [[ "$STATUS" == provenance-blocked && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
-      "$(value "$RESOLUTION" $'policy\034enabled')" == false &&
-      "$(value "$RESOLUTION" $'legacy\034disposition')" == active &&
-      -z "$(value "$RESOLUTION" $'legacy\034tombstone')" ]]; then
+if legacy_invocation_allowed "$RESOLUTION"; then
     [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]] || fail_context 'requested context is not active'
     RUNTIME_ROOT="$(value "$RESOLUTION" $'legacy\034root')"
 elif [[ "$ACTUAL_MODE" == namespaced ]] &&
@@ -131,6 +135,10 @@ assert_publication() {
         printf '[agent-dispatch] Runtime publication refused: %s Use explicit installation management to install or repair this runtime.\n' "$probe" >&2
         exit 3
     fi
+    if [[ -z "$CONTEXT" ]] && ! legacy_invocation_allowed "$probe"; then
+        printf '[agent-dispatch] Runtime publication refused: %s Use explicit installation management to migrate this runtime.\n' "$probe" >&2
+        exit 3
+    fi
     if [[ -n "$CONTEXT" ]]; then
         # Dispatch's native installer has not adopted installation-cell staging.
         # Do not let its legacy staging/default service paths mutate another root.
@@ -145,7 +153,8 @@ assert_publication() {
         --plugin-id agent-dispatch --legacy-root "$RUNTIME_ROOT")" || rc=$?
     if [[ "$rc" != 0 || "$(value "$probe" allowMutation type)" != boolean ||
           "$(value "$probe" allowMutation)" != true ||
-          "$(value "$probe" $'legacy\034root')" != "$RUNTIME_ROOT" ]]; then
+          "$(value "$probe" $'legacy\034root')" != "$RUNTIME_ROOT" ]] ||
+       ! legacy_invocation_allowed "$probe"; then
         printf '[agent-dispatch] Runtime publication refused: %s\n' "$probe" >&2
         exit 3
     fi

@@ -60,6 +60,13 @@ function Read-Decision([hashtable]$Arguments) {
     try { return ($response -join "`n") | ConvertFrom-Json -ErrorAction Stop }
     catch { Stop-Context "malformed decision: $($_.Exception.Message)" }
 }
+function Test-LegacyInvocationAllowed($Decision) {
+    return (($Decision.status -ceq 'ready' -and $Decision.actualMode -ceq 'legacy' -and
+             $Decision.desiredMode -ceq 'legacy') -or
+        ($Decision.status -ceq 'provenance-blocked' -and -not $env:COPILOT_EXTENSIONS_CONTEXT -and
+         $Decision.policy.enabled -is [bool] -and -not $Decision.policy.enabled -and
+         $null -eq $Decision.legacy.tombstone -and $Decision.legacy.disposition -ceq 'active'))
+}
 $context = ''
 $runtimeRoot = $legacyRoot
 $statusArgs = @{ Action = 'status'; PayloadRoot = $payloadRoot; PluginId = 'agent-dispatch'; LegacyRoot = $legacyRoot }
@@ -71,10 +78,7 @@ if ($env:COPILOT_EXTENSIONS_CONTEXT) {
 }
 $resolution = Read-Decision $statusArgs
 $installGeneration = [string]$resolution.installGeneration
-if (($resolution.status -ceq 'ready' -and $resolution.actualMode -ceq 'legacy' -and $resolution.desiredMode -ceq 'legacy') -or
-    ($resolution.status -ceq 'provenance-blocked' -and -not $env:COPILOT_EXTENSIONS_CONTEXT -and
-     $resolution.policy.enabled -is [bool] -and -not $resolution.policy.enabled -and
-     $null -eq $resolution.legacy.tombstone -and $resolution.legacy.disposition -ceq 'active')) {
+if (Test-LegacyInvocationAllowed $resolution) {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) { Stop-Context 'requested context is not active' }
     $runtimeRoot = [string]$resolution.legacy.root
 } elseif ($resolution.actualMode -ceq 'namespaced' -and
@@ -138,7 +142,8 @@ function Assert-Publication {
         $selected = if ($context) { [string]$decision.runtimeRoot } else { [string]$decision.legacy.root }
         if ($code -ne 0 -or $decision.deployment.allowPluginPublication -isnot [bool] -or
             -not $decision.deployment.allowPluginPublication -or $selected -cne $runtimeRoot -or
-            [string]$decision.deployment.path -cne (Join-Path $runtimeRoot 'runtime-deployment.json')) {
+            [string]$decision.deployment.path -cne (Join-Path $runtimeRoot 'runtime-deployment.json') -or
+            (-not $context -and -not (Test-LegacyInvocationAllowed $decision))) {
             throw ($response -join ' ')
         }
         if ($context) {
@@ -156,7 +161,8 @@ function Assert-Publication {
         $code = $LASTEXITCODE
         $legacy = ($response -join "`n") | ConvertFrom-Json -ErrorAction Stop
         if ($code -ne 0 -or $legacy.allowMutation -isnot [bool] -or -not $legacy.allowMutation -or
-            [string]$legacy.legacy.root -cne $runtimeRoot) { throw ($response -join ' ') }
+            [string]$legacy.legacy.root -cne $runtimeRoot -or
+            -not (Test-LegacyInvocationAllowed $legacy)) { throw ($response -join ' ') }
     } catch {
         [Console]::Error.WriteLine(
             "[agent-dispatch] Runtime publication refused: $($_.Exception.Message) Use explicit installation management to install or repair this runtime."
@@ -219,6 +225,16 @@ while (-not $lock) {
     }
 }
 $rc = 1
+function Invoke-Installer([string]$Path) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $global:LASTEXITCODE = 1
+    try {
+        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $Path provision -InstallDir $runtimeRoot 2>&1 |
+            ForEach-Object { [Console]::Error.WriteLine($_) }
+        return $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previous }
+}
 try {
     $python = Resolve-Runtime
     if (-not $python) {
@@ -237,9 +253,7 @@ try {
                 Assert-Publication
                 $provisionSource = Select-ProvisionSource
                 if (-not $provisionSource.SourcePinned) {
-                    & $hostExe -NoProfile -ExecutionPolicy Bypass -File $bootFile provision -InstallDir $runtimeRoot 2>&1 |
-                        ForEach-Object { [Console]::Error.WriteLine($_) }
-                    $rc = $LASTEXITCODE
+                    $rc = Invoke-Installer $bootFile
                 }
             } catch {
                 [Console]::Error.WriteLine("[agent-dispatch] upstream installer fetch/run failed ($($_.Exception.Message)); falling back to the locally stamped snapshot.")
@@ -249,9 +263,7 @@ try {
             Assert-Publication
             $provisionSource = Select-ProvisionSource
             if ($provisionSource.Installer -and [IO.File]::Exists($provisionSource.Installer)) {
-                & $hostExe -NoProfile -ExecutionPolicy Bypass -File $provisionSource.Installer provision -InstallDir $runtimeRoot 2>&1 |
-                    ForEach-Object { [Console]::Error.WriteLine($_) }
-                $rc = $LASTEXITCODE
+                $rc = Invoke-Installer $provisionSource.Installer
             } else {
                 [Console]::Error.WriteLine('[agent-dispatch] cannot self-provision: local snapshot installer is unavailable; re-enable/update the owning plugin.')
                 $rc = 127

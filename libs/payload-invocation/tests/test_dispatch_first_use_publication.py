@@ -61,12 +61,19 @@ def _selected_cell(fixture: dict, environment: dict[str, str]) -> tuple[Path, di
         "standalone", "managed", "healthy", "healthy-lkg", "cell-managed",
         "cell-standalone", "cell-healthy", "cell-healthy-lkg",
         "invalid", "foreign", "future", "old-resolver",
-        "missing-admission", "changed-under-lock", "custom-standalone", "custom-healthy",
+        "missing-admission", "changed-under-lock", "mode-changed-under-lock",
+        "custom-standalone", "custom-healthy",
     )
     for entry in ("global", "payload", "board")
 ] + [
-    (state, entry) for state in ("upstream-first", "upstream-policy-change")
+    (state, entry) for state in ("upstream-first", "upstream-policy-change", "upstream-mode-change")
     for entry in ("global", "board")
+] + [
+    pytest.param(
+        state, "global",
+        marks=pytest.mark.skipif(os.name != "nt", reason="Actual Windows PowerShell 5 stderr forwarding"),
+    )
+    for state in ("standalone-stderr", "upstream-stderr")
 ] + [
     pytest.param(
         "standalone-no-flock", entry,
@@ -130,7 +137,9 @@ def test_dispatch_actual_first_use_publication(
     )
     policy_state = (
         state if state in ("invalid", "foreign", "future") else
-        "standalone" if state.endswith("standalone") or state in ("changed-under-lock", "standalone-no-flock") or state.startswith("upstream-") else "managed"
+        "standalone" if state.endswith("standalone") or state in (
+            "changed-under-lock", "mode-changed-under-lock", "standalone-no-flock", "standalone-stderr",
+        ) or state.startswith("upstream-") else "managed"
     )
     _policy(binding_fixture, root, arguments, policy_state)
     if state.startswith("custom-"):
@@ -142,6 +151,14 @@ def test_dispatch_actual_first_use_publication(
             binding_fixture, legacy, binding_fixture["arguments"],
             "managed" if policy_state == "standalone" else "standalone",
         )
+    mode_change = state in ("mode-changed-under-lock", "upstream-mode-change")
+    mode_path = binding_fixture["home"] / ".copilot-extensions/installation-mode.json"
+    if mode_change:
+        (root / "runtime-deployment.json").unlink()
+        _write(mode_path, {
+            "schema": "copilot-extensions.installation-mode", "version": 1,
+            "installationMode": {"enabled": False, "marketplaces": {}},
+        })
 
     # Preserve the real installer (including source checks and lifecycle
     # admission); stop at acquisition of the first expensive external tool.
@@ -152,7 +169,9 @@ def test_dispatch_actual_first_use_publication(
     assert source.count(seam) == 1
     instrumented = source.replace(
         seam,
-        f"    [IO.File]::WriteAllText('{str(record).replace(chr(39), chr(39) * 2)}', $InstallDir)\n    exit 37"
+        f"    [IO.File]::WriteAllText('{str(record).replace(chr(39), chr(39) * 2)}', $InstallDir)\n"
+        + ("    [Console]::Error.WriteLine('local acquisition diagnostic')\n" if state == "standalone-stderr" else "")
+        + "    exit 37"
         if os.name == "nt" else
         f'    printf "%s\\n" "$INSTALL_DIR" > {shlex.quote(str(record))}\n    exit 37',
     )
@@ -219,19 +238,28 @@ def test_dispatch_actual_first_use_publication(
             payload / "scripts/installation-context"
         ) / helper.name
         missing.unlink()
-    if state == "changed-under-lock":
-        _policy(binding_fixture, root, arguments, "managed")
-        peer = tmp_path / "peer-deployment.json"
-        policy_path = root / "runtime-deployment.json"
-        peer.write_bytes(policy_path.read_bytes())
-        _policy(binding_fixture, root, arguments, "standalone")
+    if state in ("changed-under-lock", "mode-changed-under-lock"):
+        peer = tmp_path / "peer-decision.json"
+        if mode_change:
+            policy_path = mode_path
+            _write(peer, {
+                "schema": "copilot-extensions.installation-mode", "version": 1,
+                "installationMode": {"enabled": True, "marketplaces": {}},
+            })
+        else:
+            _policy(binding_fixture, root, arguments, "managed")
+            policy_path = root / "runtime-deployment.json"
+            peer.write_bytes(policy_path.read_bytes())
+            _policy(binding_fixture, root, arguments, "standalone")
         resolver = (
             root / "bin" if entry != "payload" else payload / "scripts"
         ) / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")
         real_resolver = resolver.with_name("real-" + resolver.name)
         resolver.rename(real_resolver)
         if os.name == "nt":
-            quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+            def quote(path: Path) -> str:
+                return "'" + str(path).replace("'", "''") + "'"
+
             mutation = (
                 "# Trace contract: normal/read-only/ready-v1\n"
                 "param([string]$TraceMode = 'normal')\n"
@@ -258,15 +286,27 @@ def test_dispatch_actual_first_use_publication(
             "ps1" if os.name == "nt" else "sh"
         )
         peer = tmp_path / "download-peer-policy.json"
-        _policy(binding_fixture, root, arguments, "managed")
-        peer.write_bytes((root / "runtime-deployment.json").read_bytes())
-        _policy(binding_fixture, root, arguments, "standalone")
+        download_policy_path = root / "runtime-deployment.json"
+        if mode_change:
+            download_policy_path = mode_path
+            _write(peer, {
+                "schema": "copilot-extensions.installation-mode", "version": 1,
+                "installationMode": {"enabled": True, "marketplaces": {}},
+            })
+        else:
+            _policy(binding_fixture, root, arguments, "managed")
+            peer.write_bytes(download_policy_path.read_bytes())
+            _policy(binding_fixture, root, arguments, "standalone")
         if os.name == "nt":
-            quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+            def quote(path: Path) -> str:
+                return "'" + str(path).replace("'", "''") + "'"
+
             bootstrap.write_text(
                 "param([string]$Action, [string]$InstallDir)\n"
                 f"[IO.File]::WriteAllText({quote(bootstrap_record)}, "
-                "(@{action=$Action; root=$InstallDir} | ConvertTo-Json -Compress))\nexit 0\n",
+                "(@{action=$Action; root=$InstallDir} | ConvertTo-Json -Compress))\n"
+                + ("[Console]::Error.WriteLine('upstream diagnostic')\n" if state == "upstream-stderr" else "")
+                + "exit 0\n",
                 encoding="utf-8",
             )
             substitute = (
@@ -275,14 +315,16 @@ def test_dispatch_actual_first_use_publication(
                 f"  if ($Uri -cne '{url}') {{ throw 'unexpected bootstrap URL' }}\n"
                 f"  [IO.File]::WriteAllText({quote(network_record)}, $Uri)\n"
                 f"  [IO.File]::Copy({quote(bootstrap)}, $OutFile)\n"
-                + (f"  [IO.File]::Copy({quote(peer)}, {quote(root / 'runtime-deployment.json')}, $true)\n"
-                   if state == "upstream-policy-change" else "")
+                + (f"  [IO.File]::Copy({quote(peer)}, {quote(download_policy_path)}, $true)\n"
+                   if state in ("upstream-policy-change", "upstream-mode-change") else "")
                 + "}\n"
             )
             gate = root / "bin/runtime-gate.ps1"
             gate.write_text(substitute + gate.read_text(encoding="utf-8"), encoding="utf-8")
         else:
-            quote = lambda path: shlex.quote(str(path))
+            def quote(path: Path) -> str:
+                return shlex.quote(str(path))
+
             bootstrap.write_text(
                 '#!/bin/sh\n[ "$1" = provision ] && [ "$2" = --install-dir ] || exit 91\n'
                 f'printf \'{{"action":"%s","root":"%s"}}\' "$1" "$3" > {quote(bootstrap_record)}\nexit 0\n',
@@ -293,8 +335,8 @@ def test_dispatch_actual_first_use_publication(
                 f"#!/bin/sh\n[ \"$2\" = '{url}' ] || exit 92\n"
                 f'printf "%s" "$2" > {quote(network_record)}\n'
                 f'cp {quote(bootstrap)} "$4"\n'
-                + (f"cp {quote(peer)} {quote(root / 'runtime-deployment.json')}\n"
-                   if state == "upstream-policy-change" else ""),
+                + (f"cp {quote(peer)} {quote(download_policy_path)}\n"
+                   if state in ("upstream-policy-change", "upstream-mode-change") else ""),
                 encoding="utf-8",
             )
             curl.chmod(0o755)
@@ -312,6 +354,10 @@ def test_dispatch_actual_first_use_publication(
         [os.environ["COMSPEC"], "/d", "/s", "/c", str(wrapper), *forwarded]
         if os.name == "nt" else [str(wrapper), *forwarded]
     )
+    if state in ("standalone-stderr", "upstream-stderr"):
+        windows_ps5 = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+        assert windows_ps5.is_file()
+        command = [str(windows_ps5), "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *forwarded]
     result = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"],
         capture_output=True, text=True, timeout=60,
@@ -360,25 +406,32 @@ def test_dispatch_actual_first_use_publication(
     elif state.startswith("upstream-"):
         assert network_record.read_text(encoding="utf-8") == url, evidence
         assert not record.exists(), evidence
-        if state == "upstream-policy-change":
+        if state in ("upstream-policy-change", "upstream-mode-change"):
             assert result.returncode == 3, evidence
-            assert "deployment-managed" in result.stderr, evidence
+            assert ("migration-required" if mode_change else "deployment-managed") in result.stderr, evidence
             assert not bootstrap_record.exists(), evidence
         else:
             assert result.returncode == 1, evidence
             assert json.loads(bootstrap_record.read_text(encoding="utf-8")) == {
                 "action": "provision", "root": str(root),
             }, evidence
-    elif state == "changed-under-lock":
+            if state == "upstream-stderr":
+                assert "upstream diagnostic" in result.stderr, evidence
+                assert "falling back" not in result.stderr, evidence
+                assert (root / ".provision-status").read_text() == "failed rc=1", evidence
+    elif state in ("changed-under-lock", "mode-changed-under-lock"):
         assert result.returncode == 3, evidence
-        assert "deployment-managed" in result.stderr, evidence
+        assert ("migration-required" if mode_change else "deployment-managed") in result.stderr, evidence
         assert not record.exists(), evidence
         assert not (root / ".provision-status").exists(), evidence
         assert set(changed) <= {
             ".", "runtime-deployment.json", "logs", "logs/boot-trace.jsonl", ".provision.lock",
         }, evidence
         prefix = root.relative_to(binding_fixture["home"]).as_posix()
-        assert set(home_changed) <= {prefix + ("/" + name if name != "." else "") for name in changed}, evidence
+        allowed_home = {prefix + ("/" + name if name != "." else "") for name in changed}
+        if mode_change:
+            allowed_home.add(mode_path.relative_to(binding_fixture["home"]).as_posix())
+        assert set(home_changed) <= allowed_home, evidence
     elif state == "custom-standalone":
         assert result.returncode == 126, evidence
         assert "scoped first-use provisioning is unavailable" in result.stderr, evidence
@@ -394,6 +447,9 @@ def test_dispatch_actual_first_use_publication(
         else:
             assert (root / ".provision.lock").is_file(), evidence
         assert (root / "logs/boot-trace.jsonl").is_file(), evidence
+        if state == "standalone-stderr":
+            assert "local acquisition diagnostic" in result.stderr, evidence
+            assert (root / ".provision-status").read_text() == "failed rc=37", evidence
     elif state == "cell-standalone":
         # Native Dispatch installation-cell staging is not yet supported.
         # An admitted policy cannot authorize writes through its legacy installer.
