@@ -21,7 +21,7 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
-**Current status (2026-10-23):** the containing promotion and #7743 native
+**Current status (2026-10-24):** the containing promotion and #7743 native
 self-repair gates are verified. Runtime alignment #8010 and allocation repair
 #8110 released in natural `39912447859`; bounded follow-ups #8283, #8289 and
 #8297 released through independently verified natural qualifications. Supported
@@ -30,17 +30,20 @@ settled successful durable requests. The normal-entry report verifies all
 16 registered suite targets current, no event-parse errors and no restart
 requirement. Selected native versions include Manager `0.6.108-dev1`,
 Worktrees `1.24.229-dev1`, Bridge `0.9.130-dev1` and Dispatch `0.18.76-dev1`.
-The registered native source and legacy runtime root are preserved. Guest
-recovery remains blocked by the deliberate `same_kernel_boot` fence; a real
-kernel restart is explicitly deferred by the operator; a future restart still
-needs specific approval. An external continuation baton is verified. The
-operator separately authorizes a full guest update only after successful
-restart-confirmed, no-replay recovery; that does not authorize shutdown or
-bypassing the current fence. No guest recovery, replay or ordinary update has run. After that supported
-guest acceptance, resume local-first identity implementation and the full
-creation/resume/installed matrix. The
-[current journal](journal/2026/10.22%20progress.md) preserves the exact release
-and installed evidence; the parent effort remains Active.
+The registered native source and legacy runtime root are preserved. The later
+operator-directed no-restart recovery supersedes the earlier restart
+prerequisite: #8402 released in independently verified natural `40085094788`.
+The historical guest failure remains interrupted with no successful exit or
+native settlement; its separate operator-repair authority releases the fence,
+not a replay. A subsequent supported guest repair/update completed with exit
+zero, all 16 registered targets verified current, no event-parse errors,
+advisories or restart requirement, and no remaining queue fence. Selected guest
+versions include Manager `0.6.130-dev2`, Worktrees `1.24.249-dev2`, Bridge
+`0.9.140-dev1` and Dispatch `0.18.86-dev1`. Resume local-first identity
+implementation and the full creation/resume/installed matrix, without enabling
+ordinary tuple producers or changing existing identities. The
+[current journal](journal/2026/10.24%20progress.md) preserves the release and
+guest acceptance boundary; the parent effort remains Active.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
@@ -297,10 +300,22 @@ historical launcher-hash gates for an explicitly registered Manager. Existing
 provider/package/path authority and construction-time change detection remain;
 this is not a request to remove wrong-target or source-selection boundaries.
 
-**Guest restart gate (operator-selected form):** `wsl_restart=defer`,
+**Historical guest restart gate (operator-selected form):** `wsl_restart=defer`,
 `post_recovery_update=true`. Leave current guest workloads running. The separate
 update authorization applies only after a future approved kernel restart and
 successful no-replay recovery; the restart itself is not authorized.
+
+**2026-10-24 guest repair continuation (verbatim):**
+
+> Resume; repair install as needed
+
+**Summary of the superseding direction:** use the released supported
+no-restart repair path rather than require a kernel restart. This replaces the
+historical restart prerequisite above, not the preservation of failed request
+history, queued work, existing identities or unrelated workloads. Explicit
+repair authority is distinct from native settlement and never implies replay.
+The observed supported guest repair/update now passes its bounded acceptance;
+the remaining identity implementation and installed matrix stay open.
 
 ## Plan
 
@@ -447,9 +462,11 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       registered-suite update and the normal installed project-update entry.
       Both durable requests settle successfully; all 16 registered suite
       targets are verified current, with native source/root preserved.
-- [ ] Complete supported guest interrupted-request recovery only after a
-      separately approved kernel restart and verified external baton; prove
-      no replay, then perform a separately explicit full update.
+- [x] Complete supported, explicitly authorized guest no-restart recovery;
+      preserve the historical interrupted failure without replay or fabricated
+      settlement, then verify the supported full repair/update. All 16 registered
+      targets are current, the durable request completed with exit zero, and no
+      queue fence or restart requirement remains.
 - [ ] Verify the installed Windows/WSL deployment and all-worktree resolution
       matrix; record or explicitly transfer any reproducible Manager regression.
 
