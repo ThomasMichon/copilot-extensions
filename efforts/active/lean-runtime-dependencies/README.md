@@ -809,3 +809,10 @@ profile-record API or a competing admission constructor.
   #8419, and #6941 retains candidate-input generation. Posted coordination
   on the first two PRs, including the already merged #8399 prerequisites.
   This policy-input slice does not close their gates or this parent effort.
+- #8494 carries this implementation. The initial hosted head passed the complete
+  1,421-unit packet in 34.177 seconds including coverage, and the opt-in native
+  reader lane passed on both Linux and Windows. Required guards caught two
+  newly registered SSH runtime-source copies introduced by the rebase target;
+  rerunning the canonical owner synchronized those copies. This correction
+  still requires current-head CI/review; the earlier passing jobs do not
+  authorize merging a failed guard.
