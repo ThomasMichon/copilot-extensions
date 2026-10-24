@@ -9,10 +9,12 @@
   concurrency, and compatible atomic heartbeat generation fencing.
 - **Current contract:** [selected admission, full publication](selected-authority-contract.md),
   explicitly selected by the user and reviewed/merged in #8278.
-- **Current blocker:** [one-venue total-work acceptance conflict](selected-readresult-dependency.md).
+- **Current blocker:** review the successor durable-inventory/push-assisted
+  freshness plan and select its storage/grace/action/publication contracts.
   The additive candidate seam has narrow explicit user authorization, not an
-  owner release. Selected/publication integration, review and qualification
-  remain open.
+  owner release. The previous multi-mux cost conflict is historical analysis,
+  not the new representative profile's ceiling. No cache/push algorithm is
+  implemented.
 - **Historical evidence:** [authority accounting](s3ab-authority-proposal.md) and
   [strict-boundary lower bound](s3ab-boundary-decision.md) remain retained, not
   current-policy performance qualification.
@@ -220,6 +222,44 @@ defers to the next due wave, with no hidden per-venue refresh.
   account/namespace/config/credential replacement, provider failure,
   partial/limit inventory, expiry, retries, stale heartbeat and cancellation.
   This is evidence collection, not a causal runtime fix or authority admission.
+
+### 2026-10-23 — Revised profile and durable-inventory design direction
+
+- Committed the coherent candidate-read/source-evidence checkpoint before
+  changing the planning scope. Retained its complete 72-frame packet and all
+  prior stress/raw evidence unchanged; no implementation PR update or merge.
+- New public-safe design summary: retain all active/inactive inventory locally,
+  use existing-owned-transport state notifications where supported, and bound
+  stale/disconnected/out-of-band reconciliation. Keep credentials and atomic
+  owner mutation separate from status caching. Storage, grace/action policy,
+  ACP and SSH-event ownership require plan review before functional changes.
+- Characterized two accounts and one total Copilot session per active venue:
+  0/1/4/8 examples, balanced/single-account placement, retained inventory 0/12,
+  CLI/keyring, cold/warm/not-due and optional bridge-forward health effects.
+  These are fixture parameters, not product limits or a new quota policy.
+- **96 profile tests passed / 288 complete Mux-route frames**. Mixed-fleet
+  evidence covers only four Mux venues with the other four represented in
+  inventory; ACP effects and full mixed-fleet cost remain unmeasured. A bridge
+  health probe is not an additional Copilot session.
+- **10 focused control/compatibility tests passed**, retaining four additional
+  stopped/page-limit control frames. Two-account retained inventory at the
+  page limit cannot authorize an SSH effect; known stopped entries remain
+  non-waking. No deadline or product health behavior changed.
+- One/four/eight Mux venues without configured bridge health: original CLI
+  cold/warm requests **8/6, 26/24, 50/48**; retained draft **47/47, 152/152,
+  292/292**. These characterize current unqualified algorithms, not a cache fix.
+  Local cache-hit/push-delta/successor due-action/expiry/out-of-band cells are
+  absent, not zero-cost measurements.
+- The revised uncached selected/full optimistic CLI formula is
+  `6 + 4B + 4C` for positive venue count C and completed-result batches B.
+  It is derived only and does not define the proposed cache contract or its
+  acceptance bar. The older 17/13/10 result is not reused as a new-profile fact.
+- Source trace found a prune-eligibility JSON store, in-memory availability
+  cache, existing owner lifecycle, and framed carrier subscription primitives;
+  no CodeSpace-status push operation. Bridge owns ACP transport liveness.
+  Returned those exact contracts as plan prerequisites, not permission to
+  edit other owners or deploy a new remote stack. No existing agent was
+  contacted or inspected.
 
 ## Reproduction and remaining cells
 

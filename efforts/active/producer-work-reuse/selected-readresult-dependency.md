@@ -2,6 +2,17 @@
 
 [Episode](s3ab.md) · [Merged contract](selected-authority-contract.md)
 
+**Historical workload checkpoint:** the later design direction replaces the
+primary multi-mux workload with a representative two-account,
+one-ACP-or-Mux-session-per-venue profile and proposes durable all-venue
+inventory/push-assisted freshness. The 17-versus-13/10 calculation below is
+retained historical analysis, not the new profile's acceptance ceiling.
+Functional optimization is paused pending the successor's reviewed
+inventory/auth/control-publication contract. See
+[`evidence/representative-profile-manifest.json`](evidence/representative-profile-manifest.json)
+for the new current-consumer characterization and its explicitly unavailable
+ACP/cache/push cells.
+
 The user decision is reviewed and merged in #8278:
 `c6c117c03cc75790023c7db1ffa15e2d59a589ea`.
 The additive read-result seam subsequently received explicit, narrow user

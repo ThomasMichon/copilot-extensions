@@ -75,6 +75,7 @@ def authority_fixture(monkeypatch, tmp_path):
         "namespace": 1, "error": False, "effect": None,
         "partial_account": None, "limit_account": None, "exec_effect": None,
         "ssh_failures": 0,
+        "muxes": 4, "retained": 0, "assignments": {},
     }
     counts = Counter()
     counter_lock = threading.Lock()
@@ -129,12 +130,13 @@ def authority_fixture(monkeypatch, tmp_path):
             if account == state["partial_account"]:
                 return response(code=1)
             rows = [
-                {"name": f"cs-{i}", "state": "Available"}
-                for i in range(state["count"]) if "abc"[i % 3] == account
+                {"name": f"cs-{i}", "state": "Available" if i < state["count"] else "Stopped"}
+                for i in range(state["count"] + state["retained"])
+                if state["assignments"].get(i, "abc"[i % 3]) == account
             ]
             if account == state["limit_account"]:
                 rows = [{"name": f"cs-{i}", "state": "Available"} for i in range(50)]
-            return response(json.dumps(rows))
+            return response(json.dumps(rows[:50]))
         elif args[:4] == ["gh", "codespace", "ssh", "--config"]:
             count("process.ssh.config")
             if state["effect"]:
@@ -153,7 +155,8 @@ def authority_fixture(monkeypatch, tmp_path):
                 count("transport.failed_attempts")
                 return response(code=255)
             return response(
-                "".join(f"ACMUX1\t{i}\tpresent\n" for i in range(4)) + "ACMUX1\tDONE\t4\n"
+                "".join(f"ACMUX1\t{i}\tpresent\n" for i in range(state["muxes"]))
+                + f"ACMUX1\tDONE\t{state['muxes']}\n"
                 if batch else ""
             )
         unknown.append(args[:4])
@@ -233,12 +236,15 @@ def authority_fixture(monkeypatch, tmp_path):
         holds.clear()
         gh_account.clear_caches()
         bindings = {
-            f"cs-{i}": {"codespace": f"cs-{i}", "account": "abc"[i % 3], "bound_at": 1}
+            f"cs-{i}": {
+                "codespace": f"cs-{i}",
+                "account": state["assignments"].get(i, "abc"[i % 3]), "bound_at": 1,
+            }
             for i in range(count)
         }
         account_binding.BINDINGS_FILE.write_text(json.dumps(bindings), encoding="utf-8")
         if provider:
-            for login in "abc":
+            for login in state["accounts"]:
                 auth = root / "github-auth" / login
                 auth.mkdir(parents=True, exist_ok=True)
                 (auth / "accepted-login").write_text(login, encoding="utf-8")
@@ -247,7 +253,7 @@ def authority_fixture(monkeypatch, tmp_path):
             monkeypatch.setenv("AGENT_CODESPACES_HOME", str(root))
             monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", json.dumps({"cellRoot": str(root / "cell")}))
         for i in range(count):
-            for j in range(4):
+            for j in range(state["muxes"]):
                 owner.hold(f"cs-{i}", f"t-{j}", mux_session=f"mux-{j}", confirmed=True)
 
     yield SimpleNamespace(
