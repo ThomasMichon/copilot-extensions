@@ -88,6 +88,52 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### MX-LANDING existing copy, no-mux and retained-case boundaries
+
+This settles only these two original keys; their census headers, hashes
+and `MX-LANDING` dispositions remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_finalize_landing.py:2` | `9f397fc0fcdfb908df4e0350b7c16a3a90f23228449381701ea2b57c8732bd50` |
+| `tests/test_finalize_landing.py:8` | `8bb8b00d93c7bf5c0d1dff538bf7f8dd3b8f3492b2bfc668bc72cef9995b0bac` |
+
+Hunk 2's `shutil` import and `_seed_directory` alias from `conftest`
+belong to B-LANDING, actual foundation #7661 merge
+`a51b337947f6d1a1f0a6430b624c267e6d958086`. Both remain at comparison
+`446c84f5c1`. The complete current `conftest` import also retains the
+accepted hermetic `_published_seed_environment`; the historical import
+is not reapplied over that setup. The module-level
+`pytest.mark.usefixtures("git_only_mux")` instead belongs to B-MUX,
+actual #7497 merge `91e6b9bbea7e65e958a8903016e03a710dfe9d87`.
+That complete mark matches the actual merge and immutable source by AST.
+It is explicit Git-only fixture isolation, not process-ownership proof.
+
+Hunk 8's explain-test fixture substitution belongs to B-LANDING,
+actual consumer #7662 merge
+`86f055d12f95f5162d1adc8ff681cf071fe5a493`. The complete
+`test_explain_reports_every_base_and_check` matches that merge and the
+immutable source by AST; `merged_env` matches the accepted consumer
+implementation, not a claim that every fixture body matches the source.
+Actual landing and provider-base observations still occur per case.
+
+The default-base/provider-call-zero test remains in its original
+location. Its complete AST matches the historical base, immutable source
+and each actual merge cited here at comparison. The
+historical removal/relocation delta retains its accepted B-LANDING-ASSERT
+#7701 disposition, merge `a912a66b8ec44e8bf2705c59bee17f341fea7a56`;
+that retires a delta, never the separately collected test.
+
+Six native controls pass: base/merged private-copy isolation, the retained
+default-base case, the actual explain consumer and both no-mux
+discovery/termination canaries with restored bindings. Result: 60.68
+pytest seconds, 77.53 seconds including preparation and cleanup, exactly
+two contained Windows workers with unchanged marks, item deadlines and
+resource limits. This focused functional selection is not full-module,
+normal-group or repeated complete same-head plugin qualification.
+No code/test edit is needed; other residuals and parent qualification
+remain open.
+
 ### MX-LEASE private preview input with original test identities retained
 
 This settles only these three original keys; their census headers, hashes
