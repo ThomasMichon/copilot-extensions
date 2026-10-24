@@ -354,6 +354,30 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-23 - Prepare the remote-container controller and isolate bootstrap failure
+
+- The operator selected a remote container host and a client-only controller
+  installation, not a local engine, hypervisor, daemon, or elevated setup.
+  The consumer-owned configuration and pinned client installer are merged.
+  The actual current-user client reports the declared version; its isolated
+  first-touch and idempotence checks pass without modifying engine contexts,
+  host overrides, or credential configuration.
+- Exclusive coordination for the selected existing remote host was verified.
+  Its native connection bootstrap fails before writing the host stanza: a
+  forced self-import removes a private helper from an active module invocation.
+  A no-network reproduction distinguishes this external CLI defect from missing
+  authentication or plugin preparation. The temporary host lease was released;
+  no remote body, owned tunnel, or container remains running.
+- The consumer harness readiness guard and focused setup guide are now merged
+  after clean review and successful required CI. The owning bounded setup flow
+  deployed the published runtime, whose catalog command now reports the exact
+  external module-reload failure with exit 1 while inventory still succeeds.
+  Broken/healthy first-touch module fixtures also pass. This detects and
+  documents the defect rather than hotpatching the external distribution.
+- The trusted-container combined-selection proof remains open pending a working
+  connection bootstrap. The completed native Codespace evidence is unchanged;
+  static local/SSH/privileged acceptance and issue reconciliation remain open.
+
 ### 2026-10-23 - Verify published correction in both native Codespace modes
 
 - The authorized full unified controller update completed, including normal

@@ -118,9 +118,10 @@ finally:
         "argv": [str(installed_chat.interpreter), "-I", "-m", "agent_chat_service.cli"],
         "shell": "direct", "availability": "ready",
     }
-    assert len(catalog["resource_sha256s"]) == 8
+    assert len(catalog["resource_sha256s"]) == 9
     assert "hosting.py" in catalog["resource_sha256s"]
     assert "workspace.py" in catalog["resource_sha256s"]
+    assert "collaboration.py" in catalog["resource_sha256s"]
     offline = """
 from contextlib import redirect_stdout
 import io,json

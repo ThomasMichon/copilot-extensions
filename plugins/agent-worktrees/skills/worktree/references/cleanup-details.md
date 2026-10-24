@@ -39,6 +39,30 @@ outbound resource obligations. It deliberately bypasses dirty/WIP,
 inbound-claimant, follow-up and branch-merge checks, not responsibility for
 unfinished PRs or owned children.
 
+Before physical removal, cleanup also checks for live processes whose current
+directory is inside the checkout. Any observed holder defers removal, including
+with `--force`: the checkout, branch, trust and tracking record stay intact.
+Finalize can mark landed work finalized while retaining its checkout and branch
+for the same reason. Neither path kills mux sessions or cwd-matched processes.
+A matching cwd shows use, not teardown ownership; let the process owner stop it,
+then retry ordinary cleanup.
+Unavailable inspection also defers removal; the current cwd reader supports
+Windows and Linux, not macOS. A deferred single-item cleanup reports
+`removed: false`, `skipped: true` and its reason in JSON and text, rather than
+claiming the checkout was removed.
+If the checkout was removed but later branch cleanup fails, the result instead
+reports `removed: true`, `skipped: false`, `ok: false` and retains the warning;
+text output shows the removal and warning rather than claiming a deferral.
+Strict retirement inspection resolves the checkout root and observed cwd paths
+before matching, so symlinked ancestors do not hide a live holder.
+The retirement guard also includes the inspecting process itself, even though
+the legacy general-purpose process enumerator excludes its caller.
+Strict enumeration must contain the inspecting PID; an empty/unmounted `/proc`
+or an empty Windows census is unavailable evidence, not an empty holder set.
+Retaining a checkout does not waive finality checks: PR finalization rechecks
+landed content after holder inspection before marking either a retained or a
+removed checkout finalized.
+
 Open PRs override `finalized` tracking and Git-completed content. The same
 obligation check runs before retiring a missing checkout and before archiving
 its tracking record. A stale open PR remains a hold until `--reconcile-prs`

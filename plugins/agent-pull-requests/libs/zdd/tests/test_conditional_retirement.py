@@ -517,6 +517,7 @@ def test_conditional_drain_sanitizes_response_and_reports_only_busy_count(case):
 
 @pytest.mark.parametrize("invalid", [
     {"forced": True}, {"clean": None}, {"clean": False}, {"drained": 1},
+    {"mode": "incompatible-contract-cold"},
 ])
 def test_conditional_drain_requires_unforced_boolean_evidence(case, invalid):
     root, _, events, _, snapshot, request, orch = case

@@ -167,6 +167,17 @@ ordinary Windows workers rather than claiming enforcement or deployed recovery.
 
 ## Bounded owned children
 
+`run_caller_owned(..., on_settled=callback)` optionally reports positive native
+scope settlement, separately from execution success. The callback runs once
+after known pre-launch preparation refusal, or after the entire strict Windows
+Job / unreaped POSIX group has been retired and confirmed. It also runs when
+timeout, output limits or invalid UTF-8 preserve an exception after that boundary.
+Unconfirmed cleanup or an ambiguous spawn failure does not notify. Exceptions
+retain their existing types and details; notification never manufactures a
+completed result. Consumers must separately confirm their own authority and
+borrowed obligations before using this proof to release a durable fence.
+The callback is synchronous and should perform only bounded bookkeeping.
+
 `agent_procutil.startup.StartupClock` separates receipt-time communication
 silence from a fixed startup lifetime. `StartupTimeouts` defaults to 30 seconds
 of silence, 300 seconds of startup grace and a 60-second expected startup

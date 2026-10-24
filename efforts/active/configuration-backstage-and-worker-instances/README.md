@@ -120,6 +120,18 @@ repository name redacted:
 Apply that shared intent to this effort's Manager acceptance work; do not
 silently add Companion implementation or claim its acceptance is complete.
 
+Subsequent installed-acceptance direction, verbatim:
+
+> Check where we are in the effort, and keep driving from there
+
+After the installed catalog exceeded the Manager's existing deadline:
+
+> registered-repository info should be flattened by the agent-worktrees daemon: we'll want to call something which can quickly give us the whole map
+
+The [resident repository map amendment](resident-repository-map.md) captures
+this direction. It retains the existing service and registry owners; it is not
+a request for a second daemon or parallel per-repository probes.
+
 ## Plan
 
 ### Phase 1 - Review the workspace and lifecycle contract
@@ -160,6 +172,7 @@ silently add Companion implementation or claim its acceptance is complete.
 - [ ] Audit the monitor drain path and publish bounded diagnostics for its waits, blockers, timing and outcomes. _Audit/source merged in #6807; normal promotion and installed trace receipt remain pending._
 - [ ] Support the generated-main consumer repairs and the reviewed pre-merge candidate-validation slice under #6237/#6838 without duplicating retained PRs. _Source repairs, gate #6851 and bootstrap #6867 merged; candidate #6938 merged, but immutable-main CI `38865507739` failed. Fix-forward and qualified containing-release proof remain open. (agent-recommended implementation approach)_
 - [ ] Confirm normal promotion to main, run the unified local update, and verify the installed Manager/provider versions exercise the redesigned Configuration surface.
+- [ ] Review and deliver the [resident repository map amendment](resident-repository-map.md), then repeat the installed Workers acceptance without increasing its existing deadline.
 - [ ] Reconcile all Plan and Validation Plan items, archive the completed effort, release its binding, and finalize owned worktrees. _(agent-recommended)_
 
 ## Validation Plan
@@ -176,6 +189,7 @@ silently add Companion implementation or claim its acceptance is complete.
 - [x] Reproducible renders cover the walkthrough steps, loading, populated tables, edit/instantiate, effect confirmation, success, and failure, including a compact terminal size. _(agent-recommended)_
 - [x] Targeted tests and real consumer-boundary integration exercise the combined Manager/provider path; record Windows and Linux coverage and the reason for any skipped clean-room or live-venue lane. _(agent-recommended)_
 - [ ] Documentation navigation/assets pass existing guards, and the final installed local surface matches the promoted source.
+- [ ] A single bounded read returns the daemon-produced registered-repository map; Workers does not issue a lookup per repository, and stale/unavailable inventory is not accepted as current empty inventory.
 
 ## Proposal
 
@@ -196,6 +210,7 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 Historical entries are preserved in dated journals. The Plan and Validation Plan
 above remain the completion gate; journal milestones do not close the effort.
 
+- [2026-10-23 - installed acceptance and resident repository map](journal/2026/10.23-installed-acceptance-and-repository-map.md)
 - [2026-10-19 - reviewed documentation corrections](journal/2026/10.19-reviewed-documentation-corrections.md)
 - [2026-10-16 - configuration acceptance](journal/2026/10.16-configuration-acceptance.md)
 - [2026-10-15 - diagnostics and release qualification](journal/2026/10.15-diagnostics-and-release-qualification.md)
