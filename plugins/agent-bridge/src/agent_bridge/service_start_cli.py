@@ -100,6 +100,31 @@ def _cmd_start(
     args: argparse.Namespace, *,
     required_runtime_environment: tuple[str, ...] | None = None,
 ) -> None:
+    from .diagnostic_logs import close_file_logging, configure_file_logging
+
+    handler = None
+
+    def initialize_logging():
+        nonlocal handler
+        try:
+            handler = configure_file_logging()
+        except Exception:
+            print("agent-bridge: application diagnostics unavailable; startup continues", file=sys.stderr)
+    try:
+        _run_start(
+            args, required_runtime_environment=required_runtime_environment,
+            logging_initializer=initialize_logging,
+        )
+    finally:
+        if handler is not None:
+            close_file_logging(handler)
+
+
+def _run_start(
+    args: argparse.Namespace, *,
+    required_runtime_environment: tuple[str, ...] | None = None,
+    logging_initializer=None,
+) -> None:
     from .app import create_app
     from .config import (
         config_dir,
@@ -244,6 +269,10 @@ def _cmd_start(
 
         config_kwargs["loop"] = resilient_loop_factory
     config = uvicorn.Config(app, **config_kwargs)
+    # Uvicorn's dictConfig closes existing handlers, so adopt the bounded
+    # application writer only after that real configuration boundary.
+    if logging_initializer is not None:
+        logging_initializer()
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
 

@@ -916,6 +916,16 @@ retention:
 
 ## Connection pipeline & diagnostics
 
+`agent-bridge logs` discovers local application, archived and known unmanaged
+native/fallback diagnostic locations as JSON, without starting a service or
+creating files. Explicit daemon startup adopts bounded, off-thread application
+logging under the effective config root's `logs/diagnostics/daemon.jsonl`.
+The shared owner-injected policy retains records by 30 elapsed UTC days;
+`/health` exposes application buffer counters and sanitized storage errors.
+This does not adopt raw stdout/stderr, installer attempts or session-child logs.
+See [Application diagnostics](docs/diagnostic-logs.md) for async bounds, text/
+JSON compatibility, explicit retained-spool API and remaining qualification.
+
 For carrier EOF/timeouts and apparently unavailable peers, use
 [transport failure classification](docs/transport-diagnostics.md) before
 concluding that a hosting Bridge is down. It separates local service health,

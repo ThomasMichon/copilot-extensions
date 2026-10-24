@@ -9,6 +9,11 @@ Discovery alone cannot prove another process can write: `write_health` remains
 
 ## Application owner
 
+The implementation is now the optional owner-injected
+`process_telemetry.diagnostic_logs` policy shared with Bridge. Dispatch keeps its
+existing compatibility adapter, paths, discovery schema, synchronous emission and
+maintenance ownership. The shared library discovers no roots or locks itself.
+
 The existing `configure_file_logging` entrypoints for the coordinator and
 supervisor attach a handler to `agent-dispatch.*`. Current files live at
 `<resolved-install-root>/logs/diagnostics/{coordinator,supervisor}.jsonl`.
@@ -97,6 +102,18 @@ These remaining boundaries stay under #8377, not silently covered here:
   deployment mappings require their own owner-resolved sink/discovery/retention
   adoption. Authoritative session/task state and ownership receipts never enter
   this expiry policy.
+
+## Explicit retained-spool API
+
+`telemetry.make_retained_spool_sink(directory)` is a separate Python API, not a
+change to existing factories/configured paths. The existing owner must provision
+a new exclusively participating `directory/retained/` namespace, exclude legacy
+writers, schedule quiet maintenance and expose `sink.inventory()`. Missing parents
+are never created. Producer fields and existing epoch-millisecond timestamps are
+preserved, with one append write under the injected custody and no suffix retry.
+This synchronous API is not an implicit async adapter or deployed adoption.
+See [process-telemetry](../../../libs/process-telemetry/README.md) for the exact
+contract and explicit timestamp-decoder seam.
 
 Source merge does not activate a running daemon. After release, only the existing
 authorized installation/update and graceful daemon cutover path may select the

@@ -39,6 +39,8 @@ async def health(request: Request) -> dict:
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),
     }
+    from ..diagnostic_logs import logging_status
+    body["diagnostic_logging"] = logging_status()
     # process-slot-ownership Phase 5 (private-downstream-repo): "doctor"/"activity"/cockpit
     # render process -> slot -> owner -> alive?. Read-only and best-effort; see
     # slot_descriptor's own docstring for why agent-bridge's shape omits the

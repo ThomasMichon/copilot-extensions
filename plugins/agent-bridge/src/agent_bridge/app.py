@@ -585,6 +585,8 @@ async def lifespan(app: FastAPI):
     async def _heartbeat_loop() -> None:
         while True:
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
+            from .diagnostic_logs import maintain_file_logging
+            maintain_file_logging()  # enqueue only, even during governance backoff
             try:
                 if await _governance_backoff(
                     governance,

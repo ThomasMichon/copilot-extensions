@@ -63,7 +63,91 @@ qualification requires an independent receiver readback.
 
 The buffer copies primitives but is **not a generic redactor**. Existing
 lifecycle reducers retain their own privacy policy. Use `measurement.begin`
-for content-free performance events; do not enqueue raw logs or payloads.
+for content-free performance events; do not enqueue raw logs or payloads through
+the lifecycle/performance telemetry seam. The separately owned application
+adapter below admits only its explicitly shaped local logging fields.
+
+## Optional retained application diagnostics
+
+`process_telemetry.diagnostic_logs` is an optional stdlib-only implementation of
+the existing Dispatch JSONL handler, now shared by the actual Bridge and Dispatch
+application adapters. Importing the base package still discovers no configuration,
+starts no writer and creates no files. Consumers inject their resolved directory,
+service/component attribution, timestamp decoder and existing custody context.
+The library does not import a plugin or `single_instance_lease`.
+
+The shared writer compares each aware record timestamp with UTC now minus 30
+elapsed days, retaining equality and future records. It maintains active and
+UTC/unique archived segments, preserves malformed evidence with degraded status,
+reclaims recognized interrupted prune copies under custody, and caches validated
+unchanged-segment expiry information. It never applies policy to a legacy/native
+handle destination. Owners explicitly schedule startup and quiet maintenance;
+ordinary emission does no history scan. Dispatch's adapter retains its public
+paths, discovery schema and synchronous behavior.
+
+Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
+writer, not another collector or service. Its producer copies bounded primitives
+without a blocking logging-handler lock, formatting, file access or history work.
+The existing copier limits (including 512 characters per string and supported
+primitive types) apply: invalid, contended, full, failed and abandoned work is
+observable, not lossless delivery. Exception type and up to eight frame
+locations are copied without exception objects/arguments, source reads, arbitrary
+repr, environment or credentials. Formatting, retention and kernel I/O occur on
+that one existing worker. Dynamic or over-512 format width/precision and
+over-8192-character formatted results fail the callback, preventing a small
+accepted format string from allocating unbounded output.
+
+`BufferedSink(..., on_start=callback)` optionally performs owner initialization
+once on the same worker before consuming records. Existing callers default to
+no callback. This avoids depending on a droppable queue offer for startup
+maintenance. A callback failure increments `sink_failed`; there is no new retry
+or replacement worker. `close()` remains nonjoining/nonflushing; `closed` reports
+that state. The owner must not replace a writer still blocked after closure.
+Initialization and maintenance callbacks are not persisted log records, and
+`delivered` still counts successful callbacks, not receiver-confirmed persistence.
+
+See the actual adapters' [Bridge](../../plugins/agent-bridge/docs/diagnostic-logs.md)
+and [Dispatch](../../plugins/agent-dispatch/docs/diagnostic-logs.md) contracts.
+
+## Explicit retained-spool API (not legacy-path rotation)
+
+Both consumers expose `telemetry.make_retained_spool_sink(directory)` as a
+separate **Python API**. It is not a replacement for `make_spool_sink`, not a new
+zero-argument configuration selector, and does not automatically adopt a
+previously configured spool.
+
+The existing owner must first provision a **new, exclusively participating**
+`<directory>/retained/` namespace, verify that no legacy/nonparticipating writer
+targets it, and own maintenance and discovery. The factory never creates parent
+directories. Its active files are `agent-{bridge,dispatch}-telemetry.jsonl` under
+that child namespace, with the same UTC/unique archive convention. Never point an
+old factory at these files or retrofit retention behind an old writer.
+
+```python
+from agent_bridge import telemetry
+
+# Explicit caller-owned opt-in after normal owner provisioning/authorization.
+sink = telemetry.make_retained_spool_sink(preprovisioned_diagnostics_directory)
+sink(already_privacy_filtered_event)
+sink.maintain()          # normal owner cadence, including when no events arrive
+locations = sink.inventory()
+```
+
+The sink copies the producer dict, preserves fields and an existing `ts`, and
+adds the same epoch-millisecond default only when `ts` is absent. Retention's
+decoder explicitly expects epoch milliseconds; unsupported timestamps remain
+unaged/degraded, never guessed or rewritten. The underlying optional `RetainedSpool`
+also accepts an explicit owner timestamp decoder. Under the injected custody,
+each encoded JSONL record uses the unchanged `append_bytes` one-write primitive:
+no suffix retry, no parent creation, no arbitrary envelope or identity fields.
+Failures remain advisory. The sink is synchronous, not bounded-latency; an async
+producer must explicitly use its existing bounded adapter. Quiet/startup
+maintenance is not an autonomous service.
+
+This API is available for deliberate helper/owner adoption. Existing configured
+spools retain their original format, append behavior and **unretained** status.
+It does not adopt native stdout/stderr, installer attempts, lifecycle/bootstrap
+files, authoritative state or container output.
 
 ## Measurements and reports
 

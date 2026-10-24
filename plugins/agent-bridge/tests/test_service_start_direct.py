@@ -149,8 +149,9 @@ def test_cli_routes_direct_flag(monkeypatch):
     assert seen == [True, False]
 
 
+@pytest.mark.parametrize("caller_job", [False, True])
 def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
-    monkeypatch, direct_env, tmp_path
+    monkeypatch, direct_env, tmp_path, caller_job,
 ):
     """Breakaway denied and the WMI broker failing must fail a direct start:
     a daemon started inside the installer's Job would die when it closes."""
@@ -170,6 +171,8 @@ def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
     monkeypatch.setattr(agent_procutil.subprocess, "Popen", _popen)
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     from agent_procutil import daemon
+    from agent_procutil import daemon_broker
+    monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: caller_job)
 
     def broker_failed(*_args, **_kwargs):
         raise agent_procutil.DaemonSpawnError("broker failed")
@@ -182,5 +185,7 @@ def test_direct_start_fails_instead_of_starting_inside_the_callers_job(
         m._service_start(direct=True)
 
     assert info.value.code == 1
-    assert len(popens) == 1, "no contained retry after breakaway and the broker failed"
+    assert len(popens) == (0 if caller_job else 1), (
+        "known Job uses the broker directly; neither path permits a contained retry"
+    )
     assert not direct_env.exists()

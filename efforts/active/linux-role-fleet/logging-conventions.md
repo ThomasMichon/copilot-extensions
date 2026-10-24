@@ -213,3 +213,61 @@ acceptance above is not permission or evidence for any of them:
    and coordinator/supervisor lifecycle path, then verify the imported running
    version/process identity and `agent-dispatch logs` destinations. No source
    merge, release, payload refresh or HTTP health sample alone is live proof.
+
+## Shared policy and Bridge application continuation
+
+The reviewed convention continues beyond Dispatch: reuse its policy in the
+existing dependency-free `process-telemetry` library, with explicit consumer
+paths, attribution, timestamp decoder and custody. Dispatch's compatibility
+adapter retains the existing public behavior; Bridge is a second actual
+application consumer, not another plugin-specific copy or new framework.
+
+Bridge's serving producer must not inherit a blocking file/handler mutex or
+history rewrite. Its existing bounded diagnostic writer owns initialization,
+formatting, storage and maintenance; the existing heartbeat only requests
+maintenance, and shutdown never waits for a stuck sink. This source work does not
+ascribe an independently observed watchdog stall to logging or claim a live fix.
+
+- [x] Reconcile the shared architecture and async/compatibility boundary before
+  implementation, preserving #8370/#6812 and native lifetime ownership.
+- [x] Extract shared policy without importing plugins or lock dependencies into
+  the library; keep Dispatch's discovery/retention contract.
+- [x] Adopt actual Bridge bootstrap, heartbeat and application logger namespaces
+  with bounded producer work and truthful loss/storage counters.
+- [x] Expose an explicit, separate retained-spool Python API with owner-provided
+  new namespace/maintenance, no parent creation and unchanged legacy factories.
+- [ ] Complete native Windows source validation and normal review/required CI;
+  qualify unavailable platform/live lanes separately.
+- [ ] Record the accepted source merge and retain all remaining logging-owner,
+  installer/native, deployment and released/running gates under #8377.
+
+### Continuation journal
+
+- 2026-10-24 UTC — Shared implementation retains real Bridge and Dispatch
+  consumers; declared materialized consumers are Bridge, Dispatch and standalone
+  Manager, each with a changefile. Existing optional-library import behavior
+  remains inert and dependency-closed.
+- 2026-10-24 UTC — Actual bootstrap validation identified Uvicorn's handler-close
+  `dictConfig` boundary; Bridge adopts its worker after that boundary, not before
+  it. Real bootstrap, quiet heartbeat, held mutex/handler lock, slow storage,
+  bounded shutdown, overflow, exception-argument exclusion, concurrent retained
+  spool rotation and unchanged legacy append are separate source regressions.
+  No installer, raw native capture, lifecycle/bootstrap or container adapter is
+  represented as delivered.
+- 2026-10-24 UTC — Native Windows source portfolios pass: Bridge 115 tests,
+  Dispatch 284 tests, and standalone Manager 70 tests with one optional OTLP SDK
+  case skipped because that extra is not installed. Bridge exercises the actual
+  Uvicorn handler-close boundary and heartbeat owner; held mutexes/handler locks,
+  slow storage, overflow and close do not block its producer. Existing direct-start
+  refusal coverage now explicitly pins both caller-Job observations instead of
+  depending on the test runner's ambient Job; production native launch code is
+  unchanged. The additional explicit millisecond-decoder regression retains
+  exact-cutoff/timezone/skew and unsupported-timestamp acceptance separately
+  from the shared application's ISO timestamp tests.
+- 2026-10-24 UTC — Final Bridge portfolio passes 118 tests, including both
+  application logger namespaces and bounded worker format expansion. Dispatch
+  remains 284 passes; Manager remains 70 passes/one optional SDK skip. Ruff F/E9,
+  install-contract (13 plugins), documentation consistency and diff whitespace
+  checks pass. Linux/macOS native and live external qualification are not claimed
+  by this explicitly source-only Windows stretch. Released helper/config
+  adoption and actual running-state readback remain integration work.
