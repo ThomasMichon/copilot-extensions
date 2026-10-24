@@ -272,6 +272,17 @@ Full custody, authenticated consumer/SDK integration and restoration remain open
 - Normal source review and merge remain owed. Full Phase 1b, native Linux/Windows
   qualification, remaining custody cohorts, target compatibility, guarded
   restoration and separately authorized running adoption remain open.
+- Independent review reproduced two source recovery gaps: an already-enrolled
+  consumer did not reinitialize a restarted frontend, and history cooldown could
+  advance unreconciled pages while older unknowns phase-locked later evidence
+  out of every history read. Focused failing controls reproduce both.
+  Recovery now checks the original binding and current/predecessor observations,
+  repeats the original enrollment CAS, and retains a page cursor until its
+  history can be reconciled. Foreign binding/consumer and lost-enrollment/restart
+  negatives remain held. All 15 selected Python controls pass, including two
+  actual-frontend restart cases and the combined 93-case Node wrapper.
+  The 201-receipt control keeps 100 older unknowns outstanding while settling
+  all 101 later receipts through three bounded shared history reads.
 
 ### 2026-10-24 - Recovery prerequisite merged; continue the actual SDK consumer
 - #8661 merged as `7db62f243e91da9ad25d2f354b27914a686aa65f` at

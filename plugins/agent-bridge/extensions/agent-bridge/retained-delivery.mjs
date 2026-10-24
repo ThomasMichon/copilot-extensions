@@ -64,6 +64,7 @@ export function createRetainedInbox({
   let context = null;
   let negotiation = null;
   let enrolled = false;
+  let frontendStale = false;
   let healthUntil = 0;
   let historyAt = 0;
   let after = 0;
@@ -150,6 +151,15 @@ export function createRetainedInbox({
     await report(receipt, outcome);
   }
 
+  async function currentRequest(sid, action, body) {
+    try {
+      return await request("POST", `${base(sid)}/${action}`, body);
+    } catch (error) {
+      if (error?.status === 409) frontendStale = true;
+      throw error;
+    }
+  }
+
   async function recover(sid) {
     const response = await request("GET", `${base(sid)}/recovery?limit=100&after=${after}`);
     if (!Array.isArray(response?.messages) || response.messages.length > 100
@@ -163,6 +173,9 @@ export function createRetainedInbox({
     const receipts = response.messages;
     const attempts = receipts.filter((row) => row.handoff_started_at !== null && row.stage !== "consumed");
     let events = [];
+    // A page skipped during cooldown has not been reconciled. Advancing it
+    // would phase-lock history reads to the first page of a persistent backlog.
+    if (attempts.length && now() < historyAt) return true;
     if (attempts.length && now() >= historyAt) {
       historyAt = now() + RECHECK_MS;
       events = await nativeCall(() => session.getEvents());
@@ -202,12 +215,13 @@ export function createRetainedInbox({
       context = { sid, cwd: workingDirectory, consumer };
       negotiation = null;
       enrolled = false;
+      frontendStale = false;
       after = 0;
       historyAt = 0;
     }
     if (await recover(sid) || !sendAllowed(sid, allowSend)) return;
     const owner = { contract: CONTRACT, consumer: context.consumer };
-    if (!enrolled) {
+    if (!enrolled || frontendStale) {
       if (!negotiation) {
         const observed = await request("POST", `${base(sid)}/negotiate`, owner);
         if (observed?.contract !== CONTRACT || !nonblank(observed.binding?.installation)
@@ -220,21 +234,29 @@ export function createRetainedInbox({
           binding: { installation: observed.binding.installation, epoch: observed.binding.epoch },
           expected_incarnation: observed.expected_incarnation,
         };
+      } else if (frontendStale) {
+        const observed = await request("POST", `${base(sid)}/negotiate`, owner);
+        if (observed?.contract !== CONTRACT || !sameBinding(observed.binding, negotiation.binding)
+            || (observed.expected_incarnation !== context.consumer.incarnation
+              && observed.expected_incarnation !== negotiation.expected_incarnation)) {
+          throw new Error("frontend recovery changed the original binding or consumer; no reenrollment");
+        }
       }
       await nativeContext(sid);
       if (!sendAllowed(sid, allowSend)) return;
       // Keep the exact CAS request if its reply is lost. Renegotiating would
       // confuse our already-enrolled incarnation with its original predecessor.
-      const result = await request("POST", `${base(sid)}/enroll`, { ...owner, ...negotiation });
+      const result = await currentRequest(sid, "enroll", { ...owner, ...negotiation });
       if (result?.contract !== CONTRACT || !sameBinding(result.binding, negotiation.binding)
           || result.expected_incarnation !== negotiation.expected_incarnation) {
         throw new Error("retained enrollment reply unavailable");
       }
       enrolled = true;
+      frontendStale = false;
     }
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
-    const poll = await request("POST", `${base(sid)}/poll`, {
+    const poll = await currentRequest(sid, "poll", {
       ...owner, binding: negotiation.binding, limit: 1,
     });
     if (poll?.contract !== CONTRACT || !sameBinding(poll.binding, negotiation.binding)
@@ -262,7 +284,7 @@ export function createRetainedInbox({
     if (msg.delivery === "steer") options.mode = "immediate";
     await nativeContext(sid);
     if (!sendAllowed(sid, allowSend)) return;
-    const grant = await request("POST", `${base(sid)}/begin`, {
+    const grant = await currentRequest(sid, "begin", {
       ...owner, binding: negotiation.binding, message_id: msg.id, handoff_id: msg.handoff_id,
     });
     if (grant?.begin !== true) {

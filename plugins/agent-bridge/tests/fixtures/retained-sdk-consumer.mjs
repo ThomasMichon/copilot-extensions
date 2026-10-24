@@ -31,7 +31,9 @@ const request = async (method, path, body) => {
   const reply = new Promise((resolve) => replies.set(id, resolve));
   emit({ id, method, path, body });
   const response = await reply;
-  if (!response.ok) throw new Error(`synthetic transport HTTP ${response.status}`);
+  if (!response.ok) throw Object.assign(
+    new Error(`synthetic transport HTTP ${response.status}`), { status: response.status },
+  );
   const boundary = path.endsWith("/poll") ? "poll" : path.endsWith("/begin") ? "begin"
     : path.endsWith("/outcome") ? body.outcome : "";
   if (boundary && config.exitAt === boundary) process.exit(23);
@@ -66,9 +68,9 @@ const consumer = createRetainedInbox({
   log: (message) => emit({ log: message }),
 });
 await consumer.tick(config.sid, { allowSend: !config.recoveryOnly });
-if (config.exitAt === "consumed") {
+if (config.exitAt === "consumed" || config.retry) {
   clock += 30_000;
-  await consumer.tick(config.sid, { allowSend: false });
+  await consumer.tick(config.sid, { allowSend: !!config.retry });
 }
 consumer.close();
 emit({ done: true });

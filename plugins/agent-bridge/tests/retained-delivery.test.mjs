@@ -16,7 +16,7 @@ function fixture() {
   const f = {
     calls: [], sends: [], logs: [], events: [], rows: [], current: null,
     version: 50, clock: 1_000, snapshotSid: sid, nativeSid: sid, closed: false,
-    historyReads: 0, after: null,
+    historyReads: 0, after: null, frontendReady: true,
   };
   f.receipt = (row) => ({
     session_id: sid, message_id: row.id, handoff_id: row.handoff_id,
@@ -27,14 +27,22 @@ function fixture() {
   });
   f.request = async (method, path, body) => {
     f.calls.push({ method, path, body: clone(body) });
+    if (!f.frontendReady && ["/enroll", "/poll", "/begin"].some((suffix) => path.endsWith(suffix))) {
+      throw Object.assign(new Error("frontend requires explicit negotiation"), { status: 409 });
+    }
     let result;
     if (path === "/health") result = { protocol_version: f.version };
     else if (path.startsWith(`${prefix}/recovery?`)) {
-      result = { messages: f.rows.filter((r) => r.handoff_id && r.handoff_stage !== "consumed")
-        .map(f.receipt), next_after: null };
+      const query = new URL(path, "http://localhost").searchParams;
+      const pending = f.rows.filter((r) => r.id > Number(query.get("after"))
+        && r.handoff_id && r.handoff_stage !== "consumed");
+      const page = pending.slice(0, Number(query.get("limit")));
+      result = { messages: page.map(f.receipt),
+        next_after: pending.length > page.length ? page.at(-1).id : null };
     } else if (path.startsWith(`${prefix}/recovery/`)) {
       result = f.receipt(f.rows.find((row) => row.id === Number(path.split("/").at(-1))));
     } else if (path === `${prefix}/negotiate`) {
+      f.frontendReady = true;
       result = { contract, binding, expected_incarnation: f.current?.incarnation ?? null };
     } else if (path === `${prefix}/enroll`) {
       if (f.current?.incarnation === body.consumer.incarnation) {
@@ -422,4 +430,94 @@ test("timed-out SDK invocation stays fenced until it settles, without starting a
   await consumer.tick(sid, { allowSend: false });
   assert.equal(f.rows[0].handoff_stage, "consumed");
   assert.equal(f.sends.length, 1);
+});
+
+test("frontend restart reestablishes negotiation without changing the original enrollment CAS", async () => {
+  const f = fixture();
+  const consumer = f.consumer();
+  await consumer.tick(sid);
+  const original = clone(f.enrolledRequest);
+  f.frontendReady = false;
+  f.add();
+  await consumer.tick(sid);
+  assert.equal(f.sends.length, 0);
+  f.clock += 30_000;
+  await consumer.tick(sid);
+  assert.equal(f.sends.length, 1);
+  assert.deepEqual(f.enrolledRequest, original);
+  const enrollments = f.calls.filter((call) => call.path.endsWith("/enroll"));
+  assert.equal(enrollments.length, 2);
+  assert.deepEqual(enrollments[1].body, enrollments[0].body);
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/negotiate")).length, 2);
+});
+
+test("recovery pagination reaches later receipts despite older unknowns and the history cooldown", async () => {
+  const f = fixture();
+  f.add();
+  const consumer = f.consumer();
+  await consumer.tick(sid);
+  const first = clone(f.rows[0]);
+  for (let id = 2; id <= 201; id++) f.rows.push({
+    ...clone(first), id, handoff_id: `handoff-${id}`, handoff_stage: "unknown",
+  });
+  f.events = f.rows.slice(100).map((row) => ({
+    id: `native-event-${row.id}`, type: "user.message", data: {
+      source: "agent-bridge",
+      content: f.sends[0].prompt.replace("handoff-1", row.handoff_id)
+        .replace('msg-id="1"', `msg-id="${row.id}"`),
+    },
+  }));
+  for (let count = 0; count < 45; count++) {
+    await consumer.tick(sid, { allowSend: false });
+    f.clock += 2_000;
+  }
+  assert.equal(f.rows.slice(100).filter((row) => row.handoff_stage !== "consumed").length, 0);
+  assert.equal(f.rows.slice(0, 100).some((row) => row.handoff_stage === "consumed"), false);
+  assert.equal(f.historyReads, 3);
+  assert.equal(f.sends.length, 1);
+});
+
+test("frontend restart after a lost enrollment reply still recovers the original CAS", async () => {
+  const f = fixture();
+  f.add();
+  const consumer = f.consumer();
+  let lose = true;
+  f.after = async (_method, path) => {
+    if (lose && path.endsWith("/enroll")) {
+      lose = false;
+      f.frontendReady = false;
+      throw new Error("lost enrollment then frontend exit");
+    }
+  };
+  await consumer.tick(sid);
+  const original = clone(f.enrolledRequest);
+  for (let count = 0; count < 2; count++) {
+    f.clock += 30_000;
+    await consumer.tick(sid);
+  }
+  assert.equal(f.sends.length, 1);
+  assert.deepEqual(f.enrolledRequest, original);
+  assert.equal(f.calls.filter((call) => call.path.endsWith("/begin")).length, 1);
+});
+
+test("frontend recovery refuses a changed binding or another current consumer", async () => {
+  for (const problem of ["binding", "consumer"]) {
+    const f = fixture();
+    const consumer = f.consumer();
+    await consumer.tick(sid);
+    f.frontendReady = false;
+    f.add();
+    await consumer.tick(sid);
+    f.after = async (_method, path, _body, result) => {
+      if (path.endsWith("/negotiate")) {
+        if (problem === "binding") result.binding = { ...binding, epoch: 2 };
+        else result.expected_incarnation = "foreign-consumer";
+      }
+    };
+    f.clock += 30_000;
+    await consumer.tick(sid);
+    assert.equal(f.sends.length, 0);
+    assert.equal(f.calls.filter((call) => call.path.endsWith("/enroll")).length, 1);
+    assert.match(f.logs.join("\n"), /original binding or consumer/);
+  }
 });

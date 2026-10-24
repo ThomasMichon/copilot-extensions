@@ -186,7 +186,9 @@ async function bridgeGetJson(path) {
 async function retainedBridgeRequest(method, path, body) {
   const response = await fetchBridge(method, path, body);
   if (!response.ok) {
-    throw new Error(`bridge ${method} ${path} refused (HTTP ${response.status})`);
+    const error = new Error(`bridge ${method} ${path} refused (HTTP ${response.status})`);
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }

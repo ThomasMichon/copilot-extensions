@@ -36,6 +36,10 @@ Registration remains independent of enrollment. Off the SDK event handler,
 the serialized consumer negotiates the actual installation and a fresh extension
 incarnation. A lost enrollment reply retries the original predecessor CAS,
 not a new negotiation that treats itself as its predecessor.
+If the frontend restarts while this consumer stays alive, a current-owner
+refusal triggers bounded renegotiation. The recovered installation/epoch and
+current-or-original-predecessor observations must still match; enrollment
+retries the exact original CAS. A new binding or foreign consumer remains held.
 
 Polling requests at most one message. The existing SQLite owner retains its
 original handoff before exposing the payload. After checking the current native
@@ -60,7 +64,9 @@ substitutes the new process or incarnation.
 
 Durable SDK history is read lazily, at most once per 30 seconds, and shared
 across the bounded receipt page. It is not an event-handler operation or a
-per-message RPC. Neither the bounded represented-event queue nor the legacy
+per-message RPC. A page awaiting the history-read cooldown keeps its cursor;
+older unknown receipts cannot phase-lock all reads to the first page and starve
+later consumption evidence. Neither the bounded represented-event queue nor the legacy
 in-flight cache is consumption evidence. Lost outcome replies are read back
 from the original receipt, or the same outcome is reported again without
 another SDK effect. Missing historical evidence remains visibly outstanding;

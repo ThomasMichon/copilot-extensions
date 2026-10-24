@@ -20,6 +20,7 @@ import pytest
 
 from agent_bridge.app_routes import configure_serving_app
 from agent_bridge.db import Database
+from agent_bridge.live_inbox_runtime import LiveInboxRuntime
 from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.models import ServiceConfig
 from test_loop_governance_custody import installation as installation
@@ -30,7 +31,7 @@ PREFIX = f"/api/v1/live-sessions/{SID}/retained-inbox"
 CHILD = Path(__file__).parent / "fixtures/retained-sdk-consumer.mjs"
 
 
-def run_consumer(client, config, *, insert=False):
+def run_consumer(client, config, *, insert=False, before_request=None):
     """Route one independent consumer's JSON transport into the actual ASGI app."""
     messages: queue.Queue[str | None] = queue.Queue()
     calls, logs = [], []
@@ -60,6 +61,8 @@ def run_consumer(client, config, *, insert=False):
             if message.get("done"):
                 continue
             calls.append(message)
+            if before_request is not None:
+                before_request(message)
             response = client.request(message["method"], message["path"], json=message.get("body"))
             if insert and not inserted and message["path"] == PREFIX + "/enroll" and response.is_success:
                 admitted = client.post(f"/api/v1/live-sessions/{SID}/messages", json={
@@ -179,3 +182,46 @@ def test_original_sdk_handoff_survives_process_loss_and_closed_frontend(
                 assert retained[key] == original[key]
         finally:
             reopened.close()
+
+
+def test_same_sdk_consumer_recovers_actual_frontend_restart_without_replacing_its_cas(
+    installation, tmp_db, tmp_path,
+):
+    app = configure_serving_app(
+        ServiceConfig(db_path=str(tmp_db.db_path), bind="127.0.0.1"),
+        "synthetic-secret", lifespan=None,
+    )
+    app.state.db = tmp_db
+    app.state.ready = True
+    app.state.loop_governance = LoopGovernance()
+    app.state.session_manager = SimpleNamespace(is_draining=False)
+    scheme = "Bear" + "er "
+    headers = {"Authorization": scheme + "synthetic-secret"}
+    assert headers["Authorization"].endswith("synthetic-secret")
+    config = {
+        "sid": SID, "cwd": str(tmp_path), "incarnation": "consumer-original",
+        "effects": str(tmp_path / "sdk-effects.jsonl"),
+        "events": str(tmp_path / "sdk-events.jsonl"), "exitAt": "", "retry": True,
+    }
+    restarted = False
+
+    def restart(message):
+        nonlocal restarted
+        if not restarted and message["path"].endswith("/poll"):
+            restarted = True
+            app.state.live_inbox_runtime = LiveInboxRuntime()
+            app.state.loop_governance = LoopGovernance()
+
+    with TestClient(app, headers=headers, client=("127.0.0.1", 12345)) as client:
+        code, calls, logs = run_consumer(client, config, insert=True, before_request=restart)
+        assert code == 0 and restarted, logs
+        enrollments = [call["body"] for call in calls if call["path"].endswith("/enroll")]
+        assert len(enrollments) == 2
+        assert enrollments[1] == enrollments[0]
+        assert enrollments[0]["expected_incarnation"] is None
+        assert len([call for call in calls if call["path"].endswith("/negotiate")]) == 2
+        assert len(Path(config["effects"]).read_text().splitlines()) == 1
+        retained, = tmp_db.execute_read("SELECT * FROM live_messages")
+        receipt = client.get(PREFIX + f"/recovery/{retained['id']}").json()
+        assert receipt["stage"] == "sdk_accepted"
+        assert receipt["consumer"] == enrollments[0]["consumer"]
