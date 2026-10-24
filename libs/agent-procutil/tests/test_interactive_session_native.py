@@ -77,13 +77,20 @@ def observed(self,*args,**kwargs):
 SessionCustody.retire=observed
 """
 _CALLER = """
-import copy,faulthandler,fcntl,json,os,sys,termios
+import copy,faulthandler,fcntl,json,os,sys,termios,time
 from pathlib import Path
+from types import SimpleNamespace
+import psutil
 from agent_procutil import _interactive_terminal as terminal
 from agent_procutil.interactive import run_interactive
 os.setsid()
 fcntl.ioctl(0,termios.TIOCSCTTY,0)
 before=termios.tcgetattr(0)
+def configured(values):
+    # BSD PENDIN is kernel input-queue state, not configured terminal mode.
+    result=list(values)
+    result[3]&=~getattr(termios,'PENDIN',0)
+    return result
 diagnostic={}
 _init=terminal._Terminal.__init__
 _restore=terminal._Terminal.restore
@@ -96,6 +103,43 @@ def restore(self):
     diagnostic['restored']=termios.tcgetattr(0)
 terminal._Terminal.__init__=init
 terminal._Terminal.restore=restore
+_select=terminal.select.select
+_last=[0]
+def observe_select(*args):
+    result=_select(*args)
+    frame=sys._getframe(1)
+    now=time.monotonic()
+    if frame.f_code.co_name=='_relay' and now-_last[0]>=1:
+        _last[0]=now
+        values=frame.f_locals
+        state={
+            'readers':args[0],'writers':args[1],
+            'readable':result[0],'writable':result[1],
+            'input_buffer':len(values['incoming']),
+            'output_buffer':len(values['output']),
+            'last_write_count':values.get('count')}
+        try:
+            state['pty_foreground']=os.tcgetpgrp(values['master'])
+        except OSError as error:
+            state['pty_query_errno']=error.errno
+        try:
+            state['pty_attributes']=termios.tcgetattr(values['master'])
+        except OSError as error:
+            state['pty_attributes_errno']=error.errno
+        owner=frame.f_back.f_locals.get('process')
+        if owner is not None:
+            try:
+                members=[psutil.Process(owner.pid),
+                         *psutil.Process(owner.pid).children(recursive=True)]
+                state['members']=[
+                    [p.pid,p.ppid(),p.status(),os.getpgid(p.pid),os.getsid(p.pid)]
+                    for p in members]
+            except (OSError,psutil.Error):
+                pass
+        Path(sys.argv[1]).with_suffix('.relay.json').write_text(
+            json.dumps(state,default=lambda value:value.hex()))
+    return result
+terminal.select=SimpleNamespace(select=observe_select)
 os.environ['PTY_FIXTURE_GUARDIAN']=str(Path(sys.argv[1]).with_suffix('.guardian.txt'))
 terminal._BOOTSTRAP=terminal._BOOTSTRAP.replace(
     'from agent_procutil._interactive_session import main;main()',
@@ -111,9 +155,9 @@ with Path(sys.argv[1]).with_suffix('.stack.txt').open('w') as stack:
             json.dumps(diagnostic,default=lambda value:value.hex()))
 after=termios.tcgetattr(0)
 result={
-    'code':code,'attributes':after==before,
+    'code':code,'attributes':configured(after)==configured(before),
     'foreground':os.tcgetpgrp(0)==os.getpgrp()}
-if after!=before:
+if configured(after)!=configured(before):
     result['before']=before
     result['after']=after
     result['diagnostic']=diagnostic
@@ -123,7 +167,7 @@ Path(sys.argv[1]).write_text(json.dumps(result,default=lambda value:value.hex())
 
 def _diagnostics(path):
     values = []
-    for suffix in (".guardian.txt", ".stack.txt", ".diagnostic.json"):
+    for suffix in (".guardian.txt", ".stack.txt", ".diagnostic.json", ".relay.json"):
         try:
             values.append(path.with_suffix(suffix).read_text()[:12000])
         except OSError:
@@ -203,6 +247,7 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
         assert [first["pid"], second["pid"]] == [one, two]
         assert len({shell, first["group"], second["group"]}) == 3
         assert first["session"] == second["session"] != process.pid
+        assert isinstance(first["tty"], str)
         assert first["tty"] == second["tty"] != original_tty
         pins = [psutil.Process(pid) for pid in (shell, one, two, first["session"])]
         if managed:
@@ -255,8 +300,12 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
 def test_pty_relay_preserves_redirected_json_stdout(tmp_path):
     receipt = tmp_path / "result.json"
     command = (
-        "import sys;"
-        "print('terminal-only',file=sys.stderr,flush=True);"
+        "import json,os,sys,termios;"
+        "print('terminal-only '+json.dumps({"
+        "'input_tty':os.isatty(0),'output_tty':os.isatty(1),"
+        "'group':os.getpgrp(),'foreground':os.tcgetpgrp(0),"
+        "'input_blocking':os.get_blocking(0),'attributes':termios.tcgetattr(0)"
+        "},default=lambda value:value.hex()),file=sys.stderr,flush=True);"
         "assert input()=='answer';"
         "sys.stdout.write('{\"ok\":true}\\n');sys.stdout.flush()"
     )
@@ -308,11 +357,18 @@ def test_pty_relay_drains_output_beyond_its_buffer_without_losing_the_tail(tmp_p
     output = bytearray()
 
     def drain():
-        if select.select([master], [], [], .01)[0]:
+        received = 0
+        while received < 65536:
+            if not select.select([master], [], [], .01 if not received else 0)[0]:
+                break
             try:
-                output.extend(os.read(master, 65536))
+                data = os.read(master, 65536 - received)
             except OSError:
-                pass
+                break
+            if not data:
+                break
+            output.extend(data)
+            received += len(data)
         return True
 
     try:

@@ -321,13 +321,18 @@ if sys.argv[3]=='wrapped-suspend-resume':
         sys.exit(os.waitstatus_to_exitcode(status))
 faulthandler.dump_traceback_later(6)
 before=termios.tcgetattr(0)
+def configured(values):
+    # BSD PENDIN is kernel input-queue state, not configured terminal mode.
+    result=list(values)
+    result[3]&=~getattr(termios,'PENDIN',0)
+    return result
 code=run_interactive([sys.executable,'-c',sys.argv[1]])
 faulthandler.cancel_dump_traceback_later()
 after=termios.tcgetattr(0)
 result={
     'code':code,'foreground':os.tcgetpgrp(0)==os.getpgrp(),
-    'attributes':after==before}
-if after!=before:
+    'attributes':configured(after)==configured(before)}
+if configured(after)!=configured(before):
     result['attribute_delta']=[
         [index,old,new] for index,(old,new) in enumerate(zip(before,after))
         if old!=new]
