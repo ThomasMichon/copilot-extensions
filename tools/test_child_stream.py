@@ -120,9 +120,10 @@ def test_foreign_frame_paths_normalize_once_without_caching_module_identity(monk
         calls.append(value)
         return original(value)
 
-    for key, value in (("_sources", {}), ("_expected_codes", {}), ("_code_sources", {}),
+    for key, value in (("_sources", {}), ("_expected_codes", {}), ("_code_sources", {}), ("_path_keys", {}),
                        ("_root", "verified-installed-root/"), ("_package", "fixture_package"),
-                       ("_package_path", ("fixture_package", original("fixture_package") + "/"))):
+                       ("_package_path", ("fixture_package", original("fixture_package") + "/",
+                                          "/" + original("fixture_package") + "/", "fixture_package."))):
         monkeypatch.setattr(runtime, key, value)
     monkeypatch.setattr(child_audit, "error", failures.append)
     monkeypatch.setattr(os.path, "normcase", normalized)
@@ -154,8 +155,103 @@ def test_foreign_frame_paths_normalize_once_without_caching_module_identity(monk
     calls.clear()
     failures.clear()
     assert runtime._frame_source(frame) is None
-    assert calls == ["outside/source.py", "outside"]
+    assert calls == ["outside"]
     assert failures == ["owned package executed outside verified source inventory"]
+
+
+def test_foreign_filename_metadata_is_cached_but_admission_stays_live(monkeypatch):
+    from types import SimpleNamespace
+
+    original = os.path.normcase
+    calls, failures = [], []
+    filename = "outside/source.py"
+    frame = SimpleNamespace(f_code=compile("pass\n", filename, "exec"),
+                            f_globals={"__name__": "unrelated"})
+    for name, value in (
+        ("_sources", {}), ("_expected_codes", {}), ("_code_sources", {}), ("_path_keys", {}),
+        ("_root", "verified-installed-root/"), ("_package", "fixture_package"),
+        ("_package_path", ("fixture_package", "fixture_package/", "/fixture_package/", "fixture_package.")),
+    ):
+        monkeypatch.setattr(runtime, name, value, raising=False)
+    monkeypatch.setattr(child_audit, "error", failures.append)
+    def normalized(value):
+        calls.append(value)
+        return original(value)
+    monkeypatch.setattr(os.path, "normcase", normalized)
+    for _ in range(100):
+        assert runtime._frame_source(frame) is None
+    assert calls == [filename]
+    assert runtime._path_keys == {filename: (original(filename), original(filename).replace("\\", "/"))}
+    frame.f_globals["__name__"] = "fixture_package.source"
+    for _ in range(2):
+        assert runtime._frame_source(frame) is None
+    assert failures == ["owned package executed outside verified source inventory"] * 2
+    assert not runtime._code_sources
+    frame.f_globals["__name__"] = "unrelated"
+    monkeypatch.setattr(runtime, "_package", "outside")
+    assert runtime._frame_source(frame) is None
+    assert calls == [filename, "outside"]
+    assert failures == ["owned package executed outside verified source inventory"] * 3
+
+
+@pytest.mark.parametrize("full", [False, True, "during-lock"])
+def test_filename_metadata_cache_bounds_never_skip_live_admission(monkeypatch, full):
+    from types import SimpleNamespace
+
+    contents = {str(index): (str(index), str(index)) for index in range(1024)}
+    cache = dict(contents) if full is True else {}
+    filename = "outside/source.py" if full else "outside/" + "x" * 4096 + ".py"
+    frame = SimpleNamespace(f_code=compile("pass\n", filename, "exec"),
+                            f_globals={"__name__": "fixture_package.source"})
+    failures = []
+    for name, value in (
+        ("_sources", {}), ("_expected_codes", {}), ("_code_sources", {}), ("_path_keys", cache),
+        ("_root", "verified-installed-root/"), ("_package", "fixture_package"),
+        ("_package_path", ("fixture_package", "fixture_package/", "/fixture_package/", "fixture_package.")),
+    ):
+        monkeypatch.setattr(runtime, name, value, raising=False)
+    if full == "during-lock":
+        class FillAtLock:
+            def __enter__(self):
+                cache.update(contents)
+            def __exit__(self, *_args):
+                return False
+        monkeypatch.setattr(runtime, "_generated_lock", FillAtLock())
+    monkeypatch.setattr(child_audit, "error", failures.append)
+    for _ in range(2):
+        assert runtime._frame_source(frame) is None
+    assert len(cache) == (1024 if full else 0)
+    assert failures == ["owned package executed outside verified source inventory"] * 2
+    assert not runtime._code_sources
+
+
+def test_cached_filename_metadata_never_licenses_another_executable(tmp_path, monkeypatch):
+    import hashlib
+    from types import SimpleNamespace
+
+    source = tmp_path / "source.py"
+    canonical = b"def value():\n    return 22\n"
+    source.write_bytes(canonical)
+    for name, value in (
+        ("_sources", {}), ("_expected_codes", {}), ("_code_sources", {}), ("_path_keys", {}),
+        ("_root", ""), ("_package", ""),
+    ):
+        monkeypatch.setattr(runtime, name, value, raising=False)
+    runtime._prepare_sources({str(source): (1, 2, hashlib.sha256(canonical).hexdigest())})
+    calls, failures = [], []
+    original = os.path.normcase
+    def normalized(value):
+        calls.append(value)
+        return original(value)
+    monkeypatch.setattr(os.path, "normcase", normalized)
+    monkeypatch.setattr(child_audit, "error", failures.append)
+    actual = compile(canonical, str(source), "exec", dont_inherit=True)
+    changed = compile(canonical.replace(b"22", b"11"), str(source), "exec", dont_inherit=True)
+    assert runtime._frame_source(SimpleNamespace(f_code=actual)) == (1, 2)
+    assert runtime._frame_source(SimpleNamespace(f_code=changed)) is None
+    assert calls == [str(source)]
+    assert failures == ["executed code differs from verified source inventory"]
+    assert runtime._code_sources[id(changed)] == (changed, None)
 
 
 @pytest.mark.parametrize("stale", [False, True])

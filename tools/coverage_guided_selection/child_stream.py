@@ -2,6 +2,7 @@
 
 The parent owns source equivalence, context identities, bounds and schema-v3
 merging. This module grants no baseline publication or selection authority.
+Cached filename metadata never carries executable or module admission.
 """
 
 import hashlib
@@ -23,6 +24,7 @@ _seen = set()
 _lock = threading.Lock()
 _sources = {}
 _code_sources = {}
+_path_keys = {}
 _expected_codes = {}
 _generator_codes = frozenset()
 _generated_receipts = []
@@ -43,7 +45,7 @@ _profile_owner = None
 _prior_profile = _prior_thread_profile = None
 _root = ""
 _package = ""
-_package_path = ("", "")
+_package_path = ("", "", "", "")
 _control = None
 _arming = False
 _phase_marker = None
@@ -228,19 +230,27 @@ def _frame_source(frame):
     cached = _code_sources.get(id(code))
     if cached is not None and cached[0] is code:
         return cached[1]
-    key = os.path.normcase(code.co_filename)
-    source = _source(code.co_filename, key)
+    filename = code.co_filename
+    path = _path_keys.get(filename)
+    if path is None:
+        key = os.path.normcase(filename)
+        path = (key, key.replace("\\", "/"))
+        if len(filename) <= 4096 and len(_path_keys) < 1024:
+            with _generated_lock:
+                if len(_path_keys) < 1024:
+                    _path_keys[filename] = path
+    key, package_path = path
+    source = _source(filename, key)
     if source is not None and code not in _expected_codes.get(key, ()):
         _auditor().error("executed code differs from verified source inventory")
         source = None
     if source is None and _package:
         module = getattr(frame, "f_globals", {}).get("__name__", "")
-        package_path = key.replace("\\", "/")
         if _package_path[0] != _package:
-            _package_path = (_package, os.path.normcase(_package) + "/")
-        package_prefix = _package_path[1]
-        if (isinstance(module, str) and (module == _package or module.startswith(_package + "."))
-                or package_path.startswith(package_prefix) or "/" + package_prefix in package_path):
+            prefix = os.path.normcase(_package) + "/"
+            _package_path = (_package, prefix, "/" + prefix, _package + ".")
+        if (isinstance(module, str) and (module == _package or module.startswith(_package_path[3]))
+                or package_path.startswith(_package_path[1]) or _package_path[2] in package_path):
             _auditor().error("owned package executed outside verified source inventory")
     if source is not None or key in _expected_codes:
         # Retain the object itself: recycled ids must never inherit an attribution.
