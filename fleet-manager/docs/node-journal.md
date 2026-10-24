@@ -111,6 +111,23 @@ not a fence for resources shared by different journals or external executors.
 
 ## Noncooperative effects and uncertainty
 
+`accept_named_external(intent, resource=...)` reserves the fixed
+`runner.converge` operation in the existing canonical node journal. Acceptance
+and the resource/operation binding commit together. A different operation can
+replace the retained binding only after an attributable terminal outcome and
+with a strictly higher generation. Accepted and UNKNOWN responsibilities do
+not expire or transfer. Exact repeats require the still-held binding; earlier
+terminal operations cannot reacquire a successor's resource.
+
+The v4 journal migration adds this separate retained `external_owners` table;
+it does not alter cooperative allocation release/tombstone semantics.
+The cooperative effect authorizer also protects this table. The caller must
+resolve one canonical physical resource identity and independently establish
+the backend's single-writer custody. This only serializes cooperating writers
+using this journal: another database, cluster alias or independently authorized
+Helm user is not fenced by SQLite. It is not a Kubernetes/Komodo lock, remote
+exactly-once guarantee, distributed lease or release proof.
+
 `begin_external(intent)` atomically persists UNKNOWN before external execution.
 Only the first transition from accepted returns true; concurrent or later calls
 return false and must not execute the effect. This provides at-most-one local

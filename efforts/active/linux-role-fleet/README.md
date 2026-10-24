@@ -188,6 +188,10 @@ credential-provider work stays with its current owners.
   not supply a graphical loadout surface, controller execution or live runners.
 - [ ] Connect the committed desired composition to controller-owned source
   acquisition, preparation, notification and exact-plan approval.
+  #8535 supplies the published-source and authenticated Gateway SDK path with
+  durable scoped proposals, notifications, bounded plan inspection and exact
+  review decisions. Production controller binding, selected deployment-version
+  admission and managed-owner execution remain open; review is not a grant.
 - [ ] Carry the typed runner declaration through the real supported deployment
   owner with complete support closure, bounded outcomes and no raw command API.
 - [ ] Prove real convergence, update/failure recovery, drain/removal and one
@@ -441,6 +445,23 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8535 merged the published-source preparation and review SDK as
+  `b1cd2b1a1712dd4f6b4ac815e050b10fcfd990b1` after exact-head Copilot approval,
+  complete resolved-thread review and actual required-source checks. Acquisition
+  pins advertised immutable Git objects, ignores local replacement content and
+  preserves existing repository/process custody. The Gateway consumer retains
+  fleet-bound proposals and exact review decisions, with bounded current/replay
+  notices and linear, admission-paced plan inspection. Native source and actual
+  installed-package/Gateway contracts passed (37), as did handler/caller controls
+  (44) and selected observation contracts (5). Initial Linux source/installed
+  controls passed (20); the final broader rerun was unavailable after Docker
+  Desktop failed to start, not replaced by stub evidence. The required shared
+  installer-mirror guard was repaired by pulling forward the already-merged
+  #8574 fix, not bypassing CI. Re-read this full Request, Plan and Validation
+  Plan immediately after merge. The same worktree continues with real managed
+  ARC execution/lifecycle and production binding; graphical interaction and an
+  authorized actual job remain open. No live pool, capacity, routing, credential
+  or deployment state changed, and this parent remains Active.
 - #8465 merged the installed template/slot designer, portable ARC declaration,
   dependency-capability closure and named-machine CPU/memory/disk accounting.
   Exact-head Copilot approval and required checks passed after fixes for
