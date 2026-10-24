@@ -8,7 +8,7 @@
 #   ./run.sh --scenario generic-single-plugin   # (the default) run a named scenario
 #   ./run.sh --image pristine shell             # drop into a pristine fresh box
 #   ./run.sh --until 1 --then shell run         # install the plugin, then hand off
-#   ./run.sh --uv-index https://…/pypi/simple/  # opt-in uv-index fixture (governed box)
+#   ./run.sh --uv-index https://…/pypi/simple/  # override the public runtime index
 #   ./run.sh --block-public-feeds --uv-index https://…  # reproduce a network-
 #                                                 # blocked machine (book2) from
 #                                                 # an unrestricted dev box
@@ -24,11 +24,12 @@
 # Feed policy: the host npm config is NEVER auto-forwarded (that would bias the
 # fresh-machine experiment). Pass --npm-registry <feed> ONLY to install the
 # Copilot CLI prereq on a governed box (a build-time given, not the experiment).
-# --uv-index is the RUNTIME analog: opt-in, points the deploy stage's uv at an
-# internal index; default off so the governed uv jam surfaces.
+# Runtime Python installs default to Microsoft's anonymous public feed.
+# --uv-index overrides CR_UV_INDEX; an explicit empty value disables the fixture.
 # --block-public-feeds (the downstream feed-neutral-build-config effort, Phase 3)
 # is the inverse control: it null-routes pypi.org/
-# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org via Docker
+# files.pythonhosted.org/registry.npmjs.org/download.pytorch.org and the public
+# Microsoft mirror via Docker
 # --add-host, regardless of the HOST's real connectivity, so an unrestricted
 # dev box can still exercise "public feed genuinely unreachable" -- the same
 # condition a governed box like book2 already produces naturally. Combine with
@@ -49,7 +50,7 @@ UNTIL=all
 THEN=none
 SCENARIO=generic-single-plugin
 NPM_REGISTRY="${CR_NPM_REGISTRY:-}"
-UV_INDEX="${CR_UV_INDEX:-}"
+UV_INDEX="${CR_UV_INDEX-https://packagefeedproxy.microsoft.io/pypi/simple/}"
 BLOCK_PUBLIC_FEEDS="${CR_BLOCK_PUBLIC_FEEDS:-0}"
 TOKEN_ACCOUNT=""
 NO_TOKEN=0
@@ -311,9 +312,12 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
             --add-host "files.pythonhosted.org:127.0.0.1"
             --add-host "registry.npmjs.org:127.0.0.1"
             --add-host "download.pytorch.org:127.0.0.1"
+            --add-host "packagefeedproxy.microsoft.io:127.0.0.1"
         )
-        echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org null-routed"
+        echo "block-public-feeds: pypi.org, files.pythonhosted.org, registry.npmjs.org, download.pytorch.org, packagefeedproxy.microsoft.io null-routed"
     fi
+    local uv_args=()
+    [ -z "$UV_INDEX" ] || uv_args=(-e "UV_DEFAULT_INDEX=$UV_INDEX")
     docker run -d --init --name "$CONTAINER" \
         --label "$CLEAN_ROOM_LABEL" \
         -v "$SCENARIO_DIR:/home/operator/scenario:ro" \
@@ -322,6 +326,7 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         "${scen_lib_args[@]}" \
         "${harness_args[@]}" \
         "${block_args[@]}" \
+        "${uv_args[@]}" \
         -e "CR_LIB=/home/operator/lib/clean-room-lib.sh" \
         -e "CR_SCENARIO_NAME=$SCENARIO_NAME" \
         -e "CR_MARKETPLACE_REPO=${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}" \

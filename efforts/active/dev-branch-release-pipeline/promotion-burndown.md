@@ -210,6 +210,64 @@ whole-packet samples were 8.603/8.234/7.738 seconds; the actual release packet
 took 7.034 seconds and its job took 24 seconds. These small samples do not
 establish a statistical flake-rate guarantee or a causal speedup.
 
+## Stamped-candidate ordering and coverage
+
+Parent: [Phase 9c](README.md#phase-9c---stamped-candidate-tests-and-development-coverage).
+Bounded tracker: #8390. The complete operator direction is captured verbatim
+in the parent Request. The following mechanisms and validation decomposition
+are **agent-recommended**; the existing unit-only policy remains governing.
+
+- [ ] Reuse the release composer to freeze version state, vendoring, governed
+      control inputs and the candidate before authoritative release tests.
+      Dev remains the release owner; candidate content identity describes
+      its tested composition, not another source release.
+- [ ] Execute the positively admitted unit portfolio once on that composition
+      and its actual vendored/import closure. Preserve node, effect and time
+      limits. Raw-Dev PR checks remain source admission, not automatic proof
+      of later transformed release bytes.
+- [ ] Build and validate artifacts from the same frozen composition. Preserve
+      safe unsigned-build overlap, but gate attestation, publication and merge
+      on successful exact-candidate qualification. Do not restamp or
+      rematerialize mutable inputs after tests.
+- [ ] Preserve raw candidate coverage and a deterministic candidate-to-Dev
+      projection bound to both source contents and the actual transformation.
+      Retain vendored-copy origins before combining attribution. Explicitly
+      classify changed version statements and generated/unmapped regions;
+      projected coordinates do not claim that raw Dev bytes executed.
+- [ ] Extend existing packet/receipt and coverage admission coherently.
+      Preserve validated historical formats, but never reinterpret a raw-source
+      packet or an unverified path relabel as candidate execution. Reuse only
+      evidence for identical admitted candidate and execution inputs.
+- [ ] Land Source changes normally, then use the existing independently reviewed
+      Main-control activation path. No implicit resume, guard bypass, competing
+      publisher or revival of the superseded full/native profile.
+- [ ] Verify a containing natural release and coverage readback under the
+      existing thirty-minute gate. Broader Phase 9, periodic integration and
+      adopter acceptance retain their existing owners.
+
+### Stamped-candidate validation
+
+- [ ] Reproduce the version-fallback mismatch through composition, unit-input
+      and qualification decision boundaries using eligible units. Test changed
+      stamped bytes rather than stripping them during source comparison.
+- [ ] Prove execution loads candidate and vendored inputs, not ambient installs
+      or raw Dev. Missing/extra nodes, sources, targets, outcomes and prohibited
+      effects remain refusals.
+- [ ] Reject post-test mutation, changed stamping/materialization inputs,
+      incorrect Dev anchoring, incompatible profiles/control and mismatched
+      archives before qualification reuse or publication.
+- [ ] Cover exact-copy vendoring, multiple copies of an origin, explicit
+      version transforms, line shifts and unsupported/generated regions.
+      Validate both sides of each map, preserve raw hits, and refuse forged or
+      unsupported development attribution.
+- [ ] Preserve historical coverage/receipt admission without claiming projected
+      coverage executed raw Dev. Different candidate contents sharing a Dev
+      anchor cannot collide or reuse incompatible evidence.
+- [ ] Keep effectful composition/import/installed checks in their admitted
+      bounded or periodic lanes, not as new required-unit dependencies.
+      Measure the real unit/build/publication/merge critical path and mapped
+      coverage readback before marking the slice complete.
+
 ## Validation and closure
 
 - [x] Capture matches the operator's request without softening the exclusion

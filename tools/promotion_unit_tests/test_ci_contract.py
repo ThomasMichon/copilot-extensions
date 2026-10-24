@@ -40,7 +40,7 @@ def declarations():
                 "run": "python tools/check-trusted-ci.py",
             }, {
                 "name": "Marketplace isolation inventory (report-only)",
-                "if": "github.event_name != 'pull_request'",
+                "if": GUARD.CODE_CONDITION + " && github.event_name != 'pull_request'",
                 "run": "python tools/check-marketplace-isolation.py",
             }]},
             "unit-tests": {
@@ -94,6 +94,14 @@ def declarations():
         "run": GUARD.SOURCE_AST_SCRIPT,
     }, *({"run": command, "if": GUARD.SOURCE_AST_CONDITION, "timeout-minutes": 6}
          for command in GUARD.SOURCE_AST_COMMANDS)])
+    ci["jobs"]["checks"]["steps"].insert(1, {
+        "id": "code-impact", "timeout-minutes": 2,
+        "env": GUARD.CODE_IMPACT_ENV, "run": GUARD.CODE_IMPACT_SCRIPT,
+    })
+    ci["jobs"]["checks"]["steps"].append({
+        "run": "python tools/check-changefile-presence.py --base base --head head",
+        "if": GUARD.CHANGEFILE_CONDITION,
+    })
     return routing, ci
 
 
@@ -134,19 +142,19 @@ def test_push_only_allocation_exclusion_is_required(tmp_path):
 ])
 def test_source_ast_admission_cannot_skip_failures_or_lose_pinned_inputs(tmp_path, change):
     routing, ci = declarations()
-    ci["jobs"]["checks"]["steps"][2].update(change)
+    next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "source-ast-impact").update(change)
     assert "source AST guards require conservative pinned-input admission" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("change", [
     {"if": "false"}, {"continue-on-error": True}, {"run": "echo passed"},
 ])
-@pytest.mark.parametrize("index", [3, 4, 5])
+@pytest.mark.parametrize("index", [4, 5, 6])
 def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(tmp_path, change, index):
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
-    scan = steps.pop(3)
-    steps.extend({"run": "echo unrelated guard"} for _ in range(index - 3))
+    scan = steps.pop(4)
+    steps.extend({"run": "echo unrelated guard"} for _ in range(index - 4))
     steps.insert(index, scan)
     assert validate(tmp_path, routing, ci) == []
     scan.update(change)
@@ -156,20 +164,20 @@ def test_source_ast_scan_commands_and_outcomes_cannot_be_weakened(tmp_path, chan
 def test_source_ast_scans_cannot_precede_or_duplicate_admission(tmp_path):
     routing, ci = declarations()
     steps = ci["jobs"]["checks"]["steps"]
-    steps[2], steps[3] = steps[3], steps[2]
+    steps[3], steps[4] = steps[4], steps[3]
     assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
-    steps[2], steps[3] = steps[3], steps[2]
-    steps.append(dict(steps[2]))
+    steps[3], steps[4] = steps[4], steps[3]
+    steps.append(dict(steps[3]))
     assert "source AST guards require conservative pinned-input admission" in validate(tmp_path, routing, ci)
     steps.pop()
-    steps.append(dict(steps[3]))
+    steps.append(dict(steps[4]))
     assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("budget", [None, 5, 7])
 def test_source_ast_runner_requires_the_bounded_join_step(tmp_path, budget):
     routing, ci = declarations()
-    scan = ci["jobs"]["checks"]["steps"][3]
+    scan = ci["jobs"]["checks"]["steps"][4]
     if budget is None:
         scan.pop("timeout-minutes")
     else:
@@ -177,7 +185,7 @@ def test_source_ast_runner_requires_the_bounded_join_step(tmp_path, budget):
     assert "source AST guards must follow validated admission without weakening scans" in validate(tmp_path, routing, ci)
 
 
-def execute_source_ast_selector(output, event, read_diff):
+def execute_source_ast_selector(output, event, read_diff, *, script=None):
     routing, ci = declarations()
     assert validate(output.parent, routing, ci) == []
     modules = {
@@ -192,10 +200,106 @@ def execute_source_ast_selector(output, event, read_diff):
     def imports(name, *args, **kwargs):
         return modules[name] if name in modules else builtins.__import__(name, *args, **kwargs)
 
-    body = "\n".join(GUARD.SOURCE_AST_SCRIPT.splitlines()[1:-1])
+    body = "\n".join((script or GUARD.SOURCE_AST_SCRIPT).splitlines()[1:-1])
     exec(compile(body, "<source-ast-impact>", "exec"), {
         "__builtins__": {**vars(builtins), "__import__": imports},
     })
+
+
+@pytest.mark.parametrize("change", [
+    {"if": "false"}, {"continue-on-error": True}, {"run": "echo run=false"},
+    {"timeout-minutes": 20}, {"env": {}},
+])
+def test_code_impact_cannot_omit_diff_evidence_or_ignore_errors(tmp_path, change):
+    routing, ci = declarations()
+    next(step for step in ci["jobs"]["checks"]["steps"] if step.get("id") == "code-impact").update(change)
+    assert "code guards require conservative pinned-input coverage admission" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("event,paths,expected", [
+    ("pull_request", ["plugins/example/README.md"], False),
+    ("pull_request", ["AGENTS.md", "worktree-manager/docs/usage.md"], False),
+    ("push", ["plugins/example/skills/demo/SKILL.md"], False),
+    ("pull_request", ["tools/deleted.py", "docs/moved.md"], True),
+    ("pull_request", ["README.md", ".github/workflows/ci.yml"], True),
+    ("pull_request", [], True), ("workflow_dispatch", [], True),
+])
+def test_actual_code_impact_script_reports_markdown_no_overlap(tmp_path, event, paths, expected):
+    output = tmp_path / "outputs"
+    execute_source_ast_selector(
+        output, event, lambda _: ("\0".join(paths) + "\0").encode(),
+        script=GUARD.CODE_IMPACT_SCRIPT,
+    )
+    assert output.read_text() == "run=" + str(expected).lower() + "\n"
+
+
+def test_unavailable_code_impact_diff_does_not_emit_no_overlap(tmp_path):
+    output = tmp_path / "outputs"
+
+    def unavailable(_):
+        raise RuntimeError("diff unavailable")
+
+    with pytest.raises(RuntimeError, match="diff unavailable"):
+        execute_source_ast_selector(
+            output, "pull_request", unavailable, script=GUARD.CODE_IMPACT_SCRIPT,
+        )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("command", [
+    "python tools/check-agent-bridge-contracts.py --base " + "a" * 40,
+    "python tools/check-install-contract.py",
+])
+def test_code_guards_cannot_run_without_prior_coverage_impact(tmp_path, command):
+    routing, ci = declarations()
+    steps = ci["jobs"]["checks"]["steps"]
+    scan = {"run": command, "if": GUARD.CODE_CONDITION}
+    steps.append(scan)
+    assert validate(tmp_path, routing, ci) == []
+    scan.pop("if")
+    assert "code guards must follow validated executable coverage admission" in validate(tmp_path, routing, ci)
+    scan["if"] = GUARD.CODE_CONDITION
+    steps.remove(scan)
+    steps.insert(0, scan)
+    assert "code guards must follow validated executable coverage admission" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("condition", [
+    GUARD.CODE_CONDITION, "false",
+    GUARD.CODE_CONDITION + " && " + GUARD.CHANGEFILE_CONDITION,
+])
+def test_markdown_plugin_release_lint_is_not_conditioned_on_test_coverage(tmp_path, condition):
+    routing, ci = declarations()
+    step = ci["jobs"]["checks"]["steps"][-1]
+    assert validate(tmp_path, routing, ci) == []
+    step["if"] = condition
+    assert "release changefile lint must remain independent of executable coverage" in validate(tmp_path, routing, ci)
+
+
+def test_markdown_plugin_release_lint_cannot_disappear(tmp_path):
+    routing, ci = declarations()
+    ci["jobs"]["checks"]["steps"].pop()
+    assert "release changefile lint must remain independent of executable coverage" in validate(tmp_path, routing, ci)
+
+
+@pytest.mark.parametrize("consumer,error", [
+    ("Marketplace isolation inventory (report-only)",
+     "report-only inventory must remain on non-PR CI without becoming a strict PR gate"),
+    ("ast", "source AST guards must follow validated admission without weakening scans"),
+])
+def test_every_code_impact_consumer_requires_prior_selector(tmp_path, consumer, error):
+    routing, ci = declarations()
+    steps = ci["jobs"]["checks"]["steps"]
+    assert validate(tmp_path, routing, ci) == []
+    selector = next(step for step in steps if step.get("id") == "code-impact")
+    scan = next(
+        step for step in steps
+        if step.get("name") == consumer
+        or (consumer == "ast" and step.get("run") in GUARD.SOURCE_AST_COMMANDS)
+    )
+    steps.remove(selector)
+    steps.insert(steps.index(scan) + 1, selector)
+    assert error in validate(tmp_path, routing, ci)
 
 
 @pytest.mark.parametrize("event,paths,expected", [
@@ -330,7 +434,7 @@ def test_ungated_policy_guard_remains_mandatory(tmp_path):
 ])
 def test_report_only_inventory_remains_available_without_repeating_in_pr_ci(tmp_path, change):
     routing, ci = declarations()
-    ci["jobs"]["checks"]["steps"][1].update(change)
+    next(step for step in ci["jobs"]["checks"]["steps"] if step.get("name") == "Marketplace isolation inventory (report-only)").update(change)
     assert "report-only inventory must remain on non-PR CI without becoming a strict PR gate" in validate(tmp_path, routing, ci)
 
 

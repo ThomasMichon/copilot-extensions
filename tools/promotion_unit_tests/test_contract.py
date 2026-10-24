@@ -6,7 +6,7 @@ import hashlib
 import pytest
 
 from promotion_unit_contract import (
-    PROFILE, UnitEvidenceError, admit_manifest, changed_paths, ci_requires_units, decode_json, manifest_digest, relative_file,
+    PROFILE, UnitEvidenceError, admit_manifest, changed_paths, ci_requires_code_checks, ci_requires_units, decode_json, manifest_digest, relative_file,
     requires_units, source_sha, verify_observations, verify_sources,
 )
 
@@ -118,7 +118,7 @@ def test_source_digest_rejects_changed_or_missing_bytes(tmp_path):
 
 def test_only_known_narrative_changes_can_skip_the_admitted_packet():
     assert not requires_units(["docs/guide.md", "efforts/active/example/README.md"])
-    assert requires_units(["plugins/example/skills/task/SKILL.md"])
+    assert not requires_units(["plugins/example/skills/task/SKILL.md"])
     assert requires_units(["tools/unknown.py"])
     assert requires_units(["docs/guide.md", "tools/promotion_unit_contract.py"])
     assert requires_units([])
@@ -159,3 +159,37 @@ def test_ci_events_preserve_promotion_ownership_and_conservative_fallback(event,
 ])
 def test_combined_pr_admission_preserves_exact_source_and_narrative_selection(paths, expected):
     assert ci_requires_units("pull_request", "a" * 40, "b" * 40, lambda _: paths) is expected
+
+
+@pytest.mark.parametrize("path", [
+    "README.md", "AGENTS.md", "plugins/example/README.md",
+    "plugins/example/skills/task/SKILL.md", "worktree-manager/docs/usage.MD",
+    ".github/workflows/example.md", "arbitrary/new-document.md",
+])
+def test_markdown_has_no_executable_unit_or_guard_overlap(path):
+    assert not requires_units([path])
+    for event in ("pull_request", "push"):
+        assert not ci_requires_code_checks(
+            event, "a" * 40, "b" * 40, lambda _: path.encode() + b"\0",
+        )
+
+
+@pytest.mark.parametrize("paths", [
+    b"docs/readme.md\0tools/source.py\0", b"docs/example.json\0",
+    b".github/workflows/example.yml\0", b"tools/deleted.py\0docs/moved.md\0", b"",
+])
+def test_code_guard_selection_keeps_mixed_unknown_and_empty_changes(paths):
+    assert ci_requires_code_checks(
+        "pull_request", "a" * 40, "b" * 40, lambda _: paths,
+    )
+
+
+@pytest.mark.parametrize("event,base,head", [
+    ("workflow_dispatch", "", ""), ("future-event", "a" * 40, "b" * 40),
+    ("push", "0" * 40, "b" * 40), ("pull_request", "", ""),
+])
+def test_unavailable_code_guard_inputs_never_claim_no_overlap(event, base, head):
+    def no_diff(_):
+        pytest.fail("unavailable input must not be mistaken for an empty diff")
+
+    assert ci_requires_code_checks(event, base, head, no_diff)

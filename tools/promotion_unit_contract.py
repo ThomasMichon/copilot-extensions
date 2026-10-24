@@ -144,11 +144,7 @@ def requires_units(changed_paths: list[str]) -> bool:
             or any(part in ("", ".", "..") for part in path.split("/"))
         ):
             raise UnitEvidenceError("invalid changed-input path")
-        narrative = (
-            path.startswith(("docs/", "visions/", "efforts/"))
-            and path.endswith(".md")
-        ) or path in {"README.md", "CONTRIBUTING.md", "TESTING.md", "REVIEW.md"}
-        if not narrative:
+        if not path.casefold().endswith(".md"):
             return True
     return False
 
@@ -193,3 +189,14 @@ def ci_requires_source_ast_guards(
         )
     ]
     return requires_units(relevant) if relevant else False
+
+
+def ci_requires_code_checks(
+    event: str, base: str, head: str, read_diff: Callable[[list[str]], bytes],
+) -> bool:
+    """Share unit impact for source guards; unknown or unavailable inputs cannot skip."""
+    if event not in ("pull_request", "push"):
+        return True
+    if not _SHA.fullmatch(base) or not _SHA.fullmatch(head) or base == "0" * 40:
+        return True
+    return requires_units(changed_paths(base, head, read_diff))
