@@ -1,0 +1,9 @@
+{
+  "comment": "Repair captured partial installations in one admitted native update, forward caller-selected native streams and frame repair diagnostics without payload-only site initialization.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Use admitted single-pass missing-runtime updates and finite paired context reads, honor explicit reader interpreters and avoid payload-only site initialization while retaining ownership, publication, native fallback and complete staging contracts.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

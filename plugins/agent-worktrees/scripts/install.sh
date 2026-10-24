@@ -41,9 +41,12 @@ context_governance_unchanged() {
 }
 __aw_action="${1:-status}"
 __aw_install_dir_arg=""
+__aw_provision_missing_runtime=false
 __aw_args=("$@")
 for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
-    if [[ "${__aw_args[$__aw_i]}" == "--install-dir" ]]; then
+    if [[ "${__aw_args[$__aw_i]}" == "--provision-missing-runtime" ]]; then
+        __aw_provision_missing_runtime=true
+    elif [[ "${__aw_args[$__aw_i]}" == "--install-dir" ]]; then
         ((__aw_i + 1 < ${#__aw_args[@]})) || {
             printf '%s\n' "ERROR: --install-dir requires a value" >&2
             exit 1
@@ -54,8 +57,22 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
                 __aw_install_dir_arg="$(cygpath -u "$__aw_install_dir_arg")" || exit 1
                 __aw_args[$((__aw_i + 1))]="$__aw_install_dir_arg" ;;
         esac
+        ((__aw_i += 1))
+    elif [[ "${__aw_args[$__aw_i]}" == --project-name ||
+            "${__aw_args[$__aw_i]}" == --machine ||
+            "${__aw_args[$__aw_i]}" == --owner ||
+            "${__aw_args[$__aw_i]}" == --runtime-publication-plan ||
+            "${__aw_args[$__aw_i]}" == --runtime-publication-digest ||
+            "${__aw_args[$__aw_i]}" == --runtime-publication-python ]]; then
+        ((__aw_i += 1))
     fi
 done
+if $__aw_provision_missing_runtime && [[ "$__aw_action" != update ||
+    -n "${COPILOT_EXTENSIONS_CONTEXT:-}" || -z "$__aw_install_dir_arg" ||
+    -z "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+    printf '%s\n' 'ERROR: missing-runtime provisioning requires an admitted legacy update with an explicit installation root' >&2
+    exit 1
+fi
 set -- "${__aw_args[@]}"
 if [[ "$__aw_action" == publish-runtime-helpers ]]; then
     if [[ -z "${COPILOT_PLUGIN_STAGED_FROM:-}" ||
@@ -87,7 +104,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 case "$__aw_candidate_path" in
                     */Microsoft/WindowsApps/*) continue ;;
                 esac
-                "$__aw_candidate_path" -I -B -c \
+                "$__aw_candidate_path" -I -S -B -c \
                     'import sys; assert sys.version_info >= (3, 11)' >/dev/null 2>&1 || continue
                 __aw_admission_python="$(cd "$(dirname "$__aw_candidate_path")" && pwd -P)/$(basename "$__aw_candidate_path")"
                 break
@@ -105,7 +122,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 unset COPILOT_PLUGIN_STAGED_FROM
             fi
             __aw_admission_args=(
-                -I -B -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"
+                -I -S -B -X utf8 "$PLUGIN_DIR/scripts/command_binding.py"
                 --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
                 --legacy-root "$__aw_admission_root"
                 --source-payload-root "$__aw_admission_source"
@@ -144,16 +161,20 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     }
     __aw_shell_context="$(__aw_shell_path "$COPILOT_EXTENSIONS_CONTEXT")" || exit 1
     __aw_context_python=""
+    for ((__aw_i=0; __aw_i<${#__aw_args[@]}; __aw_i++)); do
+        if [[ "${__aw_args[$__aw_i]}" == --runtime-publication-python ]]; then
+            if ((__aw_i + 1 >= ${#__aw_args[@]})) || [[ -z "${__aw_args[$((__aw_i+1))]}" ]]; then
+                printf '%s\n' "ERROR: --runtime-publication-python requires a value" >&2
+                exit 1
+            fi
+            __aw_context_python="$(__aw_shell_path "${__aw_args[$((__aw_i+1))]}")" || exit 1
+        fi
+    done
     case "${OSTYPE:-}" in
         msys*|cygwin*)
-            for ((__aw_i=0; __aw_i<${#__aw_args[@]}; __aw_i++)); do
-                if [[ "${__aw_args[$__aw_i]}" == --runtime-publication-python ]]; then
-                    __aw_context_python="$(__aw_shell_path "${__aw_args[$((__aw_i+1))]}")" || exit 1
-                fi
-            done
             if [[ -z "$__aw_context_python" ]]; then
                 while IFS= read -r __aw_candidate_path; do
-                    if "$__aw_candidate_path" -I -B -c 'import sys; assert sys.version_info >= (3,11)' >/dev/null 2>&1; then
+                    if "$__aw_candidate_path" -I -S -B -c 'import sys; assert sys.version_info >= (3,11)' >/dev/null 2>&1; then
                         __aw_context_python="$__aw_candidate_path"; break
                     fi
                 done < <(type -ap python3 python)
@@ -165,7 +186,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     esac
     __aw_context_query() {
         if [[ -n "$__aw_context_python" ]]; then
-            "$__aw_context_python" -I -B -X utf8 "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
+            "$__aw_context_python" -I -S -B -X utf8 "$SCRIPT_DIR/installation-context/installation_context.py" "$@"
         else
             bash "$__aw_context_helper" "$@"
         fi
@@ -296,7 +317,7 @@ if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 printf '%s\n' 'ERROR: Runtime publication management requires explicit --runtime-publication-python' >&2
                 return 1
             }
-            publication="$("$management_python" -I -B -X utf8 \
+            publication="$("$management_python" -I -S -B -X utf8 \
                 "$SCRIPT_DIR/installation-context/installation_context.py" \
                 probe-management-publication "${__aw_status_args[@]:1}")" || return 1
             allowed="$(__aw_context_value "$publication" managementPublication)" || return 1
@@ -698,6 +719,7 @@ while [[ $# -gt 0 ]]; do
         --runtime-publication-plan) RUNTIME_PUBLICATION_PLAN="$2"; shift 2 ;;
         --runtime-publication-digest) RUNTIME_PUBLICATION_DIGEST="$2"; shift 2 ;;
         --runtime-publication-python) RUNTIME_PUBLICATION_PYTHON="$2"; shift 2 ;;
+        --provision-missing-runtime) shift ;;
         --zero-downtime) ZERO_DOWNTIME=true; shift ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
@@ -3669,6 +3691,17 @@ case "$ACTION" in
             exit 0
         fi
 
+        if $__aw_provision_missing_runtime; then
+            if ! git --version >/dev/null 2>&1; then
+                err "Missing prerequisite: git"
+                exit 1
+            fi
+            if [[ -L "$BIN_DIR" || ( -e "$BIN_DIR" && ! -d "$BIN_DIR" ) ]]; then
+                err "Runtime bin is not an ordinary directory"
+                exit 1
+            fi
+            mkdir -p "$BIN_DIR"
+        fi
         if [[ ! -d "$BIN_DIR" ]]; then
             err "Not installed -- run 'install' first"
             exit 1

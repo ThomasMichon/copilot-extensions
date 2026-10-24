@@ -143,6 +143,18 @@ load an installed runtime. Native prerequisite diagnostics, exceptions and the
 launched Manager's streams and exit status retain their existing ownership;
 this is not a claim that those separate producers are all framed.
 
+The fresh Manager's private update-repair prefix then opens its own
+`update/manager/engine_repair` human scope before the aggregate update run
+exists. Its start, missing-source or caught-refusal diagnostics, and final
+exit status use the shared UTC/monotonic stderr formatter. A failed repair
+ends that scope as failed and does not start aggregate orchestration.
+Native repair children explicitly forward the caller's existing standard
+descriptors, retaining redirected Windows streams even when no new console
+is allocated. They settle through the existing lifecycle owner; their
+diagnostics are not captured or decorated by this scope. The exit-only repair
+entry remains unframed when called outside a human scope, and older runtimes
+without the formatter retain the original diagnostics.
+
 `doctor` also reports **plugin-catalog alignment**: whether the authored
 catalog (`data/plugins.toml`) still matches the discovered plugin membership
 (same report as `plugins --reconcile`, folded into one surface). A discovered

@@ -148,6 +148,9 @@ matrix below are _(agent-recommended)_ implementation details.
   (#7888).
 - [x] Qualify Machines' actual nested PowerShell/Python producers, including
   legacy decision progress and undecorated lifecycle JSON (#7901).
+- [x] Frame the fresh Manager bootstrap's own explicit human messages without
+  requiring an installed runtime or duplicating PowerShell information records
+  (#8020); native child diagnostics and exceptions remain separate boundaries.
 - [ ] Prefix every human-readable install/update line with a wall-clock time;
   suffix it with honestly labeled monotonic elapsed time or completed-step
   duration. Do not represent arbitrary child-line arrival as execution cost.
@@ -285,6 +288,411 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-23 - Qualify current consumers with temporary CPU allowances
+
+- The operator explicitly authorized temporarily increasing validation
+  allowances for congested CPU. Private validation runners used 60 seconds
+  per item and 600 seconds per cohort; the new project-only native callback
+  received 40 seconds instead of 20. Production deadlines, required CI,
+  inputs, assertions, custody and publication policy were unchanged.
+  These results are not original-limit performance qualification.
+- Current Windows consumer coverage passed 175 cases: all 45 repair cases,
+  41 scoped controls, 45 bootstrap/stream/snapshot cases, and 44 interpreter,
+  native project-only callback and governance controls. The complete repair
+  cohort took 519.31 seconds; its single-update call took 22.38 seconds.
+- Current native Linux coverage passed 126 cases with 33 platform-specific
+  exclusions. A failed first run exposed admission tests selecting Windows
+  PowerShell from a POSIX interoperability PATH. Restricted that selector
+  to native hosts, matching the other native test modules, and added a
+  platform-selection regression. All 27 native Windows admission controls
+  still pass; Linux no longer invokes a foreign-platform interpreter.
+- The preceding full staging/contract/generation matrix remains recorded
+  against its actual source. Current consumer qualification removes the
+  immediate source-publication blocker under the authorized temporary
+  allowances, not the remaining normal-load, installed, serving or parent
+  objective gates. Review and required CI still precede any source merge;
+  no further installed update is authorized.
+
+### 2026-10-23 - Keep publication blocked after the latest source integration
+
+- A second pre-publication synchronization retained #7667's original
+  project-root propagation and extracted governance owner, without replacing
+  either with the finite receipt/status transport. The earlier complete
+  qualification below belongs to the preceding integrated source, not this
+  newer candidate. The publication attempt did not open a PR.
+- Current Windows qualification is blocked by the original 30-second item
+  limit: the scoped management-repair case and the newly integrated native
+  project-only publication callback exceeded it. Interpreter-admission
+  controls completed before the callback timeout; subsequent controls were
+  not reached. No deadline, assertion or required input was waived.
+- Copied-script diagnostics show the scoped path reaches its intended
+  construction fence. Separate diagnostic calls completed in 18.15 and
+  23.91 seconds, but instrumented passes do not qualify the candidate.
+  The publication trace reaches its final canonical completion check after
+  initial admission, both source checks and the complete copy inventory;
+  it is not evidence that completion succeeded.
+- Aggregate host observation found sustained CPU pressure: twelve samples
+  over two minutes ranged from 54 to 100 percent, with eleven at least
+  90 percent. No idle validation window was observed. This is a measured
+  environmental blocker, not proof that every timeout has that sole cause.
+  Do not repeat unchanged gates, suppress checks or change another
+  session's processes to obtain a passing result.
+- Review/publication remains blocked pending a qualified current-source
+  validation window or a justified further source fix. Installed rollout,
+  serving/no-op measurements and the parent objectives remain open under
+  their existing owners and permissions.
+
+### 2026-10-23 - Qualify the integrated source without deadline exceptions
+
+- Synchronized the owned candidate with current `dev`, retaining the
+  accepted #8289 stream implementation and the upstream installer,
+  dependency, source-registration and serving-monitor changes. Only two
+  generated output declarations conflicted; regenerated them from the
+  combined source. Local backup refs retain the pre-integration history.
+- The integrated Windows repair suite passed all 45 cases in complementary
+  acquisition/ownership and execution/opt-in cohorts. Full bootstrap and
+  upstream stream coverage passed 38 cases, the complete scoped cohort
+  passed 41, and snapshot plus interpreter-admission coverage passed 33.
+  Native staging/CWD/watchdog coverage passed 35 with its POSIX-only case
+  excluded. Deterministic contract/generation coverage passed 261 with
+  matching-platform exclusions.
+- The same source on native Linux passed 110 repair/bootstrap/scoped/
+  snapshot cases, with Windows-only cases excluded. Native staging and
+  deterministic contract/generation coverage passed another 286, with
+  matching-platform exclusions. Both platform runs retained the original
+  30-second item and 300-second group limits.
+- Oversized combined packets reached the group limit without an assertion
+  failure. Re-selected independent module/behavior cohorts rather than
+  increasing the limit; every resulting complete cohort passed. No failed
+  item, assertion, required input or admission check was omitted.
+- Documentation consistency and the contribution-scoped module-size guard
+  pass. The identifier scanner reports no configured forbidden-identifier
+  list, so its invocation is not claimed as a privacy scan; manually
+  reviewed the diff for neutral fixtures and absence of private identifiers.
+- The source qualification block is resolved and the candidate is ready
+  for the repository's required review/CI flow. This does not resolve the
+  remaining installed/serving, whole-host no-op, external-venue or parent
+  objective gates, and authorizes no further host update.
+
+### 2026-10-23 - Converge on the accepted repair-stream fix
+
+- Source synchronization found the independently merged #8289 repair-child
+  stream forwarding. Its settlement loop and caller-selected standard
+  streams remain the implementation to reuse, not supersede.
+- Added a real-process control where Python selects file-backed input,
+  output and diagnostic streams without replacing native descriptors
+  zero/one/two. The local numeric-descriptor implementation failed both
+  exit-zero and exit-17 controls, leaking output to the unselected channel.
+- Adopted the accepted caller-selected stream forwarding and retained
+  settlement/interruption behavior. Both new cases and the existing real
+  pipe/NUL and custody controls passed: eight cases in 3.53s. This removes
+  the substantive stream overlap before synchronizing the complete source
+  candidate; it does not authorize an installed update.
+
+### 2026-10-23 - Remove the duplicated lifecycle and qualify finite context reads
+
+- Identified a structural missing-bin repair cost: provision and update both
+  enter native admission, staging and the runtime handler. The separate
+  provision pass existed because ordinary update refuses a missing bin.
+  The operator approved changing this contract to one admitted full update,
+  not relaxing its deadline or substituting an accepted validation gap.
+- Manager now requests a private missing-runtime opt-in only for its
+  captured legacy installation. The native update requires its explicit
+  root and existing lifecycle ticket, retains canonical ownership and
+  publication-policy checks and the Git prerequisite, refuses a substituted
+  file/link, creates the missing ordinary bin and continues through the
+  unchanged full update body. Ordinary update without the opt-in remains
+  refusing. No new lease, authority or installed repair path was added.
+- The Windows single-pass/opt-in selection passed 11 native cases in
+  125.29s, including both PowerShell hosts, unadmitted/forged tickets,
+  wrong action/context, absent root, unchanged ordinary-update refusal and
+  bin-file substitution. The complete single-pass call took 14.68s. A
+  subsequent coupled Git-prerequisite and routing/postcondition selection
+  passed seven cases; that single-pass call took 12.88s.
+- Added a finite payload-local transport for Windows' consecutive initial
+  receipt and status reads. It invokes the same two SDK CLI actions with
+  their original arguments in one interpreter, preserves their raw
+  responses and SDK errors, and stops on first failure. Every original
+  root/status/generation comparison remains, as do fresh publication and
+  later revalidation calls. No receipt/path cache or SDK authority
+  algorithm changed; Python-free/native fallbacks remain available.
+- The 24 reader/parser controls passed, including real PowerShell 5.1/7
+  UTF-8, no-site, two-action and exact-failure transport. The complete
+  current Windows scoped cohort then passed all 41 cases in 234.85s under
+  the original 30-second item and 300-second group limits. Its slowest
+  native-policy call was 22.32s.
+- These are source-level blocker fixes, not an installed rollout or effort
+  completion. Final source synchronization, the remaining native/platform
+  matrix, publication/review/release and the authorized installed proof
+  remain open. The existing #7743 owner retains its independent Manager
+  admission and installed-recovery work.
+
+### 2026-10-23 - Correct payload startup and repair-fixture isolation
+
+- Added failing real-consumer controls for site initialization in both
+  Windows PowerShell hosts and the explicit Bash context reader. All five
+  failed before the correction. Payload-owned admission, version probes
+  and canonical context queries now use no-site isolated startup; installed
+  runtime package loading, construction interpreter selection, validation
+  calls and custody boundaries remain unchanged.
+- The complete admission/reader selection passed 39 Windows cases,
+  retaining older-interpreter discovery, explicit refusal, native fallback,
+  Unicode arguments and exact child failures. The containing Manager
+  repair CLI uses the same payload-only startup, without forwarding a new
+  legacy bootstrap-interpreter hint.
+- Reworked only Windows fixture removal into a joined four-worker native
+  Python child. Its original 10-second child bound and 30/300-second
+  qualification bounds remain. Its working and temporary directories stay
+  outside the tree being removed; link targets and read-only-file failures
+  remain protected and observable. Production cleanup is unchanged.
+- Once cleanup allowed a full cohort to finish, six cases exposed stale
+  temporary-directory state: acquisition attempted to use the first
+  already-deleted fixture's temporary directory. Two ordered regressions
+  failed before explicitly binding Python's cached temporary directory to
+  each repair fixture. The cache is now restored by the owning monkeypatch
+  scope. The containing bootstrap/fixture selection passed 36 cases.
+- A complete corrected Windows scoped cohort is still not accepted: a
+  subsequent run reached the original item limit in native construction.
+  The ordinary legacy two-cycle case also remains blocked. A passing
+  individual scoped case (28.78s including cleanup) is not substituted for
+  either complete gate, and these fixture/source changes are not evidence
+  of an installed update or healthy host no-op.
+
+### 2026-10-23 - Map nested publication work before changing authority checks
+
+- Traced the diagnostic profile through Worktrees' actual `Governance`
+  consumer and the canonical deployment/publication SDK. The three custody
+  borrows are initial publication validation, held admission and publication
+  revalidation; each intentionally checks identity on both sides of the
+  lock-owner observations and confirms native process birth afterward.
+- Recorded the nested receipt, namespace, mode, policy and provenance work
+  in the [audit](audit.md). Internal receipt/path call counts are not
+  independent authority boundaries, and the existing scoped digest cache
+  does not authorize path, receipt, policy or custody caching.
+- No shared-SDK algorithm or production behavior changed. Foundation owners
+  retain that work; the original Windows two-cycle and current full scoped
+  gates, source-publication block and installed holds remain in force.
+- Rejected a separate compiler-based staging experiment: on the complete
+  fixture-selected 684-file input, four-worker copying took 0.661s but cold
+  compilation added 0.728s; their combined 1.389s did not beat the retained
+  helper's 1.329s comparison. Bytes, file times and modes matched, but this
+  ordinary-tree microbenchmark is not link/provider or native acceptance.
+  No compiler, assembly cache or new copy path was added to the installer.
+
+### 2026-10-23 - Accepted capture source retains the bounded legacy discrepancy
+
+- Synchronized the accepted legacy-owner capture change from #8010 while
+  preserving the local presentation, copy and context-reader corrections.
+  The actual squash merge is included; its feature-head ancestry is not
+  a valid substitute for that check. This is source synchronization, not
+  an installed rollout or original-recovery result.
+- The unchanged Windows two-cycle gate still fails on that accepted source.
+  Passive measurements reached a 16.563s first native cycle after 5.272s
+  fixture setup; the second cycle exceeded the original item budget.
+- Sparse copied-script markers separated admission, full staging copy,
+  staged-child startup, signed-base selection and the construction fence.
+  One diagnostic completed both construction cycles before timing out in
+  fixture cleanup; another reached only the second child. These markers
+  are diagnostic, not equivalent performance or acceptance evidence.
+  The observed variation spans several phases, not just output capture.
+  Neither an inherited-handle hang nor dominant stale-stage cleanup was
+  established, and no policy, signer or cleanup change was inferred.
+- A complete 685-file comparison found directory-info enumeration slower
+  than the retained native copier (2.907s versus 2.500s); discarded it.
+  A separate complete fixture-copy comparison reduced Windows copying
+  from 1.968s to 0.828s using four bounded native-copy workers, with equal
+  bytes, file times and modes. Fixture preparation retains the full tree,
+  links, ignore and overwrite behavior, independent files and surfaced
+  worker errors; it joins before directory metadata restoration or use.
+- The four targeted fixture-copy controls pass, but the native two-cycle
+  gate still fails after that setup-only improvement. It is not claimed
+  as a fix for host-update performance or permission to publish. Original
+  deadlines, native arguments, admission checks and installed holds remain.
+- The synchronized Linux repair, scoped-policy and staging selection passed
+  70 cases with 25 platform skips in 177.60s. The post-sync Windows scoped
+  selection has two additional accepted historical-owner cases, so the
+  earlier 28-case result is not final coverage of its current 30 cases.
+- The new automatic-cell historical-snapshot case spent 14.500s in its
+  fixture's ordinary `shutil.copytree`. Reusing the complete fixture copier
+  reduced that operation to 0.719s; the unchanged policy case then passed
+  in 24.34s including setup and cleanup. Snapshot bytes and provenance,
+  source selection and all native checks remain real.
+- A subsequent full Windows scoped run still reached its original item
+  limit during an earlier automatic-cell case's fixture cleanup. The full
+  current cohort is therefore not accepted. The independent current
+  Windows staging/CWD/watchdog cohort passed 35 with one platform skip in
+  160.44s. Coordination evidence is retained on #6812; #7743's later
+  historical-helper admission and installed-recovery block is separate.
+- All seven current Windows historical-snapshot cases passed in 137.90s;
+  the final snapshot/automatic-snapshot selection passed eight cases on
+  native Linux in 40.73s. These retain missing/corrupt snapshot refusal and
+  execution exclusively from refreshed native source.
+- Further scoped phase markers separate repeated canonical queries from
+  staging and construction. A diagnostic profile of the real runtime's
+  pre-construction work recorded 28 receipt validations, 1,657 canonical
+  path calls and 3,812 native final-path queries in 2.043s of profiled work.
+  These are nested call counts, not permission to drop 28 governance
+  boundaries or reuse stale decisions. No receipt/path cache, combined
+  authority algorithm or production cleanup change was added.
+- Individual instrumented scoped controls can finish while the unchanged
+  complete Windows gate still fails. They are diagnostic evidence only.
+  Source publication, ordinary legacy two-cycle qualification and complete
+  current scoped qualification remain blocked.
+
+### 2026-10-22 - Keep publication blocked and qualify explicit context readers
+
+- The operator explicitly retained the publication block rather than accepting
+  native-validation gaps. No deadline, process limit or policy exception was
+  introduced; this effort and its installed-completion gates remain open.
+- A native Linux scoped-repair trace reached dependency-free shell validation
+  and status reads before its original deadline. Manager already supplied an
+  exact interpreter, but early POSIX reads ignored that existing hint.
+  Honoring it routes the same arguments through the canonical Python SDK;
+  callers without it still retain the Bash reader. All 20 scoped/routing
+  cases then passed on native Linux; the former failing call took 10.10s.
+- Windows structured staging independently stalled in a forced provider copy.
+  Moved the same native copier before contextual staging, after required
+  output initialization, in all 13 consumers. Its own byte-identity guard
+  rejects a missing or divergent block. Worktrees' structured payload copy
+  uses it without changing paths, canonical-library handling or watchdog.
+- An explicitly supplied Windows interpreter also now drives canonical
+  context reads through the existing hidden-process adapter. The original
+  validation, status, publication and later governance checks remain, with
+  identical argument values, exit checks, identity and generation assertions.
+  Native PowerShell remains the unsupplied-interpreter fallback.
+- PowerShell 5.1/7 controls retain every mapped field, literal/Unicode values,
+  isolated execution, native fallback and exact failure exit. They exposed
+  an empty-output newline, which was fixed rather than weakening the stdout
+  assertion. The first real Windows scoped case passed its original item
+  limit: setup 8.18s, call 16.77s, cleanup 1.36s. The complete current
+  Windows scoped-policy cohort subsequently passed all 28 cases in 196.04s,
+  including automatic selection, deactivation, refusals and native transport.
+  The current shared staging/CWD/watchdog cohort passed 35 cases with one
+  platform skip in 136.09s. Both retained the original per-item/group limits.
+- Fixture preparation runs only two independent copies concurrently, joins
+  them before policy or damage mutations, and retains separate pristine
+  installed/published trees, complete inputs and surfaced failures. This
+  changes fixture setup cost, not claimed installed-update performance.
+- The legacy provision/update two-cycle case still exceeds its original
+  item limit. Passive instrumentation preserving native commands and capture
+  measured 5.604s setup and a 15.156s first cycle before the second exceeded
+  the remaining budget. Sparse debugger probes are diagnostic, not equivalent
+  cost comparisons or full-lane acceptance.
+- Extending bootstrap-interpreter forwarding to ordinary legacy native
+  invocation did not clear its bounded native gate. That experiment and its
+  four unit-only controls were reverted; `_invoke` and its normal native
+  arguments are exactly back at the retained baseline. No signer-selection,
+  native-wait, capture, custody or installed-state change was retained.
+- Source publication, complete native-policy qualification and healthy
+  installed/no-op acceptance remain blocked. No further host update,
+  dependency installation, signature repair or active-effort finalization
+  was performed.
+- Read-only coordination confirmed that the existing owner's #8010 merged
+  at `2026-10-23T04:41:09Z`. Preserve the qualified local source work and
+  synchronize that accepted legacy-capture change before attributing more
+  legacy-path failures to the retained older base. Its source merge is not
+  evidence of an authorized installed update or successful original recovery.
+
+### 2026-10-22 - Native self-stage copy cost isolated and reduced at source
+
+- The remaining Windows policy timeout was not initial lifecycle admission:
+  a private stack sample reached its native-child wait within one second.
+  PowerShell tracing then reached the shared self-stage provider copy.
+  At the unchanged outer item deadline, only 245 of 684 payload files had
+  copied. This is boundary attribution, not a complete policy result.
+- A bounded same-input comparison retained every file and used fresh private
+  destinations. `Copy-Item` reached its 20-second command limit at 659 of
+  684 files; the actual candidate native copier completed all 684 in 2.281
+  seconds. File bytes, modification times and modes matched. The baseline
+  duration is a lower bound, not an invented completed-run speedup.
+- Reused the installer's established native-copy pattern in the shared
+  PowerShell self-stage block, synchronized across all 13 consumers.
+  Ordinary files use .NET copying; reparse points retain provider behavior.
+  No input, staging destination, argument, deadline, admission check,
+  watchdog, CWD relocation or owner/PID guard was removed.
+- Native PowerShell 5.1 and 7 controls passed for complete trees, hidden and
+  read-only inputs, empty directories, bytecode, literal/Unicode names,
+  file and directory links, metadata and explicit I/O failures. The complete
+  staging/CWD/watchdog fixture suite passed 35 cases with one platform skip.
+- The actual marketplace-incumbent repair-policy case now completes under
+  its original item limit: setup 9.57s, call 16.44s and cleanup 1.77s.
+  Fixture cleanup uses native Windows deletion of its exact private root;
+  controls prove linked targets survive and missing-root failure is retained.
+- The complete optional Windows policy lane is still **not passing**: it
+  reported 16 item passes, then the two-cycle provision/update case exceeded
+  the original 30-second item limit. The three later cases passed separately.
+  A diagnostic trace measured the first real cycle at 12.484s and reached
+  the second native cycle before expiry; it is not acceptance of both cycles.
+- The exact staged source passed the full repair-policy and staging-contract
+  selection on native Linux: 39 passed and 17 platform-specific cases skipped.
+  All 20 repair-policy cases passed there, including the two-cycle case.
+  The 13-plugin install contract, generated native declarations and touched
+  Python lint also passed. These results do not waive the Windows discrepancy.
+- First-touch evidence uses real isolated native staging and installer policy
+  through the existing construction fence, not a complete fresh-machine
+  installation. A full provisioning or live external update was not run:
+  current authority is source-only and the earlier update allowance is
+  exhausted. Existing installed-completion owners and gates are unchanged.
+- #7743/#8010 retain legacy capture, admission and rollout. #5820 retains
+  version-slot relocation and whole-lifecycle/fallback redesign. This is a
+  bounded copy-cost correction, not a competing repair or architectural
+  self-staging rewrite. Source publication, the remaining native-policy
+  discrepancy and installed healthy/no-op acceptance remain open. No host
+  update, dependency installation or deadline increase occurred.
+
+### 2026-10-22 - Fresh repair presentation and native descriptors qualified locally
+
+- The source candidate opens a human scope only for the fresh Manager's
+  private repair prefix, before `UpdateRun` exists. It reports its own
+  missing-source and caught-refusal diagnostics and the exact repair exit,
+  retaining ordinary-update and unscoped exit-only behavior.
+- A real redirected Windows subprocess exposed an additional output loss:
+  the existing repair `_wait` retained native exits zero and seventeen but
+  lost both child output streams under `CREATE_NO_WINDOW`. Explicit existing
+  descriptors zero, one and two restore forwarding without capturing,
+  decorating or merging child streams. The wait/interrupt-settlement loop,
+  native flags, arguments, environment and lifecycle admission are unchanged.
+- The focused cohort passed 88 cases on both Windows and Linux. Native
+  controls cover UTF-8 pipe input, DEVNULL, raw JSON stdout, diagnostic
+  stderr and distinct success/failure exits; deterministic controls cover
+  framing, multiline redaction, errors, missing formatter and scope cleanup.
+- Additional optional repair-policy qualification is **not passing**:
+  Windows reached the original item limit first in fixture copying, then
+  in its captured native child; Linux reached it in scoped construction.
+  These cases replace `_wait` with their own capture adapter, so they are
+  not evidence against or acceptance of the new descriptor forwarding.
+  They remain unresolved rather than being relabeled as harmless or given
+  larger deadlines.
+- A same-input Windows fixture-copy probe completed all four source trees
+  in 7.17 seconds using native metadata-preserving copying; Python copying
+  exceeded the unchanged 30-second item budget. The candidate fixture
+  correction preserves full inputs and has passing byte/metadata controls,
+  but does not by itself resolve the native-policy timeout.
+- Coordinated the non-overlapping descriptor and fixture work with #7743's
+  existing #8010 owner. That PR retains legacy-owner capture and rollout;
+  no competing ownership algorithm or installed repair was attempted.
+- This candidate is not published or merged. Review, required CI, remaining
+  native-policy diagnosis and installed acceptance remain open. No host
+  update, dependency installation, deadline increase or active-effort
+  finalization was performed.
+
+### 2026-10-22 - Fresh bootstrap presentation merged; retain repair diagnostics
+
+- Merged #8020 as `5de32636d6609c686a9f84594d1cc48bb3d9ef6c`
+  after exact-head approval without findings and all required checks passing.
+  Managed publication preserved the tested bootstrap, regression and native
+  wait/stdio source bytes through rebase. Native PR status reconciled the
+  actual merge and synchronization pulled the source forward.
+- This closes only bootstrap-owned explicit human messages. It does not frame
+  prerequisite subprocesses, thrown shell exceptions, or the fresh Manager's
+  subsequent engine-repair diagnostics. The repair currently precedes
+  `UpdateRun` construction, so its own failure output is outside the ordinary
+  update formatter. Trace that source-owned boundary next without changing
+  repair admission, native waits, source selection or structured results.
+- #6812 remains open; this effort and parent #6600 remain Active. No host
+  update or installed repair was performed, no additional rollout permission
+  was inferred, and no active-effort worktree was finalized.
 
 ### 2026-10-22 - Source measurement journal merged; qualify bootstrap emitters
 

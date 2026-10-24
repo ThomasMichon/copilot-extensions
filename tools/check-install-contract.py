@@ -718,11 +718,11 @@ def check() -> int:
     ps1_resolvers: dict[str, str | None] = {}
     sh_resolvers: dict[str, str | None] = {}
     vrt_hashes: dict[str, str] = {}
-    # install-contract:v4 self-stage / smoke-seam blocks -- byte-identical across
-    # plugins, per language (#935). Keyed by plugin name; value is the exact block
-    # text (or None if absent). Non-payload plugins must carry both.
+    # Shared staging blocks are byte-identical across non-payload consumers.
+    # PowerShell also carries its native copier before contextual staging.
     v4_selfstage: dict[str, dict[str, str | None]] = {"ps1": {}, "sh": {}}
     v4_smoke: dict[str, dict[str, str | None]] = {"ps1": {}, "sh": {}}
+    v4_payload_copy: dict[str, str | None] = {}
 
     plugins = sorted(
         p for p in PLUGINS_DIR.iterdir()
@@ -904,6 +904,11 @@ def check() -> int:
             # singleton payload (self-stage) and a stalled install self-terminates
             # (watchdog). Payload (non-Python) runtimes are exempt.
             if not is_payload:
+                if ext == "ps1":
+                    v4_payload_copy[name] = _extract_marker(
+                        text, "# === install-contract:v4 payload-copy",
+                        "# === end install-contract:v4 payload-copy ===",
+                    )
                 v4_selfstage[ext][name] = _extract_marker(
                     text, "# === install-contract:v4 self-stage", "# === end install-contract:v4 self-stage ==="
                 )
@@ -913,6 +918,7 @@ def check() -> int:
 
     _check_identical("Get-SourceKind (ps1)", ps1_resolvers, violations)
     _check_identical("_source_kind (sh)", sh_resolvers, violations)
+    _check_identical("install-contract:v4 payload-copy (ps1)", v4_payload_copy, violations)
     for ext in ("ps1", "sh"):
         _check_identical(f"install-contract:v4 self-stage ({ext})", v4_selfstage[ext], violations)
         _check_identical(f"install-contract:v4 smoke seam ({ext})", v4_smoke[ext], violations)

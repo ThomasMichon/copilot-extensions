@@ -54,6 +54,7 @@ param(
 
     [string]$InstallDir,
     [string]$BootstrapPython,
+    [Parameter(DontShow)][switch]$ProvisionMissingRuntime,
     [Parameter(DontShow)][string]$RuntimePublicationPlan,
     [Parameter(DontShow)][string]$RuntimePublicationDigest,
     [string]$Owner,
@@ -71,6 +72,29 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+# === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
+function Copy-InstallerStageDirectory {
+    param([string]$Source, [string]$Destination)
+    # Retain provider semantics for links; ordinary payload files use native copying.
+    if ([IO.File]::GetAttributes($Source) -band [IO.FileAttributes]::ReparsePoint) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+        return
+    }
+    [void][IO.Directory]::CreateDirectory($Destination)
+    foreach ($file in [IO.Directory]::EnumerateFiles($Source)) {
+        $target = [IO.Path]::Combine($Destination, [IO.Path]::GetFileName($file))
+        if ([IO.File]::GetAttributes($file) -band [IO.FileAttributes]::ReparsePoint) {
+            Copy-Item -LiteralPath $file -Destination $target -Force
+        } else {
+            [IO.File]::Copy($file, $target, $true)
+        }
+    }
+    foreach ($directory in [IO.Directory]::EnumerateDirectories($Source)) {
+        Copy-InstallerStageDirectory $directory ([IO.Path]::Combine($Destination, [IO.Path]::GetFileName($directory)))
+    }
+}
+# === end install-contract:v4 payload-copy ===
 
 $script:PythonRuntimeManifestPublished = $false
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
@@ -145,6 +169,12 @@ if ($InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-worktrees'
 }
 $ContextualInstall = [bool]$env:COPILOT_EXTENSIONS_CONTEXT
+if ($ProvisionMissingRuntime -and (
+    $Action -ne 'update' -or $ContextualInstall -or -not $InstallDirSpecified -or
+    -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE
+)) {
+    throw 'Missing-runtime provisioning requires an admitted legacy update with an explicit installation root.'
+}
 if ($Action -eq 'publish-runtime-helpers' -and (
     -not $env:COPILOT_PLUGIN_STAGED_FROM -or -not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     (-not $ContextualInstall -and -not $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE)
@@ -169,7 +199,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $output = & $Candidate @Prefix -I -B -X utf8 -c `
+            $output = & $Candidate @Prefix -I -S -B -X utf8 -c `
                 'import json,sys; sys.exit(1) if sys.version_info < (3, 10) else print(json.dumps(sys.executable, ensure_ascii=True))' 2>$null
             $code = $LASTEXITCODE
         } catch {
@@ -249,7 +279,7 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
     }
     if (-not $admissionPython) { throw 'Attributable runtime admission requires an existing Python 3.10+ executable.' }
     $admissionArgs = @(
-        '-I', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
+        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $admissionPayload 'scripts\command_binding.py'),
         '--payload-root', $admissionPayload, '--plugin-id', 'agent-worktrees',
         '--legacy-root', $InstallDir, '--source-payload-root', $admissionSource,
         '--project-root', $admissionProject
@@ -323,17 +353,97 @@ if ($ContextualInstall) {
         Write-Error 'Installation-context validator is unavailable.'
         exit 1
     }
+    $contextPortableHelper = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
+    if ($BootstrapPython -and -not (Test-Path -LiteralPath $contextPortableHelper -PathType Leaf)) {
+        Write-Error 'Portable installation-context validator is unavailable.'
+        exit 1
+    }
+    function Invoke-InstallerContextQuery {
+        param([hashtable]$Query, [switch]$ValidateStatus)
+        if (-not $BootstrapPython) {
+            if ($ValidateStatus) { throw 'Paired context reads require an explicit interpreter.' }
+            & $contextHelper @Query
+            return
+        }
+        $flags = @{
+            Context = '--context'
+            DurableHome = '--durable-home'
+            ExpectedPluginId = '--expected-plugin-id'
+            ExpectedPayloadRoot = '--expected-payload-root'
+            PayloadRoot = '--payload-root'
+            PluginId = '--plugin-id'
+            LegacyRoot = '--legacy-root'
+        }
+        $reader = if ($ValidateStatus) {
+            Join-Path $PSScriptRoot 'read_installation_context.py'
+        } else { $contextPortableHelper }
+        if (-not [IO.File]::Exists($reader)) { throw 'Portable installation-context reader is unavailable.' }
+        $nativeArguments = @('-I', '-S', '-B', '-X', 'utf8', $reader)
+        if (-not $ValidateStatus) { $nativeArguments += $Query.Action }
+        foreach ($key in $Query.Keys) {
+            if ($key -eq 'Action') { continue }
+            if (-not $flags.ContainsKey($key)) { throw "Unknown installation-context query field: $key" }
+            $nativeArguments += @($flags[$key], [string]$Query[$key])
+        }
+        $nativeError = ''
+        $document = Invoke-Hidden -FilePath $BootstrapPython -ArgList $nativeArguments -ErrorOutput ([ref]$nativeError)
+        if ($nativeError) { [Console]::Error.Write($nativeError) }
+        if (-not [string]::IsNullOrEmpty($document)) { return $document }
+    }
     $contextDurableHome = $contextPath
     1..5 | ForEach-Object {
         $contextDurableHome = Split-Path -Parent $contextDurableHome
     }
     $hostExe = (Get-Process -Id $PID).Path
-    $validatedJson = & $contextHelper validate `
-        -Context $contextPath `
-        -DurableHome $contextDurableHome `
-        -ExpectedPluginId 'agent-worktrees' `
-        -ExpectedPayloadRoot $contextPayload
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $contextValidationArgs = @{
+        Action = 'validate'
+        Context = $contextPath
+        DurableHome = $contextDurableHome
+        ExpectedPluginId = 'agent-worktrees'
+        ExpectedPayloadRoot = $contextPayload
+    }
+    $contextStatusArgs = @{
+        Action = 'status'
+        PayloadRoot = $contextPayload
+        PluginId = 'agent-worktrees'
+        LegacyRoot = (Join-Path $env:USERPROFILE '.agent-worktrees')
+        Context = $contextPath
+        DurableHome = $contextDurableHome
+    }
+    if ($BootstrapPython) {
+        $pairJson = Invoke-InstallerContextQuery $contextStatusArgs -ValidateStatus
+        $pairExitCode = $LASTEXITCODE
+        if ($pairExitCode -ne 0) {
+            try {
+                $failedPair = $pairJson | ConvertFrom-Json -ErrorAction Stop
+                if ($failedPair.failedAction -notin @('validate', 'status')) {
+                    throw 'The failed context query is unknown.'
+                }
+            } catch {
+                Write-Error 'Installation-context reader returned invalid failure output.'
+                exit 1
+            }
+            if ($failedPair.failedAction -eq 'status') {
+                Write-Error 'Installation governance could not be resolved.'
+                exit 1
+            }
+            exit $pairExitCode
+        }
+        try {
+            $pair = $pairJson | ConvertFrom-Json -ErrorAction Stop
+            if ($pair.validate -isnot [string] -or $pair.status -isnot [string]) {
+                throw 'Paired context responses must be JSON strings.'
+            }
+            $validatedJson = $pair.validate
+            $initialStatusJson = $pair.status
+        } catch {
+            Write-Error 'Installation-context reader returned invalid output.'
+            exit 1
+        }
+    } else {
+        $validatedJson = Invoke-InstallerContextQuery $contextValidationArgs
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
     try {
         $validatedContext = $validatedJson | ConvertFrom-Json
         $validatedRoot = (Resolve-Path -LiteralPath (
@@ -348,15 +458,11 @@ if ($ContextualInstall) {
         Write-Error '-InstallDir does not match validated installation context.'
         exit 1
     }
-    $contextStatusArgs = @{
-        Action = 'status'
-        PayloadRoot = $contextPayload
-        PluginId = 'agent-worktrees'
-        LegacyRoot = (Join-Path $env:USERPROFILE '.agent-worktrees')
-        Context = $contextPath
-        DurableHome = $contextDurableHome
+    $contextStatusJson = if ($BootstrapPython) {
+        @($initialStatusJson)
+    } else {
+        @(Invoke-InstallerContextQuery $contextStatusArgs)
     }
-    $contextStatusJson = @(& $contextHelper @contextStatusArgs)
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'Installation governance could not be resolved.'
         exit 1
@@ -396,7 +502,7 @@ if ($ContextualInstall) {
                 throw 'Runtime publication management requires explicit -BootstrapPython.'
             }
             $managementHelper = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
-            $managementJson = @(& $BootstrapPython -I -B -X utf8 $managementHelper probe-management-publication `
+            $managementJson = @(& $BootstrapPython -I -S -B -X utf8 $managementHelper probe-management-publication `
                 --context $contextPath --durable-home $contextDurableHome `
                 --payload-root $contextPayload --plugin-id agent-worktrees `
                 --legacy-root (Join-Path $env:USERPROFILE '.agent-worktrees'))
@@ -413,7 +519,7 @@ if ($ContextualInstall) {
         }
         $publicationArgs = $contextStatusArgs.Clone()
         $publicationArgs.Action = 'probe-plugin-publication'
-        $publicationJson = @(& $contextHelper @publicationArgs)
+        $publicationJson = @(Invoke-InstallerContextQuery $publicationArgs)
         $publicationExit = $LASTEXITCODE
         try {
             $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
@@ -431,18 +537,14 @@ if ($ContextualInstall) {
     if ($Action -ne 'status') { Assert-ContextPublication }
 
     function Test-ContextGovernanceUnchanged {
-        $currentJson = @(& $contextHelper @contextStatusArgs)
+        $currentJson = @(Invoke-InstallerContextQuery $contextStatusArgs)
         if ($LASTEXITCODE -ne 0) { return $false }
         try {
             $current = ($currentJson -join "`n") | ConvertFrom-Json
         } catch {
             return $false
         }
-        $currentValidationJson = & $contextHelper validate `
-            -Context $contextPath `
-            -DurableHome $contextDurableHome `
-            -ExpectedPluginId 'agent-worktrees' `
-            -ExpectedPayloadRoot $contextPayload
+        $currentValidationJson = Invoke-InstallerContextQuery $contextValidationArgs
         if ($LASTEXITCODE -ne 0) { return $false }
         try {
             $currentValidated = $currentValidationJson | ConvertFrom-Json
@@ -484,7 +586,8 @@ if ($ContextualInstall) {
         $contextInputPayload = if ($Action -in @('repair', 'dev', 'dev-release')) {
             $RuntimeInputPlugin
         } else { $contextPayload }
-        Copy-Item -LiteralPath $contextInputPayload -Destination $contextPluginsStage -Recurse -Force
+        $contextStagedPayload = Join-Path $contextPluginsStage (Split-Path -Leaf $contextInputPayload)
+        Copy-InstallerStageDirectory $contextInputPayload $contextStagedPayload
         $contextCanonicalLibs = Join-Path $contextInputPayload '..\..\libs'
         if (Test-Path -LiteralPath $contextCanonicalLibs -PathType Container) {
             $contextIndirected = @(
@@ -497,7 +600,6 @@ if ($ContextualInstall) {
             Copy-Item -LiteralPath $contextCanonicalLibs `
                 -Destination (Join-Path $contextStage 'libs') -Recurse -ErrorAction Stop
         }
-        $contextStagedPayload = Join-Path $contextPluginsStage (Split-Path -Leaf $contextInputPayload)
         $contextStagedEntry = Join-Path (
             Join-Path $contextStagedPayload 'scripts'
         ) (Split-Path -Leaf $PSCommandPath)
@@ -662,8 +764,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
                 $__selfStageRoot = Join-Path (Join-Path $env:USERPROFILE ".$__selfStageName") '.install-stage'
                 $__selfStageDir = Join-Path $__selfStageRoot ((Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
                 New-Item -ItemType Directory -Force -Path $__selfStageDir | Out-Null
-                Copy-Item -LiteralPath $__selfStagePayload -Destination $__selfStageDir -Recurse -Force
                 $__selfStagedPayload = Join-Path $__selfStageDir (Split-Path -Leaf $__selfStagePayload)
+                Copy-InstallerStageDirectory $__selfStagePayload $__selfStagedPayload
                 $__selfStagedEntry = Join-Path (Join-Path $__selfStagedPayload 'scripts') (Split-Path -Leaf $PSCommandPath)
                 # Best-effort reap of prior stage dirs; NEVER touch a live one.
                 # Only remove a sibling whose owner pid (the <ts>-<pid> suffix) is
@@ -4538,6 +4640,31 @@ switch ($Action) {
             exit 0
         }
 
+        if ($ProvisionMissingRuntime) {
+            try {
+                git --version 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'Git prerequisite check failed.' }
+            } catch {
+                Write-ServiceErr 'Missing prerequisite: git'
+                exit 1
+            }
+            $missingRuntimeBin = $false
+            try {
+                $binAttributes = [IO.File]::GetAttributes($BinDir)
+                if (-not ($binAttributes -band [IO.FileAttributes]::Directory) -or
+                    ($binAttributes -band [IO.FileAttributes]::ReparsePoint)) {
+                    throw 'Runtime bin is not an ordinary directory.'
+                }
+            } catch [IO.FileNotFoundException] {
+                $missingRuntimeBin = $true
+            } catch [IO.DirectoryNotFoundException] {
+                $missingRuntimeBin = $true
+            }
+            if ($missingRuntimeBin) {
+                [void][IO.Directory]::CreateDirectory($BinDir)
+                Write-ServiceChanged "Created $BinDir"
+            }
+        }
         if (-not (Test-Path $BinDir)) {
             Write-ServiceErr "Not installed - run 'install' first"
             exit 1
