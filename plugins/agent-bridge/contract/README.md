@@ -138,6 +138,16 @@ Foreign owners, dirty packets and concurrent registry edits refuse before
 execution or publication; no older generation is refreshable. Unchanged semantic
 families link exact prior packets instead of copying or relabelling them.
 
+The closure also includes the actual payload installation owner under
+`plugins/agent-bridge/scripts/installation-context/`, not only its separately
+packaged `src` copy. The captured entrypoint's `_FRAGMENT_FILES` declaration
+determines required execution coverage. Every declared fragment must be present
+in the committed closure and observed executing under the guard; non-`src`
+location does not exempt it. Dirty entrypoint/fragment bytes, foreign helper
+origins and forged executable code refuse before helper effects. Historical
+inventory is checked against the captured tree, and required fragment identities
+are derived from captured entrypoint bytes rather than a producer-supplied list.
+
 All generation-47 packets remain immutable. The checker validates their original
 tree and exact primary/child bindings, not equality to a later generation's
 current source hashes. If the historical tree is unavailable, the reviewed

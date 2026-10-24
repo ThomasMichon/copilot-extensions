@@ -10,6 +10,7 @@ import re
 
 import bridge_http47_evidence as previous
 import bridge_http47_validation as historical
+import bridge_http48_installation as installation
 
 CONTRACT = previous.CONTRACT
 REGISTRY = previous.REGISTRY
@@ -46,7 +47,8 @@ def baseline(root: Path, commit: str) -> previous.registry_codec.Snapshot:
 def source_snapshot(root: Path, commit: str, registry: dict) -> dict:
     baseline(root, commit)
     return previous.source_snapshot(
-        root, commit, registry, generation=48, extra_paths=EXTRA_PATHS,
+        root, commit, registry, generation=48,
+        extra_paths=(*EXTRA_PATHS, *installation.paths(root)),
     )
 
 
@@ -146,6 +148,9 @@ def build_outputs(
         "evidence_family": FAMILY, "observations": observed,
         "execution_closure": proof, "execution_closure_sha256": digest(encode(proof)),
         "runtime_binding_policy": POLICY, "runtime_roles": ["observer"],
+        "required_execution_sources": sorted(installation.required_sources(
+            safe(root, installation.ENTRY).read_bytes(),
+        )),
         "input_sha256": proof[INPUT]["sha256"], "checked_probes": PROBES,
         "scope": "actual local ASGI/SQLite adapter; not ordinary producer, SDK or native qualification",
     }, previous.PREFIX + "protocol.py", "Actual source-bound HTTP-48 local ASGI observations.")
@@ -279,8 +284,9 @@ def validate_http48(
                 metadata_paths=set(original.inputs) - {REGISTRY},
             ) | set(EXTRA_PATHS)
             # Completeness belongs to the captured tree, not a future checkout.
-            required = {p for p in required if not historical.closure_python(p)}
-            required.update(p for p in tree if historical.closure_python(p))
+            runtime_python = lambda p: historical.closure_python(p) or installation.closure_python(p)
+            required = {p for p in required if not runtime_python(p)}
+            required.update(p for p in tree if runtime_python(p))
             if set(proof) != required:
                 raise ValueError("HTTP-48 closure inventory differs from captured tree")
         elif require_tree:
@@ -326,6 +332,16 @@ def validate_http48(
             case: vector["expected"] for case in ("legacy", "namespaced")
         }:
             raise ValueError("HTTP-48 observations differ from independent input")
+        helper_data = safe(root, installation.ENTRY).read_bytes()
+        helper_identity = proof[installation.ENTRY]
+        if previous.git_evidence.sha256_bytes(helper_data) != helper_identity["sha256"]:
+            helper_data = previous.git(root, "cat-file", "blob", helper_identity["blob"])
+        if previous.git_evidence.sha256_bytes(helper_data) != helper_identity["sha256"]:
+            raise ValueError("HTTP-48 installation helper differs from closure")
+        required_execution = installation.required_sources(helper_data)
+        if (not required_execution <= proof.keys()
+                or packet["required_execution_sources"] != sorted(required_execution)):
+            raise ValueError("HTTP-48 installation execution inventory is incomplete")
         shared = {"path": PRIMARY, "sha256": primary[0]}
         if any(captured[key] != proof[captured["source_path"]][name] for key, name in (
             ("source_git_blob", "blob"), ("source_sha256", "sha256"),

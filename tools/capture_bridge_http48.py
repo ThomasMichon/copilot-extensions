@@ -60,6 +60,9 @@ def run_probes(root: Path, proof: dict, vector: dict) -> dict:
             raise ValueError("HTTP-48 probe portfolio is incomplete or duplicated")
         receipt = binding.verify_interpreters(
             directory / "interpreters", proof, expected_roles=frozenset(),
+            required_sources=evidence.installation.required_sources(
+                evidence.safe(root, evidence.installation.ENTRY).read_bytes(),
+            ),
         )
         if receipt["roles"] != ["observer"]:
             raise ValueError("HTTP-48 ASGI observer scope changed")

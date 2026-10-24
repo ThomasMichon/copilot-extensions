@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 from pathlib import Path
 import shutil
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -34,7 +36,8 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, s
     http["provenance"] = http["provenance"][:1]
     http["evidence_window"]["generations"] = [48]
     registry["contracts"], registry["deferred_contracts"] = [http], []
-    paths = evidence.previous.proof_paths(ROOT, registry) | set(evidence.EXTRA_PATHS)
+    paths = (evidence.previous.proof_paths(ROOT, registry) | set(evidence.EXTRA_PATHS)
+             | set(evidence.installation.paths(ROOT)))
     for path in paths:
         destination = root / path
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +139,7 @@ def test_http48_capture_refresh_refuses_unowned_changes(
 
 @pytest.mark.parametrize("fault", [
     "missing-source", "wrong-blob", "wrong-sha", "wrong-outcome", "wrong-child", "wrong-roles",
+    "missing-installation-fragment", "missing-installation-execution",
 ])
 def test_http48_capture_rejects_self_consistent_evidence_tampering(
     repository: tuple[Path, str], fault: str,
@@ -146,6 +150,11 @@ def test_http48_capture_rejects_self_consistent_evidence_tampering(
     source = evidence.previous.PREFIX + "routes/live_inbox.py"
     if fault == "missing-source":
         del packet["execution_closure"][source]
+    elif fault == "missing-installation-fragment":
+        fragment = evidence.installation.INSTALLATION_HELPER_PREFIX + "_installation_context_resolution.py"
+        del packet["execution_closure"][fragment]
+    elif fault == "missing-installation-execution":
+        packet["required_execution_sources"].pop()
     elif fault == "wrong-blob":
         packet["execution_closure"][source]["blob"] = "0" * 40
     elif fault == "wrong-sha":
@@ -188,16 +197,91 @@ def test_http48_capture_unexpected_observation_writes_nothing(
     assert not (root / evidence.PRIMARY).exists()
 
 
+@pytest.mark.parametrize("source", [
+    evidence.AFFECTED[1], evidence.installation.ENTRY,
+    evidence.installation.INSTALLATION_HELPER_PREFIX + "_installation_context_resolution.py",
+])
 def test_http48_capture_dirty_source_refuses_before_probes(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, source: str,
 ) -> None:
     root, commit = repository
-    source = root / evidence.AFFECTED[1]
-    source.write_bytes(source.read_bytes() + b"\n")
+    target = root / source
+    target.write_bytes(target.read_bytes() + b"\n")
     monkeypatch.setattr(capture, "run_probes", lambda *args: pytest.fail("must not execute"))
     with pytest.raises(ValueError, match="dirty/unproven"):
         capture.capture(root, commit, write=True)
     assert not (root / evidence.PRIMARY).exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "none", "entry-bytes", "fragment-bytes", "forged-code", "foreign-entry", "foreign-suffix",
+])
+def test_http48_actual_installation_helper_execution_is_source_bound(
+    repository: tuple[Path, str], fault: str,
+) -> None:
+    from agent_procutil.owned_process import run_caller_owned
+    import bridge_http47_runtime as runtime
+
+    root, commit = repository
+    proof = evidence.source_snapshot(root, commit, evidence.baseline(root, commit).materialized)
+    directory = root / ".test-venvs/http47-capture-installation-control"
+    directory.mkdir(parents=True)
+    request = directory / "request.json"
+    payload = evidence.encode({"root": str(root), "capture_generation": 48, "source_proof": proof})
+    request.write_bytes(payload)
+    entry = root / evidence.installation.ENTRY
+    marker = directory / "must-not-execute"
+    poison = f"\nfrom pathlib import Path\nPath({str(marker)!r}).touch()\n"
+    refused_source = evidence.installation.ENTRY
+    if fault == "entry-bytes":
+        entry.write_text(entry.read_text(encoding="utf-8") + poison, encoding="utf-8")
+    elif fault == "fragment-bytes":
+        refused_source = (
+            evidence.installation.INSTALLATION_HELPER_PREFIX + "_installation_context_resolution.py"
+        )
+        fragment = root / refused_source
+        fragment.write_text(fragment.read_text(encoding="utf-8") + poison, encoding="utf-8")
+    elif fault in ("foreign-entry", "foreign-suffix"):
+        data = entry.read_bytes()
+        entry = (directory / "installation_context.py" if fault == "foreign-entry"
+                 else directory / "foreign" / evidence.installation.ENTRY)
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        entry.write_bytes(data)
+    program = (
+        "import importlib.util,sys\n"
+        "from pathlib import Path\n"
+        "path=Path(sys.argv[1])\n"
+        "spec=importlib.util.spec_from_file_location('installation_probe',path)\n"
+        "module=importlib.util.module_from_spec(spec)\n"
+        "sys.modules[spec.name]=module\n"
+        "if sys.argv[2]=='forged-code':\n"
+        " exec(compile(path.read_text(encoding='utf-8')+sys.argv[3],str(path),'exec'),module.__dict__)\n"
+        "else:\n"
+        " spec.loader.exec_module(module)\n"
+    )
+    environment = {
+        **evidence.previous.git_evidence.clean_git_environment(),
+        runtime.REQUEST: str(request), runtime.REQUEST_SHA: evidence.digest(payload),
+        "PYTHONPATH": os.pathsep.join((
+            str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
+        )),
+    }
+    result = run_caller_owned(
+        [sys.executable, "-c", program, str(entry), fault, poison],
+        env=environment, timeout=20, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    events = [
+        json.loads(line) for path in (directory / "interpreters").glob("*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert not marker.exists()
+    if fault == "none":
+        assert result.returncode == 0, result.stderr
+        required = evidence.installation.required_sources(entry.read_bytes())
+        assert required <= {event["source"] for event in events if event["kind"] == "exec"}
+    else:
+        assert result.returncode != 0 and "unproven" in result.stderr
+        assert any(event["kind"] == "refused" and event["source"] == refused_source for event in events)
 
 
 def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_path: Path) -> None:
@@ -211,6 +295,11 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
         "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8",
     )
     assert verify_interpreters(tmp_path, {}, expected_roles=frozenset())["roles"] == ["observer"]
+    with pytest.raises(ValueError, match="runtime source execution is incomplete"):
+        verify_interpreters(
+            tmp_path, {}, expected_roles=frozenset(),
+            required_sources=frozenset({evidence.installation.ENTRY}),
+        )
     with pytest.raises(ValueError, match="coverage mismatch"):
         verify_interpreters(tmp_path, {})
 
