@@ -210,7 +210,10 @@ def _retire_fixture(process):
     process.wait(timeout=10)
 
 
-@pytest.mark.parametrize("mode", ["normal", "caller-killed", "interrupt", "terminate"])
+@pytest.mark.parametrize("mode", [
+    "normal", "caller-killed", "terminate",
+    *(pytest.param("interrupt", id=f"interrupt-{trial}") for trial in range(5)),
+])
 @pytest.mark.parametrize("managed", [False, True])
 def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_path, mode, managed):
     import termios
@@ -304,6 +307,7 @@ def test_interactive_shell_groups_retire_but_managed_detachment_survives(tmp_pat
                 "attributes": True, "foreground": True,
             }
         _wait(lambda: all(_gone(pin) for pin in pins), "owned shell job group survived completion")
+        assert "retire-enter" in receipt.with_suffix(".guardian.txt").read_text()
         if detached is not None:
             assert not _gone(detached)
             heartbeat = tmp_path / "managed.heartbeat"
