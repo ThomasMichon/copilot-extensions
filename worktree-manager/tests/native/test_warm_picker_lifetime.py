@@ -44,7 +44,11 @@ def _live(identity):
 
 def _kill(identity):
     if _live(identity):
-        os.kill(identity["pid"], signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
+        try:
+            os.kill(identity["pid"], signal.SIGTERM if os.name == "nt" else signal.SIGKILL)
+        except OSError:
+            if _live(identity):
+                raise
 
 
 def _environment(root):
@@ -103,6 +107,22 @@ def _environment_keys():
         "TMP", "TEMP", "TMPDIR", "WORKTREE_MANAGER_ROOT",
         "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", "PSMUX_DATA_DIR", "TMUX_TMPDIR",
     }
+
+
+@pytest.mark.parametrize("still_live", [False, True])
+def test_pinned_cleanup_tolerates_only_a_confirmed_exit_race(monkeypatch, still_live):
+    states = iter([True, still_live])
+    monkeypatch.setattr(sys.modules[__name__], "_live", lambda _: next(states))
+
+    def denied(*args):
+        raise PermissionError("exit raced termination")
+
+    monkeypatch.setattr(os, "kill", denied)
+    if still_live:
+        with pytest.raises(PermissionError):
+            _kill({"pid": 123, "start": "fixture"})
+    else:
+        _kill({"pid": 123, "start": "fixture"})
 
 
 def _owner(root):
