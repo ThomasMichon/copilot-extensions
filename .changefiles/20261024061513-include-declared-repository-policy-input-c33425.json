@@ -1,0 +1,9 @@
+{
+  "comment": "Include declared repository-policy input in both immutable runtime profiles",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
