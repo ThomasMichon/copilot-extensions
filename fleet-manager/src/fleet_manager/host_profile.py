@@ -294,7 +294,7 @@ def _parser(action: str, path: Path) -> None:
         try:
             for sig in (signal.SIGTERM, signal.SIGKILL):
                 # Exclusive Popen ownership and WNOWAIT pin the leader through group retirement.
-                if _parser_custody(process) is None and sig == signal.SIGKILL:
+                if sig == signal.SIGKILL and _parser_custody(process) is None:
                     term_deadline = time.monotonic() + 0.1
                     while _parser_custody(process) is None and time.monotonic() < term_deadline:
                         continue

@@ -1763,7 +1763,7 @@
         ".devcontainer/trusted-harness-base/install.py": "5818d4f7a7dad564cb28496b42a3774d4f924afb95f91d65e1d46629bd05c845",
         "fleet-manager/src/fleet_manager/__init__.py": "77743b7e007c45bfd4b89c830ddc8ca3030758f739d3451f6efb7e1f20eca02d",
         "fleet-manager/src/fleet_manager/planning.py": "2f5f85665490121a1a8ffdd9c8d5f0bbdf08fadbeb858dd86035f138f6a6f4f5",
-        "fleet-manager/src/fleet_manager/host_profile.py": "fa83430e925596c6a4a4008424de6e1be16c0ae695b9a96b749b41506c3ad136",
+        "fleet-manager/src/fleet_manager/host_profile.py": "37a27641abd39690e8dd832bac5f5c19ae6885cc1cd4c1be33e3d99fe0071849",
         "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
         "fleet-manager/tests/test_host_profile.py": "8ac1c27809fdf08916b04aa06d1c0d9a87e3918a7dd4d35579cd7e75fd4af3dc",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354"
