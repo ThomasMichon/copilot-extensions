@@ -104,6 +104,8 @@ def logging_status() -> dict:
 
 
 def inventory() -> dict:
+    from . import telemetry
+
     root = install_paths.effective_config_dir().resolve()
     native_root = install_paths.install_dir().resolve()
     entry = location(root / "logs" / "diagnostics", "daemon", "agent-bridge.daemon")
@@ -130,6 +132,7 @@ def inventory() -> dict:
                      "retention": "not-managed-by-application-handler"})
     return {
         "schema": "agent-bridge.diagnostic-logs.v1", "root": str(root), "logs": logs,
+        "telemetry": telemetry.configured_sink_inventory(),
         "outside_scope": [
             "installer attempts (#8370): active/incomplete evidence stays protected",
             "legacy telemetry spools: unchanged producer-configured paths",

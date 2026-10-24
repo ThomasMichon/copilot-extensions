@@ -67,6 +67,8 @@ def maintain_file_logging() -> None:
 
 
 def inventory(root: Path | None = None) -> dict:
+    from . import telemetry
+
     root = (root if root is not None else install_paths.install_dir()).resolve()
     directory = root / "logs" / "diagnostics"
     entries = [location(directory, component, f"agent-dispatch.{component}")
@@ -106,6 +108,7 @@ def inventory(root: Path | None = None) -> dict:
         })
     return {
         "schema": "agent-dispatch.diagnostic-logs.v1", "root": str(root), "logs": entries,
+        "telemetry": telemetry.configured_sink_inventory(),
         "outside_scope": [
             "installer attempts (#8370): active/incomplete evidence remains protected",
             "configured telemetry spools: producer configuration owns their paths",

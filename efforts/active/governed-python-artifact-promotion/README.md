@@ -225,8 +225,10 @@ refusals and the installation authority's explicit path selection.
       The bounded [exact-profile contract](exact-profile-contract.md)
       contributes the authority/selection and engine-consumer seam from #6234;
       its design is approved in #6795 and the inert record/selection slice
-      merged in #7044. Authenticated approval adapters, real exact closures,
-      publication and consumer admission remain open.
+      merged in #7044. The release-channel approval adapter merged in #8568
+      and installation-owned policy intent in #8494; their authority-owned
+      composition, real exact closures, publication and consumer admission
+      remain open.
       The [zero-configuration amendment](../lean-runtime-dependencies/zero-configuration-defaults.md)
       requires a complete adopting-policy baseline: release profiles preferred,
       automatically selected governed source mode when permitted, and no
@@ -247,6 +249,10 @@ refusals and the installation authority's explicit path selection.
       The explicit closed mode preserves ordinary source seasoning, independent
       venvs, unchanged cached-byte reuse, exact binding invalidation and prior
       selection on failure. No production approval or acquisition is enabled.
+- [x] Implement the bounded release-channel whole-profile approval adapter
+      through the existing pinned hosted Main attestation verifier (#8568).
+      This is not real profile publication, governed feed admission or runtime
+      enablement; installation-policy/source-fallback composition remains open.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -497,6 +503,13 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the bounded release-approval component with complete manifest/
+      first-party binding, independent selection facts, forged origin refusal,
+      exact private subject custody, inclusive byte limits and failure/timeout/
+      cancellation cleanup. Final-head Linux/Windows wheel and policy lanes,
+      macOS guardian follow-through, required CI and review pass for #8568.
+      Attestation backend responses are synthetic; a live profile-bearing
+      release and whole fresh-adopter/runtime admission remain open.
 - [x] Prove the bounded closed-wheel constructor component with real independent
       fresh venvs, a transitive closure and a 97-wheel closure, actual installed
       origins/health, unchanged cached-byte reuse, altered binding/receipt/
@@ -663,6 +676,59 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Installation-policy and release-selection composition
+
+- Added the repository-only `plan_installation_profile` adapter using #8494's
+  real owner-bound resolver and #8568's retained release authentication, not
+  another configuration reader or caller approval map. The result freezes the
+  resolved policy and either retains authenticated release selection or requests
+  permitted source fallback with an explicit availability trigger.
+- Typed `ProfileUnavailable` separates absent approved records from malformed,
+  ambiguous or unapproved records. Invalid lock preferences remain validation
+  failures. A supplied release subject authenticates even if its artifact was
+  not discovered; integrity, I/O, provenance and cancellation do not fall back.
+  Existing managed/profile-aware publication holds remain unchanged.
+- Local validation: 147 policy/release/exact-selection/installation-policy
+  controls pass, including an isolated fresh Python caller with no artifact
+  infrastructure; touched Python lint, diff checks and the install-contract
+  guard pass. The optional Linux/Windows wheel lane includes the new tests.
+  Required no-actor inventory changes only the already-admitted selector hash;
+  effectful planner tests do not join that packet. Full packet, native remote
+  qualification and review are pending publication.
+- Review on #8586 found preference validation was skipped when the index was
+  absent. Moved the shared validation ahead of every availability branch and
+  covered malformed/duplicate preferences with present, missing-index and
+  missing-artifact inputs. Required CI and all four optional native jobs passed
+  the original head; the repaired head must qualify separately.
+- This is not source verification, an exact source lock, acquisition admission
+  or production enablement. The parent stays **Active**; complete the independent
+  source-lock/feed-admission seam and real profile publication next.
+
+### 2026-10-24 - Release approval adapter merged; policy/source composition next
+
+- #8568 merged as `f0722fcab7127f2709f239a3931db7cf8df0f40d` after
+  final-head approval with no findings or review threads, required CI success
+  and all five selected native jobs: Linux/Windows wheel inspection and policy
+  readers plus macOS guardian follow-through. The canonical effort was re-read
+  after merge; no parent acquisition or runtime gate is inferred complete.
+- The eligible no-actor inventory admits the updated promotion-validator hash
+  without adding a node or effect: its complete packet passed **1,497** tests.
+  Required CI also exposed three stale first-use guardian copies after #7753
+  reached the merge base. The normal generator synchronized those copies,
+  all four affected consumers received changefiles, and the existing guardian
+  settlement controls passed. No failing check was bypassed.
+- #8494 supplies the actual owner-bound `resolve_runtime_profile_policy` API:
+  no-file CPU-first/artifact-preferred/source-permitted intent, explicit
+  capability retention/migration and stricter optional policy. Its `policyId`
+  is an invalidation input, not profile approval or publication permission.
+  The next owned stretch composes that existing resolver with authenticated
+  release selection and independently locked governed source mode. It must
+  not introduce another policy reader or relax a blocked artifact lock.
+- Real profile production/publication, approved acquisition/redirect/withdrawal
+  evidence, production budget measurements, unchanged admitted offline reuse,
+  source fallback and native engine application remain open. No production
+  consumer or local rollout is enabled; #4876 stays **Active**.
 
 ### 2026-10-24 - Existing release-channel approval adapter implementation
 

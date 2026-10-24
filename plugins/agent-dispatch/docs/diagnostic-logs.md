@@ -119,3 +119,32 @@ Source merge does not activate a running daemon. After release, only the existin
 authorized installation/update and graceful daemon cutover path may select the
 new handler. Verify the new process's imported version and actual log inventory;
 an old running generation does not gain retention from a source or payload update.
+## Configured retained telemetry
+
+Use an explicit alternative in the convention-located `telemetry.json`:
+
+```json
+{"retained_spool": {"directory": "<absolute owner-provisioned base directory>"}}
+```
+
+Provision a new exclusive `directory/retained` before selecting it. The active
+name is `agent-dispatch-telemetry.jsonl` there, separate from Bridge's component.
+The loader creates no parents and never adopts legacy files. The object accepts
+exactly one absolute, nonempty string `directory`; top-level `sink`/`spool` may
+not coexist with it. Legacy zero-argument factories and spool semantics are
+unchanged without this opt-in.
+
+The existing owned buffer constructs and maintains the sink on its worker,
+including startup and quiet/busy iteration. Producers only offer bounded
+primitive snapshots. Selection is pending, not health/persistence evidence;
+initialization failure is optional/degraded with a content-free warning.
+Coordinator lifespan shutdown clears this configured buffer without joining a
+blocked writer. Clear/replacement never starts a replacement while its previous
+worker remains alive; retry after exit. Embedded callers own their matching
+`clear_telemetry_sink()` boundary.
+
+`agent-dispatch logs` reports configured retained active/archive locations and
+policy in `telemetry`, using configuration and metadata only. Live write health
+remains explicitly unknown. Custom legacy factories are not imported or exposed.
+See Bridge's diagnostic documentation for the identical validation, timestamp,
+retention and asynchronous failure semantics.

@@ -6,9 +6,9 @@ engine application remains
 [#6737](https://github.com/ThomasMichon/copilot-extensions/issues/6737).
 
 **Status: Design approved in #6795; inert record implemented in #7044.**
-This closes the design portion of the artifact effort's exact-profile
-prerequisite, not approval-adapter integration, publication, consumer admission,
-deployed engine selection or any production rollout.
+Release approval adapter implemented in #8568; installation-owned policy intent
+in #8494. Their authority/source composition, real profile publication, consumer
+admission, deployed engine selection and production rollout remain open.
 
 ## Reconciliation and existing boundaries
 
@@ -236,6 +236,19 @@ composition with #8494's existing `resolve_runtime_profile_policy` baseline,
 governed acquisition and independent
 source-mode selection/locking remain open. No installer or engine is enabled,
 and the authority-integration Plan item above is not complete.
+
+`tools/runtime_profile_policy.py` composes that existing policy resolver with
+release authentication. It freezes the resolved owner/policy intent, uses its
+backend selection, and prefers a matching authenticated release profile.
+`ProfileUnavailable` distinguishes an absent matching/preferred approved record
+from malformed, ambiguous or unapproved input. Lock preference validation
+precedes every availability-dependent path. Only explicit discovery absence
+or that typed absence can request a policy-permitted source fallback. A supplied
+index still authenticates if no artifact was discovered; I/O, integrity,
+provenance and cancellation failures propagate rather than requesting fallback.
+This repository-only plan does not authenticate source bytes, freeze the separate
+source lock, admit acquisition or grant publication permission. Source-mode
+construction and production enablement remain open.
 
 ### Actual-byte verification prerequisite
 

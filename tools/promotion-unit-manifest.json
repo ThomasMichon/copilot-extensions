@@ -1643,7 +1643,7 @@
     "tools/publish_python_artifacts.py": "e1df4a4b2a50135370a82da6c5a459d428a8587488c230cdf98ef774fb50eb88",
     "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
     "tools/run-promotion-unit-tests.py": "98634b63d1a251a536abf13ecefca79804a244bc5627d46df5ada46fdb1ca8da",
-    "tools/runtime_profile.py": "a1a2ac8400dda37923840966c7e32593d303848773c749c177499390369fdfaa",
+    "tools/runtime_profile.py": "ef0427f2d426b85fe5b0af8f551b80ed46392962e08460b472615d703474c5f8",
     "tools/runtime_profile_wheels.py": "c5a0e3af27d3c342ef3e491e0964d2709047369818d29e043d90e073ccb21c9e",
     "tools/standalone_consumers.py": "555286ca913069f8d54545d70d58d12293855020c763058e1f580adf01ed95c4",
     "tools/standalone_python_artifacts.py": "f0be60291f3d4987bc8bc8cfab6f8e7edb877d6991da92bdad22d9e6ce04b598",

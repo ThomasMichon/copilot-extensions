@@ -484,7 +484,8 @@ def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_pa
     async def run():
         async with app.router.lifespan_context(app):
             for _ in range(200):
-                if events(handler) == []:
+                # Payload polling can deny Windows replace while pruning.
+                if handler.path.stat().st_size == 0:
                     break
                 await asyncio.sleep(0.01)
             assert events(handler) == []

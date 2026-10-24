@@ -152,6 +152,21 @@ _TRIGGERS = frozenset(
 _slot = SinkSlot()
 
 
+def close_configured_retained_sink() -> None:
+    """Close only the buffer selected by retained configuration, without a join."""
+    from process_telemetry.configured_spool import close_configured
+
+    close_configured(_slot)
+
+
+def configured_sink_inventory() -> dict:
+    from process_telemetry.configured_spool import configured_inventory
+
+    return configured_inventory(
+        _default_config_path(), component="agent-bridge-telemetry", service="agent-bridge",
+    )
+
+
 def set_telemetry_sink(sink: TelemetrySink | None) -> None:
     """Register (or clear, with ``None``) the process-wide telemetry sink."""
     _slot.set(sink)
@@ -249,6 +264,10 @@ def load_sink_from_config(path: str | os.PathLike[str] | None = None) -> bool:
     except ValueError:
         log.warning("telemetry config %s is not valid JSON; telemetry stays off", p)
         return False
+    if isinstance(data, dict) and "retained_spool" in data:
+        from process_telemetry.configured_spool import install_retained
+
+        return install_retained(data, _slot, make_retained_spool_sink, log) is not None
     spec = str(data.get("sink") or "").strip() if isinstance(data, dict) else ""
     sink = load_sink_from_spec(spec)
     if sink is None:
