@@ -287,13 +287,20 @@ def _launch(
                 file=sys.stderr,
             )
             return 3
+    child_environment = execution.environment(invoke=invoke) if execution else None
+    if child_environment is None and launch_execution.NATIVE_HINT_ENV in os.environ:
+        child_environment = os.environ.copy()
+        child_environment.pop(launch_execution.NATIVE_HINT_ENV)
     try:
         if os.name != "nt" and not invoke and not admission_only and execution is None:
+            if child_environment is not None:
+                os.execvpe(argv[0], argv, child_environment)
             os.execvp(argv[0], argv)
         # A real interactive child inherits this console; non-interactive
         # consumers must not allocate a new one.
         process = subprocess.Popen(
             argv, stdout=sys.stdout, stderr=sys.stderr,
+            **({"env": child_environment} if child_environment is not None else {}),
             **({} if _interactive_console() else no_window_kwargs()),
         )
     except OSError as exc:

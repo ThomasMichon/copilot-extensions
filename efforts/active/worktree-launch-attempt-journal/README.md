@@ -52,8 +52,9 @@ Storage #8505 and confirmation #8542 now preserve known-target intent before
 effects. Truthful unresolved-locality refusal recording merged in #8574 and Manager
 boundary observations merged in #8588. Negotiated remote prompted admission and
 target receipt binding merged in #8605. Local and seedless resolution receipts
-and both-hop attempt propagation merged in #8615. Native process, conversation
-and handoff outcome correlation remains incomplete. Engine activity
+and both-hop attempt propagation merged in #8615. Deferred process and
+seed-claim/return observations merged in #8627. Native conversation and
+accepted-turn correlation remains incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
@@ -185,6 +186,60 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+### 2026-10-24 -- Original native-session association prepared
+
+- Trace confirmed that the original hook already carries its captured
+  environment and source witness through lifecycle registration. Reused that
+  transport and the existing exact native UUID/hold authority, without a new
+  hook, ambient current-attempt lookup or acceptance backend.
+- Execution version 2 records the qualified physical epoch; an exact
+  child-scoped backend hint selects the observation's receipt. An independent
+  immutable witness survives observation-before-spawn-receipt ordering.
+  The read-only join requires matching incarnation, epoch and backend ancestry;
+  legacy, unsupported and missing evidence remains unknown.
+- Canonical registration and seed settlement are unchanged. No session-start,
+  source join or process event is an accepted-turn verdict. Broader readers,
+  retention, selected sweeps, release/rollout and installed local/SSH proof
+  remain open.
+- Qualification: 70 focused execution/observation checks, 114 registration/source
+  checks (one Linux-only skip on Windows), 128 seed-authority checks and 52
+  selected lifecycle/transport checks passed. Seven Windows process/IPC cases
+  include two consoleless cycles with no visible windows or focus changes.
+- The explicit Linux/WSL lane passed on native Python 3.11 through an actual
+  original-hook subprocess, open native hold and resident write endpoint, with
+  direct fallback forbidden. First-touch mounted-filesystem test-cache builds
+  failed before test execution; the same canonical runner built and passed with
+  a private native-filesystem cache. Temporary and failed caches were cleaned.
+- These are synthetic source-contract/process checks, not installed Copilot
+  acceptance or a composed hook latency qualification. The latter measurements
+  remain with #7935 and this effort's installed acceptance gates.
+- Review follow-through covers entirely missing execution/attempt receipts as
+  unknown without hiding corruption. The native fixture now forbids direct
+  fallback in the backend subprocess as well as the driver, with separate
+  unavailable-registration and unavailable-observation negative controls.
+  The expanded focused packet passed 73 checks and all three native Linux/WSL
+  controls passed. No accepted-turn or installed-acceptance gate is closed.
+
+### 2026-10-24 -- Deferred execution slice merged; native association next
+
+- #8627 merged with current-head approval, no remaining findings and required
+  CI passing. Published commit and authored-file content were verified against
+  the provider-confirmed merge before pulling the source forward.
+- Review follow-through fixed interrupted post-effect receipt/identity/seed
+  cleanup so child waiting and seed-settlement ownership continue without
+  replay. The shared writer also skips unnecessary boot/polling for a complete
+  incompatible publisher only when its exact PID/birth owner is confirmed
+  live; missing, dead, reused and unconfirmed owners retain ordinary startup.
+- Source qualification includes real daemon/backend handoffs and interrupted
+  receipts, crash-after-claim preservation, actual PowerShell/Bash forwarding,
+  and two consoleless Windows cycles. These are synthetic process checks,
+  not installed Copilot first-turn or same-conversation proof.
+- Re-read both canonical efforts after merge. Continue native observation
+  association through the original source-aware owner; preserve unsupported
+  evidence as unknown. Joined readers, retention/legacy cleanup, selected
+  sweeps, containing release, authorized rollout and installed acceptance are
+  still open. Neither parent effort nor any broad Plan gate is complete.
 
 ### 2026-10-24 -- Deferred execution observations prepared
 
