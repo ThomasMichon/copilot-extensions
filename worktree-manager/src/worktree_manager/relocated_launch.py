@@ -72,6 +72,13 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
         if req.mode == "bare-resume":
             args.append("--bare-resume")
 
+    attempt_id = getattr(req, "attempt_id", None)
+    if attempt_id is not None:
+        from .seed_launch import require_attempt_plan
+
+        require_attempt_plan(getattr(plan, "raw", None) or {}, attempt_id)
+        args += ["--require-launch-attempt", "--launch-attempt-id", attempt_id]
+
     is_windows = _core()._is_windows()
     no_mux = bool(getattr(req, "no_mux", False))
 

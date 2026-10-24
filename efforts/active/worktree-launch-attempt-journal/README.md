@@ -50,18 +50,20 @@ or permission to replay an ambiguous creation or prompt.
 At effort start, Manager saved prompt-only history from the confirmation widget.
 Storage #8505 and confirmation #8542 now preserve known-target intent before
 effects. Truthful unresolved-locality refusal recording merged in #8574 and Manager
-boundary observations merged in #8588. Engine/target/native outcome correlation
-remains incomplete. Engine activity
+boundary observations merged in #8588. Negotiated remote prompted admission and
+target receipt binding merged in #8605. Full local/seedless engine and native
+outcome correlation remains incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
 
 The October 23 report is not resolved by the older source merges. Inspected
 Manager and engine versions are newer than the initial parity release.
-Current Manager explicitly refuses seeded remote requests and hides the remote
-composer; the engine also rejects remote `--require-native-seed`. Restoring SSH
-requires a negotiated target-native fence, not deleting checks. That executable
-repair remains part of #6057, with journal correlation integrated here.
+At investigation time Manager refused seeded remote requests and hid the remote
+composer; the engine also rejected remote `--require-native-seed`. Source repair
+#8605 restores that path through a negotiated target-native fence, not deleted
+checks. Containing-release, authorized rollout and installed acceptance remain
+part of #6057, with journal correlation integrated here.
 
 ## Request
 
@@ -118,7 +120,7 @@ The following decomposition and detailed evidence rules are agent-recommended.
 - [ ] Represent a missing terminal receipt after crash as interrupted or unknown,
   including allocated-but-not-launched cases; never infer success from a plan,
   a zero SSH exit, `copilot_invoked` alone or missing errors.
-- [ ] Integrate negotiated SSH prompt admission with #6057. The selected venue
+- [x] Integrate negotiated SSH prompt admission with #6057. The selected venue
   owns allocation, seed staging and launch after admission; the host journal is
   not a second execution authority and cannot automatically replay uncertainty.
 
@@ -491,3 +493,49 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   local/SSH conversation, prompt acceptance, release/rollout, retention,
   inspection and sweep gates remain open. Current-head review and required CI
   are still owed before merge.
+
+### 2026-10-24 -- Negotiated remote prompted slice merged
+
+- #8605 merged as `958165f6e81c06d3d184ab0c48a9d95a39ad7c92` after
+  current-head approval with no findings and green required CI. Final contained
+  engine packet: 410 passed, two native POSIX skips on Windows. Manager packet:
+  190 passed, four skips; remote prompt UI packet: seven passed.
+- Re-read both canonical plans. Only the bounded negotiated SSH integration
+  item is newly complete. Full local/seedless attempt transport and existing-owner
+  native start/handoff evidence are the next correlation stretch. No plan,
+  wrapper return or SSH success is promoted into Copilot acceptance.
+- The managed sync refused the deleted PR ref before mutation. All 30 authored
+  path blobs matched the provider-confirmed merge exactly; retained a recovery
+  backup and forwarded the clean source without replay. Both parents remain
+  open. No containing release, authorized rollout or delivered conversation
+  proof is implied; retention/migration, readers, sweeps and acceptance remain.
+
+### 2026-10-24 -- Local and seedless resolution correlation prepared
+
+- Journaled New/Resume/Open/Bare Resume/base resolution now requires the saved
+  attempt ID and a parser-level receipt capability. Both local re-resolution
+  and SSH launch forwarding retain them. Structured prompted admission keeps
+  its existing durable version-2 target receipt and requires a non-null attempt
+  before configuration; old receivers cannot silently discard the new fence.
+- Added prompt-free per-resolution metadata through the existing tracking-write
+  owner. An initial event commits before resolver effects, and a terminal event
+  binds the returned worktree/request/seed IDs before plan publication. Separate
+  operation IDs distinguish hops without turning the attempt into an allocation
+  retry key. Seedless SSH planning is only forwarding evidence, never target
+  admission. Missing terminal evidence remains unconfirmed.
+- The contained engine packet passes 400 cases with two platform skips. Its
+  explicitly selected native lane proves actual daemon transport and process
+  loss after the initial receipt; that lane is excluded from default unit CI.
+  The Manager packet passes 240 cases with twelve platform/privilege skips.
+  Adjacent launch/seed fixtures now create their declared checkouts and enter
+  admitted logging before checking logs; production safety fences are unchanged.
+- Native Windows measurement of 51 synthetic resolver callbacks through an
+  already-running real writer retains 102 events with zero failures. Added
+  receipt work has nearest-rank p50/p95/p99/max of about
+  60.10/134.34/154.45/154.45ms; the no-journal callback baseline is about
+  0.006/0.016/0.166/0.166ms. This measures fresh receipt directories, not monitor
+  bootstrap, complete launch, physical-key latency or installed acceptance;
+  the small sample is not tail qualification.
+- This is source preparation, not a merged or installed repair. Native process,
+  source-aware conversation, handoff/acceptance, retention/migration,
+  inspection/sweeps and same-conversation local/SSH acceptance remain open.

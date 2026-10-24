@@ -115,6 +115,49 @@ engine enforces repository policy even without the flag. Unsupported engines
 must refuse, with no fallback that removes it. Source-only `create` omits
 optional launch planning and returns no `launch` member.
 
+## Launch-attempt resolution receipts
+
+Journaled Manager actions send `--launch-attempt-id <32-lowercase-hex>` and
+`--require-launch-attempt` for explicit local or SSH New, Resume, Open, Bare
+Resume and base plans. The latter is a parser-level capability fence: an old
+receiver refuses it before resolution effects, with no capability-stripping
+retry. Preview, implicit-picker and status-only uses refuse. Without this new
+fence, the older attempt-ID option retains its remote-native-prompt-only
+contract.
+
+Each ordinary resolver invocation durably records `resolution-requested`
+through the existing tracking-write owner before entering resolution. Its
+returned plan adds `launch_attempt_id` and a version-1
+`launch_attempt_receipt`: a fresh `operation_id`, `phase`, and the returned
+`worktree_id`, `seed_id` and `request_id` when present. The same attempt's local
+re-resolve and SSH target hop get distinct operation IDs; neither uses the
+attempt as a creation retry key. The Manager validates this receipt before
+executing or delegating the plan, and both second hops retain the ID and fence.
+
+Prompt-free receipts live under the resolving machine's external project
+tracking directory, `launch-attempts/<attempt-id>/<operation-id>.json`. They
+retain only timestamps, fixed phases, exit codes and correlation IDs, never
+commands, prompts, options, paths or arbitrary exception text. Each atomic,
+flushed file contains at most an initial and final event. Reads do not create
+or repair state. Initial-write failure prevents resolution; an unconfirmed
+terminal write withholds the plan without repeating resolution. A crash may
+leave only the initial event, which is unconfirmed, not successful.
+
+`plan-ready` is preparation evidence only. A seedless remote plan is
+`forwarded`, not target admission; the target writes its own receipt when its
+resolver actually runs. `remote-admission-returned` correlates the separate,
+verified target request receipt described below. Structured target admission
+uses that existing durable version-2 receipt and requires a non-null attempt
+when the new fence is present. No resolution receipt proves process start,
+native conversation identity, prompt acceptance or retry eligibility. Native
+outcome integration, joined history readers and sweeps remain separate work.
+
+The explicit source integration lane is
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_attempt_native.py`.
+It checks actual daemon transport and process loss after the initial receipt.
+The default unit portfolio excludes that lane; neither lane proves installed
+Copilot conversation or prompt acceptance.
+
 ## SSH launch-prompt admission
 
 The Worktrees composer is host-rendered for local and machine-SSH sources.
@@ -130,7 +173,8 @@ contradictory flag/envelope refuses before configuration or admission.
 POSIX shell arguments are quoted; PowerShell commands
 are encoded. Prompt text never enters the interactive SSH launch string.
 Structured admission/status accepts only its protocol options, `--json`, and
-the hosting-admission capability fence and the matching native-seed fence;
+the hosting-admission capability fence, the matching native-seed fence and
+the optional launch-attempt fence;
 ordinary resolve selectors, modifiers and positional Copilot arguments are
 rejected before reading or mutating target launch state. Exactly one nonempty
 protocol option is required; an empty value never enters ordinary resolve.
@@ -154,6 +198,8 @@ Its remote plan exposes `launch_request_version: 2`, `launch_attempt_id` and
 `native_seed_required: true`, alongside the existing request/worktree/seed IDs.
 The subsequent launch selects the same worktree with
 `--stage-launch-seed --seed-id <id> --require-native-seed`.
+Journaled callers also retain `--require-launch-attempt` and the same attempt ID
+on this hop; the structured admission hop carries the fence too.
 The existing target setup and native
 backend boundary perform cold checks, reservation, failed-start release and
 successful handoff discard.
@@ -811,8 +857,9 @@ itself is unconditional in current engines, including direct stage callers.
 Remote/cross-environment requests requiring this fence use the version-2
 structured admission above, only for non-preview JSON New or cold Resume with
 explicit prompt text. `--launch-attempt-id <hex>` optionally correlates that
-request with the Manager's saved intent; it is refused for local, seedless,
-preview or non-native requests rather than silently ignored. Both target hops
+request with the Manager's saved intent. The new `--require-launch-attempt`
+fence also supports local and seedless resolution receipts; the legacy
+ID-only option remains remote-native-only. Preview uses refuse. Both target hops
 keep the native requirement. There is no weaker capability-stripping retry.
 Launch-seed stage/take and structured admission exclude older resident handlers
 through their declared verb versions and the existing same-code fallback.

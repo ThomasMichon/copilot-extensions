@@ -713,6 +713,14 @@ fence. Version-2 admission binds the saved Manager attempt ID to the target's
 durable receipt; the host verifies that echo before launching. Missing capability
 or mismatched identity fails visibly, never by retrying a weaker request.
 The attempt ID is audit correlation, not authority to replay an uncertain New.
+Journaled local and seedless actions also require durable engine resolution
+receipts through `--require-launch-attempt`. The confirmed ID survives the
+relocated local launcher and the SSH target hop. Each resolution has its own
+operation receipt; a returned plan is not evidence that Copilot started.
+Seedless remote planning records forwarding only, while target resolution
+records its own machine-local preparation. Missing or mismatched receipts stop
+execution without automatically repeating allocation. Full prompts remain in
+the protected Manager journal, not in these engine metadata receipts.
 Arbitrary prompt text is
 encoded, not interpolated into the remote shell. Requests are limited to an
 7 KiB UTF-8 envelope, including JSON metadata, to stay within remote command
@@ -720,7 +728,9 @@ limits after PowerShell's UTF-16LE/Base64 wrapping. Oversized envelopes or shell
 commands are rejected before SSH admission.
 
 An old target engine refuses the structured request before creating or staging
-anything; seedless remote launches remain compatible. An uncertain response
+anything. Unjournaled seedless CLI launches retain their prior compatibility;
+journaled actions require the receipt capability on the receiving engine.
+An uncertain response
 reports the target and request identity. Do not repeat New: on the target,
 `<project> resolve --json --launch-request-status <id>` reports the already
 allocated worktree and staged intent without submitting another prompt.

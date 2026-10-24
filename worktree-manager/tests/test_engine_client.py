@@ -984,6 +984,10 @@ def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
             "launch_attempt_id": "b" * 32, "launch_request_id": "a" * 32,
             "seed_id": "a" * 32, "seed_pending": True,
             "worktree_id": "wt-a", "seed_kind": "new" if new else "resume",
+            "launch_attempt_receipt": {
+                "version": 1, "operation_id": "d" * 32, "phase": "remote-admission-returned",
+                "worktree_id": "wt-a", "seed_id": "a" * 32, "request_id": "a" * 32,
+            },
         }
         if damage == "missing":
             del result["launch_attempt_id"]
@@ -998,7 +1002,7 @@ def test_remote_prompt_requires_bound_native_receipt(monkeypatch, new, damage):
     options = dict(new=new, worktree_id=None if new else "wt-a", target_machine="target",
                    seed="fixture", launch_attempt_id="b" * 32)
     if damage:
-        with pytest.raises(ec.EngineFeatureUnavailable, match="inspect the target admission"):
+        with pytest.raises(ec.EngineFeatureUnavailable, match="inspect"):
             ec.resolve_launch_plan("example", **options)
     else:
         assert ec.resolve_launch_plan("example", **options).action == "remote"
@@ -1011,7 +1015,7 @@ def test_old_engine_never_retries_without_attempt_correlation(monkeypatch):
         calls.append(args)
         raise ec.EngineError("unrecognized arguments: --launch-attempt-id")
     monkeypatch.setattr(ec, "run_json", run_json)
-    with pytest.raises(ec.EngineFeatureUnavailable, match="native-transport fence"):
+    with pytest.raises(ec.EngineFeatureUnavailable, match="launch-resolution receipts"):
         ec.resolve_launch_plan("example", new=True, target_machine="target",
                                seed="fixture", launch_attempt_id="b" * 32)
     assert len(calls) == 1

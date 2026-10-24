@@ -29,6 +29,7 @@ def test_seed_daemon_transactions_exclude_pr_discovery(tmp_path, kind):
             "repos": {"demo": {"anchor": str(root), "default_branch": "dev"}},
         }), encoding="utf-8")
         cfg.set_active_project("demo")
+        (root / "checkout").mkdir()
         discovery = []
         def forbidden_discovery():
             discovery.append(True)

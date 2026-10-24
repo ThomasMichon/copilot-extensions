@@ -47,7 +47,10 @@ def plan(action="exec", **extra):
 @pytest.mark.parametrize("action", ["exec", "remote"])
 @pytest.mark.parametrize("code", [0, 7])
 def test_launch_records_only_manager_boundaries(attempt, monkeypatch, action, code):
-    monkeypatch.setattr(engine_client, "resolve_launch_plan", lambda *a, **kw: plan(action))
+    def resolve(*args, **kwargs):
+        assert kwargs["launch_attempt_id"] == attempt[1].attempt_id
+        return plan(action)
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", resolve)
     def launch(*args, **kwargs):
         assert events(attempt)[-1]["phase"] == "launch-requested"
         return code
