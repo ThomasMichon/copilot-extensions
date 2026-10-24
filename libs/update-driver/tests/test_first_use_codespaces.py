@@ -235,6 +235,11 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     env = cold_environment(installation, project, area)
     env.pop("AGENT_VAULT_HOME")
     env["AGENT_CODESPACES_HOME"] = str(installation)
+    # Owner queries intentionally ignore CWD and read only adopted repositories.
+    installation.mkdir()
+    (installation / "adopted-repos.yaml").write_text(
+        json.dumps({"repos": [{"path": str(project)}]}), encoding="utf-8",
+    )
     if os.name == "nt":
         # Never let the canonical disabled-config branch inspect a host task.
         module = Path(env["PSModulePath"]) / "ScheduledTasks"
@@ -272,7 +277,9 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     ), diagnostic()
     assert {json.loads(item.spec.source)["plugin"] for item in requests} == {"agent-codespaces"}
     if os.name == "nt":
-        assert (installation.parent / "task-probes").read_text() == "agent-codespaces-owner"
+        probes = installation.parent / "task-probes"
+        assert probes.is_file(), diagnostic()
+        assert probes.read_text() == "agent-codespaces-owner"
     assert not (installation.parent / ".config" / "systemd").exists()
     version = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / version
@@ -295,6 +302,12 @@ def test_actual_codespaces_cold_install_preserves_selection_and_installed_origin
     payload.rename(payload.with_name("removed-codespaces"))
     inputs.rename(area / "removed-foundation-source")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    owner = subprocess.run(
+        [str(python), "-I", "-B", "-m", "agent_codespaces", "owner", "--status"],
+        env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert owner.returncode == 0, owner.stdout + owner.stderr
+    assert json.loads(owner.stdout)["enabled"] is False
     command = installation.parent / ".local" / "bin" / (
         "agent-codespaces.ps1" if os.name == "nt" else "agent-codespaces"
     )
