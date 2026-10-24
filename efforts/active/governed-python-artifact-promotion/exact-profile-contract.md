@@ -7,7 +7,8 @@ engine application remains
 
 **Status: Design approved in #6795; inert record implemented in #7044.**
 Release approval adapter implemented in #8568; installation-owned policy intent
-in #8494. Their authority/source composition, real profile publication, consumer
+in #8494; repository-only policy/release planning composition in #8586.
+Independent source locking/admission, real profile publication, consumer
 admission, deployed engine selection and production rollout remain open.
 
 ## Reconciliation and existing boundaries
@@ -251,12 +252,11 @@ matches independently selected release, manifest, capability and target facts.
 It exposes no raw approval map as user configuration.
 
 This is only the release-channel adapter. Real profile generation/publication,
-composition with #8494's existing `resolve_runtime_profile_policy` baseline,
 governed acquisition and independent
 source-mode selection/locking remain open. No installer or engine is enabled,
 and the authority-integration Plan item above is not complete.
 
-`tools/runtime_profile_policy.py` composes that existing policy resolver with
+`tools/runtime_profile_policy.py` (#8586) composes that existing policy resolver with
 release authentication. It freezes the resolved owner/policy intent, uses its
 backend selection, and prefers a matching authenticated release profile.
 `ProfileUnavailable` distinguishes an absent matching/preferred approved record

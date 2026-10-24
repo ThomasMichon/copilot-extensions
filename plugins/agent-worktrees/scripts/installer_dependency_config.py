@@ -486,7 +486,7 @@ def cutoff_arguments(settings, *, now, operation, min_age, balanced, remote_refe
     return [*result, "--reinstall"] if operation == "install" else result
 
 
-def compile_arguments(arguments, *, argument_pairs, error_type):
+def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=()):
     """Bounded requirements export, never an implicit incremental lock update."""
     values = {
         "--constraints", "-c", "--overrides", "--excludes", "--build-constraints", "-b",
@@ -505,11 +505,14 @@ def compile_arguments(arguments, *, argument_pairs, error_type):
         "--no-annotate",
     }
     result = []
+    omissions = []
     for option, value in argument_pairs(arguments):
         if not option:
             if value == "-" or not value:
                 raise error_type("lock export requires retained file inputs, not standard input")
             result.append(value)
+        elif option == "--no-emit-package":
+            omissions.append(value)
         elif option == "--format" and value != "requirements.txt":
             raise error_type("lock export supports only hashed requirements.txt output")
         elif option in ("--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate") and value:
@@ -524,7 +527,10 @@ def compile_arguments(arguments, *, argument_pairs, error_type):
             result.append(option)
         else:
             raise error_type("unsupported lock export option")
-    return [*result, "--format", "requirements.txt", "--generate-hashes", "--upgrade", "--no-header", "--no-annotate"]
+    if omissions and tuple(omissions) != source_packages:
+        raise error_type("lock export omissions must match the retained source graph")
+    return [*result, "--format", "requirements.txt", "--generate-hashes", "--upgrade", "--no-header", "--no-annotate",
+            *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
 def check_compile_projection(projection, arguments, *, argument_pairs, balanced, error_type):
@@ -532,10 +538,28 @@ def check_compile_projection(projection, arguments, *, argument_pairs, balanced,
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
         ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),
-        ("no_emit_package", r"\[\]"),
     ):
         if not re.search(r"(?m)^\s*" + field + r":\s*" + expected + r",\s*$", projection):
             raise error_type("UV lock export output configuration is unsupported")
+    omissions = re.search(r"(?m)^\s*no_emit_package:\s*\[", projection)
+    if omissions is None:
+        raise error_type("UV lock export output omissions are unsupported")
+    body, _ = balanced(projection, omissions.end() - 1, "[", "]")
+    names = []
+    while body.strip():
+        match = re.match(r'\s*PackageName\(\s*("(?:[^"\\]|\\.)*")\s*,?\s*\)\s*,\s*', body)
+        if match is None:
+            raise error_type("UV lock export output omissions are unsupported")
+        try:
+            names.append(json.loads(match[1]))
+        except ValueError as exc:
+            raise error_type("UV lock export output omissions are unsupported") from exc
+        body = body[match.end():]
+    expected = [value for option, value in argument_pairs(arguments) if option == "--no-emit-package"]
+    if names != expected:
+        raise error_type("UV lock export output omissions differ from the retained source graph")
+    if expected and not re.search(r"(?m)^\s*sources:\s*None,\s*$", projection):
+        raise error_type("source lock export cannot disable its retained source mappings")
     outputs = [value for option, value in argument_pairs(arguments) if option in ("-o", "--output-file")]
     output = re.search(r"(?m)^\s*output_file:\s*(None,|Some\()", projection)
     if output is None:
