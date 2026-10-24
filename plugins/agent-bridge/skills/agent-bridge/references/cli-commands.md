@@ -335,7 +335,7 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> status <session-id>
 <agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
 # Exact full SessionInfo JSON (native/worktree/project/path and readiness facts).
-# Unlike compact status and resume acknowledgements, this is a full identity read.
+# Unlike compact status, this reads the full identity without resuming it.
 <agent-bridge catalog argv[0]> status <session-id> --full
 
 # Wait for a running session's current turn
@@ -394,6 +394,13 @@ be discarded (or the cancel signature *persists* across sends). See the
 <agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
 <agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
 ```
+
+With global `--json`, resume preserves the server's complete session response,
+including its actual session/native identity, project/path, state and liveness
+metadata. The CLI adds its `verb` and, for singleton aliases, `requested_target`;
+missing legacy identity/status fields retain their existing CLI fallbacks.
+Returned null, false and zero values are preserved, not converted into readiness.
+Human-readable output and resume admission/refusal behavior are unchanged.
 
 The client requires HTTP protocol 40 and uses
 `POST /api/v1/worktrees/{id}/resume/{mode}` (`mode`: `acp` or `cli`). The mode-qualified route is

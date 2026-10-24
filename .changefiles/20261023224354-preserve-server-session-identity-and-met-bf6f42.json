@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve server session identity and metadata in JSON resume responses without changing admission or human output.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
