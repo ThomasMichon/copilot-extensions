@@ -12,10 +12,13 @@ from typing import TYPE_CHECKING
 
 from agent_logger.sync.publication_directory import publication_directory
 from agent_logger.usage_ledger import UsageEvidenceError, merge_session_evidence
-from agent_logger.usage_sqlite import UsageReadError, UsageStoreMissingError, read_sqlite_usage
+from agent_logger.usage_sqlite import (
+    UsageReadError, UsageRowLimitError, UsageStoreMissingError, read_sqlite_usage,
+)
 from agent_logger.usage_transcript import read_transcript_usage
 
 MAX_SESSIONS = 10000
+CAPTURE_BATCH_SIZE = 32
 if TYPE_CHECKING:
     from agent_logger.config import Config
 
@@ -82,16 +85,43 @@ def capture_usage(source: Path, include: set[str] | None) -> CaptureResult:
         return CaptureResult(failures=(f"session enumeration: {exc}",))
     if not sessions:
         return CaptureResult()
+    admitted = sorted(sessions)
+    return _combine_results([
+        _capture_batch(source, admitted[offset : offset + CAPTURE_BATCH_SIZE])
+        for offset in range(0, len(admitted), CAPTURE_BATCH_SIZE)
+    ])
+
+
+def _combine_results(results: list[CaptureResult]) -> CaptureResult:
+    return CaptureResult(
+        sum(result.updated for result in results),
+        tuple(failure for result in results for failure in result.failures),
+        tuple(dict.fromkeys(gap for result in results for gap in result.gaps)),
+    )
+
+
+def _capture_batch(source: Path, sessions: list[str]) -> CaptureResult:
     gaps: list[str] = []
+    split = False
     try:
         stored = read_sqlite_usage(source / "session-store.db", set(sessions))
         store_coverage = "captured"
+    except UsageRowLimitError as exc:
+        if len(sessions) == 1:
+            return CaptureResult(failures=(f"{sessions[0]}: session-store capture: {exc}",))
+        split = True
     except UsageStoreMissingError:
         stored = {}
         store_coverage = "missing"
         gaps.append("session-store accounting source is missing")
     except (UsageReadError, OSError) as exc:
         return CaptureResult(failures=(f"session-store capture: {exc}",))
+    if split:
+        middle = len(sessions) // 2
+        return _combine_results([
+            _capture_batch(source, sessions[:middle]),
+            _capture_batch(source, sessions[middle:]),
+        ])
     failures: list[str] = []
     updated = 0
     for session_id in sorted(sessions):

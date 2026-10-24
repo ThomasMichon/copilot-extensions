@@ -77,6 +77,9 @@ def test_modal_render_focus_hover_completion(theme, size, tmp_path):
             assert button.styles.color.rgb == focused.color.get_truecolor()
             assert button.region.right <= size[0] and button.region.bottom <= size[1]
             assert body.region.width <= size[0]
+            await pilot.pause(.2)
+            capture = app.export_screenshot()
+            assert "DEMO-CODE" in capture and "localhost/device" in capture
             app.save_screenshot(str(tmp_path / f"{theme}-{size[0]}-working.svg"))
             button.blur()
             await pilot.hover("#view-title")
@@ -92,6 +95,7 @@ def test_modal_render_focus_hover_completion(theme, size, tmp_path):
             assert screen.finished and str(button.label) == "Close"
             completed.assert_called_once_with()
             assert "Succeeded: Authorized example-user" in body.render().plain
+            assert "Succeeded:" in app.export_screenshot()
             app.save_screenshot(str(tmp_path / f"{theme}-{size[0]}-complete.svg"))
             await pilot.press("enter")
             await pilot.pause()
