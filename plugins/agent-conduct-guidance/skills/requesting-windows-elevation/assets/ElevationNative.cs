@@ -21,6 +21,18 @@ namespace AgentConduct {
             IntPtr server, int id, int field, out IntPtr value, out int bytes);
         [DllImport("wtsapi32.dll")]
         private static extern void WTSFreeMemory(IntPtr value);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        private static extern bool GetTokenInformation(
+            IntPtr token, int kind, out int value, int length, out int returned);
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetProcessWindowStation();
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetThreadDesktop(uint thread);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool GetUserObjectInformation(
+            IntPtr handle, int kind, StringBuilder text, uint length, out uint needed);
         [DllImport("kernel32.dll", SetLastError = true)]
         private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -67,26 +79,75 @@ namespace AgentConduct {
             finally { WTSFreeMemory(value); }
         }
 
+        public static bool SupportsSameAccount(int elevationType, bool administrator) {
+            return administrator || elevationType == 3;
+        }
+
+        public static bool CanElevateSameAccount() {
+            using (var identity = WindowsIdentity.GetCurrent()) {
+                bool administrator = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+                int value, returned;
+                if (!GetTokenInformation(identity.Token, 18, out value, 4, out returned))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                return SupportsSameAccount(value, administrator);
+            }
+        }
+
+        private static string UserObjectName(IntPtr handle) {
+            var text = new StringBuilder(256);
+            uint needed;
+            if (handle == IntPtr.Zero
+                || !GetUserObjectInformation(handle, 2, text, 512, out needed))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            return text.ToString();
+        }
+
+        public static string TryDesktopIdentity(string log) {
+            try {
+                return Process.GetCurrentProcess().SessionId + "|"
+                    + UserObjectName(GetProcessWindowStation()) + "|"
+                    + UserObjectName(GetThreadDesktop(GetCurrentThreadId()));
+            } catch (Win32Exception error) {
+                Append(log, "Elevation desktop identity is unavailable: " + error.NativeErrorCode);
+                return null;
+            }
+        }
+
+        private static string SessionSid(int id) {
+            string user = SessionText(id, 5);
+            if (user.Length == 0) return null;
+            return new NTAccount(SessionText(id, 7), user).Translate(typeof(SecurityIdentifier)).Value;
+        }
+
+        public static int[] OwnedInteractiveSessions(IEnumerable<int> active, string sid, Func<int, string> lookup) {
+            var result = new List<int>();
+            foreach (int id in active) {
+                try {
+                    if (lookup(id) == sid) result.Add(id);
+                } catch (Win32Exception error) when (error.NativeErrorCode == 5) {
+                    Console.Error.WriteLine("elevation: excluded an inaccessible desktop session; owner match remains required.");
+                } catch (IdentityNotMappedException) {
+                    Console.Error.WriteLine("elevation: excluded a desktop with no resolvable owner SID.");
+                }
+            }
+            return result.ToArray();
+        }
+
         public static int[] InteractiveSessions(string sid) {
             IntPtr buffer;
             int count;
             if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out buffer, out count))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
-            var result = new List<int>();
+            var active = new List<int>();
             try {
                 int size = Marshal.SizeOf<Session>();
                 for (int index = 0; index < count; index++) {
                     var session = Marshal.PtrToStructure<Session>(IntPtr.Add(buffer, index * size));
                     if (session.State != 0 || session.Id <= 0) continue;
-                    string user = SessionText(session.Id, 5);
-                    if (user.Length == 0) continue;
-                    string domain = SessionText(session.Id, 7);
-                    var account = new NTAccount(domain, user);
-                    if (account.Translate(typeof(SecurityIdentifier)).Value == sid)
-                        result.Add(session.Id);
+                    active.Add(session.Id);
                 }
             } finally { WTSFreeMemory(buffer); }
-            return result.ToArray();
+            return OwnedInteractiveSessions(active, sid, SessionSid);
         }
 
         public static void Append(string path, string line) {

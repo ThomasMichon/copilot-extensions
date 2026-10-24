@@ -1771,7 +1771,11 @@ bounded cycles use private directories, real limited interactive tasks and the
 harmless probe. They observe visible console windows and foreground transitions,
 require matching `probe` receipts and verify exact task cleanup. They never
 request UAC and do not qualify administrator execution.
-Foreground qualification requires a non-null observable foreground window.
+Window qualification first requires the baseline and watcher thread to match
+the worker's recorded session, window station and desktop. An unbound observer
+explicitly reports both window and focus observation unavailable; a nonempty
+`EnumWindows` result alone is not qualification for the selected desktop.
+Foreground qualification additionally requires a non-null observable foreground window.
 A headless caller can enumerate visible windows yet receive a null foreground
 even when the operator confirms an unlocked desktop. Such a run emits an
 explicit unavailable-observation warning: it does not prove zero focus changes.
@@ -1783,6 +1787,11 @@ twenty-five seconds. A five-second fixture child bound expired in the
 combined native run; the separate two-second owned-Job deadline
 control and production defaults remain unchanged. Failure diagnostics retain
 the log tail rather than hiding the last completed stage behind a reader timeout.
+Discovery controls exclude access-denied/unmapped foreign entries while still
+requiring positive SID ownership, and preserve unexpected errors. Identity
+preflight tests use token elevation type (including linked limited tokens),
+not the filtered group list, and reject unsupported alternate-account elevation
+before staging or consent.
 The worker contract selection also verifies an actual write/replacement denial
 between hashing and execution, separate admission expiry while execution time
 remains, and retained process-handle proof that long-lived descendants die on

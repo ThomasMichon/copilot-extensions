@@ -24,6 +24,9 @@ $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 
 if ($PSCmdlet.ParameterSetName -eq 'Start') {
     if (-not $InteractiveProbe -and -not $ConsentConfirmed) { throw 'Obtain explicit operation-specific consent before requesting RunAs.' }
+    if (-not $InteractiveProbe -and -not [AgentConduct.ElevationNative]::CanElevateSameAccount()) {
+        throw 'This helper requires same-account administrator or linked split-token elevation; alternate-account credentials are unsupported.'
+    }
     $ScriptPath = (Resolve-Path -LiteralPath $ScriptPath).Path
     $WorkingDirectory = (Resolve-Path -LiteralPath $WorkingDirectory).Path
     if (-not [IO.File]::Exists($ScriptPath) -or [IO.Path]::GetExtension($ScriptPath) -ne '.ps1') {

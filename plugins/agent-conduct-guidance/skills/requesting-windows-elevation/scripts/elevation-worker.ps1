@@ -42,8 +42,8 @@ function Get-ElevationTaskCompletion {
     $state = $Task.State
     $lastResult = $Task.LastTaskResult
     $stopped = $instances -eq 0 -and $state -notin @(2, 4) -and $lastResult -notin @(267009, 267011)
-    $terminal = Read-ElevationTerminal $LogPath $RunId
     if ($stopped) {
+        $terminal = Read-ElevationTerminal $LogPath $RunId
         if (-not $terminal) { throw "Interactive task exited without its matching terminal marker (result $lastResult)." }
         return $terminal
     }
@@ -62,6 +62,9 @@ try {
         $principal = [Security.Principal.WindowsPrincipal]::new($identity)
         $admin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
         if (-not $request.interactiveProbe -and -not $admin) { throw 'RunAs worker did not receive an administrator token.' }
+        if (-not $request.interactiveProbe -and $identity.User.Value -cne $request.ownerSid) {
+            throw 'Alternate-account elevation is unsupported; the approved operation requires its original user identity.'
+        }
         if ([Diagnostics.Process]::GetCurrentProcess().SessionId -ne $request.sessionId) { throw 'Worker reached the wrong desktop session.' }
         $scriptRead = [IO.File]::Open($request.scriptPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
         if ((Get-FileHash -InputStream $scriptRead -Algorithm SHA256).Hash -cne $request.scriptHash) {
@@ -75,7 +78,8 @@ try {
         if ($remaining -lt 1) { throw 'Elevation request deadline expired before payload admission.' }
         $payloadTimeout = [int][Math]::Min($request.timeoutSeconds, $remaining)
         [AgentConduct.ElevationNative]::OwnWorker()
-        @{ runId = $request.runId; elevated = $admin; sessionId = $request.sessionId; pid = $PID } |
+        @{ runId = $request.runId; elevated = $admin; sessionId = $request.sessionId; pid = $PID
+            desktopIdentity = [AgentConduct.ElevationNative]::TryDesktopIdentity($request.logPath) } |
             ConvertTo-Json -Compress | Set-Content -LiteralPath $startedPath -Encoding utf8NoBOM
         $code = [AgentConduct.ElevationNative]::RunPayload(
             $request.shellPath, $request.scriptPath, [string[]]$request.scriptArguments,

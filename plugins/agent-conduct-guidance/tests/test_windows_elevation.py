@@ -19,10 +19,15 @@ WORKER = SKILL / "scripts" / "elevation-worker.ps1"
 INVOKE = SKILL / "scripts" / "invoke-windows-elevation.ps1"
 PWSH = shutil.which("pwsh")
 RUN_ID = "a" * 32
+NATIVE = SKILL / "assets" / "ElevationNative.cs"
 
 
 def quote(value: object) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def desktop_binding_verified(baseline, observer, target) -> bool:
+    return bool(target and baseline and observer and baseline.casefold() == observer.casefold() == target.casefold())
 
 
 def run_ps(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -49,6 +54,87 @@ def test_owned_projection_and_discoverable_skill():
     assert "RunLevel=Highest" in skill and "cannot register" in skill
     assert "not administrator success" in skill.replace("**", "")
     assert "wait" in skill.lower() and "1223" in skill
+
+
+@pytest.mark.parametrize(
+    ("baseline", "observer", "target", "bound"),
+    [
+        ("2|WinSta0|Default", "2|WinSta0|Default", "2|WinSta0|Default", True),
+        ("2|winsta0|default", "2|WinSta0|Default", "2|WinSta0|Default", True),
+        (None, "2|WinSta0|Default", "2|WinSta0|Default", False),
+        ("2|WinSta0|Default", None, "2|WinSta0|Default", False),
+        ("2|WinSta0|Default", "2|WinSta0|Default", None, False),
+        ("0|WinSta0|Default", "0|WinSta0|Default", "2|WinSta0|Default", False),
+        ("2|WinSta0|Other", "2|WinSta0|Other", "2|WinSta0|Default", False),
+        ("2|WinSta0|Default", "2|WinSta0|Other", "2|WinSta0|Default", False),
+    ],
+)
+def test_window_observation_requires_actual_desktop_binding(baseline, observer, target, bound):
+    assert desktop_binding_verified(baseline, observer, target) is bound
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+def test_discovery_excludes_inaccessible_entries_but_requires_positive_owner_match():
+    control = r"""
+public static class ElevationDiscoveryControl {
+    public static int[] Select() {
+        return AgentConduct.ElevationNative.OwnedInteractiveSessions(
+            new [] { 1, 2, 3, 4 }, "owner", id => {
+                if (id == 1) throw new System.ComponentModel.Win32Exception(5);
+                if (id == 2) throw new System.Security.Principal.IdentityNotMappedException();
+                return id == 3 ? "owner" : "other";
+            });
+    }
+    public static int Unexpected() {
+        try {
+            AgentConduct.ElevationNative.OwnedInteractiveSessions(
+                new [] { 1 }, "owner", id => { throw new System.ComponentModel.Win32Exception(87); });
+        } catch (System.ComponentModel.Win32Exception error) { return error.NativeErrorCode; }
+        return 0;
+    }
+}
+"""
+    result = run_ps(
+        "-Command",
+        f"$source = [IO.File]::ReadAllText({quote(NATIVE)}) + {quote(control)}; "
+        "Add-Type -TypeDefinition $source; "
+        "@{selected=@([ElevationDiscoveryControl]::Select());unexpected=[ElevationDiscoveryControl]::Unexpected()} "
+        "| ConvertTo-Json -Compress",
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"selected": [3], "unexpected": 87}
+    assert "inaccessible desktop session" in result.stderr
+    assert "no resolvable owner SID" in result.stderr
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+def test_same_account_capability_uses_linked_token_not_filtered_group_membership():
+    result = run_ps(
+        "-Command",
+        f"Add-Type -Path {quote(NATIVE)}; "
+        "@([AgentConduct.ElevationNative]::SupportsSameAccount(3,$false),"
+        "[AgentConduct.ElevationNative]::SupportsSameAccount(1,$false),"
+        "[AgentConduct.ElevationNative]::SupportsSameAccount(2,$true),"
+        "[AgentConduct.ElevationNative]::SupportsSameAccount(1,$true)) | ConvertTo-Json -Compress",
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == [True, False, True, True]
+
+
+@pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Windows same-account preflight")
+def test_unsupported_credential_elevation_stops_before_staging_or_prompt(tmp_path):
+    fake = "namespace AgentConduct { public static class ElevationNative { public static bool CanElevateSameAccount() { return false; } } }"
+    log = tmp_path / "not-created.log"
+    result = run_ps(
+        "-Command",
+        f"Add-Type -TypeDefinition {quote(fake)}; "
+        f"try {{ & {quote(INVOKE)} -ScriptPath {quote(SKILL / 'assets' / 'probe.ps1')} "
+        f"-LogPath {quote(log)} -ConsentConfirmed; exit $LASTEXITCODE }} "
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }",
+    )
+    assert result.returncode != 0
+    assert "alternate-account credentials are unsupported" in result.stderr
+    assert not log.exists()
 
 
 @pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
@@ -254,6 +340,27 @@ def test_startup_and_running_states_are_not_missing_completion(tmp_path, state, 
         "$task | Add-Member ScriptMethod GetInstances { param($flags) [pscustomobject]@{Count=0} }; "
         f"$r = Get-ElevationTaskCompletion $task {quote(log)} {quote(RUN_ID)}; "
         "if ($null -ne $r) { throw 'Early completion accepted' }",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell 7 is unavailable")
+@pytest.mark.parametrize("line", [
+    "AGENT_ELEVATION_END " + json.dumps(
+        {"schema": 1, "runId": "b" * 32, "state": "success", "exitCode": 0, "elevated": True}
+    ),
+    'AGENT_ELEVATION_END {"schema":',
+])
+def test_running_task_output_is_not_parsed_as_a_terminal_result(tmp_path, line):
+    log = tmp_path / "running-output.log"
+    log.write_text(line + "\n", encoding="utf-8")
+    result = run_ps(
+        "-Command",
+        f". {quote(WORKER)} -RequestPath unused -LibraryOnly; "
+        "$task=[pscustomobject]@{State=4;LastTaskResult=267009}; "
+        "$task | Add-Member ScriptMethod GetInstances { param($flags) [pscustomobject]@{Count=1} }; "
+        f"$r=Get-ElevationTaskCompletion $task {quote(log)} {quote(RUN_ID)}; "
+        "if ($null -ne $r) { throw 'Running output was accepted as completion' }",
     )
     assert result.returncode == 0, result.stderr
 

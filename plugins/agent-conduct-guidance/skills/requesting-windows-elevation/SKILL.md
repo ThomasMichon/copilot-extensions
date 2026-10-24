@@ -1,6 +1,6 @@
 ---
 name: requesting-windows-elevation
-description: "Run one explicitly approved Windows administrator operation through a temporary interactive scheduled task, a genuine RunAs UAC request, and a specified private output log with a matching completion marker. Use for Windows elevation, UAC prompts on a development machine, run as administrator, administrator PowerShell, or a headless agent whose approved elevation never reaches the user's desktop. Never grants general administrative authority or bypasses UAC."
+description: "Run one explicitly approved same-account Windows administrator operation through a temporary interactive scheduled task, a genuine RunAs UAC request, and a specified private output log with a matching completion marker. Use for Windows elevation, UAC prompts on a development machine, run as administrator, administrator PowerShell, or a headless agent whose approved elevation never reaches the user's desktop. Never grants general administrative authority or bypasses UAC."
 ---
 
 # Requesting Windows elevation
@@ -40,6 +40,11 @@ the dialog; never weaken policy merely to force one to appear.
 
 1. **Prepare.** Windows and PowerShell 7.2+ are required; fail explicitly if
    unavailable, never install tools as an incidental elevation step.
+   This version supports same-account elevation only: an already-administrator
+   token or a linked limited token. Preflight rejects standard-user,
+   alternate-administrator credentials before requesting UAC. Do not select
+   another account in a credential dialog; the worker also checks the original
+   owner SID. Owner-only scratch permissions remain unchanged.
    Use `using-scratch-space` to prepare a private timestamped task directory.
    Write a reviewable `.ps1` for the exact operation, using absolute attributable
    command paths and a deliberate working directory. Never put credentials in

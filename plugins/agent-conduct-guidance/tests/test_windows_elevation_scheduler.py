@@ -13,7 +13,7 @@ import warnings
 
 import pytest
 
-from test_windows_elevation import INVOKE, PWSH, SKILL, quote, run_ps
+from test_windows_elevation import INVOKE, PWSH, SKILL, desktop_binding_verified, quote, run_ps
 
 pytestmark = pytest.mark.skipif(
     os.name != "nt" or not PWSH
@@ -43,6 +43,30 @@ def snapshot_windows():
     user.EnumWindows.restype = wintypes.BOOL
     assert user.EnumWindows(visit, 0)
     return rows, int(user.GetForegroundWindow() or 0)
+
+
+def desktop_identity():
+    user = ctypes.WinDLL("user32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentThreadId.restype = wintypes.DWORD
+    kernel.ProcessIdToSessionId.argtypes = [wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    user.GetProcessWindowStation.restype = wintypes.HANDLE
+    user.GetThreadDesktop.argtypes = [wintypes.DWORD]
+    user.GetThreadDesktop.restype = wintypes.HANDLE
+    user.GetUserObjectInformationW.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPWSTR, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+    ]
+    names = []
+    for handle in (user.GetProcessWindowStation(), user.GetThreadDesktop(kernel.GetCurrentThreadId())):
+        text = ctypes.create_unicode_buffer(256)
+        needed = wintypes.DWORD()
+        if not handle or not user.GetUserObjectInformationW(handle, 2, text, 512, ctypes.byref(needed)):
+            return None
+        names.append(text.value)
+    session = wintypes.DWORD()
+    if not kernel.ProcessIdToSessionId(os.getpid(), ctypes.byref(session)):
+        return None
+    return f"{session.value}|{names[0]}|{names[1]}"
 
 
 @pytest.fixture
@@ -93,11 +117,15 @@ def private_directory(tmp_path):
 def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_directory, clean_probe_tasks, cycle):
     log = private_directory / f"interactive-{cycle}.log"
     baseline, foreground = snapshot_windows()
-    assert baseline, "Visible-window observation is unavailable to this caller"
+    baseline_desktop = desktop_identity()
     stop = threading.Event()
+    ready = threading.Event()
     observations = []
+    observer_desktop = []
 
     def observe():
+        observer_desktop.append(desktop_identity())
+        ready.set()
         while not stop.is_set():
             observations.append(snapshot_windows())
             stop.wait(.02)
@@ -105,6 +133,7 @@ def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_dire
     watcher = threading.Thread(target=observe)
     watcher.start()
     try:
+        assert ready.wait(2), "Desktop observer did not start"
         result = subprocess.run(
             [
                 PWSH, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(INVOKE),
@@ -142,12 +171,22 @@ def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_dire
     resumed = run_ps("-File", str(INVOKE), "-WaitFor", str(request))
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert json.loads(resumed.stdout)["runId"] == run_id
+    started = json.loads((request.parent / "worker-started.json").read_text(encoding="utf-8"))
+    assert started["runId"] == run_id
+    bound = desktop_binding_verified(baseline_desktop, observer_desktop[0], started.get("desktopIdentity"))
+    if not bound:
+        warnings.warn(
+            "Observer is not bound to the selected session/desktop; window and focus qualification "
+            "are unavailable. Use a bound interactive observer or an operator witness.",
+            RuntimeWarning,
+        )
+        return
     console_classes = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"}
     assert not [
         (hwnd, kind) for windows, _ in observations
         for hwnd, kind in windows.items()
         if hwnd not in baseline and kind in console_classes
-    ], "An unexpected visible console appeared during the opt-in isolated probe"
+    ], "An unexpected visible console appeared on the selected desktop"
     if foreground:
         assert all(active == foreground for _, active in observations), (
             "Foreground changed during the opt-in probe; run on a quiescent desktop"

@@ -109,6 +109,9 @@ than a plain read-back, per the secret-masking skill.
 The Windows elevation helper is task-time and self-contained: it needs an
 active same-user interactive desktop and PowerShell 7.2+, but no Python,
 sibling plugin, password store, daemon or preinstalled elevated task.
+Normal execution requires same-account administrator or linked split-token
+elevation. Standard users supplying another administrator account are rejected
+before UAC rather than widening private staging permissions.
 `-InteractiveProbe` checks the desktop route without requesting administration;
 only a separately approved RunAs invocation can qualify administrator execution.
 Cancellation, missing completion and nonzero command results remain failures,
