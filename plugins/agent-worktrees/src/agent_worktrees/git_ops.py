@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -109,6 +110,7 @@ def git(
     isolated_repository: bool = False,
     auth_acquisition: bool = False,
     input_data: bytes | None = None,
+    observation_deadline: float | None = None,
 ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
     """Run a git command with consistent error handling.
 
@@ -119,6 +121,8 @@ def git(
         capture: If True, capture stdout and stderr.
         timeout: Optional subprocess bound; None preserves unbounded network ops.
             Inspection callers pass a bound to prevent stalled probes.
+        observation_deadline: Optional absolute monotonic, cleanup-inclusive
+            deadline for independently contained text observations; never persisted.
         no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's client-side
             guard hooks cannot block/corrupt trusted plumbing that only re-arranges
             ALREADY-committed content (squash re-commit, rebase). **``push()`` never passes
@@ -140,6 +144,11 @@ def git(
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
 
     def execute():
+        if observation_deadline is not None:
+            return push_timeout.run_bounded(
+                cmd, cwd=cwd, env=env, timeout=timeout,
+                observation_deadline=observation_deadline,
+            )
         if kill_tree and timeout is not None:
             return push_timeout.run_bounded(
                 cmd, cwd=cwd, env=env, timeout=timeout,
@@ -219,9 +228,8 @@ class WorktreeStateInfo:
     fetch_failed: bool = False
     """True when a requested fetch either failed outright (network down,
     remote unreachable -- classification proceeded on stale local refs) OR
-    could not be confirmed (a timeout anywhere in classification, since a
-    stalled classify may have stalled ON the fetch itself, before it could
-    even attempt the later git calls) -- both cases mean a `fetch=True`
+    could not be confirmed after an actual fetch attempt (a timeout on the
+    fetch itself or a later probe) -- both cases mean a `fetch=True`
     caller must not treat the result as refreshed evidence. Always False
     when ``fetch=False`` (no fetch was attempted) or classification short-
     circuited before reaching the fetch (GONE/zombie/ACTIVE)."""
@@ -295,23 +303,57 @@ def can_fast_forward(info: WorktreeStateInfo) -> bool:
     return info.dirty == 0 and info.ahead == 0 and info.behind > 0
 
 
-def _get_current_branch_safe(cwd: str | Path) -> str | None:
+def _get_current_branch_safe(
+    cwd: str | Path, *, timeout: float | None = None, kill_tree: bool = False,
+    observation_deadline: float | None = None,
+) -> str | None:
     """Return the worktree's current branch, or None if detached/unreadable."""
-    result = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False)
+    options = {}
+    if timeout is not None:
+        options["timeout"] = timeout
+    if kill_tree:
+        options["kill_tree"] = True
+    if observation_deadline is not None:
+        options["observation_deadline"] = observation_deadline
+    result = git("rev-parse", "--abbrev-ref", "HEAD", cwd=cwd, check=False, **options)
     if result.returncode != 0:
         return None
     name = result.stdout.strip()
-    # "HEAD" means detached -- not a named branch
     return None if name == "HEAD" else name
 
 
-def current_branch(cwd: str | Path) -> str | None:
-    """Return the checkout's current branch name, or None if detached/unreadable.
+def current_branch(
+    cwd: str | Path, *, timeout: float | None = None, kill_tree: bool = False,
+    observation_deadline: float | None = None,
+) -> str | None:
+    """Return the branch, retaining legacy unbounded defaults unless opted in."""
+    if timeout is None and not kill_tree and observation_deadline is None:
+        return _get_current_branch_safe(cwd)
+    return _get_current_branch_safe(
+        cwd, timeout=timeout, kill_tree=kill_tree,
+        observation_deadline=observation_deadline,
+    )
 
-    Public wrapper over the internal helper so other modules can gate on the
-    checked-out branch without reaching into a private symbol.
-    """
-    return _get_current_branch_safe(cwd)
+
+_CLASSIFY_GIT_TIMEOUT = 15.0
+
+
+def _observation_deadline(deadline: float | None = None) -> float:
+    limit = time.monotonic() + _CLASSIFY_GIT_TIMEOUT
+    return min(deadline, limit) if deadline is not None else limit
+
+
+def _observation_options(deadline: float, *, cap: float | None = None) -> dict:
+    remaining = deadline - time.monotonic()
+    if remaining <= push_timeout.OBSERVATION_CLEANUP_SECONDS:
+        error = subprocess.TimeoutExpired("git observation", max(0, remaining))
+        error.observation_started = False
+        raise error
+    return {
+        "timeout": min(remaining, cap) if cap is not None else remaining,
+        "kill_tree": True,
+        "observation_deadline": deadline,
+    }
 
 
 def classify_worktree(
@@ -322,22 +364,16 @@ def classify_worktree(
     remote: str = "origin",
     default_branch: str = "master",
     active_paths: set[str] | None = None,
+    observation_deadline: float | None = None,
 ) -> WorktreeStateInfo:
-    """Classify a worktree's git state.
+    """Classify checkout content against ``remote/default_branch``.
 
-    Args:
-        worktree_path: Filesystem path to the worktree.
-        branch: The worktree's branch name (e.g., worktree/id).
-        fetch: If True, fetch before classification (slower but more accurate).
-        remote: Remote name.
-        default_branch: Default branch name.
-        active_paths: Set of normalized worktree paths with live Copilot
-            sessions.  When provided, any worktree whose path is in this
-            set is classified as ACTIVE regardless of git state -- it must
-            never appear as COMPLETED or UNUSED.
-
-    Returns:
-        WorktreeStateInfo with the classification result.
+    ``branch`` is the tracked fallback; an observed HEAD drift takes precedence.
+    ``fetch=True`` attempts refresh first. ``active_paths`` names normalized
+    paths with known live owners: those remain ACTIVE even without Git metadata.
+    ``observation_deadline`` is one same-process monotonic instant, capped by
+    the existing 15 seconds total including five seconds reserved for cleanup.
+    An expired/short budget starts no Git process; incomplete evidence is UNKNOWN.
     """
     path = Path(worktree_path)
     if not path.exists():
@@ -348,69 +384,39 @@ def classify_worktree(
     if not (path / ".git").exists():
         return WorktreeStateInfo(state=WorktreeState.GONE)
 
-    # Detect branch drift: if the worktree's HEAD is on a different branch
-    # than what the tracking record says, use the actual HEAD for
-    # classification so unmerged work on feature branches isn't hidden.
-    actual_branch = _get_current_branch_safe(path)
-    drift = bool(
-        actual_branch
-        and actual_branch != branch
+    deadline = _observation_deadline(observation_deadline)
+    norm = worktree_path.rstrip("/\\")
+    active = active_paths is not None and any(
+        norm.lower() == ap.lower() if sys.platform == "win32" else norm == ap
+        for ap in active_paths
     )
-    effective_branch = actual_branch if drift else branch
-
-    # If a live Copilot session owns this worktree, it is ACTIVE -- period.
-    # active_paths stores paths stripped of trailing separators (but NOT
-    # lowercased).  Use case-insensitive lookup on Windows to match.
-    if active_paths is not None:
-        norm = worktree_path.rstrip("/\\")
-        _casefold = sys.platform == "win32"
-        if any(
-            norm == ap if not _casefold else norm.lower() == ap.lower()
-            for ap in active_paths
-        ):
-            return WorktreeStateInfo(
-                state=WorktreeState.ACTIVE,
-                current_branch=actual_branch,
-                branch_drift=drift,
-            )
-
+    actual_branch, drift = None, False
     upstream = f"{remote}/{default_branch}"
 
-    # Bound each classification git spawn so one stalled `git` (a Defender
-    # scan, an index/ref .lock, a slow pack read) cannot hang the caller. The
-    # picker loops this over every worktree, so an unbounded stall froze the
-    # whole tab for minutes. On timeout report an honest UNKNOWN for *this*
-    # worktree rather than fabricating a concrete state from a half-finished
-    # probe (an empty `status` looks clean; a failed `merge-base` looks ORPHAN).
-    # The picker's silent repoll re-resolves UNKNOWN rows on a later tick.
+    # The first probe and all subsequent probes share one cleanup-inclusive D.
     try:
+        actual_branch = _get_current_branch_safe(path, **_observation_options(deadline))
+        drift = bool(actual_branch and actual_branch != branch)
+        if active:
+            return WorktreeStateInfo(
+                state=WorktreeState.ACTIVE, current_branch=actual_branch, branch_drift=drift,
+            )
         return _classify_git_state(
-            path, effective_branch, upstream,
+            path, actual_branch if drift else branch, upstream,
             fetch=fetch, remote=remote, default_branch=default_branch,
             actual_branch=actual_branch, drift=drift,
+            observation_deadline=deadline,
         )
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, push_timeout.ObservationUnavailable) as error:
         log.warning(
-            "classify_worktree: git timed out for %s -- reporting UNKNOWN", path,
+            "classify_worktree: Git observation unavailable for %s: %s", path, error,
         )
+        attempted = bool(getattr(error, "fetch_requested", False))
         return WorktreeStateInfo(
-            state=WorktreeState.UNKNOWN,
+            state=WorktreeState.ACTIVE if active else WorktreeState.UNKNOWN,
             current_branch=actual_branch, branch_drift=drift,
-            # A timeout gives no confirmation the requested fetch (if any)
-            # ever completed -- it may have stalled on the fetch itself or on
-            # a later git call. Either way, the classification is NOT
-            # confirmed refreshed, so a `fetch=True` caller must not treat
-            # this as authoritative current-state evidence.
-            fetch_requested=fetch,
-            fetch_failed=fetch,
+            fetch_requested=attempted, fetch_failed=attempted,
         )
-
-
-# Per-call bound for classification git spawns. Generous: a normal status /
-# rev-list / cherry is well under a second, so this only trips on a genuine
-# stall (Defender scan, an index/ref .lock, a slow pack read), never on
-# legitimately-slow-but-progressing git.
-_CLASSIFY_GIT_TIMEOUT = 15.0
 
 
 def _classify_git_state(
@@ -423,25 +429,28 @@ def _classify_git_state(
     default_branch: str,
     actual_branch: str | None,
     drift: bool,
+    observation_deadline: float | None = None,
 ) -> WorktreeStateInfo:
-    """Git-driven half of :func:`classify_worktree` (dirty/ahead/behind/merge).
+    """Git classification retaining one deadline and actual fetch-attempt state."""
+    deadline = _observation_deadline(observation_deadline)
+    fetch_started = False
 
-    Every git call is bounded by ``_CLASSIFY_GIT_TIMEOUT`` via the ``_g`` helper;
-    a stalled spawn raises ``subprocess.TimeoutExpired``, which the caller turns
-    into an honest ``UNKNOWN`` state. Split out from ``classify_worktree`` so the
-    timeout guard wraps one cohesive block while the pure/session short-circuits
-    stay above it.
-    """
     def _g(*args):
-        return git(*args, cwd=path, check=False, timeout=_CLASSIFY_GIT_TIMEOUT)
+        nonlocal fetch_started
+        try:
+            options = _observation_options(deadline)
+            result = git(*args, cwd=path, check=False, **options)
+        except (subprocess.TimeoutExpired, push_timeout.ObservationUnavailable) as error:
+            if args[0] == "fetch" and getattr(error, "observation_started", False):
+                fetch_started = True
+            error.fetch_requested = fetch_started
+            raise
+        if args[0] == "fetch":
+            fetch_started = True
+        return result
 
-    # worktree-finality-and-obligations (Phase 5 follow-up): a fetch that
-    # fails (network down, remote unreachable) must not be silently treated
-    # as refreshed evidence -- the classification below still proceeds
-    # (offline callers need SOME answer), but every WorktreeStateInfo this
-    # function returns carries the honest ``fetch_failed`` flag so a
-    # destructive-freshness-sensitive caller (e.g. the closure descriptor)
-    # never treats a failed fetch attempt as authoritative current state.
+    # Offline classification may continue after a failed fetch, but it must
+    # never masquerade as confirmed refreshed evidence for cleanup.
     fetch_failed = False
     if fetch:
         fetch_r = _g("fetch", remote, default_branch, "--quiet")
@@ -487,20 +496,9 @@ def _classify_git_state(
         )
 
     if not counts_ok:
-        # `rev-list` itself failed (lock contention, a slow pack read, a
-        # racing fetch from a sibling worktree of the same repo -- all
-        # sharing one `.git`) but a merge-base DOES exist, so this isn't a
-        # genuinely unrelated-history ORPHAN either. `ahead`/`behind` above
-        # were coerced to 0 only because the count couldn't be read -- that
-        # is NOT the same fact as "genuinely zero commits ahead". Falling
-        # through previously conflated the two, landing in the `ahead == 0`
-        # squash-merge reflog heuristic below, which reports COMPLETED for
-        # ANY branch with prior commit history (true of virtually every real
-        # WIP branch) whenever this one git call transiently failed --
-        # observed live as the Worktree Manager flapping MERGED <-> WIP with
-        # no actual change underneath. Report UNKNOWN instead, exactly like
-        # the top-level timeout fallback in `classify_worktree`; a later,
-        # uncontended pass re-resolves it correctly.
+        # Failed counts are not genuinely zero ahead. With a valid merge base,
+        # neither ORPHAN nor the zero-ahead squash/reflog heuristic is evidence.
+        # Retain UNKNOWN until a later uncontended observation.
         return WorktreeStateInfo(
             state=WorktreeState.UNKNOWN, dirty=dirty_count,
             current_branch=actual_branch, branch_drift=drift,
