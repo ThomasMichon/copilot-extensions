@@ -889,6 +889,7 @@ function Materialize-SnapshotLibs {
         'agent-plugin-resolve' = 'plugin-resolve'
         'agent-plugin-activation' = 'plugin-activation'
         'agent-single-instance-lease' = 'single-instance-lease'
+        'agent-update-driver' = 'update-driver'
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $project = Join-Path $SnapshotDir 'pyproject.toml'
