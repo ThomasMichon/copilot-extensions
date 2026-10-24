@@ -271,12 +271,21 @@ def test_actual_logger_hook_deadline_caller_loss_drift_install_and_consumers(
     slot = installation / "versions" / selected
     completion = slot / ".install-complete.json"
     complete = completion.read_bytes()
+    # Fresh construction rewrites deployment metadata. A subsequent reused
+    # provision retains the lifecycle reservation whose canonical owner matters.
+    reused = subprocess.run(
+        prepare, env=env, cwd=project, capture_output=True, text=True,
+        timeout=850, **agent_procutil.no_window_kwargs(),
+    )
+    assert reused.returncode == 0, reused.stdout + reused.stderr + diagnostic()
+    count += 1
     manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     if os.name == "nt":
         owner = manifest["commandLifecycle"]["owner"]
         admitted = json.loads(drift.spec.source)
         assert owner["sourceFingerprint"] == admitted["source_fingerprint"]
         assert not owner.get("unattributed")
+        assert str(installation / ".install-stage") not in json.dumps(owner)
     healthy = subprocess.run(
         command, env=env, cwd=project, capture_output=True, text=True,
         timeout=deadline, **agent_procutil.no_window_kwargs(),
