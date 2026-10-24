@@ -27,8 +27,11 @@ The dedicated full lane allows 720 seconds for instrumented execution inside its
 Before and after collection, installed Python modules must match the canonical
 checkout byte-for-byte and have the exact expected inventory. The wheel's
 generated runtime modules map to the canonical library resources declared by
-`standalone_build.py`, not nonexistent source mirrors. The collector reads that
-literal resource mapping without importing build-time setuptools, and still
+`standalone_build.py`, not nonexistent source mirrors. Declared companion
+modules in the component's `setup.py` also map to their canonical source
+libraries; revision verification covers those libraries as build inputs.
+The collector reads the literal runtime mapping and bounded companion path
+declarations without executing setup or importing build-time setuptools, and still
 rejects missing, extra, changed or ambiguously named modules. Only verified
 installed paths receive repository line coordinates.
 Each manifest also binds the source digest. The ordinary child tracer recompiles

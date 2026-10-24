@@ -69,9 +69,58 @@ def verify_revision(repo: Path, measured_commit: str) -> None:
     """Coverage inputs must really be the named commit, not a modified checkout."""
     if _git(["rev-parse", "HEAD"], cwd=repo).strip() != measured_commit:
         raise ValueError("measured_commit must be this checkout's exact HEAD")
-    inputs = [COMPONENT, "libs/versioned-runtime"]
+    resources = runtime_resource_mapping(repo)
+    inputs = sorted({
+        COMPONENT, "libs/versioned-runtime",
+        *(Path(*path.relative_to(repo).parts[:2]).as_posix() for path in resources.values()),
+    })
     if _git(["status", "--porcelain", "--untracked-files=all", "--", *inputs], cwd=repo).strip():
         raise ValueError("standalone source/build/test inputs differ from measured_commit")
+
+
+def _companion_resource_mapping(repo: Path, canonical: Path) -> dict[str, Path]:
+    tree = ast.parse((repo / COMPONENT / "setup.py").read_text(encoding="utf-8"))
+    bindings = [node.value for node in ast.walk(tree)
+                if isinstance(node, ast.keyword) and node.arg == "companion_resources"]
+    if not bindings:
+        return {}
+    if len(bindings) != 1 or not isinstance(bindings[0], ast.Name):
+        raise ValueError("expected one named companion resource declaration")
+    declarations = [
+        node.value for node in tree.body if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == bindings[0].id for target in node.targets)
+    ]
+    if len(declarations) != 1 or not isinstance(declarations[0], ast.Dict):
+        raise ValueError("expected one literal companion resource declaration")
+    declaration = declarations[0]
+    result = {}
+    for key, value in zip(declaration.keys, declaration.values):
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+            raise ValueError("invalid companion resource name")
+        name = key.value
+        if (not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*\.py", name)
+                or name.lower() in {key.lower() for key in result}):
+            raise ValueError("invalid or ambiguous companion resource name")
+        if (not isinstance(value, ast.IfExp)
+                or not isinstance(value.test, ast.Name) or value.test.id != "canonical"
+                or not isinstance(value.orelse, ast.Constant) or value.orelse.value is not None):
+            raise ValueError("unsupported companion resource source declaration")
+        path, parts = value.body, []
+        while isinstance(path, ast.BinOp) and isinstance(path.op, ast.Div):
+            part = path.right
+            if (not isinstance(part, ast.Constant) or not isinstance(part.value, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]+", part.value) or part.value in {".", ".."}):
+                raise ValueError("unsafe companion resource source path")
+            parts.append(part.value)
+            path = path.left
+        if (not parts or not isinstance(path, ast.Attribute) or path.attr != "parent"
+                or not isinstance(path.value, ast.Name) or path.value.id != "canonical"):
+            raise ValueError("unsupported companion resource source root")
+        source = canonical.parent.joinpath(*reversed(parts))
+        if source.suffix != ".py" or not source.is_relative_to(repo):
+            raise ValueError("unsafe companion resource source path")
+        result[name] = source
+    return result
 
 
 def runtime_resource_mapping(repo: Path) -> dict[str, Path]:
@@ -90,7 +139,11 @@ def runtime_resource_mapping(repo: Path) -> dict[str, Path]:
         for pair in resources.items() for value in pair
     ) or len(set(resources.values())) != len(resources):
         raise ValueError("invalid or ambiguous runtime resource declaration")
-    return {destination: root / name for name, destination in resources.items()}
+    mapping = {destination: root / name for name, destination in resources.items()}
+    companions = _companion_resource_mapping(repo, root)
+    if {name.lower() for name in mapping} & {name.lower() for name in companions}:
+        raise ValueError("ambiguous runtime and companion resource destinations")
+    return {**mapping, **companions}
 
 
 def verified_source_mapping(

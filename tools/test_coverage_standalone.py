@@ -94,6 +94,114 @@ class TestStandaloneCoverage:
         with pytest.raises(ValueError, match="source differs"):
             standalone.verified_source_mapping(repo, installed, environment)
 
+    def _companions(self, repo, installed):
+        resources = {
+            "_runtime_launcher.py": "libs/installer-engine/runtime_launcher.py",
+            "_installer_process.py": "libs/installer-engine/installer_engine_process.py",
+            "_construction_procutil.py": "libs/agent-procutil/src/agent_procutil/__init__.py",
+        }
+        entries = []
+        for destination, relative in resources.items():
+            canonical = repo / relative
+            canonical.parent.mkdir(parents=True, exist_ok=True)
+            canonical.write_text("RESOURCE = " + repr(relative) + "\n")
+            (installed / destination).write_bytes(canonical.read_bytes())
+            expression = "canonical.parent" + "".join(
+                " / " + repr(part) for part in Path(relative).parts[1:])
+            entries.append(repr(destination) + ": (" + expression + " if canonical else None)")
+        (repo / "fleet-manager/setup.py").write_text(
+            "companions = {" + ", ".join(entries) + "}\n"
+            "commands(companion_resources=companions)\n",
+        )
+        return resources
+
+    def test_declared_companions_are_mapped_and_byte_verified(self, tmp_path):
+        repo, environment, installed = self._sources(tmp_path)
+        resources = self._companions(repo, installed)
+        mapping, hashes = standalone.verified_source_mapping(repo, installed, environment)
+        for destination, relative in resources.items():
+            assert mapping[str((installed / destination).resolve())] == relative
+            assert hashes[relative] == hashlib.sha256((repo / relative).read_bytes()).hexdigest()
+        (installed / "_runtime_launcher.py").write_text("changed = True\n")
+        with pytest.raises(ValueError, match="source differs"):
+            standalone.verified_source_mapping(repo, installed, environment)
+        (installed / "_runtime_launcher.py").unlink()
+        with pytest.raises(ValueError, match="inventories differ"):
+            standalone.verified_source_mapping(repo, installed, environment)
+
+    @pytest.mark.parametrize("library", ["libs/installer-engine", "libs/agent-procutil"])
+    def test_revision_verification_covers_declared_companion_libraries(self, tmp_path, monkeypatch, library):
+        repo, _, installed = self._sources(tmp_path)
+        self._companions(repo, installed)
+        source = "a" * 40
+        calls = []
+
+        def git(arguments, **kwargs):
+            assert kwargs["cwd"] == repo
+            calls.append(arguments)
+            if arguments == ["rev-parse", "HEAD"]:
+                return source
+            assert {"fleet-manager", "libs/versioned-runtime", library} <= set(arguments)
+            return " M " + library + "/changed.py\n"
+
+        monkeypatch.setattr(standalone, "_git", git)
+        with pytest.raises(ValueError, match="inputs differ"):
+            standalone.verify_revision(repo, source)
+        assert len(calls) == 2
+
+    @pytest.mark.parametrize("declaration", [
+        "{'../escape.py': canonical.parent / 'safe.py' if canonical else None}",
+        "{'ok.py': canonical.parent / '..' / 'escape.py' if canonical else None}",
+        "{'ok.py': canonical.parent / '/escape.py' if canonical else None}",
+        "{'ok.py': canonical.parent / 'safe.py'}",
+        "{'ok.py': canonical.parent / 'safe.py' if canonical else 'fallback.py'}",
+        "{'ok.py': unknown.parent / 'safe.py' if canonical else None}",
+        "{'ok.py': canonical.parent / 'safe.txt' if canonical else None}",
+        "{'same.py': canonical.parent / 'a.py' if canonical else None,"
+        "'SAME.py': canonical.parent / 'b.py' if canonical else None}",
+        "{'_versioned_runtime.py': canonical.parent / 'other.py' if canonical else None}",
+        "{**unknown}",
+    ])
+    def test_unsafe_or_ambiguous_companion_declarations_are_refused(self, tmp_path, declaration):
+        repo, _, _ = self._sources(tmp_path)
+        (repo / "fleet-manager/setup.py").write_text(
+            "companions = " + declaration + "\ncommands(companion_resources=companions)\n",
+        )
+        with pytest.raises(ValueError, match="companion|ambiguous runtime"):
+            standalone.runtime_resource_mapping(repo)
+
+    def test_complete_actual_build_inventory_matches_verified_canonical_mapping(self, tmp_path, monkeypatch):
+        import runpy
+        import setuptools
+        from setuptools import Distribution
+
+        repo = Path(__file__).resolve().parents[1]
+        project = repo / "fleet-manager"
+        captured = {}
+        monkeypatch.setattr(setuptools, "setup", lambda **kwargs: captured.update(kwargs))
+        runpy.run_path(str(project / "setup.py"))
+        distribution = Distribution({
+            "name": "fleet-manager", "packages": ["fleet_manager"],
+            "package_dir": {"fleet_manager": str(repo / standalone.SOURCE)},
+        })
+        distribution.script_name = str(project / "setup.py")
+        command = captured["cmdclass"]["build_py"](distribution)
+        command.ensure_finalized()
+        environment = tmp_path / "environment"
+        command.build_lib = str(environment / "site-packages")
+        command.compile = False
+        command.run()
+        installed = Path(command.build_lib) / "fleet_manager"
+        mapping, hashes = standalone.verified_source_mapping(repo, installed, environment)
+        for destination, relative in {
+            "_runtime_launcher.py": "libs/installer-engine/runtime_launcher.py",
+            "_installer_process.py": "libs/installer-engine/installer_engine_process.py",
+            "_construction_procutil.py": "libs/agent-procutil/src/agent_procutil/__init__.py",
+        }.items():
+            assert mapping[str((installed / destination).resolve())] == relative
+            assert hashes[relative] == hashlib.sha256((repo / relative).read_bytes()).hexdigest()
+        assert len(mapping) == len(list(installed.rglob("*.py")))
+
     @pytest.mark.parametrize("resources", [
         {"../foreign.py": "owned.py"}, {"owned.py": "../foreign.py"},
         {"first.py": "same.py", "second.py": "same.py"}, {},
@@ -123,12 +231,13 @@ class TestStandaloneCoverage:
     def test_measured_revision_cannot_name_another_or_dirty_source(
         self, tmp_path, monkeypatch, head, dirty,
     ):
+        repo, _, _ = self._sources(tmp_path)
         monkeypatch.setattr(
             standalone, "_git",
             lambda argv, **kwargs: head if argv[0] == "rev-parse" else dirty,
         )
         with pytest.raises(ValueError):
-            standalone.verify_revision(tmp_path, "abc")
+            standalone.verify_revision(repo, "abc")
 
     def _result(self):
         return {
