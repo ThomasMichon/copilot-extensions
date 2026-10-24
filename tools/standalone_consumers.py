@@ -7,7 +7,7 @@ from pathlib import Path
 
 STANDALONE_CONSUMERS = (
     "worktree-manager", "services/index", "fleet-manager", "services/dispatch",
-    "services/chat", "services/pr",
+    "services/chat", "services/pr", "services/ssh",
 )
 
 
@@ -16,9 +16,9 @@ def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Pa
     if component not in STANDALONE_CONSUMERS:
         raise ValueError(f"unknown standalone component: {component}")
     resources = (source_root / "libs" / "versioned-runtime",)
-    if component in {"fleet-manager", "services/pr", "services/chat"}:
+    if component in {"fleet-manager", "services/pr", "services/chat", "services/ssh"}:
         resources += (source_root / "libs" / "installer-engine",)
-    if component in {"fleet-manager", "services/pr"}:
+    if component in {"fleet-manager", "services/pr", "services/ssh"}:
         resources += (source_root / "libs" / "agent-procutil" / "src" / "agent_procutil",)
     return resources
 
