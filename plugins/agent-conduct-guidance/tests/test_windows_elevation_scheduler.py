@@ -7,6 +7,7 @@ from ctypes import wintypes
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import warnings
@@ -15,7 +16,7 @@ import pytest
 
 from test_windows_elevation import INVOKE, PWSH, SKILL, desktop_binding_verified, quote, run_ps
 
-pytestmark = pytest.mark.skipif(
+interactive_desktop = pytest.mark.skipif(
     os.name != "nt" or not PWSH
     or os.environ.get("AGENT_CONDUCT_TEST_INTERACTIVE_ELEVATION") != "1",
     reason="Explicit same-user interactive Windows desktop opt-in required",
@@ -69,6 +70,64 @@ def desktop_identity():
     return f"{session.value}|{names[0]}|{names[1]}"
 
 
+def observe_desktop(stop, ready, observations, identities, errors):
+    try:
+        identities.append(desktop_identity())
+        observations.append(snapshot_windows())
+        ready.set()
+        while not stop.wait(.02):
+            observations.append(snapshot_windows())
+    except Exception as error:
+        errors.append(error)
+
+
+def require_working_observer(errors):
+    if errors:
+        raise AssertionError("Desktop observer failed; window and focus qualification is unavailable") from errors[0]
+
+
+@pytest.mark.parametrize("successful_snapshots", [0, 1])
+def test_observer_failure_cannot_qualify_empty_or_partial_observations(monkeypatch, successful_snapshots):
+    stop, ready = threading.Event(), threading.Event()
+    observations, identities, errors = [], [], []
+    failure = OSError("synthetic desktop observation failure")
+
+    def snapshot():
+        if len(observations) == successful_snapshots:
+            raise failure
+        return {1: "synthetic-window"}, 1
+
+    monkeypatch.setattr(sys.modules[__name__], "desktop_identity", lambda: "1|station|desktop")
+    monkeypatch.setattr(sys.modules[__name__], "snapshot_windows", snapshot)
+    watcher = threading.Thread(target=observe_desktop, args=(stop, ready, observations, identities, errors))
+    watcher.start()
+    watcher.join(timeout=2)
+    assert not watcher.is_alive()
+    assert ready.is_set() is bool(successful_snapshots)
+    assert len(observations) == successful_snapshots
+    with pytest.raises(AssertionError, match="Desktop observer failed") as raised:
+        require_working_observer(errors)
+    assert raised.value.__cause__ is failure
+
+
+def test_observer_takes_first_snapshot_before_signaling_ready(monkeypatch):
+    stop, ready = threading.Event(), threading.Event()
+    observations, identities, errors = [], [], []
+
+    def snapshot():
+        assert not ready.is_set()
+        stop.set()
+        return {1: "synthetic-window"}, 1
+
+    monkeypatch.setattr(sys.modules[__name__], "desktop_identity", lambda: "1|station|desktop")
+    monkeypatch.setattr(sys.modules[__name__], "snapshot_windows", snapshot)
+    observe_desktop(stop, ready, observations, identities, errors)
+    require_working_observer(errors)
+    assert ready.is_set()
+    assert observations == [({1: "synthetic-window"}, 1)]
+    assert identities == ["1|station|desktop"]
+
+
 @pytest.fixture
 def clean_probe_tasks(tmp_path):
     yield
@@ -113,6 +172,7 @@ def private_directory(tmp_path):
     return path
 
 
+@interactive_desktop
 @pytest.mark.parametrize("cycle", [1, 2])
 def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_directory, clean_probe_tasks, cycle):
     log = private_directory / f"interactive-{cycle}.log"
@@ -122,18 +182,15 @@ def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_dire
     ready = threading.Event()
     observations = []
     observer_desktop = []
-
-    def observe():
-        observer_desktop.append(desktop_identity())
-        ready.set()
-        while not stop.is_set():
-            observations.append(snapshot_windows())
-            stop.wait(.02)
-
-    watcher = threading.Thread(target=observe)
+    observer_errors = []
+    watcher = threading.Thread(
+        target=observe_desktop, args=(stop, ready, observations, observer_desktop, observer_errors),
+    )
     watcher.start()
     try:
-        assert ready.wait(2), "Desktop observer did not start"
+        initialized = ready.wait(2)
+        require_working_observer(observer_errors)
+        assert initialized, "Desktop observer did not start"
         result = subprocess.run(
             [
                 PWSH, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(INVOKE),
@@ -152,6 +209,8 @@ def test_interactive_probe_has_real_terminal_cleanup_and_no_console(private_dire
         stop.set()
         watcher.join(timeout=2)
     assert not watcher.is_alive()
+    require_working_observer(observer_errors)
+    assert observations, "Desktop observer collected no snapshots"
     assert result.returncode == 0, result.stdout + result.stderr
     rows = log.read_text(encoding="utf-8").splitlines()
     terminal = json.loads(rows[-1].removeprefix("AGENT_ELEVATION_END "))

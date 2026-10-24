@@ -1775,6 +1775,9 @@ Window qualification first requires the baseline and watcher thread to match
 the worker's recorded session, window station and desktop. An unbound observer
 explicitly reports both window and focus observation unavailable; a nonempty
 `EnumWindows` result alone is not qualification for the selected desktop.
+The watcher takes its first snapshot before signaling readiness and propagates
+startup or later observation failures to the test. Its three synthetic observer
+controls run without desktop opt-in; empty or truncated observations cannot pass.
 Foreground qualification additionally requires a non-null observable foreground window.
 A headless caller can enumerate visible windows yet receive a null foreground
 even when the operator confirms an unlocked desktop. Such a run emits an
