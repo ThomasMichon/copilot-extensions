@@ -66,6 +66,9 @@ def main():
         raise ValueError("an actual full source commit is required")
     if evidence.integer_constant_at(commit, PREFIX + "protocol.py", "HTTP_PROTOCOL_VERSION") != 46:
         raise ValueError("selected source is not HTTP-46")
+    if args.write:
+        from agent_bridge_contract_publication import recover_pending_links
+        recover_pending_links(ROOT, commit)
     snapshot = registry_codec.load(ROOT)
     registry = copy.deepcopy(snapshot.materialized)
     http = next(row for row in registry["contracts"] if row["id"] == "agent-bridge.http-wire")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -9,6 +11,8 @@ import pytest
 
 import prepare_bridge_contract_evidence as preparation
 import agent_bridge_contract_registry as codec
+import bridge_http47_evidence as evidence
+import bridge_http47_validation as validation
 
 COMMIT = "1" * 40
 REMOTE = "https://github.com/example/repository.git"
@@ -180,3 +184,155 @@ def test_ci_prepares_checkpoint_before_local_only_contract_validation():
         "run: python tools/check-agent-bridge-contracts.py",
     )
     assert '${{ github.server_url }}/${{ github.repository }}.git' in source
+
+
+def _published_orphaned_closure(root, monkeypatch, *, chunked):
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    subprocess.run(
+        ["git", "init", str(root)], capture_output=True, check=True, timeout=10,
+        env=evidence.git_evidence.clean_git_environment(), **options,
+    )
+    monkeypatch.setattr(evidence.git_evidence, "REPO", root)
+    monkeypatch.setattr(evidence.git_evidence, "git", evidence.git_evidence.git.__wrapped__)
+    monkeypatch.setattr(evidence.git_evidence, "_OBJECT_TYPES", {})
+    monkeypatch.setattr(evidence.git_evidence, "_BLOB_HASHES", {})
+    monkeypatch.setattr(evidence, "AFFECTED", (evidence.PREFIX + "protocol.py",))
+    monkeypatch.setattr(evidence, "TESTS", ())
+
+    def write(path, data):
+        target = root / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+    rows = [{"commit": COMMIT, "detail": "x" * (96 << 10)} for _ in range(8)]
+    contract = {
+        "id": "agent-bridge.http-wire",
+        "source_paths": [{
+            "path": evidence.AFFECTED[0], "sha256": "", "semantic": True,
+        }],
+        "provenance": rows,
+    }
+    original = {"schema_version": 1, "contracts": [contract], "deferred_contracts": []}
+    if chunked:
+        chunk = codec.encode({
+            "schema": codec.CHUNK_SCHEMA, "schema_version": 1,
+            "contract": contract["id"], "record_offset": 0,
+            "provenance": [{"commit": COMMIT}],
+        })
+        sha256 = codec.digest(chunk)
+        path = f"{codec.PROVENANCE}{contract['id']}/{sha256}.json"
+        write(path, chunk)
+        original["schema_version"] = 2
+        contract["provenance_chunks"] = [{
+            "contract": contract["id"], "path": path,
+            "sha256": sha256, "record_count": 1,
+        }]
+    write(codec.REGISTRY, codec.encode(original))
+    snapshot = codec.load(root)
+    write("tools/probe.py", b"VALUE = 1\n")
+    paths = evidence.proof_paths(
+        root, snapshot.materialized, metadata_paths=set(snapshot.inputs) - {codec.REGISTRY},
+    )
+    for path in paths - set(snapshot.inputs) - {"tools/probe.py"}:
+        write(path, b"fixture\n")
+    proof = {}
+    for path in paths:
+        data = (root / path).read_bytes()
+        proof[path] = {
+            "blob": hashlib.sha1(
+                b"blob " + str(len(data)).encode() + b"\0" + data, usedforsecurity=False,
+            ).hexdigest(),
+            "sha256": evidence.digest(data),
+        }
+    packet = {
+        "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
+        "execution_closure": proof,
+        "execution_closure_sha256": evidence.digest(evidence.encode(proof)),
+        "captured_from": {
+            "commit": COMMIT, "source_path": evidence.AFFECTED[0],
+            "source_git_blob": proof[evidence.AFFECTED[0]]["blob"],
+            "source_sha256": proof[evidence.AFFECTED[0]]["sha256"],
+        },
+    }
+    updated = copy.deepcopy(snapshot.materialized)
+    updated["contracts"][0]["provenance"].extend(rows[:4])
+    updated["contracts"][0]["source_paths"][0]["sha256"] = proof[
+        evidence.AFFECTED[0]
+    ]["sha256"]
+    assert len(codec.encode(updated)) > codec.MAX_ARTIFACT_BYTES
+    for path, data in codec.plan(root, snapshot, updated).items():
+        write(path, data)
+    published = codec.load(root)
+    assert set(snapshot.inputs) < set(published.inputs)
+    assert preparation._run(root, "cat-file", "-e", f"{COMMIT}^{{commit}}").returncode != 0
+    return packet, published
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["inline-conversion", "new-chunks"])
+def test_orphaned_closure_uses_captured_metadata_before_size_triggered_publication(
+    tmp_path, monkeypatch, chunked,
+):
+    packet, published = _published_orphaned_closure(tmp_path, monkeypatch, chunked=chunked)
+    validation.validate_closure(tmp_path, packet, published.materialized)
+
+
+@pytest.mark.parametrize("fault,diagnostic", [
+    ("missing-source", "inventory is unprovable"),
+    ("extra-source", "inventory is unprovable"),
+    ("extra-chunk", "inventory is unprovable"),
+    ("chunk-prefix-gap", "inventory is unprovable"),
+    ("invalid-identity", "invalid identity"),
+    ("chunk-digest", "content mismatch"),
+    ("chunk-blob", "blob is unprovable"),
+    ("source-digest", "content mismatch"),
+    ("source-blob", "blob is unprovable"),
+    ("malformed-index", "invalid provenance chunk identity"),
+    ("chunk-bytes", "hash mismatch"),
+    ("missing-chunk", "captured chunk unavailable"),
+])
+def test_orphaned_closure_publication_preserves_fail_closed_inventory(
+    tmp_path, monkeypatch, fault, diagnostic,
+):
+    packet, published = _published_orphaned_closure(tmp_path, monkeypatch, chunked=True)
+    proof = packet["execution_closure"]
+    chunks = set(published.inputs) - {codec.REGISTRY}
+    captured_chunk = next(path for path in proof if path in chunks)
+    if fault == "missing-source":
+        proof.pop("tools/probe.py")
+    elif fault == "extra-source":
+        proof["tools/not-captured.py"] = proof["tools/probe.py"].copy()
+    elif fault == "extra-chunk":
+        proof[f"{codec.PROVENANCE}unknown/{'f' * 64}.json"] = proof[captured_chunk].copy()
+    elif fault == "chunk-prefix-gap":
+        proof.pop(captured_chunk)
+        later = published.index["contracts"][0]["provenance_chunks"][1]["path"]
+        data = published.inputs[later]
+        proof[later] = {
+            "blob": hashlib.sha1(
+                b"blob " + str(len(data)).encode() + b"\0" + data, usedforsecurity=False,
+            ).hexdigest(),
+            "sha256": evidence.digest(data),
+        }
+    elif fault == "invalid-identity":
+        proof[captured_chunk].pop("sha256")
+    elif fault.endswith("-digest"):
+        path = captured_chunk if fault.startswith("chunk") else "tools/probe.py"
+        proof[path]["sha256"] = "f" * 64
+    elif fault.endswith("-blob"):
+        path = captured_chunk if fault.startswith("chunk") else "tools/probe.py"
+        proof[path]["blob"] = "f" * 40
+    elif fault == "malformed-index":
+        published.index["contracts"][0]["provenance_chunks"][0]["path"] = "../outside.json"
+        (tmp_path / codec.REGISTRY).write_bytes(codec.encode(published.index))
+    elif fault in {"missing-chunk", "chunk-bytes"}:
+        def read(root, path):
+            if path == captured_chunk:
+                if fault == "missing-chunk":
+                    raise FileNotFoundError("captured chunk unavailable")
+                return published.inputs[path] + b" "
+            return published.inputs[path]
+
+        monkeypatch.setattr(codec, "read_file", read)
+    packet["execution_closure_sha256"] = evidence.digest(evidence.encode(proof))
+    with pytest.raises((ValueError, FileNotFoundError), match=diagnostic):
+        validation.validate_closure(tmp_path, packet, published.materialized)

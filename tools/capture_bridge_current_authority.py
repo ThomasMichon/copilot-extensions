@@ -326,6 +326,9 @@ def main() -> int:
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
     try:
+        if args.write:
+            from agent_bridge_contract_publication import recover_pending_links
+            recover_pending_links(REPO, args.source_commit)
         output = capture(args.source_commit)
         def validate() -> None:
             paths = output_paths(output)

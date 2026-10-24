@@ -135,6 +135,9 @@ def run_probes(root: Path, proof: dict, expected: dict) -> dict:
 
 
 def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]:
+    if write:
+        from agent_bridge_contract_publication import recover_pending_links
+        recover_pending_links(root, commit)
     original = evidence.baseline(root, commit)
     before = evidence.source_snapshot(root, commit, original)
     expected = expected_input(root)

@@ -19,7 +19,7 @@ def _run(root: Path, *arguments: str, timeout: int = 10) -> subprocess.Completed
     return subprocess.run(
         ["git", "--no-replace-objects", "-C", str(root),
          "-c", "protocol.file.allow=never", "-c", "protocol.ext.allow=never", *arguments],
-        capture_output=True, text=True, check=False, timeout=timeout,
+        capture_output=True, text=True, encoding="utf-8", check=False, timeout=timeout,
         env=clean_git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )

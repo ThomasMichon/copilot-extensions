@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; DB foundation merged, inbox source in review; provenance source committed and qualification in progress, full Phase 1 open
+- **Status:** Active; DB foundation merged, inbox source in review; provenance review repairs qualified, fresh capture and review pending, full Phase 1 open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -194,6 +194,21 @@ The later [provenance layout](provenance-layout.md) cleared normal review in
 Its source implementation and qualification remain open.
 
 ## Journal
+
+### 2026-10-23 - Tighten provenance publication and capture recovery
+- Initial source review identified output-consistency, interrupted journal and
+  hardlink recovery, captured-inventory and host-code-page defects. The source
+  repair requires exact preceding outputs before registry commit, atomically
+  stages journal files, recovers only the source-bound staging alias pair under
+  the existing lock, and preserves captured rather than post-publication
+  metadata inventory. Git metadata readers explicitly decode UTF-8.
+- The bounded Linux capture/publication cohort passed 121 cases with two
+  capability skips; 84 preparation, canonical-checker and real Git-encoding
+  controls passed separately. An earlier oversized selection hit its nested
+  wall-clock limit without an assertion result; it is not counted as a pass.
+- Fresh committed-source capture/no-write reproduction and a subsequent passing
+  current-head review remain required. No runtime, installer, live lane or
+  adoption effect is authorized by this source repair.
 
 ### 2026-10-23 - Provenance contract merged; source implementation next
 - #8420 merged to `dev` as `a9b307b165a8ef14a305ecf0136250572f36aa2c`,

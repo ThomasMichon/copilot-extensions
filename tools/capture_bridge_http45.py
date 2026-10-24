@@ -62,6 +62,9 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.source_commit):
         raise ValueError("capture requires an actual full source commit")
+    if args.write:
+        from agent_bridge_contract_publication import recover_pending_links
+        recover_pending_links(ROOT, args.source_commit)
     snapshot = registry_codec.load(ROOT)
     registry = copy.deepcopy(snapshot.materialized)
     http = registry["contracts"][0]

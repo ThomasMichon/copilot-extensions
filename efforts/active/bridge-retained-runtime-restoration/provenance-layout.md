@@ -171,3 +171,15 @@ the normal managed source push before capture. Additional actual HTTP-45 and
 preference-authority entry-point controls consume both inline and chunked
 history, retaining their real admission/refusal and complete-history assertions.
 Final integration review and the remaining capture-owner closure remain open.
+
+Review follow-up tightens the publication boundary: each already-published
+output must equal its planned bytes before registry replacement, journal files
+stage completely before atomic publication, and explicit capture writes recover
+only an exact journal-owned interrupted hardlink pair under the kernel lock.
+Unrelated aliases still refuse. Orphaned-checkpoint closure binds the captured
+metadata prefix rather than later publication chunks, and committed metadata
+uses explicit UTF-8 decoding. Focused controls cover reverted/removed outputs,
+partial old/new/manifest staging, owned versus foreign aliases, size-triggered
+conversion with unavailable source checkpoints, and real non-ASCII Git blobs
+under a simulated legacy host code page. The updated source still owes fresh
+committed-source reproduction and a passing current-head review.

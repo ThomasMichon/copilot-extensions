@@ -29,10 +29,24 @@ Capture publication uses one stable kernel lock and an ignored
 Immutable chunks publish without replacing an existing path; the registry
 publishes last. Each target is checked before publication, and the complete
 input history is rechecked immediately before the registry commit. A failed
-publication retains its journal rather than claiming success. Repeating the
+publication retains its journal rather than claiming success. Every preceding
+output must match its planned bytes exactly before the index can publish;
+restoring an old fixture or removing a new one is not an acceptable final state.
+Journal files are flushed at temporary names before atomic publication, so an
+interrupted staging write cannot masquerade as a completed recovery artifact.
+Repeating the
 identical source/byte plan may resume after the capture's own validation;
 changed inputs or another plan refuse and require explicit recovery. Reading
 and no-write validation never perform that recovery or retire old chunks.
+Explicit capture writes recover an interrupted chunk hardlink under the same
+lock before planning: only the exact two-link, content-addressed pair named by
+the source-bound journal may lose its staging link. Foreign or extra aliases
+remain errors. Source-closure fallback uses the captured metadata prefix, not
+chunks that publication appended afterward. Git metadata text is decoded as
+UTF-8 independently of the host's default code page.
+When the checkpoint is unavailable, that fallback retains the checker's
+existing reviewed packet/fixture-hash trust boundary; recomputing a closure
+digest alone does not authenticate historical inventory.
 This source-evidence mechanism grants no runtime or deployment authority.
 
 ## Updating a contract
