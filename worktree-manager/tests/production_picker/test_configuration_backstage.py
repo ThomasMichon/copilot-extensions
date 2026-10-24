@@ -386,6 +386,10 @@ def test_workers_catalog_picker_instance_round_trip(tmp_path, monkeypatch):
     dispatch_python = os.environ.get("WORKERS_CONFIG_TEST_PYTHON")
     if not dispatch_python:
         pytest.skip("set WORKERS_CONFIG_TEST_PYTHON for the cross-distribution lane")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     root = Path(__file__).resolve().parents[3]
     source = root / "plugins" / "agent-dispatch" / "src"
     manifest_path = root / "plugins" / "agent-dispatch" / "pivots" / "workers-config.json"
@@ -413,6 +417,7 @@ def test_workers_catalog_picker_instance_round_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(tmp_path / "overrides.json"))
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "fixture-host")
 
     async def run():
         app = PickerApp(_fixture_source(), live=False)

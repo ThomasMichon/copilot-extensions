@@ -29,8 +29,10 @@ def run_list(runtime, machine: object, generation: object = None) -> None:
         return
     state, rows, error, summary = runtime._exec_list(ctx)
     with runtime._lock:
-        runtime._inflight.discard(machine)
-        if generation is not None and generation != runtime._gen:
+        if not runtime._generation_matches(machine, generation):
             return
+        runtime._inflight.discard(machine)
+        if state == "error" and not rows:
+            rows = runtime._cache.get(machine, ("idle", [], ""))[1]
         runtime._cache[machine] = (state, rows, error)
         runtime._summaries[machine] = summary

@@ -38,6 +38,36 @@ Every new manifest declares:
 }
 ```
 
+### Read scope and failure semantics
+
+A machine-selecting list declares `{machine}` in its literal argv template.
+On **All**, Manager queries each admitted canonical machine identity without
+requiring a successful Worktrees read or a prior tab visit. Logical identities
+are deduplicated, not inferred from physical/display names. Startup fanout is
+bounded to four; a held subscription releases its startup slot after a row or
+completed empty snapshot is committed. Account/global contributions, and list
+commands without a machine selector, run once in their declared provider
+scope. Manager does not manufacture SSH targets, open tunnels, or inject
+unsupported flags to simulate another execution space.
+
+Aggregated rows carry Manager-owned source attribution, displayed in the list
+and row-action header. A contributed `{machine}` action token resolves to that
+row's admitted read scope, not whichever machine tab is selected later.
+Providers retain responsibility for their declared command's routing,
+revalidation, resource custody and confirmation requirements.
+
+Pending and failed scopes remain explicit beside available/cached rows.
+Errors do not become empty successful inventories; cached failed rows cannot
+run executable actions before a fresh read (read-only card inspection remains
+available). Refresh targets the current provider/scope cache. Worker/parser
+failures settle terminally, without a render-driven retry loop.
+
+One-shot reads have a 20-second execution budget, separate stdout/stderr limits
+(8 MiB / 256 KiB), and caller-owned descendant cleanup. Streams use the existing
+30-second initial-read budget, including held subscriptions until their first
+commit; protocol `begin` is not a commit. A timeout identifies the operation,
+budget and retry path rather than truncating a long argv ahead of the reason.
+
 Version-1 compatibility also covers the existing declarative fields:
 
 - `columns`, `summary`, `scope`, `stream`, and `subscribe`;

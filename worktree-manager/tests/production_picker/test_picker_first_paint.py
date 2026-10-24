@@ -618,7 +618,7 @@ def test_post_refresh_callback_starts_on_worker(monkeypatch):
     screen._after_first_refresh()
 
     assert calls[0][0] == "thread"
-    assert calls[0][1]["name"] == "picker-after-first-refresh"
+    assert calls[0][1]["name"] == "pivot-action:Automatic maintenance"
     assert calls[1][0] == "callback"
 
 

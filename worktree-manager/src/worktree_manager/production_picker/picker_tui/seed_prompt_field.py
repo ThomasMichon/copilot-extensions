@@ -10,17 +10,20 @@ from .field_widgets import _AutoExpandTextArea
 
 
 class SeedPromptField(_AutoExpandTextArea):
-    def __init__(self) -> None:
+    def __init__(self, *, history_on_mount=True) -> None:
         super().__init__(id="q-0")
         self.seed_store: SeedHistory | None = None
         self.seed_cursor = HistoryCursor([])
+        self._history_on_mount = history_on_mount
 
     def on_mount(self) -> None:
         super().on_mount()
-        self.seed_store = SeedHistory(context.project())
+        if not self._history_on_mount:
+            return
         try:
+            self.seed_store = SeedHistory(context.project())
             self.seed_cursor = HistoryCursor(self.seed_store.entries())
-        except SeedHistoryError as exc:
+        except (SeedHistoryError, RuntimeError) as exc:
             self.notify(str(exc), severity="error")
 
     def refusal(
@@ -38,6 +41,8 @@ class SeedPromptField(_AutoExpandTextArea):
     def remember(
         self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
     ) -> bool:
+        if not self.text.strip():
+            return True
         reason = self.refusal(options=options, refusal_reason=refusal_reason)
         if reason:
             self.notify(reason, severity="error")
@@ -47,7 +52,7 @@ class SeedPromptField(_AutoExpandTextArea):
             if self.seed_store is None:
                 self.seed_store = SeedHistory(context.project())
             self.seed_store.remember(self.text)
-        except SeedHistoryError as exc:
+        except (SeedHistoryError, RuntimeError) as exc:
             self.notify(str(exc), severity="error")
             self.focus()
             return False
@@ -74,6 +79,6 @@ class SeedPromptField(_AutoExpandTextArea):
         super().on_key(event)
 
 
-def compose_seed_prompt():
-    widget = SeedPromptField()
+def compose_seed_prompt(*, history_on_mount=True):
+    widget = SeedPromptField(history_on_mount=history_on_mount)
     return [widget], {"primary": widget}

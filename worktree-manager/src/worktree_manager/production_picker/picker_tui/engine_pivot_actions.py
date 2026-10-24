@@ -195,7 +195,10 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         ctx["title"] = rec.get(reg.title_field)
         wt = rec.get(reg.worktree_field) if reg.worktree_field else None
         ctx["worktree"] = wt or ""
-        ctx["machine"] = "" if reg.placement == "config" else self._pivot_machine_id() or ""
+        ctx["machine"] = "" if reg.placement == "config" else (
+            rec["_manager_scope"] if "_manager_scope" in rec
+            else self._pivot_machine_id() or ""
+        )
         # picker-venue-pivots Phase 3: the pivot's own `list` argv[0] is the
         # provider binstub name (e.g. "agent-codespaces"/"agent-containers"),
         # reused verbatim by the "open-venue" internal action so it never
@@ -253,6 +256,11 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         is dispatched in-process and does NOT invalidate the cache (#1425). A
         ``progress`` action (D4) streams into the modal ProgressScreen instead of
         the sync status-line path."""
+        if "_manager_scope" in rec and getattr(action, "card", None) is None:
+            state = self._pivot_runtime(reg).get(rec["_manager_scope"])[0]
+            if state != "ready":
+                self.debug = "Source read is not current; press r to retry before running this action."
+                return
         ctx = self._task_action_ctx(reg, rec)
         title = rec.get(reg.title_field) or rec.get(reg.id_field) or "task"
         if action.internal:

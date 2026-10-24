@@ -139,11 +139,11 @@ class PickerScreenLoadingMixin:
                 self._frame_health.start()
         callback = self._after_first_refresh_callback
         if callable(callback):
-            threading.Thread(
-                target=callback,
-                name="picker-after-first-refresh",
-                daemon=True,
-            ).start()
+            def report(result):
+                if result:
+                    self.notify(str(result), title="Automatic maintenance")
+
+            self._run_bg("Automatic maintenance", callback, report)
         if not self.live:
             return
         threading.Thread(

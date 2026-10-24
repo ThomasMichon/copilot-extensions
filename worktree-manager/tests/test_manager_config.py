@@ -69,6 +69,56 @@ def test_ahp_config_defaults_off(tmp_path):
     assert config.ahp.protocol_versions == ("0.7.0",)
 
 
+def test_maintenance_defaults_enabled_without_writing_config(tmp_path):
+    assert manager_config.load_config(tmp_path).maintenance.automatic is True
+    assert not source_config.config_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_maintenance_strict_boolean_and_source_preservation(tmp_path, enabled):
+    path = source_config.config_path(tmp_path)
+    body = f"[maintenance]\nautomatic = {str(enabled).lower()}\n"
+    path.write_text(body, encoding="utf-8")
+    assert manager_config.load_config(tmp_path).maintenance.automatic is enabled
+    source_config.set_source(ref="canary", root=tmp_path)
+    source_config.reset_source(root=tmp_path)
+    assert path.read_text(encoding="utf-8") == body
+
+
+@pytest.mark.parametrize("body", [
+    "maintenance = false",
+    "maintenance = []",
+    "[maintenance]\nautomatic = 0",
+    "[maintenance]\nautomatic = 'false'",
+    "[maintenance]\nautomatic = []",
+    "[maintenance]\nautomtaic = false",
+])
+def test_maintenance_rejects_invalid_or_unknown_settings(tmp_path, body):
+    source_config.config_path(tmp_path).write_text(body, encoding="utf-8")
+    with pytest.raises(manager_config.ManagerConfigError, match="maintenance"):
+        manager_config.load_config(tmp_path)
+
+
+def test_maintenance_admission_rereads_and_fails_closed(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    path = source_config.config_path(tmp_path)
+    assert manager_config.automatic_maintenance_enabled() is True
+    path.write_text("[maintenance]\nautomatic = false", encoding="utf-8")
+    assert manager_config.automatic_maintenance_enabled() is False
+    path.write_text("[maintenance]\nautomatic = true", encoding="utf-8")
+    assert manager_config.automatic_maintenance_enabled() is True
+    path.write_text("[maintenance]\nautomatic = 'false'", encoding="utf-8")
+    assert manager_config.automatic_maintenance_enabled() is False
+    assert "Automatic maintenance blocked" in caplog.text
+
+
+def test_maintenance_unreadable_config_blocks(tmp_path, monkeypatch, caplog):
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    source_config.config_path(tmp_path).mkdir()
+    assert manager_config.automatic_maintenance_enabled() is False
+    assert "could not read" in caplog.text
+
+
 def test_ahp_config_loads_general_provider_settings(tmp_path):
     source_config.config_path(tmp_path).write_text(
         """

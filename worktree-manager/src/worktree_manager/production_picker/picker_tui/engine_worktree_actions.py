@@ -11,7 +11,6 @@ from ... import picker_review
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
 from .controller_workspaces import target_row
 from .engine_live_screens import MsgViewScreen
-from .resume_prompt_actions import open_resume_prompt
 from .worktree_action_context import build_worktree_action_context
 from .command_transport import parse_action_json
 
@@ -52,7 +51,7 @@ class PickerScreenWorktreeActionsMixin:
           read file-first from ``bridge.lock`` (cwd=home, so invisible to the
           mux + cwd-keyed lock scans -- #1416). Without this, an
           ACTIVE-via-bridge worktree with no mux and no row-visible inuse lock
-          would fall through to Resume/Bare-resume -- which then FAIL because the
+          would fall through to Resume -- which then FAILS because the
           bridge Copilot already holds the session -- stranding the row.
           ``reclaim_one`` resolves the bridge.lock's owner pid (via
           :func:`reclaim.resolve_bridge_bound`) so this verb actually reaps it.
@@ -93,13 +92,13 @@ class PickerScreenWorktreeActionsMixin:
            when a head session is known, plus ``Reclaim`` as the lower-level
            fallback. Restore performs the platform remux prep and immediately
            resumes/attaches through the normal mux launcher.
-        4. **resumable** (¬M ∧ ¬bound ∧ H ∧ D) -> ``Resume`` + ``Bare resume``.
+        4. **resumable** (¬M ∧ ¬bound ∧ H ∧ D) -> ``Resume``.
         5. **sessionless** (¬M ∧ ¬bound ∧ ¬H ∧ D) -> ``Open`` (cold start).
            Refresh (always) also attempts to recover a *lost* head session so a
            falsely-sessionless worktree becomes resumable on the next paint.
         6. **gone** (¬D, no live mux/lock) -> cleanup verbs only.
 
-        Group exclusivity ({Open,Stop} ⊻ {Resume,Bare resume} ⊻ {Reclaim}) holds
+        Group exclusivity ({Open,Stop} ⊻ {Resume} ⊻ {Reclaim}) holds
         because M, (¬M ∧ bound), and (¬M ∧ ¬bound) partition every state.
 
         ``Refresh`` is ALWAYS appended -- the on-demand live gather + cache
@@ -142,13 +141,8 @@ class PickerScreenWorktreeActionsMixin:
             acts = []
         elif not rec.get("sessionless"):
             # A stopped worktree with prior history (not positively sessionless)
-            # -> Resume (relaunch + resume its last conversation). "Bare resume"
-            # (create the mux but launch Copilot in HOME with no --resume, then
-            # a manual ``/resume <id>``) is offered only when we have a concrete
-            # head-session id to hand the operator.
+            # -> Resume (relaunch + resume its last conversation).
             acts = ["Resume"]
-            if rec.get("last_session_id"):
-                acts.append("Bare resume")
         else:
             # Sessionless: cold-start Open (resuming nothing would silently
             # blank-start, #1026). A worktree that only *looks* sessionless
@@ -156,8 +150,6 @@ class PickerScreenWorktreeActionsMixin:
             acts = ["Open"]
         if rec.get("is_local", True) and ("Open" in acts or "Resume" in acts):
             acts.append("Launch in new window")
-        if "Resume" in acts:
-            acts.append("Resume prompt…")
         # Read-only "Messages" peek -- an auxiliary, non-lifecycle verb offered
         # for any worktree that could have a session to peek (not positively
         # sessionless) and is not in the inconsistent WARNING state. Independent
@@ -350,7 +342,14 @@ class PickerScreenWorktreeActionsMixin:
         worker_verbs, self._wt_submenu_workers = self._worker_menu_verbs(rec)
         acts.extend(worker_verbs)
         acts.append("View details")
-        return acts, ext
+        # Stable groups: launch, recovery, inspection/navigation, maintenance.
+        groups = {
+            "Open": 0, "Resume": 0, "Restore": 0, "Launch in new window": 0,
+            "Stop": 1, "Repair": 1, "Reclaim": 1, "Dispose hosted session": 1,
+            "Messages": 2, "Sessions": 2,
+            "Sync": 4, "Cleanup": 4, "Finalize": 4, "Refresh": 5, "View details": 6,
+        }
+        return sorted(acts, key=lambda action: groups.get(action, 3)), ext
     def _reciprocal_target_row(self, rec):
         """Return the one exact loaded controller target, if navigable."""
         return target_row(rec, self.data)
@@ -372,13 +371,14 @@ class PickerScreenWorktreeActionsMixin:
         direct legacy callers retain the engine-map fallback."""
         if result is None:
             return
-        cur, no_mux, ahp = result
+        cur, no_mux, ahp, *prompt = result
+        seed_prompt = prompt[0] if prompt else ""
         if cur not in {"View details", "Jump to host", "Jump to caller", "Go to controller"}:
             if picker_review.refuse(self):
                 return
         if (
             rec.get("managed_child")
-            and cur in ("Open", "Resume", "Bare resume", "Resume prompt…", "Launch in new window")
+            and cur in ("Open", "Resume", "Launch in new window")
             and cur not in self._session_action_verbs(rec)
         ):
             self.debug = "This workspace has no session here; navigate to its controller or Refresh."
@@ -402,7 +402,9 @@ class PickerScreenWorktreeActionsMixin:
             # #4043: No-Mux now rides Resume too (a stopped worktree can be
             # resumed without the mux wrapper for troubleshooting), not just
             # Open. no_mux is inert unless the toggle was flipped.
-            self._decide(self._resume_decision(rec, no_mux=no_mux, ahp=ahp))
+            self._decide(self._resume_decision(
+                rec, no_mux=no_mux, ahp=ahp, seed_prompt=seed_prompt,
+            ))
         elif cur == "Launch in new window":
             # Phase 9 (#5210): runs the row's ordinary resume decision with
             # LaunchRequest.new_window=True in-process, opening a brand-new
@@ -414,11 +416,6 @@ class PickerScreenWorktreeActionsMixin:
             from .headed_actions import open_worktree_cli_headed
 
             open_worktree_cli_headed(self, rec, no_mux=no_mux, ahp=ahp)
-        elif cur == "Resume prompt…":
-            open_resume_prompt(self, rec, no_mux=no_mux, ahp=ahp)
-        elif cur == "Bare resume":
-            # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
-            self._decide(self._resume_decision(rec, bare_resume=True))
         elif cur == "Messages":
             # Read-only peek at the worktree's latest session messages.
             self._open_msgview(rec)
@@ -464,7 +461,7 @@ class PickerScreenWorktreeActionsMixin:
             self._start_stop(rec)
         elif cur == "Reclaim":
             # Kill the exact Copilot process holding the session's lock
-            # (bare orphans Stop cannot reach); then re-Open / Bare resume.
+            # (bare orphans Stop cannot reach); then re-Open / Resume.
             self._start_reclaim(rec)
         elif cur == "Restore":
             decision = self._resume_decision(rec)

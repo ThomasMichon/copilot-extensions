@@ -76,13 +76,6 @@ def _worktrees_contract() -> PivotContract:
                     "verb": "resume",
                     "shortcut": "l",
                 },
-                {
-                    "key": "bare-resume",
-                    "label": "Bare resume",
-                    "kind": "internal",
-                    "verb": "bare-resume",
-                    "shortcut": "b",
-                },
             ],
             "view_actions": [
                 {
@@ -133,8 +126,7 @@ class LaunchRequest:
     records this request and quits the app; :func:`run_picker`'s ``on_launch``
     callback then resolves + executes it (fetch the plan across the engine
     boundary, compose by mux capability, run). ``mode`` maps to the engine's
-    ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``bare-resume`` ->
-    ``--worktree-id --bare-resume``, ``new`` -> ``--new``.
+    ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``new`` -> ``--new``.
 
     ``new_window``, unlike every other field here, is NOT dispatched through
     the exit-the-app-then-run cycle above -- it opens a brand-new, visible
@@ -405,7 +397,7 @@ class WorktreeManagerApp(App):
                 if action.available
                 and action.shortcut == event.key
                 and descriptor.pivot.entity == "worktree"
-                and action.internal in ("resume", "bare-resume", "new")
+                and action.internal in ("resume", "new")
             ),
             None,
         )
@@ -637,7 +629,7 @@ class WorktreeManagerApp(App):
             if action.available
             and action.shortcut
             and pivot.entity == "worktree"
-            and action.internal in ("resume", "bare-resume", "new")
+            and action.internal in ("resume", "new")
         ]
         return " · ".join([ready, *action_hints, "r: refresh", "q: quit"])
 

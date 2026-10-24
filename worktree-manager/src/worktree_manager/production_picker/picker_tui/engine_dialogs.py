@@ -25,6 +25,8 @@ from .engine_helpers import (
     MAINT_ACTION_DESC,
 )
 from .worktree_details_screen import WtDetailsScreen as WtDetailsScreen
+from .actions_prompt import ActionsPromptMixin
+from .worktree_detail_queries import published_locality, verify_liveness
 
 class QuitConfirmScreen(ModalScreen[bool]):
     """Native modal confirm for Esc/q on a top-level picker view (#88 F4;
@@ -241,6 +243,8 @@ class TaskMenuScreen(ModalScreen[int]):
         reg, rec = self._reg, self._rec
         title = rec.get(reg.title_field) or rec.get(reg.id_field) or ""
         sub_bits = []
+        if rec.get("_manager_scope"):
+            sub_bits.append(f"source: {rec['_manager_scope']}")
         if reg.worktree_field and rec.get(reg.worktree_field):
             sub_bits.append(str(rec.get(reg.worktree_field)))
         if reg.subtitle_field and rec.get(reg.subtitle_field):
@@ -273,7 +277,7 @@ class TaskMenuScreen(ModalScreen[int]):
     def action_cancel(self) -> None:
         self.dismiss(None)
 
-class SubMenuScreen(ModalScreen[tuple]):
+class SubMenuScreen(ActionsPromptMixin, ModalScreen[tuple]):
     """Native modal per-worktree action menu (#88 F4; native-focus internals NF1).
 
     Renders the focused worktree's header (title + meta) and its available
@@ -295,20 +299,22 @@ class SubMenuScreen(ModalScreen[tuple]):
     CSS = """
     SubMenuScreen { align: center middle; background: $background 55%; }
     SubMenuScreen > #sub-frame {
-        width: 72; height: auto; max-height: 90%;
+        width: 72; max-width: 100%; height: 90%; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
     }
-    SubMenuScreen #sub-head { height: auto; padding: 0 0 1 0; }
+    SubMenuScreen #sub-head { height: auto; max-height: 4; overflow-y: auto; }
     SubMenuScreen OptionList {
-        height: auto; border: none; background: $surface; padding: 0;
+        height: 1fr; min-height: 3; border: none; background: $surface; padding: 0;
     }
     SubMenuScreen OptionList:focus { background-tint: $surface 0%; }
     SubMenuScreen OptionList > .option-list--option-highlighted,
     SubMenuScreen OptionList:focus > .option-list--option-highlighted {
         background: #ffaf00; color: black; text-style: bold;
     }
-    SubMenuScreen #sub-desc { color: grey; height: auto; padding: 1 0 0 0; }
-    SubMenuScreen #sub-foot { color: grey; height: 1; padding: 1 0 0 0; }
+    SubMenuScreen #sub-desc { color: grey; height: 2; max-height: 2; }
+    SubMenuScreen #sub-foot { color: grey; height: 1; }
+    SubMenuScreen TextArea { height: 3; max-height: 4; border: round grey; }
+    SubMenuScreen #sub-prompt { height: auto; max-height: 5; }
     """
     BINDINGS = [
         Binding("escape", "cancel", show=False),
@@ -321,18 +327,7 @@ class SubMenuScreen(ModalScreen[tuple]):
     _AHP_DESC = ("Launch (Open/Resume) through the configured same-machine "
                  "Agent Host Protocol endpoint. Enter/Space toggles this row.")
 
-    @staticmethod
-    def record_is_local(rec, engine=None) -> bool:
-        """Use published locality only; the source's LOCAL may be a cold resolver."""
-        if rec.get("source_kind", "machine-ssh") != "machine-ssh":
-            return False
-        explicit = rec.get("is_local")
-        if explicit is not None:
-            return bool(explicit)
-        if engine is None:
-            return True
-        local = getattr(engine, "_source_local", None)
-        return local is not None and (rec.get("machine"), rec.get("env")) == local
+    record_is_local = staticmethod(published_locality)
 
     @classmethod
     def open_for(cls, engine, rec, *, loading=False):
@@ -355,6 +350,9 @@ class SubMenuScreen(ModalScreen[tuple]):
             ):
                 return
             engine._wt_submenu_epoch += 1
+            if result is not None and menu.launch_decision is not None:
+                engine._decide(menu.launch_decision)
+                return
             engine._wt_submenu_dispatch(
                 rec, result, ext=menu._action_extensions, workers=menu._action_workers,
             )
@@ -362,28 +360,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         engine.app.push_screen(menu, dismissed)
         return menu
 
-    @staticmethod
-    def verify_liveness(rec, source, project):
-        """Worker-only eligibility and liveness refinement."""
-        try:
-            from .. import project_config, engine_group_c
-
-            wt_id = rec["raw"]["id"]
-            local_check = getattr(source, "is_local", None)
-            if callable(local_check):
-                is_local = bool(local_check(rec.get("machine"), rec.get("env")))
-            else:
-                local = getattr(source, "LOCAL", None)
-                is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
-            if not is_local or not (project_config.tracking_dir(project) / f"{wt_id}.yaml").exists():
-                return None, is_local
-            batch = engine_group_c.picker_reconcile_local(project, worktree_ids=[wt_id])
-            for row in batch.rows:
-                if isinstance(row, dict) and row.get("id") == wt_id:
-                    return row, is_local
-            return None, is_local
-        except Exception:
-            return None, None
+    verify_liveness = staticmethod(verify_liveness)
 
     def __init__(self, rec, actions, *, loading=False, engine=None) -> None:
         super().__init__()
@@ -404,13 +381,12 @@ class SubMenuScreen(ModalScreen[tuple]):
         self._spin_timer = None
         # The No-mux modifier rides the primary launch verb -- Open (live mux /
         # sessionless) OR Resume (stopped session) -- so the toggle row is offered
-        # whenever either is available (#4043). It sits at the end of the
-        # OptionList. Bare resume is deliberately excluded (it already implies a
-        # mux-in-HOME, which no-mux would contradict).
+        # whenever either is available (#4043), at the end of the OptionList.
         self._has_nomux = ("Open" in actions) or ("Resume" in actions)
         self._nomux_index = len(actions) if self._has_nomux else None
         self._has_ahp = self._has_nomux and self._is_local
         self._ahp_index = len(actions) + 1 if self._has_ahp else None
+        self._init_prompt()
 
     @property
     def no_mux(self) -> bool:
@@ -447,6 +423,9 @@ class SubMenuScreen(ModalScreen[tuple]):
     def compose(self) -> ComposeResult:
         with Vertical(id="sub-frame"):
             yield Static(self._header(), id="sub-head")
+            with Vertical(id="sub-prompt"):
+                yield Static("Resume prompt (optional) · Tab to edit; Enter returns to actions")
+                yield from self._prompt_widgets
             yield OptionList(*self._prompts(), id="sub-list")
             yield Static("", id="sub-desc")
             yield Static(Text(self._verification_status), id="sub-foot")
@@ -464,8 +443,7 @@ class SubMenuScreen(ModalScreen[tuple]):
         relation = (rec.get("reciprocal_relation") or {}).get("state")
         if relation and relation != "unbound":
             t.append(f"\n relation {relation}", style=C_DIM)
-        # two-step-restore: show the full session id so the operator can type
-        # ``/resume <id>`` after a Bare resume; flag a live bound lock / residue.
+        # Show the full session identity and any live bound lock / residue.
         sid = rec.get("last_session_id")
         if sid:
             if rec.get("mux_live") and rec.get("session_bare_orphan"):
@@ -498,6 +476,8 @@ class SubMenuScreen(ModalScreen[tuple]):
     def on_mount(self) -> None:
         ol = self.query_one("#sub-list", OptionList)
         self.query_one("#sub-frame", Vertical).border_title = "Worktree actions"
+        self.query_one("#sub-prompt").display = self._show_prompt()
+        self._load_prompt_history()
         if self._actions:
             ol.highlighted = 0
         self._set_desc(0)
@@ -559,6 +539,8 @@ class SubMenuScreen(ModalScreen[tuple]):
             self._no_mux = False
         self._ahp_index = len(self._actions) + 1 if self._has_ahp else None
         try:
+            self.query_one("#sub-prompt").display = self._show_prompt()
+            self._load_prompt_history()
             ol = self.query_one("#sub-list", OptionList)
         except Exception:
             return
@@ -569,7 +551,8 @@ class SubMenuScreen(ModalScreen[tuple]):
         if count:
             ol.highlighted = min(prev, count - 1)
         self._set_desc(ol.highlighted or 0)
-        ol.focus()
+        if self.focused is not self._prompt_rec["primary"]:
+            ol.focus()
 
     def refine(self, rec, *, status=""):
         engine = self._engine
@@ -615,7 +598,22 @@ class SubMenuScreen(ModalScreen[tuple]):
         if event.option_index == self._ahp_index:
             self._toggle_ahp()
             return
-        self.dismiss((self._actions[event.option_index], self._no_mux, self._ahp))
+        action = self._actions[event.option_index]
+        seed = self._accepted_prompt(action)
+        if seed is None:
+            return
+        if action == "Resume" and self._can_prompt():
+            if self._confirm_prompt_resume(seed):
+                return
+            self.dismiss((action, self._no_mux, self._ahp, seed))
+        else:
+            self.dismiss((action, self._no_mux, self._ahp))
+
+    def _can_prompt(self):
+        return self._is_local and "Resume" in self._actions
+
+    def _advance_focus(self, widget):
+        self.query_one("#sub-list", OptionList).focus()
 
     def action_toggle_modifier(self) -> None:
         ol = self.query_one("#sub-list", OptionList)
@@ -628,7 +626,8 @@ class SubMenuScreen(ModalScreen[tuple]):
         self.action_toggle_modifier()
 
     def action_cancel(self) -> None:
-        self.dismiss(None)
+        if self.app.screen is self:
+            self.dismiss(None)
 
 class ScopeDlgScreen(ModalScreen[bool]):
     """Native modal scope dialog for Clean/Sync and New-worktree options (#88 F4;

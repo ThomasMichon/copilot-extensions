@@ -7,6 +7,13 @@ import os
 from pathlib import Path
 
 
+def runtime_status_path(scope: str) -> Path:
+    from .config import run_dir
+    from .single_instance import lock_path_for
+
+    return lock_path_for(run_dir(), scope).with_suffix(".status.json")
+
+
 def read_status(path: Path) -> tuple[dict | None, str | None]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))

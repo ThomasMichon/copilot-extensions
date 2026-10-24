@@ -318,10 +318,10 @@ def _scope_dlg_open(scr):
 
 
 def _prompt_dlg(scr):
-    """The F4 PromptDlgScreen instance on the app's screen stack, or None."""
-    from worktree_manager.production_picker.picker_tui.engine import PromptDlgScreen
+    """The Actions menu with an inline Resume prompt, or None."""
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
     for s in scr.app.screen_stack:
-        if isinstance(s, PromptDlgScreen):
+        if isinstance(s, SubMenuScreen) and s._can_prompt():
             return s
     return None
 
@@ -2519,8 +2519,8 @@ def test_resume_prompt_offered_only_for_local_or_remote_cold_resume_rows():
     }
     acts = M._session_action_verbs(local_resumable)
     assert "Resume" in acts
-    assert "Resume prompt…" in acts
-    assert "Resume prompt…" in M._session_action_verbs(
+    assert "Resume prompt…" not in acts
+    assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, is_local=False))
     assert "Resume prompt…" not in M._session_action_verbs(
         dict(local_resumable, sessionless=True))
@@ -2557,13 +2557,14 @@ def test_resume_prompt_seed_carries_through_to_resume_decision():
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             rec.update(mux_live=False, sessionless=False)
-            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            scr._push_wt_submenu(rec)
             await pilot.pause()
 
             dlg = _prompt_dlg(scr)
             assert dlg is not None
             assert app.result is None  # the Picker has not exited yet
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "sync, then status"
+            dlg.query_one("#q-0").focus()
             await pilot.press("enter")   # the textarea's own accept + advance
             await pilot.press("enter")   # confirm
             await _wait_for_launch_confirmation(pilot)
@@ -2593,7 +2594,7 @@ def test_resume_prompt_cancel_leaves_the_picker_open():
                 if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
             )
             rec.update(mux_live=False, sessionless=False)
-            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            scr._push_wt_submenu(rec)
             await pilot.pause()
 
             assert _prompt_dlg(scr) is not None
@@ -2623,11 +2624,12 @@ def test_resume_prompt_refuses_live_dispatch_but_retains_confirmed_racing_intent
             assert app.result is None
 
             rec.update(mux_live=False, sessionless=False)
-            scr._wt_submenu_dispatch(rec, ("Resume prompt…", False, False))
+            scr._push_wt_submenu(rec)
             await pilot.pause()
             dlg = _prompt_dlg(scr)
             assert dlg is not None
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "must not run"
+            dlg.query_one("#q-0").focus()
             rec["mux_live"] = True
             await pilot.press("enter")
             await pilot.press("enter")
@@ -5686,13 +5688,13 @@ def test_orphan_chip_appears_in_status_text_when_orphans_present():
 
     s._orphans = [{"kind": "codespace", "ref": "cs-1"}]
     text = s.status_text(False).plain
-    assert "1 orphaned (local, 'o')" in text
+    assert "1 local re-homed obligation(s) · o details" in text
     assert "\u26a0" in text   # ⚠
     # The compact form (used when the full status doesn't fit) still
     # preserves the local scope and the 'o' shortcut -- never a bare
     # "⚠N" that a narrow terminal could mistake for a fleet-wide count.
     compact = s.status_text(True).plain
-    assert "\u26a01(local,'o')" in compact
+    assert "\u26a01 local obligation(s) · o" in compact
 
 
 def test_poll_orphan_state_fetches_from_source_orphans(monkeypatch):

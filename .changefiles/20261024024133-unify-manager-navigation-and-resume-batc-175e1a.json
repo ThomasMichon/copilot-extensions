@@ -1,0 +1,13 @@
+{
+  "comment": "Unify Manager navigation and Resume, batch declared provider scopes, stream Workers discovery with owned read deadlines, and add a user-local automatic-maintenance KillSwitch",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

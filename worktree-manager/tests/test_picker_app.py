@@ -131,10 +131,8 @@ def test_internal_worktrees_surface_is_declarative():
     assert [column.key for column in pivot.columns] == [
         "id4", "machine", "repo", "state_display", "sync_tag", "title"
     ]
-    assert [action.internal for action in pivot.actions] == [
-        "resume", "bare-resume"
-    ]
-    assert [action.shortcut for action in pivot.actions] == ["l", "b"]
+    assert [action.internal for action in pivot.actions] == ["resume"]
+    assert [action.shortcut for action in pivot.actions] == ["l"]
     assert [action.internal for action in pivot.view_actions] == ["new"]
     assert [action.shortcut for action in pivot.view_actions] == ["n"]
 
@@ -160,7 +158,7 @@ def test_worktrees_ready_status_comes_from_contract():
             return app._last_status
 
     assert asyncio.run(_run()) == (
-        "r · 2 worktree(s) · l: Launch/Resume · b: Bare resume · "
+        "r · 2 worktree(s) · l: Launch/Resume · "
         "n: New worktree · r: refresh · q: quit"
     )
 
@@ -629,9 +627,8 @@ def test_cursor_move_then_launch_targets_that_row():
     assert req is not None and req.worktree_id == "bbbb2222"
 
 
-def test_bare_resume_key():
-    req = _drive(["b"])
-    assert req is not None and req.mode == "bare-resume"
+def test_bare_resume_key_is_retired():
+    assert _drive(["b", "q"]) is None
 
 
 def test_new_worktree_key_needs_no_selection():

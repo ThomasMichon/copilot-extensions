@@ -4,6 +4,7 @@
   "placement": "config",
   "scope": "global",
   "list": ["agent-dispatch", "workers", "catalog"],
+  "stream": true,
   "summary": "{configured} configured / {source_declarations} source-owned / {templates} templates",
   "entry": {
     "id": "id",
