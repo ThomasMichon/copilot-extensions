@@ -290,13 +290,21 @@ transaction execution from the existing recurring-maintenance assignment.
   canonical snapshot provenance, live publication policy, exact queued source,
   ordinary-copy refusal and unavailable/reselected-source outcomes; do not
   replace the retained snapshot with the currently installed payload.
-- [ ] **Agent-recommended bounded publisher adoption:** route Pull Requests'
+- [x] **Agent-recommended bounded publisher adoption:** route Pull Requests'
   actual generated legacy primary/payload cold commands through the packaged
   foundation and canonical queue before cold trace or outer-lock writes.
   Qualify generated commands, exact selected snapshot, caller loss, healthy
   dispatch and no-write refusals on native Windows/Linux. Refuse unsupported
   cold custom roots and cells without changing healthy dispatch or adopting
   bootstrap/explicit installer publishers.
+- [ ] **Agent-recommended bounded bootstrap adoption:** route Pull Requests'
+  legacy session bootstrap's first stamp and drift provisioning through those
+  qualified native actions and the same canonical queue. Preserve publication,
+  exact source/root/project, killswitch, healthy and independent hook behavior,
+  the actual hook deadline and output-free acknowledgement. Refuse nested and
+  unsupported outcomes before state writes; remove its age/PID installer guard
+  rather than retaining another execution owner. Explicit installers and cells
+  remain separate acceptance.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.

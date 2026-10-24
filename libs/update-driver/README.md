@@ -676,7 +676,8 @@ primary delegates to its exact selected snapshot's versioned dispatcher;
 missing/older dispatchers and custom roots refuse without a foreground fallback.
 Healthy commands retain their existing runtime path without touching the queue.
 Cold namespaced commands refuse before activation or provisioning until that
-recipe is qualified. Bootstrap and explicit installer publishers remain separate.
+recipe is qualified. Its legacy session bootstrap uses the same fixed
+stamp/provision actions; explicit installer publishers remain separate.
 The recipe uses the
 same canonical queue and frozen-input owner, projects its own context instead of
 Vault's, and clears legacy shell action/force/root hints before invoking the
@@ -761,6 +762,16 @@ The POSIX hook preserves its existing metadata-Python/no-Python no-op boundary;
 only actual native first-use commands claim Python-free genesis. Stock legacy
 Bash/macOS cold bootstrap explicitly refuses. Other session hook behavior and
 the independent guidance writer remain unchanged.
+
+Pull Requests' legacy session bootstrap follows that same launch-only and
+read-only/no-op contract, without Vault's runtime-routing normalization or
+service options. Both first stamping and drift provisioning retain the exact
+originating project, default legacy root and admitted source under the same
+foundation and ordinary queue. It preserves no-self-provision presence
+semantics, validates the existing lifecycle capability and never retains the
+old age/PID reconcile owner. Global command availability follows the queued
+stamp rather than hook return. Its native admission wrapper still owns the
+single empty JSON response, and the guidance hook remains independent.
 
 Vault declares this library through the existing canonical `uv` source and
 release materializer. Its self-contained payload carries the fixed three-sibling
@@ -852,8 +863,7 @@ Pull Requests' corresponding actual-installer case uses its service-less
 canonical contract: cold stamp, provision from that exact retained snapshot
 with the installed payload unavailable, failed candidate preserving the
 healthy selection, and installed CLI/module origin after both source trees
-are removed. The caller-loss fixture runs with both fixed identities. The
-same portfolio does not switch any ordinary Pull Requests publisher.
+are removed. The caller-loss fixture runs with both fixed identities.
 The hosted-only actual bootstrap case additionally enforces the declared hook
 deadline and output shape, closes its caller Job/group during cold construction,
 and verifies the same stamp operation/result survives. It then qualifies real
@@ -861,6 +871,17 @@ drift provisioning with default service effects, normalized foreign routing,
 exact originating project and healthy hooks that submit no new work. Canonical
 uninstall and owned-supervisor settlement enclose that disposable service lane;
 it does not authorize operator-host enrollment.
+
+The manual `pull-requests-bootstrap` portfolio qualifies the actual materialized
+Pull Requests admission wrapper and legacy hook on Windows and Linux. It
+enforces the declared 15-second hook deadline and `{}` response, pins and joins
+the launch-acknowledged supervisor across caller Job/group loss, and requires
+complete ordinary receipts before observing the strict queue. Cold stamp,
+initial provisioning and real version drift retain exact source/root/project
+and separate request results. Actual managed/no-self/pinned/nested/skew refusals
+preserve installation and source bytes without creating a queue. Healthy
+hook/CLI re-entry adds no requests or completion changes. This isolated native
+qualification is not host rollout or adoption of explicit installers/cells.
 
 Worker queue-startup acknowledgement is not an execution/completion claim.
 A worker failing before queue startup records a visible pending launch error;

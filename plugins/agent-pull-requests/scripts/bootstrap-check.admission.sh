@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Native admission wrapper for the unchanged shared bootstrap-check reconciler.
+# Native admission wrapper for the legacy bootstrap-check driver submission.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 emit_session_start_json() {
