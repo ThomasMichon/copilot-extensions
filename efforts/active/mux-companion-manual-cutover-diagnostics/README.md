@@ -32,6 +32,15 @@ button.
 
 ## Coordination
 
+The complete direct retained #4369 acceptance below continues through this SAME Active
+ROOT's Plan, own and actual global Validation, and Journal under every incumbent source,
+integration, native and resource custodian. Administrative supersession retires
+duplicate tracking only; historical closed sources cannot serve as live coordination
+tokens. If current custody requires the original live token, retain it. No owner, claim,
+hold, completed row, accepted alternative or evidence tier is removed, and no
+implementation, runtime, credentials, process action, rollout or new blanket approval is
+authorized.
+
 The direct #2696 app-input/dismissal lane continues under the SAME Companion source/UI
 custodian through this existing Plan, Validation and Journal plus eligible open
 bounded-source coordination. The Mux-bind Relay ROOT independently owns its direct
@@ -230,7 +239,152 @@ full popup qualification.
 No app launch, native input, popup, handoff, process, runtime, service or configuration
 action is authorized by this intake.
 
+<!-- backlog-reconciliation:7556:transfer:4369:to:efforts/active/mux-companion-manual-cutover-diagnostics/README.md -->
+
+### Direct retained #4369 manual diagnostic and independent expected-head acceptance
+
+APPEND without removing/revising ANY incumbent ROOT Plan, completed work, own global
+Validation Plan, Participants/custody expressed in Coordination, full historical
+Journal, related claims or direct #2696 app-input/dismissal lane. Preserve that lane's
+complementary Mux-bind Relay ownership and BOTH-root review/readback condition
+independently. This is tracker intake, NOT runtime/head qualification,
+source/UI/provider/native ownership transfer or rollout. Original and complete
+refinements: https://github.com/ThomasMichon/copilot-extensions/issues/4369 ;
+https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6083439434 ;
+https://github.com/ThomasMichon/copilot-extensions/issues/4369#issuecomment-6321372187 .
+
+#### Direct unchecked Plan
+
+- [ ] P1. Retain all original four steps and earned source delivery: scoped vision,
+  explicit one-call context-handoff force option, one-worktree on-demand existing
+  claim/spawn/retire invocation, Companion human Cut over and refreshable previous/new
+  lineage. Preserve actual retired-predecessor and quiesce/background/schedule evidence
+  at its stated scope. Old unchecked prose does not erase merged delivery; old
+  build-complete/quiesce wording does not settle the later acknowledged expected-session
+  comparison.
+- [ ] P2. Keep diagnostic trigger DIRECT-HUMAN ONLY, for an existing pending baton and
+  exactly one selected worktree, through the SAME admitted host machinery. Explicit
+  mode-force bypass is one call, not automatic arming, config persistence, a second
+  cutover implementation, process-force permission or evidence of current operator
+  approval. Ordinary manual-only/MCP/non-force paths must retain their existing
+  non-arming safety.
+- [ ] P3. Independently resolve the expected session most recently actually cut over to
+  OR manually resumed and compare it to the durable authoritative Picker-resolved head.
+  An is_head dot or immediate returned head_before/head_after alone cannot compare head
+  against a separately admitted expected identity. Preserve exact worktree,
+  session/incarnation/lineage, pending baton and current owner context; do not compare
+  head to the same head-labelled observation and call that verification.
+- [ ] P4. Cover BOTH direct Cut over and classic manual clear/paste-seed resume,
+  including refresh AND reopening. Show previous/new lineage and a truthful
+  match/mismatch/unknown/unavailable comparison to the expected identity; a missing
+  expected/owner observation cannot be fabricated into a pass. Use the existing owning
+  identity/receipt/read path, not a new persistent Companion state/head authority;
+  preserve the incumbent no-persistent-Companion-state app lane.
+- [ ] P5. Detection/display ONLY: no automatic repair, report filing, raw head override,
+  session switching, baton consumption or session retirement merely from a mismatch.
+  Existing separate raw-override and selected-prior-resume work keeps its own
+  owner/authority. The operator may direct its existing current session under the normal
+  procedure; this feature grants none of that authority to a researcher or observer.
+- [ ] P6. Preserve ENTIRE root/manual/native/background-work/provider and source holds
+  plus direct #2696 choices, Exit/Cut over/Refresh/dismissal, popup/focus and
+  complementary relay ownership. Dismissing/reopening a popup must never trigger
+  cutover. Those separate app/relay validation and source-retirement gates remain
+  intact; unrelated popup or whole-Manager completion is not a new gate on this finite
+  independent-head feature.
+- [ ] P7. Preserve current admission, exact
+  predecessor/successor/candidate/consumer/native/manual/reservation custody,
+  quiesce-before-trigger ordering and existing schedules/background-work rules. Unknown
+  identity or process/operation state is a hold, not age/TTL/silence/local-task-based
+  expiry, replacement or forced repair permission. Keep source, containing release,
+  selected serving and native/manual validation explicit at their original tiers.
+- [ ] P8. Journal actual finite progress and the acknowledged comparison residual while
+  preserving full prior history. Deliver this COMPLETE direct intake and actual
+  own-global Validation entry below through a NEW normal reviewed PR, obtain ACTUAL
+  merge, then read back the WHOLE current ROOT before source supersession. Old
+  creation/vision, Step4 checkbox, title/link/child/Draft/proposal or quiesce receipt is
+  not intake delivery; retain source if any original clause/owner/evidence tier is
+  absent or current custody needs its live token.
+
+#### Direct unchecked Validation
+
+- [ ] V1. Preserve the actually delivered original vision/force/one-worktree
+  host/Companion action contract and source/recorded native proofs without counting them
+  as independent expected-head verification. Credit existing real retire/quiesce tests
+  exactly at their scope.
+- [ ] V2. Verify direct-human, existing-baton, selected-one-worktree and one-call
+  mode-force boundaries; ordinary manual-only/non-force/MCP/automatic sweeps cannot arm
+  or invoke cutover from observation alone. No persistent repo config change, second
+  mechanism or process-force authority.
+- [ ] V3. Through the actual expected-session source and authoritative head read, verify
+  separate identities are compared correctly: actual most-recent resumed/cut-over
+  session versus Picker-resolved head. Include matching and mismatched
+  lineage/current-incarnation cases, not a duplicated is_head marker or same returned
+  head used twice.
+- [ ] V4. Verify BOTH explicit Cut over and manual clear/paste resume, refresh and
+  reopen. Previous/new lineage, retained expected identity and truthful
+  missing/stale/unavailable/unknown outcomes remain visible without a new persistent
+  Companion registry/state owner. Qualification uses the original
+  supported/manual/native lanes when separately authorized, not a new all-host program.
+- [ ] V5. Verify mismatch display never writes head repair, files a bug, invokes raw
+  override/switch/resume, consumes/creates a baton or retires a process/session.
+  Existing popup dismissal and explicit action separation remains; read evidence is not
+  mutation permission.
+- [ ] V6. Preserve current source/UI/native/host/provider/claims/reservations and full
+  direct #2696 app/relay choices/receipt conditions under their owners. Completed
+  narrower source or live quiesce scope is not whole independent-comparison acceptance;
+  no adjacent feature token is closed by this validation.
+- [ ] V7. Keep original appropriate manual/native evidence,
+  source/containing-release/selected-serving attribution and
+  quiesce/schedule/background-work boundaries. Unknown live state cannot be
+  guessed/repaired/expired, and no extra universal native/whole-parent/blanket-ACK gate
+  is created for administrative intake or finite source work.
+- [ ] V8. After NEW normal reviewed ACTUAL merge, read the WHOLE current ROOT and verify
+  P1-P8, V1-V8, C1-C4 and actual own-global Validation entry, together with every
+  incumbent Plan/Validation/Journal/owner/claim/hold. Missing any unique
+  original/refinement/choice/native tier or current required live source custody means
+  retain #4369. Product/head comparison remains unchecked until its own actual finite
+  qualification.
+
+#### Continuing Coordination
+
+- C1. SAME existing Companion source/UI custodian and manual-diagnostics integration
+  owner retain stewardship. Existing admitted host/handoff/process/native/provider
+  owners keep physical claim/spawn/retire and identity custody; the Companion remains a
+  caller/observer. No source, implementation, current resource or operational ownership
+  is handed off by this tracking text.
+- C2. Preserve the entire incumbent original and direct #2696 app-input/dismissal
+  Plan/Validation/Journal, its explicit choices and complementary Mux-bind Relay
+  lane/conditions. Preserve every current pending baton, predecessor/candidate/consumer,
+  native/manual/source/runtime/background-work/provider claim and completed finite
+  evidence. Separate raw-head-override/prior-session recovery scopes stay separate.
+- C3. Existing driver journals next finite work under this SAME Active ROOT and
+  repository's eligible open bounded-source coordination policy; historical closed
+  source numbers are provenance, not usable live claims. Recheck
+  creator/state/lock/assignee and textual/native/resource holds before
+  publication/effects. No age, silence, TTL, empty assignee or missing local task
+  settles current custody; if a current holder needs the live #4369 token, KEEP it OPEN
+  rather than administratively releasing anything.
+- C4. Coordinator alone obtains NEW normal reviewed ACTUAL ROOT intake merge and WHOLE
+  current readback before source supersession. The actual own-global Validation entry is
+  mandatory. A proposal, old4371/5409/5517 receipt, title/link or partial app subsection
+  cannot substitute. No new blanket ACK, original owner-condition weakening,
+  implementation, mode change, cutover/head write, SDK/session/native/probe or rollout
+  authority is granted.
+
+Public delivery foundations:
+https://github.com/ThomasMichon/copilot-extensions/pull/4371 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/5409 ;
+https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
+
 ## Validation Plan
+
+- [ ] Complete EVERY directly retained #4369 P1-P8, V1-V8 and C1-C4 clause above at the
+  original finite source/manual/native bounds, preserving the entire incumbent Plan, own
+  Validation, Participants/Coordination, full historical Journal,
+  direct2696/complementary relay conditions, all current owners/claims/holds and
+  partial-delivery credit. Administrative tracking is not independent head-comparison or
+  runtime acceptance; NEW normal reviewed ACTUAL merge plus WHOLE current ROOT readback
+  precede source supersession.
 
 - [ ] Complete every direct #2696 Plan/Validation clause above at its original supported evidence tier. Preserve the complementary root's separate lane and all original owners/holds; administrative consolidation is not implemented popup acceptance.
 
@@ -277,6 +431,8 @@ action is authorized by this intake.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+- [2026-10-24 - Direct retained acceptance from #4369](<journal/2026/10.24 backlog-intake-90.md>)
 
 ### 2026-10-22 - Direct retained #2696 acceptance
 
