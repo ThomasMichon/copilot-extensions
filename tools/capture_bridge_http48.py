@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture committed HTTP-48 local ASGI observations without rewriting history."""
+"""Capture a selected retained-inbox generation without rewriting history."""
 
 from __future__ import annotations
 
@@ -18,20 +18,23 @@ import bridge_http47_runtime as binding
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run_probes(root: Path, proof: dict, vector: dict) -> dict:
+def run_probes(root: Path, proof: dict, vector: dict, *, evidence=evidence) -> dict:
     from agent_procutil.owned_process import run_caller_owned
 
     parent = evidence.safe(root, ".test-venvs", directory=True)
     parent.mkdir(exist_ok=True)
     # Reuse the source/entrypoint guard, including its confined request path.
     # Its historical name does not select a protocol generation or writer.
-    with tempfile.TemporaryDirectory(prefix="http47-capture-http48-", dir=parent) as temporary:
+    label = f"HTTP-{evidence.GENERATION}"
+    with tempfile.TemporaryDirectory(
+        prefix=f"http47-capture-http{evidence.GENERATION}-", dir=parent,
+    ) as temporary:
         directory = Path(temporary)
         request = directory / "request.json"
         report = directory / "observed.json"
         junit = directory / "junit.xml"
         payload = evidence.encode({
-            "root": str(root), "capture_generation": 48, "source_proof": proof,
+            "root": str(root), "capture_generation": evidence.GENERATION, "source_proof": proof,
             "input_sha256": proof[evidence.INPUT]["sha256"], "report": str(report),
         })
         request.write_bytes(payload)
@@ -41,23 +44,23 @@ def run_probes(root: Path, proof: dict, vector: dict) -> dict:
         }):
             result = run_caller_owned([
                 sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
-                "--test-file", "tests/test_http48_capture_probes.py",
-                "-k", "test_http48_capture_actual_observations",
+                "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
+                "-k", " or ".join(evidence.PROBES),
             ], timeout=240, max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=1024 * 1024)
         print(result.stdout, end="")
         print(result.stderr, end="", file=sys.stderr)
         if result.returncode or request.read_bytes() != payload:
-            raise ValueError("HTTP-48 bounded probes failed or request changed")
+            raise ValueError(f"{label} bounded probes failed or request changed")
         cases: dict[str, int] = {}
         for case in ET.parse(junit).getroot().iter("testcase"):
             name = case.attrib.get("name", "").split("[", 1)[0]
             if name not in evidence.PROBES or any(
                 case.find(tag) is not None for tag in ("failure", "error", "skipped")
             ):
-                raise ValueError("HTTP-48 probe failed, skipped or escaped its portfolio")
+                raise ValueError(f"{label} probe failed, skipped or escaped its portfolio")
             cases[name] = cases.get(name, 0) + 1
         if cases != evidence.PROBES:
-            raise ValueError("HTTP-48 probe portfolio is incomplete or duplicated")
+            raise ValueError(f"{label} probe portfolio is incomplete or duplicated")
         receipt = binding.verify_interpreters(
             directory / "interpreters", proof, expected_roles=frozenset(),
             required_sources=evidence.installation.required_sources(
@@ -65,17 +68,19 @@ def run_probes(root: Path, proof: dict, vector: dict) -> dict:
             ),
         )
         if receipt["roles"] != ["observer"]:
-            raise ValueError("HTTP-48 ASGI observer scope changed")
+            raise ValueError(f"{label} ASGI observer scope changed")
         if report.is_symlink() or not report.is_file() or report.stat().st_nlink != 1:
-            raise ValueError("HTTP-48 observation report is absent or aliased")
+            raise ValueError(f"{label} observation report is absent or aliased")
         observed = json.loads(report.read_bytes())
         expected = {case: vector["expected"] for case in ("legacy", "namespaced")}
         if observed != expected:
-            raise ValueError("HTTP-48 observations differ from independent expectations")
+            raise ValueError(f"{label} observations differ from independent expectations")
         return observed
 
 
-def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]:
+def capture(
+    root: Path, commit: str, *, write: bool = False, evidence=evidence, probe_runner=None,
+) -> dict[str, bytes]:
     if write:
         from agent_bridge_contract_publication import recover_pending_links
         recover_pending_links(root, commit)
@@ -83,20 +88,21 @@ def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]
     before = evidence.source_snapshot(root, commit, snapshot.materialized)
     vector = json.loads(evidence.safe(root, evidence.INPUT).read_bytes())
     if (set(vector) != {"schema", "generation", "requests", "expected"}
-            or vector["schema"] != "http48-retained-inbox-cases-v1" or vector["generation"] != 48):
-        raise ValueError("HTTP-48 independent input identity mismatch")
+            or vector["schema"] != evidence.VECTOR_SCHEMA
+            or vector["generation"] != evidence.GENERATION):
+        raise ValueError(f"HTTP-{evidence.GENERATION} independent input identity mismatch")
     expected = {case: vector["expected"] for case in ("legacy", "namespaced")}
     proposed = evidence.build_outputs(root, commit, snapshot, before, expected)
     evidence.validate_outputs(root, snapshot, proposed)
     history = evidence.history(root, snapshot.materialized, proposed)
-    observed = run_probes(root, before, vector)
+    observed = (probe_runner or run_probes)(root, before, vector)
     if evidence.source_snapshot(root, commit, snapshot.materialized) != before:
-        raise ValueError("HTTP-48 source changed during capture")
+        raise ValueError(f"HTTP-{evidence.GENERATION} source changed during capture")
     if evidence.history(root, snapshot.materialized, proposed) != history:
-        raise ValueError("HTTP-48 historical inputs changed during capture")
+        raise ValueError(f"HTTP-{evidence.GENERATION} historical inputs changed during capture")
     outputs = evidence.build_outputs(root, commit, snapshot, before, observed)
     if outputs != proposed:
-        raise ValueError("HTTP-48 capture plan changed after actual probes")
+        raise ValueError(f"HTTP-{evidence.GENERATION} capture plan changed after actual probes")
     evidence.validate_outputs(root, snapshot, outputs)
     if write:
         from agent_bridge_contract_publication import publish
@@ -106,20 +112,20 @@ def capture(root: Path, commit: str, *, write: bool = False) -> dict[str, bytes]
     else:
         for path, data in outputs.items():
             if evidence.safe(root, path).read_bytes() != data:
-                raise ValueError(f"HTTP-48 capture output drift: {path}")
+                raise ValueError(f"HTTP-{evidence.GENERATION} capture output drift: {path}")
     return outputs
 
 
-def main() -> None:
+def main(*, evidence=evidence, capture_fn=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--write", action="store_true")
     args = parser.parse_args()
-    outputs = capture(ROOT, args.source_commit, write=args.write)
+    outputs = (capture_fn or capture)(ROOT, args.source_commit, write=args.write)
     print(json.dumps({
-        "source_commit": args.source_commit, "generation": 48,
+        "source_commit": args.source_commit, "generation": evidence.GENERATION,
         "write": args.write, "outputs": len(outputs),
-        "scope": "model-free local ASGI source evidence; not producer/SDK/native qualification",
+        "scope": evidence.SCOPE,
     }))
 
 

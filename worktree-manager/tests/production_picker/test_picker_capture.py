@@ -165,6 +165,11 @@ def _isolate_pivots(monkeypatch, tmp_path):
     plugins.mkdir()
     monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pivots))
     monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(plugins))
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    monkeypatch.setattr(
+        data_ssh, "machine_key_map", lambda: {"anomalous-potato": "anomalous-potato"},
+    )
 
 
 # The topbar title carries a volatile version string + "update available" flag;

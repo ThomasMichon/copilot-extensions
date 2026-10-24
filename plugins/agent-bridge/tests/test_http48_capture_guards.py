@@ -6,6 +6,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 from types import SimpleNamespace
@@ -13,8 +14,10 @@ from types import SimpleNamespace
 import pytest
 
 import bridge_http48_evidence as evidence
+import bridge_http49_evidence as producer_evidence
 import bridge_http47_validation as historical
 import capture_bridge_http48 as capture
+import capture_bridge_http49 as producer_capture
 import test_http47_capture_guards as old_guards
 from test_http47_capture_guards import (
     commit_fixture, fixture_git, source_seed as source_seed,
@@ -24,9 +27,16 @@ ROOT = Path(__file__).resolve().parents[3]
 historical_repository = old_guards.repository
 
 
+@pytest.fixture(params=["http48", "http49"])
+def capture_case(request):
+    return ((evidence, capture) if request.param == "http48"
+            else (producer_evidence, producer_capture))
+
+
 @pytest.fixture
-def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, str]:
-    root = tmp_path / "http48-source"
+def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) -> tuple[Path, str]:
+    evidence, _ = capture_case
+    root = tmp_path / f"http{evidence.GENERATION}-source"
     original = evidence.previous.registry_codec.load(ROOT).materialized
     registry = copy.deepcopy(original)
     http = evidence.contract(registry)
@@ -34,7 +44,10 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, s
     assert {row["path"] for row in http["source_paths"]} == set(evidence.AFFECTED)
     http["fixtures"] = []
     http["provenance"] = http["provenance"][:1]
-    http["evidence_window"]["generations"] = [48]
+    http["evidence_window"]["generations"] = [evidence.GENERATION]
+    http["declared_range"].update(
+        current=evidence.GENERATION, previous_generation=evidence.GENERATION - 1,
+    )
     registry["contracts"], registry["deferred_contracts"] = [http], []
     paths = (evidence.previous.proof_paths(ROOT, registry) | set(evidence.EXTRA_PATHS)
              | set(evidence.installation.paths(ROOT)))
@@ -42,24 +55,50 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, s
         destination = root / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / path, destination)
+    # Composed publication-only cohorts, never an original historical receiver.
+    protocol = root / evidence.previous.PREFIX / "protocol.py"
+    text = protocol.read_text(encoding="utf-8")
+    text = re.sub(
+        r"(?m)^HTTP_PROTOCOL_VERSION = \d+$",
+        f"HTTP_PROTOCOL_VERSION = {evidence.GENERATION}", text,
+    )
+    if evidence.GENERATION == 48:
+        text = text.replace("RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION = 49\n", "")
+        http["capability_versions"].pop("retained_inbox_producer", None)
+    protocol.write_text(text, encoding="utf-8")
+    next(row for row in http["source_paths"]
+         if row["path"] == evidence.previous.PREFIX + "protocol.py")["sha256"] = evidence.digest(
+             protocol.read_bytes(),
+         )
+    prior_path = evidence.CONTRACT + "fixtures/publication-only/previous-generation.json"
+    prior_data = evidence.encode({
+        "scope": "Synthetic historical publication guard; not runtime evidence.",
+    })
+    prior = root / prior_path
+    prior.parent.mkdir(parents=True, exist_ok=True)
+    prior.write_bytes(prior_data)
+    http["fixtures"].append({
+        "path": prior_path, "sha256": evidence.digest(prior_data),
+        "role": "Synthetic historical publication guard", "generation": evidence.GENERATION - 1,
+    })
     (root / evidence.REGISTRY).write_bytes(evidence.previous.registry_codec.encode(registry))
     fixture_git(root, "init", "-q")
-    commit = commit_fixture(root, "Synthetic HTTP-48 publication-guard cohort")
+    commit = commit_fixture(root, f"Synthetic HTTP-{evidence.GENERATION} publication-guard cohort")
     monkeypatch.setattr(evidence.previous.git_evidence, "REPO", root)
     evidence.previous.git_evidence.prefetch_sources([])
     yield root, commit
     evidence.previous.git_evidence.prefetch_sources([])
 
 
-def expected(root: Path) -> dict:
+def expected(root: Path, evidence) -> dict:
     vector = json.loads((root / evidence.INPUT).read_bytes())
     return {case: vector["expected"] for case in ("legacy", "namespaced")}
 
 
-def planned(root: Path, commit: str) -> tuple[dict, dict, dict]:
+def planned(root: Path, commit: str, evidence) -> tuple[dict, dict, dict]:
     snapshot = evidence.baseline(root, commit)
     proof = evidence.source_snapshot(root, commit, snapshot.materialized)
-    outputs = evidence.build_outputs(root, commit, snapshot, proof, expected(root))
+    outputs = evidence.build_outputs(root, commit, snapshot, proof, expected(root, evidence))
     loaded = {
         path: (evidence.digest(data), json.loads(data))
         for path, data in outputs.items() if path != evidence.REGISTRY
@@ -69,33 +108,42 @@ def planned(root: Path, commit: str) -> tuple[dict, dict, dict]:
 
 
 def test_http48_capture_write_and_no_write_preserve_the_source(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
 ) -> None:
+    evidence, capture = capture_case
     root, commit = repository
     calls = []
 
     def controlled_probe(source: Path, proof: dict, vector: dict) -> dict:
         calls.append((source, proof))
-        return expected(root)  # Explicit publication-only seam, never an execution claim.
+        return expected(root, evidence)  # Publication-only seam, never an execution claim.
 
     monkeypatch.setattr(capture, "run_probes", controlled_probe)
     source = {p: (root / p).read_bytes() for p in evidence.AFFECTED}
+    historical = {
+        row["path"]: (root / row["path"]).read_bytes()
+        for row in evidence.contract(
+            evidence.previous.registry_codec.load(root).materialized,
+        )["fixtures"]
+    }
     outputs = capture.capture(root, commit, write=True)
     before = {p: (root / p).read_bytes() for p in outputs}
     assert capture.capture(root, commit) == outputs
     assert len(calls) == 2
     assert {p: (root / p).read_bytes() for p in before} == before
     assert {p: (root / p).read_bytes() for p in source} == source
+    assert {p: (root / p).read_bytes() for p in historical} == historical
 
 
 def test_http48_capture_refreshes_only_registered_current_outputs(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
 ) -> None:
+    evidence, capture = capture_case
     root, commit = repository
-    monkeypatch.setattr(capture, "run_probes", lambda *args: expected(root))
+    monkeypatch.setattr(capture, "run_probes", lambda *args: expected(root, evidence))
     first = capture.capture(root, commit, write=True)
     old = evidence.previous.registry_codec.load(root).materialized
-    path = root / "tools/capture_bridge_http48.py"
+    path = root / evidence.CAPTURE
     path.write_bytes(path.read_bytes() + b"\n")
     next_commit = commit_fixture(root, "Synthetic next source checkpoint")
     second = capture.capture(root, next_commit, write=True)
@@ -108,14 +156,32 @@ def test_http48_capture_refreshes_only_registered_current_outputs(
     assert {f["path"] for f in after["fixtures"]} == {f["path"] for f in before["fixtures"]}
 
 
+def test_http48_capture_ignores_observation_object_key_order(
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
+) -> None:
+    evidence, capture = capture_case
+    root, commit = repository
+    observed = expected(root, evidence)
+    for case in observed:
+        observed[case] = dict(reversed(list(observed[case].items())))
+        observed[case]["ordinary_producer"] = dict(reversed(list(
+            observed[case]["ordinary_producer"].items(),
+        )))
+    assert observed == expected(root, evidence)
+    monkeypatch.setattr(capture, "run_probes", lambda *args: observed)
+    outputs = capture.capture(root, commit, write=True)
+    assert capture.capture(root, commit) == outputs
+
+
 @pytest.mark.parametrize("fault", ["dirty-output", "foreign-owner", "dirty-registry"])
 def test_http48_capture_refresh_refuses_unowned_changes(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, fault: str,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, fault: str, capture_case,
 ) -> None:
+    evidence, capture = capture_case
     root, commit = repository
-    monkeypatch.setattr(capture, "run_probes", lambda *args: expected(root))
+    monkeypatch.setattr(capture, "run_probes", lambda *args: expected(root, evidence))
     capture.capture(root, commit, write=True)
-    next_commit = commit_fixture(root, "Synthetic registered HTTP-48 evidence")
+    next_commit = commit_fixture(root, f"Synthetic registered HTTP-{evidence.GENERATION} evidence")
     if fault == "dirty-registry":
         snapshot = evidence.previous.registry_codec.load(root)
         changed = copy.deepcopy(snapshot.materialized)
@@ -140,12 +206,14 @@ def test_http48_capture_refresh_refuses_unowned_changes(
 @pytest.mark.parametrize("fault", [
     "missing-source", "wrong-blob", "wrong-sha", "wrong-outcome", "wrong-child", "wrong-roles",
     "missing-installation-fragment", "missing-installation-execution",
+    "wrong-generation", "wrong-child-family",
 ])
 def test_http48_capture_rejects_self_consistent_evidence_tampering(
-    repository: tuple[Path, str], fault: str,
+    repository: tuple[Path, str], fault: str, capture_case,
 ) -> None:
+    evidence, _ = capture_case
     root, commit = repository
-    registry, outputs, loaded = planned(root, commit)
+    registry, outputs, loaded = planned(root, commit, evidence)
     packet = loaded[evidence.PRIMARY][1]
     source = evidence.previous.PREFIX + "routes/live_inbox.py"
     if fault == "missing-source":
@@ -165,6 +233,10 @@ def test_http48_capture_rejects_self_consistent_evidence_tampering(
         loaded[evidence.source_fixture_path(source)][1]["captured_from"]["source_path"] = (
             evidence.previous.PREFIX + "protocol.py"
         )
+    elif fault == "wrong-generation":
+        packet["captured_from"]["protocol_generation"] = evidence.GENERATION - 1
+    elif fault == "wrong-child-family":
+        loaded[evidence.source_fixture_path(source)][1]["evidence_family"] = "foreign"
     else:
         packet["runtime_roles"].append("native-sdk")
     packet["execution_closure_sha256"] = evidence.digest(
@@ -178,17 +250,18 @@ def test_http48_capture_rejects_self_consistent_evidence_tampering(
         if "shared_operation_evidence" in value:
             value["shared_operation_evidence"]["sha256"] = sha
     errors: list[str] = []
-    evidence.validate_http48(root, registry, loaded, errors, require_tree=True)
-    assert errors and "HTTP-48 execution closure" in errors[0]
+    evidence.validate(root, registry, loaded, errors, require_tree=True)
+    assert errors and f"HTTP-{evidence.GENERATION} execution closure" in errors[0]
     assert not (root / evidence.PRIMARY).exists()
 
 
 def test_http48_capture_unexpected_observation_writes_nothing(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, capture_case,
 ) -> None:
+    evidence, capture = capture_case
     root, commit = repository
     before = (root / evidence.REGISTRY).read_bytes()
-    wrong = expected(root)
+    wrong = expected(root, evidence)
     wrong["namespaced"]["poll"]["body"] = "substituted"
     monkeypatch.setattr(capture, "run_probes", lambda *args: wrong)
     with pytest.raises(ValueError, match="plan changed"):
@@ -202,8 +275,9 @@ def test_http48_capture_unexpected_observation_writes_nothing(
     evidence.installation.INSTALLATION_HELPER_PREFIX + "_installation_context_resolution.py",
 ])
 def test_http48_capture_dirty_source_refuses_before_probes(
-    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, source: str,
+    repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, source: str, capture_case,
 ) -> None:
+    evidence, capture = capture_case
     root, commit = repository
     target = root / source
     target.write_bytes(target.read_bytes() + b"\n")
@@ -217,8 +291,9 @@ def test_http48_capture_dirty_source_refuses_before_probes(
     "none", "entry-bytes", "fragment-bytes", "forged-code", "foreign-entry", "foreign-suffix",
 ])
 def test_http48_actual_installation_helper_execution_is_source_bound(
-    repository: tuple[Path, str], fault: str,
+    repository: tuple[Path, str], fault: str, capture_case,
 ) -> None:
+    evidence, _ = capture_case
     from agent_procutil.owned_process import run_caller_owned
     import bridge_http47_runtime as runtime
 
@@ -227,7 +302,9 @@ def test_http48_actual_installation_helper_execution_is_source_bound(
     directory = root / ".test-venvs/http47-capture-installation-control"
     directory.mkdir(parents=True)
     request = directory / "request.json"
-    payload = evidence.encode({"root": str(root), "capture_generation": 48, "source_proof": proof})
+    payload = evidence.encode({
+        "root": str(root), "capture_generation": evidence.GENERATION, "source_proof": proof,
+    })
     request.write_bytes(payload)
     entry = root / evidence.installation.ENTRY
     marker = directory / "must-not-execute"
@@ -304,8 +381,9 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
         verify_interpreters(tmp_path, {})
 
 
+@pytest.mark.parametrize("future_generation", [48, 49])
 def test_http47_historical_current_hashes_are_not_future_source_inputs(
-    historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch,
+    historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, future_generation,
 ) -> None:
     from capture_bridge_http47 import expected_input
 
@@ -318,7 +396,7 @@ def test_http47_historical_current_hashes_are_not_future_source_inputs(
         root, commit, metadata, proof, expected_input(root)["expected"],
     )[evidence.previous.PRIMARY])
     http = evidence.contract(metadata)
-    http["declared_range"]["current"] = 48
+    http["declared_range"]["current"] = future_generation
     row = next(r for r in http["source_paths"] if r["path"] == evidence.previous.PREFIX + "protocol.py")
     row["sha256"] = "f" * 64
     assert row["sha256"] != packet["execution_closure"][row["path"]]["sha256"]

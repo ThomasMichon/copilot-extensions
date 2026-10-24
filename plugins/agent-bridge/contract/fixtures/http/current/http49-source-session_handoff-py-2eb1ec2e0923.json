@@ -1,0 +1,20 @@
+{
+  "evidence_family": "http49-unchanged-source-link-v1",
+  "preserved_from": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http48-source-session_handoff-py-2eb1ec2e0923.json",
+    "sha256": "80c0a0f2d5233e88e739eb8d905d443e31ea68be559fdaa4157305dca1fcc1f8"
+  },
+  "advertisement_evidence": {
+    "path": "plugins/agent-bridge/contract/fixtures/http/current/http49-retained-producer.json",
+    "sha256": "bc5fc8664decb1a72bd3f0ec444f5c55894165d817060b2a4d1845b5df32a1cc"
+  },
+  "scope": "unchanged source and immutable prior operation; no new runtime observation",
+  "captured_from": {
+    "commit": "7c61179a52beb96699f3e9f3191e54b52e7d958c",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 49,
+    "source_path": "plugins/agent-bridge/src/agent_bridge/session_handoff.py",
+    "source_git_blob": "d9e2c2839a6e81fa6a9e6424f6a24f71ec3d5235",
+    "source_sha256": "53f3d553ab610f1fb352c9131cf81041faadb81ce94ac8513f362267ea92f1d8"
+  }
+}

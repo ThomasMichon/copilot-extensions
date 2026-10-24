@@ -103,6 +103,12 @@ class LiveInboxRuntime:
             installation, admission, consumer, expected_incarnation=expected_incarnation, now=now,
         )
 
+    def producer_admission(
+        self, db: Database, governance: LoopGovernance,
+    ) -> RuntimeAdmission:
+        """Observe existing frontend enrollment without initializing or reopening it."""
+        return self._context(db, governance)[1]
+
     def poll(
         self, db: Database, governance: LoopGovernance, consumer: InboxConsumer,
         binding: InboxBinding, *, now: float,

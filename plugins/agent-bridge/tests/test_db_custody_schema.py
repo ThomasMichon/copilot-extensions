@@ -74,8 +74,8 @@ def test_supported_writable_migration_preserves_v27_history_and_ordinary_operati
         }
     prepared = Database(path)
     try:
-        assert SCHEMA_VERSION == 31
-        assert prepared.execute_read("SELECT version FROM schema_version")[0][0] == 31
+        assert SCHEMA_VERSION == 32
+        assert prepared.execute_read("SELECT version FROM schema_version")[0][0] == 32
         validate_schema(prepared._get_conn())
         for table, rows in before.items():
             after = [dict(row) for row in prepared.execute_read(f"SELECT * FROM {table}")]

@@ -273,6 +273,62 @@ session identity before executing the selected script. With
 application custody or a completion receipt. Neither helper supplies cgroup
 escape, an installation queue or macOS admission.
 
+## Caller-owned interactive completion
+
+`interactive.run_interactive(argv, env=...)` runs a foreground command and
+returns its exit status. Use it after an
+interactive UI has returned, not on the UI's first-paint path. It requires
+the main thread and settles owned descendants before returning, including on
+Ctrl-C (130) or caller death. Cleanup failure raises `OwnedCleanupError` with
+retained process/Job custody rather than claiming completion.
+Normal exit codes are preserved; POSIX signal termination uses `128 + signal`,
+and Windows' native control-C status maps to 130 rather than a wrapped CLI code.
+
+Windows requires suspended assignment to a kill-on-close Job and confirms
+Job termination. Linux and macOS use a finite guardian with a private session.
+With a caller terminal, it owns a separate PTY: bytes and resize events are
+relayed, the completion terminal-device identity changes, and redirected
+non-TTY streams remain inherited rather than entering the relay. The caller's
+absent standard streams map to the null device, and private descriptors stay
+above fd 2 so those mappings cannot overwrite control pipes. The caller's
+terminal attributes are restored when the caller unwinds. Default SIGHUP,
+SIGTERM and SIGQUIT dispositions unwind cleanup before re-delivering the
+original signal; ignored and custom dispositions remain unchanged. An
+uncatchable SIGKILL cannot restore the caller's terminal modes, although the
+guardian still retires its descendants. A start gate precedes command
+execution and the command has its own foreground group inside that session.
+Control/status pipes remain separate from terminal data.
+Relay buffers are bounded. After owned-session settlement, terminal output
+drains under a two-second no-progress deadline rather than a total-output
+deadline; continuous progress does not discard a large command's tail.
+The relay continues bounded nonblocking output progress while waiting for
+settlement, so BSD terminal closure cannot wait on its paused master consumer.
+
+Retirement covers every ordinary job group in the private session, not just
+the initial group. Kernel `setpgroup` admission places owned child anchors only
+in that session; unreaped anchors pin group IDs through signalling. The caller
+retains the guardian unreaped until a whole-session census confirms no live
+members. A permission failure or partial census is not settlement.
+Stopped commands suspend the caller's foreground job group, including a shell
+wrapper, for normal suspend/resume. Without a
+controlling terminal, a stopped command fails explicitly and is cleaned up
+instead of signalling an unrelated parent group.
+Foreground ownership and terminal attributes are restored on exit;
+an unrelated foreground owner is never replaced.
+
+This is a finite post-UI relay and custody helper, not a shared terminal server
+or daemon. Workloads that explicitly detach into another session through
+managed lifecycle APIs remain outside its scope. The noninteractive streaming
+API below is preferred for
+bounded captured commands. `tests/test_interactive.py` covers strict Windows
+teardown plus native descendant and POSIX controlling-terminal behavior.
+`tests/test_interactive_session_native.py` additionally exercises an actual
+interactive shell with separate job groups, redirected JSON stdout and the
+managed-detachment exemption.
+The `interactive_completion=true` selector in the manual
+`installation-context-acceptance.yml` lane runs this focused packet on Linux,
+macOS and Windows; it does not widen required unit-only PR CI.
+
 ## Caller-owned native execution with streaming limits
 
 An ordinary synchronous caller that also needs caller-death cleanup uses the

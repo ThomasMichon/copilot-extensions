@@ -98,8 +98,10 @@ completion. An unknown attempt cannot return to an offered state. Handoff
 identity/input and recorded timestamps cannot be erased to mint a retry.
 Legacy poll/ACK/consumption methods do not send or settle retained handoffs.
 Associated messages are excluded from those legacy paths from insertion onward,
-not just after a handoff exists. An identical keyed retry must match the retained
-producer association, including legacy versus associated admission.
+not just after a handoff exists. Internal explicitly associated insertion
+retries must match the retained producer association. The ordinary producer
+recovery path below instead returns the original admitted row without acquiring
+a replacement frontend association.
 Registration deregistration, takeover and reaping preserve associated inbox
 history even when the registration itself goes away.
 
@@ -109,7 +111,8 @@ Both message insertion methods and
 the canonical SQL guards reject custody-associated `control:` kinds, including
 case variants. Legacy control claim refuses an existing unsupported associated
 control before expiry or claim mutations; ACK and withdrawal cannot settle it.
-Ordinary unassociated control behavior is unchanged.
+Control admission and pending-control enrollment are serialized as described
+below; never-enrolled legacy control behavior is unchanged.
 
 Custody transactions, including associated inbox insertion, commit with
 connection-local `synchronous=FULL` before returning. Both normal and adopted
@@ -133,6 +136,16 @@ consumer incarnation, installation and open admission epoch. It does not mint a
 credential, bind a client-selected database or retroactively enroll an ordinary
 legacy registration. A remote `venue` remains unsupported in this local owner.
 
+Schema 32 adds the nonpartial consumer-session history index and partial
+retained-message session index used by ordinary admission.
+Current-consumer selection uses the existing unique current index; a separate
+indexed history-existence check preserves retired-target refusal without loading
+all incarnations. The retained-row fallback uses its partial index rather than
+scanning a never-enrolled target's old unassociated messages. The normal writable
+migration preserves every enrollment, message and handoff. Passive adoption
+requires the prepared schema and exact indexes; neither read-only open nor
+adoption creates them.
+
 Enrollment compare-and-swaps the observed predecessor, retaining both
 incarnations. An identical retry after a lost enrollment reply observes the same
 current record without changing its revision. A stale predecessor, reused input,
@@ -148,7 +161,22 @@ admission require the exact current enrollment as well as fresh registration;
 concurrent reload and final admission therefore have one serial order. An
 already-committed final attempt stays outstanding after reload, and its original
 consumer can still report outcomes. A successor cannot inherit its old handoff.
-Unoffered original messages remain intact for the newly enrolled consumer.
+Unoffered original messages remain intact for a newly enrolled consumer of the
+same native session. A native-session rename does not move associated messages
+or handoffs to its successor; only unassociated legacy messages follow aliases.
+The original retained target, input and producer association therefore survive
+alias cleanup, and an original-URL keyed retry still recovers that same row
+after deregistration or purge without granting a new send opportunity.
+While aliases still exist, retained admission, keyed recovery, receipt reads
+and pending-input inspection also use the original native target. An original
+URL cannot downgrade a retired enrollment to the successor's legacy queue,
+and the successor cannot recover the predecessor's retained operation key.
+Unassociated legacy rows continue to follow their routing aliases.
+Pending-input inspection first narrows indexed session candidates, so an empty
+inbox does not scan unrelated retained history to apply custody-aware matching.
+Readiness-bound startup, standalone readiness and mode-control admission retain
+that original target too: an alias cannot insert an unsupported control into a
+successor's legacy queue or reach its readiness waiter.
 
 Enrollment history is immutable apart from irreversible retirement, survives
 registration cleanup and participates in DB revision/inventory observations.
@@ -203,11 +231,47 @@ enrollment nor reinitializes it. Original message, handoff and consumer identiti
 must match. Lost final-admission replies remain outstanding and cannot be
 converted to a second true result by repeating `/begin`.
 
-The ordinary message-producer routes and actual SDK consumer are not switched
-to this adapter yet. Unassociated legacy inbox rows remain unqualified and
+The actual SDK consumer is not switched to this adapter yet.
+Unassociated legacy inbox rows remain unqualified and
 refuse a retained batch without partial handoff commits. No SDK event,
 consumption evidence, automatic replay, proxy implementation or native behavior
 is inferred from these ASGI/installation/real-SQLite controls.
+
+## Ordinary producer admission
+
+HTTP generation 49 advertises `RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION` for the
+ordinary admission/recovery guarantee below. A producer relying on it must
+require that floor through the daemon's advertised health version. The
+retained-inbox transport floor of 48 alone is insufficient: its original
+receiver leaves ordinary message ingress unassociated. Unversioned and older
+receivers cannot qualify this guarantee from a successful ordinary response.
+The supported minimum and every earlier capability floor remain unchanged.
+
+`POST /api/v1/live-sessions/{session_id}/messages` now selects retained custody
+when the durable target enrollment requires it. The existing atomic freshness
+owner selects the current consumer and original frontend association in the
+same SQLite write transaction as insertion. This requires an original nonblank
+operation key and currently serving admitted local frontend; it does not
+initialize an epoch or enroll anyone. Missing, retired, foreign or stale
+observations refuse before admission, never fall back to a legacy row.
+A never-enrolled target remains on the ordinary legacy path, independently of
+another session's enrollment.
+
+An identical keyed retry observes its original message, payload and producer
+association before considering a fresh admission. It can therefore recover a
+lost admission reply after frontend replacement, closure or registration
+cleanup. Changed input refuses; neither recovery nor the returned admitted
+receipt grants an SDK invocation or implies acceptance or consumption.
+The original row survives a real producer-process exit before its reply.
+
+Retained startup, interrupt and control effects remain unsupported. The
+existing freshness insertion statement refuses their unqualified admission
+to an enrolled target, including readiness controls before a startup prompt.
+Enrollment refuses pending legacy controls, so control insertion and enrollment
+have one serial order; it never retires or silently settles the control.
+Direct internal owner methods and other producer cohorts are not thereby
+qualified. Full SDK wiring, outcome/consumption recovery and native/platform
+evidence remain open.
 
 ## Inventory is observation, not qualification
 
@@ -245,6 +309,7 @@ native-send settlement, host/remote enrollment, cross-owner revision closure,
 target-declared state compatibility and continuing installer retention remain
 unimplemented beyond the inbox owners and explicit local adapter above.
 No existing drain, SDK consumer or installer path is switched to this foundation.
+Only the bounded ordinary inbox-producer route above selects enrolled custody.
 No Dispatch database or adopter effect owner is involved.
 
 The focused tests cover real SQLite serial ordering, queue rollback, original

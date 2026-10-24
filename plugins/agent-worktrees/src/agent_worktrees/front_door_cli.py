@@ -55,6 +55,25 @@ def policy_invocation(args: list[str]) -> tuple[list[str], str | None] | None:
     return None
 
 
+def fire_launch_resolution_watchdog(timeout: float) -> None:
+    """Self-terminate a hung bare-launch invocation.
+
+    A Windows console close can leave a native pre-handoff call blocked even
+    after the console-control handler returns. Exit without relying on that
+    call to unwind; this watchdog never covers a healthy attached session.
+    """
+    try:
+        sys.stderr.write(
+            "[agent-worktrees] bare-launch resolution exceeded "
+            f"{timeout}s -- self-terminating a likely "
+            "hang instead of blocking forever.\n"
+        )
+        sys.stderr.flush()
+    except Exception:
+        pass
+    os._exit(1)
+
+
 # ── `<repo> <slug>` command-surface router ───────────────────────────────────
 # The router DERIVES its routable set from the installed ``agent-<slug>``
 # binstubs (so a newly-installed agent-* plugin auto-gets a `<repo> <slug>`

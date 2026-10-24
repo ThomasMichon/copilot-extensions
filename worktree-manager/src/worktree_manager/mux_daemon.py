@@ -16,7 +16,6 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
@@ -155,19 +154,7 @@ def _daemon_is_live(data: dict | None) -> bool:
     )
 
 
-def _mapping_to_observation(entry: dict) -> dict:
-    return {
-        "project": entry["project"],
-        "worktree_id": entry["worktree_id"],
-        "worktree_path": entry.get("worktree_path"),
-        "mux_session": entry["mux_session"],
-        "session_incarnation": entry.get("session_incarnation") or "",
-        "panes": list(entry.get("panes") or []),
-        "attached_clients": int(entry.get("attached_clients") or 0),
-        "live": bool(entry.get("live", True)),
-        "mapping_revision": int(entry["mapping_revision"]),
-        "observed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-    }
+_mapping_to_observation = mux_daemon_live._mapping_to_observation
 
 
 def _monitor_unavailable() -> dict:
@@ -448,6 +435,10 @@ def build_compute(
                 return control_fn(runtime, payload)
             finally:
                 runtime._end_control_request()
+        if kind == "picker-session-v1":
+            if runtime is None or not runtime.accepting_requests():
+                return {"available": False, "reason": "draining"}
+            return runtime.picker_sessions.acquire(payload)
         if kind != KIND:
             if kind == mux_discovery.KIND:
                 return mux_discovery.handle_discovery(registry, payload, runtime, handler_tracker)
@@ -648,6 +639,11 @@ class MuxDaemonRuntime:
             self.root, self.recovery_observer,
             can_admit=lambda: not self.passive and self.republish_enabled and self.accepting_requests(),
         )
+        from .warm_picker_pool import WarmPickerPool
+
+        self.picker_sessions = WarmPickerPool(self.root)
+        if passive:
+            self.picker_sessions.pause()
 
     def activate_restart_recovery(self) -> None:
         """Freeze under the owning loop's drain-visible mutation boundary."""
@@ -706,12 +702,14 @@ class MuxDaemonRuntime:
             and self.handler_tracker.wait_for_drain(0.0)
             and not self._loop_mutation_active
             and self.restart_notifications.drained
+            and not self.picker_sessions.busy
         )
 
     def begin_drain(self) -> None:
         self.draining = True
         self.republish_enabled = False
         self.restart_notifications.request_pause()
+        self.picker_sessions.pause()
 
     def begin_retire(self) -> None:
         self.begin_drain()
@@ -749,12 +747,13 @@ class MuxDaemonRuntime:
             "version": __version__,
             "runtime_generation": running_generation(),
             "attached_clients": attached_clients,
-            "busy": active_handlers > 0,
+            "busy": active_handlers > 0 or self.picker_sessions.busy,
             "restart_recovery": self.restart_notifications.status,
         }
 
     def promote(self) -> dict:
         self.admissions_open = True
+        self.picker_sessions.resume()
         return {"adopted": True}
 
     def drain(self, payload: dict) -> dict:
@@ -783,6 +782,7 @@ class MuxDaemonRuntime:
         self.retire_requested = False
         self.shutdown_requested = False
         self._self_retire_confirms = 0
+        self.picker_sessions.resume()
         return {"draining": False}
 
     def request_shutdown(self) -> dict:
@@ -810,6 +810,8 @@ class MuxDaemonRuntime:
         return self.shutdown_requested or (self.retire_requested and self._is_drained())
 
     def has_active_demand(self) -> bool:
+        if self.picker_sessions.busy:
+            return True
         if self.server is not None and self.server.subscriber_count() > 0:
             return True
         if self.server is not None and self.server.active_handler_count() > 0:
@@ -817,6 +819,7 @@ class MuxDaemonRuntime:
         return self.registry.has_any_live()
 
     def shutdown(self) -> None:
+        self.picker_sessions.close()
         try:
             self.restart_notifications.close()
         finally:
@@ -896,6 +899,8 @@ def run_daemon_foreground(
                 if lease is not None:
                     write_lock_data(lock, runtime.lock_extra())
                 runtime.sync_self_retire()
+                if lease is not None:
+                    runtime.picker_sessions.pump()
                 if runtime.republish_enabled:
                     with runtime.loop_mutation():
                         if runtime.republish_enabled:

@@ -150,6 +150,36 @@ The separate real peer control uses `tools/run-plugin-tests.py agent-dispatch
 --test-file tests/test_procutil.py -k "ssh_snapshot or (namespaced_sibling_resolution
 and agent-ssh)"`. No production credentials, remote hosts or capacity are needed.
 
+## Optional foreground completion custody
+
+The manual `installation-context-acceptance.yml` selector
+`interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`
+and `test_interactive_session_native.py` on Linux, macOS and Windows. It
+exercises real finite commands, normal-exit
+descendant cleanup, abrupt caller death, POSIX interruption and controlling-PTY
+input/resize/foreground restoration. Windows also generates a real SIGINT in
+the owned caller while its command remains blocked, then verifies descendant
+exit; it does not broadcast signals to an external console. Job refusal and
+cleanup-failure confirmation remain deterministic unit controls. This is
+completion custody evidence, not a resident Picker startup benchmark or an
+installed-runtime rollout, and does not expand required unit-only PR CI.
+The separate-session native cases use a real interactive Bash with background
+job groups, preserve redirected JSON stdout and check that an explicitly
+managed detached workload remains live. Managed-detachment cases skip inside
+the contained local runner rather than bypassing its suppression; they run in
+the explicit disposable native workflow.
+
+The same Linux job also runs Manager's
+`tests/native/test_warm_picker_lifetime.py` through its isolated plugin runner.
+That packet uses an unmodified warm worker on a private tmux TTY, hard-kills
+its birth-pinned owner before and after project binding, and verifies UI,
+engine-child, mux-session and slot retirement. Its audited engine contract
+double records every child state root; the fixture allowlists the environment
+and isolates home, app-data, provider, Manager, temp and mux paths. This is
+not full engine/daemon or performance qualification. Run that selector locally
+on Windows with psmux and PowerShell available; platforms without supported
+warm-worker birth identity retain the cold path and skip this packet.
+
 ## Optional candidate dependency profiles
 
 The installation-context Python `runtime-profile-policy` reader has no

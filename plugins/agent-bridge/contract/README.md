@@ -99,7 +99,37 @@ When a wire contract does change:
    python tools/run-plugin-tests.py agent-bridge --guards
    ```
 
-## HTTP-48 local retained-inbox evidence
+## HTTP-49 ordinary retained-producer evidence
+
+HTTP generation 49 advertises ordinary keyed producer association and original
+admission recovery through `RETAINED_INBOX_PRODUCER_PROTOCOL_VERSION`.
+`RETAINED_INBOX_PROTOCOL_VERSION` remains 48 for the transport itself; that
+earlier floor does not promise retained ordinary ingress. Producers depending on
+the guarantee require 49 from the daemon's health advertisement. Unversioned and
+HTTP-48 receivers are unsupported for that guarantee, not legacy fallback.
+Never-enrolled targets remain a separate, intentionally legacy cohort.
+
+Independent current expectations live in `inputs/http49/retained-producer.json`;
+the model-free ASGI driver is `test_http49_capture_probes.py`. After committing
+matching source and declarations, use the bounded capture path:
+
+```text
+python tools/capture_bridge_http49.py --source-commit <full-source-commit> --write
+python tools/capture_bridge_http49.py --source-commit <full-source-commit>
+python tools/check-agent-bridge-contracts.py --base <reviewed-base>
+```
+
+Generation-specific policy facades share source/publication/validation mechanics,
+not mutable global generation overrides or copied writers. HTTP-49 output paths
+cannot replace HTTP-48 or older packets, inputs or provenance. Historical
+validation uses each captured tree and primary/child bindings, not future source
+hashes or newly registered owners. Both writer policies retain dirty-source,
+foreign-owner, complete-installation-helper and actual interpreter guards.
+The selected HTTP-49 ASGI portfolio must execute both fixture installation modes;
+older execution drivers require their matching source and are not relabelled as
+current observations. SDK/native and installed qualification remain separate.
+
+## Historical HTTP-48 local retained-inbox evidence
 
 HTTP generation 48 introduces explicit local retained-inbox negotiation,
 enrollment, poll, final-admission and original-outcome routes. The
@@ -113,11 +143,16 @@ Independent expectations live in `inputs/http48/retained-inbox.json`.
 `test_http48_capture_probes.py` executes the actual serving app, ordinary auth
 middleware, installation owner and SQLite handoffs in both legacy and namespaced
 fixture installations. It observes repeated poll/final-admission responses,
-wrong-epoch refusal and original outcomes after closure and registration cleanup.
-It does not run an ordinary message producer, extension SDK, native session or
-deployed receiver.
+ordinary keyed producer admission and recovery, interrupt/wrong-epoch refusal
+and original outcomes after closure and registration cleanup. It does not run
+an extension SDK, native session or deployed receiver.
 
-After committing matching source and source registry declarations:
+Some source-pinned prerelease HTTP-48 packets contain ordinary producer
+observations. Those qualify only their exact captured source, not an arbitrary
+receiver advertising 48; the distinct producer capability starts at 49.
+
+The historical writer requires matching genuine HTTP-48 source and declarations,
+not the current HTTP-49 checkout:
 
 ```text
 python tools/capture_bridge_http48.py --source-commit <full-source-commit> --write
@@ -244,7 +279,7 @@ before the final snapshot-based replay. Missing history is never fetched.
 
 ### Qualifying the historical capture owner
 
-The current checkout advertises HTTP-47 and must not be rewritten as HTTP-46
+The current checkout advertises a later generation and must not be rewritten as HTTP-46
 to exercise this older writer. On Linux, explicitly qualify it with a locally
 available, genuine HTTP-46 source commit:
 

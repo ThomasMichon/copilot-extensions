@@ -19,6 +19,10 @@ on:
         description: Full immutable 40-hex commit for the guardian packet (empty uses the dispatch SHA)
         type: string
         default: ""
+      interactive_completion:
+        description: Exercise owned foreground completion on Linux, macOS and Windows
+        type: boolean
+        default: false
       watch_owner:
         description: Run PR-owner native-account and contained owner-boundary acceptance instead
         type: boolean
@@ -65,7 +69,7 @@ permissions:
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -86,7 +90,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -340,6 +344,48 @@ jobs:
           python tools/run-plugin-tests.py copilot-extensions-harness
           --test-file tests/test_reviewer_source.py
           -k test_windows_command_shim_uses_cmd
+
+  interactive-completion-linux:
+    if: ${{ inputs.interactive_completion }}
+    name: Owned foreground completion (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &interactive-completion-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real descendant and controlling-terminal ownership
+        run: |
+          python tools/seasoned_uv.py --uv uv -- --system pytest psutil
+          python -m pytest -q libs/agent-procutil/tests/test_interactive.py libs/agent-procutil/tests/test_interactive_session_native.py
+      - name: Qualify warm UI lifetime in a private native mux
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          if ! command -v tmux; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          fi
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_warm_picker_lifetime.py
+
+  interactive-completion-macos:
+    if: ${{ inputs.interactive_completion }}
+    name: Owned foreground completion (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 6
+    steps: *interactive-completion-steps
+
+  interactive-completion-windows:
+    if: ${{ inputs.interactive_completion }}
+    name: Owned foreground completion (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *interactive-completion-steps
 
   candidate-profiles-linux:
     if: ${{ inputs.candidate_profiles }}

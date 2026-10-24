@@ -14,6 +14,18 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    import sys as _entry_sys
+
+    if _entry_sys.argv[1:2] == ["--resident-picker"]:
+        from .resident_picker import main as _resident_picker_main
+
+        raise SystemExit(_resident_picker_main(_entry_sys.argv[2:]))
+    if _entry_sys.argv[1:2] == ["--resident-result"]:
+        from .resident_picker import finish as _resident_picker_finish
+
+        raise SystemExit(_resident_picker_finish(_entry_sys.argv[2:]))
+
 import json
 import os
 import subprocess
@@ -959,7 +971,7 @@ def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
     return decision.get("machine") or None, decision.get("env") or None
 
 
-def _run_production_picker(project: str) -> int:
+def _run_production_picker(project: str, *, initial_decision=None) -> int:
     """Run the transplanted production UX and act on its launch decision.
 
     ``"refresh"``/``"manager-update"`` apply an update and loop back to
@@ -978,17 +990,21 @@ def _run_production_picker(project: str) -> int:
         # a launch dispatch below: a dispatched decision (resume/restore/...)
         # spawns the actual workload (shell, Copilot session) as a CHILD of
         # this process, which would otherwise silently inherit the boost.
-        raise_current_process_priority()
-        try:
-            decision = runner.run(project)
-        except runner.ProjectSelectionError as error:
-            print(f"error: {error}")
-            return 2
-        except Exception as error:
-            print(f"error: production Picker failed: {error}")
-            return 1
-        finally:
-            restore_normal_process_priority()
+        if initial_decision is not None:
+            decision = initial_decision
+            initial_decision = None
+        else:
+            raise_current_process_priority()
+            try:
+                decision = runner.run(project)
+            except runner.ProjectSelectionError as error:
+                print(f"error: {error}")
+                return 2
+            except Exception as error:
+                print(f"error: production Picker failed: {error}")
+                return 1
+            finally:
+                restore_normal_process_priority()
         if not decision:
             return 0
         if not project:
