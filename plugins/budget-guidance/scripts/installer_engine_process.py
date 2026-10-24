@@ -11,10 +11,12 @@ import math
 import os
 import select
 import signal
+import stat
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import ExitStack
 from pathlib import Path
 from types import ModuleType
 import uuid
@@ -50,6 +52,180 @@ _GUARDIAN_BOOTSTRAP = (
     "__file__='_installer_process.py'\n"
     "exec(compile(_guardian_sources[__file__],__file__,'exec'))\n"
 )
+
+
+_RETENTION_SCOPE_ENV = "COPILOT_EXTENSIONS_INSTALLER_RETENTION_SCOPE"
+_SCOPE_PACKET_LIMIT = 256 * 1024
+
+
+class _ScopeDeadlineExpired(TimeoutError):
+    pass
+
+
+def _scope_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Installer retention packet has a duplicate field")
+        value[key] = item
+    return value
+
+
+def _scope_packet(path: Path, value: dict) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    stream = temporary.open("x", encoding="utf-8")
+    try:
+        with stream:
+            json.dump(value, stream, ensure_ascii=False)
+        # Windows rename refuses an existing destination; no foreign packet is replaced.
+        os.rename(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _read_scope_packet(path: Path) -> dict:
+    metadata = path.lstat()
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or getattr(metadata, "st_file_attributes", 0) & 0x400
+    ):
+        raise RuntimeError("Installer retention packet is not an ordinary file")
+    if os.name == "nt":
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.CreateFileW.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+            wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ]
+        kernel.CreateFileW.restype = wintypes.HANDLE
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        # Atomic rename can still hold DELETE access when the name becomes visible.
+        handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
+        if handle == wintypes.HANDLE(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        except BaseException:
+            kernel.CloseHandle(handle)
+            raise
+        stream = os.fdopen(descriptor, "rb")
+    else:
+        stream = path.open("rb")
+    with stream:
+        opened = os.fstat(stream.fileno())
+        if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+            raise RuntimeError("Installer retention packet identity changed")
+        data = stream.read(_SCOPE_PACKET_LIMIT + 1)
+    if len(data) > _SCOPE_PACKET_LIMIT:
+        raise RuntimeError("Installer retention packet exceeds its bound")
+    value = json.loads(data, object_pairs_hook=_scope_object)
+    if not isinstance(value, dict):
+        raise RuntimeError("Installer retention packet is not an object")
+    return value
+
+
+def _register_retention(context: str, root: Path, version: str, timeout: float) -> float:
+    started = time.monotonic()
+    scope = json.loads(context, object_pairs_hook=_scope_object)
+    if (
+        not isinstance(scope, dict)
+        or set(scope) != {"version", "root", "directory", "nonce", "guardian_pid"}
+        or type(scope["version"]) is not int or scope["version"] != 1
+        or any(not isinstance(scope[key], str) for key in ("root", "directory", "nonce"))
+        or len(scope["nonce"]) != 32
+        or type(scope["guardian_pid"]) is not int or scope["guardian_pid"] <= 0
+        or Path(scope["root"]).resolve() != root.resolve()
+    ):
+        raise ChildLaunchError("Installer child has invalid retention-scope evidence")
+    directory = Path(scope["directory"])
+    if not directory.is_absolute():
+        raise ChildLaunchError("Installer retention scope is not an absolute private directory")
+    metadata = directory.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+        raise ChildLaunchError("Installer retention scope is not an ordinary private directory")
+    request = directory / (uuid.uuid4().hex + ".request")
+    acknowledgement = request.with_suffix(".ack")
+    packet = {"nonce": scope["nonce"], "root": str(root.resolve()), "runtime_version": version}
+    _scope_packet(request, packet)
+    try:
+        while True:
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                raise ChildLaunchError("Installer retention registration timed out before child launch")
+            try:
+                observed = _read_scope_packet(acknowledgement)
+            except FileNotFoundError:
+                time.sleep(min(0.02, remaining))
+                continue
+            if observed.get("retained") is not True or observed != {**packet, "retained": True}:
+                raise ChildLaunchError("Installer guardian did not prove the requested retention")
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                raise ChildLaunchError("Installer retention registration exhausted the child deadline")
+            return remaining
+    finally:
+        request.unlink(missing_ok=True)
+        acknowledgement.unlink(missing_ok=True)
+
+
+class _RetentionScope:
+    """The finite guardian co-retains each constructor target before writers start."""
+
+    def __init__(self, directory: Path, root: Path, runtime: ModuleType, custody: ExitStack):
+        self.directory = directory.absolute()
+        self.directory.mkdir(mode=0o700, exist_ok=False)
+        self.directory = self.directory.resolve(strict=True)
+        self.root = root.resolve()
+        self.runtime = runtime
+        self.custody = custody
+        self.nonce = uuid.uuid4().hex
+        self.versions: set[str] = set()
+        self.handled: set[str] = set()
+
+    def environment(self) -> str:
+        return json.dumps({
+            "version": 1, "root": str(self.root),
+            "directory": str(self.directory), "nonce": self.nonce,
+            "guardian_pid": os.getpid(),
+        }, ensure_ascii=False)
+
+    def retain_requests(self, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        with os.scandir(self.directory) as entries:
+            pending = sorted(Path(entry.path) for entry in entries if entry.name.endswith(".request"))
+        for path in pending:
+            if path.name in self.handled:
+                continue
+            try:
+                packet = _read_scope_packet(path)
+            except FileNotFoundError:
+                continue
+            if (
+                set(packet) != {"nonce", "root", "runtime_version"}
+                or packet["nonce"] != self.nonce
+                or not isinstance(packet["root"], str)
+                or Path(packet["root"]).resolve() != self.root
+                or not isinstance(packet["runtime_version"], str)
+            ):
+                raise RuntimeError("Installer guardian refused invalid retention registration")
+            version = packet["runtime_version"]
+            self.runtime.version_dir(self.root, version)
+            if version.lower() not in self.versions:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _ScopeDeadlineExpired(
+                        "Installer retention registration exhausted the owner deadline"
+                    )
+                self.custody.enter_context(
+                    self.runtime.retention_lease(self.root, version, timeout=remaining)
+                )
+                self.versions.add(version.lower())
+            _scope_packet(path.with_suffix(".ack"), {**packet, "retained": True})
+            self.handled.add(path.name)
 
 
 class ChildLaunchError(RuntimeError):
@@ -97,6 +273,8 @@ def run_owned(
     on_output: Callable[[str, bytes], None] | None = None,
     output_fds: Mapping[str, int] | None = None,
     guardian_sources: dict[str, bytes] | None = None,
+    allow_breakaway: bool = False,
+    retention_scope: Path | None = None,
 ) -> subprocess.CompletedProcess:
     """Settle owned writers before returning or propagating a timeout.
 
@@ -117,6 +295,22 @@ def run_owned(
         if remaining <= 0:
             raise ChildTimeoutExpired(argv, 0, output="", stderr="")
         timeout = min(timeout, remaining)
+    if type(allow_breakaway) is not bool:
+        raise ValueError("installer child breakaway policy must be a boolean")
+    if retention_scope is not None and (
+        os.name != "nt" or runtime_root is None or runtime_version is None or runtime_path is None
+    ):
+        raise ValueError("installer retention scope requires complete Windows Job custody")
+    if _RETENTION_SCOPE_ENV in env:
+        if os.name != "nt" or retention_scope is not None:
+            raise ChildLaunchError("Installer retention scopes cannot be nested or cross platforms")
+        if runtime_root is None or runtime_version is None or runtime_path is None:
+            raise ChildLaunchError("Scoped installer children require complete runtime custody")
+        timeout = _register_retention(
+            env[_RETENTION_SCOPE_ENV], runtime_root, runtime_version, timeout,
+        )
+        env = dict(env)
+        env.pop(_RETENTION_SCOPE_ENV)
     if any(value is not None for value in (runtime_root, runtime_version, runtime_path)):
         if not all(value is not None for value in (runtime_root, runtime_version, runtime_path)):
             raise ValueError("installer retained child requires complete runtime custody")
@@ -128,6 +322,8 @@ def run_owned(
                 output_fds=output_fds,
                 guardian_sources=guardian_sources,
                 **({"deadline": deadline} if deadline is not None else {}),
+                allow_breakaway=allow_breakaway,
+                retention_scope=retention_scope,
             )
     options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -150,7 +346,7 @@ def run_owned(
         # An explicit application path avoids MAX_PATH command-token parsing.
         try:
             process, job = procutil.spawn_sync_in_kill_on_close_job(
-                argv, require_job=True, allow_breakaway=False,
+                argv, require_job=True, allow_breakaway=allow_breakaway,
                 executable=argv[0],
                 **procutil.no_window_kwargs(), **options,
             )
@@ -310,6 +506,7 @@ def _load_guardian_resources(
 def _retained_windows(
     argv, *, cwd, env, timeout, procutil, root, version, runtime_path,
     deadline=None, guardian_sources=None, on_output=None, output_fds=None,
+    allow_breakaway=False, retention_scope=None,
 ):
     import msvcrt
 
@@ -324,6 +521,7 @@ def _retained_windows(
     capture = None
     timeout_error = None
     try:
+        guardian_python = sys._base_executable if retention_scope is not None else sys.executable
         handle = msvcrt.get_osfhandle(reader)
         startup = subprocess.STARTUPINFO()
         startup.lpAttributeList = {"handle_list": [handle]}
@@ -333,17 +531,22 @@ def _retained_windows(
                 if time.monotonic() >= execution_deadline:
                     raise ChildTimeoutExpired(argv, timeout, output="", stderr="")
                 process = subprocess.Popen(
-                    [sys.executable, "-I", "-B", "-c", _GUARDIAN_BOOTSTRAP,
+                    [guardian_python, "-I", *(["-S"] if retention_scope is not None else []),
+                     "-B", "-c", _GUARDIAN_BOOTSTRAP,
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version,
                      "--timeout", str(timeout),
                      *(["--progress-output"] if progress_output else []),
                      *(["--deadline", str(completion_deadline)] if completion_deadline is not None else []),
-                     "--", *argv],
+                     *(["--retention-scope", str(retention_scope)] if retention_scope is not None else []),
+                     *(["--allow-breakaway"] if allow_breakaway else []), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                    startupinfo=startup, close_fds=True, executable=sys.executable,
-                    **procutil.no_window_kwargs(),
+                    startupinfo=startup, close_fds=True, executable=guardian_python,
+                    **(
+                        procutil.windowless_daemon_kwargs(breakaway=True)
+                        if retention_scope is not None else procutil.no_window_kwargs()
+                    ),
                 )
             except OSError as error:
                 raise ChildLaunchError(f"Installer guardian could not start: {error}") from error
@@ -445,13 +648,28 @@ def _supervise_windows(args, argv):
         with _load_guardian_resources(_guardian_sources) as (runtime, procutil):
             if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
                 return expired
-            with runtime.retention_lease(Path(args.runtime_root), args.runtime_version):
-                return _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, expired)
+            with ExitStack() as custody:
+                custody.enter_context(runtime.retention_lease(Path(args.runtime_root), args.runtime_version))
+                scope = (
+                    _RetentionScope(args.retention_scope, Path(args.runtime_root), runtime, custody)
+                    if args.retention_scope is not None else None
+                )
+                environment = dict(os.environ)
+                environment.pop(_RETENTION_SCOPE_ENV, None)
+                if scope is not None:
+                    scope.versions.add(args.runtime_version.lower())
+                    environment[_RETENTION_SCOPE_ENV] = scope.environment()
+                return _run_guardian_child(
+                    args, argv, procutil, disconnected, absolute_deadline, expired,
+                    scope=scope, environment=environment,
+                )
     finally:
         kernel.CloseHandle(args.owner_handle)
 
 
-def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, expired):
+def _run_guardian_child(
+    args, argv, procutil, disconnected, absolute_deadline, expired, *, scope=None, environment=None,
+):
     deadline = time.monotonic() + args.timeout
     if absolute_deadline is not None:
         deadline = min(deadline, absolute_deadline)
@@ -463,7 +681,8 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
         return expired
     try:
         process, job = procutil.spawn_sync_in_kill_on_close_job(
-            argv, require_job=True, allow_breakaway=False, executable=argv[0],
+            argv, require_job=True, allow_breakaway=getattr(args, "allow_breakaway", False),
+            executable=argv[0], env=environment,
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", **procutil.no_window_kwargs(),
         )
@@ -479,6 +698,8 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
             def observe_owner():
                 if disconnected():
                     raise _OwnerDisconnected("installer caller exited during child execution")
+                if scope is not None:
+                    scope.retain_requests(max(0, deadline - time.monotonic()))
 
             capture = _output_capture(
                 process, procutil, None,
@@ -491,6 +712,8 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
                 )
             except subprocess.TimeoutExpired:
                 timed_out = True
+            except _ScopeDeadlineExpired:
+                timed_out = True
             except _OwnerDisconnected:
                 pass
         else:
@@ -501,6 +724,12 @@ def _run_guardian_child(args, argv, procutil, disconnected, absolute_deadline, e
                 if remaining <= 0:
                     timed_out = True
                     break
+                if scope is not None:
+                    try:
+                        scope.retain_requests(remaining)
+                    except _ScopeDeadlineExpired:
+                        timed_out = True
+                        break
                 try:
                     stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
                     timed_out = time.monotonic() >= deadline
@@ -606,12 +835,16 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--deadline", type=float)
     parser.add_argument("--progress-output", action="store_true")
+    parser.add_argument("--allow-breakaway", action="store_true")
+    parser.add_argument("--retention-scope", type=Path)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if not args.command or args.command[0] != "--" or len(args.command) < 2:
         parser.error("a child argv after -- is required")
     if args.deadline is not None and (not math.isfinite(args.deadline) or args.deadline <= 0):
         parser.error("a finite positive monotonic deadline is required")
+    if args.retention_scope is not None and args.owner_handle is None:
+        parser.error("retention scope requires a Windows retained Job guardian")
     if args.owner_handle is not None:
         if os.name != "nt" or not all((
             args.runtime_root, args.runtime_version,

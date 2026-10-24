@@ -102,28 +102,24 @@ def retained_input_graph(
     ) as transaction:
         if set(transaction.sources) != set(inputs.packages):
             raise RuntimeError("Retained UV inputs differ from the runtime dependency graph")
+        file_hashes: dict[Path, str] = {}
         if (
             engine._package_roots(inputs.plugin) != inputs.packages
             or engine._source_files(inputs.packages, on_progress=on_progress) != files
             or engine._construction_hash(
                 files, inputs.extras, inputs.local_packages, on_progress=on_progress,
+                file_hashes=file_hashes,
             ) != inputs.payload_hash
         ):
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
         if not set(files) <= set(transaction.source_hashes):
             raise RuntimeError("Retained UV inputs do not cover the runtime source files")
-        def changed_content(path):
-            return path if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path] else None
-
-        def completed_content(result):
-            if result is None:
+        changed = []
+        for path in files:
+            if file_hashes[path] != transaction.source_hashes[path]:
+                changed.append(path)
+            else:
                 on_progress()
-
-        changed = [
-            path for path in engine._bounded_content_map(
-                changed_content, files, on_result=completed_content,
-            ) if path is not None
-        ]
         if changed:
             raise RuntimeError(
                 "Retained UV inputs differ from the admitted source content: "
