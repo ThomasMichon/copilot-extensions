@@ -162,3 +162,14 @@ installer attempts, optional spools or a deployment adapter.
   roll an unterminated file before appending. A restart regression preserves the
   damaged archive byte-for-byte while proving the new event stays parseable.
   This does not alter the separately owned telemetry append contract.
+- 2026-10-23 — Review identified the supported task-GC-disabled configuration.
+  The existing lifespan-owned maintenance loop now remains armed for diagnostics
+  in that mode, with a 60-second logging-only branch and no queue reconciliation.
+  The actual application lifespan regression proves aged records expire while
+  task GC remains disabled (zero liveness runs); shutdown retains the existing
+  loop cancellation owner. No separate logging scheduler or process is added.
+- 2026-10-23 — Final disabled-GC correction validation passes 282 native Windows
+  tests across diagnostics, coordinator, supervisor, loop governance and telemetry.
+  This preserves disabled task recovery, governance backoff and existing queue
+  behavior while qualifying quiet diagnostic maintenance. The diagnostic module
+  now has 20 cases, including the actual lifespan boundary.

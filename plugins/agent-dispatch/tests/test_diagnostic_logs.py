@@ -452,3 +452,47 @@ def test_restart_rolls_unterminated_tail_without_corrupting_next_event(tmp_path)
     archives = [p for p in handler._files() if p != path]
     assert len(archives) == 1
     assert archives[0].read_bytes() == original
+
+
+def test_actual_lifespan_prunes_with_task_gc_disabled_without_reconciling(tmp_path, monkeypatch):
+    from agent_dispatch import coordinator
+    from agent_dispatch.queue import TaskQueue
+
+    now = datetime.now(timezone.utc)
+    handler = logs.DiagnosticLog("coordinator", tmp_path, clock=lambda: now)
+    handler.emit(record_at(now))
+    now += timedelta(days=31)
+    monkeypatch.setattr(logs, "MAINTENANCE_SECONDS", 0.01)
+    monkeypatch.setattr(coordinator, "_self_retire_settings", lambda: (False, 30, 3))
+    monkeypatch.setattr(coordinator, "_abandoned_passive_reap_settings",
+                        lambda: (False, 120, 600))
+    monkeypatch.setattr(coordinator, "_self_update_settings", lambda: (False, 60, 3, 600))
+    calls = []
+
+    async def unexpected_gc(*_args, **_kwargs):
+        calls.append("queue reconciliation")
+        raise AssertionError("disabled task GC must not reconcile")
+
+    monkeypatch.setattr(coordinator, "_run_supervised_cycle", unexpected_gc)
+    app = coordinator.create_app(
+        TaskQueue(tmp_path / "tasks.db"), sweep_interval=0,
+        wake_interval=0, verification_interval=0, enable_mcp=False,
+    )
+    package = logging.getLogger("agent-dispatch")
+    package.addHandler(handler)
+
+    async def run():
+        async with app.router.lifespan_context(app):
+            for _ in range(200):
+                if events(handler) == []:
+                    break
+                await asyncio.sleep(0.01)
+            assert events(handler) == []
+            assert calls == []
+            assert app.state.loop_health["liveness_gc"].total_runs == 0
+
+    try:
+        asyncio.run(run())
+    finally:
+        package.removeHandler(handler)
+        handler.close()

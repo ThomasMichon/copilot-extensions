@@ -51,7 +51,10 @@ Startup forces maintenance. The existing coordinator liveness-GC loop and
 supervisor iteration boundary also invoke maintenance, even when no new messages
 arrive and before governance backoff. Quiet-service cleanup therefore follows the
 owner's configured maintenance cadence; a stopped service cleans up on restart.
-There is no new timer, process, service, cron job or collector.
+The existing lifespan-owned coordinator loop stays armed on a 60-second
+diagnostics-only cadence when task GC is disabled; that branch never reconciles
+queue state and uses the same lifespan cancellation owner. There is no separate
+scheduler, process, service, cron job or collector.
 
 All participating application writers close their data handles after each append.
 The existing crash-releasing `OperationLock` serializes append, rotation and
