@@ -88,6 +88,37 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-PUB-DEADLINE existing NUL absence and configured bounds
+
+This settles only `tests/test_publication_deadline.py:1`, header
+`@@ -117,8 +117,12 @@ def test_verified_rebase_retains_configured_bound(monkeypatch):`,
+full hunk SHA256
+`7d5e82b9d533802e6bd0569e161ef47c3987ff95d2a7aee877ee45f0501157fe`.
+The complete `test_verified_rebase_retains_configured_bound` function has
+identical ASTs in the immutable source, actual merged #7886 commit
+`c1ca9083463d0b0b7bad22cc401c37ab3e462b78`, and accepted comparison
+`e38e62981c410de3041215d1a6eafc24a1aff18e`.
+
+The Git double recognizes the NUL-framed `config --null --get-regexp`
+absence query with exit 1 and empty stdout/stderr, rather than returning a
+URL as malformed configuration evidence. Other reads retain their scenario
+URL. The test still exercises ordinary-push refusal followed by a separately
+verified push, requires the original `old` lease, checks both attempts retain
+the configured 300-second bound and requires the verified source head in
+the result. This is compatibility with P's fresh transport evidence, not a
+new timeout value, authority cache or permissive configuration fallback.
+
+The complete current publication-deadline module passes all 27 cases in
+97.83 seconds preparation/cleanup inclusive, with exactly two native workers
+and unchanged item marks, watchdog and process/memory/temp bounds. Its real
+snapshot/refspec publications, client hook markers, publication/finalization
+lock budgets, auth retry, invalid values, maximum usable subprocess bound
+and fractional diagnostic assertions remain intact.
+
+No runtime or test edit is needed. This is one historical-key semantic
+disposition, not settlement of another publication/rewrite fixture or
+normal-group/repeated complete same-head performance qualification.
+
 ### B-INCONCLUSIVE retains five independently collected native refusals
 
 This settles only `tests/test_finalize_precondition.py:4`, header
