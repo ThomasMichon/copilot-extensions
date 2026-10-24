@@ -3109,6 +3109,29 @@ separate concern (#6941); neither constraints nor this inert record prove an
 approved, available CPU/accelerator closure. The current constructors and their
 retained slots remain unchanged by this preparation seam.
 
+`tools/runtime_profile_wheels.py` adds repository-only actual-byte verification,
+not an approval adapter. `verify_profile_wheels` requires the complete exact
+filename-to-binary-stream set, caller-supplied total archive/unpacked byte
+budgets and a per-metadata-file budget. It compares every archive's SHA-256 and
+actual Requires-Python, Provides-Extra and Requires-Dist with the validated
+record. The shared wheel inspector checks distribution/version/tag identity,
+safe members and each RECORD entry without extracting or executing code.
+Runtime RECORD entries support SHA-256, SHA-384 and SHA-512; weak/unsupported
+algorithms refuse, while archive locks remain SHA-256. Distribution aliases and
+runtime versions compare by normalized identity. First-party promotion retains
+its locked generator, exact version spelling and SHA-256 RECORD policy.
+The shared filename grammar lives in the static-admission module so byte
+inspection never imports builder/feed machinery. A third-party wheel's
+generator is not an approval source.
+
+Streams remain caller-owned and must remain immutable under retained custody
+through subsequent construction. Verification detects changed bytes during its
+own inspection, but produces no admission/reuse receipt and grants no trust to
+a path, feed, release or record. The caller still owes authenticated approval,
+source/feed/seasoning/revocation evidence, real device eligibility and the
+existing constructor integration. Explicit test budgets are not production
+acquisition defaults or permission to enable a consumer.
+
 ### Shared engine delivery
 
 A canonical pair of files, `libs/installer-engine/installer-engine.ps1` and

@@ -360,6 +360,30 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+The exact-profile wheel cases in
+`tools/promotion_unit_tests/test_runtime_profile_wheels.py` inspect complete
+synthetic ZIP/RECORD bytes in memory, including executable-looking payloads
+that must never execute. They cover actual metadata/digest disagreement,
+closed-set refusal, inclusive closure-wide byte budgets, malformed archives,
+mutation during inspection and preservation of first-party generator checks.
+These units qualify the repository-only byte verifier, not an approved feed,
+real CPU/accelerator closure, installed constructor or production reuse receipt.
+
+Portable preservation units substitute synthetic file reads/replaces for the
+Windows native shared-handle adapter. The registry packet runs its original
+FIFO refusal assertions with a synthetic FIFO stat result instead of creating
+a platform-specific FIFO. Original library native tests remain unchanged and
+outside this packet; neither native rename sharing nor FIFO creation is
+qualified by these unit adapters. The effect observer and zero-skip rule remain
+unchanged on Windows and POSIX.
+
+`tools/test_runtime_profile_bootstrap.py` separately runs a real fresh caller
+with `-I -S` and an import guard denying `packaging`. The builder's public
+filename parser and first-party wheel inspector must both work without that
+caller dependency. Runtime PEP 440 validation still uses the runtime tooling's
+declared `packaging`; no package is installed by the parser. Run this native
+child check under the bounded development supervisor, not the no-actor packet.
+
 The reviewed [promotion burndown](efforts/active/dev-branch-release-pipeline/promotion-burndown.md)
 supersedes the historical full-suite promotion requirement below. Source CI
 and the independently governed Main control consume the unit-profile contract.
