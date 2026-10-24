@@ -88,6 +88,48 @@ the still-open #5694/#5682 qualification and residual-settlement obligation.
 
 ## Admitted narrow batches
 
+### B-PUBSTUB existing transport-preserving scenario labels
+
+This settles only these six original keys; their headers and dispositions
+in the census below remain unchanged:
+
+| Key | Full original hunk SHA256 |
+|---|---|
+| `tests/test_pr_break_glass.py:1` | `12af3ab7448260054e7f3e9c28cea67a5c41ca509236ea7555b066d6315dd827` |
+| `tests/test_pr_break_glass.py:2` | `4286283f0def863ba0691b24f04c7dd6e68d60aa941606656f115cbd0a7b53c9` |
+| `tests/test_pr_break_glass.py:4` | `9a79c77f23d3871bf9b8fadff4464d0f39c66be4ed9da585f5ece6b892e13cc7` |
+| `tests/test_pr_custom_head.py:1` | `e4b49a73473e5c3396b80962afca6aaaf0690338b3942a8d60c44ed1d7bfd36c` |
+| `tests/test_pr_custom_head.py:2` | `fb488e13c0bc76276c61a3c51a76e4534edfca835c0d33df598552f17ecac2f5` |
+| `tests/test_pr_custom_head.py:3` | `6342b54cc4ecda26670b67950e5e0fcc8374f125802e9b6fcd7e5666fa7bf71c` |
+
+Actual merged #7886 commit `c1ca9083463d0b0b7bad22cc401c37ab3e462b78`
+already contains the adapter and all six consumers/import changes. The
+complete `_stub_remote_target`, `_recovered_pr`, Azure recovery-preview
+test and public custom-head rewrite test have identical ASTs in that merge,
+the immutable source and accepted comparison
+`ed488d7dfce78da4ac10f1bcbae23415960725fe`. `_attested` matches the merge
+exactly; its intentional difference from the immutable source is the remote
+selector `None` instead of `"origin"`, labeling all valid scenario remotes.
+This is not a claim of literal whole-file equivalence.
+
+The shared helper wraps the real fresh `_remote_snapshot`, replacing only
+the scenario slug and optional identity after a valid transport result.
+It retains invalid results unchanged. The real-Git adapter regression
+introduces a conflicting push URL and requires both destination fields to
+become empty, proving scenario labels cannot hide transport disagreement.
+The recovery and custom-head consumers retain actual Git publications,
+confirmation/refusal paths, tracking and remote-head checks. No old
+`push_slug`/`push_identity` stub replaces those snapshot reads.
+
+The complete remote-evidence and custom-head modules plus both Azure
+preview variants and real confirmed-recovery regression pass 23 native
+Windows cases: 141.83 pytest seconds, 152.12 preparation/cleanup-inclusive
+seconds, exactly two contained workers with existing marks and bounds.
+This is focused functional evidence, not a normal-group or full-plugin
+timing result. No runtime/test edit is needed. The mixed helper hunk,
+other publication/recovery keys and repeated complete same-head Windows
+qualification remain separately owned and open.
+
 ### B-PUB-REWRITE existing fresh destination refusal
 
 This settles only `tests/test_pr_rewrite.py:7`, header
