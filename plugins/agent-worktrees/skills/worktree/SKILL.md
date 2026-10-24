@@ -261,6 +261,13 @@ session is still live -- that is normal, not a failure to loop on.
 
 ### Finalize is gated on outbound resource obligations
 
+The paired knowledge worktree is one such obligation: pairing journals a
+protected `worktree` claim on the harness. Finalize the knowledge sibling
+through its own publication flow first; its conclusion settles that claim.
+Do not release, remove, sweep, hand off, or abandon the claim while the exact
+reciprocal sibling is not finalized. Harness finalization repairs missing
+legacy pair claims rather than accepting unfinished knowledge work as complete.
+
 `finalize` holds a worktree **accountable** for what it allocated. If this
 worktree still owns **unsettled** outbound resources -- a cross-repo
 worktree, a borrowed CodeSpace/container, or a bridge session it brought

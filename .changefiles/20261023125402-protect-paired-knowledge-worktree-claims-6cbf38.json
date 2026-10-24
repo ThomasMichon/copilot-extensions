@@ -1,0 +1,9 @@
+{
+  "comment": "Protect paired knowledge worktree claims until reciprocal finalization and preserve unfinished companion content.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

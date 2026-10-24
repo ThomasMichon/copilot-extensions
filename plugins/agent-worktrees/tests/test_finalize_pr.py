@@ -22,6 +22,17 @@ class TestPRFinalize(PRWorkflowSetup):
         monkeypatch.setattr(fin, "_warn_of_codespace_claims_for_worktree", lambda *a: None)
         monkeypatch.setattr(fin, "_warn_of_dev_slot_claims_for_worktree", lambda *a: None)
 
+    def test_precondition_ok_after_create_pr(self, published_pr_repo):
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, _ = published_pr_repo
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        import dataclasses
+        repo = config.default_repo
+        repo = dataclasses.replace(repo, pr=dataclasses.replace(repo.pr, strategy="detach"))
+        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
+        assert ok is True, err
+        assert err is None
+
     @pytest.mark.parametrize(
         "disposition", ["retained", "live-process", "unsupported-platform", "failed-removal", "removed"],
     )
@@ -81,17 +92,6 @@ class TestPRFinalize(PRWorkflowSetup):
         ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
         assert ok is False
         assert "not upstream" in err
-
-    def test_precondition_ok_after_create_pr(self, published_pr_repo):
-        from agent_worktrees import finalize as fin
-        config, wid, wt_path, _ = published_pr_repo
-        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
-        import dataclasses
-        repo = config.default_repo
-        repo = dataclasses.replace(repo, pr=dataclasses.replace(repo.pr, strategy="detach"))
-        ok, err = fin._pr_finalize_precondition(rec, repo, str(wt_path), repo.anchor)
-        assert ok is True, err
-        assert err is None
 
     def test_precondition_detects_unpushed(self, published_pr_repo):
         from agent_worktrees import finalize as fin

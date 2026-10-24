@@ -21,6 +21,18 @@ matrix or required release enforcement. The
 [feed-construction effort](efforts/active/feed-construction-release-gate/README.md)
 retains those open acceptance gates.
 
+## Optional paired-worktree finalization
+
+For paired-worktree finalization, select
+`tools/run-plugin-tests.py agent-worktrees --test-file tests/test_paired_claims.py
+--test-file tests/test_paired_finalize_integration.py`.
+The first file covers claim mutation/refusal and concurrent lifecycle ownership.
+The second uses isolated fresh Git repositories and actual CLI refusal paths,
+then proves bottom-up sibling settlement, BOTH-finalized removal retention,
+and preservation of untracked, modified and unpublished committed knowledge.
+These are on-demand filesystem/process controls, not additions to required
+unit-only CI or a claim of installed-runtime rollout.
+
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py

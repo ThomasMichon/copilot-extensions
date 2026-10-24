@@ -66,7 +66,7 @@ def _commit(repo: Path, name: str, content: str) -> None:
 
 
 @pytest.fixture
-def _env(tmp_path: Path, monkeypatch):
+def _env(tmp_path: Path, monkeypatch, git_only_mux):
     """A real anchor+origin repo, plus a shared tracking dir resolved
     identically by both ``config.tracking_dir()`` (the "current worktree's
     own record" path every finalize call uses) and ``config.project_dir()``
@@ -75,6 +75,8 @@ def _env(tmp_path: Path, monkeypatch):
     lets A and B's records settle each other for real, not via two
     disjoint stores.
     """
+    monkeypatch.setattr(finalize, "_warn_of_codespace_claims_for_worktree", lambda *_: None)
+    monkeypatch.setattr(finalize, "_warn_of_dev_slot_claims_for_worktree", lambda *_: None)
     tracking_d = tmp_path / f".{PROJECT}" / "worktrees"
     tracking_d.mkdir(parents=True)
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_d)
