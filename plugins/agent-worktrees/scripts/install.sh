@@ -69,6 +69,13 @@ fi
 if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
     case "$__aw_action" in
         install|update|provision|stamp|uninstall|repair|dev|dev-release|publish-runtime-helpers)
+            __aw_admission_project="${COPILOT_PROJECT_DIR:-$PWD}"
+            if [[ -n "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-}" &&
+                  -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
+                __aw_admission_project="$COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"
+            fi
+            __aw_admission_project="$(cd -P -- "$__aw_admission_project" && pwd)" || exit 1
+            export COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT="$__aw_admission_project"
             __aw_admission_root="${__aw_install_dir_arg:-$HOME/.agent-worktrees}"
             [[ "$__aw_admission_root" == /* ]] || {
                 printf '%s\n' "ERROR: --install-dir must be absolute" >&2
@@ -102,6 +109,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees
                 --legacy-root "$__aw_admission_root"
                 --source-payload-root "$__aw_admission_source"
+                --project-root "$__aw_admission_project"
             )
             __aw_admission_operation=publish
             [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
@@ -2738,7 +2746,8 @@ write_deploy_manifest() {
     elif ! printf '%s\n' "$manifest_json" |
         "$VENV_PYTHON" -B -E -X utf8 "$PLUGIN_DIR/scripts/command_binding.py" \
             --payload-root "$PLUGIN_DIR" --plugin-id agent-worktrees --legacy-root "$INSTALL_DIR" \
-            --publish-legacy --write-manifest --source-payload-root "$stable_plugin" >/dev/null; then
+            --publish-legacy --write-manifest --source-payload-root "$stable_plugin" \
+            --project-root "$__aw_admission_project" >/dev/null; then
         err "Command ownership validation refused deploy-manifest publication."
         return 1
     fi

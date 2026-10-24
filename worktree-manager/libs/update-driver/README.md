@@ -123,7 +123,7 @@ creation, not an implicit permission migration or a read-only status side effect
   cannot lose a concurrent submission. Debug uses this same path, not a bypass.
   An optional trusted `executor(Transaction)->int` must finish all its effects
   and cleanup before returning. Returning an exit code certifies that cleanup
-  boundary; exceptions are conservatively interrupted.
+  boundary; custom-executor exceptions remain conservatively interrupted.
 
 ## Execution and borrowed custody
 
@@ -227,9 +227,35 @@ inherited native group; deliberate group escape, cross-kernel commands, and
 privilege transitions require their own supported owner. An interrupted fence
 is not cleared merely because cleanup probably completed or the lock is free.
 
+### Native-confirmed same-boot failure
+
+The default executor receives an explicit `run_caller_owned(on_settled=...)`
+notification only at a known pre-launch refusal or after the entire strict
+Windows Job / POSIX group has been positively settled. If execution then fails
+and all borrowed participants close cleanly, the owner records `interrupted`
+with **no exit status**, the original exception type, `settlement_kind` of
+`native_scope`, `settled_at`, and the unchanged admission boot in
+`settled_boot_id`. This is a failed request, not a fabricated canonical result.
+The waiter still reports failure, but later requests may execute on the same
+boot without clearing history or replaying the interrupted work.
+
+Cleanup failure, lost custody, unclosed/abandoned participants, arbitrary custom
+executor exceptions and owner death do not produce that proof. Their fences
+remain. Native foundation progress keeps its independent interruption checks;
+a settled queue request cannot clear an uncertain foundation operation.
+
+Schema **3** adds the explicit settlement kind. Read-only status and enqueue
+also accept schema 2 without migrating it. A drainer migrates a valid schema-2
+queue only while holding the existing installation lock and an immediate
+SQLite transaction: requests and pending identities are preserved, existing
+changed-boot settlement becomes `kernel_restart`, and old interrupted records
+remain unsettled. Migration never invents native cleanup evidence for them.
+Downlevel code that supports only schema 2 refuses the upgraded database rather
+than silently interpreting the new proof. Schema 1 remains unsupported.
+
 ### Explicit positive settlement after kernel restart
 
-Schema **2** records `Request.boot_id` at transaction admission, under the
+`Request.boot_id` is recorded at transaction admission, under the
 installation lock, before invoking the executor. `kernel_boot_identity()`
 reads Linux's kernel boot UUID, macOS `sysctlbyname("kern.bootsessionuuid")`,
 or Windows `NtQuerySystemInformation(SystemBootEnvironmentInformation=90)` BootIdentifier.
@@ -255,9 +281,9 @@ settled_requests = recover_after_restart()  # explicit mutation, same OperationL
   initializes one, and checks its file identity across reconciliation.
   Missing/disappeared/replaced state refuses explicitly, including a database
   removed between the initial observation and the mutation boundary.
-- Only a different native boot UUID on the same platform provides positive
-  evidence that old native descendants cannot still execute. Settlement adds
-  `settled_boot_id` and `settled_at`, preserving the interrupted state, failure
+- For interruptions without native scope proof, this existing recovery path
+  requires a different native boot UUID on the same platform. Settlement adds
+  `settlement_kind=kernel_restart`, `settled_boot_id` and `settled_at`, preserving the interrupted state, failure
   text, absent exit status, and original admission identity. A crashed
   `running` record becomes `interrupted`, never successful or replayed.
 - Only those positively settled fences stop blocking later work. Existing
@@ -267,8 +293,9 @@ settled_requests = recover_after_restart()  # explicit mutation, same OperationL
 
 Schema 1 predates admission boot evidence and is explicitly unsupported rather
 than silently upgraded into fabricated recovery authority. Malformed state
-also refuses. This new core has not been deployed to live state; these schema
-changes affect only isolated fixtures in this change.
+also refuses. Same-boot repair for older interrupted records and bounded
+operator-approved takeover remain unimplemented; this new proof does not
+authorize manual journal surgery, a reboot, or a live repair.
 
 ### Native foundation progress and interruption
 
@@ -276,8 +303,9 @@ The earlier Python-free construction boundary has a separate, narrowly scoped
 progress record, **not another request queue or installation owner**:
 `<execution-root>/foundation-operation.json`. It uses
 `copilot-extensions.installation-foundation-operation`, version `1`, and the
-same `<execution-root>/execution.lock`. SQLite remains schema 2; no request
-history is deleted, migrated or moved to another execution root.
+same `<execution-root>/execution.lock`. Its native progress remains version 1,
+independent of the schema-3 queue; no request history is deleted or moved to
+another execution root.
 
 `foundation_status(root=...) -> FoundationOperation | None` reads that bounded,
 plain-file record without creating anything. It records only operation/source

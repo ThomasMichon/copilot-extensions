@@ -80,6 +80,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from .authority import contributor, effective_authority, sort_decisions
+from .registry_values import parse_reg_query as _parse_reg_query, registry_values_equal
 from .manifest import (
     RequirementPackage,
 )
@@ -1245,7 +1246,6 @@ REGISTRY_TYPE_MAP = {
     "QWord": "REG_QWORD",
     "Binary": "REG_BINARY",
 }
-_REG_VALUE_RE = re.compile(r"\s(REG_[A-Z_]+)\s+(.*)$")
 
 
 def canonical_reg_key(path: str) -> str:
@@ -1256,19 +1256,6 @@ def canonical_reg_key(path: str) -> str:
     hive = _HIVE_ALIASES.get(hive, hive)
     rest = parts[1] if len(parts) > 1 else ""
     return f"{hive}\\{rest}" if rest else hive
-
-
-def _parse_reg_query(stdout: str, name: str) -> tuple[str | None, str | None]:
-    """Extract ``(data, REG_type)`` for ``name`` (``""`` = the default value)."""
-    target = name.lower() if name else "(default)"
-    for line in stdout.splitlines():
-        m = _REG_VALUE_RE.search(line)
-        if not m:
-            continue
-        vname = line[: m.start()].strip()
-        if vname.lower() == target:
-            return m.group(2).strip(), m.group(1)
-    return None, None
 
 
 class RegistryResourceHandler(ResourceHandler):
@@ -1416,7 +1403,7 @@ class RegistryResourceHandler(ResourceHandler):
             value = "" if d.get("value") is None else str(d.get("value"))
             needs = (
                 (not live["present"])
-                or live.get("value") != value
+                or not registry_values_equal(live.get("value"), value, reg_type)
                 or (live.get("reg_type") not in (None, reg_type))
             )
             if not needs:

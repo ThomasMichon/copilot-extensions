@@ -1616,6 +1616,14 @@ All diagnostics remain inside the unchanged test and subprocess deadlines.
 
 ### Native Agent Machines lifecycle boundaries
 
+`tools/run-plugin-tests.py agent-machines --test-file tests/test_registry_native.py`
+checks DWORD/QWORD convergence against real `reg.exe` hexadecimal output.
+It reads the existing Windows `InstallDate`/`InstallTime` values independently
+with `winreg`, then exercises dry-run and apply through a query-only runner.
+No registry value is created, changed or deleted. Missing Windows prerequisites
+skip explicitly; a skip is not native convergence proof. Pure injected-runner
+controls remain in `tests/test_resources.py`; required unit CI is unchanged.
+
 `plugins/agent-machines/tests/test_payload_installer_lifecycle_powershell.py`
 likewise gives each cleanup outcome, staging/watchdog outcome and output
 encoding its own function-scoped sandbox and pytest item. The default remains
@@ -1843,6 +1851,32 @@ its sleeping descendant and the console ancestry alive, then requires them all
 to exit before outer observer cleanup and before the existing held-read
 watchdog. The test dependency does not enter the core/client runtime wheels.
 
+Typed collaboration adds pure normalization and captured-view-control contracts
+to `tools/promotion_unit_tests/test_chat_collaboration.py`, with the exact
+five-file import/test closure and production coverage targets enrolled in the
+existing unit manifest. These units create no store, provider, process or
+listener. Database atomicity, non-consuming pending/thread pages, unchanged
+reader progress, strict receipts, lost-response recovery and actual source-removed
+installed commands stay in the existing Chat acceptance/full portfolio.
+Its family and parameter inventory expands additively; neither the 120/600-second
+allowances nor any original family is relaxed.
+The empty-inbox and sparse-thread regressions compare actual SQLite instruction
+counts with100 versus5000 unrelated questions/messages, including the viewer's
+own ambient traffic and correspondence in another channel. They allow at most1000 extra instructions
+while retaining correct pending/page results and unchanged semantic progress.
+Pending-backlog cases additionally require the same bound with100 versus5000
+unanswered questions and mixed answer/question attention. Settled-history cases
+retain the bound for answered, resolved and superseded conversations, proving
+candidate examination is limited before retirement filtering. The client follows
+empty scan-progress pages within the captured boundary without skipping pending
+entries or consuming semantic progress, and rejects stalled/out-of-bound
+continuations and mismatched returned counts.
+
+The sharing-race control injects its transient error only after the first
+successful real readiness-file read. A stale negative existence probe cannot
+bypass injection. Both normal and fault cases retain actual child birth/prefix
+checks, crash-before-outer-Job-cleanup proof and the original five-second bound.
+
 The [per-test assessment](efforts/active/agent-chat-graduation/test-portfolio.csv)
 and [measured comparison](efforts/active/agent-chat-graduation/README.md#journal)
 separate the full222-case snapshot from explicit42/221-case candidates measured
@@ -1912,6 +1946,13 @@ must run from their own attributable payload or isolated working directory so
 UV does not discover unrelated checkout metadata. Retained-path assertions
 validate source identity, private ownership and content at the physical UV
 boundary before normalizing paths for ordering or retry comparisons.
+Vault's offline UV fixture builds its native PE directly with the Windows
+.NET Framework compiler, preferring Framework64 and falling back to Framework.
+Its existing preflight contract forces fresh compilation and executes the real
+provider, then proves byte-identical reuse without another compiler invocation.
+Headless execution and the 20-second native child deadline remain unchanged.
+This fixture does not alter snapshot copying or the separate NoService contract.
+
 Vault's two snapshot-provisioning integration cases explicitly allow 60 seconds
 per item: fixture setup performs one complete four-package installation,
 health gate and publication transaction. The remaining items keep the default
@@ -1947,6 +1988,14 @@ task-specific scratch folder and pass its absolute path as
 synthetic read/write tokens and an in-memory HTTP adapter; it makes no live API
 requests or review writes. This catches bundled dependency/import differences
 that an injected unit-test client cannot reproduce.
+
+CI first runs `tools/prepare_bridge_contract_evidence.py` against its explicitly
+selected repository URL. If the exact HTTP-47 capture checkpoint is absent, this
+bounded preparation retains it without moving a branch or changing capture
+evidence. Full ordinary history does not include every squash-orphaned commit.
+Missing or malformed checkpoints fail rather than waiving closure validation.
+The targeted tests cover existing and missing objects, exact remote/revision
+selection, failed preparation and a real unreferenced Git commit.
 
 The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
 requires Git 2.45+ for enforced `GIT_NO_LAZY_FETCH` support; older versions
