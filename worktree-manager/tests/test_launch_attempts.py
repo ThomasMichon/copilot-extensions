@@ -346,6 +346,27 @@ def test_observations_preserve_owner_meaning_and_do_not_infer_success(tmp_path):
     assert detail["events"][-1]["details"] == {"exit_code": 0}
 
 
+@pytest.mark.parametrize("value", [
+    "d\u00e8sktop-wsl-20261021-010203-abcd",
+    "de\u0301sktop-wsl-20261021-010203-abcd",
+    "\u65e5\u672c-\U0001f5a5-wsl-20261021-010203-abcd",
+])
+def test_worktree_observation_identity_preserves_unicode_without_normalization(tmp_path, value):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    store.append(attempt_id, owner="manager", phase="resolved", worktree_id=value)
+    assert store.detail(attempt_id)["events"][-1]["details"] == {"worktree_id": value}
+
+
+@pytest.mark.parametrize("value", ["", "a" * 513, "line\nbreak", "tab\there", "null\0byte", "del\x7f"])
+def test_worktree_observation_identity_stays_bounded_and_ascii_control_free(tmp_path, value):
+    store = journal.LaunchAttempts(tmp_path)
+    attempt_id = record(store)
+    with pytest.raises(journal.LaunchAttemptError, match="observation"):
+        store.append(attempt_id, owner="manager", phase="resolved", worktree_id=value)
+    assert [event["phase"] for event in store.detail(attempt_id)["events"]] == ["confirmed"]
+
+
 def test_large_accepted_history_does_not_hide_private_input_and_is_fully_pageable(tmp_path):
     store = journal.LaunchAttempts(tmp_path)
     attempt_id = record(store)

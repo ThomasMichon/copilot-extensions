@@ -277,11 +277,13 @@ requirements.
   the container path or publishing downstream configuration.
   #8522 merged after current-head approval and required CI. This closes the
   intent/specification review only, not image delivery or private deployment.
-- [ ] Deliver an independently operable Chat service image and portable
-  role/configuration template with explicit artifact, storage, identity,
-  Gateway, placement and resource bindings through existing owners.
-  The candidate portable contribution uses the existing Fleet loadout and
-  reference-only Komodo binding schemas; it is not an image or effect executor.
+- [x] Deliver the portable Chat-owned loadout contribution and reference-only
+  Komodo binding example through existing schemas. #8578 qualifies pure template
+  actualization, input refusal, resource/support closure and override preservation;
+  it does not deliver an image, private allocation or effect executor.
+- [ ] Deliver an independently operable Chat service image and its actual
+  role/configuration bindings with explicit artifact, storage, identity,
+  Gateway, placement and resource inputs through existing owners.
 - [ ] Actualize that template in the resolved private configuration repository's
   dedicated worktree and publication flow, preserving overrides and selected
   template/source revisions rather than embedding private deployment state here.
@@ -480,6 +482,65 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-10-24 - Durable canonical publication settlement
+
+- The selected-client trace found that `CopyPublication.keep()` deliberately
+  deletes its producer receipts and backups. It is not a persistent ownership
+  boundary for later preserving removal. Add the narrow canonical `retain()`
+  settlement instead of copying the engine or introducing a command ledger.
+  It verifies the successful outputs and evidence, then releases writer
+  custody without deleting the original recovery artifacts. Existing
+  `keep()` and `rollback()` behavior remains unchanged.
+- Qualification exercises real competing processes, reconstruction after the
+  producer exits, canonical ownership checking and later restoration, plus
+  target/backup/context/receipt drift refusal. The native Windows focused
+  publication/header/generator packet reports156 passed and3 platform skips.
+  The skips are explicitly non-Windows cases, not claimed native evidence.
+  These are fresh disposable publication roots, not a selected Chat
+  installation or live service test.
+- The first review of #8589 identified a real valid-JSON context-drift case:
+  changing a captured backup binding to absence could make later recovery
+  remove the original target. Pin the parsed root and full backup/state map
+  to the captured transaction in retained settlement, rollback and cleanup.
+  Fifteen regressions cover five valid-JSON binding mutations across all
+  three paths; no live output or recovery evidence is deleted on refusal.
+- The second review's full body identified altered created-state receipts
+  despite its empty open-thread count. Require every newly created output's
+  captured physical state in the retained proofs before releasing custody.
+  Inode/time drift and a missing created record refuse; a mixed normalized
+  no-op remains non-owned and can still settle. Read the complete review,
+  not only its summary or open-thread count.
+- Synchronize generated publication companions from their canonical source.
+  The standard generator also reconciles eight already-drifted dependency
+  policy/config companions byte-for-byte; no dependency policy is redesigned
+  here. All affected consumers retain normal changefile/review gates.
+- This closes no selected-setup, removal, service, container-execution or
+  adoption checkbox. Continue the Chat-owned selected manual-client adapter
+  over these canonical construction and publication primitives.
+
+### 2026-10-24 - Portable template reviewed and merged
+
+- #8578 merged as `d9cff53a36fd847a1cc1ce52b76cc9a150dbc737`
+  at11:39:36Z after Copilot approval of
+  `a9f02cdf13e2c246a7f699e172c976d5d876f043`, no findings or review
+  threads, and all required checks. Managed completion used only the existing
+  additional-CODEOWNER exception; no CI bypass or deployment was performed.
+- Twenty focused contracts pass in1.53s against the current contribution base.
+  Canonical readers and the source CLI exercise actual contributed JSON,
+  preserve private overrides and reject unsupported support/provenance/resource
+  inputs. The install contract, focused lint and documentation guards pass.
+  Pure planning qualification is not a clean-room image or live service result.
+- Re-read the full Plan and Validation Plan after merge. Close only the
+  portable-template delivery item, split from the still-open image/binding item.
+  Private actualization, supported Gateway/Komodo execution, single-writer
+  container recovery, selected manual-client setup/removal and all remaining
+  native/adoption gates stay open. #7238 remains Active.
+- Continue the selected-client adapter trace through existing lifecycle owners.
+  Fleet's current `client-state` construction explicitly accepts only its own
+  single portable wheel; it is not a generic Chat lifecycle SDK and must not be
+  imported or copied as one. Reuse the canonical construction/publication
+  primitives without weakening that owner's release or command custody.
 
 ### 2026-10-24 - Portable container-template contribution
 

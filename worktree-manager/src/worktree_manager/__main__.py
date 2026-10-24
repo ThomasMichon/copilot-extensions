@@ -1090,8 +1090,11 @@ def _run_production_picker(project: str) -> int:
             _cmd_update(["--project", project])
             continue
         if action == "open-venue":
-            from . import launcher
-            return launcher.open_venue(decision.get("provider", ""), decision.get("venue", ""))
+            from . import launch_observations, launcher
+            attempt_id = decision.get("attempt_id")
+            return launch_observations.run_attempt(attempt_id, lambda: launch_observations.launch(
+                attempt_id, lambda: launcher.open_venue(decision.get("provider", ""), decision.get("venue", "")),
+            ))
         print(f"error: Picker returned an unsupported decision: {action!r}")
         return 1
 
@@ -1107,9 +1110,11 @@ def _restore_production_picker_session(
     attempt_id: str | None = None,
 ) -> int:
     """Run platform remux prep, then immediately launch/attach through mux."""
-    from . import engine_client, picker_app
+    from . import engine_client, launch_observations, picker_app
+    from .launch_attempts import LaunchAttemptError
 
     try:
+        launch_observations.observe(attempt_id, "restore-requested")
         if is_local:
             # Resolve the interactive launch boundary before terminating the
             # unreachable owner. A missing binstub must fail without mutation.
@@ -1133,7 +1138,7 @@ def _restore_production_picker_session(
                     "error: Picker returned a remote restore decision without "
                     "a machine and environment."
                 )
-                return 1
+                return launch_observations.refuse(attempt_id)
             argv = data_ssh.remote_op_argv(
                 machine,
                 environment,
@@ -1142,25 +1147,38 @@ def _restore_production_picker_session(
             )
             if argv is None:
                 print("error: the selected source does not support session restore.")
-                return 1
+                return launch_observations.refuse(attempt_id)
             result = maintenance._ssh_json(argv)
+    except LaunchAttemptError:
+        print("error: could not retain restore observation; no further restore step was authorized.")
+        return 1
     except (engine_client.EngineError, OSError, subprocess.SubprocessError) as error:
         print(f"error: could not prepare session restore: {error}")
+        launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
         return 1
+    except (Exception, KeyboardInterrupt) as error:
+        launch_observations.observe(
+            attempt_id, "unknown", required=False,
+            code="interrupted" if isinstance(error, KeyboardInterrupt) else "engine-error",
+        )
+        raise
 
     if not result.get("ok"):
         print(
             "error: could not prepare session restore: "
             f"{result.get('reason') or 'unknown engine error'}"
         )
+        launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
         return 1
     if result.get("action") != "reclaimed" and not result.get("verified"):
         print(
             "error: could not prepare session restore: the live process was "
             "not confirmed inside the mux pane"
         )
+        launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
         return 1
 
+    launch_observations.observe(attempt_id, "restore-returned", required=False)
     request = picker_app.LaunchRequest(
         project=project,
         worktree_id=worktree_id,
@@ -1175,39 +1193,9 @@ def _restore_production_picker_session(
 
 
 def _resolve_for(req, *, defer_projections: bool = False) -> "tuple[object | None, int]":
-    """Resolve a picker :class:`LaunchRequest` to a launch plan (shared).
-
-    Returns ``(plan, 0)`` on success, else ``(None, exit_code)`` after printing
-    the engine error. The whole thing goes through the process boundary --
-    ``engine_client.resolve_launch_plan`` shells to ``agent-worktrees resolve
-    --json`` and never imports the plugin.
-    """
-    from .engine_client import (
-        EngineError,
-        EngineFeatureUnavailable,
-        resolve_launch_plan,
-    )
-    try:
-        from .seed_launch import require_supported_seed
-
-        require_supported_seed(req)
-        plan = resolve_launch_plan(
-            req.project, worktree_id=req.worktree_id,
-            new=(req.mode == "new"), bare_resume=(req.mode == "bare-resume"),
-            base=(req.mode == "base"),
-            target_machine=getattr(req, "machine", None),
-            target_environment=getattr(req, "environment", None),
-            target_no_mux=getattr(req, "no_mux", False),
-            seed=getattr(req, "seed_prompt", None),
-            **({"defer_projections": True} if defer_projections else {}),
-        )
-    except EngineFeatureUnavailable as e:
-        print(f"error: could not resolve a launch plan: {e}")
-        return None, 1
-    except EngineError as e:
-        print(f"error: could not resolve a launch plan: {e}")
-        return None, 1
-    return plan, 0
+    """Resolve through the engine process boundary and retain Manager evidence."""
+    from .launch_observations import resolve_for
+    return resolve_for(req, defer_projections=defer_projections)
 
 
 def _is_windows() -> bool:
@@ -1216,8 +1204,15 @@ def _is_windows() -> bool:
 
 
 def _run_launch(req) -> int:
+    from .launch_observations import run_attempt
+    return run_attempt(getattr(req, "attempt_id", None), lambda: _execute_launch(req))
+
+
+def _execute_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
-    from . import engine_client, launcher
+    from . import engine_client, launch_observations, launcher
+
+    attempt_id = getattr(req, "attempt_id", None)
 
     use_ahp = bool(getattr(req, "ahp", False))
     script = (
@@ -1230,7 +1225,7 @@ def _run_launch(req) -> int:
             use_ahp = launcher.uses_ahp(req, str(getattr(req, "worktree_id", None) or ""))
         except engine_client.EngineError as error:
             print(f"error: could not inspect the persisted execution leg: {error}")
-            return 1
+            return launch_observations.refuse(attempt_id, "engine-error")
         if use_ahp:
             script = None
     plan, code = _resolve_for(
@@ -1239,39 +1234,43 @@ def _run_launch(req) -> int:
     if plan is None:
         return code
     if plan.action == "none":
+        launch_observations.observe(attempt_id, "refused", exit_code=plan.exit_code)
         return plan.exit_code
     new_window = bool(getattr(req, "new_window", False))
     if plan.action == "remote":
         if new_window:
             print('error: "new window" launches are supported only for local worktrees.')
-            return 1
+            return launch_observations.refuse(attempt_id)
         if use_ahp:
             print("error: AHP is supported only for same-machine launches")
-            return 1
-        return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+            return launch_observations.refuse(attempt_id)
+        return launch_observations.launch(
+            attempt_id, lambda: launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+        )
     if not backend_checked:
         try:
             use_ahp = launcher.uses_ahp(req, str(getattr(plan, "worktree_id", None) or ""))
         except engine_client.EngineError as error:
             print(f"error: could not inspect the persisted execution leg: {error}")
-            return 1
+            return launch_observations.refuse(attempt_id, "engine-error")
     if use_ahp:
         try:
             engine_client.require_agent_hosting(str(plan.work_dir))
         except engine_client.EngineError as error:
             print(f"error: repository hosting admission refused: {error}")
-            return 1
+            return launch_observations.refuse(attempt_id)
         if new_window:
             print('error: "new window" launches are not yet supported for AHP-backed sessions.')
-            return 1
+            return launch_observations.refuse(attempt_id)
         from . import ahp_provider, engine_client, manager_config
 
         if getattr(req, "machine", None):
             print("error: AHP is supported only for same-machine launches")
-            return 1
+            return launch_observations.refuse(attempt_id)
         if req.mode in {"base", "bare-resume"}:
             print("error: AHP requires an agent-worktrees-managed worktree")
-            return 1
+            return launch_observations.refuse(attempt_id)
+        launch_observations.observe(attempt_id, "launch-requested")
         try:
             attachment = ahp_provider.ensure_session(
                 req.project,
@@ -1285,20 +1284,27 @@ def _run_launch(req) -> int:
             manager_config.ManagerConfigError,
         ) as error:
             print(f"error: could not prepare AHP launch: {error}")
+            launch_observations.observe(attempt_id, "unknown", required=False, code="engine-error")
             return 1
         # AHP already rewrote plan.cmd to the attach client; the relocated
         # launch-session script would re-resolve a vanilla plan and clobber
         # that rewrite, so AHP stays on the direct-exec path (no mux wrapping
         # for AHP attachment in this pass -- a known follow-up gap, not a
         # regression: AHP launches never went through launch-session.ps1).
-        return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+        return launch_observations.returned(
+            attempt_id, launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+        )
     if getattr(req, "machine", None) is None and plan.action == "exec":
         if script is not None:
-            return _run_relocated_mux_launch(req, plan, script)
+            return launch_observations.launch(
+                attempt_id, lambda: _run_relocated_mux_launch(req, plan, script),
+            )
     if new_window:
         print('error: "new window" launches require the relocated launch-session script, which was not found.')
-        return 1
-    return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
+        return launch_observations.refuse(attempt_id)
+    return launch_observations.launch(
+        attempt_id, lambda: launcher.launch(plan, want_mux=not getattr(req, "no_mux", False)),
+    )
 
 def _cmd_self_install(rest: list[str]) -> int:
     do_apply = "--apply" in rest

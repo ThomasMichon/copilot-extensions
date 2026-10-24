@@ -592,6 +592,7 @@ class CopyPublication:
         self.expected = [[str(item.target), item.digest] for item in self.bindings]
         self.baseline: dict[Path, PhysicalState | None] = {}
         self.backups: dict[Path, PhysicalState] = {}
+        self.recovery_entries: dict[Path, tuple[Path | None, PhysicalState | None]] = {}
         self.published = False
         self.outputs: dict[Path, PhysicalState] = {}
         self._custody: ExitStack | None = None
@@ -652,6 +653,9 @@ class CopyPublication:
                             self.backups[backup] = state_fd(stream.fileno())
                     bindings.append([str(item.target), str(backup) if before else "",
                                      before.digest if before else ""])
+                    self.recovery_entries[item.target] = (
+                        (backup, self.backups[backup]) if before else (None, None)
+                    )
                 create_context(self.context, self.root, bindings)
                 receipt = Receipt(self.receipts[0], self.root, list(self.baseline), "files")
                 self.before_effects()
@@ -701,9 +705,7 @@ class CopyPublication:
             raise PublicationProofError("Copy recovery requires retained publication custody")
         output = self.workspace / f"copy-recovery.{len(self.receipts)}.jsonl"
         try:
-            root, entries = read_context(self.context)
-            if set(entries) != set(self.baseline):
-                raise PublicationProofError("Copy recovery context differs from its baseline")
+            root, entries = self._context()
             proofs = _proofs(self.receipts, root, entries, self.expected)
             foreign = _recover_uncontested_locked(root, entries, proofs, output, self.baseline)
         finally:
@@ -716,10 +718,32 @@ class CopyPublication:
                 + ", ".join(map(str, foreign)) + f"; {self.workspace}"
             )
 
+    def _context(self) -> tuple[Path, dict[Path, tuple[Path | None, PhysicalState | None]]]:
+        root, entries = read_context(self.context)
+        if root != self.root or entries != self.recovery_entries:
+            raise PublicationProofError("Copy recovery context differs from its captured bindings")
+        return root, entries
+
+    def retain(self) -> None:
+        """Settle a successful copy while retaining its durable recovery proofs."""
+        if not self.published:
+            raise PublicationProofError("Only a successful publication can retain its proofs")
+        self.verify()
+        for path, before in self.backups.items():
+            if state_path(path) != before:
+                raise PublicationProofError(f"Backup changed before retained settlement: {path}")
+        root, entries = self._context()
+        proofs = _proofs(self.receipts, root, entries, self.expected)
+        for path, created in self.outputs.items():
+            if created != self.baseline[path] and created not in proofs.get(path, ()):
+                raise PublicationProofError(f"Captured copy output is absent from its proofs: {path}")
+        self._release()
+
     def keep(self) -> None:
         """Metadata cleanup is not a new mutable-source postcommit gate."""
         try:
             self.verify()
+            self._context()
             for path, before in self.backups.items():
                 if state_path(path) != before:
                     raise PublicationProofError(f"Backup changed before cleanup: {path}")

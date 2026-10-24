@@ -117,6 +117,55 @@ def native_retained_path(path):
 
 
 @contextmanager
+def retain_closed_wheels(
+    uv, snapshot, *, python, env, captured_environment, select_uv,
+    transaction_type, error_type,
+):
+    """Retain the policy owner's fixed, closed wheel invocation projection."""
+    from installer_wheel_snapshot import WheelSnapshot
+
+    if not isinstance(snapshot, WheelSnapshot):
+        raise error_type("closed wheel installation requires retained wheel custody")
+    python = Path(python)
+    if not python.is_absolute():
+        raise error_type("closed wheel interpreter must be an absolute candidate path")
+    uv = select_uv(uv)
+    if not Path(uv).is_absolute():
+        if os.path.dirname(uv):
+            selected = uv
+        else:
+            import shutil
+
+            selected = shutil.which(uv)
+            if selected is None:
+                raise error_type("closed wheel UV executable is unavailable")
+        uv = select_uv(os.path.abspath(selected))
+    environment = {
+        key: value for key, value in captured_environment(env).items()
+        if not key.upper().startswith(("UV_", "PIP_", "PYTHON"))
+        and key.upper() not in ("VIRTUAL_ENV", "CONDA_PREFIX", "__PYVENV_LAUNCHER__")
+    }
+    with temporary_inputs(None) as temporary:
+        root = private_retained_root(Path(temporary), error_type=error_type).resolve()
+        requirements = root / "wheels.txt"
+        requirements.write_text("".join(
+            f"{name.split('-', 1)[0]} @ "
+            f"{path.as_uri()}#sha256={snapshot.digests[name].removeprefix('sha256:')} "
+            f"--hash={snapshot.digests[name]}\n"
+            for name, path in sorted(snapshot.paths.items())
+        ), encoding="utf-8")
+        snapshot.verify()
+        yield transaction_type(
+            (uv, "pip", "install", "--no-config", "--no-cache", "--offline",
+             "--no-python-downloads", "--no-index", "--no-deps", "--no-build",
+             "--no-sources", "--require-hashes", "--link-mode", "copy",
+             "--python", str(python), "--requirements", str(requirements)),
+            environment, root, {}, {},
+        )
+        snapshot.verify()
+
+
+@contextmanager
 def temporary_inputs(parent):
     prefix = "uv-" if parent is not None else "seasoned-uv-"
     temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
