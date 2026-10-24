@@ -11,19 +11,21 @@ import agent_chat_service as chat
 import agent_chat_service.catalog as catalog
 
 
-@pytest.mark.parametrize(("version", "quote", "key_quote"), [
-    ("0.1.20-dev1", '"', ""), ("1.2.3", "'", ""),
-    ("0.1.20-dev1", '"', '"'), ("1.2.3", "'", "'"),
+@pytest.mark.parametrize(("version", "quote", "key_quote", "header"), [
+    ("0.1.20-dev1", '"', "", "[project]"), ("1.2.3", "'", "", "[project]"),
+    ("0.1.20-dev1", '"', '"', "[project]"), ("1.2.3", "'", "'", "[project]"),
+    ("0.1.20-dev1", '"', "", "[project] # package metadata"),
+    ("1.2.3", "'", "'", '["project"] # package metadata'),
 ])
 def test_source_version_reads_only_its_own_project_metadata(
-    tmp_path, monkeypatch, version, quote, key_quote,
+    tmp_path, monkeypatch, version, quote, key_quote, header,
 ):
     project = tmp_path / "source"
     package = project / "src/agent_chat_service"
     package.mkdir(parents=True)
     monkeypatch.setattr(chat, "__file__", str(package / "__init__.py"))
     (project / "pyproject.toml").write_text(
-        f"[project]\n{key_quote}name{key_quote} = {quote}agent-chat-service{quote}\n"
+        f"{header}\n{key_quote}name{key_quote} = {quote}agent-chat-service{quote}\n"
         f"{key_quote}version{key_quote} = {quote}{version}{quote}\n"
         "[project.optional-dependencies]\nclient=[]\n",
         encoding="utf-8",
@@ -51,6 +53,13 @@ def test_source_version_reads_only_its_own_project_metadata(
     '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\nversion.extra = 42\n',
     '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n\'name\'.extra = "other"\n',
     '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[project]\nname = "other"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[project] # duplicate\nname = "other"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n["project"]\nname = "other"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[\'project\']\nname = "other"\n',
+    '[other]\nexample = """\n[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n"""\n',
+    "[other]\nexample = '''\n[project]\nname = 'agent-chat-service'\nversion = '0.1.20-dev1'\n'''\n",
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n["pro\\u006aect"]\nname = "other"\n',
+    '[project]\nname = "agent-chat-service"\nversion = "0.1.20-dev1"\n[[project]]\nname = "other"\n',
 ])
 def test_source_version_refuses_invalid_metadata_without_installed_fallback(
     tmp_path, monkeypatch, text,

@@ -14,15 +14,33 @@ def _resolve_version() -> str:
         if not manifest.is_file():
             raise
         text = manifest.read_text(encoding="utf-8")
-    projects = re.findall(r"(?ms)^\s*\[project\]\s*\n(.*?)(?=^\s*\[|\Z)", text)
+    key_pattern = r"""[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+'"""
+    if '"""' in text or "'''" in text:
+        raise ValueError("Chat source project version metadata is invalid.")
+    projects = []
+    section = None
+    for line in text.splitlines():
+        if line.lstrip().startswith("["):
+            header = re.fullmatch(r"[ \t]*\[(.+?)\][ \t]*(?:#.*)?", line)
+            if header is None or any(
+                re.fullmatch(key_pattern, key.strip()) is None for key in header[1].split(".")
+            ):
+                raise ValueError("Chat source project version metadata is invalid.")
+            keys = [key.strip().strip("\"'") for key in header[1].split(".")]
+            section = None
+            if keys == ["project"]:
+                section = []
+                projects.append(section)
+        elif section is not None:
+            section.append(line)
     fields = {}
     if len(projects) == 1:
         declarations = {"name": [], "version": []}
-        for key, value in re.findall(r"(?m)^[ \t]*([^=\r\n]+)=(.*)$", projects[0]):
+        for key, value in re.findall(r"(?m)^[ \t]*([^=\r\n]+)=(.*)$", "\n".join(projects[0])):
             key = key.strip()
             if key.startswith("#"):
                 continue
-            if re.fullmatch(r"""[A-Za-z0-9_-]+|"[A-Za-z0-9_-]+"|'[A-Za-z0-9_-]+'""", key) is None:
+            if re.fullmatch(key_pattern, key) is None:
                 raise ValueError("Chat source project version metadata is invalid.")
             key = key.strip("\"'")
             if key in declarations:
