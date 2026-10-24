@@ -224,7 +224,8 @@ def test_terminal_and_out_of_order_events_are_refused(record):
         execution.append("unknown")
 
 
-def test_old_resident_is_excluded_before_sending_an_execution_write(record, monkeypatch):
+@pytest.mark.parametrize("monitoring", [False, True])
+def test_old_resident_is_excluded_before_sending_an_execution_write(record, monkeypatch, monitoring):
     from agent_worktrees import locks, status_monitor_runtime
 
     old = {
@@ -232,9 +233,17 @@ def test_old_resident_is_excluded_before_sending_an_execution_write(record, monk
         "tracking_write_token": "fixture-token",
         "tracking_write_verbs": ["launch_attempt_resolution"],
         "tracking_write_verb_versions": {"launch_attempt_resolution": 1},
+        "pid": os.getpid(), "start_time": locks.process_start_time(os.getpid()),
     }
     monkeypatch.setattr(locks, "read_lock", lambda *a: old)
-    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: False)
+    monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: monitoring)
+    monkeypatch.setattr(
+        status_monitor_runtime, "_ensure_status_monitor",
+        lambda *a: pytest.fail("boot requested for known incompatible live owner"),
+    )
+    monkeypatch.setattr(tracking_write, "time", SimpleNamespace(
+        time=lambda: 0, sleep=lambda *a: pytest.fail("waited for incompatible live owner"),
+    ))
     monkeypatch.setattr(
         tracking_write, "_send_tracking_write_request",
         lambda *a, **kw: pytest.fail("sent new verb to old owner"),

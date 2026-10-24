@@ -183,6 +183,13 @@ unconfirmed, not permission to unwind past an already-started child. Interrupted
 seed settlement retains its existing uncertainty fence while child waiting
 continues.
 
+Each write rechecks the advertised verb/version. A published incompatible
+endpoint with a confirmed live PID/birth owner is not a starting monitor:
+the client skips boot and polling and uses the same locked direct fallback.
+Missing, dead, reused or unconfirmed publishers keep ordinary boot handling.
+An incompatible endpoint is never sent a request, and ambiguous sent writes
+are never replayed.
+
 `seed-claimed` records only the saved seed and handoff IDs: ownership was taken,
 not necessarily delivered. A later proven spawn failure can restore that seed.
 `process-spawned` records only the OS PID, process-birth token when readable,
