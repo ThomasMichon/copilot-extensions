@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the suite source repository opt-out without changing source contribution or external review.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -10,7 +10,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; source qualified, final review/release/adoption gates open
+- **Status:** Active; enforcement merged, source marker review and release/adoption open
 - **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
   [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
@@ -59,8 +59,8 @@ vendor CLI.
 The current machine-local `projects.yaml` field `expose_agent` filters Bridge
 discovery; `repos.yaml` uses `agent` when projecting local exposure into project
 registration. These are not already a repository-owned, consistently enforced
-hosting veto. The qualified source candidate now adds that contract; publication,
-release and running adopter enforcement remain separate gates.
+hosting veto. The reviewed implementation adds that contract; the source marker, release and
+running adopter enforcement remain separate gates.
 
 Use the existing repository configuration and resolution rules documented in
 [configuration](../../../docs/configuration.md#in-repo-committed), including
@@ -158,12 +158,12 @@ _Agent-recommended implementation sequence; requires Phase 1._
 
 _Agent-recommended follow-through; live changes require separate authorization._
 
-- [ ] Add the source-only repository's explicit denial after generic enforcement
+- [x] Add the source-only repository's explicit denial after generic enforcement
   and source-operation compatibility are qualified. Do not add an inert marker
   and claim that hosting is already prevented. Keep this repository worktree-class
   related only, with no advertised agent; preserve existing state until any
   necessary reconciliation is explicitly approved.
-- [ ] Provide a supported preview/reconciliation path for conflicting existing
+- [x] Provide a supported preview/reconciliation path for conflicting existing
   project registrations. Preserve sessions, history, tracking and claims; no
   automatic termination, deletion or unregistration.
 - [ ] Update authoritative configuration, adoption and launch documentation;
@@ -432,3 +432,23 @@ daemon or separately resolved Worktrees owner has upgraded.
   retaining both append-only histories and unchanged immutable chunks, then
   recaptured the genuine public rebased checkpoint. Canonical write and no-write
   runs each pass all 117 probes; this remains source evidence, not rollout.
+
+### 2026-10-24 - Enforcement merged; source marker acceptance
+
+- Implementation #8468 merged at `3c42fee5f95c56acfc1ffe2b72f1fb9cfc356f33`
+  after current-head clean Copilot review and passing required CI. Read the
+  canonical Plan and Validation Plan again; release, the source marker and
+  installed adoption were not inferred complete from that merge.
+- The supported read-only registration audit and state-preserving reconciliation
+  procedure landed with enforcement. They do not mutate registrations, stop
+  sessions, delete state or settle another owner's claims.
+- Added the repository's negative marker in its existing
+  `.agent-worktrees/config.yaml`, not a competing configuration path. The source
+  guide now states the boundary. Qualification and a source-only contribution
+  through external review under that marker follow before claiming acceptance.
+  No live runtime, project registration or session is changed.
+- The marker, policy, source-allocation and read-only audit cohort passes 88
+  disconnected cases. Both contracts and all 583 fixtures still validate
+  without recapture because no runtime producer changed. The marker's own
+  external-harness contribution and review remain the next acceptance witness;
+  the older clean room already proves real source allocation under denial.
