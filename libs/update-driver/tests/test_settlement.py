@@ -170,6 +170,7 @@ def test_only_native_proof_and_closed_participants_settle_failed_execution(
     {"finished_at": None},
     {"error": None},
     {"state": "blocked"},
+    {"state": "running"},
 ])
 def test_native_settlement_requires_complete_typed_evidence(area, monkeypatch, change):
     from agent_procutil import owned_process
@@ -191,3 +192,9 @@ def test_native_settlement_requires_complete_typed_evidence(area, monkeypatch, c
         )
     with pytest.raises(StateError, match="positive-settlement"):
         status(queued.id, root=root)
+    before = (root / "queue.sqlite3").read_bytes()
+    with pytest.raises(StateError, match="positive-settlement"):
+        request(area, root)
+    with pytest.raises(StateError, match="positive-settlement"):
+        drain(root=root, executor=lambda tx: pytest.fail("malformed proof admitted execution"))
+    assert (root / "queue.sqlite3").read_bytes() == before

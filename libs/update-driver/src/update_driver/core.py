@@ -385,7 +385,7 @@ def enqueue(
     _assert_foundation_clear(root)
     with _database(root, create=True) as db:
         db.execute("BEGIN IMMEDIATE")
-        if _has_fence(db):
+        if _has_fence(db, root):
             raise InterruptedError("installation queue fenced; explicit positive settlement required")
         row = None
         if coalesce_running:
@@ -441,11 +441,14 @@ def _outcome(
             )
 
 
-def _has_fence(db: sqlite3.Connection) -> bool:
-    return db.execute(
-        """SELECT 1 FROM requests WHERE state IN ('interrupted','blocked')
-        AND settled_at IS NULL LIMIT 1""",
-    ).fetchone() is not None
+def _has_fence(db: sqlite3.Connection, root: Path) -> bool:
+    requests = tuple(_request(row, root) for row in db.execute(
+        "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
+    ))
+    return any(
+        request.state in {"interrupted", "blocked"} and request.settled_at is None
+        for request in requests
+    )
 
 
 def foundation_status(*, root: Path | None = None) -> foundation_state.FoundationOperation | None:
@@ -490,6 +493,8 @@ def _reconcile_lost_owner(root: Path) -> None:
             return
         with _database(root, create=True) as db:
             with db:
+                db.execute("BEGIN IMMEDIATE")
+                _has_fence(db, root)
                 db.execute(
                     """UPDATE requests SET state='interrupted',error=?,finished_at=?
                     WHERE state='running'""",
@@ -675,21 +680,22 @@ def drain(
         _reconcile_foundation(root, lock)
         with _database(root, create=True) as db:
             with db:
+                db.execute("BEGIN IMMEDIATE")
+                _has_fence(db, root)
                 db.execute(
                     """UPDATE requests SET state='interrupted',error=?,finished_at=?
                     WHERE state='running'""",
                     ("previous owner lost custody; descendant settlement unconfirmed", time.time()),
                 )
-            if db.execute(
-                """SELECT 1 FROM requests WHERE state IN ('interrupted','blocked')
-                AND settled_at IS NULL LIMIT 1""",
-            ).fetchone():
+            if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced by unsettled prior transaction")
         while True:
             lock.assert_owned()
             _reconcile_foundation(root, lock)
             with _database(root, create=True) as db:
                 db.execute("BEGIN IMMEDIATE")
+                if _has_fence(db, root):
+                    raise InterruptedError("installation queue fenced by unsettled prior transaction")
                 row = db.execute(
                     "SELECT * FROM requests WHERE state='pending' ORDER BY rowid LIMIT 1",
                 ).fetchone()
@@ -818,7 +824,7 @@ def _observe_pending_worker_exit(root: Path, request_id: str, code: int) -> None
             request = _request(row, root)
             if request.state != "pending":
                 return
-            if _has_fence(db):
+            if _has_fence(db, root):
                 raise InterruptedError("installation queue fenced by unsettled prior transaction")
             error = f"worker exited before claiming request: exit {code}"
             db.execute("UPDATE requests SET error=? WHERE id=?", (error, request_id))

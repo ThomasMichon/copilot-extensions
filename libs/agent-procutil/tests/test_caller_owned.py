@@ -509,6 +509,51 @@ def test_prelaunch_refusal_notifies_without_attempting_native_spawn(monkeypatch)
     assert observed == [True]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX lifetime pipe preparation")
+@pytest.mark.parametrize("boundary", ["pipe", "registration", "inheritable"])
+def test_lifetime_pipe_refusal_notifies_outside_guard_and_closes_descriptors(monkeypatch, boundary):
+    observed, descriptors = [], []
+    pipe = os.pipe
+
+    def allocate():
+        if boundary == "pipe":
+            raise OSError(errno.EMFILE, "synthetic descriptor exhaustion")
+        pair = pipe()
+        descriptors.extend(pair)
+        return pair
+
+    def refuse(*args):
+        raise OSError(errno.EIO, "synthetic inheritance refusal")
+
+    def notify():
+        assert protocol._lifetime_lock.acquire(blocking=False)
+        protocol._lifetime_lock.release()
+        assert not set(descriptors) & protocol._lifetime_writers
+        for fd in descriptors:
+            with pytest.raises(OSError):
+                os.fstat(fd)
+        observed.append(True)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("failed pipe preparation reached native launch")
+
+    monkeypatch.setattr(protocol.os, "pipe", allocate)
+    monkeypatch.setattr(protocol, "_require_posix_support", lambda: None)
+    if boundary == "registration":
+        class RefusingWriters(set):
+            def add(self, value):
+                raise MemoryError("synthetic registration refusal")
+
+        monkeypatch.setattr(protocol, "_lifetime_writers", RefusingWriters())
+    if boundary == "inheritable":
+        monkeypatch.setattr(protocol.os, "set_inheritable", refuse)
+    monkeypatch.setattr(protocol, "_run_owned", forbidden)
+    with pytest.raises((OSError, MemoryError)):
+        _run("pass", on_settled=notify)
+    assert observed == [True]
+    assert bool(descriptors) is (boundary != "pipe")
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux group ownership")
 def test_guard_owns_the_group_before_target_execution():
     result = _run(

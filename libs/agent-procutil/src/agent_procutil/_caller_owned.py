@@ -240,11 +240,14 @@ def run(
             capture_limits=(max_stdout_bytes, max_stderr_bytes),
             on_settled=on_settled,
         )
-    with _lifetime_lock:
-        reader, writer = os.pipe()
-        _lifetime_writers.add(writer)
+    reader = writer = None
+    launch_attempted = False
     try:
+        with _lifetime_lock:
+            reader, writer = os.pipe()
+            _lifetime_writers.add(writer)
         os.set_inheritable(writer, False)
+        launch_attempted = True
         try:
             result = _run_owned(
                 [
@@ -262,10 +265,18 @@ def run(
         except OutputLimitExceeded as error:
             raise RuntimeError("caller-owned completion frame exceeded its byte budget") from error
     finally:
-        os.close(reader)
-        with _lifetime_lock:
-            _lifetime_writers.remove(writer)
-            os.close(writer)
+        try:
+            try:
+                if reader is not None:
+                    os.close(reader)
+            finally:
+                if writer is not None:
+                    with _lifetime_lock:
+                        _lifetime_writers.discard(writer)
+                        os.close(writer)
+        finally:
+            if not launch_attempted and on_settled is not None:
+                on_settled()
     try:
         reply = json.loads(result.stdout)
     except (ValueError, TypeError) as error:
