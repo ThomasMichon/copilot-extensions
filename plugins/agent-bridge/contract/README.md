@@ -49,6 +49,24 @@ existing reviewed packet/fixture-hash trust boundary; recomputing a closure
 digest alone does not authenticate historical inventory.
 This source-evidence mechanism grants no runtime or deployment authority.
 
+### Retaining capture-time source objects
+
+Squash merges need not retain intermediate PR commits or their unique blobs.
+`source-blobs/http48/<git-blob>.txt` therefore preserves the exact capture-time
+probe and writer bytes that changed before the HTTP-49 merge. These are inert
+historical source artifacts, not executable copies or refreshed observations.
+Their Git blob identities and SHA-256 values must match the unchanged HTTP-48
+primary execution closure. The directory disables text conversion to retain
+those bytes on every checkout.
+
+Committing these files makes the original objects available through ordinary
+canonical history. The existing validator can then prove the frozen closure
+without a private object store, deleted PR branch or missing capture commit.
+Neither the historical packets, inputs and provenance nor the validator's
+missing-object and content-hash checks are relaxed. Validate in a fresh
+canonical-history-only clone, not only a long-lived source checkout that may
+still contain orphaned PR objects.
+
 ## Updating a contract
 
 Classify the change before touching a golden packet:

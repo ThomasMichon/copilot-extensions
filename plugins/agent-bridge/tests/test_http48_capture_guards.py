@@ -72,7 +72,7 @@ def repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capture_case) ->
     if evidence.GENERATION < 50:
         text = text.replace("RETAINED_INBOX_RECOVERY_PROTOCOL_VERSION = 50\n", "")
         http["capability_versions"].pop("retained_inbox_recovery", None)
-    protocol.write_text(text, encoding="utf-8")
+    protocol.write_text(text, encoding="utf-8", newline="\n")
     next(row for row in http["source_paths"]
          if row["path"] == evidence.previous.PREFIX + "protocol.py")["sha256"] = evidence.digest(
              protocol.read_bytes(),

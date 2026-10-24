@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -130,6 +130,24 @@ honest across the harder case a full machine restart represents, not only the
 case where some part of the provider survives to notice its own child died.
 
 ## Features
+
+### installation-independent-running-sessions
+
+A directly hosted, muxed session remains interactive with the same execution
+identity when its launcher and coordination installations are updated,
+uninstalled or replaced around it. Its essential process lifetime and terminal
+attachment do not depend on keeping an old runtime or mutable installed helper
+alive. Initial launch and final exit reach the compatible implementation
+selected at that boundary within the owning installation, rather than a stale
+implementation captured before the session began.
+
+An affirmative end observation belongs to one execution incarnation; it never
+retires a replacement or conflates an observed process exit with an unobserved
+host loss. If no compatible lifecycle implementation exists at exit, the
+session can close without provisioning or disturbing unrelated installations,
+and the fabric retains honest uncertainty about undelivered notification.
+Installation independence preserves host-owned containment and retirement
+authority rather than escaping them.
 
 ### interchangeable-session-hosts
 
