@@ -92,7 +92,8 @@ current OS/substrate observations and, when applicable, its existing configured
 binding. Missing-file handling and configuration provenance remain caller-owned.
 An empty map or a map containing only other machines does not deny this local
 context. A matching map can customize physical and execution names. An observed
-physical hostname ending in `-wsl` or `-win` is literal, not address syntax.
+physical hostname resembling `-wsl`, `-win` or a parenthesized environment label
+is literal, not address syntax.
 
 This is an additive API for the reviewed local-first correction, not an
 activation of tuple producers or an automatic migration of existing consumers.

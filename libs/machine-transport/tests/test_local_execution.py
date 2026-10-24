@@ -68,7 +68,7 @@ def test_unmapped_literal_hostname_can_remain_the_local_binding(environment: str
     assert context.execution_machine == ("literal-wsl-wsl" if environment == "wsl" else "literal-wsl")
 
 
-@pytest.mark.parametrize("hostname", ["literal-wsl", "literal-win"])
+@pytest.mark.parametrize("hostname", ["literal-wsl", "literal-win", "literal(WSL)", "literal(Windows)"])
 @pytest.mark.parametrize("environment", ["windows", "wsl"])
 @pytest.mark.parametrize("configured", [False, True])
 def test_literal_native_and_guest_siblings_keep_the_observed_physical_name(
@@ -88,6 +88,23 @@ def test_literal_native_and_guest_siblings_keep_the_observed_physical_name(
         hostname, execution, execution,
     )
     assert entries == before
+
+
+@pytest.mark.parametrize("hostname", ["literal(WSL)", "literal(Windows)"])
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("matching", [False, True])
+@pytest.mark.parametrize("configured", [False, True])
+def test_observed_parentheses_are_not_legacy_presentation_syntax(
+    hostname: str, environment: str, matching: bool, configured: bool,
+) -> None:
+    entries = {hostname: MachineEntry(hostname, "", hostname=hostname)} if matching else {}
+    context = resolve_local_execution_context(
+        entries, hostname=hostname, environment=environment,
+        configured_machine=hostname if configured else None,
+    )
+    assert context.machine == (hostname if matching else hostname.casefold())
+    physical = hostname if matching else hostname.casefold()
+    assert context.execution_machine == (f"{physical}-wsl" if environment == "wsl" else physical)
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl"])
@@ -136,7 +153,9 @@ def test_normalization_rejects_invalid_observation_context(hostname: str) -> Non
         normalize_machine_entries({}, observed_hostname=hostname)
 
 
-@pytest.mark.parametrize("hostname", ["raw-host", "literal-win", "literal-wsl"])
+@pytest.mark.parametrize("hostname", [
+    "raw-host", "literal-win", "literal-wsl", "literal(WSL)", "literal(Windows)",
+])
 @pytest.mark.parametrize(("environment", "address"), [
     ("windows", "{host}"), ("windows", "{host}-win"), ("windows", "{host} (Windows)"),
     ("wsl", "{host}-wsl"), ("wsl", "{host} (WSL)"),

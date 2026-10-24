@@ -66,8 +66,8 @@ def _context(
     selected = registry.get(customization_key) if customization_key is not None else None
     presentation = (
         selected is not None and not selected.execution_platform
-        and execution == selected.key and "(" in execution
-        and bool(split_machine_environment(execution).environment)
+        and execution == selected.key and execution.endswith(")")
+        and bool(_platform(selected, observed))
     )
     if presentation:
         execution = split_machine_environment(execution, platform).logical_machine
@@ -146,12 +146,8 @@ def resolve_local_execution_context(
     if configured_machine is not None:
         # Literal current-host metadata has already been resolved above; do not
         # feed that OS observation back through target-shaped suffix inference.
-        literal_observation = observed.casefold().endswith(("-win", "-wsl"))
         target_registry = {
-            key: replace(entry, hostname="") if (
-                literal_observation
-                and entry.hostname.casefold() == observed.casefold()
-            ) else entry
+            key: replace(entry, hostname="") if entry.hostname.casefold() == observed.casefold() else entry
             for key, entry in registry.items()
         }
         try:
