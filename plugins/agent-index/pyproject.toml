@@ -51,6 +51,7 @@ agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.optional-dependencies]
+relay = ["fleet-manager>=0.1.0.dev1"]
 fleet = ["fleet-manager[auth]>=0.1.0.dev1"]
 store = [
     # The indexing + vector-store stack: reads/writes the LanceDB store and chunks

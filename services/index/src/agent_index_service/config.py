@@ -122,13 +122,17 @@ def _source(value: Any, index: int) -> dict[str, Any]:
         if "path" in raw or "ref" in raw:
             raise ConfigurationError(f"{label}: path/ref are only supported for git")
     if "auth" in raw:
-        auth = _mapping(raw["auth"], f"{label}.auth", {"account", "gateway"})
+        auth = _mapping(raw["auth"], f"{label}.auth", {"account", "gateway", "relay"})
+        if "gateway" in auth and "relay" in auth:
+            raise ConfigurationError(f"{label}.auth: gateway and relay are mutually exclusive")
         result["auth"] = {"account": _text(auth.get("account"), f"{label}.auth.account")}
         if "gateway" in auth:
             result["auth"]["gateway"] = str(_path(auth["gateway"], f"{label}.auth.gateway"))
+        if "relay" in auth:
+            result["auth"]["relay"] = str(_path(auth["relay"], f"{label}.auth.relay"))
     if "remote" in raw:
-        if kind != "git" or "gateway" not in result.get("auth", {}):
-            raise ConfigurationError(f"{label}.remote requires Git Gateway credentials")
+        if kind != "git" or not ({"gateway", "relay"} & result.get("auth", {}).keys()):
+            raise ConfigurationError(f"{label}.remote requires explicit renewable Git credentials")
         from urllib.parse import urlsplit
 
         remote = _text(raw["remote"], f"{label}.remote")
@@ -140,8 +144,8 @@ def _source(value: Any, index: int) -> dict[str, Any]:
         ):
             raise ConfigurationError(f"{label}.remote must be a credential-free HTTPS URL")
         result["remote"] = remote
-    if kind == "git" and "gateway" in result.get("auth", {}) and "remote" not in result:
-        raise ConfigurationError(f"{label}: Git Gateway credentials require remote")
+    if kind == "git" and ({"gateway", "relay"} & result.get("auth", {}).keys()) and "remote" not in result:
+        raise ConfigurationError(f"{label}: renewable Git credentials require remote")
     if "trust_domain" in raw:
         result["trust_domain"] = _text(raw["trust_domain"], f"{label}.trust_domain")
     return result

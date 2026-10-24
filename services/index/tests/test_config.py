@@ -73,6 +73,32 @@ def test_defaults_and_environment(config_data, tmp_path):
     assert not config.home.exists()
 
 
+def test_account_relay_git_remote_is_explicit_and_preserved(config_data, tmp_path):
+    policy = tmp_path / "worker-policy.json"
+    config_data["sources"] = [{
+        "name": "git:fixture", "path": str(tmp_path / "repository"),
+        "remote": "https://github.com/example/project.git",
+        "auth": {"account": "account-a", "relay": str(policy)},
+    }]
+    result = parse_config(config_data, tmp_path / "host.yaml")
+    assert result.sources[0]["auth"] == {"account": "account-a", "relay": str(policy.resolve())}
+    assert result.sources[0]["remote"] == "https://github.com/example/project.git"
+    assert result.core_environment()["AGENT_INDEX_HOST"] == "127.0.0.1"
+    config_data["sources"][0]["auth"]["gateway"] = str(tmp_path / "other.json")
+    with pytest.raises(ConfigurationError, match="mutually exclusive"):
+        parse_config(config_data, tmp_path / "host.yaml")
+
+
+@pytest.mark.parametrize("auth", [
+    {"relay": "relative", "account": "account-a"},
+    {"relay": "relative"},
+])
+def test_invalid_account_relay_references(config_data, tmp_path, auth):
+    config_data["sources"] = [{"name": "github:example/project", "auth": auth}]
+    with pytest.raises(ConfigurationError):
+        parse_config(config_data, tmp_path / "host.yaml")
+
+
 @pytest.mark.parametrize(("key", "value"), [
     ("schema_version", True), ("schema_version", 2), ("schema_version", "1"),
     ("home", "relative"), ("home", None), ("sources", []), ("sources", {}),
