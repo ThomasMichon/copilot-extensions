@@ -719,6 +719,34 @@ def test_real_start_adopts_after_uvicorn_dictconfig_and_closes_owned_writer(tmp_
     )
 
 
+@pytest.mark.parametrize("invalid", [1e20, -1e20, "os-range-error"])
+def test_out_of_range_timestamp_is_preserved_without_blocking_expiry(tmp_path, invalid):
+    from process_telemetry.retained_spool import RetainedSpool, milliseconds_timestamp
+
+    def decoder(event):
+        if event["ts"] == "os-range-error":
+            raise OSError("synthetic platform timestamp range failure")
+        return milliseconds_timestamp(event)
+
+    (tmp_path / "retained").mkdir()
+    now = datetime(2026, 10, 23, tzinfo=timezone.utc)
+    sink = RetainedSpool(
+        tmp_path, "fixture", service="agent-bridge", custody=logs.operation_custody,
+        clock=lambda: now, timestamp_decoder=decoder,
+    )
+    sink({"ts": int(now.timestamp() * 1000), "id": "expires"})
+    unknown = {"ts": invalid, "id": "unknown"}
+    sink(unknown)
+    assert unknown in [json.loads(line) for line in sink.store.path.read_text(
+        encoding="utf-8").splitlines()]
+    now += timedelta(days=31)
+    sink.maintain(force=True)
+    remaining = [json.loads(line) for path in sink.store._files()
+                 for line in path.read_text(encoding="utf-8").splitlines()]
+    assert remaining == [unknown]
+    assert sink.store.last_error == "ValueError"
+
+
 def test_explicit_millisecond_decoder_exact_cutoff_timezone_and_skew(tmp_path):
     from process_telemetry.retained_spool import RetainedSpool
 

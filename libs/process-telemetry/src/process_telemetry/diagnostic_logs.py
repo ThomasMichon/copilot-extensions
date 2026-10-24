@@ -110,7 +110,7 @@ class DiagnosticLog(logging.Handler):
     def _event_stamp(self, event: dict) -> datetime | None:
         try:
             return _utc(self.timestamp_decoder(event))
-        except (ValueError, TypeError, KeyError, UnicodeError, OverflowError):
+        except (ValueError, TypeError, KeyError, UnicodeError, OverflowError, OSError):
             return None
 
     @staticmethod

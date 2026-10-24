@@ -355,3 +355,12 @@ ascribe an independently observed watchdog stall to logging or claim a live fix.
   attribution. This is a source-test correction, not macOS/live qualification.
   Native Windows managed Bridge diagnostic portfolio: 28 passed; touched-test
   Ruff F/E9 and diff whitespace checks pass.
+- 2026-10-24 UTC — Subsequent current-head review identified platform timestamp
+  conversion raising `OSError` for out-of-range producer values. The decoder
+  boundary now treats that range failure as an unknown timestamp, preserving the
+  original record while still expiring valid old records in the same segment.
+  Regression coverage includes both extreme epoch values and an injected
+  platform-style range error; no legacy append/factory or configuration changes.
+  Native managed source validation passes 31 Bridge diagnostic tests and 49
+  Dispatch diagnostic/telemetry tests; touched-code Ruff F/E9 and whitespace
+  checks pass.
