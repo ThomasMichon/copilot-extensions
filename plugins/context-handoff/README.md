@@ -85,7 +85,32 @@ returns a short handoff seed a human can use manually.
 ## Recovery prompt receipts
 
 The first root user message captures its recovery locator without invoking a
-CLI. One coalesced asynchronous observer uses an optional, already-delivered
+CLI. Production registration first restores one pending slot from the actual
+local SDK session's private client metadata (`rpc.metadata.snapshot()`,
+`getClientMetadata()` and `updateClientMetadata({set})`). Unsupported/remote
+hosts, corrupt or over-capacity data, session mismatches and storage errors
+permit no receipt mutation; there is no file or CLI persistence fallback.
+
+The metadata API has no CAS. Up to three immutable identity/phase records
+commute: capture, qualified possibly-sent identity, and monotonic confirmation.
+Each prospective record admission atomically re-publishes the identical
+qualified key and verifies the committed bag plus read-back; a stale read must
+not downgrade confirmation. Conflicting identities refuse new mutation.
+Only own keys are set, never cleared/removed; terminal markers remain so a
+late pending write cannot reopen them. Own values are bounded to 8 KiB within
+native limits (256-byte keys, 16-KiB values, 128 entries, 64-KiB serialized bag),
+without evicting other clients.
+
+A first prompt without a recovery seed stores a terminal checked capture
+without storing its text. The slot covers one logical first prompt per actual
+native session, not a history of handoff episodes. Missing pre-protocol state
+cannot reconstruct already-lost identity or prove historical first-message
+order. Fresh qualified state queries only its original identity before any
+later record; known in-memory uncertainty with lost native records is not
+silently initialized as a new capture. Fresh capture-only state without a
+qualified tuple stays unavailable rather than selecting a replacement binding.
+
+One coalesced asynchronous observer uses an optional, already-delivered
 resident-control candidate from this session's Worktrees guidance. It reads
 only the selected active route and existing credential, negotiates the closed
 receipt capability, then uses the existing loopback TCP JSON-lines service.
@@ -93,8 +118,9 @@ It never starts a runtime, installer, credential producer, service or helper.
 Missing trusted project/incarnation/session delivery remains unavailable; no
 nonce, path or head identity is guessed.
 
-The **2,000 ms whole-observation ceiling** includes guidance, token and route
-reads, health, admission and response. The client reserves 100 ms for local
+The **2,000 ms whole-observation ceiling** includes metadata restore/commit,
+guidance, token and route reads, health, admission, response and confirmation.
+The client reserves 100 ms for local
 settlement rather than extending that ceiling. A later user, idle or tool
 completion event may reconcile after a 30-second cooldown; there is no periodic
 poll or per-event queue. Successful receipt suppresses further attempts.
@@ -111,7 +137,12 @@ bounded lookup output, and refuses legacy matching rows without qualified
 incarnation evidence. A missing captured session identity may be filled from the
 same live session later; an already-known identity is never replaced.
 Shutdown destroys the local socket but retains uncertain identity for a later
-registration. It does not claim server rollback or cancellable fsync. Server
+registration, including fresh extension state. Uncancellable metadata RPCs
+retain their single-flight owner until actual settlement; disposal/deadlines
+suppress follow-up calls and socket admission. SDK persisted atomic commit is
+not a claim of power-loss/fsync durability; real-host process/refork
+qualification is separate from RPC-owner-double tests.
+It does not claim server rollback or cancellable fsync. Server
 in-flight ownership lasts until settlement; a local timeout is not completion.
 An exact replay is acknowledged only after the backend successfully synchronizes
 the existing receipt; a row left readable by a failed fsync stays uncertain.

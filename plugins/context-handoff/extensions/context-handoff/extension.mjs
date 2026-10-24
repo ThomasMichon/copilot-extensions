@@ -71,7 +71,7 @@ import {
 } from "./thresholds.mjs";
 import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnostics.mjs";
 import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
-import { registerPromptReceiptObservation } from "./prompt-receipt.mjs";
+import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
 
 // --- Emergency crash diagnostics ---------------------------------------
 // This extension has been observed, on at least one machine, to reach the
@@ -1346,7 +1346,7 @@ handoffConfigPromise.then((resolved) => {
 });
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
-const promptReceiptObservation = registerPromptReceiptObservation(session, state);
+const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
 session.on("session.shutdown", () => { void promptReceiptObservation.dispose(); });
 
 // File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).

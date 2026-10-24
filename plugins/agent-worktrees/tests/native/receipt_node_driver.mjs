@@ -7,6 +7,7 @@ import { readFileSync, watch } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { nativeClientMetadata } from "../../../context-handoff/tests/fixtures/native-client-metadata.mjs";
 
 let helperCalls = 0;
 let socketCalls = 0;
@@ -19,7 +20,7 @@ dns.lookup = () => { throw new Error("DNS forbidden"); };
 syncBuiltinESMExports();
 const source = join(process.env.RECEIPT_CLIENT_ROOT, "extensions", "context-handoff", "handoff-core.mjs");
 const { observeHandoffPromptReceived } = await import(pathToFileURL(source));
-const { registerPromptReceiptObservation } = await import(pathToFileURL(
+const { registerNativePromptReceiptObservation } = await import(pathToFileURL(
   join(process.env.RECEIPT_CLIENT_ROOT, "extensions", "context-handoff", "prompt-receipt.mjs"),
 ));
 const options = JSON.parse(readFileSync(process.argv[2], "utf-8"));
@@ -31,20 +32,19 @@ const watcher = options.cancelFile ? watch(options.cancelFile, () => controller.
 const observe = (state, locator = options.locator) => observeHandoffPromptReceived({
   sessionDir: options.sessionDir, sid: options.sessionId, locator, pending: state,
   signal: controller.signal,
+  // Isolated transport/backend lane, not native SDK persistence qualification.
+  beforeRecord: async () => ({ verified: true }),
 });
 let result;
 let callbackMs;
 let callbackBeforeIO;
 if (options.callback) {
-  const handlers = new Map();
-  const session = {
-    on(name, callback) { handlers.set(name, callback); return () => handlers.delete(name); },
-    log() {},
-  };
+  const metadata = nativeClientMetadata({ sessionId: options.sessionId });
+  const session = metadata.client();
   const state = { turnCount: 0, sessionId: options.sessionId, cwd: process.cwd() };
-  const observation = registerPromptReceiptObservation(session, state, { sessionDir: options.sessionDir });
+  const observation = registerNativePromptReceiptObservation(session, state, { sessionDir: options.sessionDir });
   const callbackStarted = performance.now();
-  handlers.get("user.message")({ data: { content: `Recovery: context-handoff ${options.locator}` } });
+  session.emit("user.message", { data: { content: `Recovery: context-handoff ${options.locator}` } });
   callbackMs = performance.now() - callbackStarted;
   callbackBeforeIO = socketCalls === 0;
   try {
@@ -65,4 +65,5 @@ console.log(JSON.stringify({
   status: result.status, reason: result.reason, replayed: result.replayed,
   results: result.results, elapsedMs: performance.now() - started,
   helperCalls, socketCalls, callbackMs, callbackBeforeIO, pending,
+  metadataMode: options.callback ? "sdk-shaped-rpc-owner-double" : "explicit-transport-fixture-gate",
 }));

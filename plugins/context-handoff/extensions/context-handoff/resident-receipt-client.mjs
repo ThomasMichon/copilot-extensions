@@ -5,7 +5,7 @@ import { PROMPT_RECEIPT_TIMEOUT_MS } from "./cli-timeouts.mjs";
 
 export const OBSERVATION_MS = PROMPT_RECEIPT_TIMEOUT_MS;
 export const FRAME_BYTES = 8192;
-const SETTLEMENT_RESERVE_MS = 100;
+export const SETTLEMENT_RESERVE_MS = 100;
 const GUIDANCE_BYTES = 65536;
 const CAPABILITY = "handoff-prompt-receipt-v1";
 const IDENTITY = ["installationId", "sourceFingerprint", "marketplaceId", "pluginId",
@@ -202,13 +202,19 @@ function subjectFromBinding(binding, sid, locator) {
 }
 
 export async function observeResidentReceipt({
-  sessionDir, sid, locator, signal, pending = {},
+  sessionDir, sid, locator, signal, pending = {}, deadline: suppliedDeadline, beforeRecord,
 }) {
   if (pending.inflight) return { status: "unavailable", reason: "local-observation-in-flight", pending };
   if (!text(sessionDir) || !text(sid, 256) || !text(locator, 512)) {
     return { status: "unavailable", reason: "session-unavailable", pending };
   }
-  const deadline = performance.now() + OBSERVATION_MS - SETTLEMENT_RESERVE_MS;
+  if (typeof beforeRecord !== "function") {
+    return { status: "unavailable", reason: "native-metadata-required", pending };
+  }
+  const deadline = Math.min(
+    performance.now() + OBSERVATION_MS - SETTLEMENT_RESERVE_MS,
+    Number.isFinite(suppliedDeadline) ? suppliedDeadline : Infinity,
+  );
   const aborter = new AbortController();
   const cancel = () => aborter.abort();
   signal?.addEventListener("abort", cancel, { once: true });
@@ -257,13 +263,26 @@ export async function observeResidentReceipt({
     const expected = { ...selected, routeGeneration: route.routeGeneration, pid: route.pid,
       processStartTime: route.processStartTime, runtimeGeneration: owner.runtimeGeneration };
     if (!text(owner.runtimeGeneration, 256) || !same(owner, expected)) refuse("owner-mismatch");
-    // No effect after the producer or active route changes during negotiation.
+    const query = pending.uncertain === true;
+    if (!query) {
+      const admission = await beforeRecord(pending);
+      check();
+      if (admission?.confirmed === true) {
+        pending.uncertain = false;
+        return { status: "logged", reason: "metadata-confirmed", replayed: true, pending };
+      }
+      if (admission?.verified !== true) refuse("native-metadata-unverified");
+    }
+    // Persistence can wait; do not admit a socket effect using a superseded projection.
     const again = candidateFromGuidance(await readBounded(guidance, GUIDANCE_BYTES, check));
+    const currentBinding = parseUniqueJson(await readBounded(
+      join(sessionDir, "worktree-binding.json"), FRAME_BYTES, check,
+    ));
     if (!same(again, candidate)
-        || await readBounded(candidate.activeRoutePath, FRAME_BYTES, check) !== routeText) {
+        || await readBounded(candidate.activeRoutePath, FRAME_BYTES, check) !== routeText
+        || !same(subjectFromBinding(currentBinding, sid, locator), subject)) {
       refuse("owner-changed");
     }
-    const query = pending.uncertain === true;
     const result = await request(route, token, "handoff-prompt-receipt", {
       contractVersion: 1, operation: query ? "query" : "record",
       subject: pending.subject, expectedOwner: owner,

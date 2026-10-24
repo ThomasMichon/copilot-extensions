@@ -538,3 +538,55 @@ new authority or ownership behavior requires a separate proposal.
   head; fixture manifests must be regenerated before any future admitted run.
   Readiness, draft/merge, source CI/review and installed/platform gates remain
   separate; cancellation and scaled-test intent are not completion.
+
+### Native metadata owner selected and admitted
+
+- The coordinating owner selected the actual host SDK's persisted private
+  client-metadata bag. Read the current 1.0.101 SDK declarations directly through
+  the extension authoring guide: native metadata snapshot, get and atomic
+  update return values, local/private semantics and all bag limits.
+- The API has no CAS. The admitted protocol is three commutative immutable
+  identity-bound records for one logical first-prompt slot, with retained
+  monotonic confirmation and no clear/remove/foreign writes. The precise
+  owner/API decision and source/native validation gates are in
+  [native-metadata-contract.md](native-metadata-contract.md).
+- Implementation scope is the H2 pending-slot adapter, scheduler/resident
+  before-send gate, production registration wiring and focused tests/docs.
+  P-owned files, handoff-request storage, services, CLI/session creation,
+  provider registration and extension reload remain excluded.
+
+### Native metadata source implementation and qualification boundary
+
+- Added the private native API adapter and production registration wiring.
+  Restore precedes observation; qualification is committed/read back before
+  record admission, with monotonic confirmation and the original whole budget.
+  Unsupported hosts and inconsistent storage never fall back to in-memory
+  persistence. Source/nonce/route projection is revalidated after a waiting
+  metadata commit.
+- Added checked-no-recovery captures, retained terminal markers, no-CAS
+  interleavings, stale read-back, late/disposed RPC ownership, actual native SID
+  selection, changed projection during commit, and known-memory/native-record
+  loss regressions. A fresh capture-only restore cannot choose another binding
+  after failed qualified persistence; without the original tuple it remains
+  unavailable instead of fabricating an exact query or new record.
+  Forty-nine adapter/production-registration/scheduler
+  source units passed; the native driver parsed without being executed.
+- Independent read-only review of the material metadata protocol delta found
+  no significant issues, without rerunning tests or claiming host persistence.
+  The subsequent conservative capture-only refusal and its new regression
+  passed the full 49-case source group; current-head forge review is still due.
+- The latest selected client-only functional run passed six of seven tests.
+  Lost-reply replay returned `unknown` instead of expected `logged`; its
+  two-attempt case took 2,530.9407 ms. The preserved result does not identify
+  the internal refusal reason, so timing causation is not asserted. A previous
+  selected seven-case run passed, but that does not erase this current failure.
+  No unchanged timing retry, production budget change or native run followed.
+- These tests use an explicitly labeled RPC-owner double. Actual SDK host
+  persisted atomic commit, process/refork restoration and independent runtime
+  writer interleavings remain unqualified. The native slot is reserved, not
+  GO, until the repaired source/current review/CI and the test-only mechanism
+  are admitted. No extra native session/CLI host or extension reload occurred.
+- Pre-protocol missing state cannot reconstruct previously lost identity or
+  historical first-message order. Multiple logical handoff episodes under one
+  native session ID are refused, not implemented as another ledger. This
+  initialization boundary remains explicit for coordinator acceptance.

@@ -23,7 +23,9 @@ const { observeHandoffPromptReceived } = await import("../extensions/context-han
 const { observeResidentReceipt, parseUniqueJson } = await import("../extensions/context-handoff/resident-receipt-client.mjs");
 
 function input(fixture, pending = {}) {
-  return { sessionDir: fixture.sessionDir, sid: "subject", locator: "task:one", pending };
+  // Transport tests isolate the socket contract; registration tests use the real native adapter.
+  return { sessionDir: fixture.sessionDir, sid: "subject", locator: "task:one", pending,
+    beforeRecord: async () => ({ verified: true }) };
 }
 async function withFixture(body) {
   let fixture;
@@ -170,6 +172,16 @@ test("a nonresponsive resident consumes one whole 2000ms observation, no retry l
 
 test("duplicate escaped JSON keys are refused", () => {
   assert.throws(() => parseUniqueJson('{"key":1,"\\u006bey":2}'));
+});
+
+test("missing native metadata admission never falls back to record transport", async () => {
+  await withFixture(async (f) => {
+    const options = input(f);
+    delete options.beforeRecord;
+    assert.equal((await observeResidentReceipt(options)).reason, "native-metadata-required");
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.effects.size, 0);
+  });
 });
 
 function setGenerations(fixture, installGeneration, activationGeneration, owner = true) {

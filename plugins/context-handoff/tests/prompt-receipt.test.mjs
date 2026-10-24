@@ -3,12 +3,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 import { registerPromptReceiptObservation } from "../extensions/context-handoff/prompt-receipt.mjs";
+import { nativeClientMetadata, pendingIdentity } from "./fixtures/native-client-metadata.mjs";
 
 const prompt = "Continue work | Recovery: context-handoff task:receipt-1";
 function harness(options = {}) {
   const handlers = new Map();
   const warnings = [];
+  const runtime = nativeClientMetadata();
+  const native = runtime.client();
   const session = {
+    sessionId: native.sessionId,
+    rpc: native.rpc,
     on(name, callback) {
       const callbacks = handlers.get(name) || new Set();
       callbacks.add(callback);
@@ -18,9 +23,21 @@ function harness(options = {}) {
     log: (message) => warnings.push(message),
   };
   const state = { turnCount: 0, cwd: process.cwd(), sessionId: "subject" };
-  const observation = registerPromptReceiptObservation(session, state, options);
+  const observe = options.observe && (async (input) => {
+    const query = input.pending.uncertain === true;
+    const result = await options.observe(input);
+    if (["logged", "unknown"].includes(result.status)) {
+      const identity = pendingIdentity(input.sid, input.locator);
+      input.pending.installation ??= identity.installation;
+      input.pending.runtimeRoot ??= identity.runtimeRoot;
+      input.pending.subject = { ...identity.subject, ...input.pending.subject };
+      if (!query) await input.beforeRecord(input.pending);
+    }
+    return result;
+  });
+  const observation = registerPromptReceiptObservation(session, state, { ...options, observe });
   return {
-    state, session, observation, warnings,
+    state, session, observation, warnings, runtime,
     emit: (name, event = {}) => {
       for (const callback of handlers.get(name) || []) callback(event);
     },
@@ -95,15 +112,18 @@ test("later reconciliation fills only a missing captured session ID", async () =
   });
   try {
     h.state.sessionId = null;
+    h.session.sessionId = null;
+    h.runtime.snapshot.sessionId = "resolved-later";
     h.emit("user.message", { data: { content: prompt } });
     await settle(h.observation);
-    assert.equal(seen[0].sid, null);
+    assert.equal(seen.length, 0);
     h.state.sessionId = "resolved-later";
+    h.session.sessionId = "resolved-later";
     clock = 11;
     h.emit("tool.execution_complete");
     await settle(h.observation);
-    assert.equal(seen[1].sid, "resolved-later");
-    assert.equal(seen[1].locator, "task:receipt-1");
+    assert.equal(seen[0].sid, "resolved-later");
+    assert.equal(seen[0].locator, "task:receipt-1");
   } finally { await h.observation.dispose(); }
 });
 
@@ -151,7 +171,7 @@ test("subagent events and later locators do not fabricate a first-prompt receipt
 
 test("extension registers the tested boundary without a synchronous receipt logger", () => {
   const source = readFileSync(new URL("../extensions/context-handoff/extension.mjs", import.meta.url), "utf-8");
-  assert.match(source, /registerPromptReceiptObservation\(session, state\)/);
+  assert.match(source, /registerNativePromptReceiptObservation\(session, state\)/);
   assert.doesNotMatch(source, /logHandoffPromptReceived/);
   assert.doesNotMatch(source, /session\.on\("user\.message"/);
 });
