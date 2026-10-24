@@ -1,0 +1,9 @@
+{
+  "comment": "Acquire adopted published loadouts and expose durable scoped preparation notifications and exact-generation review through the authenticated Gateway SDK",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
