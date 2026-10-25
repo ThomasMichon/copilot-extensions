@@ -77,7 +77,9 @@ def run_targeted_update(rest: list[str]) -> int:
                     isinstance(cutover.get("result"), dict) and cutover["result"].get("ok") is False
                 )
                 run.say(f"Manager: {result.action}; {result.reason or result.version}")
-                run.record_self_update(result.action, failed, result.reason)
+                if failed:
+                    run.say(f"Manager mux cutover failed: {cutover}", state="failed")
+                run.record_self_update(result.action, failed, str(cutover) if failed else result.reason)
             return run.finish(0 if result.action in {"updated", "already-current"} and not failed else 1)
         from .update_orchestration import preflight_runtime_source
 

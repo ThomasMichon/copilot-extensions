@@ -166,6 +166,20 @@ def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatc
     assert calls == ([] if target == "worktree-manager" else [(None, ["update", "--no-manager", "--target", "guide"])])
 
 
+@pytest.mark.parametrize("cutover", [
+    {"action": "error", "reason": "synthetic cutover lease busy"},
+    {"action": "cutover", "result": {"ok": False, "reason": "synthetic cutover lease busy"}},
+])
+def test_manager_cutover_failure_keeps_actionable_owner_detail(inventory, monkeypatch, capsys, cutover):
+    monkeypatch.setattr(self_install, "self_update", lambda **kwargs: SimpleNamespace(
+        action="updated", cutover=cutover, reason="", version="2",
+    ))
+    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda *a, **k: pytest.fail("Manager-only failure updated plugins"))
+    assert manager._cmd_update(["--target", "worktree-manager"]) != 0
+    output = capsys.readouterr()
+    assert "synthetic cutover lease busy" in output.out + output.err
+
+
 @pytest.mark.parametrize("flags", [
     ["--force"], ["--force-runtime", "guide"], ["--skip-modules"], ["--repair-engine", "source"],
     ["--engine-acquisition-timeout", "120"],
