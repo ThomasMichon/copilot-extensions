@@ -459,7 +459,8 @@ function Write-DeployManifest {
         [string]$SourcePathOverride = '',
         [string]$VersionOverride = '',
         [string]$PayloadHash = '',
-        [hashtable]$AdditionalFields = @{}
+        [hashtable]$AdditionalFields = @{},
+        [switch]$PassThru
     )
 
     $manifestPath = [IO.Path]::GetFullPath((Join-Path $InstallPath 'deploy-manifest.json'))
@@ -522,6 +523,8 @@ function Write-DeployManifest {
     foreach ($key in $AdditionalFields.Keys) {
         $manifest[$key] = $AdditionalFields[$key]
     }
+
+    if ($PassThru) { return $manifest }
 
     $tmp = $manifestPath + '.tmp-' + [Guid]::NewGuid().ToString('N')
     try {

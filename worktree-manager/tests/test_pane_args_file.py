@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import ast
 from concurrent.futures import ThreadPoolExecutor
+import ctypes
+from ctypes import wintypes
 import json
 import os
 from pathlib import Path
-import runpy
 import shutil
 import subprocess
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -23,26 +26,40 @@ pytestmark = pytest.mark.skipif(not PWSH, reason="PowerShell 7 is required")
 
 
 def _test_env(tmp_path: Path) -> dict[str, str]:
+    keep = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE"}
+    env = {key: value for key, value in os.environ.items() if key.upper() in keep}
+    for key, name in {
+        "APPDATA": "roaming", "LOCALAPPDATA": "local", "AGENT_HOME": "profile",
+        "XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data",
+        "XDG_STATE_HOME": "state", "XDG_CACHE_HOME": "cache",
+        "WORKTREE_MANAGER_ROOT": "manager",
+    }.items():
+        path = tmp_path / name
+        path.mkdir(exist_ok=True)
+        env[key] = str(path)
     (tmp_path / "profile").mkdir(exist_ok=True)
-    env = dict(
-        os.environ, USERPROFILE=str(tmp_path / "profile"),
+    env.update(
+        USERPROFILE=str(tmp_path / "profile"),
         HOME=str(tmp_path / "profile"), WORKTREE_PANE_MIN_RUNTIME="0",
         TEMP=str(tmp_path), TMP=str(tmp_path),
         PSMUX_NO_WARM="1", PSMUX_DATA_DIR=str(tmp_path / "psmux-data"),
+        PSMUX_CONFIG_FILE=os.devnull,
     )
-    env.pop("PSMUX_SESSION", None)
     return env
 
 
-def test_native_pane_fixture_drops_parent_mux_session(tmp_path, monkeypatch):
-    monkeypatch.setenv("PSMUX_SESSION", "unrelated-parent-pane")
+@pytest.mark.parametrize("key", ["TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION"])
+def test_native_pane_fixture_drops_parent_mux_session(tmp_path, monkeypatch, key):
+    monkeypatch.setenv(key, "unrelated-parent-pane")
     env = _test_env(tmp_path)
-    assert "PSMUX_SESSION" not in env
+    assert key not in env
     assert env["PSMUX_DATA_DIR"] == str(tmp_path / "psmux-data")
-    assert os.environ["PSMUX_SESSION"] == "unrelated-parent-pane"
+    assert os.environ[key] == "unrelated-parent-pane"
 
 
-def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list[str]:
+def _powershell_producer(
+    tmp_path: Path, wrapper: Path, argv: list[str], *, timeout: float = 15,
+) -> list[str]:
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     start = source.index("                    $paneArgsRoot = Join-Path")
     end = source.index("\n                }\n                $savedAuth", start)
@@ -63,7 +80,7 @@ def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(script), str(wrapper), str(payload),
          str(tmp_path / "runtime")],
-        capture_output=True, text=True, encoding="utf-8", timeout=15, env=_test_env(tmp_path),
+        capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=_test_env(tmp_path),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
@@ -112,32 +129,76 @@ def test_manifest_round_trip_and_fresh_retry(tmp_path):
             receipt.unlink(missing_ok=True)
 
 
-@pytest.mark.parametrize("nested", [False, True])
-@pytest.mark.parametrize("shell", [PWSH, shutil.which("powershell")])
-def test_launch_plan_preserves_string_argv_before_manifest_creation(tmp_path, nested, shell):
-    if not shell:
-        pytest.skip("Windows PowerShell 5.1 is unavailable")
+def _run_launch_plan_parser(tmp_path, plan_json, shell):
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     start = source.index('$plan = ($jsonOutput -join "`n")')
-    end = source.index("# Feed the crash-detector trap", start)
-    expected = ["program", "", "2026-10-08T12:00:00+05:30", "/Date(0)/", "--allow-all"]
-    plan = {"action": "exec", "cmd": expected}
+    end = source.index("\nif ($plan.action -eq 'exec') {", start)
     payload = tmp_path / "plan.json"
-    payload.write_text(json.dumps({"launch": plan} if nested else plan), encoding="utf-8")
+    payload.write_text(plan_json, encoding="utf-8")
     script = tmp_path / "plan-argv.ps1"
     script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "$PSModuleAutoLoadingPreference='None'\n"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\n"
+        "Import-Module ([IO.Path]::Combine($PSHOME, 'Modules', "
+        "'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Utility.psd1')) "
+        "-ErrorAction Stop\n"
         "$jsonOutput=@([IO.File]::ReadAllText($args[0]))\n"
         + source[start:end]
         + "\nConvertTo-Json -InputObject @($plan.cmd) -Compress\n",
         encoding="utf-8",
     )
-    result = subprocess.run(
+    return subprocess.run(
         [shell, "-NoProfile", "-File", str(script), str(payload)],
-        capture_output=True, text=True, timeout=15, env=_test_env(tmp_path),
+        capture_output=True, text=True, encoding="utf-8", timeout=15, env=_test_env(tmp_path),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("shell", [PWSH, shutil.which("powershell")])
+def test_launch_plan_preserves_string_argv_before_manifest_creation(tmp_path, nested, shell):
+    if not shell:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+    expected = [
+        "program", "", "2026-10-08T12:00:00+05:30", "/Date(0)/", "--allow-all",
+        "two words", 'a"quote', "a'quote", "trailing\\", "\u03bb", "line1\r\nline2", "\t",
+    ]
+    plan = {"action": "exec", "cmd": expected}
+    result = _run_launch_plan_parser(
+        tmp_path, json.dumps({"launch": plan} if nested else plan), shell,
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == expected
+
+
+@pytest.mark.parametrize("nested", [False, True])
+@pytest.mark.parametrize("shell", [PWSH, shutil.which("powershell")])
+@pytest.mark.parametrize("command,message", [
+    ("program", "Launch command must be a string argv array."),
+    (42, "Launch command must be a string argv array."),
+    (["program", None], "Launch command contains a non-string argument."),
+    (["program", 42], "Launch command contains a non-string argument."),
+])
+def test_launch_plan_parser_rejects_non_string_argv(tmp_path, nested, shell, command, message):
+    if not shell:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+    plan = {"action": "exec", "cmd": command}
+    result = _run_launch_plan_parser(
+        tmp_path, json.dumps({"launch": plan} if nested else plan), shell,
+    )
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+@pytest.mark.parametrize("plan_json", [
+    '{"action":"exec","cmd":["first"],"cmd":["last"]}',
+    '{"launch":{"action":"exec","cmd":["first"]},"launch":{"action":"exec","cmd":["last"]}}',
+])
+def test_launch_plan_parser_preserves_last_duplicate_property(tmp_path, plan_json):
+    result = _run_launch_plan_parser(tmp_path, plan_json, PWSH)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ["last"]
 
 
 @pytest.mark.parametrize("content", ['{}', '[]', 'null', '["ok",null]', '[1]', '{'])
@@ -529,8 +590,45 @@ def test_launcher_locked_cleanup_logs_and_preserves_failure_path(tmp_path):
     os.name != "nt" or os.environ.get("PSMUX_FILE_LAUNCH_E2E") != "1",
     reason="opt-in real Windows PSMux consumer check",
 )
+def test_real_psmux_direct_child_control(tmp_path):
+    psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
+    if not psmux:
+        pytest.skip("PSMux is required")
+    name = "aw-direct-test-" + uuid.uuid4().hex
+    try:
+        result = subprocess.run(
+            [psmux, "new-session", "-d", "-s", name, "-c", str(tmp_path),
+             "pwsh.exe", "-NoProfile", "-NoLogo", "-Command", "Start-Sleep -Seconds 20"],
+            capture_output=True, text=True, encoding="utf-8", timeout=15,
+            env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        time.sleep(2)
+        live = subprocess.run(
+            [psmux, "has-session", "-t", name],
+            capture_output=True, text=True, timeout=5,
+            env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert live.returncode == 0, live.stderr
+    finally:
+        subprocess.run(
+            [psmux, "kill-session", "-t", name],
+            capture_output=True, text=True, timeout=10,
+            env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("PSMUX_FILE_LAUNCH_E2E") != "1",
+    reason="opt-in real Windows PSMux consumer check",
+)
+@pytest.mark.timeout(180)
 @pytest.mark.parametrize("producer", ["powershell", "python"])
 def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
+    root = WRAPPER.parents[2]
+    # This opt-in cross-plugin fixture supplies AW; standalone Manager does not.
+    monkeypatch.syspath_prepend(str(root / "libs" / "repository-policy" / "src"))
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "src"))
     from agent_worktrees import config
 
     monkeypatch.setattr(config, "install_dir", lambda: tmp_path / "runtime")
@@ -551,10 +649,23 @@ def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
         encoding="utf-8",
     )
     expected = ["", "two words", 'a"quote', "a'quote", "--allow-all", "\u03bb"]
-    observer = runpy.run_path(str(
-        WRAPPER.parents[2] / "plugins" / "agent-worktrees" / "tests"
-        / "test_status_monitor_windows.py"
-    ))
+    from agent_worktrees import locks
+
+    observer_path = root / "plugins" / "agent-worktrees" / "tests" / "test_status_monitor_windows.py"
+    observer_names = {
+        "_ProcessEntry", "_kernel32", "_user32", "_process_snapshot",
+        "_window_snapshot", "_foreground_state", "_creation_time", "_descendants",
+    }
+    definitions = [
+        node for node in ast.parse(observer_path.read_text("utf-8")).body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in observer_names
+    ]
+    assert {node.name for node in definitions} == observer_names
+    observer = {
+        "ctypes": ctypes, "wintypes": wintypes,
+        "m": SimpleNamespace(locks=locks),
+    }
+    exec(compile(ast.Module(body=definitions, type_ignores=[]), str(observer_path), "exec"), observer)
     roots: set[int] = set()
     descendants: set[int] = set()
     visible: set[int] = set()
@@ -578,7 +689,7 @@ def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
         monitor = executor.submit(observe)
         try:
             _exercise_psmux_cycles(
-                tmp_path, producer, psmux, folder, wrapper, child, expected, roots,
+                tmp_path, producer, psmux, folder, wrapper, child, expected, roots, observer,
             )
         finally:
             stop.set()
@@ -593,13 +704,15 @@ def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
     assert not leaked, f"owned descendants leaked: {leaked}"
 
 
-def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, expected, roots):
+def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, expected, roots, observer):
+    from agent_worktrees import locks
+
     for cycle in range(2):
         name = "aw-file-test-" + uuid.uuid4().hex
         output = tmp_path / f"capture-{cycle}.json"
         child_argv = [PWSH, "-NoProfile", "-File", str(child), str(output), *expected]
         if producer == "powershell":
-            command = _powershell_producer(tmp_path, wrapper, child_argv)
+            command = _powershell_producer(tmp_path, wrapper, child_argv, timeout=45)
         else:
             from agent_worktrees import sessions
 
@@ -622,6 +735,7 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
         assert command[command.index("-File") + 1] == (
             "'" + str(folder / LAUNCHER.name).replace("'", "''") + "'"
         )
+        pane_owner = None
         try:
             process = subprocess.Popen(
                 [psmux, "new-session", "-d", "-s", name, "-c", str(tmp_path),
@@ -637,18 +751,43 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
                 process.kill()
                 process.communicate(timeout=5)
                 raise
-            assert process.returncode == 0, stderr
-            deadline = time.monotonic() + 8
-            while not output.exists() and time.monotonic() < deadline:
+            assert process.returncode == 0, (
+                f"{stderr}; receipt={receipt.read_text('utf-8') if receipt.exists() else 'absent'}"
+            )
+            pane = subprocess.run(
+                [psmux, "display-message", "-p", "-t", name, "#{pane_pid}"],
+                capture_output=True, text=True, timeout=5,
+                env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert pane.returncode == 0 and pane.stdout.strip().isdigit(), pane.stderr
+            pane_pid = int(pane.stdout.strip())
+            pane_birth = locks.process_start_time(pane_pid)
+            assert pane_birth is not None, "could not identify the owned pane process"
+            pane_owner = pane_pid, pane_birth
+            roots.add(pane_pid)
+            deadline = time.monotonic() + 45
+            while (
+                not output.exists()
+                and locks.process_start_time(pane_pid) == pane_birth
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.05)
             if not output.exists():
+                snapshot = observer["_process_snapshot"]()
+                owned = (
+                    observer["_descendants"](pane_pid, snapshot)
+                    if locks.process_start_time(pane_pid) == pane_birth else set()
+                )
                 diagnostic = subprocess.run(
                     [psmux, "capture-pane", "-p", "-t", name],
                     capture_output=True, text=True, encoding="utf-8", timeout=5,
                     env=_test_env(tmp_path), creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 pytest.fail(
-                    f"manifest_pending={manifest.exists()}; {diagnostic.stdout}; "
+                    f"manifest_pending={manifest.exists()}; "
+                    f"receipt={receipt.read_text('utf-8') if receipt.exists() else 'absent'}; "
+                    f"owned_processes={ {pid: snapshot[pid] for pid in owned if pid in snapshot} }; "
+                    f"{diagnostic.stdout}; "
                     f"{diagnostic.stderr}; {stderr}"
                 )
             assert json.loads(output.read_text("utf-8")) == expected
@@ -663,6 +802,17 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
                 capture_output=True, text=True, timeout=10, env=_test_env(tmp_path),
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
+            assert stopped.returncode == 0, stopped.stderr
+            if pane_owner is not None:
+                pane_pid, pane_birth = pane_owner
+                deadline = time.monotonic() + 3
+                while (
+                    locks.process_start_time(pane_pid) == pane_birth
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+                assert locks.process_start_time(pane_pid) != pane_birth, (
+                    "owned pane process survived kill-session"
+                )
             manifest.unlink(missing_ok=True)
             receipt.unlink(missing_ok=True)
-            assert stopped.returncode == 0, stopped.stderr

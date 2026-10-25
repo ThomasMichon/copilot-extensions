@@ -773,9 +773,8 @@ _ensure_uv_index() {
 # Deploy the self-provisioning `agent-logger` binstub (install-on-first-use). Fast
 # path execs the venv's `agent-logger` console script; otherwise it provisions on
 # first use -- announcing (a human line + a machine-readable ::agent-provisioning::
-# signal so a caller can extend its timeout), lock-serialized, fail-fast. The 5
-# auxiliary console-script binstubs (session-sync, collate-session, ...) are plain
-# symlinks created only by a full provision.
+# signal so a caller can extend its timeout). Cold commands delegate to the
+# selected snapshot's queued dispatcher, as do the five auxiliary wrappers.
 deploy_binstub() {
     local temporary
     mkdir -p "${LOCAL_BIN}" || return 1
@@ -817,46 +816,21 @@ if [ -n "${AGENT_LOGGER_NO_SELFPROVISION:-}" ]; then
     printf '%s\n' "[$_name] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set)." >&2
     exit 1
 fi
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
+_payload="$(cat "$_root/payload-dir" 2>/dev/null)"
+_shim="$_payload/bin/agent-logger"
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
+    printf '%s\n' "[$_name] cannot self-provision: selected snapshot command not found. Re-enable/update the plugin, then retry." >&2
     exit 127
 fi
-_payload="${_install%/scripts/install.sh}"
-_probe="$_payload/scripts/installation-context/plugin-publication-probe.sh"
-if [ ! -f "$_probe" ]; then
-    printf '%s\n' "[$_name] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry." >&2
+if [ ! -f "$_gate" ] ||
+   ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
+    printf '%s\n' "[$_name] selected snapshot lacks the queued command contract. Re-enable/update the plugin, then retry." >&2
     exit 126
 fi
-bash "$_probe" "$_payload" "$_name" "$_root" || exit $?
-_resolve normal
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_logger "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
+COPILOT_PLUGIN_ROOT="$_payload"
+export COPILOT_PLUGIN_ROOT
+exec "$_shim" "$@"
 STUBEOF
     then
         rm -f "$temporary"
@@ -990,7 +964,7 @@ deploy_auxiliary_compatibility_binstubs() {
             _fail "Logger auxiliary binstub staging is not a regular file: $temporary"; return 1;
         }
         if ! cat > "$temporary" << 'STUBEOF'
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Legacy/global compatibility wrapper. The owning payload shim selects and
 # self-provisions its own runtime; this file never resolves a same-named command
 # through PATH.
@@ -1003,6 +977,24 @@ if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
     printf '[%s] owning payload shim not found: %s\n' "$_command" "$_shim" >&2
     printf '[%s] re-enable/update agent-logger, then retry.\n' "$_command" >&2
     exit 127
+fi
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ ! -f "$_gate" ] ||
+   ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
+    if [ ! -f "$_gate" ] ||
+       ! grep -Fq 'AGENT_LOGGER_NO_SELFPROVISION' "$_gate"; then
+        printf '[%s] selected snapshot lacks non-provisioning dispatch support; re-enable/update agent-logger.\n' "$_command" >&2
+        exit 126
+    fi
+    _resolver="$_payload/scripts/resolve-runtime.sh"
+    if [ ! -f "$_resolver" ] ||
+       ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
+        printf '[%s] read-only runtime resolver is unavailable; re-enable/update agent-logger.\n' "$_command" >&2
+        exit 126
+    fi
+    # The old gate owns effective-context resolution, but never construction.
+    AGENT_LOGGER_NO_SELFPROVISION=1
+    export AGENT_LOGGER_NO_SELFPROVISION
 fi
 COPILOT_PLUGIN_ROOT="$_payload"
 export COPILOT_PLUGIN_ROOT

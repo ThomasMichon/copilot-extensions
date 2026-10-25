@@ -30,13 +30,15 @@ source change alone.
 | Installation-survival driver | Canonical plan, bounded implementation, serial PRs, validation and release acceptance | #8669 and this effort |
 | Existing lean-lifecycle owner | Retains wait-only forwarding and launcher-depth reduction | #5579 and `efforts/active/lean-session-lifecycle/README.md` |
 | Existing prerequisite owners | Retain already claimed installer/updater repairs | #8410 and #8312 |
+| Linux baseline worker | Evidence-only disposable installation/uninstall baseline at the reviewed source pin | Reports to Installation-survival driver; no source or host changes |
 
 ## Coordination
 
 - **Topology:** serial per-slice PRs; each slice leaves the default branch usable.
 - **Host (owns PRs):** Installation-survival driver.
-- **Delegates:** none assigned. Any later assignment records exclusive source
-  scope and acceptance before edits.
+- **Delegates:** Linux baseline worker owns one disposable Linux baseline and
+  its evidence/cleanup only; no source edits, git mutations or host operations.
+  The driver retains production wrappers, hooks and Windows validation.
 - **Boundary:** #5579's existing owner retains removal of wait-only forwarding
   layers. Agree the shared launch contract and overlapping edit ownership
   before changing those paths; no competing implementation or silent transfer.
@@ -107,7 +109,8 @@ verbatim operator requirements.
 - [x] Land this proposal and standing-intent amendment through normal review
   before production implementation.
 - [ ] Inventory current mux/no-mux, direct/new-window, resume and remote
-  launch consumers; record the smallest compatible boundary and migration.
+  launch consumers; record the smallest compatible boundary and migration in
+  [launch-contract.md](launch-contract.md).
 
 ### Phase 2 - Literal disposable-installation reproduction
 
@@ -116,7 +119,7 @@ verbatim operator requirements.
   same real-removal baseline.
 - [ ] Reproduce current behavior with real installed A, an interactive owned
   session, actual uninstallation of both systems, installed B and final exit.
-- [ ] Resolve or coordinate #8410 only as the required Linux uninstall
+- [x] Resolve or coordinate #8410 only as the required Linux uninstall
   prerequisite; do not substitute deleting a prototype fixture for uninstall.
 - [ ] Record baseline process identities, terminal interactivity, installed
   file removal and locks, and current failure without altering host installs.
@@ -270,3 +273,139 @@ Keeping a version directory alive is not an acceptable substitute.
   resolving only the effort documentation overlap. The Bash repair is unchanged.
   Supported Manager uninstall, actual interactive survival and the parent
   effort's remaining gates are not completed by this prerequisite.
+
+### 2026-10-24 - Reviewed intent and initial consumer trace
+
+- #8675 merged as `32b43c74e7e0f35a947eb605f8ef5ea83ad5b718` after an
+  exact-head Copilot approval with no findings and required green CI. Managed
+  completion used the repository-authorized exception for an additional
+  CODEOWNER vote; it did not waive review findings or required CI.
+- Reconciled the terminal PR through `pr-status` and pulled the source
+  worktree forward with the normal guarded sync. No manual rebase bypass.
+- Re-read the canonical plan after merge. Implementation and native acceptance
+  remain open; a merged proposal is not completion.
+- Began the production consumer trace in [launch-contract.md](launch-contract.md).
+  Found version-pinned Manager end callbacks, installed wrapper paths and a
+  distinct agent-worktrees handoff/new-window consumer; copying one script
+  alone would not migrate the contract.
+- Announced the bounded integration boundary on #5579. A separate cleanup
+  rollout owner confirmed no wrapper/lifecycle edits and no custody conflict;
+  that does not transfer #5579's broader forwarding-removal programme.
+- Assigned one evidence-only Linux worker to the pinned real-installation
+  baseline. No host uninstall/update, repository edits or credentials are
+  delegated; a concrete setup/uninstall failure is a result, not a success.
+
+### 2026-10-24 - Literal baseline and native prerequisites
+
+- Pinned Linux baseline at the reviewed source completed real installations
+  of both products. The actual Worktrees uninstall failed with exit 1 on its
+  top-level `local stub_path`, reproducing #8410. Both owned containers were
+  removed; no host installation or shared Docker service was changed.
+- That baseline did not launch tmux or Copilot and did not reach Manager
+  uninstall, reinstall, state-preservation or handler-adoption acceptance.
+  It is a prerequisite failure, not a survival pass.
+- The selected native Windows wrapper/argv baseline initially exposed a
+  parser-test timeout. Strict error handling found that the fixture included
+  unrelated undefined hosting-admission calls and silently masked a missing
+  Newtonsoft type on PowerShell 5.1. A local prerequisite repair uses the
+  built-in string-preserving JSON reader and strict parser-only fixtures.
+- The repaired selected native matrix passed 57 tests with two opt-in skips;
+  both PowerShell 5.1 and 7 exercised literal strings and malformed-command
+  refusal. This is local working-source evidence, not a reviewed/released fix.
+- Enabling the skipped real PSMux consumers exposed fixture dependency
+  coupling and then an unresolved delivery failure: a pane handoff may be
+  consumed while the controlled child's output never appears within the
+  existing budget, or the session exits immediately. A direct native child
+  control remains live after its creating client exits.
+- A temporary copied-wrapper trace reached wrapper entry with the correct
+  native command and arguments. Disabling the pane Job in an isolated
+  diagnostic did not resolve the failure; containment remains required and
+  enabled. Waiting for exact pane teardown and making the fixture child
+  noninteractive did not establish a passing delivery result either.
+- Temporary wrapper tracing and the diagnostic Job override were removed.
+  The native delivery failure must be diagnosed before calling this baseline
+  green. No deadline was raised and no application session was stopped.
+- The Linux worker returned a minimal uninstall fix and a proposed real-branch
+  regression/rerun plan. Neither has been applied or qualified yet. The
+  production copied-wrapper/current-handler migration remains outstanding.
+
+### 2026-10-24 - Longer-running native diagnostic
+
+- Operator direction:
+
+  > Perhaps just run the tests unbounded and see what happens right now
+
+- Temporarily removed the native fixture's short subprocess, output and
+  teardown waits, while retaining real PSMux, both production producers,
+  exact process identities, observation and kernel containment.
+- The first diagnostic still hit the runner's separate 30-second item
+  watchdog. Its stack was waiting for the PowerShell producer's stdout to
+  close, before that cycle's PSMux launch.
+- The contained runner requires positive budgets. With diagnostic-only
+  `--test-timeout 1200 --timeout 1500 --plugin-timeout 1800`, all three native
+  cases passed: both producers completed two cycles and the direct control
+  passed. Pytest reported three passes, no skips and 53 deselections in
+  80.63 seconds; the complete command took 97.83 seconds.
+- This establishes eventual delivery for that diagnostic, not a pass under
+  the ordinary budgets or proof that every earlier failure has one cause.
+  Separate setup, delivery and teardown timings before changing a permanent
+  test budget. Interactive Copilot and actual installation survival remain
+  open.
+- Restored the temporary test edits exactly to the published candidate.
+  No production deadline, process-containment policy or acceptance gate changed.
+
+### 2026-10-24 - Scoped native budgets and uninstall-contract preflight
+
+- Phase timing did not justify calling every failure a timeout: PSMux 3.3.5
+  also returned an immediate error followed by an absent server. An isolated,
+  digest-verified 3.3.6 comparison completed both cycles without changing the
+  host installation.
+- Observed native readiness reached 23.344 seconds. A later run separately
+  measured file creation at 13.810 seconds and its pane query at 0.172 seconds,
+  confirming that the former eight-second fixture limit was too short.
+  Pane teardown remained below 1.2 seconds and descendant cleanup below
+  0.05 seconds.
+- Replaced temporary unbounded instrumentation with scoped, finite integration
+  limits: 180 seconds per opt-in two-cycle case and 45 seconds for its
+  PowerShell preparation/readiness. Ordinary unit defaults and existing
+  client, query, teardown and containment limits remain unchanged.
+  The normal runner passed all eight selected controls in 86.70 seconds;
+  both workflow contract tests also passed.
+- The manual Windows lane now pins test-tool PSMux 3.3.6. This is neither an
+  operator-host upgrade nor a new production compatibility-floor policy.
+- A fresh Linux preflight at published source
+  `0e5d68c82bb8a7f810f5b60342c0e86a7a8995a5` borrowed credentials through
+  the normal provider, installed both real products and the missing tmux
+  prerequisite, and registered a synthetic local project through the actual
+  CLI. It did not establish interactive Copilot entitlement or launch a session.
+- The baseline stopped because no supported Manager uninstall entrypoint was
+  established from its installed help and pinned product entrypoints. No
+  manual file deletion was substituted for uninstall. The exact owned
+  container was removed and the shared Docker service left running.
+  Resolve that product contract before claiming a real two-product survival
+  baseline; the copied-wrapper/current-handler implementation is still open.
+
+### 2026-10-25 - Prerequisites merged and implementation resumed
+
+- #8763 merged as `cf5bfdea83164a21e717591f6e2055bbce8ebbb6` after
+  exact-head approval, green required CI and final changed-dependency
+  qualification at `f00b06be11bb1e3f639be5db35cbc3573337e235`.
+  The real Linux regression passed without skips; both actual installs
+  passed, Worktrees uninstall returned zero and labelled durable-state hashes
+  were unchanged. Both owned disposable containers were removed.
+- This closes the bounded #8410 prerequisite, not complete Worktrees-root
+  erasure or same-process installation survival. Shared selectors, resolvers
+  and cross-platform shims remain inventoried rather than claimed removed.
+- #8871 merged the supported Manager uninstall contract. Implementation now
+  targets the existing installer with read-only preview, attributable artifact
+  removal, existing publication/retention custody and an external interpreter
+  boundary. Older layouts without sufficient ownership evidence must refuse;
+  the installer must not rebuild a target merely to remove it.
+- The scoped native argument-delivery candidate passed its local eight-case
+  packet and the fresh Windows lane at `5470775c0ec8f940d50e3b6e82b08252790eb424`.
+  Those results supersede the earlier unresolved diagnostic for that narrow
+  candidate, not interactive Copilot or installation-removal acceptance.
+- Next: qualify and land the native argument-delivery prerequisite, implement
+  and qualify supported Manager removal, then resume the same real interactive
+  two-product baseline and production copied-wrapper/current-handler work.
+  The parent effort, release and approved installed validation remain open.

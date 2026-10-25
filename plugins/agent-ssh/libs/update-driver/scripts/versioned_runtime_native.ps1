@@ -2,7 +2,8 @@ function Invoke-Hidden {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [string[]]$ArgList = @(),
-        [ref]$ErrorOutput
+        [ref]$ErrorOutput,
+        [string]$InputText
     )
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $FilePath
@@ -22,10 +23,18 @@ function Invoke-Hidden {
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
+    $psi.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
     $proc = [System.Diagnostics.Process]::Start($psi)
     try {
         $stdout = $proc.StandardOutput.ReadToEndAsync()
         $stderr = $proc.StandardError.ReadToEndAsync()
+        if ($psi.RedirectStandardInput) {
+            $encoding = New-Object System.Text.UTF8Encoding($false)
+            $bytes = $encoding.GetBytes($InputText)
+            $proc.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $proc.StandardInput.BaseStream.Flush()
+            $proc.StandardInput.Close()
+        }
         $proc.WaitForExit()
         [Threading.Tasks.Task]::WaitAll($stdout, $stderr)
         $global:LASTEXITCODE = $proc.ExitCode

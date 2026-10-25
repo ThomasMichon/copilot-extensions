@@ -889,27 +889,33 @@ if ($plan.PSObject.Properties.Name -contains 'launch') {
 }
 
 # Date-shaped argv values must stay strings on older PowerShell versions too.
-$argvText = [IO.StringReader]::new(($jsonOutput -join "`n"))
-$argvReader = [Newtonsoft.Json.JsonTextReader]::new($argvText)
-$argvReader.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
+if (-not ('System.Runtime.Serialization.Json.JsonReaderWriterFactory' -as [type])) {
+    Add-Type -AssemblyName System.Runtime.Serialization
+}
+$argvBytes = [Text.Encoding]::UTF8.GetBytes(($jsonOutput -join "`n"))
+$argvReader = [System.Runtime.Serialization.Json.JsonReaderWriterFactory]::CreateJsonReader(
+    $argvBytes, [System.Xml.XmlDictionaryReaderQuotas]::Max
+)
 try {
-    $rawPlan = [Newtonsoft.Json.Linq.JObject]::Load($argvReader)
-    if ($rawPlan.Property('launch')) { $rawPlan = $rawPlan.GetValue('launch') }
-    $rawCommand = $rawPlan.GetValue('cmd')
+    $rawDocument = [System.Xml.XmlDocument]::new()
+    $rawDocument.Load($argvReader)
+    $rawPlan = $rawDocument.DocumentElement
+    $rawLaunch = $rawPlan.SelectSingleNode('launch[last()]')
+    if ($null -ne $rawLaunch) { $rawPlan = $rawLaunch }
+    $rawCommand = $rawPlan.SelectSingleNode('cmd[last()]')
     if ($null -ne $rawCommand) {
-        if ($rawCommand.Type -ne [Newtonsoft.Json.Linq.JTokenType]::Array) {
+        if ($rawCommand.GetAttribute('type') -ne 'array') {
             throw 'Launch command must be a string argv array.'
         }
-        $plan.cmd = @($rawCommand.Children() | ForEach-Object {
-            if ($_.Type -ne [Newtonsoft.Json.Linq.JTokenType]::String) {
+        $plan.cmd = @($rawCommand.ChildNodes | ForEach-Object {
+            if ($_.GetAttribute('type') -ne 'string') {
                 throw 'Launch command contains a non-string argument.'
             }
-            [string]$_.Value
+            [string]$_.InnerText
         })
     }
 } finally {
     $argvReader.Close()
-    $argvText.Dispose()
 }
 
 if ($plan.action -eq 'exec') {

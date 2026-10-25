@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -64,6 +65,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tomllib
 import venv
 from datetime import datetime, timedelta, timezone
@@ -78,7 +80,31 @@ if args == ['--version']:
 if args[:1] == ['venv']:
     target = Path(args[1])
     assert target.resolve().is_relative_to(root.resolve())
-    venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
+    managed = os.environ.get('UV_PYTHON_INSTALL_DIR')
+    if sys.platform == 'linux' and managed:
+        base = Path(managed)
+        assert base.resolve().is_relative_to(root.resolve())
+        executable = base / 'bin' / 'python'
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sys._base_executable, executable)
+        for name in ('python3', 'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)):
+            alias = executable.with_name(name)
+            if not alias.exists():
+                alias.symlink_to(executable.name)
+        library = base / 'lib'
+        stdlib = Path(sysconfig.get_path('stdlib'))
+        shutil.copytree(
+            stdlib, library / stdlib.name, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns('site-packages', 'dist-packages', '__pycache__'),
+        )
+        for shared in Path(sysconfig.get_config_var('LIBDIR')).glob('libpython*.so*'):
+            shutil.copy2(shared, library / shared.name)
+        subprocess.run(
+            [str(executable), '-I', '-m', 'venv', '--without-pip', '--symlinks', str(target)],
+            check=True, timeout=60,
+        )
+    else:
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
     raise SystemExit(0)
 assert args[:2] == ['pip', 'install'], args
 if '--show-settings' in args:
@@ -88,7 +114,7 @@ if '--show-settings' in args:
     exclude_newer: ExcludeNewer {{ global: None, package: ExcludeNewerPackage({{}}), }},
 }}, }}''')
     raise SystemExit(0)
-assert '--reinstall' in args and '--quiet' in args
+assert '--reinstall' in args
 assert '--no-deps' not in args and '--no-build-isolation' not in args
 cutoff = datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00'))
 assert cutoff <= datetime.now(timezone.utc) - timedelta(days=7)
@@ -125,6 +151,7 @@ def install_local(project, installed):
     info = site / (name.replace('-', '_') + '-' + version + '.dist-info')
     info.mkdir(exist_ok=True)
     (info / 'METADATA').write_text('Metadata-Version: 2.1\\nName: ' + name + '\\nVersion: ' + version + '\\n')
+    (info / 'direct_url.json').write_text(json.dumps({{'url': project.as_uri(), 'dir_info': {{'editable': False}}}}))
     shutil.copytree(source, site, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
     if name == 'agent-logger' and os.name != 'nt':
         launcher = python.parent / 'agent-logger'
@@ -132,13 +159,22 @@ def install_local(project, installed):
         launcher.chmod(0o755)
 
 if 'setuptools>=83.0.0' in args:
+    assert '--quiet' in args
     shutil.copytree(fixture / 'setuptools', site, dirs_exist_ok=True)
 elif 'pyyaml>=6.0' in args:
+    assert '--quiet' in args
     shutil.copytree(fixture / 'PyYAML', site, dirs_exist_ok=True)
 else:
     sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
-    assert len(sources) == 1, args
-    install_local(sources[0], set())
+    names = {{tomllib.loads((p / 'pyproject.toml').read_text())['project']['name'] for p in sources}}
+    if names == {{'agent-procutil', 'agent-single-instance-lease', 'agent-update-driver'}}:
+        assert len(sources) == 3 and '--no-editable' in args and '--link-mode' in args
+        assert args[args.index('--link-mode') + 1] == 'copy'
+    else:
+        assert len(sources) == 1 and '--quiet' in args, args
+    installed = set()
+    for project in sources:
+        install_local(project, installed)
 with (fixture / 'installs.jsonl').open('a') as log:
     log.write(json.dumps(args) + '\\n')
 """,
@@ -192,6 +228,7 @@ class Launcher {
         shutil.copyfile(driver, command)
         command.chmod(0o755)
     env["PATH"] = f"{fixture}{os.pathsep}{env['PATH']}"
+    env["UV_PYTHON_INSTALL_DIR"] = str(fixture / "python")
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell")
         selected = subprocess.run(
@@ -207,6 +244,33 @@ class Launcher {
     assert probe.stdout.startswith("PipInstallSettings {")
     assert not calls.exists()
     return calls
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux private acquisition layout")
+@pytest.mark.parametrize("foundation", [False, True])
+def test_offline_uv_provides_private_interpreter_layout(tmp_path: Path, foundation: bool) -> None:
+    env = _isolated_install_env(tmp_path / "home")
+    env["UV_PYTHON_INSTALL_DIR"] = str(tmp_path.parent / "must-not-use-inherited-base")
+    _offline_uv(tmp_path, env)
+    assert Path(env["UV_PYTHON_INSTALL_DIR"]).is_relative_to(tmp_path)
+    if foundation:
+        env["UV_PYTHON_INSTALL_DIR"] = str(tmp_path / "bootstrap" / "python")
+    managed = Path(env["UV_PYTHON_INSTALL_DIR"])
+    command = shutil.which("uv", path=env["PATH"])
+    assert command is not None
+    target = tmp_path / "venv"
+    subprocess.run(
+        [command, "venv", str(target), "--python", "3.11"],
+        env=env, capture_output=True, text=True, check=True, timeout=60,
+    )
+    assert (target / "bin" / "python").resolve().is_relative_to(managed)
+    for executable in (target / "bin" / "python", managed / "bin" / "python3"):
+        result = subprocess.run(
+            [str(executable), "-I", "-c",
+             "import json,sys; print(json.dumps(sys.base_prefix))"],
+            env=env, capture_output=True, text=True, check=True, timeout=20,
+        )
+        assert Path(json.loads(result.stdout)) == managed
 
 
 def _assert_complete_runtime(home: Path) -> None:
@@ -704,6 +768,8 @@ def test_provision_publishes_durable_compatibility_wrappers(
     assert wrapper.is_file()
     assert calls.is_file()
     _assert_complete_runtime(home)
+    manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,
@@ -798,10 +864,17 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         timeout=420,
         check=False,
     )
-    assert provision.returncode == 0, provision.stdout + provision.stderr
+    driver = home / ".copilot-extensions" / "update-driver"
+    diagnostics = "\n".join(
+        f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
+        for path in driver.rglob("*.log") if path.is_file()
+    )
+    assert provision.returncode == 0, provision.stdout + provision.stderr + diagnostics
     assert f"agent-logger {version}" in provision.stdout
     assert calls.is_file()
     _assert_complete_runtime(home)
+    manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,
@@ -871,6 +944,88 @@ def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None
     )
     assert repeat.returncode == 0, repeat.stderr
     assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("case", ["healthy-cell-global-cold", "cold-custom-global-healthy"])
+def test_auxiliary_pre_contract_dispatch_uses_effective_runtime(tmp_path: Path, case: str) -> None:
+    helpers = runpy.run_path(str(_PLUGIN_ROOT / "tests/test_runtime_gate.py"))
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    suffix = "ps1" if os.name == "nt" else "sh"
+    if os.name == "nt":
+        shell = shutil.which("powershell.exe")
+        assert shell is not None
+        prefix = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        stamp = prefix + [str(payload / "scripts/install.ps1"), "stamp"]
+    else:
+        prefix = ["bash"]
+        stamp = prefix + [str(payload / "scripts/install.sh"), "stamp"]
+    kwargs = dict(
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    result = subprocess.run(stamp, **kwargs)
+    assert result.returncode == 0, result.stdout + result.stderr
+    installation = home / ".agent-logger"
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    # Exact dispatcher blobs from 62fa19a4b5, including the old foreground installer.
+    old_gate = (_PLUGIN_ROOT / "tests/fixtures" /
+                f"pre-command-driver-runtime-gate.{suffix}.txt").read_text(encoding="utf-8").encode("utf-8")
+    assert hashlib.sha256(old_gate).hexdigest() == {
+        "ps1": "b8dc70821b7982e6a20df9df483429cddfa4b1a01c189a2e2e4ca40423208fa8",
+        "sh": "2ea2af737ce935b18f8e7ae70a7c7ec1910b4f75cab19564fcddc2884a5167bd",
+    }[suffix]
+    (snapshot / "scripts" / f"runtime-gate.{suffix}").write_bytes(old_gate)
+    resolver = snapshot / "scripts" / f"resolve-runtime.{suffix}"
+    resolver_bytes = resolver.read_bytes()
+    helpers["_write_gate_stubs"](snapshot)
+    resolver.write_bytes(resolver_bytes)
+    capture = tmp_path / "capture.json"
+    env["TEST_CAPTURE"] = str(capture)
+    if case == "healthy-cell-global-cold":
+        effective = home / "marketplaces/example/plugins/agent-logger"
+        context = effective / "install.json"
+        effective.mkdir(parents=True)
+        context.write_text("{}\n", encoding="utf-8")
+        helpers["_fake_runtime"](effective)
+        env.update({
+            "TEST_CELL_ROOT": str(effective),
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_INSTALLATION_STATUS": json.dumps({
+                "status": "ready", "reason": "namespaced-active",
+                "actualMode": "namespaced", "desiredMode": "namespaced",
+                "installGeneration": 1, "context": str(context),
+                "marketplaceId": "example--1234",
+                "policy": {"state": "valid", "enabled": True},
+            }),
+        })
+    else:
+        helpers["_fake_runtime"](installation)
+        effective = home / "custom-logger"
+        env["AGENT_LOGGER_HOME"] = str(effective)
+    ready_root = effective if case == "healthy-cell-global-cold" else installation
+    completion = ready_root / "versions/9.9.9/.install-complete.json"
+    completion.write_bytes(completion.read_text(encoding="utf-8").strip().encode("utf-8"))
+    for name in _COMMANDS[1:]:
+        command = home / ".local/bin" / (f"{name}.ps1" if os.name == "nt" else name)
+        result = subprocess.run(prefix + [str(command), "--probe"], **kwargs)
+        if case == "healthy-cell-global-cold":
+            assert result.returncode == 0, result.stdout + result.stderr
+            observed = json.loads(capture.read_text(encoding="utf-8"))
+            assert observed["home"] == str(effective)
+            assert observed["context"] == str(context)
+            assert observed["installation_id"] == "example--1234/agent-logger"
+            assert observed["args"] == ["--probe"]
+            capture.unlink()
+            assert not (installation / "versions").exists()
+        else:
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "AGENT_LOGGER_NO_SELFPROVISION set" in result.stderr
+            assert not effective.exists() and not capture.exists()
+    assert not (home / ".copilot-extensions/update-driver").exists()
+    assert not list(home.rglob(".provision*"))
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,
