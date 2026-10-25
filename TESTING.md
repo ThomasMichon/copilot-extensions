@@ -542,6 +542,14 @@ runner/workflow budgets are unchanged; this is not a production database change.
 
 ## Optional PR service lifecycle
 
+The existing `pr_service=true` manual Linux/Windows lane also runs
+`services/pr/tests/test_image_inputs.py` through the standalone runner. It
+checks the repository-only offline-context consumer with real retained
+synthetic wheels, a fresh offline hash-enforced installation and tampered-wheel
+refusal. It neither contacts a feed nor invokes Docker. Profile/feed/base
+approval, real image construction and container lifecycle remain separate
+acceptance tiers; this lane does not substitute for them.
+
 The independent `dependency_compile=true` selector exercises the canonical
 retained lock-export API on Linux and Windows. `tools/test_installer_dependency_compile.py`
 uses a synthetic loopback package index: ordinary UV selects a recent transitive

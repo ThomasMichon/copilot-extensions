@@ -1,0 +1,9 @@
+{
+  "comment": "Document and exercise retained exact-wheel offline image contexts for the standalone PR service",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}
