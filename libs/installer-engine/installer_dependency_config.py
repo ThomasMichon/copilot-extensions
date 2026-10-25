@@ -605,10 +605,11 @@ def source_compile_arguments(
         packages = source_compile_packages(projects, toml=toml, identity=identity, error_type=error_type)
     return compile_arguments(
         arguments, argument_pairs=argument_pairs, error_type=error_type, source_packages=packages,
+        source_graph=operation == "source-compile",
     )
 
 
-def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=()):
+def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=(), source_graph=False):
     """Bounded requirements export, never an implicit incremental lock update."""
     values = {
         "--constraints", "-c", "--overrides", "--excludes", "--build-constraints", "-b",
@@ -628,6 +629,7 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
     }
     result = []
     omissions = []
+    output_format = "requirements.txt"
     for option, value in argument_pairs(arguments):
         if not option:
             if value == "-" or not value:
@@ -635,8 +637,10 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             result.append(value)
         elif option == "--no-emit-package":
             omissions.append(value)
-        elif option == "--format" and value != "requirements.txt":
-            raise error_type("lock export supports only hashed requirements.txt output")
+        elif option == "--format":
+            if value not in (("requirements.txt", "pylock.toml") if source_graph else ("requirements.txt",)):
+                raise error_type("lock export format is unsupported for this transaction")
+            output_format = value
         elif option in ("--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate") and value:
             raise error_type("lock export boolean options cannot carry values")
         elif option in ("--format", "--generate-hashes", "--upgrade", "-U", "--no-header", "--no-annotate"):
@@ -651,7 +655,7 @@ def compile_arguments(arguments, *, argument_pairs, error_type, source_packages=
             raise error_type("unsupported lock export option")
     if omissions and tuple(omissions) != source_packages:
         raise error_type("lock export omissions must match the retained source graph")
-    return [*result, "--format", "requirements.txt", "--generate-hashes", "--upgrade", "--no-header", "--no-annotate",
+    return [*result, "--format", output_format, "--generate-hashes", "--upgrade", "--no-header", "--no-annotate",
             *[argument for name in source_packages for argument in ("--no-emit-package", name)]]
 
 
@@ -659,6 +663,10 @@ def check_compile_projection(
     projection, arguments, *, argument_pairs, balanced, error_type, source_graph=False, native_target=False,
 ):
     """Output policy is effective configuration, not merely a CLI intention."""
+    if dict(argument_pairs(arguments)).get("--format") == "pylock.toml" and (
+        not source_graph or not re.search(r"(?m)^\s*format:\s*Some\(\s*PylockToml,\s*\),\s*$", projection)
+    ):
+        raise error_type("UV source wheel-lock format differs from the selected output")
     for field, expected in (
         ("generate_hashes", "true"), ("no_header", "true"), ("no_annotate", "true"),
         ("emit_index_url", "false"), ("emit_find_links", "false"), ("emit_index_annotation", "false"),

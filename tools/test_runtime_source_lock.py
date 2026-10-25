@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
@@ -57,20 +57,22 @@ def plan(adopter):
     )
 
 
-def candidate(adopter, source, target, tmp_path, **changes):
+def candidate(adopter, source, target, tmp_path, *, wheel_witness=False, **changes):
     arguments = dict(
         payload=source[0], expected_source=source[1], target=target, component="fixture",
         uv="uv", python=Path(sys.executable), max_lock_bytes=4096,
         deadline=time.monotonic() + 60, env=offline_environment(tmp_path),
     )
-    return locks.retain_source_lock(plan(adopter), **(arguments | changes))
+    retain = locks.retain_source_wheel_lock if wheel_witness else locks.retain_source_lock
+    return retain(plan(adopter), **(arguments | changes))
 
 
+@pytest.mark.parametrize("wheel_witness", [False, True])
 def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_closure(
-    adopter, source, target, tmp_path,
+    adopter, source, target, tmp_path, wheel_witness,
 ):
     # This source has no third-party requirements; an empty third-party lock is real.
-    with candidate(adopter, source, target, tmp_path) as selected:
+    with candidate(adopter, source, target, tmp_path, wheel_witness=wheel_witness) as selected:
         record = selected.record()
         assert record["source"] == source[1].document()
         assert record["trigger"] == "release-index-unavailable"
@@ -81,6 +83,11 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
         assert "artifact" not in record and "approved" not in record
         assert record["requirements_sha256"] == "sha256:" + hashlib.sha256(selected.requirements).hexdigest()
         assert selected.lock_id == "sha256:" + hashlib.sha256(selected.canonical).hexdigest()
+        if wheel_witness:
+            assert record["files"] == []
+            assert record["native_lock_sha256"] == "sha256:" + hashlib.sha256(selected.native_lock).hexdigest()
+        else:
+            assert selected.native_lock is None
         assert selected.payload != source[0]
         assert (selected.payload / "pyproject.toml").is_file()
         record["source"]["source_commit"] = "c" * 40
@@ -92,7 +99,10 @@ def test_native_source_lock_binds_real_owner_plan_selected_source_and_empty_clos
 
 
 @pytest.mark.parametrize("as_extra", [False, True])
-def test_native_source_lock_binds_nonempty_dated_feed_output(adopter, source, target, tmp_path, as_extra):
+@pytest.mark.parametrize("wheel_witness,multiple", [(False, False), (True, False), (True, True)])
+def test_native_source_lock_binds_nonempty_dated_feed_output(
+    adopter, source, target, tmp_path, as_extra, wheel_witness, multiple,
+):
     filename = "fixture_registry-1.0-py3-none-any.whl"
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w") as wheel:
@@ -102,6 +112,7 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(adopter, source, ta
         wheel.writestr(prefix + "RECORD", "")
     content = archive.getvalue()
     digest = hashlib.sha256(content).hexdigest()
+    filenames = [filename, "fixture_registry-1.0-py2.py3-none-any.whl"] if multiple else [filename]
 
     class Index(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -117,11 +128,12 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(adopter, source, ta
             if self.path.rstrip("/") == "/simple/fixture-registry":
                 body = json.dumps({
                     "meta": {"api-version": "1.2"}, "name": "fixture-registry",
-                    "files": [{"filename": filename, "url": "/files/" + filename,
-                               "hashes": {"sha256": digest}, "upload-time": "2000-01-01T00:00:00Z"}],
+                    "files": [{"filename": name, "url": "/files/" + name,
+                               "hashes": {"sha256": digest}, "upload-time": "2000-01-01T00:00:00Z"}
+                              for name in filenames],
                 }).encode()
                 kind = "application/vnd.pypi.simple.v1+json"
-            elif self.path == "/files/" + filename:
+            elif self.path in {"/files/" + name for name in filenames}:
                 body, kind = content, "application/octet-stream"
             else:
                 self.send_error(404)
@@ -153,9 +165,9 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(adopter, source, ta
     )
     environment["UV_CONFIG_FILE"] = str(configuration)
     try:
-        with candidate(
+        with (pytest.raises(ProfileError, match="one exact wheel") if multiple else nullcontext()), candidate(
             adopter, selected_source, target, tmp_path, env=environment,
-            extras=("feature",) if as_extra else (),
+            extras=("feature",) if as_extra else (), wheel_witness=wheel_witness,
         ) as selected:
             assert selected.record()["pins"] == [
                 {"name": "fixture-registry", "version": "1.0", "hashes": ["sha256:" + digest]},
@@ -163,6 +175,14 @@ def test_native_source_lock_binds_nonempty_dated_feed_output(adopter, source, ta
             assert b"fixture-registry==1.0" in selected.requirements
             assert selected.record()["source"] == selected_source[1].document()
             assert selected.record()["extras"] == (["feature"] if as_extra else [])
+            if wheel_witness:
+                assert selected.record()["files"] == [{
+                    "name": "fixture-registry", "version": "1.0", "filename": filename,
+                    "sha256": "sha256:" + digest,
+                }]
+                assert filename.encode() in selected.native_lock
+                assert b"127.0.0.1" not in selected.canonical
+                assert b"127.0.0.1" not in selected.requirements
     finally:
         server.shutdown()
         server.server_close()
@@ -313,6 +333,157 @@ def test_exact_candidate_pins_are_frozen_without_claiming_wheel_admission():
     assert locks._pins(content, default_environment(), time.monotonic() + 10) == [
         {"name": "fixture", "version": "1.0", "hashes": ["sha256:" + "a" * 64]},
     ]
+
+
+def _native_wheel_lock(**package_changes):
+    package = {
+        "name": "fixture", "version": "1.0",
+        "wheels": [{"url": "https://example.invalid/files/fixture-1.0-py3-none-any.whl",
+                    "hashes": {"sha256": "a" * 64}}],
+    } | package_changes
+    return package
+
+
+def _wheel_pins(packages, target):
+    # JSON shapes feed the real TOML parser without inventing a second lock format.
+    prefix = 'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=3"\n'
+    lines = [prefix]
+    for package in packages:
+        lines.append("[[packages]]")
+        for key, value in package.items():
+            if key == "wheels":
+                entries = [
+                    "{url=" + json.dumps(wheel["url"]) + ", hashes={sha256="
+                    + json.dumps(wheel["hashes"]["sha256"]) + "}}"
+                    for wheel in value
+                ]
+                lines.append("wheels=[" + ",".join(entries) + "]")
+            else:
+                lines.append(key + "=" + json.dumps(value))
+    content = "\n".join(lines).encode()
+    assert locks.dependencies._toml_parser().loads(content.decode())
+    return locks._wheel_pins(content, target, time.monotonic() + 10)
+
+
+def test_native_exact_witness_carries_actual_filename_without_admitting_url(target):
+    assert _wheel_pins([_native_wheel_lock()], target) == [{
+        "name": "fixture", "version": "1.0", "filename": "fixture-1.0-py3-none-any.whl",
+        "sha256": "sha256:" + "a" * 64,
+    }]
+
+
+def test_native_witness_canonicalizes_duplicate_tag_alternatives_before_parsing(target, monkeypatch):
+    import runtime_profile
+
+    filename = "fixture-1.0-" + "-".join(
+        ".".join([part] * 128) for part in ("py3", "none", "any")
+    ) + ".whl"
+    package = _native_wheel_lock()
+    package["wheels"][0]["url"] = "https://example.invalid/" + filename
+    actual = runtime_profile.parse_wheel_filename
+    parsed = []
+
+    def bounded_parse(name):
+        assert name == "fixture-1.0-py3-none-any.whl"
+        parsed.append(name)
+        return actual(name)
+
+    monkeypatch.setattr(runtime_profile, "parse_wheel_filename", bounded_parse)
+    assert _wheel_pins([package], target)[0]["filename"] == filename
+    assert parsed == ["fixture-1.0-py3-none-any.whl"]
+
+
+@pytest.mark.parametrize("kind", [
+    "ambiguous", "source-only", "foreign-name", "foreign-version", "foreign-tag",
+    "invalid-hash", "duplicate", "path", "encoded-path", "non-wheel", "marker", "unlocked",
+])
+def test_native_witness_refuses_ambiguity_or_unsupported_records(target, kind):
+    package = _native_wheel_lock()
+    packages = [package]
+    if kind == "ambiguous":
+        package["wheels"] *= 2
+    elif kind == "source-only":
+        package["wheels"] = []
+    elif kind in ("foreign-name", "foreign-version"):
+        package["name" if kind == "foreign-name" else "version"] = "foreign" if kind == "foreign-name" else "2"
+    elif kind == "foreign-tag":
+        package["wheels"][0]["url"] = "https://example.invalid/fixture-1.0-cp399-cp399-never.whl"
+    elif kind == "invalid-hash":
+        package["wheels"][0]["hashes"]["sha256"] = "x" * 64
+    elif kind == "duplicate":
+        packages *= 2
+    elif kind in ("path", "encoded-path", "non-wheel"):
+        suffix = {"path": "fixture\\1.0-py3-none-any.whl",
+                  "encoded-path": "fixture%2F1.0-py3-none-any.whl",
+                  "non-wheel": "fixture-1.0.tar.gz"}[kind]
+        package["wheels"][0]["url"] = "https://example.invalid/" + suffix
+    elif kind == "marker":
+        package["marker"] = "sys_platform == 'never'"
+    elif kind == "unlocked":
+        package.pop("version")
+    with pytest.raises(ProfileError):
+        _wheel_pins(packages, target)
+
+
+@pytest.mark.parametrize("content", [
+    b"", b"\xff", b"lock-version = true", b'lock-version = "1.0"\nlock-version = "1.0"',
+    b'lock-version = "1.0"\ncreated-by = "uv"\nrequires-python = ">=399"',
+])
+def test_native_witness_refuses_malformed_or_incompatible_documents(content, target):
+    with pytest.raises(ProfileError):
+        locks._wheel_pins(content, target, time.monotonic() + 10)
+
+
+def test_native_source_only_third_party_is_refused_without_backend_execution(
+    adopter, source, target, tmp_path,
+):
+    calls = []
+
+    class Index(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            calls.append(self.path)
+            if self.path.rstrip("/") != "/simple/fixture-registry":
+                self.send_error(500, "source archive must not be requested")
+                return
+            body = json.dumps({
+                "meta": {"api-version": "1.2"}, "name": "fixture-registry",
+                "files": [{"filename": "fixture_registry-1.0.tar.gz", "url": "/backend.tar.gz",
+                           "hashes": {"sha256": "a" * 64}, "upload-time": "2000-01-01T00:00:00Z"}],
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.pypi.simple.v1+json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    manifest = source[0] / "pyproject.toml"
+    manifest.write_text(manifest.read_text().replace("dependencies=[]", 'dependencies=["fixture-registry>=1"]'))
+    selected_source = _selected_identity(source[0])
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Index)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    environment = offline_environment(tmp_path)
+    environment.pop("UV_OFFLINE", None)
+    configuration = tmp_path / "uv.toml"
+    configuration.write_text(
+        f'[[index]]\nurl="http://127.0.0.1:{server.server_port}/simple"\ndefault=true\n',
+        encoding="utf-8",
+    )
+    environment["UV_CONFIG_FILE"] = str(configuration)
+    try:
+        with pytest.raises(ProfileError, match="resolution failed"):
+            with candidate(
+                adopter, selected_source, target, tmp_path, env=environment, wheel_witness=True,
+            ):
+                pytest.fail("source-only dependency reached source consumption")
+        assert calls and all(path.rstrip("/") == "/simple/fixture-registry" for path in calls)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 @pytest.mark.parametrize("failure", ["nonzero", "timeout", "cancel", "oversize", "source-change"])

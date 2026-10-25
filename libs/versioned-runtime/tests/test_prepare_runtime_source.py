@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 import pytest
 
@@ -91,6 +92,40 @@ def test_prepare_is_noneditable_relocatable_and_reuses_exact_bytes(
     assert (first.payload / "pyproject.toml").read_bytes() == (
         root / "plugins" / PLUGIN / "pyproject.toml"
     ).read_bytes()
+
+
+@pytest.mark.parametrize("deadline", [True, 0, float("nan"), float("inf")])
+def test_preparation_deadline_refuses_before_git_or_output(
+    repository, tmp_path, monkeypatch, deadline,
+):
+    monkeypatch.setattr(
+        source_runtime, "_git", lambda *args, **options: pytest.fail("invalid deadline ran Git"),
+    )
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime.prepare(*repository, PLUGIN, tmp_path / "prepared", deadline=deadline)
+    assert not (tmp_path / "prepared").exists()
+
+
+def test_preparation_git_child_preserves_original_deadline(repository, monkeypatch):
+    actual = source_runtime.subprocess.run
+    timeouts = []
+
+    def run(command, **options):
+        timeouts.append(options["timeout"])
+        return actual(command, **options)
+
+    monkeypatch.setattr(source_runtime.subprocess, "run", run)
+    assert source_runtime._git(repository[0], "rev-parse", "HEAD", deadline=time.monotonic() + 5) == repository[1]
+    assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
+
+
+def test_deadline_is_checked_between_archive_copy_chunks(monkeypatch):
+    clock = iter((1.0, 3.0))
+    monkeypatch.setattr(source_runtime.time, "monotonic", lambda: next(clock))
+    copied = io.BytesIO()
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime._copy(io.BytesIO(b"x" * ((1 << 20) + 1)), copied, deadline=2.0)
+    assert len(copied.getvalue()) == 1 << 20
 
 
 def test_same_package_version_new_commit_gets_another_generation(

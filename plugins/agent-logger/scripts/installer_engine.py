@@ -720,7 +720,11 @@ def _candidate(
     if dev_owner is not None and (extras or local_packages is not None or wheel_inputs is not None):
         raise ValueError("Dependency profiles require an immutable numbered runtime")
     packages = _package_roots(plugin)
-    local_packages = _selected_local_packages(plugin, packages, local_packages)
+    if wheel_inputs is not None and local_packages == ():
+        if extras:
+            raise ValueError("A third-party-only wheel closure cannot select local extras")
+    else:
+        local_packages = _selected_local_packages(plugin, packages, local_packages)
     if wheel_inputs is not None:
         if not isinstance(wheel_inputs, WheelInstallInputs):
             raise ValueError("Closed construction requires inspected wheel inputs")

@@ -115,6 +115,22 @@ class WheelSnapshot:
         """Asserted archive identities, not approval or semantic admission."""
         return MappingProxyType({name: record[2] for name, record in self._records.items()})
 
+    def subset(self, filenames: tuple[str, ...]) -> WheelSnapshot:
+        """Borrow an exact nonempty subset; the original owner keeps custody."""
+        self.verify()
+        if (
+            not isinstance(filenames, tuple) or not filenames
+            or any(not isinstance(name, str) for name in filenames)
+            or len(set(filenames)) != len(filenames) or not set(filenames) <= self.paths.keys()
+        ):
+            raise WheelError("wheel snapshot subset must select unique retained filenames")
+        return WheelSnapshot(
+            MappingProxyType({name: self.paths[name] for name in filenames}),
+            MappingProxyType({name: self.archives[name] for name in filenames}),
+            MappingProxyType({name: self._records[name] for name in filenames}),
+            self._deadline,
+        )
+
     def verify(self):
         """Recheck custody before a caller's construction/publication boundary."""
         for name, path in self.paths.items():
@@ -184,7 +200,7 @@ class WheelInstallInputs:
             seen, total = set(), 0
             for item in record["files"]:
                 _check_deadline(self.deadline)
-                if not isinstance(item, dict) or set(item) != {
+                if not isinstance(item, dict) or set(item) - {"requires_python"} != {
                     "filename", "sha256", "size", "feed", "uploaded", "source_origins", "yanked", "withdrawn",
                 }:
                     raise ValueError
@@ -199,6 +215,11 @@ class WheelInstallInputs:
                     or not isinstance(item["source_origins"], list) or not item["source_origins"]
                     or any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in item["source_origins"])
                     or item["yanked"] is not False or item["withdrawn"] is not False
+                    or ("requires_python" in item and (
+                        not isinstance(item["requires_python"], str) or not item["requires_python"]
+                        or item["requires_python"] != item["requires_python"].strip()
+                        or len(item["requires_python"]) > 4096
+                    ))
                 ):
                     raise ValueError
                 seen.add(name)

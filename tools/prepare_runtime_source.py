@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -14,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -52,7 +55,18 @@ class PreparedSource:
     reused: bool
 
 
-def _git(source: Path, *arguments: str) -> str:
+def _remaining(deadline: float | None, cap: float = 120) -> float:
+    if deadline is None:
+        return cap
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+        raise SourcePreparationError("Source preparation requires a finite deadline")
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SourcePreparationError("Source preparation deadline exceeded")
+    return min(cap, remaining)
+
+
+def _git(source: Path, *arguments: str, deadline: float | None = None) -> str:
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
@@ -61,17 +75,21 @@ def _git(source: Path, *arguments: str) -> str:
     environment["GIT_OPTIONAL_LOCKS"] = "0"
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     result = subprocess.run(
-        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false", "-C", str(source), *arguments],
+        ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
+         "-c", "core.autocrlf=false", "-C", str(source), *arguments],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=120, env=environment, check=False, creationflags=creationflags,
+        timeout=_remaining(deadline), env=environment, check=False, creationflags=creationflags,
     )
+    _remaining(deadline)
     if result.returncode:
         detail = result.stderr.strip() or f"exit {result.returncode}"
         raise SourcePreparationError(f"Source Git probe failed: {detail}")
     return result.stdout.strip()
 
 
-def _admit(source: Path, commit: str, branch: str) -> tuple[str, str]:
+def _admit(source: Path, commit: str, branch: str, *, deadline: float | None = None) -> tuple[str, str]:
+    _remaining(deadline)
+    git_command = _git if deadline is None else partial(_git, deadline=deadline)
     if branch not in ("dev", "main") or not _OBJECT_ID.fullmatch(commit):
         raise SourcePreparationError("Select a full commit from the fetched dev or main branch")
     git_dir = source / ".git"
@@ -79,25 +97,35 @@ def _admit(source: Path, commit: str, branch: str) -> tuple[str, str]:
         getattr(git_dir.lstat(), "st_file_attributes", 0) & 0x400
     ):
         raise SourcePreparationError("Runtime source must be a standalone checkout, not a worktree")
-    if Path(_git(source, "rev-parse", "--show-toplevel")).resolve() != source:
+    if Path(git_command(source, "rev-parse", "--show-toplevel")).resolve() != source:
         raise SourcePreparationError("Runtime source must name the exact checkout root")
-    head = _git(source, "rev-parse", "--verify", "HEAD")
-    resolved = _git(source, "rev-parse", "--verify", f"{commit}^{{commit}}")
+    head = git_command(source, "rev-parse", "--verify", "HEAD")
+    resolved = git_command(source, "rev-parse", "--verify", f"{commit}^{{commit}}")
     if resolved != commit:
         raise SourcePreparationError("Selected source does not resolve to the exact requested commit")
-    merged_tip = _git(source, "rev-parse", "--verify", f"refs/remotes/origin/{branch}^{{commit}}")
-    if _git(source, "merge-base", commit, merged_tip) != commit:
+    merged_tip = git_command(source, "rev-parse", "--verify", f"refs/remotes/origin/{branch}^{{commit}}")
+    if git_command(source, "merge-base", commit, merged_tip) != commit:
         raise SourcePreparationError("Selected commit is not merged into the fetched source branch")
-    if _git(source, "status", "--porcelain=v1", "--untracked-files=all", "--ignored"):
+    if git_command(source, "status", "--porcelain=v1", "--untracked-files=all", "--ignored"):
         raise SourcePreparationError("Runtime source contains modified, untracked or ignored files")
-    if _git(source, "rev-parse", "--verify", "HEAD") != head:
+    if git_command(source, "rev-parse", "--verify", "HEAD") != head:
         raise SourcePreparationError("Source checkout moved during admission")
-    return head, _git(source, "rev-parse", "--verify", f"{commit}^{{tree}}")
+    return head, git_command(source, "rev-parse", "--verify", f"{commit}^{{tree}}")
 
 
-def _extract_archive(archive: Path, destination: Path) -> None:
+def _copy(source, destination, *, deadline: float | None = None) -> None:
+    while True:
+        _remaining(deadline)
+        block = source.read(1 << 20)
+        if not block:
+            return
+        destination.write(block)
+
+
+def _extract_archive(archive: Path, destination: Path, *, deadline: float | None = None) -> None:
     with tarfile.open(archive, "r:") as source:
         for member in source:
+            _remaining(deadline)
             name = PurePosixPath(member.name)
             if (
                 name.is_absolute() or ".." in name.parts or not name.parts
@@ -113,17 +141,26 @@ def _extract_archive(archive: Path, destination: Path) -> None:
                 if content is None:
                     raise SourcePreparationError("Source archive file has no readable content")
                 with content, target.open("xb") as output:
-                    shutil.copyfileobj(content, output)
+                    _copy(content, output, deadline=deadline)
                 target.chmod(member.mode & 0o777)
             else:
                 raise SourcePreparationError("Source archive links and special files are unsupported")
 
 
-def _materialize(snapshot: Path, plugin: str, destination: Path) -> None:
+def _materialize(
+    snapshot: Path, plugin: str, destination: Path, *, deadline: float | None = None,
+) -> None:
+    _remaining(deadline)
     source = snapshot / plugin if plugin == "worktree-manager" else snapshot / "plugins" / plugin
     if not (source / "pyproject.toml").is_file():
         raise SourcePreparationError(f"No Python runtime consumer at {source.relative_to(snapshot)}")
-    shutil.copytree(source, destination)
+    def copy_file(source, destination):
+        with open(source, "rb") as incoming, open(destination, "wb") as output:
+            _copy(incoming, output, deadline=deadline)
+        shutil.copystat(source, destination)
+        return destination
+
+    shutil.copytree(source, destination, copy_function=copy_file if deadline is not None else shutil.copy2)
     for metadata in (SOURCE_FILE, "snapshot-provenance.json"):
         if (destination / metadata).exists() or (destination / metadata).is_symlink():
             raise SourcePreparationError("Source payload already contains reserved deployment metadata")
@@ -142,13 +179,17 @@ def _materialize(snapshot: Path, plugin: str, destination: Path) -> None:
         reuse_existing=True,
     ))
     refusals = [entry for entry in log if entry.startswith("SKIP ")]
+    _remaining(deadline)
     if refusals:
         raise SourcePreparationError("Source materialization refused:\n" + "\n".join(refusals))
 
 
 def prepare(
     source: Path, commit: str, plugin: str, output: Path, *, branch: str = "dev",
+    deadline: float | None = None,
 ) -> PreparedSource:
+    _remaining(deadline)
+    git_command = _git if deadline is None else partial(_git, deadline=deadline)
     source = source.resolve(strict=True)
     output = output.resolve()
     if not _PLUGIN.fullmatch(plugin):
@@ -158,19 +199,19 @@ def prepare(
         publication_root == source or source in publication_root.parents
     ):
         raise SourcePreparationError("Source preparation output must be outside the checkout")
-    head, tree = _admit(source, commit, branch)
+    head, tree = _admit(source, commit, branch, deadline=deadline)
     output.mkdir(parents=True, exist_ok=True)
     prefix = f".prepare-{plugin}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}-"
     with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
         work = Path(temporary)
         archive = work / "source.tar"
-        _git(source, "archive", "--format=tar", "--output", str(archive), commit)
+        git_command(source, "archive", "--format=tar", "--output", str(archive), commit)
         snapshot = work / "source"
         snapshot.mkdir()
-        _extract_archive(archive, snapshot)
+        _extract_archive(archive, snapshot, deadline=deadline)
         payload = work / plugin
-        _materialize(snapshot, plugin, payload)
-        if _git(source, "rev-parse", "--verify", "HEAD") != head or _git(
+        _materialize(snapshot, plugin, payload, deadline=deadline)
+        if git_command(source, "rev-parse", "--verify", "HEAD") != head or git_command(
             source, "status", "--porcelain=v1", "--untracked-files=all", "--ignored",
         ):
             raise SourcePreparationError("Source checkout changed while preparing the selected commit")
@@ -189,7 +230,9 @@ def prepare(
         read_source_identity(payload, version, plugin=plugin)
         destination = output / plugin / identity.runtime_version
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with construction_lease(destination.parent, identity.runtime_version):
+        with construction_lease(
+            destination.parent, identity.runtime_version, timeout=_remaining(deadline, 60),
+        ):
             if destination.exists() or destination.is_symlink():
                 if destination.is_symlink():
                     raise SourcePreparationError("Prepared runtime generation must not be linked")

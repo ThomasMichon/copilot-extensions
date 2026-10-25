@@ -417,7 +417,7 @@ def test_source_mutation_during_build_cannot_relabel_wheels(
         return result
 
     monkeypatch.setattr(completion, "build_wheel", mutate)
-    with pytest.raises(ProfileError, match="source changed"):
+    with pytest.raises(ProfileError, match="source (changed|differs)"):
         with completion.retain_source_profile(candidate, third_party={}, **arguments(toolchain)):
             pytest.fail("changed source reached a complete profile")
 

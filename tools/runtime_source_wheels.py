@@ -116,6 +116,9 @@ def retain_source_profile(
     candidate: SourceLockCandidate, *, third_party: dict[str, Path],
     uv: str, toolchain: ToolchainLock, limits: WheelLimits,
     max_wheels: int, max_total_bytes: int, max_snapshot_bytes: int, deadline: float,
+    build_profile: RuntimeProfile | None = None, offline: bool = False,
+    procutil=None, construction_fd: int | None = None,
+    retained_runtime: tuple[Path, str, Path] | None = None,
 ):
     """Build and freeze the exact complete source closure before construction.
 
@@ -130,8 +133,31 @@ def retain_source_profile(
         max_wheels, max_total_bytes, max_snapshot_bytes,
     )):
         raise ProfileError("source completion requires positive closure budgets")
-    toolchain_record = json.loads(json.dumps(toolchain.record, allow_nan=False))
     record = candidate.record()
+    build_record = None
+    if build_profile is not None:
+        if not isinstance(build_profile, RuntimeProfile) or not offline:
+            raise ProfileError("admitted build-only inputs require owned offline construction")
+        build_record = validate_profile(build_profile.record(), deadline=deadline).record()
+        if (
+            build_record["mode"] != "source"
+            or toolchain.packages != {
+                item["name"]: item["version"] for item in build_record["wheels"]
+            }
+            or build_record["target"] != record["target"]
+            or build_record["component"] != record["component"]
+            or build_record["roots"] != record.get("build_roots")
+            or build_record["release"] != {
+                "identity": "source:" + record["source"]["source_commit"],
+                "sha256": "sha256:" + record["source"]["assembly_hash"],
+            }
+        ):
+            raise ProfileError("build-only closure differs from the retained source selection")
+    toolchain_record = json.loads(json.dumps(
+        toolchain.record if build_record is None else {
+            "packages": toolchain.packages, "admitted_profile": build_record,
+        }, allow_nan=False,
+    ))
     if "sha256:" + hashlib.sha256(candidate.requirements).hexdigest() != record["requirements_sha256"]:
         raise ProfileError("source candidate requirements changed")
     projects = _package_roots(candidate.payload)
@@ -162,14 +188,26 @@ def retain_source_profile(
         archives[filename], expected[filename] = path, digest
     if third_names != pins.keys():
         raise ProfileError("third-party wheel set does not complete the source lock")
+    if build_record is not None and any(
+        item["name"] not in third_names
+        or item["filename"] not in archives
+        or expected[item["filename"]] != item["sha256"]
+        or Version(pins[item["name"]]["version"]) != Version(item["version"])
+        for item in build_record["wheels"]
+    ):
+        raise ProfileError("build-only closure differs from the retained source selection")
     with _temporary_inputs(None) as temporary:
         output = _private_retained_root(Path(temporary)).resolve(strict=True) / "built"
         local_projects = {}
         for project_path in selected_projects:
-            _check_deadline(deadline)
+            candidate.verify(deadline=deadline)
             wheel = build_wheel(
                 project_path, output, toolchain=toolchain, reserved_names=set(archives),
                 uv=uv, deadline=deadline,
+                **({
+                    "offline": True, "procutil": procutil,
+                    "construction_fd": construction_fd, "retained_runtime": retained_runtime,
+                } if offline else {}),
             )
             name, version, _, _ = _wheel_filename(wheel.name, limits.max_tags, deadline)
             declaration = _toml(project_path / "pyproject.toml")["project"]
@@ -184,7 +222,10 @@ def retain_source_profile(
             expected[wheel.name] = _digest(wheel, limits.max_archive_bytes, deadline)
         if before != runtime.fingerprint_source(_source_files(projects)):
             raise ProfileError("source changed while building the exact wheel closure")
-        if toolchain.record != toolchain_record:
+        observed_toolchain = toolchain.record if build_record is None else {
+            "packages": toolchain.packages, "admitted_profile": build_profile.record(),
+        }
+        if observed_toolchain != toolchain_record:
             raise ProfileError("build toolchain selection changed while building the source closure")
         with retain_wheel_inputs(
             archives, expected, max_wheels=max_wheels,
@@ -209,7 +250,10 @@ def retain_source_profile(
                 if name in wheels:
                     raise ProfileError("source closure has duplicate distribution identities")
                 if name in local_projects:
-                    if facts.wheel_metadata.get_all("Generator", []) != [toolchain.generator]:
+                    generators = facts.wheel_metadata.get_all("Generator", [])
+                    if len(generators) != 1 or (
+                        build_record is None and generators != [toolchain.generator]
+                    ):
                         raise ProfileError("built first-party wheel differs from its selected toolchain")
                     try:
                         validate_runtime_metadata(local_projects[name], facts.metadata)
@@ -224,8 +268,10 @@ def retain_source_profile(
             extras = "[" + ",".join(record["extras"]) + "]" if record["extras"] else ""
             roots = [f"{root}{extras}=={project['version']}"]
             wanted = _extras(wheels, roots, record["target"]["environment"], deadline)
-            if wanted.keys() != wheels.keys():
+            build_names = {item["name"] for item in build_record["wheels"]} if build_record else set()
+            if set(wheels) - wanted.keys() - build_names:
                 raise ProfileError("source closure includes unreachable wheels")
+            wheels = {name: wheels[name] for name in wanted}
             for name, selected in wanted.items():
                 wheels[name]["selected_extras"] = sorted(selected)
             profile = validate_profile({
@@ -240,8 +286,11 @@ def retain_source_profile(
                 "acquisition_policy": candidate.lock_id,
                 "wheels": [wheels[name] for name in sorted(wheels)],
             }, max_tags=limits.max_tags, deadline=deadline)
+            runtime_snapshot = snapshot.subset(tuple(
+                item["filename"] for item in profile.record()["wheels"]
+            )) if build_record is not None else snapshot
             inputs = profile_wheel_inputs(
-                profile, snapshot, max_archive_bytes=max_total_bytes,
+                profile, runtime_snapshot, max_archive_bytes=max_total_bytes,
                 max_unpacked_bytes=limits.max_expanded_bytes,
                 max_metadata_bytes=limits.max_metadata_member_bytes,
                 limits=limits, deadline=deadline,
@@ -249,14 +298,13 @@ def retain_source_profile(
             inputs = replace(inputs, binding_json=json.dumps({
                 "profile": profile.record(), "source_lock": record,
                 "build_toolchain": toolchain_record,
+                **({"build_profile": build_record} if build_record is not None else {}),
             }, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False))
             inputs.verify()
-            if runtime.fingerprint_source(_source_files(projects)) != before:
-                raise ProfileError("retained source changed before profile consumption")
+            candidate.verify(deadline=deadline)
             yield SourceProfileInputs(profile, inputs, tuple(sorted(local_projects)))
             inputs.verify()
-            if runtime.fingerprint_source(_source_files(projects)) != before:
-                raise ProfileError("retained source changed during candidate consumption")
+            candidate.verify(deadline=deadline)
 
 
 @contextmanager

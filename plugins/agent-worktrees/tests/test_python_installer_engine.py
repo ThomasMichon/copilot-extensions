@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,7 +56,7 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
 
     monkeypatch.setattr(engine, "run_owned", fail)
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        engine._child(["uv"], inputs=None, descriptor=0, timeout=1)
+        engine._child(["uv"], inputs=SimpleNamespace(wheel_inputs=None), descriptor=0, timeout=1)
     assert caught.value is failure
     stderr.flush()
     assert b"\\u2502 build failed" in stream.getvalue()
@@ -119,7 +120,7 @@ def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch,
 
     monkeypatch.setattr(engine, "run_owned", fail)
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        engine._child(["uv"], inputs=None, descriptor=0, timeout=1)
+        engine._child(["uv"], inputs=SimpleNamespace(wheel_inputs=None), descriptor=0, timeout=1)
     assert caught.value is failure
     diagnostic = capsys.readouterr().err
     assert "building example" in diagnostic and "backend stalled" in diagnostic
@@ -136,7 +137,7 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
 
     monkeypatch.setattr(engine, "run_owned", run)
     engine._child(
-        [sys.executable], inputs=None, descriptor=0, timeout=1,
+        [sys.executable], inputs=SimpleNamespace(wheel_inputs=None), descriptor=0, timeout=1,
         environment=environment, cwd=tmp_path,
     )
 

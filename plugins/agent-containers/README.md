@@ -279,6 +279,27 @@ The staged profile coordinator runs in Python isolated mode and loads its
 runtime helper from the same payload directory explicitly, so safe-path
 settings and ambient Python modules cannot redirect that import.
 
+Newly constructed slots also publish a versioned `executionContract` inside the
+slot's own `runtime-profile.json`. The installer-owned
+[`runtime_profile.select_execution`](scripts/runtime_profile.py) is a read-only
+internal selection API: it uses the canonical completed-runtime selector, checks
+the slot/profile identity and completion hash, and returns that exact immutable
+interpreter with its declaration. It does not provision, activate, acquire a
+retention lease, start a provider, or inspect a guest. A later mutable payload
+shim is **not** that selected execution; final execution and continuing retention
+must use the actual runtime owners.
+
+Declaration schema `copilot-extensions.agent-containers.provider-execution`,
+version `1`, contains a strict boolean `retainedCreation`. Both dependency
+profiles currently publish `false`: Paramiko, readiness and instance-pinned
+execution do not implement Bridge creation custody. Missing, malformed,
+duplicate-key or unsupported declarations refuse this selection API without
+effects. Previously completed profiles without the declaration remain reusable
+for ordinary installation byte-for-byte; they are never retroactively stamped
+as supporting a new contract. Re-select after a runtime change or rollback.
+This is provider-first metadata, not an enabled retained-creation caller,
+provider/guest admission, launch-lifetime retention or native qualification.
+
 With an explicit installation-cell context, configuration loading validates the
 Containers owner before using config overrides. Its optional knowledge-repo
 fallback invokes only that cell's Agent Worktrees through the packaged native

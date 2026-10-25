@@ -3395,6 +3395,14 @@ process ownership and validates the existing extras/local-package selection.
 It does not introduce another allocator, mutable venv, cutover or fallback.
 Mutable dev construction refuses this mode.
 
+Only with inspected `wheel_inputs`, an explicit `local_packages=()` selects no
+first-party distribution. This supports a separate immutable build-tools
+environment while retaining authenticated source for process ownership and
+identity. Local extras are refused for that empty selection. Ordinary source
+construction keeps its existing primary-distribution inclusion.
+`WheelSnapshot.subset()` borrows an exact nonempty subset of the existing
+read-only handles; the original snapshot owner must remain open.
+
 The canonical dependency-policy owner projects only the complete retained
 wheel set into a private hash-required requirements file. Named local wheel
 URLs carry the exact SHA-256 fragment as well as `--hash`. UV runs offline,
@@ -3487,6 +3495,46 @@ This consistency binding is not approval or offline
 reuse authority: authenticated admission, supplied revocation, source fallback,
 real release/client integration and measured production budgets remain parent
 gates.
+
+### Authenticated source-build preparation
+
+The repository-only `runtime_source_build.retain_source_runtime_inputs` composes
+the actual configured-runtime-source acquisition owner with canonical source
+preparation, the retained native compiler and the same governed feed worker.
+It uses no artifact index or fabricated release selection. An unsupported
+default marketplace source provider remains unavailable rather than guessed.
+
+One native source lock includes declared runtime/build requirements and the
+frontend's `packaging` dependency. Its actual installation owner validates
+the held native indexes, credential/trust providers and supported configuration
+before the compiler can make package requests. The same retained transaction
+then resolves dependencies and supplies acquisition; no second resolver pass
+or artifact selection is introduced. Exact native wheel witnesses must be
+unambiguous; inspection precedes backend execution. A separate numbered
+build-tools environment runs the existing frontend offline, with owned
+deadline-bound children. Built runtime metadata must agree with authenticated
+static declarations. The final complete runtime profile contains only its
+reachable runtime closure, not build-only packages. Generation identity binds
+source, lock, build and actual acquisition facts through the existing receipt.
+Wheel completion uses `runtime_source_wheels.retain_source_profile`, not a
+second source-profile builder. Its optional admitted build role must match
+the same source, target, component, declared build roots, exact packages and
+acquired files before backend execution. Only that explained build-only
+closure may be excluded from the final runtime. Its tools binding records the
+actual admitted profile, not fabricated promotion-toolchain provenance; the
+ordinary promotion-toolchain and generator checks remain unchanged.
+When native source output lacks an asserted Python hint, acquisition retains
+the selected index hint and source admission compares it with actual wheel
+metadata before running a backend; artifact profiles retain their exact check.
+
+Keep the returned context open through installed health and recheck `verify()`
+before consumption. Pass its `local_packages` selection to the existing
+constructor alongside its wheel inputs. Current owner/source policy and byte custody remain live
+checks before each backend and around consumption, through the existing
+candidate verifier's nonserialized owner hook, not an approval map. This explicit composition does not enable a
+production consumer, persistent offline discovery, source-cache GC, activation
+or a live-feed exception. See [source preparation](../tools/prepare_runtime_source.md)
+and [validation coverage](../TESTING.md#wheel-input-inspection).
 
 ### Bounded wheel inspection
 
@@ -3712,7 +3760,7 @@ Mutable `dev_candidate()` does not accept non-base profiles.
 For an independently declared role, `numbered_candidate(local_packages=(...),
 extras=(...))` additionally selects the exact local distribution closure to
 install. Names are normalized and must belong to the admitted source graph;
-the primary distribution is always included. The caller supplies every required
+source construction always includes the primary distribution. The caller supplies every required
 transitive local distribution, not paths or replacement project metadata.
 UV remains the dependency resolver: an incomplete closure fails resolution,
 rather than fetching an omitted first-party distribution from a registry.
@@ -3733,7 +3781,7 @@ unused roles. The selected extras and local names additionally bind candidate
 identity and installed-origin evidence. Fresh and reused health require selected
 non-editable installed origins and refuse any omitted local distribution that
 is actually present. `ReadyCandidate.local_packages` reports the normalized
-selection. An explicit empty tuple selects only the primary distribution;
+selection. Without inspected `wheel_inputs`, an explicit empty tuple selects only the primary distribution;
 `None` preserves the existing all-local-input behavior and its identity/receipt
 compatibility. Mutable `dev_candidate()` refuses explicit local selections.
 The caller owns the named role, distinct immutable slot, role-specific health

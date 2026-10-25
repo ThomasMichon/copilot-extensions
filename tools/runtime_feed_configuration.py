@@ -9,6 +9,7 @@ import base64
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+import hashlib
 import io
 import json
 import netrc
@@ -25,6 +26,7 @@ from build_toolchain_lock import _MARKER_ENV_QUERY_SCRIPT, sanitize_subprocess_e
 from governed_feed_trust import _is_public_pypi_url, _opaque_index_identity
 from runtime_profile import ProfileError, ProfileUnavailable, validate_profile
 from runtime_profile_policy import InstallationProfilePlan
+from runtime_source_lock import SourceLockCandidate
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
@@ -301,7 +303,7 @@ def _tls(network):
     return context
 
 
-def _machine_constraints(outer, settings, transaction, profile):
+def _machine_constraints(outer, settings, transaction, wheels):
     for key in (
         "constraints", "overrides", "excludes", "build_constraints",
         "constraints_from_workspace", "overrides_from_workspace",
@@ -315,13 +317,13 @@ def _machine_constraints(outer, settings, transaction, profile):
     options = _fields(_body(settings.get("build_options", ""), "BuildOptions"))
     if options.get("no_binary") != "None":
         raise AcquisitionUnavailable("native source-only package policy cannot admit selected wheels")
-    names = {_name(wheel["name"]) for wheel in profile.record()["wheels"]}
+    names = None if wheels is None else {_name(wheel["name"]) for wheel in wheels}
     mappings = [dependencies._toml(Path(transaction.environment["UV_CONFIG_FILE"])).get("sources", {})]
     for project in transaction.sources.values():
         mappings.append(dependencies._toml(project / "pyproject.toml").get("tool", {}).get("uv", {}).get("sources", {}))
     for mapping in mappings:
         for name, choices in mapping.items():
-            if _name(name) not in names:
+            if names is not None and _name(name) not in names:
                 continue
             choices = choices if isinstance(choices, list) else [choices]
             if any(isinstance(choice, dict) and "index" in choice for choice in choices):
@@ -355,7 +357,22 @@ class NativeFeedInputs:
     proxies: dict[str, str] = field(repr=False)
 
 
-def _capture(transaction, projection, original, profile, policy, uv, deadline):
+def _capture(
+    transaction, projection, original, profile, policy, uv, deadline, *,
+    source_lock=None, source_resolution=False,
+):
+    if source_resolution:
+        if profile is not None or source_lock is not None:
+            raise ProfileError("source resolution preflight cannot carry an artifact or lock")
+        wheels, profile_policy = None, "source-resolution"
+    elif source_lock is None:
+        wheels = profile.record()["wheels"]
+        profile_policy = profile.record()["acquisition_policy"]
+    else:
+        if profile is not None:
+            raise ProfileError("source feed capture must not carry an artifact profile")
+        wheels = source_lock.record()["files"]
+        profile_policy = "source-lock:" + source_lock.lock_id
     global_settings = _projection(projection, "GlobalSettings")
     network = _fields(_body(global_settings.get("network_settings", ""), "NetworkSettings"))
     if network.get("connectivity") != "Online" or network.get("offline") != "Disabled":
@@ -364,9 +381,14 @@ def _capture(transaction, projection, original, profile, policy, uv, deadline):
         raise AcquisitionUnavailable("native proxy bypass policy is not yet supported")
     if any(network.get(key, "None") != "None" for key in ("http_proxy", "https_proxy")):
         raise AcquisitionUnavailable("native proxy configuration is not yet supported")
+    if any(
+        key.upper() in {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"} and value
+        for key, value in transaction.environment.items()
+    ):
+        raise AcquisitionUnavailable("retained native proxy environment is not yet supported")
     outer = _projection(projection, "PipCompileSettings")
     settings = _fields(_body(outer.get("settings", ""), "PipSettings"))
-    _machine_constraints(outer, settings, transaction, profile)
+    _machine_constraints(outer, settings, transaction, wheels)
     if settings.get("index_strategy") != "FirstIndex" or settings.get("keyring_provider") != "Disabled":
         raise AcquisitionUnavailable("native index strategy or credential provider is not yet supported")
     indexes = _fields(_body(settings.get("index_locations", ""), "IndexLocations"))
@@ -414,7 +436,7 @@ def _capture(transaction, projection, original, profile, policy, uv, deadline):
     if cutoff is None:
         raise ProfileError("native feed configuration lacks a frozen seasoning cutoff")
     floor = datetime.fromisoformat(cutoff.replace("Z", "+00:00"))
-    cutoffs = {_name(wheel["name"]): floor for wheel in profile.record()["wheels"]}
+    cutoffs = {_name(wheel["name"]): floor for wheel in wheels or ()}
     for option, value in pairs:
         if option == "--exclude-newer-package":
             name, _, value = value.partition("=")
@@ -432,7 +454,7 @@ def _capture(transaction, projection, original, profile, policy, uv, deadline):
         "owner_policy": policy["policyId"], "feeds": [feed.identity for feed in feeds],
         "transport": transport, "seasoning": _seasoning_identity(original_settings),
         "index_strategy": settings["index_strategy"],
-        "profile_policy": profile.record()["acquisition_policy"],
+        "profile_policy": profile_policy,
     }, sort_keys=True, separators=(",", ":")))
     proxies = {}
     for key in ("http_proxy", "https_proxy"):
@@ -492,3 +514,60 @@ def retain_native_feed_inputs(
             if len(projection) != 2:
                 raise ProfileError("native feed capture did not produce paired native configurations")
             yield _capture(transaction, projection[1], projection[0], profile, current, transaction.argv[0], deadline)
+
+
+def _source_policy(plan: InstallationProfilePlan, installation: dict) -> dict:
+    current = resolve_runtime_profile_policy(**installation)["runtimeProfiles"]
+    if (
+        current.get("status") != "ready" or current != plan.policy()
+        or plan.release_selection is not None
+        or plan.source_trigger not in (
+            "release-index-unavailable", "artifact-unavailable", "approved-profile-unavailable",
+        )
+        or not current["selection"]["allowSourceFallback"]
+    ):
+        raise ProfileError("source feed capture lacks its actual owner")
+    return current
+
+
+def validate_source_resolution_inputs(
+    plan: InstallationProfilePlan, *, installation: dict, transaction, projections: list[str],
+    deadline: float,
+) -> None:
+    """Validate the held native settings before the compiler can request packages."""
+    _check_deadline(deadline)
+    current = _source_policy(plan, installation)
+    if len(projections) != 2:
+        raise ProfileError("source resolution preflight needs paired native configurations")
+    _capture(
+        transaction, projections[1], projections[0], None, current,
+        transaction.argv[0], deadline, source_resolution=True,
+    )
+
+
+@contextmanager
+def retain_source_feed_inputs(
+    plan: InstallationProfilePlan, source_lock: SourceLockCandidate, *, installation: dict, deadline: float,
+):
+    """Reuse the source compiler's held native configuration, never re-resolve it."""
+    _check_deadline(deadline)
+    current = _source_policy(plan, installation)
+    if (
+        not isinstance(source_lock, SourceLockCandidate) or source_lock.native_lock is None
+        or source_lock.transaction is None or len(source_lock.projections) != 2
+    ):
+        raise ProfileError("source feed capture lacks its native lock")
+    record = source_lock.record()
+    if (
+        record["policy"] != current or record["trigger"] != plan.source_trigger or record["mode"] != "source"
+        or record["native_lock_sha256"] != "sha256:" + hashlib.sha256(source_lock.native_lock).hexdigest()
+        or record["requirements_sha256"] != "sha256:" + hashlib.sha256(source_lock.requirements).hexdigest()
+    ):
+        raise ProfileError("source feed capture differs from its retained lock and owner")
+    yield _capture(
+        source_lock.transaction, source_lock.projections[1], source_lock.projections[0],
+        None, current, source_lock.transaction.argv[0], deadline, source_lock=source_lock,
+    )
+    _check_deadline(deadline)
+    if resolve_runtime_profile_policy(**installation)["runtimeProfiles"] != current:
+        raise ProfileError("source acquisition policy changed during consumption")

@@ -177,12 +177,22 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
                         _strings(entry["requires_dist"], "Requires-Dist", deadline)]
         wheels[name] = entry, requirements
 
-    roots = [_requirement(text, deadline) for text in _strings(record["roots"], "roots", deadline)]
+    wanted = _reachable(wheels, record["roots"], target["environment"], deadline)
+    if wanted.keys() != wheels.keys():
+        raise ProfileError("closure includes distributions unreachable from its roots")
+    for name, (entry, _) in wheels.items():
+        _check_deadline(deadline)
+        if wanted[name] != _extras(entry["selected_extras"], "selected extras", deadline):
+            raise ProfileError(f"{name}: selected extras do not match full root closure")
+
+
+def _reachable(wheels: dict, roots: list[str], environment: dict, deadline: float) -> dict[str, set[str]]:
+    """Traverse inspected metadata and exact versions, never resolve packages."""
+    roots = [_requirement(text, deadline) for text in _strings(roots, "roots", deadline)]
     if not roots:
         raise ProfileError("closure: roots cannot be empty")
     wanted: dict[str, set[str]] = {}
     pending = [(requirement, {""}) for requirement in roots]
-    environment = target["environment"]
     while pending:
         _check_deadline(deadline)
         requirement, parent_extras = pending.pop()
@@ -215,12 +225,7 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
         for edge in dependencies:
             _check_deadline(deadline)
             pending.append((edge, {"", *wanted[name]}))
-    if wanted.keys() != wheels.keys():
-        raise ProfileError("closure includes distributions unreachable from its roots")
-    for name, (entry, _) in wheels.items():
-        _check_deadline(deadline)
-        if wanted[name] != _extras(entry["selected_extras"], "selected extras", deadline):
-            raise ProfileError(f"{name}: selected extras do not match full root closure")
+    return wanted
 
 
 @dataclass(frozen=True)

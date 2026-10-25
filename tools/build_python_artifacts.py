@@ -626,8 +626,12 @@ def build_wheel(
     python: str | None = None,
     toolchain: ToolchainLock | None = None,
     reserved_names: set[str] | None = None,
+    offline: bool = False,
     uv: str = "uv",
     deadline: float | None = None,
+    procutil=None,
+    construction_fd: int | None = None,
+    retained_runtime: tuple[Path, str, Path] | None = None,
 ) -> Path:
     """Builds a wheel for ``source_dir`` via `uv build --wheel`.
 
@@ -640,7 +644,10 @@ def build_wheel(
     517 build, resolving its build-system `requires` the normal way --
     which, on a correctly governed-feed-configured machine, already
     resolves only from that feed; this script adds no index configuration
-    of its own either way.
+    of its own either way. The explicit ``offline`` consumer path requires
+    an already admitted toolchain and retained runtime custody. It disables
+    indexes, configuration discovery, caches and Python downloads; requirement
+    checks and the build share the caller's deadline and owned-child scope.
 
     Builds into a fresh, empty temporary staging directory (never directly
     into ``out_dir``) and moves the single resulting wheel into ``out_dir``
@@ -662,14 +669,42 @@ def build_wheel(
     function's staging-directory design already handles (a prior
     invocation's own leftover wheel, which carries no in-progress
     ``reserved_names`` entry to collide with)."""
+    run = None
+    if offline:
+        if (
+            toolchain is None or deadline is None or procutil is None
+            or construction_fd is None or retained_runtime is None
+        ):
+            raise ArtifactBuildError("Offline source builds require retained toolchain and child custody")
+        from installer_dependency_policy import _select_uv_executable
+        from installer_engine_process import run_owned
+        from installer_wheel_inputs import _check_deadline
+
+        _check_deadline(deadline)
+        uv = _select_uv_executable(uv)
+        build_env = sanitize_subprocess_env()
+        strip_package_source_env_vars(build_env, strip_credentials=True)
+
+        def run(argv):
+            return run_owned(
+                argv, cwd=source_dir, env=build_env, timeout=deadline - time.monotonic(),
+                deadline=deadline, procutil=procutil, construction_fd=construction_fd,
+                runtime_root=retained_runtime[0], runtime_version=retained_runtime[1],
+                runtime_path=retained_runtime[2],
+            )
+
     out_dir.mkdir(parents=True, exist_ok=True)
     if toolchain is not None:
-        _assert_toolchain_satisfies_build_requires(
-            source_dir, toolchain, **({"deadline": deadline} if deadline is not None else {}),
-        )
+        options = {"deadline": deadline} if deadline is not None else {}
+        if run is not None:
+            options["run"] = run
+        _assert_toolchain_satisfies_build_requires(source_dir, toolchain, **options)
     with tempfile.TemporaryDirectory(prefix="build-python-artifacts-") as staging:
         staging_dir = Path(staging)
         cmd = [uv, "build", "--wheel", "-o", str(staging_dir)]
+        if offline:
+            cmd += ["--offline", "--no-index", "--no-config", "--no-cache",
+                    "--no-sources", "--no-python-downloads"]
         if toolchain is not None:
             cmd += ["--no-build-isolation", "--python", str(toolchain.venv_python)]
         elif python:
@@ -687,7 +722,7 @@ def build_wheel(
             # credential variables so it can authenticate), this build
             # subprocess has no such need and strips them too.
             strip_package_source_env_vars(build_env, strip_credentials=True)
-        result = _build_child(cmd, build_env, deadline)
+        result = run(cmd) if run is not None else _build_child(cmd, build_env, deadline)
         if result.returncode != 0:
             raise ArtifactBuildError(
                 f"uv build failed for {source_dir}:\n{result.stdout}\n{result.stderr}"
