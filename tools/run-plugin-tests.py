@@ -622,6 +622,7 @@ def run_plugin(
         env.pop(_CODESPACES_PROFILE_ENV, None)
         if test_profile != "standard":
             env[_CODESPACES_PROFILE_ENV] = test_profile
+            env.pop("PYTEST_ADDOPTS", None)
         if selection is not None:
             env.pop("PYTEST_ADDOPTS", None)
             snapshot = sandbox / "selection.json"

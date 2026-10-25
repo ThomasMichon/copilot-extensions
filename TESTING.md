@@ -106,7 +106,8 @@ selected inventory, assertions, admission/refusal and immutable-input checks,
 six Windows partitions, and 128-process/4096-MiB-memory/2048-MiB-temp caps.
 No repository hash or load probe is a prerequisite. The runner passes a
 test-only profile value to these fixtures and clears inherited profile state
-for ordinary runs.
+for ordinary runs. Functional runs also clear inherited `PYTEST_ADDOPTS`, so
+ambient collection-only or keyword options cannot silently replace execution.
 
 A profile PASS is **functional evidence only**. It is not a PASS under the
 original wall-time budgets, a performance or baseline qualification, or a

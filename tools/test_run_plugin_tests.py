@@ -2035,12 +2035,16 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
 ):
     plugin, _, _ = codespaces_native_plan
     monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "unrequested-ambient-profile")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only -k healthy")
     calls = []
 
     def execute(command, **kwargs):
         calls.append(command)
         assert kwargs["env"].get(runner._CODESPACES_PROFILE_ENV) == (
             None if profile == "standard" else profile
+        )
+        assert kwargs["env"].get("PYTEST_ADDOPTS") == (
+            "--collect-only -k healthy" if profile == "standard" else None
         )
         assert (
             kwargs["limits"].max_processes, kwargs["limits"].max_memory_mb,
@@ -2062,6 +2066,41 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
     )
     assert all(str(runner._CODESPACES_NATIVE_FILE) in command for command in calls)
     assert plugin.is_dir()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.parametrize("profile,status,executed", [
+    ("standard", 0, False), ("busy-host-functional", 1, True),
+])
+def test_codespaces_functional_profile_runs_assertions_despite_ambient_collect_only(
+    monkeypatch, profile, status, executed,
+):
+    with tempfile.TemporaryDirectory(prefix="profile-assertion-") as directory:
+        root = Path(directory)
+        tests = root / "tests"
+        tests.mkdir()
+        sentinel = root / "assertion-ran"
+        target = Path("tests") / "test_installer_test_support.py"
+        (root / target).write_text(
+            "from pathlib import Path\n"
+            "def test_assertions_execute():\n"
+            f"    Path({str(sentinel)!r}).write_text('executed')\n"
+            "    assert False, 'functional-profile-sentinel'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(runner, "_plugin_dir", lambda _name: root)
+        monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+        monkeypatch.setenv("TEMP", str(root))
+        monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only")
+        assert runner.run_plugin(
+            "agent-codespaces", "unused", reinstall=False, kexpr=None,
+            test_files=(str(target),), test_profile=profile,
+            limits=containment.Limits(wall_seconds=30), plugin_timeout=60,
+            test_timeout=10, max_files_per_subsuite=25,
+        ) == status
+        assert sentinel.exists() is executed
+        if executed:
+            assert sentinel.read_text() == "executed"
 
 
 def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
