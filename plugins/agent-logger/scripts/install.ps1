@@ -1687,8 +1687,8 @@ function Deploy-SelfProvisioningBinstub {
     # The primary `agent-logger` binstub (.ps1 primary + .cmd fallback), SELF-
     # PROVISIONING (#1393): fast-path the built versioned slot's python; if no
     # slot is built yet (a `stamp` deferred the venv), provision on first use by
-    # running the slot-local snapshot's `scripts/install.ps1 provision`, then
-    # dispatch. Opt out with AGENT_LOGGER_NO_SELFPROVISION=1. Deployed byte-
+    # delegating to the selected snapshot's queued dispatcher. Opt out with
+    # AGENT_LOGGER_NO_SELFPROVISION=1. Deployed byte-
     # identically at stamp AND during Install-Package so a provision triggered by
     # this very binstub never rewrites the .cmd it is mid-execution.
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
@@ -1710,10 +1710,20 @@ AGENT_RT_ROOT="$_root"
 AGENT_RT_RESOLVE_TRACE_MODE=ready
 . "$_resolver"
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_logger "$@"
-_i="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_i" ] || _i="$(ls "$HOME"/.copilot/installed-plugins/*/agent-logger/scripts/install.sh 2>/dev/null | head -n1)"
-if [ -n "$_i" ] && [ -f "$_i" ]; then echo "[agent-logger] runtime not provisioned; run: bash \"$_i\" provision" >&2; else echo "[agent-logger] runtime not provisioned and the installer was not found; re-enable the plugin, then retry." >&2; fi
-exit 1
+_payload="$(cat "$_root/payload-dir" 2>/dev/null)"
+_shim="$_payload/bin/agent-logger"
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
+    echo '[agent-logger] selected snapshot command not found; re-enable/update the plugin.' >&2
+    exit 127
+fi
+if [ ! -f "$_gate" ] ||
+   ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
+    echo '[agent-logger] selected snapshot lacks the queued command contract; re-enable/update the plugin.' >&2
+    exit 126
+fi
+export COPILOT_PLUGIN_ROOT="$_payload"
+exec "$_shim" "$@"
 '@
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
         Write-Ok "Binstub: $stubPath"
@@ -1740,27 +1750,21 @@ if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
 if ($env:AGENT_LOGGER_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-logger] runtime not provisioned (AGENT_LOGGER_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-logger] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
-$_probe = Join-Path $_snap 'scripts\installation-context\plugin-publication-probe.ps1'
-if (-not (Test-Path -LiteralPath $_probe -PathType Leaf)) {
-    [Console]::Error.WriteLine('[agent-logger] Runtime publication refused: snapshot admission helper is unavailable. Re-enable/update the plugin, then retry.')
+$_shim = if ($_snap) { Join-Path $_snap 'bin\agent-logger.ps1' } else { '' }
+if (-not ($_shim -and (Test-Path -LiteralPath $_shim -PathType Leaf))) {
+    [Console]::Error.WriteLine('[agent-logger] cannot self-provision: selected snapshot command not found. Re-enable/update the plugin, then retry.')
+    exit 127
+}
+$_gate = Join-Path $_snap 'scripts\runtime-gate.ps1'
+if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
+    Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: logger-first-use-v1' -Quiet
+)) {
+    [Console]::Error.WriteLine('[agent-logger] selected snapshot lacks the queued command contract. Re-enable/update the plugin, then retry.')
     exit 126
 }
-$global:LASTEXITCODE = 0
-& $_probe -PayloadRoot $_snap -PluginId agent-logger -LegacyRoot $_root
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-$_py = _Resolve-Py normal
-if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-logger] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-logger eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_logger @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-logger] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
+$env:COPILOT_PLUGIN_ROOT = $_snap
+& $_shim @args
+exit $LASTEXITCODE
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
@@ -1805,6 +1809,24 @@ if (-not ($_shim -and (Test-Path -LiteralPath $_shim))) {
     [Console]::Error.WriteLine("[$_command] owning payload shim not found: $_shim")
     [Console]::Error.WriteLine("[$_command] re-enable/update agent-logger, then retry.")
     exit 127
+}
+$_gate = Join-Path $_payload 'scripts\runtime-gate.ps1'
+if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
+    Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: logger-first-use-v1' -Quiet
+)) {
+    $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $_resolver -PathType Leaf) -or -not (
+        Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet
+    )) {
+        [Console]::Error.WriteLine("[$_command] read-only runtime resolver is unavailable; re-enable/update agent-logger.")
+        exit 126
+    }
+    $env:AGENT_RT_ROOT = $_root
+    . $_resolver -TraceMode ready
+    if (-not $AgentRtPy) {
+        [Console]::Error.WriteLine("[$_command] selected snapshot lacks the queued command contract; re-enable/update agent-logger.")
+        exit 126
+    }
 }
 $env:COPILOT_PLUGIN_ROOT = $_payload
 & $_shim @args

@@ -20,6 +20,7 @@ on:
           - codespaces-bootstrap
           - logger-recipes
           - logger-bootstrap
+          - logger-commands
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
@@ -62,6 +63,68 @@ jobs:
           tools/test_promotion_control.py::test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci
           tools/test_promotion_control.py::test_manifest_removal_cannot_reactivate_deleted_dev_workflow
 
+  logger-commands-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'
+    name: Logger command publishers (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real command admission, caller loss and installed consumers
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_command.py
+          --test-timeout 900 --timeout 1800
+      - name: Preserve healthy dispatch and native wrapper publication
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_runtime_gate.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 120 --timeout 600
+  logger-commands-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'
+    name: Logger command publishers (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real command admission, caller loss and installed consumers
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_command.py
+          --test-timeout 900 --timeout 1800
+      - name: Preserve healthy dispatch and native wrapper publication
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_runtime_gate.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 120 --timeout 600
   dispatch-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-binding'
     name: Dispatch scoped-stamp binding (Ubuntu)

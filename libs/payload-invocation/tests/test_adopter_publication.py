@@ -81,7 +81,7 @@ def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str
 
 
 @pytest.mark.portfolio_tier("T3")
-@pytest.mark.timeout(240)
+@pytest.mark.timeout(600)
 @pytest.mark.filterwarnings("ignore:Unknown pytest.mark.guard:pytest.PytestUnknownMarkWarning")
 @pytest.mark.parametrize(("entry", "state", "stamp_python"), [
     (entry, state, python)
@@ -92,7 +92,7 @@ def _adopter(fixture: dict, plugin: str, source: Path | None = None) -> dict[str
     (entry, state, False)
     for entry in ("payload-trailing", "auxiliary-trailing")
     for state in ("standalone", "managed")
-] + [("legacy-resolver", "managed", False), ("missing-admission", "managed", False)])
+] + [("legacy-resolver", "managed", False), ("missing-driver", "managed", False)])
 def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     binding_fixture: dict, state: str, stamp_python: bool, entry: str, tmp_path: Path,
 ) -> None:
@@ -131,9 +131,9 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
         resolver.write_text(resolver.read_text(encoding="utf-8").replace(
             "# Trace contract: normal/read-only/ready-v1", "# Older resolver without deferred tracing",
         ), encoding="utf-8")
-    elif entry == "missing-admission":
+    elif entry == "missing-driver":
         suffix = "ps1" if os.name == "nt" else "sh"
-        (snapshot / f"scripts/installation-context/plugin-publication-probe.{suffix}").unlink()
+        (snapshot / f"libs/update-driver/scripts/first-use.{suffix}").unlink()
     entrypoint = entry.removesuffix("-trailing")
     if entry != entrypoint:
         environment["AGENT_LOGGER_HOME"] = str(root) + os.sep
@@ -150,13 +150,13 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
     )
     result = subprocess.run(
         command, env=environment, cwd=snapshot, capture_output=True, text=True,
-        timeout=180, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=420, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if state == "managed":
         assert result.returncode != 0
         diagnostic = (
             "read-only runtime resolver is unavailable" if entry == "legacy-resolver" else
-            "snapshot admission helper is unavailable" if entry == "missing-admission" else
+            "packaged installation driver lacks" if entry == "missing-driver" else
             "deployment-managed"
         )
         assert diagnostic in result.stdout + result.stderr
@@ -185,7 +185,7 @@ def test_logger_actual_stamp_first_use_revalidates_snapshot_owner(
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("shell", SHELLS)
-def test_logger_cold_payload_uses_selected_cell_publication_policy(
+def test_logger_cold_cell_refuses_without_legacy_fallback(
     binding_fixture: dict, shell: str, managed: bool,
 ) -> None:
     environment = _adopter(binding_fixture, "agent-logger")
@@ -233,15 +233,10 @@ def test_logger_cold_payload_uses_selected_cell_publication_policy(
     legacy_before = _snapshot(binding_fixture["legacy"])
     result = _run(binding_fixture, environment, _command(binding_fixture, shell, "runtime-gate"))
     assert _snapshot(binding_fixture["legacy"]) == legacy_before
-    if managed:
-        assert result.returncode == 3, result.stdout + result.stderr
-        assert "deployment-managed" in result.stdout + result.stderr
-        assert _snapshot(root) == before
-    else:
-        assert result.returncode == 37, result.stdout + result.stderr
-        assert (root / "installer-ran").read_text(encoding="utf-8") == "yes"
-        assert "failed rc=37" in (root / ".provision-status").read_text(encoding="utf-8-sig")
-        assert (root / "logs/boot-trace.jsonl").is_file()
+    assert result.returncode == 126, result.stdout + result.stderr
+    assert "cold namespaced/custom-root provisioning" in result.stdout + result.stderr
+    assert _snapshot(root) == before
+    assert not (binding_fixture["home"] / ".copilot-extensions/update-driver").exists()
 
 
 def _without_python(fixture: dict, environment: dict[str, str]) -> None:

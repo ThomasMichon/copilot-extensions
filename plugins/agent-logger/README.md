@@ -121,16 +121,27 @@ Legacy snapshots retain
 for fresh-process policy admission, including stamps made without Python.
 The live deployment policy is never cached as permission in that evidence.
 Generated compatibility wrappers and payload-local commands resolve a healthy
-runtime before considering publication. Cold misses defer durable resolver
-tracing until the live canonical deployment decision admits publication, before
-any provision status or orchestration-lock write. Payload-local commands check
-the validated selected installation root, including namespaced cells; they do
-not substitute legacy-root policy. Healthy managed runtimes remain callable
-without invoking an installer, and retain their normal resolution trace.
-An older deployed resolver without the deferred-trace contract, or a cold
-snapshot without the admission helper, returns an explicit readiness error
-without writing runtime state; update/re-enable the plugin or use explicit
-installation management rather than falling back to unguarded provisioning.
+runtime before considering publication. Cold legacy commands submit the same
+caller-independent Driver `provision` request and wait as observers; no outer
+provisioning lock, status writer or foreground installer remains. The primary
+and five auxiliary wrappers retain the exact selected snapshot, never an
+arbitrary installed-payload fallback. The snapshot dispatcher and packaged
+client must declare their queued-command support before cold invocation.
+Publication and exact source/root/project are revalidated by the existing
+canonical admission/execution owners.
+
+Healthy managed and installation-cell runtimes remain callable without
+installer work, preserving the command's module arguments and exit status.
+Cold custom-root/cell construction remains explicitly unsupported through
+this Driver recipe rather than silently using legacy-root policy. An older
+resolver without the read-only contract or cold dispatcher/client without
+queued-command support returns an explicit readiness error before state
+writes; update/re-enable the plugin or use explicit installation management.
+The bootstrap's drift `install` still reconciles task/timer registration;
+command-side service-less `provision` does not register or start periodic
+session processing. The manual `logger-commands` Windows/Ubuntu portfolio
+qualifies actual emitted wrappers, caller loss, source independence and safe
+installed consumers separately from host rollout.
 Identical inputs reuse snapshots and completion evidence. Recovery requires an
 exact current or last-known-good selector rather than ordering source hashes.
 `agent-logger version` reports the selected source generation without changing

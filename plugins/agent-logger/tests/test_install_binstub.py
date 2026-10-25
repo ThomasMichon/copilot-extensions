@@ -88,7 +88,7 @@ if '--show-settings' in args:
     exclude_newer: ExcludeNewer {{ global: None, package: ExcludeNewerPackage({{}}), }},
 }}, }}''')
     raise SystemExit(0)
-assert '--reinstall' in args and '--quiet' in args
+assert '--reinstall' in args
 assert '--no-deps' not in args and '--no-build-isolation' not in args
 cutoff = datetime.fromisoformat(args[args.index('--exclude-newer') + 1].replace('Z', '+00:00'))
 assert cutoff <= datetime.now(timezone.utc) - timedelta(days=7)
@@ -125,6 +125,7 @@ def install_local(project, installed):
     info = site / (name.replace('-', '_') + '-' + version + '.dist-info')
     info.mkdir(exist_ok=True)
     (info / 'METADATA').write_text('Metadata-Version: 2.1\\nName: ' + name + '\\nVersion: ' + version + '\\n')
+    (info / 'direct_url.json').write_text(json.dumps({{'url': project.as_uri(), 'dir_info': {{'editable': False}}}}))
     shutil.copytree(source, site, dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
     if name == 'agent-logger' and os.name != 'nt':
         launcher = python.parent / 'agent-logger'
@@ -132,13 +133,22 @@ def install_local(project, installed):
         launcher.chmod(0o755)
 
 if 'setuptools>=83.0.0' in args:
+    assert '--quiet' in args
     shutil.copytree(fixture / 'setuptools', site, dirs_exist_ok=True)
 elif 'pyyaml>=6.0' in args:
+    assert '--quiet' in args
     shutil.copytree(fixture / 'PyYAML', site, dirs_exist_ok=True)
 else:
     sources = [Path(a) for a in args if (Path(a) / 'pyproject.toml').is_file()]
-    assert len(sources) == 1, args
-    install_local(sources[0], set())
+    names = {{tomllib.loads((p / 'pyproject.toml').read_text())['project']['name'] for p in sources}}
+    if names == {{'agent-procutil', 'agent-single-instance-lease', 'agent-update-driver'}}:
+        assert len(sources) == 3 and '--no-editable' in args and '--link-mode' in args
+        assert args[args.index('--link-mode') + 1] == 'copy'
+    else:
+        assert len(sources) == 1 and '--quiet' in args, args
+    installed = set()
+    for project in sources:
+        install_local(project, installed)
 with (fixture / 'installs.jsonl').open('a') as log:
     log.write(json.dumps(args) + '\\n')
 """,
@@ -798,7 +808,12 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
         timeout=420,
         check=False,
     )
-    assert provision.returncode == 0, provision.stdout + provision.stderr
+    driver = home / ".copilot-extensions" / "update-driver"
+    diagnostics = "\n".join(
+        f"{path.name}:\n{path.read_text(errors='replace')[-16000:]}"
+        for path in driver.rglob("*.log") if path.is_file()
+    )
+    assert provision.returncode == 0, provision.stdout + provision.stderr + diagnostics
     assert f"agent-logger {version}" in provision.stdout
     assert calls.is_file()
     _assert_complete_runtime(home)
