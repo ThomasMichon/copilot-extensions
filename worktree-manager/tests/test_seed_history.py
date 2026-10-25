@@ -102,7 +102,7 @@ def test_actual_history_connection_ddl_does_not_start_implicit_transaction(
     history.remember("second")
     assert history.entries() == ["second", "first"]
     assert [row for row in observed if row[0] == "CREATE"] == [
-        ("CREATE", False, False, ""), ("CREATE", False, False, ""),
+        ("CREATE", True, True, ""), ("CREATE", True, True, ""),
     ]
     assert [row for row in observed if row[0] == "BEGIN"] == [
         ("BEGIN", False, True, ""), ("BEGIN", False, True, ""),

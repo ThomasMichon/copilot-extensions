@@ -199,6 +199,11 @@ def run(
             return
         if not load_config().maintenance.automatic:
             return "Automatic maintenance disabled by maintenance.automatic = false"
+        from ..launch_retention import maintain
+
+        retention_warning = maintain()
+        if retention_warning:
+            return retention_warning
         from .. import resident_picker
 
         if not resident_picker.wait_for_local(context.project(), finished.is_set):

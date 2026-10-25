@@ -883,10 +883,13 @@ browsing.
 History is per project, survives Manager restarts and runtime updates, and
 retains exact submitted text locally under `WORKTREE_MANAGER_ROOT` (or the
 normal `~/.worktree-manager` root). It is not synced, logged, or automatically
-executed. Consecutive identical submissions do not create duplicates; entries
-are not automatically expired. Treat this database as private prompt content.
-Initialized history accepts only the expected table with zero application/version
-markers; extra triggers, indexes, tables or foreign markers refuse prompt reads/writes.
+executed. Consecutive identical submissions do not create duplicates or extend
+their original deadline. Entries expire 90 days after submission; reads hide
+expired text even before physical maintenance. Treat this database as private
+prompt content. Recognized legacy history migrates without changing original
+IDs, projects or timestamps. Versioned history accepts only its expected table,
+expiry index and application/version markers; extra schema or foreign markers
+refuse prompt reads/writes.
 The history directory and database are owner-only on POSIX; Windows uses a
 protected owner/SYSTEM ACL, including inherited protection for SQLite journals.
 Existing history permissions are repaired before access; failure blocks submission.
@@ -898,6 +901,14 @@ intent and never retries an allocation automatically.
 History reads open SQLite in read-only mode. A valid uninitialized empty database
 is treated as empty history without creating its schema. Corrupt, foreign, or
 incompatible stores refuse access instead of being silently repaired or migrated.
+Real production Picker use maintains both history and launch-journal input after
+first paint when automatic maintenance is enabled. Explicit confirmation also
+maintains both off-thread before saving. Offline machines physically expire text
+at their next permitted maintenance opportunity. Migration scrubs legacy freelist
+copies and safely checkpoints recognized WAL into DELETE mode; busy or unexpected
+sidecars report errors rather than being removed by hand. Pending daemon seeds
+remain untouched. See [the storage contract](docs/launch-attempt-storage.md#private-readers-and-expiry)
+for crash recovery, privacy and automatic-maintenance behavior.
 
 Nonempty prompts with Anchor, Bare, AHP, or Local model selected refuse
 confirmation visibly and keep the draft open without recording it. Clear the
@@ -1073,8 +1084,9 @@ select its text. Resolution, launcher exit, seed claim and original native-sessi
 observations remain separate evidence. `prompt_acceptance` stays `unknown`,
 including after a zero exit or a qualified native-session join. These commands
 do not launch, repair, expire, retry or sweep other machines. Whole-attempt
-outcome aggregation, selected-machine sweeps and legacy-history retention
-integration remain separate capabilities.
+outcome aggregation and selected-machine sweeps remain separate capabilities;
+local retention maintenance runs through the Picker/confirmation path, not
+these read-only inspection commands.
 
 The explicit cross-runtime source lane is
 `python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_launch_history_cli_native.py`.

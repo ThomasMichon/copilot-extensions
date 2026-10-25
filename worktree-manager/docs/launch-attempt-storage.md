@@ -46,11 +46,10 @@ ID. A later separate action after a successful confirmation gets a new ID.
 The journal preserves raw text independently of existing execution-text
 normalization.
 
-Legacy `SeedHistory` writes still occur, off-thread, after successful journal
+`SeedHistory` writes still occur, off-thread, after successful journal
 persistence and before composer dismissal. This preserves existing history
-navigation while migration is pending; it is **not** complete 90-day retention
-across all prompt copies. No pending daemon intent is migrated or deleted by
-this confirmation gate.
+navigation with the same 90-day input bound. Neither history nor journal
+maintenance migrates or deletes pending daemon intent.
 
 ## Manager observations
 
@@ -169,10 +168,30 @@ store rather than interpreting unknown locality as local.
 
 `expire` physically clears expired input using SQLite secure deletion while
 retaining metadata and observations. Reads hide expired input even before
-maintenance. The store does not schedule expiry or migrate existing
-`SeedHistory`; production maintenance, legacy-copy expiry and UI integration
-remain required before claiming a delivered retention feature. It never deletes
-pending engine/daemon prompt state.
+maintenance. Real production Picker use runs both journal and history maintenance
+off-thread after first paint, subject to `maintenance.automatic`. Mock and
+read-only review never run it. Explicit launch confirmation also maintains both
+stores before saving, including in a long-running Picker or with automatic
+maintenance disabled. A failure reports only the affected store, preserves the
+draft, and prevents that launch; maintenance still attempts the other store.
+Offline or automatic-maintenance-disabled machines physically expire input at
+the next permitted maintenance or confirmation opportunity. No scheduler is added.
+
+Recognized unversioned `SeedHistory` databases migrate in place, preserving IDs,
+projects, exact unexpired text and original submission timestamps. These remain
+prompt-only history, never evidence of an allocation or launch. An indexed expiry
+transaction securely deletes expired rows across projects and marks the migration
+as awaiting a scrub. A subsequent `VACUUM` removes legacy freelist copies before
+the final version is committed; interruption leaves the retryable scrub marker,
+not a falsely completed migration. Normal new history uses the same indexed
+secure-deletion path. Deduplication and reads never extend an input deadline.
+Recognized legacy WAL is checkpointed by SQLite into DELETE mode before migration;
+a busy connection produces an explicit failure, not manual sidecar deletion.
+Read-only history access refuses WAL until maintenance instead of creating
+bookkeeping files. Unexpected WAL sidecars on DELETE-mode stores and orphaned
+sidecars with no database are errors and remain untouched for diagnosis.
+No operation deletes pending engine/daemon prompt state. These are source storage
+contracts, not proof of rollout or installed prompt acceptance.
 
 ## Reproducible checks
 
@@ -181,6 +200,7 @@ contained test runner. The explicit native lane is:
 
 ```text
 python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_launch_attempts_native.py
+python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_launch_retention_native.py
 ```
 
 It exercises abrupt writer exit and an independent reader, interrupted
@@ -192,3 +212,7 @@ Measurements identify an in-process storage boundary, not a UI gesture or an
 installed launch. Storage work can exceed the Picker's acknowledgement budget
 under load: confirmation integration must remain responsive while awaiting
 durability, without dismissing or allocating early.
+The retention native lane leaves a real committed WAL behind after abrupt process
+exit, migrates and erases it in a separate process, interrupts immediately before
+legacy freelist scrubbing, and proves restart completion without changing retained
+timestamps, journal metadata or a synthetic pending seed.

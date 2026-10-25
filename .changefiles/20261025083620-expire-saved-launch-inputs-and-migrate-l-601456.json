@@ -1,0 +1,9 @@
+{
+  "comment": "Expire saved launch inputs and migrate legacy prompt history on normal Picker use without touching pending launch intent.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

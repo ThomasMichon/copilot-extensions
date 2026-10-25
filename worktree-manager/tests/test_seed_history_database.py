@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -25,7 +26,7 @@ def test_history_tolerates_real_journal_commit_during_sidecar_protection(
     try:
         connection.execute(
             "INSERT INTO seeds(project, prompt, submitted_at) VALUES (?, ?, ?)",
-            ("demo", "concurrent", 0),
+            ("demo", "concurrent", time.time()),
         )
         assert journal.exists()
 

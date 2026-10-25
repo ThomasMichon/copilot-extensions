@@ -167,6 +167,11 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #8994 merged interactive local launch-history inspection
+  after current-head approval and required CI. Both Pickers expose protected
+  metadata/detail without replay or inferred acceptance. Journal retention,
+  selected-machine inspection, containing release, authorized rollout and
+  installed New/cold Resume conversation evidence remain open.
 - **2026-10-25** -- #8990 merged bounded local Manager/engine attempt inspection
   with current-head approval and required CI. Saved intent and qualified
   receipts can be inspected without replaying prompts; acceptance remains

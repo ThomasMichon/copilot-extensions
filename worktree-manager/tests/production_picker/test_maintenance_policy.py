@@ -133,6 +133,8 @@ def test_existing_heartbeat_stops_renewal_and_ensure_after_policy_change(policy,
     "[maintenance]\nautomatic = 'false'",
 ])
 def test_runner_still_binds_and_returns_browsing_result(policy, monkeypatch, body):
+    from worktree_manager import launch_retention
+
     policy.write_text(body, encoding="utf-8")
     monkeypatch.setattr(runner, "_select_project", lambda project: project)
     monkeypatch.setattr(
@@ -142,6 +144,7 @@ def test_runner_still_binds_and_returns_browsing_result(policy, monkeypatch, bod
     monkeypatch.setattr(runner, "_start_anchor_heal_check", _forbidden)
     monkeypatch.setattr(runner, "_start_housekeeping", _forbidden)
     monkeypatch.setattr(housekeeping, "start_picker_monitor_root", _forbidden)
+    monkeypatch.setattr(launch_retention, "maintain", _forbidden)
 
     def picker(*, prepare, after_first_refresh, **_kwargs):
         binding = prepare()
@@ -196,3 +199,28 @@ def test_startup_policy_result_and_errors_are_delivered_through_ui_inbox(monkeyp
         assert "maintenance.automatic" in screen.debug
     else:
         assert notices == ["Automatic maintenance disabled"]
+
+
+@pytest.mark.parametrize("mock", [False, True])
+def test_real_picker_runs_private_retention_without_waiting_for_resident_owner(policy, monkeypatch, mock):
+    from worktree_manager import launch_retention, resident_picker
+
+    calls = []
+    monkeypatch.setattr(
+        launch_retention, "maintain", lambda: calls.append("retention") or "retention unavailable",
+    )
+    monkeypatch.setattr(resident_picker, "wait_for_local", _forbidden)
+    monkeypatch.setattr(runner, "_start_housekeeping", _forbidden)
+
+    def picker(*, source, after_first_refresh, **kwargs):
+        assert after_first_refresh() == (None if mock else "retention unavailable")
+        return {"action": "cancel"}
+
+    monkeypatch.setattr(runner, "run_tui_picker", picker)
+    try:
+        assert runner.run("fixture", mock_mode=mock, local=True, bootstrap_payload={
+            "version": 1, "project": "fixture", "default_live": False,
+        }) == {"action": "cancel"}
+        assert calls == ([] if mock else ["retention"])
+    finally:
+        runner.context.reset()

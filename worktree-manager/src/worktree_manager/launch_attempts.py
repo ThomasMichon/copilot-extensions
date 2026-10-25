@@ -170,6 +170,11 @@ class LaunchAttempts:
             raise LaunchAttemptError("Launch journal has an incompatible database header.")
         if header[18:20] != b"\x01\x01":
             raise LaunchAttemptError("Launch journal requires DELETE journaling.")
+        if any(
+            self.path.with_name(self.path.name + suffix).exists()
+            for suffix in ("-wal", "-shm")
+        ):
+            raise LaunchAttemptError("Launch journal has an unexpected WAL sidecar.")
         if (
             int.from_bytes(header[60:64], "big") not in (1, _SCHEMA_VERSION)
             or int.from_bytes(header[68:72], "big") != _APPLICATION_ID

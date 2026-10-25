@@ -157,6 +157,11 @@ class _SavingLaunch(ModalScreen[str | None]):
 
         def work() -> str | None:
             try:
+                from .launch_retention import maintain
+
+                warning = maintain()
+                if warning:
+                    return warning + " Your draft is unchanged; no launch started."
                 store = LaunchAttempts()
                 store.record_intent(confirmation.attempt_id, **confirmation.intent)
                 if refusal:

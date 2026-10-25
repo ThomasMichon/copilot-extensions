@@ -200,6 +200,55 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
 
+### 2026-10-25 -- Retention and legacy history migration prepared
+
+- Normal production Picker use runs local private-input maintenance after first
+  paint, respecting the automatic-maintenance veto and read-only/mock modes.
+  Explicit confirmation also runs it off-thread before saving, preserving the
+  draft and refusing launch on a sanitized retention failure.
+- Legacy prompt history now has the same 90-day bound, preserving original
+  IDs, projects, exact text and submission timestamps without inventing launch
+  evidence. Migration securely deletes expired rows, checkpoints recognized
+  WAL through SQLite, scrubs old freelist copies and leaves a retryable marker
+  if interrupted before the scrub finishes. New history is indexed and uses
+  DELETE journaling and secure deletion. Orphan or unexpected sidecars refuse.
+- The affected intent/history/confirmation/maintenance packet passes 213 cases
+  with eight platform skips. Follow-up retention controls include the real
+  production maintenance callback and native abrupt-exit WAL/restart proof.
+  The final migration/database/native packet passes 44 cases, including a busy
+  real WAL reader. Windows migration measured about 37.71ms for 101 legacy
+  rows, with 20 warm maintenance samples at p50/p95/p99/max
+  14.66/89.94/103.27/103.27ms and no failures. An earlier run measured
+  49.61ms migration and 14.75/17.45/21.18/21.18ms warm samples; the later
+  outlier remains evidence, not a discarded sample. This is storage work
+  off-thread, not installed or key latency; neither small sample qualifies
+  high-percentile tails.
+- Frozen-source POSIX validation passes 128 cases with two Windows-only skips,
+  including all three native migration/restart/measurement cases. The source
+  archive and isolated caches were removed afterward. POSIX migration measured
+  about 20.53ms for 101 legacy rows; 20 warm samples measured
+  p50/p95/p99/max 0.87/2.79/2.84/2.84ms with no failures, still not tail or
+  installed qualification.
+- Pending daemon seed state is untouched. Review/merge, containing release and
+  authorized rollout remain owed.
+  Outcome filtering, selected-machine sweeps and installed local/SSH prompt
+  acceptance are still parent completion gates.
+
+### 2026-10-25 -- Interactive local history merged; retention next
+
+- #8994 merged both Picker entry points with current-head approval and required
+  CI. The common read-only screen exposes local metadata, bounded owner detail
+  and separately requested private input without launching or replaying.
+- Review regressions prove history row messages cannot reach compact Resume,
+  including queued selections during a read; explicit private-input recovery
+  hints retain their flag; and project/action changes cannot reuse another
+  query's pagination cursor. The focused packet passes 32 cases.
+- Next, complete the reviewed 90-day retention contract across normal Manager
+  use and legacy prompt-history copies, retaining original timestamps,
+  protecting SQLite sidecars and never deleting pending daemon intent.
+  Whole-attempt outcome filtering, selected-machine sweeps and installed
+  local/SSH acceptance remain separate incomplete work.
+
 ### 2026-10-25 -- Bounded local reader merged; interactive history next
 
 - #8990 merged with current-head approval and required CI. Manager metadata
