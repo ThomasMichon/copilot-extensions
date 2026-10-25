@@ -89,6 +89,7 @@ def _assert_profile_launch_effects(
     profile: cfg.CopilotProfile | None,
 ) -> None:
     assert profile is not None
+    (tmp_path / "wt").mkdir(exist_ok=True)
     config = cfg.Config(
         srcroot=str(tmp_path),
         machine="test-machine",
@@ -1609,6 +1610,7 @@ def test_invalid_armed_policy_fails_before_worktree_side_effects(
     launch_mode: str,
 ):
     profiles = _profiles(2)
+    (tmp_path / "anchor").mkdir()
     config = cfg.Config(
         srcroot=str(tmp_path),
         machine="test-machine",
@@ -2149,16 +2151,18 @@ def test_corrupt_numeric_record_assignment_metadata_is_ignored(
         assert loaded.profile_assignment_revision == 0
 
 
-def test_selected_profile_remains_an_ordinary_launch_profile():
+def test_selected_profile_remains_an_ordinary_launch_profile(tmp_path):
+    worktree = tmp_path / "worktrees" / "wt"
+    worktree.mkdir(parents=True)
     config = cfg.Config(
-        srcroot="/src",
+        srcroot=str(tmp_path),
         machine="machine",
         platform="linux",
         repo_name="repo",
         repos={
             "repo": cfg.RepoConfig(
-                anchor="/repo",
-                worktree_root="/worktrees",
+                anchor=str(tmp_path),
+                worktree_root=str(worktree.parent),
                 launch={"linux": ["copilot"]},
             )
         },
@@ -2179,10 +2183,10 @@ def test_selected_profile_remains_an_ordinary_launch_profile():
     command = m._build_launch_cmd(
         config,
         argparse.Namespace(copilot_args=[], recovery=False),
-        "/worktrees/wt",
+        str(worktree),
         profile=profile,
     )
     inner = _inner_command(command)
     assert inner[:1] == ["copilot"]
     assert profile.copilot_args == inner[1:1 + len(profile.copilot_args)]
-    assert "-C=/worktrees/wt" in inner[1 + len(profile.copilot_args):]
+    assert f"-C={worktree}" in inner[1 + len(profile.copilot_args):]

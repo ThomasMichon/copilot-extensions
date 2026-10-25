@@ -1,0 +1,9 @@
+{
+  "comment": "Repair exercised launch-path and byte-exact cache fixture prerequisites without relaxing repository admission or Git safety.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
