@@ -260,6 +260,31 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-24 - Integrated regression gates pass; native tail still fails
+
+- The integrated lifecycle, namespace, resolver and external-ownership packet
+  passes 130 tests with one platform skip. The five earlier fixture failures
+  are resolved by the original owner's merged changes, not waived or duplicated.
+- The canonical packet first hit its unchanged 300-second supervisor limit
+  while normal fixture construction ran concurrently. That incomplete run is
+  retained as failed evidence. With those builds finished, the same exact
+  source passed all 1,702 nodes, with coverage and zero effects, in 227.610
+  seconds under the same bound. No timeout, hash, coverage or effect rule changed.
+- Fresh normal Worktrees/Containers construction completed with no stderr.
+  Executing config/lifecycle/resolver and Worktrees module hashes/origins match
+  the integrated source; complete bound state-root JSON and actual global
+  legacy peer identity remain verified.
+- The new complete-provider cohort returned actual complete empty inventories,
+  exit 0 and no stderr in 7.799/5.632/5.502/6.752/**8.821** seconds. The fifth
+  invocation fails the unchanged eight-second requirement. The cohort stopped;
+  no integrated Bridge cohort, average-based pass, installed rollout or
+  comfortable-headroom claim follows.
+- The independent one-query work reduction remains the source change, not a
+  complete latency repair. Source review/CI may assess that component while
+  the parent native and adoption gates remain open. The next performance work
+  must diagnose the combined source's residual/variability; do not retry this
+  unchanged cohort or substitute the earlier source's passing measurements.
+
 ### 2026-10-24 - Original-owner dependency merged and integration resumed
 
 - The original owner reported #8805 merged; provider state independently
