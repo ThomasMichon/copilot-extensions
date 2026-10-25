@@ -771,6 +771,23 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+Complete-source units in `test_complete_source.py`,
+`test_complete_source_publication.py` and `test_source_objects.py` under
+`tools/promotion_unit_tests/` use synthetic blobs, Git protocol responses and
+release metadata. They prove full-tree reconstruction, immutable generation
+bindings, fresh exact-subject admission and publication refusal; no Git
+storage, network or child actor is used. Separate controller contract tests
+inspect the proposal's prepare/attest/publish/PR ordering. They are not packet
+inputs: independently owned Main workflows need not match a Dev proposal.
+
+The separate `tools/test_complete_source_native.py` witness is opt-in:
+set `COPILOT_EXTENSIONS_SOURCE_ARCHIVE_INTEGRATION=1` and run that file through
+bounded development validation. It creates a fresh temporary Git repository
+with export attributes, executable and symlink blobs, then verifies the
+actual object's complete reconstruction. It is not enrolled in required CI
+or the unit-only promotion packet, and does not prove live release publication
+or Main activation.
+
 The three retained-input cardinality/remapping controls live in
 `tools/promotion_unit_tests/test_installer_retention.py` and are shared with
 the on-demand dependency-policy suite. They exercise the real retention

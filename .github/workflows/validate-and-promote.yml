@@ -1214,7 +1214,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      attestations: read
+      attestations: write
+      id-token: write
       pull-requests: read
     outputs:
       publication_digest: ${{ steps.publish.outputs.publication_digest }}
@@ -1288,6 +1289,17 @@ jobs:
           if hashlib.sha256(receipt.read_bytes()).hexdigest() != expected:
               raise RuntimeError("candidate qualification receipt digest mismatch")
           PY
+      - name: Prepare complete source subjects from pinned raw Git objects
+        run: |
+          git fetch origin "$CANDIDATE_SHA"
+          python reviewed-helpers/tools/promotion_source_archive.py \
+            --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/complete-source" \
+            --source-index python-artifacts/python-artifacts.json \
+            --qualification-receipt qualification/qualification.json
+      - name: Attest the complete source and its external generation manifest
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/complete-source/*
       - name: Publish immutable source assets and verify all raw bytes before merge
         id: publish
         env:
@@ -1303,6 +1315,7 @@ jobs:
             --candidate-commit "$CANDIDATE_SHA" --dev-head "$DEV_SHA" --main-before "$MAIN_BEFORE" \
             --candidate-root candidate --promotion-run "$QUALIFICATION_PROMOTION_RUN" \
             --qualification-profile candidate-units-v3 \
+            --complete-source-dir "$RUNNER_TEMP/complete-source" \
             --unit-packet-dir "$RUNNER_TEMP/promotion-unit-evidence" \
             --unit-manifest tools/promotion-unit-manifest.json --dev-root validated-dev \
             --qualification-receipt qualification/qualification.json --github-output "$GITHUB_OUTPUT"

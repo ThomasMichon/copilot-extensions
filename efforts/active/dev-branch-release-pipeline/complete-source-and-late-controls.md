@@ -2,7 +2,7 @@
 
 Parent: [Dev/Main Release Pipeline](README.md), Phase 9d. Tracker: #8736.
 
-**Status:** agent-recommended implementation plan; review before execution.
+**Status:** Active; agent-recommended plan reviewed in #8745 before execution.
 The parent Request retains the operator's exact direction and execution consent.
 
 ## Goal and non-goals
@@ -47,7 +47,7 @@ shared interface requires coordination, not a competing implementation.
 
 ### 1. Review and isolate the extension
 
-- [ ] Land the parent vision/plan amendment before production changes.
+- [x] Land the parent vision/plan amendment before production changes: #8745.
 - [ ] Inventory existing source-archive, release-index, unit-packet and
       Main-control interfaces; coordinate the exact shared seams.
 - [ ] Keep new helpers small and independently testable rather than expanding

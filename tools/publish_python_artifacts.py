@@ -393,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
         "--qualification-profile", choices=("legacy-ci-v1", "source-units-v2", "candidate-units-v3"), default="legacy-ci-v1",
     )
     parser.add_argument("--unit-packet-dir", type=Path)
+    parser.add_argument("--complete-source-dir", type=Path)
     parser.add_argument("--unit-manifest")
     parser.add_argument("--dev-root", type=Path)
     parser.add_argument("--github-output", type=Path)
@@ -450,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
             args.operation == "publish-candidate" and signed_index["schema_version"] == 2
         )
         if source_candidate:
+            if args.qualification_profile in ("source-units-v2", "candidate-units-v3") and args.complete_source_dir is None:
+                raise PromotionArtifactError("source candidate publication requires complete source subjects")
             from promotion_artifact_readiness import verify_ready_artifact_set
 
             tag, index = verify_ready_artifact_set(
@@ -502,6 +505,14 @@ def main(argv: list[str] | None = None) -> int:
                     qualification_digest=qualification_digest,
                 )
                 print(f"unit-evidence-published: {tag}/{publication['unit_evidence']['filename']}")
+                from promotion_release_evidence import publish_complete_source
+
+                publication["complete_source"] = publish_complete_source(
+                    args.directory, source_directory=args.complete_source_dir,
+                    repository=args.repository, tag=tag, index=index, receipt=receipt,
+                    qualification_digest=qualification_digest,
+                )
+                print(f"complete-source-published: {tag}/{args.candidate_commit}")
             digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
             if args.github_output is not None:
                 with args.github_output.open("a", encoding="utf-8") as output:

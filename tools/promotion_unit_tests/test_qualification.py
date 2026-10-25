@@ -659,7 +659,7 @@ def test_v2_publisher_consumes_the_real_packet_verifier_with_explicit_profile(un
     assert writes == [CANDIDATE]
 
 
-@pytest.mark.parametrize("failed_evidence", [False, True])
+@pytest.mark.parametrize("failed_evidence", [False, True, "source", "missing-source"])
 def test_source_owned_unit_publication_requires_retained_evidence_before_success(
     unit_case, tmp_path, monkeypatch, failed_evidence,
 ):
@@ -693,21 +693,41 @@ def test_source_owned_unit_publication_requires_retained_evidence_before_success
         assert kwargs["qualification_digest"] == qualification.receipt_digest(value)
         assert kwargs["dev_sha"] == DEV and kwargs["candidate_sha"] == CANDIDATE
         observed.append("evidence-readback")
-        if failed_evidence:
+        if failed_evidence is True:
             raise ValueError("evidence readback failed")
         return retained
 
+    source = {"tree": value["tree"], "assets": [{"sha256": "f" * 64}]}
+
+    def retain_source(path, **kwargs):
+        assert observed == ["code-readback", "evidence-readback"] and path == directory
+        assert kwargs["source_directory"] == tmp_path / "source-subjects"
+        assert kwargs["receipt"] == value and kwargs["qualification_digest"] == qualification.receipt_digest(value)
+        observed.append("complete-source-readback")
+        if failed_evidence == "source":
+            raise ValueError("complete-source readback failed")
+        return source
+
     monkeypatch.setattr(readiness, "verify_ready_artifact_set", ready)
     monkeypatch.setattr(release_evidence, "publish_evidence", retain)
+    monkeypatch.setattr(release_evidence, "publish_complete_source", retain_source)
+    source_arguments = (
+        [] if failed_evidence == "missing-source"
+        else ["--complete-source-dir", str(tmp_path / "source-subjects")]
+    )
     result = publisher.main([
         *_publish_arguments(unit_case, directory, receipt_path),
         "--qualification-profile", qualification.CANDIDATE_UNIT_PROFILE,
         "--unit-packet-dir", str(unit_case["args"]["unit_packet_dir"]),
         "--unit-manifest", MANIFEST, "--dev-root", str(unit_case["args"]["dev_root"]),
         "--github-output", str(output),
+        *source_arguments,
     ])
     assert result == (1 if failed_evidence else 0)
-    assert observed == ["code-readback", "evidence-readback"]
+    expected = [] if failed_evidence == "missing-source" else ["code-readback", "evidence-readback"]
+    if failed_evidence is not True and failed_evidence != "missing-source":
+        expected.append("complete-source-readback")
+    assert observed == expected
     if failed_evidence:
         assert not output.exists()
     else:
@@ -715,6 +735,7 @@ def test_source_owned_unit_publication_requires_retained_evidence_before_success
             "dev_head": DEV, "candidate": CANDIDATE, "qualification": qualification.receipt_digest(value),
             "index_digest": hashlib.sha256(index_raw).hexdigest(), "artifacts": [],
             "unit_evidence": retained,
+            "complete_source": source,
         }
         digest = hashlib.sha256(json.dumps(publication, sort_keys=True).encode()).hexdigest()
         assert f"publication_digest={digest}\n" in output.read_text()
