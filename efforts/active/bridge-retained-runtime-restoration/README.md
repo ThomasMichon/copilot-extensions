@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK, original-turn/acquisition DB and explicit local native/acquisition source merged; full custody/qualification/restoration open
+- **Status:** Active; opt-in SDK, original-turn/acquisition DB and explicit local native/acquisition/creation source merged; full custody/qualification/restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -147,8 +147,10 @@ require their own review and qualification.
       installed qualification remain open. The internal
       [keyed-creation DB foundation](../../../plugins/agent-bridge/docs/creation-custody.md)
       merged in #8823. Its separately selected local allocation subprocess
-      fence merged in #8869; ground-owner child qualification, native creation,
-      provider and remaining effect-owner integration stay open.
+      fence merged in #8869. Explicit original local Host/child/native creation,
+      binding and first-turn source merged in #8895. Ground-owner child and
+      actual native/platform qualification, provider and remaining effect-owner
+      integration stay open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -263,6 +265,39 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-25 - Original local native creation merged; provider handoff storage next
+
+- #8895 merged as `5468f03f35e7f6e67e722f87ecbba9d8f738498d` at
+  02:05:02 PDT after the independent current-head review `5642376894` on
+  `6743f921a1e3c6c54c518f47353ddfb523efe0ad` reported no open issues and
+  required CI passed. The owner-authored clean Comment satisfies the target
+  contribution policy; no earlier review or author-reply metadata was used
+  as a current verdict.
+- The final corrections preserve actual live startup custody and child
+  environment, including selected resume, and avoid idle-sweep/reattachment
+  lock inversion. The coupled source portfolio passes 678 controls, the
+  changed-authority/registry cohort passes 109, and the final lock-order
+  selection passes 67, each with its reported capability skips and verified
+  cleanup. Genuine source `d33335b83a2fc0c83db7b21c94d9dc9730c898e8`
+  remains retrievable through its immutable contract-evidence tag.
+- Re-read the complete Plan and Validation Plan. Only this bounded original
+  local creation slice lands. Phase 1/1b, ground-child filesystem, other
+  producer/provider/background/remote cohorts, attributed consumption,
+  target compatibility, guarded restoration and separately authorized
+  platform/running adoption remain open. No full checkbox closes.
+- Guarded source reconciliation verified all nine local commits in the
+  provider's merged PR, retained the reviewed tip and advanced only the owned
+  source venue to the actual squash merge. This is not release or deployment.
+- Continue at the existing provider creation owner, which starts an already-ready
+  instance-pinned provider-exec target rather than allocating a workspace.
+  The next bounded prerequisite retains prospective native handoff, one-shot
+  start and original outcome observations on the existing `provider_embodiments`
+  row, with prepared storage, strict inventory and passive/adoption validation.
+  It grants no provider subprocess/native invocation or remote ownership;
+  actual provider effect-owner mediation and qualification remain subsequent
+  gates. Do not fabricate a provider allocation operation or an acquisition
+  request to reuse the local workspace adapter.
 
 ### 2026-10-24 - Original local creation native source controls
 
