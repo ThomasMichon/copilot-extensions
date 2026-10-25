@@ -148,6 +148,11 @@ class PickerScreenInputMixin:
             elif zone == "BTN":
                 self._activate()
         elif key == "r":
+            if self._kind() == "registered":
+                from .registered_scopes import refresh
+                refresh(self, self._reg_pivot())
+                self.debug = f"{self._reg_pivot().label}: refreshing selected declared scope(s)"
+                return
             if self._in_configuration():
                 if self._kind() == "config_section":
                     self._load_current_config_section(force=True)
@@ -255,8 +260,7 @@ class PickerScreenInputMixin:
     def _nav_view_row(self, d):
         """Move focus across the top tab-row -- the left-rail pivots plus the
         ⚙ Configuration entry -- with bare ◀▶. Landing on a pivot switches the
-        view (as a tab implies); landing on Configuration just focuses it (Enter
-        opens its menu). Configuration is thus part of the same row as the
+        view (as a tab implies), including Configuration. It is part of the same row as the
         pivots, not a separate stop (#1426)."""
         left = self._left_pivots()
         if not left:
@@ -272,6 +276,7 @@ class PickerScreenInputMixin:
             cur = 0
         target = row[(cur + d) % len(row)]
         if target == "cfg":
+            self._open_cfgmenu()
             self.sel = ("CFG", 0)
         else:
             self.htab = target

@@ -37,7 +37,7 @@ def test_source_launcher_uses_normal_shutdown_workaround(monkeypatch, candidate)
     assert calls == [("main", ["example", *candidate]), ("exit", 0)]
 
 
-@pytest.mark.parametrize("kind", ["bootstrap", "catalog"])
+@pytest.mark.parametrize("kind", ["bootstrap", "catalog", "streaming-manifest"])
 def test_teardown_cancels_and_drains_real_read_descendants(tmp_path, monkeypatch, kind):
     heartbeat = tmp_path / "heartbeat"
     grandchild = (
@@ -65,6 +65,17 @@ def test_teardown_cancels_and_drains_real_read_descendants(tmp_path, monkeypatch
         try:
             if kind == "bootstrap":
                 engine_group_b.picker_bootstrap("example")
+            elif kind == "streaming-manifest":
+                from dataclasses import replace
+                from worktree_manager.production_picker.picker_tui import pivots
+                path = Path(__file__).resolve().parents[3] / "plugins" / "agent-dispatch" / "pivots" / "workers-config.json"
+                reg = replace(
+                    pivots.parse_manifest(json.loads(path.read_text(encoding="utf-8")), name="workers", source_path=str(path)),
+                    source_owner="agent-dispatch@example",
+                )
+                runtime = tasks.RegisteredPivotRuntime(reg)
+                runtime._run_list("", runtime._gen)
+                results.append(runtime.get("")[0])
             else:
                 runtime = tasks.RegisteredPivotRuntime(
                     type("Pivot", (), {"list_cmd": ["catalog"]})(),

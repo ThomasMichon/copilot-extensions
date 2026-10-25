@@ -144,7 +144,8 @@ to eager imports; that is not all removable work or an additive prediction of
 whole-command savings. For example, an activity import includes configuration
 that state-root genuinely needs.
 
-Review a bounded import-closure slice before implementation:
+The bounded import-closure plan was reviewed in #8818 and merged as
+`a1a15d4c9e7d934d02fac5818e3f194865f4cae6`. Implementation remains open:
 
 - Trace the ordinary CLI's existing state-root dispatch and retain its project,
   CWD, binding, configuration, output, error and conduct decisions. Use the
@@ -178,8 +179,18 @@ Review a bounded import-closure slice before implementation:
   into installer/native-frontdoor, SDK or lifetime work. Source review/CI,
   containing release and authorized installed consumption remain distinct.
 
-This is a proposal under step 4, not implemented import behavior or another
-implementation assignment to the already-completed selector PR.
+The first bounded import experiment was rejected after normal isolated builds:
+three alternating fresh global-command pairs retained complete state-root JSON,
+but candidate times were 2.938/2.735/2.281 seconds against baseline
+2.578/2.296/2.204 seconds. Installed module origins and the absence of the targeted
+unrelated imports were verified; work-count reduction did not establish useful
+latency reduction. The candidate is withdrawn, not a published optimization or
+an eight-second pass. No unchanged whole-discovery cohort was retried.
+
+This remains the reviewed slice under step 4, not shipped import behavior or
+another implementation assignment to the already-completed selector PR.
+Any different mechanism, including the existing Docker preflight, still requires
+its own measured trace, ownership check and separate reviewed plan.
 
 ## Validation plan
 

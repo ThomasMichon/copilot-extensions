@@ -998,13 +998,13 @@ def test_cli_and_form_contract(capsys):
 def test_real_observation_requires_fresh_receipt(monkeypatch):
     monkeypatch.setattr("agent_dispatch.remote_dispatch.local_machine", lambda: "fixture-host")
     monkeypatch.setattr(
-        "agent_dispatch.supervise_cli._read_supervisor_runtime_status",
-        lambda scope: ({"updated_at": time.time() - 1000, "running": []}, None),
+        "agent_dispatch.supervisor_status_io.read_status",
+        lambda path: ({"updated_at": time.time() - 1000, "running": []}, None),
     )
     assert not real_observation()["known"]
     monkeypatch.setattr(
-        "agent_dispatch.supervise_cli._read_supervisor_runtime_status",
-        lambda scope: ({"updated_at": time.time(), "running": []}, None),
+        "agent_dispatch.supervisor_status_io.read_status",
+        lambda path: ({"updated_at": time.time(), "running": []}, None),
     )
     assert real_observation()["known"]
 

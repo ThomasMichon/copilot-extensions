@@ -7,6 +7,7 @@ import threading
 from collections.abc import Mapping
 
 from .. import engine_client, harness_state, picker_review
+from ..manager_config import automatic_maintenance_enabled, load_config
 from . import context
 from . import engine_group_b
 from .picker_tui import run_tui_picker
@@ -78,7 +79,12 @@ def _start_anchor_heal_check(project: str) -> None:
     first paint never waits on control-plane discovery or machine-roster
     inspection; nothing downstream reads its result."""
 
+    if not automatic_maintenance_enabled():
+        return
+
     def _worker() -> None:
+        if not automatic_maintenance_enabled():
+            return
         try:
             engine_group_b.repair_stale_anchor(project)
         except Exception:
@@ -93,8 +99,12 @@ def _start_anchor_heal_check(project: str) -> None:
 
 def _start_housekeeping() -> None:
     """Run the production pre-Picker sweeps without delaying first paint."""
+    if not automatic_maintenance_enabled():
+        return
 
     def reap_background() -> None:
+        if not automatic_maintenance_enabled():
+            return
         from . import housekeeping
 
         try:
@@ -187,6 +197,8 @@ def run(
         nonlocal picker_root
         if resolved_mock or picker_review.active() or finished.is_set():
             return
+        if not load_config().maintenance.automatic:
+            return "Automatic maintenance disabled by maintenance.automatic = false"
         from .. import resident_picker
 
         if not resident_picker.wait_for_local(context.project(), finished.is_set):

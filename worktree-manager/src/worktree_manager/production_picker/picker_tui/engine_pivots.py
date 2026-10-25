@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 from .engine_helpers import BUILTIN_PIVOTS, PIVOT_PLACEMENT
+from .task_category_filter import combine_task_categories
 
 _UNTRACKED_CONFIG_REVISION = object()
 
@@ -41,7 +42,7 @@ class PickerScreenPivotsMixin:
                 ], []
                 config_sections = []
         self.registered_pivots = registered
-        self.pivots = descriptors
+        self.pivots = combine_task_categories(descriptors)
         # Cross-plugin worktree-row actions (a layer augmenting the Worktrees
         # view's Enter sub-menu, e.g. a bridge's "Send message"): discovered
         # from the same manifests, independent of any list pivot (#B).
@@ -83,7 +84,7 @@ class PickerScreenPivotsMixin:
             return
         registered, descriptors, wt_actions, config_sections = payload
         self.registered_pivots = registered
-        self.pivots = descriptors
+        self.pivots = combine_task_categories(descriptors)
         self.wt_actions = wt_actions
         self.config_sections = config_sections
         self._install_config_descriptors()
@@ -323,8 +324,12 @@ class PickerScreenPivotsMixin:
         **account-scoped** pivot (a cross-machine shared resource like CodeSpaces)
         keys off a single constant so its ``list`` runs once, not per machine."""
         reg = self._reg_pivot()
-        if reg is not None and getattr(reg, "account_scoped", False):
-            return ""
+        if reg is not None:
+            from .registered_scopes import selects_machine
+            if reg.account_scoped or not selects_machine(reg):
+                return ""
+            if self.is_all() and reg.placement != "config":
+                return None
         return self._pivot_machine_id()
     def _pivot_runtime(self, reg):
         """Lazily build (and cache) the background runtime for a registered

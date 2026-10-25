@@ -15,6 +15,7 @@ from worktree_manager.form_requests import (
 )
 from worktree_manager.form_draft_storage import write_record
 from .engine_dialogs import TaskMenuScreen
+from .registered_scopes import read_scope
 
 
 class RetainedResponsesMenu(TaskMenuScreen):
@@ -235,8 +236,8 @@ class PivotFormRequestActionsMixin:
             if reg is not None:
                 try:
                     runtime = self._pivot_runtime(reg)
-                    runtime.invalidate()
-                    scope = "" if reg.account_scoped else str(record["context"].get("machine") or "")
+                    scope = read_scope(reg, str(record["context"].get("machine") or ""))
+                    runtime.invalidate(scope)
                     runtime.ensure(scope)
                     self.refresh()
                 except Exception as exc:

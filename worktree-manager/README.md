@@ -326,6 +326,40 @@ No installation, global mux configuration or extra service is required.
 
 ## Launch preparation
 
+### Disable automatic maintenance while auditing
+
+Set this strictly boolean user-local policy in
+`~/.worktree-manager/config.toml` (or the existing `WORKTREE_MANAGER_ROOT`):
+
+```toml
+[maintenance]
+automatic = false
+```
+
+Omitting the table/key preserves the enabled default. Invalid or unreadable
+configuration blocks automatic work with a diagnostic; strings such as
+`"false"` and unknown maintenance keys are errors, not enabled defaults.
+The Picker reports a disabled policy without blocking ordinary browsing.
+This switch is a veto, not installation consent: `true` does not bypass the
+updater's existing opt-in, publication, or ownership checks.
+
+The policy vetoes Manager-initiated automatic launch update/reconciliation
+submissions, background staging, anchor healing, orphan/managed/finished-session
+sweeps, Picker monitor-root enrollment/renewal and monitor start/restart
+attempts. It is re-read at each admission, including queued worker entry and
+successive launch phases. Optional warm-Picker spare creation is also vetoed;
+cleanup of already-owned UI processes still follows their normal lifecycle.
+The legacy `AGENT_WORKTREES_NO_AUTO_CLEAN` opt-out
+still independently vetoes finished-session cleanup.
+
+This is **not a read-only sandbox**: manual actions retain their existing
+confirmation/ownership gates, passive discovery and update-availability reads
+continue, and work already admitted may finish. It neither cancels an accepted
+update request nor stops another owner's resident service or scheduled
+maintenance. Set it before launch when auditing; changing it later cannot
+undo earlier effects. Reset to `true` or remove the key to allow future
+automatic admissions.
+
 For changes to installation or launch, run the ordinary contained Manager tests
 and `python tools/run-manager-runtime-acceptance.py --root .validation` from the
 repository root. The latter constructs fresh candidates under the existing
@@ -717,7 +751,7 @@ Nonempty prompts with Anchor, Bare, AHP, or Local model selected refuse
 confirmation visibly and keep the draft open without recording it. Clear the
 prompt or change the options to continue. Remote and cross-environment
 (including Windows-to-WSL) New and Resume do not offer a prompt composer; programmatic
-prompt requests for those transports, Bare resume, or active/uncertain execution
+prompt requests for those transports or active/uncertain execution
 legs refuse before engine staging. Seedless launches are unchanged. No Mux is a
 supported prompt launch modifier. History retains the exact paste buffer;
 launch submission retains the composer's existing surrounding-whitespace trimming.
@@ -732,7 +766,78 @@ available; a genuinely empty, unowned worktree still offers **Open**.
 A successful explicit task embodiment may attach its newly launched session
 even while the Picker's pre-transaction workspace snapshot is still sessionless.
 
-For a stopped worktree, **Actions > Resume prompt…** supplies the first
+### Picker navigation and read-only status
+
+Dispatch contributes one **Tasks** pivot. **Include maintenance** is unchecked
+by default (work tasks only); checking it includes both work and maintenance
+tasks from the same attributed provider, even when only the maintenance
+contribution is available. The toggle filters the current scope; it does not
+create tasks, change categories or establish cross-machine aggregation.
+Provider scope/read errors remain explicit, not an empty successful result.
+The provider applies its row limit independently to each category before
+combining the board, so maintenance traffic cannot hide older work tasks.
+This requires the provider's `--limit-per-category` board support; an older
+peer reports an unsupported-option/upgrade error instead of an incomplete
+work-only inventory.
+
+Workers Configuration uses its provider's progressive catalog: known templates
+appear while configured-worker and source discovery continues. The loading
+banner qualifies the partial view; final counts and activity facts come from
+the provider, not Manager-side reconstruction. See the
+[Workers catalog contract](../plugins/agent-dispatch/docs/worker-instances.md).
+
+**All** gathers machine-selecting registered providers from admitted canonical
+source descriptors, including machines whose Worktrees read failed. Repeated
+tabs for one logical machine share a request; distinct guest identities are
+not collapsed by a common display name. At most four initial reads start
+concurrently. Available and cached rows retain their source labels beside
+pending/failed scopes; a failed scope is never reported as an empty success.
+Account/global providers and commands without a declared `{machine}` selector
+run once in their own declared scope, without invented machine flags.
+`r` refreshes the active registered provider's selected scope(s), not the
+Worktrees loader. Cached failed rows remain inspectable, but executable row
+actions refuse until the source has a current read; provider-side ownership
+checks and action confirmations remain authoritative.
+
+One-shot registered reads retain the 20-second command budget and now use
+caller-owned process-tree cleanup, including wrapper descendants on Windows.
+The existing 30-second stream budget also bounds a held stream's first commit:
+`begin` alone is not a committed snapshot; a row or completed empty snapshot is.
+After that first commit a subscribed channel may remain open normally.
+Startup timeouts and worker exceptions settle as cached, source-attributed
+errors instead of retrying on every render frame. Explicit refresh and the
+normal polling cadence can retry them.
+
+Highlighting the right-docked **Configuration** entry immediately displays its
+last selected section. This is browsing only; Apply/confirmation remains
+required for changes. Escape returns to the previous operational view.
+
+One header update action is shown: a Manager update takes precedence when both
+Manager and payload report availability (that path also reconciles the payload).
+Otherwise the payload's staged-update action remains available.
+Rows retain checked selections while buttons hold focus, but the amber cursor
+appears only while the list itself has focus.
+Filtered live publications remap focus by the source-qualified row key, rather
+than reusing a stale row index. The existing safety rule still keeps live/ACTIVE
+rows visible even when they do not match the query; newly admitted live rows
+must not silently retarget the filtered selection.
+
+`WT✗` qualifies a failed **Worktrees source read**, not whole-machine
+reachability; another pivot may still read successfully on that machine.
+Claim-coverage and orphanage details are read-only snapshots: inspect their
+scope, freshness and incomplete/unknown evidence before considering any cleanup.
+Unreachable never establishes that a resource is stopped, absent or safe to
+reclaim.
+
+For a stopped local worktree, **Actions > Resume** includes an optional prompt
+field directly above the actions and the existing **No Mux** / **AHP** options.
+Only eligible prompts load history, asynchronously through the Picker's
+existing background/Inbox owner. History completion never replaces a draft or
+its cursor, and Escape does not wait for history storage. If late verification
+removes local cold-Resume eligibility, a nonempty draft remains visible and
+launch refuses rather than silently dropping it. The compact Actions frame
+keeps its native option list scrollable at 80×24 and 118×24.
+There is no separate prompt dialog or Bare-resume action in Manager. The prompt supplies the first
 turn of the cold Copilot start alongside its prior `--resume=<session>` target.
 It uses the full `--interactive` argument, including with **No Mux**. A live
 session offers **Open**, not Resume with a prompt; Open neither queues nor

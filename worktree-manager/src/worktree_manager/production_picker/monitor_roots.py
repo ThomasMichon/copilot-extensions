@@ -26,6 +26,7 @@ from agent_procutil import windowless_daemon_kwargs
 from . import context
 from .. import agent_plugin_runtime
 from .. import engine_client
+from ..manager_config import automatic_maintenance_enabled
 from ..mux_daemon_process import scrub_session_credentials
 
 _PICKER_HEARTBEAT_INTERVAL = 10.0
@@ -90,6 +91,8 @@ def _monitor_lock_satisfies_current_runtime(data: dict | None) -> bool:
 
 
 def _spawn_status_monitor(base: list[str]) -> bool:
+    if not automatic_maintenance_enabled():
+        return False
     env = scrub_session_credentials(engine_client._engine_environment())
     for key in ("COPILOT_AGENT_SESSION_ID", "WORKTREE_PROJECT", engine_client.ENGINE_ARGV_ENV):
         env.pop(key, None)
@@ -109,7 +112,7 @@ def _spawn_status_monitor(base: list[str]) -> bool:
 
 
 def ensure_status_monitor_running() -> bool:
-    if not status_monitor_enabled():
+    if not automatic_maintenance_enabled() or not status_monitor_enabled():
         return False
     if _monitor_lock_satisfies_current_runtime(_read_lock(_status_monitor_lock_path())):
         return True
@@ -288,10 +291,12 @@ class PickerHeartbeat:
         self._thread: threading.Thread | None = None
 
     def _write(self) -> bool:
+        if not automatic_maintenance_enabled():
+            return False
         return _write_lock(self.path, extra={"kind": "picker", "project": self.project})
 
     def _ensure(self) -> None:
-        if self._ensure_monitor is None:
+        if self._ensure_monitor is None or not automatic_maintenance_enabled():
             return
         try:
             self._ensure_monitor()
@@ -299,6 +304,8 @@ class PickerHeartbeat:
             pass
 
     def start(self) -> bool:
+        if not automatic_maintenance_enabled():
+            return False
         if not self._write():
             return False
         self._ensure()
@@ -356,7 +363,7 @@ def live_picker_projects(*, now: float | None = None, stale_after: float = _PICK
 
 
 def start_picker_monitor_root(project: str | None = None):
-    if not status_monitor_enabled():
+    if not automatic_maintenance_enabled() or not status_monitor_enabled():
         return None
     try:
         root = PickerHeartbeat(project or context.project(), ensure_monitor=ensure_status_monitor_running)

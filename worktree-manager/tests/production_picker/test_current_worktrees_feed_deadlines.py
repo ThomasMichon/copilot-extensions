@@ -1,4 +1,4 @@
-"""Real child-process coverage for startup, publication and idle deadlines."""
+"""Real-child deadline recovery, with timer delivery qualified separately."""
 
 from __future__ import annotations
 
@@ -189,20 +189,45 @@ def test_feed_process_startup_uses_source_budget_not_publication_budget(monkeypa
 def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
     monkeypatch, tmp_path, boundary, request,
 ):
+    """Force one expiry after its wire boundary; do not time healthy retries.
+
+    This qualifies recovery, atomic publication and child custody after a
+    watchdog reports expiry, not wall-clock timer delivery. Both children
+    remain test-owned until forced expiry or cancellation. The startup and
+    heartbeat tests separately exercise the actual production watchdog.
+    """
     factor = _test_budget_factor()
-    started, events = time.monotonic(), []
+    started, events, armed = time.monotonic(), [], []
     monkeypatch.setattr(loader_feed, "INITIAL_TIMEOUT", 0.15 * factor)
     monkeypatch.setattr(loader_feed, "IDLE_TIMEOUT", 0.4 * factor)
     marker = tmp_path / "first-attempt"
-    armed = []
-    arm = loader_feed._Watchdog.arm
+    boundary_flushed = tmp_path / "first-boundary-flushed"
+    release_retry = tmp_path / "release-retry"
+    watchdogs = []
 
-    def capture_budget(watchdog, timeout):
-        armed.append(timeout)
-        events.append({"event": "watchdog-armed", "at": time.monotonic(), "budget": timeout})
-        arm(watchdog, timeout)
+    class ControlledWatchdog:
+        def __init__(self, kill, timeout):
+            self.kill = kill
+            self.initial_budget = timeout
+            self.armed = []
+            self.expired = False
+            self.closed = False
+            watchdogs.append(self)
 
-    monkeypatch.setattr(loader_feed._Watchdog, "arm", capture_budget)
+        def arm(self, timeout):
+            self.armed.append(timeout)
+            armed.append(timeout)
+            events.append({"event": "watchdog-armed", "at": time.monotonic(), "budget": timeout})
+
+        def expire(self):
+            assert not self.closed and not self.expired
+            self.expired = True
+            self.kill()
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(loader_feed, "_Watchdog", ControlledWatchdog)
     first = snapshot([{"id": "one", "status": "active", "dirty": 2}])
     pending = update([{"id": "one", "status": "active", "dirty": 9}])
     second = snapshot(
@@ -221,16 +246,34 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         f"  for frame in {pending[:-1]!r}: print(json.dumps(frame),flush=True)\n"
         f" if {boundary!r}=='partial-frame':\n"
         "  sys.stdout.write('{\"type\":\"worktree\"'); sys.stdout.flush()\n"
-        f" time.sleep({10 * factor!r})\n"
+        f" pathlib.Path({str(boundary_flushed)!r}).write_text('flushed')\n"
+        " while True: time.sleep(.1)\n"
         "else:\n"
+        f" gate=pathlib.Path({str(release_retry)!r})\n"
+        " while not gate.exists(): time.sleep(.01)\n"
         f" for frame in {second!r}: print(json.dumps(frame),flush=True)\n"
-        " for _ in range(100):\n"
+        " while True:\n"
         f"  time.sleep({0.1 * factor!r})\n"
         "  print(json.dumps({'type':'heartbeat','generation':'b'*32,'cursor':1}),flush=True)\n"
     )
     source = data_ssh.Source("host", "Win", None, local=True, timeout=2 * factor)
     loader, worker, children = run_loader(monkeypatch, source, script, events=events)
     try:
+        wait_until(lambda: len(watchdogs) == 1 and boundary_flushed.exists(), factor=factor)
+        first_watchdog = watchdogs[0]
+        expected_arms = {
+            "startup": [],
+            "initial-publication": [loader_feed.INITIAL_TIMEOUT],
+            "publication": [
+                loader_feed.INITIAL_TIMEOUT, loader_feed.IDLE_TIMEOUT,
+                loader_feed.INITIAL_TIMEOUT,
+            ],
+            "partial-frame": [loader_feed.INITIAL_TIMEOUT, loader_feed.IDLE_TIMEOUT],
+            "heartbeat": [loader_feed.INITIAL_TIMEOUT, loader_feed.IDLE_TIMEOUT],
+        }[boundary]
+        wait_until(lambda: first_watchdog.armed == expected_arms, factor=factor)
+        assert first_watchdog.initial_budget == source.timeout
+        first_watchdog.expire()
         wait_until(lambda: bool(loader.error_for_source(source.source_id)), factor=factor)
         events.append({"event": "deadline-visible", "at": time.monotonic(),
                        "records": _record_state(loader),
@@ -240,11 +283,12 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
             assert loader.records() == []
             assert loader._state[source.cache_key] == "failed"
             if boundary == "initial-publication":
-                assert armed == [loader_feed.INITIAL_TIMEOUT]
+                assert first_watchdog.armed == [loader_feed.INITIAL_TIMEOUT]
         else:
             assert loader.records()[0]["id"] == "one"
             assert loader.records()[0]["raw"]["dirty"] == 2
             assert loader.records()[0]["title"].startswith("[stale]")
+        release_retry.write_text("release", encoding="utf-8")
         wait_until(lambda: bool(loader.records()) and loader.records()[0]["id"] == "two",
                    factor=factor)
         events.append({"event": "recovery-visible", "at": time.monotonic()})
@@ -253,6 +297,8 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         assert not loader.error_for_source(source.source_id)
         assert loader._state[source.cache_key] == "ready"
         assert len(children) == 2 and children[0].poll() is not None
+        assert len(watchdogs) == 2 and first_watchdog.closed
+        assert not watchdogs[1].expired
     finally:
         failure, cleanup_failure = sys.exc_info()[1], None
         try:
@@ -263,7 +309,70 @@ def test_feed_transient_deadline_recovers_without_partial_or_empty_overwrite(
         finally:
             _report(request, factor, started, events, source, loader, worker, children,
                     failure, cleanup_failure, armed,
-                    synthetic_delays={"negative_stall": 10 * factor, "heartbeat": 0.1 * factor})
+                    synthetic_delays={"controlled_expiry": True, "heartbeat": 0.1 * factor})
+    assert all(watchdog.closed for watchdog in watchdogs)
+
+
+def test_feed_heartbeat_expiry_uses_real_watchdog_after_committed_snapshot(monkeypatch):
+    """Time actual idle expiry; enrollment/publication are controlled setup."""
+    monkeypatch.setattr(loader_feed, "INITIAL_TIMEOUT", 0.15)
+    monkeypatch.setattr(loader_feed, "IDLE_TIMEOUT", 0.4)
+    real_watchdog = loader_feed._Watchdog
+    watchdogs, observed = [], []
+    fault = threading.Event()
+
+    class HeartbeatWatchdog:
+        def __init__(self, kill, timeout):
+            self.kill = kill
+            self.initial_budget = timeout
+            self.armed = []
+            self.timer = None
+            watchdogs.append(self)
+
+        @property
+        def expired(self):
+            return self.timer is not None and self.timer.expired
+
+        def arm(self, timeout):
+            self.armed.append(timeout)
+            if self.timer is not None:
+                self.timer.arm(timeout)
+            elif timeout == loader_feed.IDLE_TIMEOUT:
+                self.timer = real_watchdog(self.kill, timeout)
+
+        def close(self):
+            if self.timer is not None:
+                self.timer.close()
+
+    monkeypatch.setattr(loader_feed, "_Watchdog", HeartbeatWatchdog)
+    feed_error = loader_feed.CurrentFeedMixin._feed_error
+
+    def capture_expiry(loader, source, generation, reason):
+        feed_error(loader, source, generation, reason)
+        observed.append((reason, loader.records(), loader._state[source.cache_key]))
+        loader.cancel()
+        fault.set()
+
+    monkeypatch.setattr(loader_feed.CurrentFeedMixin, "_feed_error", capture_expiry)
+    frames = snapshot([{"id": "one", "status": "active", "dirty": 2}])
+    script = (
+        "import json,time\n"
+        f"for frame in {frames!r}: print(json.dumps(frame),flush=True)\n"
+        "while True: time.sleep(.1)\n"
+    )
+    source = data_ssh.Source("host", "Win", None, local=True, timeout=2)
+    loader, worker, children = run_loader(monkeypatch, source, script)
+    try:
+        assert fault.wait(5), "actual heartbeat watchdog did not report expiry"
+        reason, rows, state = observed[0]
+        assert "deadline" in reason and watchdogs[0].expired
+        assert watchdogs[0].initial_budget == source.timeout
+        assert watchdogs[0].armed == [loader_feed.INITIAL_TIMEOUT, loader_feed.IDLE_TIMEOUT]
+        assert rows[0]["id"] == "one" and rows[0]["raw"]["dirty"] == 2
+        assert rows[0]["title"].startswith("[stale]") and state == "ready"
+        assert len(children) == 1 and children[0].poll() is not None
+    finally:
+        stop_loader(loader, worker, children)
 
 
 def test_feed_unterminated_frame_without_watchdog_expiry_is_terminal(monkeypatch):

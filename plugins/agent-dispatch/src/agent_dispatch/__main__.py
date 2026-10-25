@@ -18,11 +18,11 @@ import time
 from pathlib import Path as Path  # noqa: F401 -- compatibility export for tests
 from typing import Any
 
-from .delegated_waiter_contract import CALLBACK_COMMAND
+if __name__ == "__main__":
+    from .early_cli import dispatch
 
-if __name__ == "__main__" and sys.argv[1:2] == [CALLBACK_COMMAND]:
-    from .delegated_waiter_callback import main as callback_main
-    raise SystemExit(callback_main(sys.argv[2:]))
+    if (result := dispatch(sys.argv[1:])) is not None:
+        raise SystemExit(result)
 
 import httpx
 
@@ -754,6 +754,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="machine to scope to; a *remote* machine reads that peer's queue "
         "over the SSH mesh (default: this machine, resolved via agent-worktrees)",
     )
+    p.add_argument("--limit-per-category", action="store_true", help="With --board --category all, retain --limit rows per category.")
     p.add_argument(
         "--status",
         default="proposed",

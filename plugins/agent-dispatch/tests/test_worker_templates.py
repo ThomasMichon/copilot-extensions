@@ -35,6 +35,15 @@ def registered_root(name, root, repo_class="reference"):
     return {"name": name, "class": repo_class, "registration": "ready", "path": str(root)}
 
 
+def native_symlink(path, target, *, target_is_directory):
+    try:
+        path.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as error:
+        if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+            pytest.skip("native symlink creation requires Windows privilege")
+        raise
+
+
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "registrar"))
@@ -224,7 +233,8 @@ def test_unavailable_repository_layers_are_not_absent_optional_layers(monkeypatc
         if broken_layer == "canonical-file-parent":
             target.write_text("not a directory", encoding="utf-8")
         else:
-            target.symlink_to(
+            native_symlink(
+                target,
                 target if broken_layer == "canonical-loop-parent" else root / "missing-layer",
                 target_is_directory=True,
             )
@@ -260,7 +270,7 @@ def test_user_local_broken_entries_remain_visible_not_optional(monkeypatch, tmp_
     }.get(broken)
     if target:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.symlink_to(tmp_path / "missing-entry", target_is_directory=broken != "index.json")
+        native_symlink(target, tmp_path / "missing-entry", target_is_directory=broken != "index.json")
     rows, summary = wt.discover_templates(empty_activation())
     assert rows == []
     assert summary["state"] == ("partial" if broken else "complete")

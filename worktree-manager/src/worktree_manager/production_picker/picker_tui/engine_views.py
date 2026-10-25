@@ -271,6 +271,15 @@ class WorktreesView:
     def build_data(self, add, width, sel, *, deferred=False):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
+        from .source_read_notices import failed_worktree_reads
+        failures = failed_worktree_reads(eng)
+        for label, identity, reason in failures[:6]:
+            add(Text(f"  Worktrees read failed · {label} · {identity or 'declared source'}", style=C_WARN))
+            add(Text(f"    {reason}", style=C_DIM))
+        if failures:
+            add(Text("  Reachability/liveness unknown; r retries reads. Other pivots may still work.", style=C_DIM))
+        if len(failures) > 6:
+            add(Text(f"  +{len(failures) - 6} other source reads failed; select a source to inspect.", style=C_DIM))
         cols, sections = eng.current_list_visible()
         worker_index = eng._worktree_supervised_workers_index(
             [rec for _label, rows in sections for rec in rows])
@@ -518,6 +527,12 @@ class TasksView:
         eng = self._eng
         account = bool(getattr(reg, "account_scoped", False))
         machine = eng._pivot_machine()
+        if not account:
+            from .registered_scopes import selects_machine
+            if not selects_machine(reg):
+                machine = "provider-declared scope"
+            elif eng.is_all():
+                machine = "All declared machines"
         if machine is None:
             machine = eng._scope_label()
         # An account-scoped pivot (CodeSpaces) is a cross-machine shared resource:
@@ -529,9 +544,14 @@ class TasksView:
             t.append(f"loading {reg.label.lower()}{where}…", style=C_LOAD)
         elif state == "error":
             t.append("✗ ", style=C_WARN)
-            t.append(f"{reg.label} unavailable: {err or 'command failed'}", style=C_META)
+            t.append(f"{reg.label} read failed{where}: {err or 'command failed'}", style=C_META)
         elif not rows:
-            t.append(reg.empty_hint, style=C_DIM)
+            t.append(
+                "No tasks in this scope (work + maintenance)." if (
+                    eng._has_task_category_filter()
+                    and getattr(eng, "include_maintenance", False)
+                ) else reg.empty_hint, style=C_DIM,
+            )
         else:
             t.append("●", style=C_PULSE[eng.pulse])
             tail = f" {reg.label.lower()}" if account else f" on {machine}"
@@ -544,6 +564,8 @@ class TasksView:
         title = str(rec.get(reg.title_field) or rec.get(reg.id_field) or "(untitled)")
         t = Text("    ")
         t.append(title, style="grey85" if not selected else C_HEADER)
+        if rec.get("_manager_scope"):
+            t.append(f"  [source: {rec['_manager_scope']}]", style=C_META)
         badges: list[str] = []
         for f in reg.badge_fields:
             v = rec.get(f)
@@ -733,13 +755,20 @@ class TasksView:
         """An optional dim second metadata line under a column row (e.g. the
         claiming worktree + its title). Rendered from ``reg.subtitle_field`` when
         the entry supplies it; ``None`` otherwise. Non-selectable (decorative)."""
-        if not reg.subtitle_field:
-            return None
-        sub = rec.get(reg.subtitle_field)
-        if not sub:
+        sub = rec.get(reg.subtitle_field) if reg.subtitle_field else None
+        source = rec.get("_manager_scope")
+        failed = rec.get("_manager_scope_state") == "error"
+        if not sub and not source and not failed:
             return None
         t = Text("     ")
-        t.append(str(sub), style=C_DIM)
+        if source or failed:
+            t.append(f"source: {source or 'provider'}", style=C_META)
+            if failed:
+                t.append(" · cached/read failed", style=C_WARN)
+            if sub:
+                t.append(" · ", style=C_DIM)
+        if sub:
+            t.append(str(sub), style=C_DIM)
         t.append(" " * max(0, width - t.cell_len))
         return t
 
@@ -786,7 +815,7 @@ class TasksView:
         if summary_line is not None:
             add(summary_line)
         add(Text(""))
-        if state not in ("ready", "idle") or not rows:
+        if not rows:
             return
         if reg.columns:
             # Table render. Enrich each row with the claiming worktree's title

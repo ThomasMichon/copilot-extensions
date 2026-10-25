@@ -67,7 +67,7 @@ def uses_ahp(req, worktree_id: str) -> bool:
     if (
         getattr(req, "machine", None) is None
         and worktree_id
-        and getattr(req, "mode", "") in {"resume", "bare-resume"}
+        and getattr(req, "mode", "") == "resume"
     ):
         try:
             persisted = engine_client.execution_leg_get(
@@ -85,11 +85,6 @@ def uses_ahp(req, worktree_id: str) -> bool:
                     raise engine_client.EngineError(
                         "worktree requires unsupported execution-leg "
                         f"provider {provider or '<unknown>'}"
-                    )
-                if req.mode == "bare-resume":
-                    raise engine_client.EngineError(
-                        "bare resume is incompatible with the worktree's "
-                        "active AHP execution leg"
                     )
                 use_ahp = True
     return use_ahp

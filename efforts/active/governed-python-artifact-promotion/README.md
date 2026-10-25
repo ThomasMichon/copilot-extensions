@@ -278,6 +278,12 @@ probe qualification, CI authorization and lifecycle validation remain with
 - [x] Bind independently selected source, native target, declared extras,
       fallback trigger and exact candidate lock through retained resolution
       (#8705). This freezes inputs, not origin approval or governed admission.
+- [x] Provide bounded exact-wheel acquisition and actual owner/native-feed
+      configuration composition (#8820). Exact trust, file-policy facts and
+      retained bytes flow into the existing offline constructor; per-attempt
+      counters do not invalidate healthy same-input reuse. This explicit
+      preparation API does not enable consumers, approve a live feed or
+      complete source/revocation/provider/retention contracts.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -548,6 +554,14 @@ verified answer against its actual repository or machine configuration:
       routing, and owned installation/update/rollback/stop. This is future
       implementation, not completed by accepting the documentation-only design.
 
+- [x] Qualify bounded exact-wheel preparation with real TLS/authentication,
+      pre-request redirect refusal, independent count/byte/storage/deadline
+      bounds, worker settlement, offline installed health and unchanged-input
+      reacquisition/reuse. #8820's final head passes required CI and all six
+      selected Linux/Windows wheel-input, runtime-policy and compiler jobs.
+      Review has no retained concrete findings; all threads are resolved.
+      Live governed-feed/profile publication, broader providers, supplied
+      revocation and enabled real consumers remain distinct open gates.
 - [x] Qualify selected source-lock binding with canonical retained inventory,
       copy-time mutation/restoration refusal, native target override refusal,
       whole-preflight deadlines and context-owned cleanup. #8705's repaired
@@ -742,6 +756,27 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-24 - Bounded exact-wheel preparation merged; source admission next
+
+- #8820 merged as `68223a35d34a77773d65a263e2bb8b140fe0c63b`.
+  Final head `8a83d9fabce6ab5e05232ceced670117c0f0077e` passes required CI
+  `40155921723` and all six selected Linux/Windows jobs in native acceptance
+  `40155955097`. Review `5641244436` is a clean owner-authored Comment with
+  no retained concrete findings; both inline policy-reader threads are
+  resolved. The documented Maintainer CODEOWNER exception was used; required
+  CI was not bypassed and no human approval or rollout is claimed.
+- The current 1594-unit packet passes without observed effects in 231.906
+  seconds. Native qualification covers the POSIX invalid-origin/IPv6 repairs;
+  real reacquisition/reuse verifies that diagnostic counters do not become
+  stable identity. This closes only the bounded preparation component and
+  its qualification item, not the larger admission/consumer slice.
+- Re-read the parent Plan and Validation Plan after merge. The effort remains
+  **Active**. Continue with independently authenticated source-mode admission
+  and exact fallback-lock acquisition/receipt composition, then real
+  consumer/revocation/provider and measured-default gates. Existing publisher
+  and candidate-input owners retain their scopes. No production consumer is
+  enabled and no rollout authority is inferred from this merge.
 
 ### 2026-10-24 - Bounded exact-wheel acquisition implementation
 

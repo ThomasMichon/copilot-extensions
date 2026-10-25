@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 
 def _worktree_fingerprint(rows):
     fields = ("id", "title", "state", "age_secs", "sess",
-              "activity", "live_intent", "live_rest", "status_markers")
+              "activity", "live_intent", "live_rest", "status_markers",
+              "_manager_scope", "_manager_scope_state")
     return tuple(tuple(row.get(field) for field in fields) for row in rows)
 
 
@@ -151,11 +152,8 @@ class _PickerButtons(_FocusRegion):
     def on_click(self, event) -> None:
         scr = self._screen
         reg = scr._reg_pivot()
-        if event.y == 0 and reg is not None and scr._pivot_view_actions():
-            labels = (
-                ([f"+ {reg.create_action.label}"] if reg.create_action else [])
-                + [action.label for action in scr._pivot_view_actions()]
-            )
+        if event.y == 0 and reg is not None and scr.button_set():
+            labels = scr._registered_button_labels(reg)
             x = 2
             for index, label in enumerate(labels):
                 if x <= event.x < x + len(label) + 2:
@@ -261,6 +259,7 @@ class _PickerNativeData(OptionList):
     # ---- data <-> options -------------------------------------------------
     def _signature(self):
         scr = self._screen
+        from .source_read_notices import failed_worktree_reads
         wt = tuple(sorted(scr.wt_sel.ids)) if hasattr(scr, "wt_sel") else ()
         kind = scr._kind()
         worker_fp = ()
@@ -309,7 +308,8 @@ class _PickerNativeData(OptionList):
                 getattr(scr, "manager_update_state", None),
                 scr.size.width, getattr(scr, "cmd_mode", False),
                 getattr(scr.list_view, "query", ""),
-                getattr(scr.list_view, "sort_index", 0), fp, worker_fp)
+                getattr(scr.list_view, "sort_index", 0), fp, worker_fp,
+                tuple(failed_worktree_reads(scr)) if kind == "worktrees" else ())
 
     def _rebuild(self):
         scr = self._screen

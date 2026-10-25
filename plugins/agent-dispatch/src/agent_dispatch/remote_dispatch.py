@@ -315,6 +315,8 @@ def build_remote_browse_argv(
     board = subcommand == "inbox" and getattr(args, "board", False)
     if board:
         argv += ["--board"]
+        if getattr(args, "limit_per_category", False):
+            argv += ["--limit-per-category"]
         recent_mins = getattr(args, "recent_mins", None)
         if recent_mins is not None:
             argv += ["--recent-mins", str(recent_mins)]

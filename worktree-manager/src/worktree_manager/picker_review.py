@@ -177,7 +177,6 @@ def list_command(pivot, argv: list[str]) -> tuple[list[str], dict[str, str]]:
         not isinstance(owner, str) or owner.split("@", 1)[0] != "agent-dispatch"
         or Path(argv[0]).stem.casefold() != "agent-dispatch"
         or args[:2] != ["workers", "catalog"]
-        or getattr(pivot, "stream", False)
     ):
         raise ReadOnlyError("Read-only candidate: this contributed read has not been qualified.")
     remaining = args[2:]

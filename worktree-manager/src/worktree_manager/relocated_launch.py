@@ -69,8 +69,6 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
                 print("error: the engine omitted the staged launch-prompt identity; update and retry.")
                 return 1
             args += ["--stage-launch-seed", "--seed-id", seed_id]
-        if req.mode == "bare-resume":
-            args.append("--bare-resume")
 
     attempt_id = getattr(req, "attempt_id", None)
     if attempt_id is not None:

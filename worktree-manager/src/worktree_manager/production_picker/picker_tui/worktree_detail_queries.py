@@ -3,6 +3,42 @@
 from __future__ import annotations
 
 
+def published_locality(rec, engine=None) -> bool:
+    """Read published locality without evaluating a cold source's LOCAL."""
+    if rec.get("source_kind", "machine-ssh") != "machine-ssh":
+        return False
+    explicit = rec.get("is_local")
+    if explicit is not None:
+        return bool(explicit)
+    if engine is None:
+        return True
+    local = getattr(engine, "_source_local", None)
+    return local is not None and (rec.get("machine"), rec.get("env")) == local
+
+
+def verify_liveness(rec, source, project):
+    """Worker-only eligibility and liveness refinement."""
+    try:
+        from .. import project_config, engine_group_c
+
+        wt_id = rec["raw"]["id"]
+        local_check = getattr(source, "is_local", None)
+        if callable(local_check):
+            is_local = bool(local_check(rec.get("machine"), rec.get("env")))
+        else:
+            local = getattr(source, "LOCAL", None)
+            is_local = local is not None and (rec.get("machine"), rec.get("env")) == local
+        if not is_local or not (project_config.tracking_dir(project) / f"{wt_id}.yaml").exists():
+            return None, is_local
+        batch = engine_group_c.picker_reconcile_local(project, worktree_ids=[wt_id])
+        for row in batch.rows:
+            if isinstance(row, dict) and row.get("id") == wt_id:
+                return row, is_local
+        return None, is_local
+    except Exception:
+        return None, None
+
+
 def claims_argv(machine, env, worktree_id, *, transitive=False, **source_identity):
     """Explicit full claim inspection through the selected remote source."""
     return remote_argv(

@@ -94,7 +94,10 @@ def _scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
 
 def ensure_status_monitor_running() -> bool:
     from . import engine_client
+    from .manager_config import automatic_maintenance_enabled
 
+    if not automatic_maintenance_enabled():
+        return False
     base = engine_client.engine_base_command()
     if not base:
         return False

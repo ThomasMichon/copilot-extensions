@@ -107,6 +107,13 @@ class WtDetailsScreen(ModalScreen[None]):
         if relation and relation != "unbound":
             text.append(f"\nrelation  {relation}\n", style=C_DIM)
         coverage = claim_coverage(rec)
+        if coverage:
+            text.append(
+                "\n Claim coverage: selected worktree's last loaded projection; "
+                "freshness/completeness may be unknown. Read-only details do not "
+                "verify resource liveness. Unreachable does not mean stopped or absent.\n",
+                style=C_DIM,
+            )
         if coverage or rec.get("claims_links") or rec.get("claims_summary"):
             from .engine_helpers import _claims_cell
 

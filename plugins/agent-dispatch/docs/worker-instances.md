@@ -12,6 +12,24 @@ directories, starting services, changing configuration, or querying the task
 coordinator. The target is **the invoking CLI's local machine**, independent of
 the operational machine selected elsewhere in the Manager.
 
+The Manager uses `agent-dispatch workers catalog --stream`. Its NDJSON output
+starts with `begin`, a loading summary and already-known built-in template
+`row` frames, so source discovery does not withhold that safe content.
+Configured instances and source declarations follow from the normal catalog,
+then its final `summary` and `done`. Rows are keyed by their existing IDs;
+a repeated template row replaces the earlier row rather than adding a copy.
+Discovery failure emits `error` without `done`, preserving explicit partial
+state. Early templates are not running workers, a complete inventory or
+permission to save/activate: normal validation and confirmation still apply.
+The plain JSON command and its schema remain unchanged.
+
+Local `workers catalog` and `workers save` invocations reuse the existing
+Workers parser and handlers without importing unrelated coordinator command
+families. Supervisor activity is read through the shared status-file I/O
+module, not by loading the supervisor CLI. Invocations with projected
+`AGENT_DISPATCH_TASK_*` authority retain the full CLI admission path; other
+commands and leading global options also retain their existing route.
+
 The table distinguishes:
 
 - **Configured**: user-local instance drafts, with **Edit** actions.

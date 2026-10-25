@@ -371,7 +371,11 @@ def test_post_submit_refresh_keeps_rows_and_selected_identity_until_swap(monkeyp
                             and not app.screen.pending)
                 app.screen.action_close()
                 await pilot.pause()
-                assert scr._task_rows() == rows and scr.sel == ("T", 1)
+                assert scr._task_rows() == [
+                    {**row, "_manager_scope": "", "_manager_row_key": ("", row["id"]),
+                     "_manager_scope_state": "ready"}
+                    for row in rows
+                ] and scr.sel == ("T", 1)
                 release.set()
                 await _wait(pilot, lambda: scr._task_rows()[0]["id"] == "two")
                 assert scr.sel == ("T", 0)
@@ -386,6 +390,10 @@ def test_workers_catalog_picker_instance_round_trip(tmp_path, monkeypatch):
     dispatch_python = os.environ.get("WORKERS_CONFIG_TEST_PYTHON")
     if not dispatch_python:
         pytest.skip("set WORKERS_CONFIG_TEST_PYTHON for the cross-distribution lane")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     root = Path(__file__).resolve().parents[3]
     source = root / "plugins" / "agent-dispatch" / "src"
     manifest_path = root / "plugins" / "agent-dispatch" / "pivots" / "workers-config.json"
@@ -413,6 +421,7 @@ def test_workers_catalog_picker_instance_round_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(tmp_path / "overrides.json"))
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "install"))
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "fixture-host")
 
     async def run():
         app = PickerApp(_fixture_source(), live=False)

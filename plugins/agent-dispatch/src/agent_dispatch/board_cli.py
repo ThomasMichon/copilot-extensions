@@ -554,6 +554,8 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
         str(args.limit),
     ]
     command.extend(["--category", getattr(args, "category", "work")])
+    if getattr(args, "limit_per_category", False):
+        command.append("--limit-per-category")
     if args.label:
         command.extend(["--label", args.label])
     env = dict(os.environ)
@@ -564,6 +566,8 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
     )
     if result.returncode != 0:
         error = result.stderr or ""
+        if "unrecognized arguments" in error and "--limit-per-category" in error:
+            raise DispatchUpgradeRequired("peer lacks per-category board windows")
         if "HTTP 426" in error or ("unrecognized arguments" in error and "--category" in error):
             raise DispatchUpgradeRequired("peer lacks task category support")
         raise RuntimeError(
@@ -573,8 +577,31 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
     return json.loads(result.stdout or "[]")
 
 
+def board_categories(args: argparse.Namespace) -> tuple[str, ...]:
+    category = getattr(args, "category", "work")
+    if not getattr(args, "limit_per_category", False):
+        return (category,)
+    if category != "all":
+        raise ValueError("--limit-per-category requires --category all")
+    return ("work", "maintenance")
+
+
 def _fetch_raw_tasks_direct(
     args: argparse.Namespace, *, endpoint: str | None = None
+) -> list[dict]:
+    endpoint = endpoint or _endpoint()
+    if not getattr(args, "limit_per_category", False):
+        return _fetch_raw_tasks_category_direct(args, endpoint=endpoint)
+    rows = {}
+    for category in board_categories(args):
+        selected = argparse.Namespace(**{**vars(args), "category": category})
+        for task in _fetch_raw_tasks_category_direct(selected, endpoint=endpoint):
+            rows[task["id"]] = task
+    return list(rows.values())
+
+
+def _fetch_raw_tasks_category_direct(
+    args: argparse.Namespace, *, endpoint: str
 ) -> list[dict]:
     """Network-only half of :func:`_fetch_rows_direct`: fetch this machine's
     own coordinator ``/tasks`` endpoint and return the raw task dicts. The
@@ -843,6 +870,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--label")
     parser.add_argument("--category", choices=("work", "maintenance", "all"), default="work")
     parser.add_argument("--limit", type=int, default=200)
+    parser.add_argument("--limit-per-category", action="store_true", help="With --category all, retain --limit rows per category.")
     parser.add_argument(
         "--stream", dest="stream", action="store_true",
         help="Emit the registered-pivot NDJSON envelope (begin -> row per "
@@ -862,6 +890,8 @@ def main(argv: list[str] | None = None) -> int:
              f"(default: {DEFAULT_SUBSCRIBE_INTERVAL}).",
     )
     args = parser.parse_args(argv)
+    if args.limit_per_category and args.category != "all":
+        parser.error("--limit-per-category requires --category all")
 
     if args.stream:
         return _run_stream(args)
@@ -883,6 +913,8 @@ def main(argv: list[str] | None = None) -> int:
             str(args.limit),
         ]
         command.extend(["--category", args.category])
+        if args.limit_per_category:
+            command.append("--limit-per-category")
         if args.label:
             command.extend(["--label", args.label])
         env = dict(os.environ)
@@ -890,6 +922,16 @@ def main(argv: list[str] | None = None) -> int:
         return subprocess.run(
             command, check=False, env=env, **_no_window_kwargs()
         ).returncode
+
+    if args.limit_per_category:
+        try:
+            rows = _fetch_rows_direct(args)
+        except Exception as exc:
+            print(f"agent-dispatch-board: {exc}", file=sys.stderr)
+            return 1
+        json.dump(rows, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
 
     query = {
         "category": args.category,

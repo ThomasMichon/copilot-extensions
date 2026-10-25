@@ -8,6 +8,7 @@ import subprocess
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from textual.app import App
@@ -16,10 +17,36 @@ from agent_procutil import no_window_kwargs
 from worktree_manager import seed_history
 from worktree_manager.engine_client import EngineError, EngineFeatureUnavailable
 from worktree_manager.production_picker import context
-from worktree_manager.production_picker.picker_tui.engine_dialogs import ScopeDlgScreen
+from worktree_manager.production_picker.picker_tui.engine_dialogs import ScopeDlgScreen, SubMenuScreen
 from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
-from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
 from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
+
+
+def _resume_dialog(*, record=None, ahp=False, history=True):
+    record = record if record is not None else {"is_local": True, "raw": {"id": "wt-a"}}
+    engine = SimpleNamespace(
+        real_ops=True, src=SimpleNamespace(), _run_bg=lambda *args, **kwargs: None,
+        _resume_decision=lambda rec, **options: {
+            "action": "resume", "is_local": rec.get("is_local", True),
+            "worktree_id": rec["raw"]["id"], "options": options,
+        },
+    )
+    dialog = SubMenuScreen(record, ["Resume"], engine=engine)
+    dialog._ahp = ahp
+    if history:
+        field = dialog._prompt_rec["primary"]
+        field.seed_store = seed_history.SeedHistory(context.project())
+        field.seed_cursor = seed_history.HistoryCursor(field.seed_store.entries())
+    return dialog
+
+
+def _confirm(dialog):
+    if isinstance(dialog, SubMenuScreen):
+        dialog.on_option_list_option_selected(SimpleNamespace(option_index=0))
+    else:
+        dialog.on_focus_group_activated(
+            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"),
+        )
 
 
 async def _await_confirmation(pilot):
@@ -275,7 +302,7 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
     history.remember("older seed")
     dialog = (
         ScopeDlgScreen({"opts": [], "section": 1}, show_prompt=True)
-        if scope else PromptDlgScreen("Resume", "Prompt")
+        if scope else _resume_dialog()
     )
     outcomes = []
     def refuse(*_args, **_kwargs):
@@ -288,7 +315,8 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
         outcomes.append(confirmed)
         assert entrypoint._run_launch(LaunchRequest(
             project="demo", mode="new" if scope else "resume",
-            worktree_id=None if scope else "wt-a", seed_prompt=dialog.seed_prompt,
+            worktree_id=None if scope else "wt-a",
+            seed_prompt=dialog.launch_decision["options"]["seed_prompt"],
         )) == 1
 
     app = App()
@@ -297,14 +325,13 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
         await pilot.pause()
         field = dialog.query_one(SeedPromptField)
         field.load_text("valuable\npaste")
-        dialog.on_focus_group_activated(
-            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-        )
+        _confirm(dialog)
         await _await_confirmation(pilot)
-        assert outcomes == [True]
-        retry = PromptDlgScreen("Retry", "Prompt")
+        assert outcomes == ([True] if scope else [("Resume", False, False, "valuable\npaste")])
+        retry = _resume_dialog()
         app.push_screen(retry)
         await pilot.pause()
+        retry.query_one(SeedPromptField).focus()
         await pilot.press("up")
         assert retry.query_one(SeedPromptField).text == "valuable\npaste"
         await pilot.press("up")
@@ -319,7 +346,7 @@ def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, m
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
         context.set_project("demo")
         dialog = (
-            PromptDlgScreen("Resume", "Prompt", seed_refusal="AHP prompt launch is unsupported")
+            _resume_dialog(ahp=True)
             if option == "resume-ahp" else ScopeDlgScreen(
                 {"opts": [{"label": option, "on": True}], "section": 1},
                 show_prompt=True,
@@ -332,9 +359,7 @@ def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, m
             await pilot.pause()
             field = dialog.query_one(SeedPromptField)
             field.load_text("unsubmitted draft")
-            dialog.on_focus_group_activated(
-                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-            )
+            _confirm(dialog)
             await _await_confirmation(pilot)
             assert app.screen is dialog
             assert field.text == "unsubmitted draft" and outcomes == []
@@ -342,27 +367,13 @@ def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, m
     asyncio.run(run())
 
 
-def test_remote_resume_opens_composer_for_selected_target(monkeypatch):
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui import resume_prompt_actions
-
-    dialogs = []
-    def compose(*args, **kwargs):
-        dialogs.append(kwargs)
-        return SimpleNamespace(launch_decision=kwargs["launch_decision"])
-    monkeypatch.setattr(resume_prompt_actions, "PromptDlgScreen", compose)
-    record = {"is_local": False, "raw": {"id": "wt-a"}}
-    decision = {"action": "resume", "is_local": False, "machine": "target", "env": "wsl"}
-    opened = []
-    screen = SimpleNamespace(
-        debug="", _find_internal_worktree=lambda *args: (record, None),
-        _session_action_verbs=lambda _: ["Resume prompt…"],
-        _resume_decision=lambda *a, **kw: decision,
-        app=SimpleNamespace(push_screen=lambda scr, callback: opened.append(scr)),
-    )
-    resume_prompt_actions.open_resume_prompt(screen, record)
-    assert len(opened) == 1 and dialogs[0]["launch_decision"] is decision
-    assert dialogs[0]["seed_refusal"] is None
+def test_remote_resume_has_no_local_history_composer(monkeypatch):
+    monkeypatch.setattr(seed_history.SeedHistory, "entries", lambda *_: pytest.fail("remote history read"))
+    record = {"is_local": False, "machine": "target", "env": "wsl", "raw": {"id": "wt-a"}}
+    dialog = _resume_dialog(record=record, history=False)
+    assert not dialog._can_prompt()
+    dialog._load_prompt_history()
+    assert not dialog._history_requested
 
 
 @pytest.mark.parametrize("leg,ahp,reason", [
@@ -374,36 +385,21 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, leg: dict[str, str] | None,
     ahp: bool, reason: str,
 ) -> None:
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
-
     async def run() -> None:
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
         context.set_project("demo")
-        record = {"raw": {"id": "wt-a", "execution_leg": leg}, "title": "Demo"}
+        record = {"is_local": True, "raw": {"id": "wt-a", "execution_leg": leg}, "title": "Demo"}
         outcomes = []
         app = App()
-        screen = SimpleNamespace(
-            app=app, debug="",
-            _find_internal_worktree=lambda *args: (record, None),
-            _session_action_verbs=lambda _: ["Resume prompt…"],
-            _resume_decision=lambda *args, **kwargs: {
-                "action": "resume", "is_local": True, "worktree_id": "wt-a",
-                "options": {"no_mux": kwargs.get("no_mux"), "ahp": kwargs.get("ahp")},
-            },
-            _decide=outcomes.append,
-        )
+        dialog = _resume_dialog(record=record, ahp=ahp)
         async with app.run_test() as pilot:
-            open_resume_prompt(screen, record, ahp=ahp)
+            app.push_screen(dialog, outcomes.append)
             await pilot.pause()
-            dialog = app.screen
             field = dialog.query_one(SeedPromptField)
             notices = []
             monkeypatch.setattr(dialog, "notify", lambda message, **kwargs: notices.append(message))
             field.load_text("retained draft")
-            dialog.on_focus_group_activated(
-                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-            )
+            _confirm(dialog)
             await _await_confirmation(pilot)
             assert app.screen is dialog and field.text == "retained draft"
             assert len(notices) == 1 and reason in notices[0]
@@ -412,13 +408,12 @@ def test_resume_refusal_reports_actual_transport_without_fake_option(
             assert outcomes == []
             assert seed_history.SeedHistory("demo", tmp_path).entries() == []
             field.load_text("")
-            dialog.on_focus_group_activated(
-                FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-            )
+            _confirm(dialog)
             await _await_confirmation(pilot)
             assert len(outcomes) == 1
-            assert outcomes[0]["options"] == {"no_mux": False, "ahp": ahp, "seed_prompt": ""}
-            assert outcomes[0]["attempt_id"]
+            assert outcomes == [("Resume", False, ahp, "")]
+            assert dialog.launch_decision["options"] == {"no_mux": False, "ahp": ahp, "seed_prompt": ""}
+            assert dialog.launch_decision["attempt_id"]
     asyncio.run(run())
 
 
@@ -482,26 +477,14 @@ def test_missing_resume_id_seedless_guard_retains_existing_behavior(
 def test_missing_resume_id_ui_refuses_before_history_composer(
     monkeypatch: pytest.MonkeyPatch, target: str | None,
 ) -> None:
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
-        PickerScreenWorktreeActionsMixin,
-    )
-    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
-
     def forbidden(*args, **kwargs):
         pytest.fail("missing resume target must not open or read/write a history composer")
     monkeypatch.setattr(seed_history.SeedHistory, "entries", forbidden)
     monkeypatch.setattr(seed_history.SeedHistory, "remember", forbidden)
-    record = {"raw": {"id": target}}
-    screen = SimpleNamespace(
-        data=[record], debug="", app=SimpleNamespace(push_screen=forbidden),
-        _session_action_verbs=forbidden,
-    )
-    screen._find_internal_worktree = (
-        lambda *args: PickerScreenWorktreeActionsMixin._find_internal_worktree(screen, *args)
-    )
-    open_resume_prompt(screen, record)
-    assert "cold-start-only" in screen.debug
+    dialog = _resume_dialog(record={"is_local": True, "raw": {"id": target}}, history=False)
+    dialog._engine._run_bg = forbidden
+    dialog._load_prompt_history()
+    assert not dialog._history_requested
 
 
 def test_new_no_mux_seed_keeps_raw_whitespace_and_requires_no_resume_id(
@@ -542,7 +525,7 @@ async def _failed_history_save_keeps_composer_open(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     context.set_project("demo")
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt")
+    dialog = _resume_dialog()
     outcomes = []
     async with app.run_test() as pilot:
         app.push_screen(dialog, outcomes.append)
@@ -552,9 +535,7 @@ async def _failed_history_save_keeps_composer_open(tmp_path, monkeypatch):
         def fail(_prompt):
             raise seed_history.SeedHistoryError("Cannot save history")
         monkeypatch.setattr(field.seed_store, "remember", fail)
-        dialog.on_focus_group_activated(
-            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm")
-        )
+        _confirm(dialog)
         await _await_confirmation(pilot)
         assert app.screen is dialog
         assert field.text == "do not lose this"
@@ -571,11 +552,12 @@ async def _cancel_and_multiline_cursor(tmp_path, monkeypatch):
     history = seed_history.SeedHistory("demo", tmp_path)
     history.remember("previous")
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt")
+    dialog = _resume_dialog()
     async with app.run_test() as pilot:
         app.push_screen(dialog)
         await pilot.pause()
         field = dialog.query_one(SeedPromptField)
+        field.focus()
         field.load_text("first\nsecond\nthird")
         field.move_cursor((1, 2))
         await pilot.press("up")
@@ -599,10 +581,11 @@ async def _recalled_multiline_seed(tmp_path, monkeypatch):
     context.set_project("demo")
     seed_history.SeedHistory("demo", tmp_path).remember("one\ntwo\nthree")
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt")
+    dialog = _resume_dialog()
     async with app.run_test() as pilot:
         app.push_screen(dialog)
         await pilot.pause()
+        dialog.query_one(SeedPromptField).focus()
         await pilot.press("up")
         field = dialog.query_one(SeedPromptField)
         field.move_cursor((1, 1))
