@@ -167,6 +167,15 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #9013 merged per-owner launch observations after genuine
+  current-head approval, required CI and a fixed receipt-result/final-wrapper
+  distinction. Windows and frozen-source POSIX packets each pass 76 cases,
+  including the actual execution owner's earlier-write-failure path. Both
+  parent plans were re-read. Continue #8375's selected-machine protected detail;
+  accepted-turn correlation, containing release, authorized rollout and the
+  original installed local/SSH conversation, exactly-once and cleanup gates
+  remain open. This source merge does not make either effort Done.
+
 - **2026-10-25** -- #9008 merged explicit configured-SSH metadata inspection
   after current-head review, required CI and resolution of all four concrete
   findings. Windows and frozen-source POSIX packets each pass 225 cases.

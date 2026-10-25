@@ -1,0 +1,9 @@
+{
+  "comment": "Read exact launch detail from one configured SSH Manager with explicit protected-input opt-in, safe owner projection and attributed partial failures.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

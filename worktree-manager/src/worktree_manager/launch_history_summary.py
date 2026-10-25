@@ -197,64 +197,30 @@ def _allocation(value: dict) -> dict | None:
     }
 
 
-def read_summary(
-    store: LaunchAttempts, attempt_id: str, *, include_input: bool = False,
-    read_page: Callable[..., dict],
-) -> dict:
-    """Explicit local read with finite work; each page is an independent observation."""
-    detail = store.detail(attempt_id, include_input=include_input, event_limit=1000)
-    references = list(dict.fromkeys(
-        event["details"]["request_id"] for event in detail["events"]
-        if "request_id" in event["details"]
-    ))
-    errors = []
-    requests = []
-    for request in references:
-        try:
-            requests.append(_identity(request))
-        except ValueError:
-            errors.append({"source": "manager", "code": "invalid-reference"})
-    if len(requests) > 16:
-        errors.append({"source": "manager", "code": "reference-limit"})
-    requests = requests[:16]
-    if detail["events_has_more"]:
-        errors.append({"source": "manager", "code": "event-limit"})
-    facts: dict[str, list[dict]] = {boundary: [] for boundary in _BOUNDARIES}
-    observations: dict[str, list[dict]] = {"resolution": [], "execution": [], "admission": []}
-    engine = {
-        "scope": "local-project", "status": "unavailable", "pages_read": 0,
-        "receipts_read": 0, "has_more": None, "next_after": None,
-    }
-    after = None
-    deadline = time.monotonic() + _DEADLINE_SECONDS
-    admissions = {}
-    for _ in range(_MAX_PAGES):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            errors.append({"source": "engine", "code": "deadline"})
-            break
-        try:
-            page = read_page(
-                detail["project"], attempt_id, limit=100, after=after,
-                request_ids=requests, timeout=int(remaining),
-            )
-            cursor = page["next_after"]
-            if (
-                (page["has_more"] and (
-                    not isinstance(cursor, str) or _CURSOR.fullmatch(cursor) is None
-                    or (after is not None and cursor <= after)
-                ))
-                or (not page["has_more"] and cursor is not None)
-            ):
-                raise engine_client.EngineError("Invalid launch evidence continuation")
-        except engine_client.EngineError:
-            errors.append({"source": "engine", "code": "unavailable-or-incompatible"})
-            break
-        engine.update(
-            status="read", pages_read=engine["pages_read"] + 1,
-            receipts_read=engine["receipts_read"] + len(page["receipts"]),
-            has_more=page["has_more"], next_after=cursor,
-        )
+def page_cursor(page: dict, after: str | None) -> str | None:
+    cursor = page["next_after"]
+    if (
+        (page["has_more"] and (
+            not isinstance(cursor, str) or _CURSOR.fullmatch(cursor) is None
+            or (after is not None and cursor <= after)
+        ))
+        or (not page["has_more"] and cursor is not None)
+    ):
+        raise engine_client.EngineError("Invalid launch evidence continuation")
+    return cursor
+
+
+class EvidenceProjection:
+    """Prompt-free owner projection shared by cross-page and selected-source reads."""
+
+    def __init__(self) -> None:
+        self.facts: dict[str, list[dict]] = {boundary: [] for boundary in _BOUNDARIES}
+        self.observations: dict[str, list[dict]] = {"resolution": [], "execution": [], "admission": []}
+        self.errors: list[dict] = []
+        self._admissions: dict[str, dict] = {}
+
+    def add_page(self, page: dict, attempt_id: str, *, after: str | None = None) -> None:
+        cursor = page_cursor(page, after)
         seen = set()
         for row in page["receipts"]:
             try:
@@ -274,12 +240,12 @@ def read_summary(
                 fact = _fact(row, attempt_id)
                 if fact is not None:
                     boundary, value = fact
-                    facts[boundary].append(value)
+                    self.facts[boundary].append(value)
                 observation = _owner_observation(row, attempt_id)
                 if observation is not None:
-                    observations[source].append(observation)
+                    self.observations[source].append(observation)
             except (ValueError, TypeError, KeyError):
-                errors.append({"source": "engine", "code": "invalid-receipt"})
+                self.errors.append({"source": "engine", "code": "invalid-receipt"})
         for value in page["admissions"]:
             try:
                 request = _identity(value["request_id"])
@@ -291,16 +257,15 @@ def read_summary(
                         "creation_started", "creation_complete", "admission_accepted",
                     )},
                 }
-                if request in admissions:
-                    if admissions[request] != observation:
-                        errors.append({"source": "admission", "code": "changed-between-pages"})
-                if observation not in observations["admission"]:
-                    observations["admission"].append(observation)
-                admissions[request] = observation
-                if allocation is not None and allocation not in facts["allocation"]:
-                    facts["allocation"].append(allocation)
+                if request in self._admissions and self._admissions[request] != observation:
+                    self.errors.append({"source": "admission", "code": "changed-between-pages"})
+                if observation not in self.observations["admission"]:
+                    self.observations["admission"].append(observation)
+                self._admissions[request] = observation
+                if allocation is not None and allocation not in self.facts["allocation"]:
+                    self.facts["allocation"].append(allocation)
             except (ValueError, TypeError, KeyError):
-                errors.append({"source": "admission", "code": "invalid-receipt"})
+                self.errors.append({"source": "admission", "code": "invalid-receipt"})
         for error in page["errors"]:
             # The engine owns source diagnostics; never echo arbitrary process content.
             source = error.get("source") if isinstance(error, dict) else None
@@ -315,7 +280,68 @@ def read_summary(
                     reference = error.get(field)
                     if isinstance(reference, str) and _ID.fullmatch(reference):
                         diagnostic[field] = reference
-            errors.append(diagnostic)
+            self.errors.append(diagnostic)
+
+    def report(self) -> dict:
+        return {
+            "owner_observations": self.observations,
+            "boundaries": {
+                name: {"status": "observed" if values else "unknown", "evidence": values}
+                for name, values in self.facts.items()
+            },
+            "errors": self.errors,
+        }
+
+
+def read_summary(
+    store: LaunchAttempts, attempt_id: str, *, include_input: bool = False,
+    read_page: Callable[..., dict],
+) -> dict:
+    """Explicit local read with finite work; each page is an independent observation."""
+    detail = store.detail(attempt_id, include_input=include_input, event_limit=1000)
+    references = list(dict.fromkeys(
+        event["details"]["request_id"] for event in detail["events"]
+        if "request_id" in event["details"]
+    ))
+    projection = EvidenceProjection()
+    errors = projection.errors
+    requests = []
+    for request in references:
+        try:
+            requests.append(_identity(request))
+        except ValueError:
+            errors.append({"source": "manager", "code": "invalid-reference"})
+    if len(requests) > 16:
+        errors.append({"source": "manager", "code": "reference-limit"})
+    requests = requests[:16]
+    if detail["events_has_more"]:
+        errors.append({"source": "manager", "code": "event-limit"})
+    engine = {
+        "scope": "local-project", "status": "unavailable", "pages_read": 0,
+        "receipts_read": 0, "has_more": None, "next_after": None,
+    }
+    after = None
+    deadline = time.monotonic() + _DEADLINE_SECONDS
+    for _ in range(_MAX_PAGES):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            errors.append({"source": "engine", "code": "deadline"})
+            break
+        try:
+            page = read_page(
+                detail["project"], attempt_id, limit=100, after=after,
+                request_ids=requests, timeout=int(remaining),
+            )
+            cursor = page_cursor(page, after)
+        except engine_client.EngineError:
+            errors.append({"source": "engine", "code": "unavailable-or-incompatible"})
+            break
+        engine.update(
+            status="read", pages_read=engine["pages_read"] + 1,
+            receipts_read=engine["receipts_read"] + len(page["receipts"]),
+            has_more=page["has_more"], next_after=cursor,
+        )
+        projection.add_page(page, attempt_id, after=after)
         if not page["has_more"]:
             break
         after = cursor
@@ -329,11 +355,6 @@ def read_summary(
             "scope": "local-manager-and-project", "observation": "non-atomic",
             "selected_remote": "not-queried", "absence": "unknown",
             "manager_events_has_more": detail["events_has_more"],
-            "owner_observations": observations,
-            "boundaries": {
-                name: {"status": "observed" if values else "unknown", "evidence": values}
-                for name, values in facts.items()
-            },
-            "errors": errors,
+            **projection.report(),
         },
     }

@@ -18,10 +18,7 @@ from worktree_manager import launch_history_cli, launch_history_sweep as sweep, 
 from worktree_manager.launch_attempts import LaunchAttempts
 
 
-@pytest.mark.parametrize("target_state", ["ready", "missing-launcher", "incompatible"])
-def test_real_target_list_process_preserves_private_fixture_and_continuation(
-    tmp_path, monkeypatch, capsys, target_state,
-):
+def _target(tmp_path, monkeypatch, target_state="ready", *, engine_ready=False):
     windows = os.name == "nt"
     shell = "pwsh" if windows else "bash"
     shell_executable = shutil.which(shell)
@@ -80,6 +77,33 @@ def test_real_target_list_process_preserves_private_fixture_and_continuation(
     })
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "WORKTREE_MANAGER_ENGINE_ARGV"):
         environment.pop(name, None)
+    if engine_ready:
+        engine = manager / "synthetic_engine.py"
+        engine.write_text(textwrap.dedent("""
+            import json, sys
+            attempt = sys.argv[sys.argv.index("launch-attempts") + 1]
+            operation = "d" * 32
+            print(json.dumps({
+                "schema": "worktree-launch-attempt-inspection", "version": 1,
+                "attempt_id": attempt, "scope": "local-project", "admissions": [], "errors": [],
+                "has_more": False, "next_after": None, "prompt_acceptance": "unknown",
+                "receipts": [{
+                    "source": "resolution", "operation_id": operation, "evidence": {
+                        "schema": "worktree-launch-resolution", "version": 1,
+                        "attempt_id": attempt, "operation_id": operation,
+                        "input": "UNEXPECTED PRIVATE ENGINE FIELD",
+                        "events": [
+                            {"at": "2026-10-25T00:00:00+00:00",
+                             "phase": "resolution-requested", "details": {}},
+                            {"at": "2026-10-25T00:00:01+00:00",
+                             "phase": "plan-ready", "details": {"exit_code": 0}},
+                        ],
+                    },
+                }],
+            }))
+        """), encoding="utf-8")
+        environment.pop("WORKTREE_MANAGER_ENGINE_CMD")
+        environment["WORKTREE_MANAGER_ENGINE_ARGV"] = json.dumps([sys.executable, "-B", str(engine)])
     platform = "windows" if windows else "linux"
     entry = MachineEntry(
         key="fixture-" + platform, display_name="Synthetic target", environment=platform,
@@ -91,8 +115,8 @@ def test_real_target_list_process_preserves_private_fixture_and_continuation(
     monkeypatch.setattr(sweep, "SSHProfileSource", lambda *a, **kw: type(
         "Profile", (), {"get_ssh_config": lambda self: config},
     )())
-    # Only the transport executable is synthetic. Keep the real proxy/process
-    # owner, configured target shell, absolute target launcher and Manager CLI.
+    # The transport and optional engine fixture are synthetic. Keep the real
+    # process owner, target shell, absolute target launcher and Manager CLI.
     async def spawn(*args, **kwargs):
         kwargs["env"] = environment
         return await create_ssh_subprocess(
@@ -105,6 +129,14 @@ def test_real_target_list_process_preserves_private_fixture_and_continuation(
             path.relative_to(target_home): path.read_bytes()
             for root in (manager, bin_dir) for path in root.rglob("*") if path.is_file()
         }
+    return store, entry, snapshot
+
+
+@pytest.mark.parametrize("target_state", ["ready", "missing-launcher", "incompatible"])
+def test_real_target_list_process_preserves_private_fixture_and_continuation(
+    tmp_path, monkeypatch, capsys, target_state,
+):
+    _, entry, snapshot = _target(tmp_path, monkeypatch, target_state)
     before = snapshot()
     query = ["--sweep-project", "example", "--source-machine", entry.key, "--limit", "1", "--json"]
     status = launch_history_cli.main(query)
@@ -128,4 +160,63 @@ def test_real_target_list_process_preserves_private_fixture_and_continuation(
     second = json.loads(capsys.readouterr().out)["sources"][0]["page"]
     assert second["has_more"] is False and len(second["attempts"]) == 1
     assert first["attempts"][0]["attempt_id"] != second["attempts"][0]["attempt_id"]
+    assert snapshot() == before
+
+
+def test_real_target_exact_private_detail_and_partial_engine_are_read_only(tmp_path, monkeypatch, capsys):
+    store, entry, snapshot = _target(tmp_path, monkeypatch)
+    store.append("a" * 32, owner="manager", phase="unknown", code="interrupted")
+    with monkeypatch.context() as expired:
+        expired.setattr("worktree_manager.launch_attempts._timestamp", lambda: 1)
+        store.record_intent(
+            "c" * 32, action="resume", project="example", surface="expired-native",
+            is_local=True, prompt="EXPIRED PRIVATE INPUT",
+        )
+    before = snapshot()
+    query = ["a" * 32, "--sweep-project", "example", "--source-machine", entry.key, "--json"]
+    assert launch_history_cli.main([*query, "--event-limit", "1"]) == 1
+    raw = capsys.readouterr().out
+    source = json.loads(raw)["source"]
+    assert source["status"] == "partial" and source["target_exit_code"] == 1
+    assert source["detail"]["engine"]["status"] == "unavailable"
+    first = source["detail"]["attempt"]
+    assert first["events_has_more"] and first["manager_outcome"] == "interrupted"
+    assert "PRIVATE SYNTHETIC INPUT" not in raw and '"input"' not in raw
+    assert "this-must-never-be-run" not in raw
+    assert launch_history_cli.main([
+        *query, "--after-sequence", str(first["next_event_sequence"]),
+        "--event-limit", "1", "--include-input",
+    ]) == 1
+    detail = json.loads(capsys.readouterr().out)["source"]["detail"]["attempt"]
+    assert [event["phase"] for event in detail["events"]] == ["unknown"]
+    assert not detail["events_has_more"]
+    assert detail["input"] == {"prompt": " PRIVATE SYNTHETIC INPUT\n ", "options": {"no_mux": True}}
+    assert launch_history_cli.main([
+        "c" * 32, "--sweep-project", "example", "--source-machine", entry.key,
+        "--include-input", "--json",
+    ]) == 1
+    raw = capsys.readouterr().out
+    assert json.loads(raw)["source"]["code"] == "unreadable-or-expired"
+    assert "EXPIRED PRIVATE INPUT" not in raw and '"detail"' not in raw
+    assert snapshot() == before
+
+
+def test_real_target_exact_detail_projects_engine_without_echoing_raw_fields(tmp_path, monkeypatch, capsys):
+    _, entry, snapshot = _target(tmp_path, monkeypatch, engine_ready=True)
+    before = snapshot()
+    assert launch_history_cli.main([
+        "a" * 32, "--sweep-project", "example", "--source-machine", entry.key, "--json",
+    ]) == 0
+    raw = capsys.readouterr().out
+    source = json.loads(raw)["source"]
+    assert source["status"] == "read" and source["target_exit_code"] == 0
+    engine = source["detail"]["engine"]
+    assert engine["status"] == "read" and engine["absence"] == "unknown"
+    assert engine["owner_observations"]["resolution"] == [{
+        "operation_id": "d" * 32, "last_phase": "plan-ready",
+        "at": "2026-10-25T00:00:01+00:00", "terminal_phase": "plan-ready",
+        "recorded_exit_code": 0, "wrapper_exit_code": None,
+    }]
+    assert "UNEXPECTED PRIVATE ENGINE FIELD" not in raw
+    assert "PRIVATE SYNTHETIC INPUT" not in raw and '"input"' not in raw
     assert snapshot() == before

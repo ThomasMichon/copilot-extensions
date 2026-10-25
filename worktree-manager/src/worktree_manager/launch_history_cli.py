@@ -33,8 +33,13 @@ def engine_evidence(
     for request_id in request_ids:
         args += ["--request-id", request_id]
     value = engine_client.run_json(project, args, **({"timeout": timeout} if timeout is not None else {}))
+    return validate_engine_evidence(value, attempt_id, limit=limit)
+
+
+def validate_engine_evidence(value: dict, attempt_id: str, *, limit: int) -> dict:
     if (
-        set(value) != {
+        not isinstance(value, dict)
+        or set(value) != {
             "schema", "version", "attempt_id", "scope", "receipts", "admissions", "errors",
             "has_more", "next_after", "prompt_acceptance",
         }
@@ -101,7 +106,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--source-machine", action="append",
-        help="Explicit configured SSH machine to inspect (repeat, maximum 8); metadata list only",
+        help="Explicit configured SSH source; repeat for metadata, select one for exact detail",
     )
     for name in ("project", "action", "machine", "environment", "provider", "venue"):
         parser.add_argument("--" + name)
@@ -121,17 +126,21 @@ def main(argv: list[str]) -> int:
     if args.sweep_project is not None or args.source_machine is not None:
         from .launch_history_sweep import SweepError, read_sweep
         try:
-            report = asyncio.run(read_sweep(args))
+            if args.attempt_id is not None:
+                from .launch_history_remote_detail import read_remote_detail
+                report = asyncio.run(read_remote_detail(args))
+            else:
+                report = asyncio.run(read_sweep(args))
         except SweepError:
             _error(
-                "invalid-query", "Sweep requires a roster project and 1-8 explicit sources; metadata list only.",
+                "invalid-query",
+                "Select a roster project and 1-8 sources for metadata; exact detail requires one source.",
                 json_output=args.json,
             )
             return 2
         print(json.dumps(report, ensure_ascii=False, indent=2))
-        return 1 if report["errors"] or any(
-            source["status"] != "read" for source in report["sources"]
-        ) else 0
+        sources = report.get("sources", [report.get("source", {})])
+        return 1 if report["errors"] or any(source["status"] != "read" for source in sources) else 0
     filters = {
         key: getattr(args, key) for key in (
             "before", "before_id", "after", "project", "action", "machine", "environment", "provider", "outcome",

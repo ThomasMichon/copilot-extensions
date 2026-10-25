@@ -131,10 +131,14 @@ The following decomposition and detailed evidence rules are agent-recommended.
   target receipt and allocated worktree ID before later launch phases.
 - [ ] Record per-owner progress, refusal, error and exit events without putting
   prompt contents in shared logs. Distinguish allocated, launcher started,
-  Copilot process started and prompt handoff/acceptance where proven.
-- [ ] Represent a missing terminal receipt after crash as interrupted or unknown,
+  Copilot process started and prompt handoff/acceptance where proven. Existing
+  resolver/execution observations are projected in #9013; accepted-turn
+  correlation and installed qualification remain open.
+- [x] Represent a missing terminal receipt after crash as interrupted or unknown,
   including allocated-but-not-launched cases; never infer success from a plan,
-  a zero SSH exit, `copilot_invoked` alone or missing errors.
+  a zero SSH exit, `copilot_invoked` alone or missing errors. #9013 preserves
+  absent or explicit unknown source terminals; installed crash validation
+  remains in Phase 5 and the Validation Plan.
 - [x] Integrate negotiated SSH prompt admission with #6057. The selected venue
   owns allocation, seed staging and launch after admission; the host journal is
   not a second execution authority and cannot automatically replay uncertainty.
@@ -202,6 +206,30 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+- **2026-10-25** -- Prepared exact selected-machine detail under the existing
+  read-only Phase 4 contract. One configured SSH source invokes its existing
+  local Manager reader; protected prompt/options require explicit opt-in.
+  Metadata and event pages are validated, engine receipts reuse the prompt-free
+  owner projection, and a validated partial target failure retains useful
+  intent with a nonzero outcome instead of becoming empty success. Default
+  metadata sweeps are unchanged. Windows and frozen-source POSIX packets each
+  pass 203 cases, including native target-shell/Manager reads, exact private
+  input, event continuation, expiry refusal, partial engine failure and
+  unchanged fixture bytes. The remote transport and positive engine fixture
+  are synthetic; this does not establish real SSH authentication, installed
+  target compatibility or Copilot acceptance. Release, authorized rollout and
+  the original installed-conversation gates remain open.
+
+- **2026-10-25** -- #9013 merged as
+  `fdd1daf27d5c3c946483b8d270584a1601de839c` after genuine current-head
+  approval, required CI and complete resolution of the recorded-result/final-
+  wrapper-exit finding. Both parent plans were re-read after merge. The
+  source reader preserves missing terminals as unknown; no installed wrapper,
+  Copilot acceptance or crash outcome is inferred. Continue Phase 4's explicit
+  selected-machine protected detail, retaining accepted-turn correlation and
+  all containing-release, authorized-rollout, installed-conversation and
+  cleanup gates. Both efforts remain Active.
 
 - **2026-10-25** -- The bounded local summary now projects existing resolver,
   execution and admission observations separately. Resolver uncertainty and

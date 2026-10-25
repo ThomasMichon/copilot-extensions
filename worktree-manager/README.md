@@ -1116,10 +1116,46 @@ cursor. Unconfigured, ambiguous, duplicate, unavailable, incompatible,
 oversized or timed-out sources remain explicit errors, alongside independently
 read pages, and produce a nonzero exit. Remote stderr and unexpected response
 fields are never echoed. `--source-machine` is separate from the existing
-`--machine` journal-venue filter. Sweep is metadata-list-only: it refuses an
-attempt ID, `--summary`, `--include-input` and detail page selectors before
-opening a transport. Use exact local detail on the target for private input;
-remote private-detail retrieval is not implemented by this sweep.
+`--machine` journal-venue filter. Without an attempt ID this remains a
+metadata-list-only sweep: it refuses `--summary`, `--include-input` and detail
+page selectors before opening a transport.
+
+For one exact attempt on one explicitly selected configured SSH source:
+
+```text
+worktree-manager launch-attempts <attempt-id> --sweep-project example --source-machine worker-linux --json
+worktree-manager launch-attempts <attempt-id> --sweep-project example --source-machine worker-linux --include-input --json
+```
+
+This is not a fleet-wide prompt search. Exact detail refuses multiple sources,
+list filters, non-default `--limit` and `--summary` before reading configuration.
+It invokes the selected target's existing local detail reader through the same
+absolute published Manager launcher and SSH process owner; it never falls back
+to the host journal, provisions a target runtime or retries a launch.
+`--event-limit` / `--after-sequence` and `--receipt-limit` / `--receipt-after`
+select one independent target event/engine page. The source retains its
+20-second transport and 1 MiB response budgets; oversized detail is refused,
+not truncated or silently redacted. Smaller page limits can reduce a response.
+
+The result uses `worktree-manager-launch-history-remote-detail` v1 with one
+configured-profile-attributed `source`. `source.detail.attempt` contains
+validated metadata and events; only explicit `--include-input` admits its exact
+protected prompt/options, and missing, expired or erased input refuses that
+request. Default detail never admits a target's unexpected `input` field.
+`source.detail.engine` projects the existing prompt-free owner observations,
+positive boundaries, sanitized errors and continuation rather than echoing raw
+engine receipt bodies. Observations remain non-atomic, absence and prompt
+acceptance remain unknown, and the recorded-result/final-wrapper distinction
+below is unchanged.
+
+An independently unavailable engine can leave useful target intent:
+`source.status: partial` retains validated detail with the actual
+`target_exit_code`, a sanitized `incomplete-evidence` code and nonzero caller
+exit. A nonzero target exit never becomes clean success. Missing/old launchers,
+incompatible or foreign detail, malformed fields, timeouts and unavailable
+protected input remain attributed errors without echoing target stderr or
+arbitrary error text. Neither a partial nor a complete read is launch or replay
+authority.
 
 `worktree-manager launch-attempts <attempt-id> --json` reads one protected
 intent and its Manager events, then queries the installed engine once for that
@@ -1221,6 +1257,13 @@ published launcher. It follows two independent pages and checks unchanged
 Manager journal/launcher bytes, plus missing and incompatible target refusals.
 Native shells may maintain their own OS caches outside Manager state. This
 lane does not claim real SSH authentication or installed target compatibility.
+Its exact-detail cases also exercise the actual target Manager reader through
+that shell and process owner: default privacy, explicit input, event
+continuation, expired input, partial engine failure and a projected synthetic
+engine process. Manager journal/launcher fixture bytes remain unchanged. The
+separate native Manager-to-selected-engine lane above qualifies real engine
+receipt consumption; the synthetic remote engine is not installed Copilot
+acceptance.
 
 #### SSH admission and pending intent
 

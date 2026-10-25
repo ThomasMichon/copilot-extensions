@@ -100,6 +100,14 @@ async def _capture(stream, *, retain: bool) -> bytes:
 
 
 async def query_source(entry, query: list[str], *, timeout: float) -> bytes:
+    output, return_code = await query_source_result(entry, query, timeout=timeout)
+    if return_code != 0:
+        raise SweepError("target-reader-unavailable")
+    return output
+
+
+async def query_source_result(entry, query: list[str], *, timeout: float) -> tuple[bytes, int]:
+    """Retain the target exit separately so exact detail can preserve a validated partial."""
     if len(entry.ssh_environments) > 1:
         raise SweepError("ambiguous-ssh-profile")
     alias, shell = resolve_ssh_target(entry)
@@ -143,9 +151,7 @@ async def query_source(entry, query: list[str], *, timeout: float) -> bytes:
                 asyncio.create_task(_capture(process.stderr, retain=False)),
             ]
             output, _ = await asyncio.gather(*readers)
-            if await process.wait() != 0:
-                raise SweepError("target-reader-unavailable")
-            return output
+            return output, await process.wait()
     except (TimeoutError, subprocess.TimeoutExpired) as exc:
         raise SweepError("source-timeout") from exc
     except (OSError, RuntimeError) as exc:
@@ -158,6 +164,37 @@ async def query_source(entry, query: list[str], *, timeout: float) -> bytes:
             await asyncio.gather(*readers, return_exceptions=True)
         if process is not None:
             await terminate_ssh_process_tree(process, grace=1)
+
+
+def validate_metadata(row: dict) -> None:
+    if not isinstance(row, dict) or set(row) != _FIELDS:
+        raise ValueError("Invalid metadata")
+    if (
+        type(row["is_local"]) not in (bool, type(None))
+        or type(row["inputs_available"]) is not bool
+        or type(row["submitted_at"]) not in (float, int)
+        or row["manager_outcome_scope"] != "manager-boundary"
+    ):
+        raise ValueError("Invalid metadata types")
+    raw = {key: row[key] for key in _FIELDS - {
+        "manager_outcome", "manager_outcome_scope", "last_manager_event",
+    }}
+    raw["is_local"] = -1 if row["is_local"] is None else int(row["is_local"])
+    raw["inputs_available"] = int(row["inputs_available"])
+    launch_attempts._metadata(raw, version=2)
+    event = row["last_manager_event"]
+    if event is not None and (
+        not isinstance(event, dict)
+        or set(event) != {"sequence", "observed_at", "phase", "details"}
+        or type(event["sequence"]) is not int or event["sequence"] <= 0
+        or type(event["observed_at"]) not in (int, float)
+    ):
+        raise ValueError("Invalid Manager observation")
+    observation = (None, None, None, None) if event is None else (
+        event["sequence"], event["observed_at"], event["phase"], json.dumps(event["details"]),
+    )
+    if row["manager_outcome"] != launch_attempts._manager_outcome(*observation):
+        raise ValueError("Invalid Manager outcome")
 
 
 def validate_page(output: bytes, args) -> dict:
@@ -179,34 +216,7 @@ def validate_page(output: bytes, args) -> dict:
             raise ValueError("Invalid list")
         previous = None
         for row in value["attempts"]:
-            if not isinstance(row, dict) or set(row) != _FIELDS:
-                raise ValueError("Invalid metadata")
-            if (
-                type(row["is_local"]) not in (bool, type(None))
-                or type(row["inputs_available"]) is not bool
-                or type(row["submitted_at"]) not in (float, int)
-                or row["manager_outcome_scope"] != "manager-boundary"
-            ):
-                raise ValueError("Invalid metadata types")
-            raw = {key: row[key] for key in _FIELDS - {
-                "manager_outcome", "manager_outcome_scope", "last_manager_event",
-            }}
-            raw["is_local"] = -1 if row["is_local"] is None else int(row["is_local"])
-            raw["inputs_available"] = int(row["inputs_available"])
-            launch_attempts._metadata(raw, version=2)
-            event = row["last_manager_event"]
-            if event is not None and (
-                not isinstance(event, dict)
-                or set(event) != {"sequence", "observed_at", "phase", "details"}
-                or type(event["sequence"]) is not int or event["sequence"] <= 0
-                or type(event["observed_at"]) not in (int, float)
-            ):
-                raise ValueError("Invalid Manager observation")
-            observation = (None, None, None, None) if event is None else (
-                event["sequence"], event["observed_at"], event["phase"], json.dumps(event["details"]),
-            )
-            if row["manager_outcome"] != launch_attempts._manager_outcome(*observation):
-                raise ValueError("Invalid Manager outcome")
+            validate_metadata(row)
             position = (row["submitted_at"], row["attempt_id"])
             if previous is not None and position >= previous:
                 raise ValueError("Invalid list ordering")
