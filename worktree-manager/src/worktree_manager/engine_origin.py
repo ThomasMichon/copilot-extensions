@@ -253,14 +253,17 @@ def _native_acquisition(
                 argv, env=environment, cwd=cwd, stdin=subprocess.DEVNULL,
                 stdout=stdout, stderr=stderr, **no_window_kwargs(),
             )
+        timeout_error = None
         try:
             try:
                 rc = process.wait(timeout=timeout)
-            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
                 if job is None:
                     process.kill()
                     process.wait()
-                raise
+                if isinstance(error, KeyboardInterrupt):
+                    raise
+                timeout_error = error
         finally:
             if job is not None:
                 try:
@@ -269,12 +272,21 @@ def _native_acquisition(
                     process.wait()
                 except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                     raise OwnedCleanupError(process, job) from error
-        stdout.seek(0)
-        stderr.seek(0)
-        return subprocess.CompletedProcess(
-            argv, rc, stdout.read(8192).decode("utf-8", "replace"),
-            stderr.read(8192).decode("utf-8", "replace"),
-        )
+        try:
+            stdout.seek(0)
+            stderr.seek(0)
+            captured = (
+                stdout.read(8192).decode("utf-8", "replace"),
+                stderr.read(8192).decode("utf-8", "replace"),
+            )
+        except (OSError, ValueError):
+            if timeout_error is not None:
+                raise timeout_error
+            raise
+        if timeout_error is not None:
+            timeout_error.output, timeout_error.stderr = captured
+            raise timeout_error
+        return subprocess.CompletedProcess(argv, rc, *captured)
 
 
 def _sharing_failure(result: subprocess.CompletedProcess[str]) -> bool:
@@ -410,5 +422,18 @@ def refresh_registered_origin(
         if any(actual[key] != origin.provenance[key] for key in _IDENTITY_FIELDS):
             raise ValueError("Acquired payload provenance differs from selected origin")
         return actual
-    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+    except subprocess.TimeoutExpired as error:
+        detail = f"Native acquisition timed out after {error.timeout:g} seconds"
+        diagnostics = [str(_error("Registered origin refresh", origin.source, detail))]
+        for channel, value in (("stdout", error.stdout), ("stderr", error.stderr)):
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", "replace")
+            if isinstance(value, str) and value:
+                diagnostic = _failure(
+                    channel, origin.source,
+                    SimpleNamespace(returncode=1, stdout="", stderr=value),
+                )
+                diagnostics.append(str(diagnostic)[:190])
+        raise RuntimeError("\n".join(diagnostics)) from error
+    except (OSError, ValueError) as error:
         raise _error("Registered origin refresh", origin.source, str(error)) from error

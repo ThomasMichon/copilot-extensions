@@ -372,13 +372,76 @@ def test_native_timeout_is_explicit_and_not_replayed(case, monkeypatch):
     assert len(calls) == 1
 
 
+@pytest.mark.parametrize("binary", [False, True])
+def test_timeout_reports_both_sanitized_streams_without_command_repr(case, monkeypatch, binary):
+    selected = _select(case)
+    calls = []
+    stdout = "cache phase \u03c0\ncredential fixture-stdout-canary\n" + "detail " * 2000
+    stderr = "payload phase \u03a9\nhttps://example.invalid/private-location\n" + "detail " * 2000
+    if binary:
+        stdout, stderr = stdout.encode(), stderr.encode()
+
+    def timeout(argv, environment, cwd, **kwargs):
+        calls.append(argv)
+        raise subprocess.TimeoutExpired(
+            ["fixture-command-repr-must-not-appear"], 180, output=stdout, stderr=stderr,
+        )
+
+    monkeypatch.setattr(origin_api, "_native_acquisition", timeout)
+    with pytest.raises(RuntimeError) as caught:
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    message = str(caught.value)
+    assert "timed out after 180 seconds" in message
+    assert "cache phase \u03c0" in message and "payload phase \u03a9" in message
+    assert "fixture-stdout-canary" not in message
+    assert "private-location" not in message
+    assert "fixture-command-repr-must-not-appear" not in message
+    assert len(message) < 700 and len(calls) == 1
+
+
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
+    reason="explicit nonpromotion Windows registered-origin consumer",
+)
+def test_real_timeout_reaches_registered_origin_formatter(case, monkeypatch, tmp_path):
+    _write_ledger(case)
+    selected = _select(case)
+    before = case.settings.read_bytes(), (case.home / "config.json").read_bytes()
+    started = tmp_path / "started"
+    script = tmp_path / "native_cli.py"
+    script.write_text(
+        "import pathlib,sys,time\n"
+        "print('cache phase \u03c0',flush=True)\n"
+        "print('payload phase \u03a9',file=sys.stderr,flush=True)\n"
+        "print('credential fixture-secret',file=sys.stderr,flush=True)\n"
+        f"pathlib.Path({str(started)!r}).write_text('flushed')\n"
+        "time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = "8"
+    monkeypatch.setattr(origin_api, "_native_acquisition", case.native)
+    with pytest.raises(RuntimeError) as caught:
+        origin_api.refresh_registered_origin(
+            primitive, selected, environment=case.env,
+            copilot_command=(sys.executable, "-I", "-S", "-X", "utf8", str(script)),
+        )
+    message = str(caught.value)
+    assert started.is_file()
+    assert "cache phase \u03c0" in message and "payload phase \u03a9" in message
+    assert "fixture-secret" not in message and str(script) not in message
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
+    assert before == (case.settings.read_bytes(), (case.home / "config.json").read_bytes())
+    assert not case.payload.exists()
+
+
 def test_owned_windows_job_quiesces_once_on_timeout(case, monkeypatch):
     events = []
+    failure = subprocess.TimeoutExpired(["copilot"], 180)
 
     class Process:
         def wait(self, timeout=None):
             if timeout is not None:
-                raise subprocess.TimeoutExpired(["copilot"], timeout)
+                raise failure
             events.append("wait")
             return 1
 
@@ -390,11 +453,16 @@ def test_owned_windows_job_quiesces_once_on_timeout(case, monkeypatch):
             events.append("close")
 
     monkeypatch.setattr(origin_api, "_WINDOWS", True)
-    monkeypatch.setattr(
-        origin_api, "spawn_sync_in_kill_on_close_job", lambda *args, **kwargs: (Process(), Job()),
-    )
-    with pytest.raises(subprocess.TimeoutExpired):
+    def spawn(*args, **kwargs):
+        kwargs["stdout"].write("cache phase \u03c0".encode())
+        kwargs["stderr"].write("payload phase \u03a9".encode())
+        return Process(), Job()
+
+    monkeypatch.setattr(origin_api, "spawn_sync_in_kill_on_close_job", spawn)
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
         case.native(["copilot"], case.env, case.home)
+    assert caught.value is failure
+    assert failure.stdout == "cache phase \u03c0" and failure.stderr == "payload phase \u03a9"
     assert events == ["quiesce", "close", "wait"]
 
 
