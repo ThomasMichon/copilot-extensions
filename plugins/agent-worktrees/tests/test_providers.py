@@ -148,10 +148,10 @@ class TestAccountTokenForSlug:
         assert base.account_token_for_slug("", prcfg) is None
 
     def test_github_account_without_gh_token_is_none(self, monkeypatch):
-        # Account resolves but gh has no token for it -> fall through to ambient.
+        # An unconfigured owner hint without a token retains legacy behavior.
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
-            lambda slug: "host-acct",
+            lambda slug, **kwargs: None if kwargs.get("configured_only") else "host-acct",
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: None,

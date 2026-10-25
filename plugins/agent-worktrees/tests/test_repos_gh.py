@@ -56,7 +56,10 @@ def test_ambient_when_no_account(monkeypatch):
 
 def test_no_inject_when_token_missing(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "acct-x")
+    monkeypatch.setattr(
+        repos, "account_for_github_slug",
+        lambda t, **kwargs: None if kwargs.get("configured_only") else "acct-x",
+    )
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda a: None)
 
     env, login, injected = m._gh_env_for_repo("owner/name")

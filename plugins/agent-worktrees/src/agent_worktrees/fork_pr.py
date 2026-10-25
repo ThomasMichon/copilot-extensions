@@ -363,8 +363,8 @@ def _resolve_fork_credential(repo_slug: str, prcfg) -> tuple[str | None, str]:
     ``provider.ensure_fork`` come from this single resolution (mirroring
     ``providers.account_token_for_slug``'s own priority: an explicit
     ``pr.token_command``/``token_env`` binding first, else the repo's
-    resolved account mapping only when a token can actually be minted for
-    it, else ambient ``gh`` auth).
+    resolved account mapping when its token is available. A missing explicit
+    choice refuses; only an unconfigured owner hint may use ambient ``gh``).
 
     ``scope`` is ``""`` only when neither a configured token nor a
     mapped/ambient account can be resolved at all -- an opaque custom token
@@ -385,7 +385,11 @@ def _resolve_fork_credential(repo_slug: str, prcfg) -> tuple[str | None, str]:
     active = git_ops.active_gh_account() or ""
     if not account or (active and active.casefold() == account.casefold()):
         return None, active
-    minted = git_ops.gh_token_for_account(account)
+    from .providers.base import ProviderError
+    try:
+        minted = git_ops.gh_token_for_target(account, repo_slug)
+    except git_ops.AccountCredentialError as exc:
+        raise ProviderError(str(exc)) from exc
     return (minted, account) if minted else (None, active)
 
 
@@ -584,7 +588,11 @@ def resolve_fork_publish(
     # Resolve the credential ONCE: the same (token, scope) pair both gates
     # the confirmation decision and authenticates the actual fork operation
     # below -- see _resolve_fork_credential's docstring.
-    fork_token, effective_account = _resolve_fork_credential(default_pr_repo, prcfg)
+    from .providers.base import ProviderError
+    try:
+        fork_token, effective_account = _resolve_fork_credential(default_pr_repo, prcfg)
+    except ProviderError as exc:
+        return {"error": str(exc)}
     # Fail closed on an unresolvable identity: never trust (or later
     # persist) a confirmation under an empty scope.
     confirmed_entry = (

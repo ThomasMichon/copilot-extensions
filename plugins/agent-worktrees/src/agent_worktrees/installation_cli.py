@@ -211,7 +211,8 @@ def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
     ``GH_TOKEN`` set when an account resolved *and* a token minted; ``login`` is
     the resolved account (or None); ``injected`` reports whether ``GH_TOKEN``
     was set. When nothing resolves the ambient env is returned unchanged (caller
-    falls back to the active gh account).
+    falls back to the active gh account). An unavailable explicitly configured
+    identity raises ``AccountCredentialError`` before execution.
     """
     from . import repos
 
@@ -219,7 +220,7 @@ def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
     login = repos.account_for_github_slug(target)
     injected = False
     if login:
-        token = git_ops.gh_token_for_account(login)
+        token = git_ops.gh_token_for_target(login, target)
         if token:
             env["GH_TOKEN"] = token
             injected = True

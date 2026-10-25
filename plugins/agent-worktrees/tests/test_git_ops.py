@@ -213,6 +213,7 @@ class TestPush:
             go, "_auth_config_args",
             lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         no_hooks_seen: list[bool] = []
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
@@ -347,6 +348,7 @@ class TestPushTimeout:
             go, "_auth_config_args",
             lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
                      no_hooks=False, kill_tree=False, isolated_repository=False):
@@ -799,6 +801,7 @@ class TestCrossAccountAuth:
             go, "_auth_config_args",
             lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         calls: list[bool] = []
 
         def fake_git(*args, **kwargs):
