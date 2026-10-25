@@ -21,14 +21,17 @@ def _error(code: str, message: str, *, json_output: bool) -> None:
         print("error: " + message)
 
 
-def engine_evidence(project: str, attempt_id: str, *, limit: int, after: str | None, request_ids: list[str]) -> dict:
+def engine_evidence(
+    project: str, attempt_id: str, *, limit: int, after: str | None,
+    request_ids: list[str], timeout: int | None = None,
+) -> dict:
     """Use the versioned process boundary; never import the engine or echo errors."""
     args = ["launch-attempts", attempt_id, "--json", "--limit", str(limit)]
     if after is not None:
         args += ["--after", after]
     for request_id in request_ids:
         args += ["--request-id", request_id]
-    value = engine_client.run_json(project, args)
+    value = engine_client.run_json(project, args, **({"timeout": timeout} if timeout is not None else {}))
     if (
         set(value) != {
             "schema", "version", "attempt_id", "scope", "receipts", "admissions", "errors",
@@ -102,6 +105,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--after-sequence", type=int, default=0)
     parser.add_argument("--receipt-limit", type=int, default=100)
     parser.add_argument("--receipt-after")
+    parser.add_argument(
+        "--summary", action="store_true",
+        help="Bounded positive local owner evidence across pages; not prompt acceptance or a remote sweep",
+    )
     args = parser.parse_args(argv)
     filters = {
         key: getattr(args, key) for key in (
@@ -114,9 +121,14 @@ def main(argv: list[str]) -> int:
         or (args.attempt_id is not None and any(value is not None for value in filters.values()))
         or not 1 <= args.receipt_limit <= 100
         or not 1 <= args.limit <= 100
+        or (args.summary and (
+            args.attempt_id is None or args.event_limit != 100 or args.after_sequence != 0
+            or args.receipt_limit != 100 or args.receipt_after is not None
+        ))
     ):
         _error(
-            "invalid-query", "Private input requires detail; list filters and page limits must be valid.",
+            "invalid-query",
+            "Private input and summary require detail; summary cannot use page selectors; filters and limits must be valid.",
             json_output=args.json,
         )
         return 2
@@ -132,6 +144,11 @@ def main(argv: list[str]) -> int:
                 "next_before": rows[-1]["submitted_at"] if has_more else None,
                 "next_before_id": rows[-1]["attempt_id"] if has_more else None,
             }
+        elif args.summary:
+            from .launch_history_summary import read_summary
+            report = read_summary(
+                store, args.attempt_id, include_input=args.include_input, read_page=engine_evidence,
+            )
         else:
             report = read_detail(
                 store, args.attempt_id, include_input=args.include_input,
@@ -146,4 +163,7 @@ def main(argv: list[str]) -> int:
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))
     # A partial result is useful evidence, but not an empty-success response.
-    return 1 if report.get("engine", {}).get("status") == "unavailable" else 0
+    return 1 if (
+        report.get("engine", {}).get("status") == "unavailable"
+        or report.get("summary", {}).get("errors")
+    ) else 0

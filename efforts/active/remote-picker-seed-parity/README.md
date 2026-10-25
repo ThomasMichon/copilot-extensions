@@ -167,6 +167,21 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- Prepared an opt-in bounded local Manager evidence summary
+  using the existing engine v1 reader, with no launch/SSH protocol change.
+  Completed New allocation, launcher/backend spawn and qualified original
+  native-session evidence remain distinct; absent receipts and prompt
+  acceptance stay unknown. Four actual Manager/engine read cases on Windows
+  and frozen-source POSIX
+  preserve fixture state, including later-page native evidence. This is source
+  inspection, not selected-machine sweeping, rollout or installed parity.
+  All original conversation, exactly-once and cleanup gates remain open.
+- **2026-10-25** -- #9001 merged scoped Manager-boundary outcome filtering
+  after genuine current-head approval, no open findings and required CI.
+  Zero launcher return remains distinct from successful Copilot launch or
+  accepted prompt; missing evidence stays unknown. Whole-attempt qualified
+  evidence, selected-machine sweeps, containing release, authorized rollout,
+  installed local/SSH conversation proof and cleanup remain open.
 - **2026-10-25** -- #8999 merged 90-day private-input retention and legacy
   prompt-history migration after current-head approval, resolved findings and
   required CI. Final frozen POSIX checks include actual WAL/restart and

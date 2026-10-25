@@ -1094,13 +1094,43 @@ An unavailable/incompatible engine preserves the saved local detail with an
 explicit source error and nonzero exit, without invoking setup or replay.
 Per-receipt read errors remain in the engine response.
 
+For an explicit cross-page local projection, use
+`worktree-manager launch-attempts <attempt-id> --summary --json`. This reads at
+most 1,000 Manager events and ten existing engine pages of 100 receipts each;
+the engine calls share a 120-second deadline, rather than each acquiring a
+fresh deadline. At most 16 Manager request references are sent per call;
+engine-discovered admission references retain the engine's own per-page limit.
+The default detail, list and UI read budgets are unchanged. Summary cannot be
+combined with event/receipt page selectors.
+
+`summary.boundaries` keeps positive owner evidence separate: `allocation`
+requires a New admission's completed creation, `launcher_start` and
+`backend_start` require the corresponding actual process-spawned observation,
+and `native_session` requires the engine's qualified original native-session
+join. Each fact keeps its request or operation identity; process observations
+retain resolution/parent/worktree/incarnation, timestamp, PID and birth evidence.
+A backend command is not by itself proof of a Copilot session, a seed claim
+does not prove handoff, and a returned plan does not prove allocation. Multiple
+operations are not collapsed into one winning launch or conversation. The
+Manager-only `--outcome` filter retains its existing meaning.
+
+The projection labels its observations **non-atomic**, leaves absent boundaries
+`unknown`, and never claims snapshot completeness, current liveness, safe replay,
+or allocated-but-not-launched based on a missing event. A later-page failure
+retains independently observed facts. Limits, incompatible/unavailable sources,
+invalid receipts and changed admissions remain explicit `summary.errors` and
+produce a nonzero exit; page counts and the last continuation remain under
+`engine`. The selected remote is explicitly `not-queried`. These facts are a
+bounded local view of an attempt, not a remote sweep or a universal terminal
+outcome.
+
 Only `--include-input` with an exact attempt ID selects protected prompt/options.
 Expired or erased input refuses that request; list and ordinary detail never
 select its text. Resolution, launcher exit, seed claim and original native-session
 observations remain separate evidence. `prompt_acceptance` stays `unknown`,
 including after a zero exit or a qualified native-session join. These commands
-do not launch, repair, expire, retry or sweep other machines. Whole-attempt
-outcome aggregation and selected-machine sweeps remain separate capabilities;
+do not launch, repair, expire, retry or sweep other machines. Complete
+terminal-outcome classification and selected-machine sweeps remain separate capabilities;
 local retention maintenance runs through the Picker/confirmation path, not
 these read-only inspection commands.
 
@@ -1110,6 +1140,10 @@ Set `WORKTREE_MANAGER_TEST_ENGINE_ARGV` to a JSON array naming a prepared
 candidate engine interpreter/entry command. The lane runs the real Manager
 entry and engine CLI against isolated synthetic intent, checking metadata and
 explicit input in separate cases and verifying unchanged fixture state.
+Its summary cases additionally cross two real engine pages (103 receipts),
+including a backend spawn and the engine's native-session join beyond page
+one, while preserving unknown allocation and prompt acceptance. They print
+source-read elapsed time, not a performance-budget verdict.
 It is not a required-unit-CI matrix, a latency qualification, installed
 Copilot acceptance or permission to provision a runtime.
 

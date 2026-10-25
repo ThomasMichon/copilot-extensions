@@ -200,6 +200,47 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
 
+### 2026-10-25 -- Bounded local positive-evidence summary prepared
+
+- An explicit Manager `launch-attempts <id> --summary` joins up to ten existing
+  v1 engine pages under one 120-second engine-read deadline. The default
+  list/detail and shared history UI remain unchanged; no new engine flags,
+  response fields, daemon, launch behavior or replay path are introduced.
+- Allocation requires completed New admission evidence. Launcher-command
+  spawn, backend-command spawn and the engine's qualified native-session join
+  remain separate positive facts with their own request/operation identities.
+  Returned plans, zero exits, seed claims and absent receipts never become
+  Copilot acceptance or allocated-but-not-launched verdicts.
+- Pages are independent, non-atomic observations. Partial failures retain safe
+  positive facts with source errors, budgets and continuation visible; Manager
+  references and events remain bounded. Remote targets are not contacted.
+- The focused Windows and frozen-source POSIX packets each pass 45 cases, including four actual
+  Manager/engine subprocess cases with and without explicit private input.
+  Cross-page cases read 103 receipts in two engine calls and reach the native
+  join beyond page one without changing fixture state. Measured summary reads
+  took 4.806444 and 4.283359 seconds on Windows, and 0.407694 and 0.437641
+  seconds on POSIX; these are source samples, not an installed performance or
+  acceptance qualification. Frozen POSIX source and caches were removed after
+  qualification. Touched Python lint, installation contracts and the scoped
+  module-size guard pass; committed-source documentation checks pass.
+- This closes only a bounded local projection gap. Complete per-owner terminal
+  classification, selected-machine sweeps, containing release, authorized
+  rollout, installed prompt/conversation proof and parent cleanup remain open.
+
+### 2026-10-25 -- Manager-boundary outcome filtering merged
+
+- #9001 merged as `69794c92b53ba40a5a170f6807eadb1e1516fc10` after genuine
+  current-head Copilot approval, no review threads/findings and required CI
+  passing. Both parent trackers remain open.
+- Re-read both parent plans after merge. The new filters intentionally expose
+  only Manager-boundary observations; they do not settle whole-attempt
+  provider/native aggregation or selected-machine inspection. Continue those
+  source slices before containing release, authorized rollout and installed
+  New/cold Resume same-conversation/exactly-once proof.
+- The managed post-merge sync pulled this worktree onto the provider-confirmed
+  merge. Parent validation, release/rollout, resource cleanup and effort
+  closure gates remain open; this worktree is not ready to finalize.
+
 ### 2026-10-25 -- Scoped Manager-outcome filter source
 
 - Local list and detail now project the latest durable Manager observation
