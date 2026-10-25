@@ -123,6 +123,8 @@ against already-installed payloads without downloading other plugins.
 `anchors`, `prune` and `integration` independently run their existing local
 owners. Anchor/prune phases do not enumerate registered plugins, and local
 phases do not eagerly discover unrelated network authentication.
+Filtered payload requests prepare authentication only when acquiring their
+selected contexts; unknown selections refuse before auth discovery.
 
 A successful selected phase is **partial**, not full-update convergence.
 Detached/status JSON includes `phase`, `plugins` and `full_update: false`;

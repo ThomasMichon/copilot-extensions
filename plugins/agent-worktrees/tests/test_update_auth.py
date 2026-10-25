@@ -67,6 +67,60 @@ def test_payload_phase_does_not_prepare_anchor_auth(monkeypatch, tmp_path):
     assert prepared == [(tmp_path, {"include_anchors": False})]
 
 
+@pytest.mark.parametrize("selected_status", ["ok", "auth_required"])
+def test_filtered_payload_auth_prepares_only_its_selected_context(monkeypatch, tmp_path, selected_status):
+    invocation, selected = tmp_path / "invocation", tmp_path / "selected"
+    observed = []
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    monkeypatch.setattr(context, "_marketplace_context", lambda: invocation)
+
+    def marketplaces(cwd):
+        observed.append(cwd)
+        return [_source(id="marketplace:copilot-extensions", cwd=cwd)]
+
+    def report(items):
+        return auth.AuthReport([
+            auth.SourceAuth(
+                item, [], status=selected_status if item.cwd == selected else "auth_required",
+            )
+            for item in items
+        ])
+
+    monkeypatch.setattr(sources, "marketplaces", marketplaces)
+    monkeypatch.setattr(auth, "report", report)
+    monkeypatch.setattr(update_events, "enter", lambda *a, **kw: None)
+    monkeypatch.setattr(update_events, "auth_result", lambda *a, **kw: None)
+
+    def acquire(args):
+        context.child_environment(selected)
+        return 0
+
+    result = context.run_update(
+        argparse.Namespace(phase="payloads", plugin=["agent-example"]), acquire,
+    )
+    assert result == (0 if selected_status == "ok" else 4)
+    assert observed == [selected]
+
+
+def test_unknown_filtered_payload_rejects_before_auth_discovery(monkeypatch):
+    from agent_worktrees import update_cli
+
+    monkeypatch.setenv("CE_UPDATE_AUTH", "on")
+    monkeypatch.setattr(update_cli, "_core_helper", lambda name, fallback: fallback)
+    monkeypatch.setattr(update_cli, "_registered_plugin_targets", lambda: {})
+    monkeypatch.setattr(
+        context.Session, "prepare", lambda *a, **kw: pytest.fail("unselected auth preparation"),
+    )
+    monkeypatch.setattr(
+        context, "_marketplace_context", lambda: pytest.fail("unselected marketplace discovery"),
+    )
+    monkeypatch.setattr(update_events, "record", lambda *a, **kw: None)
+    assert context.run_update(
+        argparse.Namespace(phase="payloads", plugin=["unknown"]),
+        update_cli._update_in_plugin_steps,
+    ) == 1
+
+
 def _source(owner="team", *, id="marketplace:example", required=True, cwd=None):
     return auth.source(id, f"https://example.test/{owner}/repo", required=required, cwd=cwd)
 

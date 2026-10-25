@@ -1,0 +1,9 @@
+{
+  "comment": "Ship shared partial-run telemetry preservation while retaining ordinary full-update aggregation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

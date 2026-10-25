@@ -278,7 +278,7 @@ def run_update(args: argparse.Namespace, steps) -> int:
             phase = getattr(args, "phase", None)
             if phase == "anchors":
                 value.prepare_anchors()
-            elif phase in (None, "payloads"):
+            elif phase in (None, "payloads") and not getattr(args, "plugin", None):
                 value.prepare(
                     _marketplace_context(), include_anchors=(
                         phase is None and not getattr(args, "no_anchor_sync", False)

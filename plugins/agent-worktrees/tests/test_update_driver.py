@@ -140,20 +140,39 @@ def test_phase_execution_does_not_probe_or_self_update_manager(monkeypatch):
     assert update_cli.manager_handoff(_args(phase="preflight")) is None
 
 
-def test_partial_completion_does_not_report_full_verified_current(monkeypatch):
+@pytest.mark.parametrize("target_status", [None, "OK", "SKIPPED (current)", "timed out (2s)"])
+def test_partial_completion_does_not_report_full_verified_current(monkeypatch, tmp_path, target_status):
+    import json
+    import update_telemetry as ut
     from agent_worktrees import update_events
 
-    outcomes = []
-    monkeypatch.setattr(update_events, "_ut", SimpleNamespace(
-        SKIPPED="skipped", VERIFIED_CURRENT="verified_current",
-    ))
-    monkeypatch.setattr(update_events, "_run", SimpleNamespace(
-        finish=lambda outcome, **kw: outcomes.append(outcome) or 0,
-    ))
+    environment = {ut.ENV_HOME: str(tmp_path / "telemetry")}
+    previous = ut.Run.from_env_or_new("engine", environ=environment)
+    previous.target("runtime_reconcile", "agent-example@copilot-extensions", ut.VERIFIED_CURRENT)
+    assert previous.finish() == 0
+    path = tmp_path / "telemetry" / "update-status.json"
+    history = json.loads(path.read_text(encoding="utf-8"))
+    run = ut.Run.from_env_or_new("engine", environ=environment)
+    monkeypatch.setattr(update_events, "_ut", ut)
+    monkeypatch.setattr(update_events, "_run", run)
     monkeypatch.setattr(update_events, "_required_failures", set())
     monkeypatch.setattr(update_events, "_human_phase", None)
-    assert update_events.finish(0, partial=True) == 0
-    assert outcomes == ["skipped"]
+    if target_status:
+        update_events.record(
+            "payload_refresh", "agent-example@copilot-extensions", target_status,
+            changed=target_status == "OK",
+        )
+    failed = target_status == "timed out (2s)"
+    assert update_events.finish(0, partial=True) == (6 if failed else 0)
+    status = json.loads(path.read_text(encoding="utf-8"))
+    assert status["run"]["id"] == run.run_id
+    assert status["run"]["outcome"] == (ut.TIMEOUT if failed else ut.SKIPPED)
+    assert status["run"]["exit_code"] == (6 if failed else 0)
+    assert status["last_success"] == history["last_success"]
+    if failed:
+        assert status["last_failure"]["run_id"] == run.run_id
+    else:
+        assert status["last_failure"] == history["last_failure"]
 
 
 def test_no_manager_does_not_bypass_the_queue(queued):
