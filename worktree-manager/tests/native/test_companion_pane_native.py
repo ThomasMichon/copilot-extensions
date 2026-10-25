@@ -33,8 +33,13 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
     (package / "mux_companion.py").write_text(
         "import json,os,sys,time\n"
         "from pathlib import Path\n"
+        "from worktree_manager.companion_lifecycle import cli_alive\n"
         f"Path({str(observed)!r}).write_text(json.dumps({{'argv':sys.argv[1:],'prefix':sys.prefix,'pid':os.getpid()}}))\n"
-        "time.sleep(90)\n",
+        "options=dict(zip(sys.argv[1::2],sys.argv[2::2]))\n"
+        "for _ in range(900):\n"
+        " if cli_alive(options['--project'],options['--worktree-id'],options['--cli-pane'],"
+        "session_incarnation=options['--session-incarnation']) is False: break\n"
+        " time.sleep(0.1)\n",
         encoding="utf-8",
     )
     environment = {
@@ -88,7 +93,11 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         assert observed.exists(), mux("capture-pane", "-p", "-t", observer)
         receipt = json.loads(observed.read_text(encoding="utf-8"))
         assert Path(receipt["prefix"]).resolve() == slot.resolve()
-        assert receipt["argv"] == ["--cli-pane", cli, "--cwd", str(cwd.resolve())]
+        assert receipt["argv"] == [
+            "--cli-pane", cli, "--cwd", str(cwd.resolve()),
+            "--project", "example", "--worktree-id", "fixture",
+            "--session-incarnation", incarnation,
+        ]
         marker = mux("show-options", "-v", "-t", session, "@aw_companion_" + cli[1:])
         assert marker == observer
         def pane_rows():
@@ -114,6 +123,21 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         assert replacement != observer
         assert pane_rows()[cli][0] == pid
         assert len(pane_rows()) == 2
+        companion_pane.switch("return", str(cwd), cli_pane=cli)
+        mux("kill-pane", "-t", cli)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            gone = subprocess.run(
+                [binary, "has-session", "-t", session], env=environment,
+                capture_output=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if gone.returncode:
+                break
+            time.sleep(0.05)
+        assert gone.returncode, "Summary kept the CLI-only session alive"
+        mux("new-session", "-d", "-s", session, "-c", str(cwd))
+        assert len(mux("list-panes", "-s", "-t", session, "-F", "#{pane_id}").splitlines()) == 1
+        assert mux("display-message", "-p", "-t", session, "#{session_id}:#{session_created}") != incarnation
     finally:
         # Only this uniquely named test session; never the user's server.
         subprocess.run(

@@ -42,6 +42,11 @@ pane directory and window before switching; older sessions without that
 identity refuse rather than guessing pane zero. Reattachment preserves a
 recorded CLI only when the same native session and live pane are confirmed.
 The observer uses the constructed runtime's bootstrap, not source or `uv`.
+Concurrent callers serialize lookup and creation for that native CLI
+incarnation. While open, the observer checks only its registered CLI's native
+presence once per second off the UI loop and exits when that owner is
+confirmed ended; unavailable evidence never means death. It cannot keep an
+otherwise-ended CLI session alive indefinitely or adopt a successor pane.
 
 Topology/statistics, attention indicators and two-line clickable mux chrome
 remain tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).

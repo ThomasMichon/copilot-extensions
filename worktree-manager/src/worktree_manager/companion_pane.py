@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import re
 import subprocess
 import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import engine_client as ec
 from .mux_child_process import run as run_mux_child
-from .mux_mapping_registry import get_mapping
+from .mux_mapping_registry import get_mapping, _try_lock_file_once, _unlock_file
+from .self_install import default_root
 
 _PANE = re.compile(r"%\d+\Z")
 _INCARNATION = re.compile(r"\$\d+:\d+\Z")
@@ -31,17 +35,46 @@ def _call(mapping: dict, *args: str, cancelled=None) -> str:
             index = arguments.index("-t") + 1
             if index < len(arguments) and _PANE.fullmatch(arguments[index]):
                 arguments[index] = mapping["mux_session"] + ":" + arguments[index]
+    elif arguments[0] in {"show-options", "set-option"} and "-t" in arguments:
+        index = arguments.index("-t") + 1
+        if arguments[index] == "=" + mapping["mux_session"]:
+            arguments[index] = mapping["session_incarnation"].split(":", 1)[0]
     try:
         result = run_mux_child(
             [mapping["mux_bin"], *arguments], capture_output=True, text=True,
             env=environment,
             timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         raise PaneError(f"Mux navigation failed: {exc}") from exc
     if result.returncode:
         raise PaneError((result.stderr or "Mux navigation failed.").strip())
     return result.stdout.rstrip("\r\n")
+
+
+@contextmanager
+def _navigation_guard(mapping: dict, cli: str, cancelled=None):
+    key = "\0".join(str(mapping.get(field, "")) for field in (
+        "project", "worktree_id", "mux_session", "session_incarnation",
+    )) + "\0" + cli
+    folder = default_root() / "companion-panes"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
+    try:
+        with path.open("a+b") as handle:
+            deadline = time.monotonic() + 10
+            while not _try_lock_file_once(handle):
+                if cancelled is not None and cancelled.is_set():
+                    raise PaneError("View switch cancelled.")
+                if time.monotonic() >= deadline:
+                    raise PaneError("Another view switch is still in progress.")
+                time.sleep(0.05)
+            try:
+                yield
+            finally:
+                _unlock_file(handle)
+    except OSError as exc:
+        raise PaneError(f"View switch guard unavailable: {exc}") from exc
 
 
 def _target(cwd: str, cli_pane: str | None, runner=None, cancelled=None) -> tuple[dict, str, str, list[dict]]:
@@ -107,13 +140,26 @@ def _focus(mapping: dict, pane: str, cancelled=None) -> None:
 
 def switch(
     action: str, cwd: str | None = None, *, cli_pane: str | None = None, runner=None,
-    cancelled=None,
+    cancelled=None, session_incarnation: str | None = None,
 ) -> str:
     """Return the selected pane ID, refusing unregistered or stale targets."""
     if action not in {"show", "return"}:
         raise PaneError("Unknown Companion pane action.")
     target_path = str(Path(cwd or os.getcwd()).resolve())
-    mapping, cli, window, panes = _target(target_path, cli_pane, runner, cancelled)
+    original, cli, _window, _panes = _target(target_path, cli_pane, runner, cancelled)
+    if session_incarnation is not None and original.get("session_incarnation") != session_incarnation:
+        raise PaneError("The observer's original CLI session has ended.")
+    with _navigation_guard(original, cli, cancelled):
+        mapping, current_cli, window, panes = _target(target_path, cli, runner, cancelled)
+        if current_cli != cli or any(
+            mapping.get(field) != original.get(field)
+            for field in ("mux_session", "session_incarnation", "mux_bin")
+        ):
+            raise PaneError("The CLI identity changed during the view switch.")
+        return _switch_verified(action, target_path, mapping, cli, window, panes, cancelled)
+
+
+def _switch_verified(action, target_path, mapping, cli, window, panes, cancelled):
     if action == "return":
         _focus(mapping, cli, cancelled)
         return cli
@@ -138,6 +184,8 @@ def switch(
             shell_command = companion_shell_command([
                 "-m", "worktree_manager.mux_companion",
                 "--cli-pane", cli, "--cwd", target_path,
+                "--project", mapping["project"], "--worktree-id", mapping["worktree_id"],
+                "--session-incarnation", mapping["session_incarnation"],
             ])
         except (RuntimeError, ValueError) as exc:
             raise PaneError(str(exc)) from exc

@@ -380,10 +380,16 @@ class MuxCompanionApp(App):
 
     BINDINGS = [("r", "refresh", "Refresh"), ("escape", "quit", "Exit")]
 
-    def __init__(self, cwd: str | None = None, *, cli_pane: str | None = None) -> None:
+    def __init__(
+        self, cwd: str | None = None, *, cli_pane: str | None = None,
+        project: str | None = None, worktree_id: str | None = None,
+        session_incarnation: str | None = None,
+    ) -> None:
         super().__init__()
         self._cwd = cwd
         self._cli_pane = cli_pane
+        self._observer_identity = (project, worktree_id, session_incarnation)
+        self._checking_cli = False
         self._navigating = False
         self._data = _CompanionData()
         self._loading = True
@@ -419,6 +425,29 @@ class MuxCompanionApp(App):
 
     def on_mount(self) -> None:
         self._reload()
+        if self._cli_pane and all(self._observer_identity):
+            self._poll_cli()
+            self.set_interval(1, self._poll_cli)
+
+    def _poll_cli(self) -> None:
+        if not self._checking_cli:
+            self._checking_cli = True
+            self._observe_cli()
+
+    @work(group="cli-lifecycle")
+    async def _observe_cli(self) -> None:
+        from .companion_lifecycle import cli_alive
+
+        project, worktree_id, incarnation = self._observer_identity
+        try:
+            alive = await asyncio.to_thread(
+                cli_alive, project, worktree_id, self._cli_pane,
+                session_incarnation=incarnation,
+            )
+            if alive is False:
+                self.exit()
+        finally:
+            self._checking_cli = False
 
     def on_unmount(self) -> None:
         self._read_cancel.set()
@@ -460,6 +489,7 @@ class MuxCompanionApp(App):
                 switch, "return" if self._cli_pane else "show", self._cwd,
                 cli_pane=self._cli_pane,
                 cancelled=self._navigation_cancel,
+                session_incarnation=self._observer_identity[2],
                 runner=cc.cancellable_read_runner(
                     self._navigation_cancel, cwd=self._cwd or os.getcwd(),
                 ),
@@ -593,9 +623,16 @@ class MuxCompanionApp(App):
             self._navigate()
 
 
-def run(cwd: str | None = None, cli_pane: str | None = None) -> int:
+def run(
+    cwd: str | None = None, cli_pane: str | None = None, *,
+    project: str | None = None, worktree_id: str | None = None,
+    session_incarnation: str | None = None,
+) -> int:
     try:
-        MuxCompanionApp(cwd, cli_pane=cli_pane).run()
+        MuxCompanionApp(
+            cwd, cli_pane=cli_pane, project=project, worktree_id=worktree_id,
+            session_incarnation=session_incarnation,
+        ).run()
     finally:
         if cli_pane:
             from .companion_pane import PaneError, switch
@@ -605,6 +642,7 @@ def run(cwd: str | None = None, cli_pane: str | None = None) -> int:
                 switch(
                     "return", cwd, cli_pane=cli_pane,
                     runner=lambda command, timeout: runner(command, min(timeout, 2)),
+                    session_incarnation=session_incarnation,
                 )
             except (PaneError, ec.EngineError):
                 pass
@@ -617,5 +655,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cwd")
     parser.add_argument("--cli-pane")
+    parser.add_argument("--project")
+    parser.add_argument("--worktree-id")
+    parser.add_argument("--session-incarnation")
     args = parser.parse_args()
-    raise SystemExit(run(args.cwd, args.cli_pane))
+    raise SystemExit(run(
+        args.cwd, args.cli_pane, project=args.project, worktree_id=args.worktree_id,
+        session_incarnation=args.session_incarnation,
+    ))

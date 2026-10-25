@@ -11,6 +11,7 @@ on:
         options:
           - context
           - foundation
+          - mux-companion
           - pull-requests-commands
           - pull-requests-bootstrap
           - ssh-recipes
@@ -30,6 +31,31 @@ permissions:
   contents: read
 
 jobs:
+  mux-companion-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mux-companion'
+    name: Mux Companion native tmux (isolated session)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record immutable source and native prerequisite
+        run: |
+          git show --no-patch --format='source=%H parents=%P'
+          tmux -V
+      - name: Qualify real tmux observer navigation
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers
+          --test-file tests/native/test_companion_pane_tmux.py --test-timeout 120
+
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
     name: Promotion control retirement (actual Git)

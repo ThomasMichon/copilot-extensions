@@ -469,6 +469,24 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ## Journal
 
+### 2026-10-24 - Observer review fixes and lifecycle qualification
+
+- Addressed the four findings on #8881: native session-ID option targeting
+  for POSIX tmux, visible translation of Windows Job failures, a
+  cross-process guard around observer lookup/creation/publication, and
+  termination of the observer after its original CLI is confirmed ended.
+- The observer pins its original native incarnation before its first poll,
+  never adopts a successor, and treats unavailable evidence as unknown.
+  Its one-second check reads only the registered CLI's native inventory
+  off the UI loop, with no engine or transcript scan.
+- The local focused/native packet passed 136 tests with three platform
+  skips. It includes two overlapping processes and actual PSMux CLI exit,
+  observer termination and subsequent clean CLI relaunch.
+- Added the opt-in `mux-companion` Ubuntu portfolio for actual tmux option
+  targeting, same-window navigation and CLI-exit cleanup. Its result must
+  be recorded before claiming POSIX native qualification; Windows skips
+  do not prove that platform. No production rollout is authorized here.
+
 ### 2026-10-24 - Same-window observer source and native controller proof
 
 - Added explicit Show Summary / Return to CLI navigation while preserving the
