@@ -66,6 +66,17 @@ the old generation immediately, then retires captured children off the input
 thread through a scope-owned worker. Repeated reloads coalesce; replacement
 waits for that scope's retirement and prior request to finish. Shutdown drains
 retirement workers without admitting replacements.
+Invalidation reserves the affected scope before releasing the generation
+lock, so a concurrent ensure cannot publish a replacement into retirement's
+capture window. Reconnect admission rechecks that request generation under
+the same lock.
+
+Action completion refreshes the originating row's declared read scope, not a
+later selected machine or the aggregate All sentinel. View-wide completions
+retain their explicit declared scope set. Worker prefetch, joins and the
+visible inventory use the same scope rule, including shared provider commands
+without a `{machine}` selector. If a publication removes a selected row,
+opening Actions refuses rather than falling through to another row.
 
 One-shot reads have a 20-second execution budget, separate stdout/stderr limits
 (8 MiB / 256 KiB), and caller-owned descendant cleanup. Streams use the existing

@@ -43,6 +43,7 @@ def test_tasks_one_provider_filter_for_machine_and_all_scopes(categories, scope)
     assert len(descriptors) == 1 and descriptors[0]["label"] == "Tasks"
     reg = descriptors[0]["pivot"]
     assert reg.list_cmd[reg.list_cmd.index("--category") + 1] == "all"
+    assert "--limit-per-category" in reg.list_cmd
     screen = PickerScreen(_fixture_source(), live=False)
     screen.setup_sync_for_tests()
     screen.pivots = descriptors

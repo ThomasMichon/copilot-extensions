@@ -3,11 +3,15 @@ from __future__ import annotations
 
 
 def selects_machine(pivot):
-    return any("{machine}" in argument for argument in pivot.list_cmd)
+    return any("{machine}" in argument for argument in getattr(pivot, "list_cmd", ()))
+
+
+def read_scope(pivot, machine):
+    return "" if getattr(pivot, "account_scoped", False) or not selects_machine(pivot) else machine
 
 
 def request_scopes(engine, pivot):
-    if pivot.account_scoped or not selects_machine(pivot):
+    if read_scope(pivot, None) == "":
         return ("",)
     if not engine.is_all():
         tab = engine._current_tab()

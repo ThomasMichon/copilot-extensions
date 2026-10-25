@@ -32,6 +32,15 @@ from a bounded mixed-category response. Local and delegated peer boards pass
 the same selector. `get`, results, events, progress and session reverse lookups
 remain category-independent.
 
+Combined board consumers may request `--category all --limit-per-category`
+on `agent-dispatch-board` or `inbox --board`. The existing `--limit` then
+applies independently to `work` and `maintenance` before their rows are
+combined. Two bounded category queries share the selected coordinator endpoint;
+duplicate task IDs are coalesced. A failed category read fails the board rather
+than presenting the other category as complete. The option is forwarded to
+peer inboxes; an older peer refuses it visibly. Without this explicit option,
+the existing global limit and all ordinary CLI query semantics are unchanged.
+
 Clients require `/health`'s `task_categories: 1` before explicit category
 reads, maintenance creation, or classification.
 The check runs for each category-sensitive operation using the client's existing
@@ -52,6 +61,13 @@ accepted request ledger, so an original retry still returns its accepted task.
 `pivots/agent-dispatch-maintenance.json` independently owns **Maintenance tasks** and requests
 `maintenance`. Both use the same board implementation, columns, phase palette,
 streaming, progress and worktree/session enrichment.
+
+Manager versions that unify these attributed templates present one **Tasks**
+view with **Include maintenance** disabled initially. That consumer requests
+the explicit per-category board windows above, so hidden maintenance rows
+cannot displace work rows from the bounded result. Template IDs and provider
+ownership remain unchanged; other consumers may still present both templates
+independently.
 
 Both expose **Inspect evidence**, a read-only `inspect-task` command that reads
 the task, statistics, result/log references, events, accumulated progress and

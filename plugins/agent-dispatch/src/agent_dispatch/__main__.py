@@ -754,6 +754,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="machine to scope to; a *remote* machine reads that peer's queue "
         "over the SSH mesh (default: this machine, resolved via agent-worktrees)",
     )
+    p.add_argument("--limit-per-category", action="store_true", help="With --board --category all, retain --limit rows per category.")
     p.add_argument(
         "--status",
         default="proposed",

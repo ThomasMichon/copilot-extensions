@@ -359,6 +359,119 @@ def test_scope_invalidation_does_not_drop_another_hosts_inflight_result():
         runtime.close()
 
 
+def test_invalidation_reserves_scope_before_retirement_capture(monkeypatch):
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=True))
+    old = SimpleNamespace(_picker_scope="a")
+    runtime._procs = [old]
+    runtime._cache["a"] = ("ready", [{"id": "old"}], "")
+    starts, retired = [], []
+    stop = runtime._stop_scope_read
+    monkeypatch.setattr(runtime, "_start_pending_lists", lambda: starts.append(True))
+    monkeypatch.setattr(tasks, "_kill_proc_tree", retired.append)
+
+    def interleave(machine, *, refetch):
+        runtime.ensure(machine)
+        assert not starts and not runtime._pending_requests
+        stop(machine, refetch=refetch)
+
+    monkeypatch.setattr(runtime, "_stop_scope_read", interleave)
+    runtime.invalidate("a")
+    wait(lambda: not runtime._scope_retirements)
+    assert retired == [old]
+    runtime.ensure("a")
+    assert starts == [True] and runtime._pending_requests[0][0] == "a"
+
+
+def test_invalidation_between_drop_publication_and_reconnect_cannot_reserve_stale_work(monkeypatch):
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=True))
+    generation = (runtime._gen, 0, object())
+    runtime._active_requests["a"] = generation
+    runtime._inflight.add("a")
+    runtime._request_context.generation = generation
+    finish = runtime._finish
+
+    def publish_then_invalidate(machine, result, summary):
+        finish(machine, result, summary)
+        runtime.invalidate(machine)
+
+    monkeypatch.setattr(runtime, "_finish", publish_then_invalidate)
+    runtime._handle_subscribe_drop("a", {}, ("error", [], "dropped"), {}, had_rows=False)
+    assert not runtime._inflight and not runtime._reconnecting_scopes
+    assert not runtime._subscribe_retries
+    monkeypatch.setattr(runtime, "_finish", finish)
+    runtime._exec_list = lambda context: ("ready", [{"id": "fresh"}], "", {})
+    runtime._run_list = lambda machine, generation: runtime._finish(
+        machine, ("ready", [{"id": "fresh"}], ""), {},
+    )
+    runtime.ensure("a")
+    wait(lambda: runtime.get("a")[0] == "ready")
+    runtime.close()
+
+
+def test_removed_task_cannot_open_another_scopes_action_menu(monkeypatch):
+    from dataclasses import replace
+    states = {
+        "host-a": ("ready", [{"id": "survives"}], ""),
+        "host-b": ("ready", [{"id": "selected"}], ""),
+    }
+    runtime = SimpleNamespace(ensure_many=lambda scopes: None, get=states.__getitem__)
+    screen = engine(runtime, replace(pivot(), actions=(SimpleNamespace(),)))
+    screen._task_rows()
+    screen.sel = ("T", 1)
+    states["host-b"] = ("ready", [], "")
+    opened = []
+    monkeypatch.setattr(PickerScreen, "app", property(lambda self: SimpleNamespace(
+        push_screen=lambda *args: opened.append(args),
+    )))
+    screen._open_task_menu()
+    assert not opened and screen.sel == ("M", 0)
+
+
+def test_all_row_result_refreshes_only_the_origin_scope_even_after_navigation():
+    invalidated, ensured = [], []
+    runtime = SimpleNamespace(
+        get=lambda scope: ("ready", [], ""), invalidate=invalidated.append,
+        ensure=ensured.append, run_resolved=lambda *args, **kwargs: (True, "evidence"),
+    )
+    screen = engine(runtime, pivot())
+    action = SimpleNamespace(
+        internal=None, form=None, card=None, progress=False,
+        result_view="text", run=["fixture"], label="Inspect",
+    )
+
+    def command(label, work, refreshed, result_screen):
+        assert work() == (True, "evidence")
+        screen.machine_idx = 1
+        refreshed()
+
+    screen._run_command_result = command
+    screen._run_task_action(
+        screen._reg_pivot(), action, {"id": "selected", "_manager_scope": "host-b"},
+    )
+    assert invalidated == ensured == ["host-b"]
+
+
+def test_unscoped_worker_prefetch_join_and_visible_inventory_share_one_cache(monkeypatch):
+    from dataclasses import replace
+    from worktree_manager.production_picker.picker_tui import engine as engine_module
+    from worktree_manager.production_picker.picker_tui.pivot_manifest import WorkerSpec
+    rows = [{"id": "container", "worktree_id": "worktree"}]
+    ensured, polled = [], []
+    runtime = SimpleNamespace(
+        ensure=ensured.append, repoll=polled.append,
+        get=lambda scope: ("ready", rows, "") if scope == "" else ("idle", [], ""),
+    )
+    reg = replace(pivot(machine=False), worker=WorkerSpec(worktree_field="worktree_id", label_field="id"))
+    screen = engine(runtime, reg)
+    screen.machine_idx = 3
+    monkeypatch.setattr(engine_module, "POLL_SECS", 1)
+    screen._maybe_refresh_worker_pivots()
+    assert ensured == polled == [""]
+    screen._pivot_runtimes = {reg.name: runtime}
+    assert screen._task_state()[1] == rows
+    assert pivots.find_supervised_workers(screen.pivots, screen._pivot_runtimes, "host-b", "worktree")[0]["id"] == "container"
+
+
 def test_prior_request_cleanup_cannot_release_a_new_refresh_in_the_same_scope_epoch():
     runtime = tasks.RegisteredPivotRuntime(pivot())
     first_published = threading.Event()

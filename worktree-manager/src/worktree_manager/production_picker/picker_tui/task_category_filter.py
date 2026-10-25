@@ -30,6 +30,8 @@ def combine_task_categories(descriptors):
             continue
         command = list(pivot.list_cmd)
         command[command.index("--category") + 1] = "all"
+        if "--limit-per-category" not in command:
+            command.append("--limit-per-category")
         key = (pivot.source_owner, tuple(command))
         combined = {
             **descriptor, "label": "Tasks",

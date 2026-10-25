@@ -16,6 +16,7 @@ class PivotRequestsMixin:
         self._reconnecting_scopes = set()
         self._refresh_pending = set()
         self._scope_retirements = {}
+        self._resetting_scopes = {}
 
     def ensure_many(self, machines):
         for machine in dict.fromkeys(machines):
@@ -36,6 +37,8 @@ class PivotRequestsMixin:
         """Fence cached reads; the next ensure starts a fresh selected source."""
         with self._lock:
             scopes = tuple(self._cache.keys() | self._inflight) if machine is None else (machine,)
+            for scope in scopes:
+                self._resetting_scopes[scope] = self._resetting_scopes.get(scope, 0) + 1
             if machine is None:
                 self._gen += 1
                 self._cache.clear()
@@ -45,7 +48,11 @@ class PivotRequestsMixin:
                 self._cache.pop(machine, None)
                 self._summaries.pop(machine, None)
         for scope in scopes:
-            self._stop_scope_read(scope, refetch=False)
+            try:
+                self._stop_scope_read(scope, refetch=False)
+            finally:
+                self._release_reset(scope)
+                self._refresh_when_idle(scope)
 
     def refresh_read(self, machine):
         """Coalesce explicit reloads while retaining rows and other source channels."""
@@ -53,7 +60,20 @@ class PivotRequestsMixin:
             if self._closed.is_set():
                 return
             self._scope_generations[machine] = self._scope_generations.get(machine, 0) + 1
-        self._stop_scope_read(machine, refetch=True)
+            self._resetting_scopes[machine] = self._resetting_scopes.get(machine, 0) + 1
+        try:
+            self._stop_scope_read(machine, refetch=True)
+        finally:
+            self._release_reset(machine)
+            self._refresh_when_idle(machine)
+
+    def _release_reset(self, machine):
+        with self._lock:
+            remaining = self._resetting_scopes[machine] - 1
+            if remaining:
+                self._resetting_scopes[machine] = remaining
+            else:
+                self._resetting_scopes.pop(machine)
 
     def _stop_scope_read(self, machine, *, refetch):
         with self._lock:
@@ -97,7 +117,6 @@ class PivotRequestsMixin:
     def _retire_scope_read(self, machine, procs):
         from .tasks import _kill_proc_tree
 
-        refetch = False
         try:
             for proc in procs:
                 _kill_proc_tree(proc)
@@ -107,11 +126,18 @@ class PivotRequestsMixin:
         finally:
             with self._lock:
                 self._scope_retirements.pop(machine, None)
-                if machine not in self._inflight:
-                    refetch = machine in self._refresh_pending and not self._closed.is_set()
-                    self._refresh_pending.discard(machine)
-            if refetch:
-                self._schedule_list(machine, force=True)
+            self._refresh_when_idle(machine)
+
+    def _refresh_when_idle(self, machine):
+        with self._lock:
+            if (
+                self._closed.is_set() or machine in self._inflight
+                or machine in self._scope_retirements or machine in self._resetting_scopes
+                or machine not in self._refresh_pending
+            ):
+                return
+            self._refresh_pending.discard(machine)
+        self._schedule_list(machine, force=True)
 
     def _join_scope_retirements(self):
         with self._lock:
@@ -134,7 +160,11 @@ class PivotRequestsMixin:
 
     def _schedule_list(self, machine, *, force=False):
         with self._lock:
-            if self._closed.is_set() or machine in self._inflight or machine in self._scope_retirements:
+            if self._closed.is_set() or machine in self._inflight:
+                return
+            if machine in self._scope_retirements or machine in self._resetting_scopes:
+                if force:
+                    self._refresh_pending.add(machine)
                 return
             if not force and machine in self._cache:
                 return
@@ -197,7 +227,6 @@ class PivotRequestsMixin:
                         "error", rows, f"{type(error).__name__}: {str(error).strip()[:160]}",
                     )
         finally:
-            refetch = False
             with self._lock:
                 if (
                     self._active_requests.get(machine) == generation
@@ -205,12 +234,8 @@ class PivotRequestsMixin:
                 ):
                     self._inflight.discard(machine)
                     self._active_requests.pop(machine, None)
-                    if machine not in self._scope_retirements:
-                        refetch = machine in self._refresh_pending and not self._closed.is_set()
-                        self._refresh_pending.discard(machine)
             self._release_startup(machine)
-            if refetch:
-                self._schedule_list(machine, force=True)
+            self._refresh_when_idle(machine)
 
     def _finish(self, machine, cache, summary):
         """Publish only this request's terminal result and retain failed cached rows."""

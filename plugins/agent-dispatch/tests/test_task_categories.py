@@ -227,6 +227,114 @@ def test_actual_cli_and_board_contract_with_first_touch_coordinator(queue, monke
         assert rows[0]["title"] == "upkeep" and rows[0]["category"] == "maintenance"
 
 
+def test_combined_board_preserves_each_category_window_before_local_filter(queue, monkeypatch, capsys):
+    from urllib.parse import parse_qs, urlsplit
+    from agent_dispatch import __main__ as cli, client_categories
+
+    work = queue.create("older active work", repo=REPO, now=1)
+    for number in range(205):
+        queue.create(f"newer upkeep {number}", repo=REPO, category="maintenance", now=number + 2)
+    requests = []
+    monkeypatch.setattr(board_cli, "_endpoint", lambda: "http://testserver")
+    monkeypatch.setattr(board_cli, "_token", lambda: None)
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "worker")
+    monkeypatch.setattr(client_categories, "require_endpoint_categories", lambda *args, **kwargs: None)
+    monkeypatch.setattr(board_cli, "_relay_fetch_many", lambda refs: {})
+    monkeypatch.setattr(board_cli, "_fetch_run_waiters_direct", lambda *args: {})
+    monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda machine: False)
+    with TestClient(create_app(queue)) as http:
+        class Response:
+            def __init__(self, content):
+                self.content = content
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self):
+                return self.content
+
+        def urlopen(request, timeout):
+            query = parse_qs(urlsplit(request.full_url).query)
+            requests.append(query)
+            response = http.get("/tasks", params={key: values[0] for key, values in query.items()})
+            assert response.status_code == 200
+            return Response(response.content)
+
+        def exchange(request):
+            response = http.request(request.method, str(request.url), content=request.content)
+            return httpx.Response(response.status_code, json=response.json())
+
+        monkeypatch.setattr(board_cli.urllib.request, "urlopen", urlopen)
+        monkeypatch.setattr(cli, "_client", lambda _: DispatchClient(
+            "http://testserver", transport=httpx.MockTransport(exchange),
+        ))
+        args = SimpleNamespace(category="all", limit_per_category=True, limit=200, label=None)
+        raw = board_cli._fetch_raw_tasks_direct(args)
+        assert len(raw) == 201 and work.id in {task["id"] for task in raw}
+        assert [(query["category"], query["limit"]) for query in requests] == [
+            (["work"], ["200"]), (["maintenance"], ["200"]),
+        ]
+        assert board_cli.main([
+            "--machine", "worker", "--category", "all", "--limit-per-category",
+        ]) == 0
+        assert work.id in {row["id"] for row in json.loads(capsys.readouterr().out)}
+        assert cli.main([
+            "inbox", "--machine", "worker", "--board", "--category", "all",
+            "--limit-per-category",
+        ]) == 0
+        assert work.id in {row["id"] for row in json.loads(capsys.readouterr().out)}
+        args.limit_per_category = False
+        assert work.id not in {task["id"] for task in board_cli._fetch_raw_tasks_direct(args)}
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_combined_board_window_flag_reaches_peer_and_old_peer_fails_explicitly(monkeypatch, stream):
+    calls = []
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "local")
+    monkeypatch.setattr(board_cli.subprocess, "run", lambda argv, **kwargs: (
+        calls.append(argv) or SimpleNamespace(
+            returncode=2, stdout="", stderr="unrecognized arguments: --limit-per-category",
+        )
+    ))
+    args = SimpleNamespace(
+        machine="peer", board=True, category="all", limit_per_category=True,
+        limit=200, recent_mins=120, label=None,
+    )
+    if stream:
+        with pytest.raises(DispatchUpgradeRequired, match="per-category"):
+            board_cli._fetch_rows_delegated(args)
+    else:
+        assert board_cli.main([
+            "--machine", "peer", "--category", "all", "--limit-per-category",
+        ]) == 2
+    assert "--limit-per-category" in calls[0]
+    assert "--limit-per-category" in remote_dispatch.build_remote_browse_argv("inbox", args)
+
+
+def test_per_category_limit_requires_explicit_all_board_mode(monkeypatch, capsys):
+    from agent_dispatch import __main__ as cli
+
+    with pytest.raises(SystemExit) as error:
+        board_cli.main(["--machine", "worker", "--limit-per-category"])
+    assert error.value.code == 2
+    assert cli.main(["inbox", "--machine", "worker", "--limit-per-category"]) == 2
+    assert "requires --board --category all" in capsys.readouterr().err
+
+
+def test_combined_board_cannot_report_one_failed_category_as_complete(monkeypatch):
+    calls = []
+    def read(args, *, endpoint):
+        calls.append((args.category, endpoint))
+        if args.category == "maintenance":
+            raise RuntimeError("maintenance query unavailable")
+        return [{"id": "work"}]
+    monkeypatch.setattr(board_cli, "_fetch_raw_tasks_category_direct", read)
+    args = SimpleNamespace(category="all", limit_per_category=True, limit=200)
+    with pytest.raises(RuntimeError, match="maintenance query unavailable"):
+        board_cli._fetch_raw_tasks_direct(args, endpoint="http://selected")
+    assert calls == [("work", "http://selected"), ("maintenance", "http://selected")]
+
+
 @pytest.fixture
 def native_category_server(queue):
     import os

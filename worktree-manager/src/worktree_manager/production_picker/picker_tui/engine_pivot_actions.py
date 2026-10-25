@@ -10,6 +10,7 @@ from .create_action_screen import CreateActionScreen
 from .background import run_background
 from .inbox import ensure_inbox
 from .engine_form_drafts import PivotFormDraftActionsMixin
+from .registered_scopes import read_scope, request_scopes
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
@@ -22,13 +23,15 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         if reg is None or action not in self._pivot_view_actions():
             return
         rt = self._pivot_runtime(reg)
-        scope = self._pivot_scope_key()
+        scopes = request_scopes(self, reg)
         ctx = dict(self._task_summary())
-        ctx["machine"] = scope or ""
+        ctx["machine"] = scopes[0] if len(scopes) == 1 else ""
+        ctx["_manager_refresh_scopes"] = scopes
 
         def completed():
-            rt.invalidate()
-            rt.ensure(scope)
+            for scope in scopes:
+                rt.invalidate(scope)
+                rt.ensure(scope)
             self.refresh()
 
         def run():
@@ -262,6 +265,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 self.debug = "Source read is not current; press r to retry before running this action."
                 return
         ctx = self._task_action_ctx(reg, rec)
+        scopes = ctx.get("_manager_refresh_scopes", (read_scope(reg, ctx["machine"]),))
         title = rec.get(reg.title_field) or rec.get(reg.id_field) or "task"
         if action.internal:
             ok, msg = self._internal_pivot_action(action.internal, ctx)
@@ -293,18 +297,22 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         if getattr(action, "result_view", None) == "text":
             from . import pivots as _pivots
             from .configuration_form import CommandResultScreen
-            scope = self._pivot_scope_key()
             argv = _pivots.format_template(action.run, ctx)
 
             def work():
                 result = rt.run_resolved(argv, preserve_output=True)
-                rt.invalidate()
+                for scope in scopes:
+                    rt.invalidate(scope)
                 return result
+
+            def refreshed():
+                for scope in scopes:
+                    rt.ensure(scope)
 
             self._run_command_result(
                 action.label,
                 work,
-                lambda: rt.ensure(scope),
+                refreshed,
                 CommandResultScreen(
                     action.label, context=reg.label, return_label=f"Return to {reg.label}",
                 ),
@@ -313,7 +321,8 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
 
         def _work():
             ok, msg = rt.run_action(action, ctx)
-            rt.invalidate()   # off-thread: the next fetch reflects the new state
+            for scope in scopes:
+                rt.invalidate(scope)
             return ok, msg
 
         def _done(result):
@@ -326,7 +335,8 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 # Kick an immediate re-fetch + repaint of the current scope so the
                 # row reflects the mutation at once (see _run_pivot_form_submit).
                 try:
-                    rt.ensure(self._pivot_scope_key())
+                    for scope in scopes:
+                        rt.ensure(scope)
                 except Exception:
                     pass
                 self.refresh()
@@ -349,6 +359,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         import threading as _threading
 
         rt = self._pivot_runtime(reg)
+        scopes = ctx.get("_manager_refresh_scopes", (read_scope(reg, ctx["machine"]),))
         cancel_ev = _threading.Event()
         prog = {
             "kind": "action-stream",
@@ -374,7 +385,9 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         def _worker():
             ok, msg = rt.run_action_stream(
                 action, ctx, _on_frame, should_cancel=cancel_ev.is_set)
-            rt.invalidate()
+            for scope in scopes:
+                rt.invalidate(scope)
+                rt.ensure(scope)
             if self.progress is prog:
                 prog["done"] = True
                 if not ok:
@@ -512,9 +525,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         rt = self._pivot_runtime(reg)
         argv = _pivots.format_form_template(action.run, ctx, values)
         task_id = ctx.get("task_id")
-        scope = (
-            "" if reg.account_scoped else str(ctx.get("machine") or "")
-        ) if retained_request is not None else self._pivot_scope_key()
+        scope = read_scope(reg, str(ctx.get("machine") or ""))
         text_result = retained_request is not None or getattr(action, "result_view", None) == "text"
         result_screen = None
 
@@ -554,7 +565,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 ok, msg = False, f"{type(exc).__name__}: {exc}"
             else:
                 try:
-                    rt.invalidate()
+                    rt.invalidate(scope)
                 except Exception:
                     pass
             if retained_request is not None:
@@ -677,6 +688,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         from . import pivots as _pivots
 
         rt = self._pivot_runtime(reg)
+        scopes = request_scopes(self, reg)
         argv = _pivots.format_form_template(action.run, {}, values)
 
         def _work():
@@ -686,7 +698,8 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
                 ok, msg = False, f"{type(exc).__name__}: {exc}"
             else:
                 try:
-                    rt.invalidate()
+                    for scope in scopes:
+                        rt.invalidate(scope)
                 except Exception:
                     pass
             return ok, msg
@@ -696,7 +709,8 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             short = (msg or "").splitlines()[0][:80] if msg else ""
             if ok:
                 try:
-                    rt.ensure(self._pivot_scope_key())
+                    for scope in scopes:
+                        rt.ensure(scope)
                 except Exception:
                     pass
                 self.refresh()

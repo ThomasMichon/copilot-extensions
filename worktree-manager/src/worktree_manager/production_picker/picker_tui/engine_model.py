@@ -242,6 +242,7 @@ class PickerScreenModelMixin:
             return []
     def _worktree_supervised_workers_index(self, records):
         from .pivots import supervised_workers_by_worktree
+        from .registered_scopes import read_scope
 
         machine_keys = self._machine_key_map()
         scopes = {}
@@ -257,7 +258,7 @@ class PickerScreenModelMixin:
             workers = []
             for d in worker_pivots:
                 reg = d["pivot"]
-                scope = "" if getattr(reg, "account_scoped", False) else machine
+                scope = read_scope(reg, machine)
                 key = (reg.name, scope)
                 if key not in scopes:
                     scopes[key] = supervised_workers_by_worktree(
@@ -295,6 +296,8 @@ class PickerScreenModelMixin:
         if self.sel[0] != "T":
             return None
         rows = self._task_rows()
+        if self.sel[0] != "T":
+            return None
         i = self.sel[1]
         return rows[i] if 0 <= i < len(rows) else None
     def cur_machine(self):

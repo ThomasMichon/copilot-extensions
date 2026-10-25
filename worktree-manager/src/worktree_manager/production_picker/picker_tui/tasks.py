@@ -675,24 +675,16 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         self._finish(machine, result, summary)
         if not self.pivot.subscribe:
             return
-        if had_rows:
-            # Having delivered at least one real row this session resets the
-            # budget -- only CONSECUTIVE drops with zero rows delivered (a
-            # bare/early ``done``, an immediate crash, a repeated ``error``
-            # with nothing ever produced) count toward exhaustion.
-            self._subscribe_retries[machine] = 0
-        attempts = self._subscribe_retries.get(machine, 0)
-        if self._closed.is_set() or attempts >= SUBSCRIBE_MAX_RECONNECT_ATTEMPTS:
-            # Exhausted (or shutting down): stop pretending this channel is
-            # live so repoll() resumes ordinary one-shot polling instead of
-            # trusting a dead subscribe forever.
-            self._subscribe_live[machine] = False
-            return
-        self._subscribe_retries[machine] = attempts + 1
-        self._subscribe_live[machine] = False  # not live during the backoff
-        # Claim in-flight NOW (not inside the backoff thread) so a concurrent
-        # ensure()/repoll() can't race a duplicate fetch while we wait.
         with self._lock:
+            if not self._generation_matches(machine, generation) or machine in self._resetting_scopes:
+                return
+            if had_rows:
+                self._subscribe_retries[machine] = 0
+            attempts = self._subscribe_retries.get(machine, 0)
+            self._subscribe_live[machine] = False
+            if self._closed.is_set() or attempts >= SUBSCRIBE_MAX_RECONNECT_ATTEMPTS:
+                return
+            self._subscribe_retries[machine] = attempts + 1
             self._inflight.add(machine)
             self._reconnecting_scopes.add(machine)
 

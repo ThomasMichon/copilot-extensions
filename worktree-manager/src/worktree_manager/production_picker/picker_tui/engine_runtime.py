@@ -307,7 +307,8 @@ class PickerScreenRuntimeMixin:
             if reg is None or getattr(reg, "worker", None) is None:
                 continue
             try:
-                scope = "" if reg.account_scoped else self._pivot_machine_id()
+                from .registered_scopes import read_scope
+                scope = read_scope(reg, self._pivot_machine_id())
                 if scope is None:
                     continue
                 rt = self._pivot_runtime(reg)

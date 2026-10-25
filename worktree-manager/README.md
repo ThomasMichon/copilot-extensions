@@ -745,6 +745,11 @@ tasks from the same attributed provider, even when only the maintenance
 contribution is available. The toggle filters the current scope; it does not
 create tasks, change categories or establish cross-machine aggregation.
 Provider scope/read errors remain explicit, not an empty successful result.
+The provider applies its row limit independently to each category before
+combining the board, so maintenance traffic cannot hide older work tasks.
+This requires the provider's `--limit-per-category` board support; an older
+peer reports an unsupported-option/upgrade error instead of an incomplete
+work-only inventory.
 
 Workers Configuration uses its provider's progressive catalog: known templates
 appear while configured-worker and source discovery continues. The loading
