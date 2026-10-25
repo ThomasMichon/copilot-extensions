@@ -1453,6 +1453,20 @@ function Read-AwMuxRetryChoice {
     }
 }
 
+function Invoke-AwPsmuxFromHome {
+    param([Parameter(Mandatory)][AllowEmptyString()][string[]]$CommandArgs)
+
+    # PSMux may retain an idle standby after the selected worktree is retired.
+    Push-Location -LiteralPath $HOME -ErrorAction Stop
+    try {
+        & $script:AwPsmuxBin @CommandArgs
+        $nativeExitCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    Set-Variable -Name LASTEXITCODE -Value $nativeExitCode -Scope 1
+}
+
 function Stop-AwOwnedPsmuxSession {
     param([Parameter(Mandatory)][string]$Session)
 
@@ -1492,8 +1506,12 @@ function Stop-AwOwnedPsmuxSession {
         while ($frontier.Count -gt 0) {
             $next = @()
             foreach ($parentPid in $frontier) {
+                # Older children belong to a previous use of this parent PID.
                 foreach ($child in @($all | Where-Object {
-                    [int]$_.ParentProcessId -eq $parentPid
+                    [int]$_.ParentProcessId -eq $parentPid -and
+                    $null -ne $_.CreationDate -and
+                    $null -ne $identity[$parentPid].CreationDate -and
+                    $_.CreationDate.ToUniversalTime() -ge $identity[$parentPid].CreationDate.ToUniversalTime()
                 })) {
                     $childPid = [int]$child.ProcessId
                     if (-not $depth.ContainsKey($childPid)) {
@@ -2080,8 +2098,11 @@ if (-not $noMux) {
                     }
                 }
                 try {
-                    & $script:AwPsmuxBin new-session -d -s $sessName `
-                        -c $plan.work_dir @envFlags @paneCmd
+                    $psmuxArgs = @(
+                        'new-session', '-d', '-s', $sessName,
+                        '-c', [string]$plan.work_dir
+                    ) + $envFlags + $paneCmd
+                    Invoke-AwPsmuxFromHome -CommandArgs $psmuxArgs
                     $newSessionExit = if ($null -eq $LASTEXITCODE) {
                         0
                     } else {

@@ -77,6 +77,17 @@ for what each one means.
 
 ## Two backends, one model
 
+Windows mux creation starts the PSMux client in the resolved user home, not
+the selected checkout. The pane still receives its explicit worktree directory
+through `-c`, so Copilot executes in the selected workspace.
+Programmatic relative or omitted pane directories retain the original caller's
+context before the PSMux process moves to home. This separates the
+short-lived launch context from PSMux's persistent servers and idle standbys,
+which otherwise can retain a checkout's directory handle after its session ends.
+The Manager restores its original launch directory after success or failure.
+This does not disable warm sessions, edit global PSMux configuration, change
+POSIX launch behavior, or move an already-running standby.
+
 `tmux` (Linux/WSL) and `psmux` (Windows) are different implementations of the
 **same** model — a named, detachable session with a status bar. The launcher
 (relocated to Worktree Manager's `bin/` in Phase 3b Sub-slice 2a Step 2)

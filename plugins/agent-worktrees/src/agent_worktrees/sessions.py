@@ -21,7 +21,7 @@ from pathlib import Path, PureWindowsPath
 
 import yaml
 
-from . import activity
+from . import activity, mux_creation
 from .sessions_pane_args import cleanup_mux_pane_args, file_mux_pane_cmd
 from .sessions_pane_retire import (
     _mux_bin,
@@ -1935,8 +1935,10 @@ def mux_new_session(
     sess = mux_session_name(worktree_id)
     argv: list[str] = []
     try:
-        argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        argv = build_mux_new_session_argv(
+            worktree_id, mux_creation.pane_work_dir(work_dir), cmd, env, mux=mux,
+        )
+        r = mux_creation.run(argv)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         if not isinstance(e, subprocess.TimeoutExpired):
             cleanup_mux_pane_args(argv)
@@ -2494,7 +2496,7 @@ def mux_new_window(
     try:
         argv = build_mux_new_window_argv(
             worktree_id,
-            work_dir,
+            mux_creation.pane_work_dir(work_dir),
             cmd,
             env,
             mux=mux,
@@ -2502,7 +2504,7 @@ def mux_new_window(
             prompt_receipt=str(receipt_path) if receipt_path else None,
             session_name=session_name,
         )
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        r = mux_creation.run(argv)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         if not isinstance(e, subprocess.TimeoutExpired):
             cleanup_mux_pane_args(argv)
