@@ -59,11 +59,12 @@ def native_panes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[di
         yield panes
     finally:
         if server.poll() is None:
-            subprocess.run(
-                [tmux, "-S", socket, "kill-server"],
-                capture_output=True, text=True, check=True, timeout=5,
-            )
-        server.wait(timeout=5)
+            server.terminate()
+        try:
+            server.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.kill()
+            server.wait(timeout=5)
 
 
 def test_native_active_pane_lookups(native_panes: dict[str, str]) -> None:

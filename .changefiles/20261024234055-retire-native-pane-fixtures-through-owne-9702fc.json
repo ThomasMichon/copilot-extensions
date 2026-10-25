@@ -1,0 +1,9 @@
+{
+  "comment": "Retire native pane fixtures through owned process handles instead of server-wide mux cleanup.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

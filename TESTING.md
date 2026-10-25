@@ -1517,6 +1517,68 @@ platform's native build prerequisites.
 
 ## The turn-key runner
 
+### Shared-host command safety
+
+The host may contain live work from other sessions or users. A temporary home,
+`USERPROFILE`, `PSMUX_DATA_DIR`, redirected config, Windows Job or POSIX process
+group does **not** prove that an external command targets a private service.
+Jobs/groups contain child lifetime, not IPC to an already-running mux, Docker
+engine, service manager or WSL distribution.
+
+`run-plugin-tests.py` checks test/helper source before dependency preparation
+or collection for literal destructive cleanup, including helpers later started
+with Python `-I`/`-S`. The injected pytest portfolio guard and repository-tool
+conftest also install a Python audit guard before tests execute. It rejects
+server-wide mux shutdown, name/pattern/image-based process termination, global
+signals, shared service/WSL shutdown, container/image pruning and known bulk
+container cleanup. It also rejects real mux commands without a runner-owned
+transport. Neither `--allow-host-state` nor `--allow-explicit-tiers` disables
+command safety.
+
+For real mux fixtures, use
+`plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact
+arguments to **every** client and owner-pool operation. On Windows it creates
+a fresh `-L` namespace bound to this runner sandbox; on POSIX it selects a
+private `-S` socket. Only POSIX tmux's documented, sandbox-contained `TMUX`
+socket is accepted as an inherited transport. A different home/data directory
+alone never qualifies Windows routing. An isolated Python fixture owner must
+explicitly install the same command guard and validate the received namespace
+before starting native work.
+
+Cleanup must retire only the fixture's sessions or identity-pinned process
+handles. Do not call `kill-server`, `pkill`, `killall`, `taskkill /IM`,
+`Stop-Process -Name`, `wsl --shutdown`, `systemctl stop/restart`, or container
+pruning from a test. Exact-PID commands are not ownership proof: establish
+birth/handle identity first, refuse changed targets and preserve pre-existing
+processes. Never broaden cleanup after a timeout or failed assertion. Preserve
+evidence and report an unreaped fixture rather than terminating unrelated work.
+Do not install/update the operator's runtimes or rewrite Terminal settings as
+test setup.
+
+These are accident-prevention guards, **not an OS security sandbox**. Source
+checks recognize literal call shapes, not arbitrary generated code; audit
+hooks do not automatically propagate through `-I`/`-S`, native shells or
+third-party processes. A trusted fixture must carry its explicit scope through
+those boundaries. If routing/ownership or child isolation cannot be proved,
+mock the operation or run in a disposable VM/container without live host
+sockets, credentials or work mounted. Do not add an annotation or opt-out to
+execute a global cleanup on a shared host.
+
+Validate refusal with pure command classification, source-only controls and
+harmless executable stand-ins. Never execute the dangerous command as a
+negative control, even when expecting rejection. Native qualification belongs
+on a disposable worker: keep a fixture-owned sentinel in a separate namespace,
+prove it and all pre-existing mux identities survive, and clean up only
+identity-verified fixture resources. A passing pytest result without those
+checks is not proof of host isolation.
+
+The existing optional `installation-context-acceptance.yml` dispatch with
+`interactive_completion=true` qualifies the real mux lifetime fixture on
+disposable Linux and Windows workers, plus the private POSIX pane fixture.
+Windows uses portable PSMux 3.3.5 in runner temp, pinned by archive SHA-256;
+it does not install or register a host service. This lane remains manual and
+outside required unit CI. Do not substitute a shared developer desktop for it.
+
 Agent MCP's focused home-binding lane is:
 
 ```text

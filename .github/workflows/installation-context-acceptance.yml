@@ -368,14 +368,31 @@ jobs:
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil
           python -m pytest -q libs/agent-procutil/tests/test_interactive.py libs/agent-procutil/tests/test_interactive_session_native.py
-      - name: Qualify warm UI lifetime in a private native mux
-        if: ${{ runner.os == 'Linux' }}
+      - name: Prepare pinned PSMux only on the disposable Windows runner
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
         run: |
-          if ! command -v tmux; then
+          $archive = Join-Path $env:RUNNER_TEMP 'psmux-3.3.5.zip'
+          $destination = Join-Path $env:RUNNER_TEMP 'psmux-fixture-3.3.5'
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.5/psmux-v3.3.5-windows-x64.zip' -OutFile $archive
+          $expected = '7e3059f082df01eaa233bc50dbf62650d993150029b1d12327d3fcae2f6db808'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+            throw 'PSMux fixture archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination
+          $binaries = @(Get-ChildItem -LiteralPath $destination -Recurse -File -Filter psmux.exe)
+          if ($binaries.Count -ne 1) { throw 'Expected one fixture PSMux executable' }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $binaries[0].Directory.FullName
+      - name: Qualify warm UI lifetime in a private native mux
+        if: ${{ runner.os == 'Linux' || runner.os == 'Windows' }}
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && ! command -v tmux; then
             sudo apt-get update
             sudo apt-get install -y tmux
           fi
-          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_warm_picker_lifetime.py
+          python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_warm_picker_lifetime.py
+          python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_mux_active_pane.py
 
   interactive-completion-macos:
     if: ${{ inputs.interactive_completion }}

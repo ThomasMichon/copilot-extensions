@@ -1,4 +1,4 @@
-"""Real mux/TTY worker lifetime; the engine is an audited contract double."""
+"""Private native mux/TTY worker lifetime; the engine is a contract double."""
 
 from __future__ import annotations
 
@@ -54,7 +54,10 @@ def _kill(identity):
 def _environment(root):
     # Start with OS executable-discovery essentials, never an inherited control
     # plane, credential, installation-cell, Git, or Python override.
-    keep = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE"}
+    keep = {
+        "PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
+        "COPILOT_EXTENSIONS_TEST_SANDBOX",
+    }
     env = {key: value for key, value in os.environ.items() if key.upper() in keep}
     for key, name in {
         "HOME": "home", "USERPROFILE": "home", "AGENT_HOME": "home",
@@ -125,13 +128,26 @@ def test_pinned_cleanup_tolerates_only_a_confirmed_exit_race(monkeypatch, still_
         _kill({"pid": 123, "start": "fixture"})
 
 
-def _owner(root):
+def _owner(root, namespace):
+    tools = Path(__file__).resolve().parents[3] / "tools"
+    previous_path = sys.path.copy()
+    sys.path.insert(0, str(tools))
+    try:
+        from plugin_test_command_safety import (
+            SANDBOX_ENV, install_command_guard, validate_private_mux_args,
+        )
+    finally:
+        sys.path[:] = previous_path
+    sandbox = Path(os.environ[SANDBOX_ENV])
+    namespace = validate_private_mux_args(namespace, sandbox=sandbox, cwd=root)
+    install_command_guard(sandbox)
     from worktree_manager import demo
     from worktree_manager.warm_picker_pool import WarmPickerPool, runtime_identity
     from worktree_manager.warm_picker_worker import publish
 
     publish(root / "owner.json", {"pid": os.getpid(), "start": process_start_time(os.getpid())})
     pool = WarmPickerPool(root / "manager")
+    pool.mux_args = namespace
     claimed = False
     try:
         while True:
@@ -173,15 +189,75 @@ def _owner(root):
         pool.close()
 
 
+@pytest.fixture
+def sentinel_mux(tmp_path_factory):
+    from plugin_test_command_safety import private_mux_args
+
+    if process_start_time(os.getpid()) is None:
+        pytest.skip("native mux process-birth identity is unsupported")
+    mux = shutil.which("psmux" if os.name == "nt" else "tmux")
+    if mux is None or os.name == "nt" and shutil.which("pwsh") is None:
+        pytest.skip("native mux and its shell are required")
+    root = tmp_path_factory.mktemp("mux-sentinel")
+    env = _environment(root)
+    namespace = private_mux_args(root)
+
+    def command(*args):
+        return subprocess.run(
+            [mux, *namespace, *args], env=env, cwd=root,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            timeout=5, **no_window_kwargs(),
+        )
+
+    created = command(
+        "new-session", "-d", "-s", "sentinel", "--",
+        sys.executable, "-I", "-c", "import time; time.sleep(120)",
+    )
+    assert created.returncode == 0, created.stderr
+    identity = command(
+        "display-message", "-p", "-t", "sentinel", "#{session_id}:#{session_created}",
+    )
+    assert identity.returncode == 0 and identity.stdout.strip()
+
+    def assert_live():
+        current = command(
+            "display-message", "-p", "-t", "sentinel", "#{session_id}:#{session_created}",
+        )
+        assert current.returncode == 0 and current.stdout == identity.stdout, (
+            "separate fixture-owned sentinel mux did not survive"
+        )
+
+    try:
+        yield assert_live
+    finally:
+        assert_live()
+        stopped = command("kill-session", "-t", "sentinel")
+        assert stopped.returncode == 0, stopped.stderr
+
+
 @pytest.mark.parametrize("phase", ["pending", "bound"])
-def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, phase):
+def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, phase, sentinel_mux):
+    from plugin_test_command_safety import private_mux_args
+
     if process_start_time(os.getpid()) is None:
         pytest.skip("warm UI process-birth identity is unsupported on this platform")
     mux = shutil.which("psmux" if os.name == "nt" else "tmux")
     if mux is None or os.name == "nt" and shutil.which("pwsh") is None:
         pytest.skip("native mux and its shell are required")
     env = _environment(tmp_path)
-    namespace = [] if os.name == "nt" else ["-S", env["TMUX"].split(",")[0]]
+    namespace = private_mux_args(tmp_path)
+    if os.name != "nt":
+        env["TMUX"] = namespace[1] + ",0,0"
+    prior_muxes = []
+    if os.name == "nt":
+        from mux_windows_observer import processes
+
+        prior_muxes = [
+            {"pid": pid, "start": process_start_time(pid)}
+            for pid, (name, _) in processes().items() if name.lower() == "psmux.exe"
+        ]
+        if any(identity["start"] is None for identity in prior_muxes):
+            pytest.skip("pre-existing mux process birth could not be verified")
 
     def command(*args):
         return subprocess.run(
@@ -194,7 +270,10 @@ def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, pha
     slot = None
     with (tmp_path / "owner.log").open("w", encoding="utf-8") as log:
         process = subprocess.Popen(
-            [sys.executable, "-I", "-B", str(Path(__file__).resolve()), "owner", str(tmp_path)],
+            [
+                sys.executable, "-I", "-B", str(Path(__file__).resolve()),
+                "owner", str(tmp_path), json.dumps(namespace),
+            ],
             env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
             stdout=log, stderr=log, **no_window_kwargs(),
         )
@@ -232,6 +311,7 @@ def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, pha
                 "native mux session survived its worker", timeout=5,
             )
             assert not directory.exists(), "cancelled worker left its slot behind"
+            sentinel_mux()
             records = [_read(path) for path in tmp_path.glob("engine-*.json")]
             _wait(
                 lambda: all(not _live(record) for record in records),
@@ -251,11 +331,13 @@ def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, pha
                 command("kill-session", "-t", slot["session"])
             for path in tmp_path.glob("engine-*.json"):
                 _kill(_read(path))
-            command("kill-server")
             if process.poll() is None:
                 process.kill()
             process.wait(timeout=5)
+            assert all(_live(identity) for identity in prior_muxes), "pre-existing PSMux process exited"
 
 
 if __name__ == "__main__":
-    raise SystemExit((_owner if sys.argv[1] == "owner" else _engine)(Path(sys.argv[2])))
+    if sys.argv[1] == "owner":
+        raise SystemExit(_owner(Path(sys.argv[2]), json.loads(sys.argv[3])))
+    raise SystemExit(_engine(Path(sys.argv[2])))

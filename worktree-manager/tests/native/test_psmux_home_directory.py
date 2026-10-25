@@ -6,7 +6,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import time
-import uuid
 
 import pytest
 
@@ -165,6 +164,7 @@ ConvertTo-Json -InputObject $report -Depth 4 -Compress
 
 def test_real_standby_does_not_pin_retired_checkout(tmp_path, capsys):
     from mux_windows_observer import descendants, processes, windows
+    from plugin_test_command_safety import private_mux_args
 
     source = Path(__file__).resolve().parents[2] / "bin" / "launch-session.ps1"
     text = source.read_text("utf-8")
@@ -192,7 +192,7 @@ def test_real_standby_does_not_pin_retired_checkout(tmp_path, capsys):
         env.update(
             HOME=str(home), USERPROFILE=str(home), PSMUX_DATA_DIR=str(registry),
         )
-        namespace = "home-proof-" + uuid.uuid4().hex
+        namespace = private_mux_args(home)[1]
         visible, _ = windows()
         seen_windows = {}
         foregrounds = set()
