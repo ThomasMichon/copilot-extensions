@@ -46,6 +46,17 @@ without Copilot or marketplace hooks. Its offline non-root container recipe
 and existing `container.service` role references do not themselves construct,
 place or activate a fleet workload. Native PR operation remains independent.
 
+The standalone [SSH service](../services/ssh/README.md) registers an explicit
+enrollment/public-directory control plane through the existing Gateway service
+channel. Declared principal/generation bindings gate automatic public-key
+admission; durable revisions and bounded notifications let the existing machine
+Fleet owner converge agent-ssh profiles and native login authorization.
+Its offline container recipe is independent of Copilot or a source checkout.
+An optional owned, non-root Linux OpenSSH child provides the native relay with
+distinct relay keys and verified listener custody before registration. Native
+OpenSSH remains the data plane: this registration does not introduce generic
+TCP routing into the HTTP Gateway or complete managed SSH installation.
+
 The standalone [agent-chat-service](../services/chat/README.md) currently
 provides dependency-free conversation state and a callable RPC core, plus an
 explicit optional `service` role for independently installed foreground hosting.

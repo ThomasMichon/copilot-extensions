@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-ssh"
-version = "0.1.126-dev1"
+version = "0.1.127-dev1"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -81,9 +81,11 @@ target-version = "py310"
 line-length = 99
 
 [project.optional-dependencies]
+fleet = ["fleet-manager>=0.1.0.dev1"]
 dev = [
     "pytest>=9.1.1",
     "jsonschema>=4.26.0",
+    "fleet-manager>=0.1.0.dev1",
 ]
 
 [tool.ruff.lint]

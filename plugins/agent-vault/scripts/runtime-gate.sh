@@ -194,7 +194,8 @@ resolve_runtime
 if [[ -n "$AGENT_RT_PY" ]]; then
     run_runtime "$@"
 fi
-if [[ "${1:-}" == identity-key && "${2:-}" == setup ]]; then
+if [[ ( "${1:-}" == identity-key && "${2:-}" == setup ) ||
+      ( "${1:-}" == ssh-key && ( "${2:-}" == prepare || "${2:-}" == install ) ) ]]; then
     for argument in "$@"; do
         if [[ "$argument" == --require-running ]]; then
             printf '%s\n' '{"version":1,"error":"service_unavailable","message":"Provision and start the selected vault independently before delegated setup."}'

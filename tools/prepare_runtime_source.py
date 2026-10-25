@@ -19,7 +19,12 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import materialize_main as materializer
 
-_RUNTIME_LIBRARY = Path(__file__).resolve().parent.parent / "libs" / "versioned-runtime"
+_TOOL_DIRECTORY = Path(__file__).resolve().parent
+_RUNTIME_LIBRARY = (
+    _TOOL_DIRECTORY.parent
+    if (_TOOL_DIRECTORY.parent / "versioned_runtime.py").is_file()
+    else _TOOL_DIRECTORY.parent / "libs" / "versioned-runtime"
+)
 sys.path.insert(0, str(_RUNTIME_LIBRARY))
 from versioned_runtime import construction_lease
 from versioned_runtime_source import (
@@ -27,6 +32,7 @@ from versioned_runtime_source import (
     SourceIdentity,
     SourceIdentityError,
     assembly_hash as _assembly_hash,
+    payload_package_version,
     read_source_identity,
     runtime_version,
 )
@@ -114,9 +120,9 @@ def _extract_archive(archive: Path, destination: Path) -> None:
 
 
 def _materialize(snapshot: Path, plugin: str, destination: Path) -> None:
-    source = snapshot / "plugins" / plugin
+    source = snapshot / plugin if plugin == "worktree-manager" else snapshot / "plugins" / plugin
     if not (source / "pyproject.toml").is_file():
-        raise SourcePreparationError(f"No Python runtime plugin at plugins/{plugin}")
+        raise SourcePreparationError(f"No Python runtime consumer at {source.relative_to(snapshot)}")
     shutil.copytree(source, destination)
     for metadata in (SOURCE_FILE, "snapshot-provenance.json"):
         if (destination / metadata).exists() or (destination / metadata).is_symlink():
@@ -133,6 +139,7 @@ def _materialize(snapshot: Path, plugin: str, destination: Path) -> None:
     ))
     log.extend(materializer.materialize_launch_wrapper_assets_into(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
+        reuse_existing=True,
     ))
     refusals = [entry for entry in log if entry.startswith("SKIP ")]
     if refusals:
@@ -167,12 +174,10 @@ def prepare(
             source, "status", "--porcelain=v1", "--untracked-files=all", "--ignored",
         ):
             raise SourcePreparationError("Source checkout changed while preparing the selected commit")
-        manifest = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
-        if not isinstance(manifest, dict) or manifest.get("name") != plugin:
-            raise SourcePreparationError("Materialized plugin identity does not match the selection")
-        version = manifest.get("version")
-        if not isinstance(version, str):
-            raise SourcePreparationError("Materialized plugin has no package version")
+        try:
+            version = payload_package_version(payload, plugin)
+        except SourceIdentityError as error:
+            raise SourcePreparationError(str(error)) from error
         digest = _assembly_hash(payload)
         identity = SourceIdentity(
             plugin, version, commit, tree, digest, runtime_version(version, commit, digest),
@@ -207,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--commit", required=True)
-    parser.add_argument("--plugin", required=True)
+    parser.add_argument("--plugin", required=True, help="Runtime plugin identifier or worktree-manager")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--branch", choices=("dev", "main"), default="dev")
     args = parser.parse_args(argv)

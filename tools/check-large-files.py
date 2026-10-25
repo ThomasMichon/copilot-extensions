@@ -30,25 +30,18 @@ map or a raw diff/patch file is a generated-or-derived artifact that never
 belongs hand-committed, regardless of size (none currently exist in the
 tree, so this has zero pre-existing debt to grandfather).
 
-**Diff mode checks every commit in the range individually, not just the net
-difference between the range's endpoints.** A naive tree-to-tree diff would
-miss a commit that adds an oversized/disallowed blob and a later commit in
-the *same push* that deletes or shrinks it -- the oversized blob is still
-permanently in the pushed history at that point, which is exactly the
-accumulation this guard exists to prevent (it is, verbatim, how the
-coverage-baseline bloat this guard follows up on actually happened: each
-promotion both added a new oversized baseline snapshot and left the
-previous one in history). For each commit newly reachable in the range,
-this diffs it against its own first parent (``git diff-tree``) and checks
-every path THAT commit touches at its own blob size -- not an object-level
-"is this blob content new to the whole repository" scan
-(``git rev-list --objects``), which would silently miss a rename/type-change
-whose content happens to be byte-identical to something already elsewhere
-in history (the content isn't new, even though the path is).
+**Publication modes check new blob objects, not every changed path.** A blob
+already reachable from the supplied base or published tips is not introduced
+again by a rename, copy, merge or rewritten commit. Unpublished local branches
+and merely present loose objects are not publication baselines. ``--published``
+adds an actual already-published tip, including the old PR tip on a rebase.
 
-Like ``check-module-size.py`` and ``check-effort-vision-structure.py``, this
-only checks the range's own commits -- nothing already on ``origin/dev``
-before this diff started ever blocks an unrelated change.
+New objects remain reachable through their introducing commits even if later
+deleted or shrunk in the same push, so those introductions are still checked.
+Object IDs are enumerated without names; NUL-delimited commit diffs recover
+their paths without Git's quoting/locale ambiguities. Each new blob is checked
+once, using an offending path if it has multiple names in the incoming history.
+``--all`` remains an explicit full-tree audit, not an introduction-scoped mode.
 
 Every size check reads the actual git blob -- the index for explicit staged
 paths, the object store for diff/full-tree modes -- never the working
@@ -69,7 +62,7 @@ Usage::
                                               # "--all" (or any other flag-shaped name) is never parsed
                                               # as an option instead of a path.
     check-large-files.py                     # every blob new in HEAD vs --base (default origin/dev)
-    check-large-files.py --base <ref> [--head <ref>]
+    check-large-files.py --base <ref> [--head <ref>] [--published <old-published-tip>]
     check-large-files.py --all [--head <ref>] # full-tree sweep at one revision (CI guards-full-sweep;
                                                # default --head: HEAD)
 
@@ -80,11 +73,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+_HEADLESS = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 #: Generous cap for images -- comfortably above the largest legitimate image
 #: currently tracked (~1.7MB), with real headroom for a new visual reference.
@@ -106,15 +101,7 @@ ALWAYS_BLOCKED_EXTENSIONS = {".map", ".diff", ".patch"}
 
 
 class GitEnumerationError(RuntimeError):
-    """A git plumbing command needed to enumerate blobs for this check
-    failed outright (nonzero exit). Always a hard failure for the caller --
-    never silently treated as "nothing to check", since an unexamined
-    commit/path could easily be the one carrying the oversized/disallowed
-    blob this guard exists to catch. Distinct from the one legitimate soft
-    skip this tool has (an unresolvable ``--base``/``--head`` ref before
-    enumeration even starts, e.g. a not-yet-fetched base in some CI
-    contexts), which returns ``None`` rather than raising.
-    """
+    """Unavailable publication history or failed/malformed Git metadata."""
 
 
 #: Environment variables that redirect git's own notion of "which repo/
@@ -151,10 +138,10 @@ def _git_env() -> dict[str, str]:
     return env
 
 
-def _git_bytes(*args: str) -> subprocess.CompletedProcess[bytes]:
+def _git_bytes(*args: str, input: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", str(REPO), *args],
-        capture_output=True, check=False, env=_git_env(),
+        input=input, capture_output=True, check=False, env=_git_env(), creationflags=_HEADLESS,
     )
 
 
@@ -172,10 +159,6 @@ def _decode(raw: bytes) -> str:
     return raw.decode("utf-8", errors="surrogateescape")
 
 
-def _git(*args: str) -> str:
-    return _decode(_git_bytes(*args).stdout)
-
-
 def _git_or_raise(*args: str) -> str:
     """Like ``_git``, but raises :class:`GitEnumerationError` (naming the
     command and git's own stderr) instead of silently returning whatever
@@ -190,34 +173,56 @@ def _git_or_raise(*args: str) -> str:
 
 
 def _rev_parse(ref: str) -> str | None:
-    r = _git_bytes("rev-parse", "--verify", "--quiet", ref)
+    r = _git_bytes("rev-parse", "--verify", "--quiet", "--end-of-options", ref)
+    if r.returncode:
+        return None
     out = _decode(r.stdout).strip()
-    return out or None
-
-
-def _merge_base(base: str, head: str) -> str | None:
-    out = _git("merge-base", base, head).strip()
-    return out or None
+    if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", out) is None:
+        raise GitEnumerationError("git returned a malformed publication object id")
+    return out
 
 
 def _ext(path: str) -> str:
     return Path(path).suffix.lower()
 
 
-#: The well-known SHA of an empty git tree -- used as the "parent" for a
-#: root commit (one with no parent of its own) when diffing a single
-#: commit against its predecessor.
-EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+def _object_metadata(shas: list[str]) -> dict[str, tuple[str, int]]:
+    requested = list(dict.fromkeys(shas))
+    if not requested:
+        return {}
+    if any(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is None for sha in requested):
+        raise GitEnumerationError("git reported an invalid blob object id")
+    result = _git_bytes(
+        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input=("\n".join(requested) + "\n").encode("ascii"),
+    )
+    if result.returncode:
+        raise GitEnumerationError(
+            f"'git cat-file --batch-check' failed: {_decode(result.stderr).strip()}"
+        )
+    lines = _decode(result.stdout).splitlines()
+    if len(lines) != len(requested):
+        raise GitEnumerationError("git blob-size batch response is incomplete")
+    metadata = {}
+    for sha, line in zip(requested, lines):
+        fields = line.split()
+        if (
+            len(fields) != 3 or fields[0] != sha or fields[1] not in {"blob", "tree", "commit", "tag"}
+            or not fields[2].isascii() or not fields[2].isdigit()
+        ):
+            raise GitEnumerationError("git blob-size batch response is missing or malformed")
+        try:
+            metadata[sha] = (fields[1], int(fields[2]))
+        except ValueError as exc:
+            raise GitEnumerationError("git blob-size batch response contains an invalid size") from exc
+    return metadata
 
 
-def _blob_at(rev: str, path: str) -> str | None:
-    """The blob sha recorded for ``path`` at ``rev``, or None if ``path``
-    doesn't exist there (including when ``rev`` doesn't name a real blob
-    for that path -- e.g. a directory, or absent entirely).
-    """
-    r = _git_bytes("rev-parse", "--verify", "--quiet", f"{rev}:{path}")
-    out = _decode(r.stdout).strip()
-    return out or None
+def _blob_sizes(shas: list[str]) -> dict[str, int]:
+    metadata = _object_metadata(shas)
+    if any(kind != "blob" for kind, _size in metadata.values()):
+        raise GitEnumerationError("git reported a non-blob for a staged file")
+    return {sha: size for sha, (_kind, size) in metadata.items()}
 
 
 #: Blob-ish modes diff-tree's --raw output ever reports as a FILE entry.
@@ -229,136 +234,75 @@ def _blob_at(rev: str, path: str) -> str | None:
 _REGULAR_FILE_MODES = {"100644", "100755", "120000"}
 
 
-def _commits_in_range(mbase: str, head: str) -> list[str]:
-    out = _git_or_raise("rev-list", f"{mbase}..{head}")
-    return [line for line in out.split("\n") if line]
+def _blob_candidates(paths: dict[str, set[str]], sizes: dict[str, int]) -> list[tuple[str, int]]:
+    result = []
+    for sha, size in sizes.items():
+        names = sorted(paths[sha])
+        selected = next((name for name in names if violation_for(name, size)), names[0])
+        result.append((selected, size))
+    return result
 
 
-def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
-    """``(path, size)`` for every path ``commit`` itself adds, modifies,
-    renames, or type-changes relative to its own first parent (or the
-    empty tree, for a root commit) -- i.e. this one commit's own diff, at
-    its own post-commit blob size. Checking per-commit rather than only the
-    whole range's net tree-to-tree difference is what makes a rename (same
-    blob content, same object id, merely a new path) still inspected at its
-    new path: ``git rev-list --objects`` considers such a blob *not new* to
-    the repository (the same content is already reachable via its old
-    path/commit), so it would otherwise never surface in an object-level
-    scan -- see the module docstring's new-blobs rationale, which this
-    function implements per-commit rather than for the whole range as one
-    object-reachability query.
-
-    For a MERGE commit (more than one parent), a path is excluded if its
-    blob is UNCHANGED from any parent OTHER than the first -- diffing only
-    against the first parent would otherwise flag every file a merge
-    brings in from a second parent (e.g. a long-lived feature branch
-    merging its base branch in) as "newly touched" by this commit, even
-    though that content already existed on the base and is not this
-    branch's own new content; only a file the merge's own conflict
-    resolution actually changed (different from EVERY parent) is this
-    commit's own responsibility.
-
-    ``git diff-tree --raw`` (rather than ``--name-only``) gives the new
-    blob sha and file mode directly, which both (a) lets a submodule
-    gitlink (mode ``160000``) be excluded deliberately rather than treated
-    as an unreadable blob (see ``_REGULAR_FILE_MODES``), and (b) saves a
-    separate ``cat-file``/lookup round-trip per path to learn the sha.
-    Its own ``-z`` only affects its own output (no external piped input to
-    worry about, unlike the earlier ``rev-list --objects`` attempt), so
-    this can safely use it for a filename containing non-ASCII characters,
-    a tab, or a newline -- git quotes such names in plain ``--name-only``
-    output, which would otherwise make a lookup against the (mis-parsed,
-    quoted) name fail and silently skip the real file. Raises
-    :class:`GitEnumerationError` if any underlying git command fails,
-    including a blob-size read for a path this function itself just
-    confirmed is a real, non-gitlink blob -- never silently skipped.
-    """
-    parents_out = _git_or_raise("rev-parse", f"{commit}^@")
-    all_parents = [p for p in parents_out.split("\n") if p]
-    first_parent = all_parents[0] if all_parents else EMPTY_TREE_SHA
-    other_parents = all_parents[1:]
-
-    raw = _git_or_raise(
-        "diff-tree", "--no-commit-id", "--raw", "-r", "--diff-filter=d", "-z", first_parent, commit,
-    )
-    parts = raw.split("\0")
-    out: list[tuple[str, int]] = []
-    i = 0
-    while i + 1 < len(parts):
-        meta, path = parts[i], parts[i + 1]
-        i += 2
-        if not meta:
-            continue
-        # ":<old_mode> <new_mode> <old_sha> <new_sha> <status>" (no rename/
-        # copy detection requested, so exactly one path per record).
-        fields = meta.lstrip(":").split(" ")
-        if len(fields) < 5:
-            continue
-        new_mode, new_sha = fields[1], fields[3]
-        if new_mode not in _REGULAR_FILE_MODES:
-            continue  # e.g. a submodule gitlink -- not a blob in this repo, deliberate skip
-        if other_parents and any(_blob_at(p, path) == new_sha for p in other_parents):
-            continue  # unchanged from another parent -- inherited, not this commit's own content
-        r = _git_bytes("cat-file", "-s", new_sha)
-        if r.returncode != 0:
+def _new_blob_paths(commits: list[str], sizes: dict[str, int]) -> list[tuple[str, int]]:
+    paths: dict[str, set[str]] = {}
+    if commits:
+        if any(re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None for commit in commits):
+            raise GitEnumerationError("git reported an invalid introducing commit id")
+        result = _git_bytes(
+            "diff-tree", "--stdin", "--root", "-m", "--no-commit-id", "--raw", "--no-abbrev",
+            "--no-renames", "-r", "--diff-filter=d", "-z",
+            input=("\n".join(commits) + "\n").encode("ascii"),
+        )
+        if result.returncode:
             raise GitEnumerationError(
-                f"'git cat-file -s {new_sha}' (path {path!r} at {commit}) failed: "
-                f"{_decode(r.stderr).strip()}"
+                f"'git diff-tree --stdin' failed: {_decode(result.stderr).strip()}"
             )
-        try:
-            size = int(_decode(r.stdout).strip())
-        except ValueError:
-            continue
-        out.append((path, size))
-    return out
+        raw = _decode(result.stdout)
+        parts = raw.split("\0")
+        for index in range(0, len(parts) - 1, 2):
+            meta, path = parts[index], parts[index + 1]
+            fields = meta.lstrip(":\n").split()
+            if len(fields) != 5:
+                raise GitEnumerationError("git reported malformed new-blob path metadata")
+            mode, sha = fields[1], fields[3]
+            if mode in _REGULAR_FILE_MODES and sha in sizes:
+                paths.setdefault(sha, set()).add(path)
+    if set(paths) != set(sizes):
+        raise GitEnumerationError("git did not report an introducing path for every new blob")
+    return _blob_candidates(paths, sizes)
 
 
-def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] | None:
-    """Every ``(path, size)`` touched by any commit newly reachable in
-    ``<merge-base of base_ref and head_ref>..head_ref`` -- i.e. every file
-    this diff's own commits add, modify, rename, or type-change, each
-    checked at ITS OWN introducing commit's blob size. This includes a file
-    added then deleted or shrunk again later in the same range (see the
-    module docstring for why this must not be scoped to only the range's
-    net tree-to-tree difference), and a rename/type-change whose content is
-    byte-identical to something already elsewhere in history (merely
-    re-pathed, so its blob object itself isn't "new" to the repository --
-    see ``_commit_touched_blobs``).
-
-    Returns None ONLY for the one legitimate soft skip this function has:
-    ``base_ref``/``head_ref`` can't be resolved, OR they share no common
-    ancestor at all (e.g. after a deliberate `main` history rewrite --
-    see ``check-version-bump.py``'s identical fix for the full rationale),
-    before enumeration even starts (e.g. ``base_ref`` genuinely not fetched
-    yet), matching
-    ``check-effort-vision-structure.py``'s own convention. Once enumeration
-    begins, a real git plumbing failure (``rev-list``/``diff-tree``) raises
-    :class:`GitEnumerationError` instead -- never silently returns "nothing
-    to check", since an unexamined commit could easily be the one carrying
-    the oversized/disallowed blob this guard exists to catch.
-    """
+def _new_blobs_in_range(
+    base_ref: str, head_ref: str, published_refs: list[str] | None = None,
+) -> list[tuple[str, int]]:
+    """New blob objects relative to complete published histories, not merge-base paths."""
     head = _rev_parse(head_ref)
     if head is None:
-        print(f"check-large-files: cannot resolve head ({head_ref}); skipping.")
-        return None
-    base = _rev_parse(base_ref)
-    if base is None:
-        print(
-            f"check-large-files: base '{base_ref}' unavailable; "
-            "skipping (fetch it to enable the guard).",
-        )
-        return None
-    mbase = _merge_base(base, head)
-    if mbase is None:
-        print(
-            f"check-large-files: base '{base_ref}' shares no common history "
-            "with head (e.g. after a main history rewrite); skipping.",
-        )
-        return None
-    out: list[tuple[str, int]] = []
-    for commit in _commits_in_range(mbase, head):
-        out.extend(_commit_touched_blobs(commit))
-    return out
+        raise GitEnumerationError("the selected publication head is unavailable")
+    excluded = []
+    if base_ref not in ("0" * 40, "0" * 64):
+        base = _rev_parse(base_ref)
+        if base is None:
+            raise GitEnumerationError("the publication base is unavailable; fetch it first")
+        excluded.append(base)
+    for ref in published_refs or []:
+        resolved = _rev_parse(ref)
+        if resolved is None:
+            raise GitEnumerationError("an explicitly published baseline is unavailable; fetch it first")
+        excluded.append(resolved)
+    incoming = _git_or_raise("rev-list", "--objects", "--no-object-names", head).splitlines()
+    known = set(_git_or_raise(
+        "rev-list", "--objects", "--no-object-names", *dict.fromkeys(excluded),
+    ).splitlines()) if excluded else set()
+    # Negative commit traversal can still report known blobs after a rebase or
+    # deletion/reuse. Novelty is the difference of complete reachability sets.
+    objects = [sha for sha in incoming if sha not in known]
+    metadata = _object_metadata(objects)
+    sizes = {sha: size for sha, (kind, size) in metadata.items() if kind == "blob"}
+    if not sizes:
+        return []
+    commits = [sha for sha, (kind, _size) in metadata.items() if kind == "commit"]
+    return _new_blob_paths(commits, sizes)
 
 
 def _blobs_in_tree(rev: str) -> list[tuple[str, int]]:
@@ -392,44 +336,19 @@ def _blobs_in_tree(rev: str) -> list[tuple[str, int]]:
 
 
 def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
-    """``(path, size)`` for each of ``paths`` as recorded in the INDEX
-    (stage 0) -- never the working tree. A staged oversized blob whose
-    working-tree copy is later shrunk or deleted without re-staging is
-    still what would actually be committed, and must still be caught; the
-    reverse (an unrelated working-tree edit growing a safely-sized staged
-    blob) must not false-positive.
+    """New stage-0 blob objects, excluding complete HEAD reachability.
 
-    Resolves each path's blob sha via ``git ls-files --stage`` (a plain CLI
-    argument, parsed unambiguously by the shell/argv, never embedded in a
-    colon-delimited revision string) rather than ``git cat-file -s
-    ":<path>"``: the latter's ``:[<n>:]<path>`` revision grammar means a
-    LITERAL path that itself begins with a stage-number-shaped prefix (e.g.
-    a file genuinely named ``0:large.json``) can be misparsed as an
-    explicit-stage reference to a *different* path (stage 0 of
-    ``large.json``), silently checking the wrong file -- or none at all.
-    ``--literal-pathspecs`` (a global git option, passed before the
-    subcommand) additionally disables git's OWN pathspec "magic" prefix
-    syntax for the ``ls-files`` arguments themselves -- without it, a file
-    literally named e.g. ``:(literal)large.json`` would be reinterpreted as
-    a magic pathspec signature rather than that literal filename, and its
-    real index entry would never be looked up at all.
-    Raises :class:`GitEnumerationError` if ``ls-files`` fails outright, or
-    if a path it resolved to a real, regular-file index entry then fails a
-    blob-size read (shouldn't happen for a sha ls-files itself just
-    reported, but must never be silently skipped if it somehow does) -- a
-    path simply ABSENT from the index (e.g. a staged deletion) is a
-    different, always legitimate, silent no-op, and so is a staged
-    submodule gitlink (mode ``160000``, naming a commit in another repo's
-    object store, not a blob in this one -- see ``_REGULAR_FILE_MODES``,
-    shared with ``_commit_touched_blobs``'s own equivalent exclusion) or a
-    merge-conflict stage (1/2/3, never stage 0 -- this check only ever
-    means to look at the actual staged (stage 0) content).
+    Paths resolve through literal NUL-delimited ls-files entries, not Git's
+    colon revision or magic pathspec grammars. Working-tree growth/shrinkage
+    cannot change the checked index object. Deletions, gitlinks and unresolved
+    merge stages are not new stage-0 blobs; failures reading a selected object
+    remain errors. Multiple paths to one new object are classified once.
     """
     if not paths:
         return []
     ls_files = subprocess.run(
         ["git", "--literal-pathspecs", "-C", str(REPO), "ls-files", "--stage", "-z", "--", *paths],
-        capture_output=True, check=False, env=_git_env(),
+        capture_output=True, check=False, env=_git_env(), creationflags=_HEADLESS,
     )
     if ls_files.returncode != 0:
         raise GitEnumerationError(
@@ -448,25 +367,19 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
         if mode not in _REGULAR_FILE_MODES or stage != "0":
             continue  # e.g. a submodule gitlink, or an unmerged conflict stage -- deliberate skip
         shas[path] = sha
-    out: list[tuple[str, int]] = []
     # Iterate the entries ls-files itself already resolved and normalized
     # (not the caller's original path strings): a caller-supplied path like
     # "./src/big.json" round-trips through ls-files as "src/big.json", so
     # matching back against the ORIGINAL spelling would silently find
     # nothing and skip a real, staged, oversized file.
+    head = _rev_parse("HEAD")
+    known = set(_git_or_raise("rev-list", "--objects", "--no-object-names", head).splitlines()) if head else set()
+    shas = {path: sha for path, sha in shas.items() if sha not in known}
+    sizes = _blob_sizes(list(shas.values()))
+    names: dict[str, set[str]] = {}
     for path, sha in shas.items():
-        r2 = _git_bytes("cat-file", "-s", sha)
-        if r2.returncode != 0:
-            raise GitEnumerationError(
-                f"'git cat-file -s {sha}' (staged path {path!r}) failed: "
-                f"{_decode(r2.stderr).strip()}"
-            )
-        try:
-            size = int(_decode(r2.stdout).strip())
-        except ValueError:
-            continue
-        out.append((path, size))
-    return out
+        names.setdefault(sha, set()).add(path)
+    return _blob_candidates(names, sizes)
 
 
 def violation_for(path: str, size: int) -> str | None:
@@ -512,7 +425,7 @@ def check(blobs: list[tuple[str, int]]) -> list[str]:
     return violations
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths", nargs="*", metavar="FILE",
@@ -532,10 +445,14 @@ def main() -> int:
         help="Diff/sweep head (default: HEAD).",
     )
     parser.add_argument(
+        "--published", action="append", default=[], metavar="REF",
+        help="Additional already-published tip whose reachable objects are not new (repeatable).",
+    )
+    parser.add_argument(
         "--all", action="store_true",
         help="Full-tree sweep at --head, ignoring --base/FILE.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         if args.all:
@@ -543,16 +460,9 @@ def main() -> int:
             scope_desc = f"every tracked file at {args.head}"
         elif args.paths:
             blobs = _staged_blobs(args.paths)
-            scope_desc = f"{len(args.paths)} staged file(s)"
+            scope_desc = f"{len(blobs)} new staged blob(s)"
         else:
-            found = _new_blobs_in_range(args.base, args.head)
-            if found is None:
-                # Genuinely environmental (e.g. --base not fetched yet) --
-                # matches check-effort-vision-structure.py's own convention
-                # of skipping (not failing) when its base ref is
-                # unavailable.
-                return 0
-            blobs = found
+            blobs = _new_blobs_in_range(args.base, args.head, args.published)
             scope_desc = f"this diff's {len(blobs)} newly-introduced blob(s)"
     except GitEnumerationError as exc:
         # A git plumbing command needed to enumerate blobs failed outright

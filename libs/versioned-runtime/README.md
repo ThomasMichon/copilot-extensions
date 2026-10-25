@@ -411,6 +411,10 @@ not grant installation ownership or release attestation.
 The adapter verifies the plugin/package identity, canonical assembly bytes
 and any caller-pinned runtime selection. Malformed or changed metadata
 refuses installation rather than falling back to the ordinary package slot.
+`payload_package_version(payload, plugin)` reads that same consumer identity
+for preparation: runtime plugins use `plugin.json`, while `worktree-manager`
+requires its canonical standalone project name and version in `pyproject.toml`
+(Manager's Python 3.11+ floor). Receipt validation uses the same reader.
 The synchronizer ships the same helper to every runtime plugin without changing
 ordinary package-only installation behavior; the source-preparation guide names
 the native installer adopters. Independently deployed Python resolver bundles,

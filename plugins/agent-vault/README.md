@@ -183,13 +183,25 @@ Supported built-in command groups:
 | Area | Commands |
 |------|----------|
 | Entries | `get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
-| SSH keys | `import-key`, `export-key` |
+| SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
 | Git HTTPS credentials | `git-credential get|store|erase` (delegates allowlisted hosts to local Git Credential Manager) |
 | Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
+
+## SSH key preparation and protected installation
+
+For standalone SSH identity preparation, see
+[Vault-owned SSH key preparation](docs/ssh-key-preparation.md). It validates and
+reuses a whole pair, permits separately confirmed first creation only, and
+returns public metadata without writing plaintext key files. This is not SSH
+enrollment or automatic mesh setup; attachment import/export remains unchanged.
+`ssh-key install` separately materializes an existing pair in an explicitly
+selected owner-private local directory. It never initializes a missing record,
+overwrites a different key or repairs existing permissions. Both commands support
+`--require-running` to prohibit service activation and first-touch provisioning.
 
 ## Shared owner-key setup
 

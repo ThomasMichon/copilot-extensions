@@ -211,6 +211,31 @@ def test_ci_path_gates_smoke_and_promotion_keeps_exhaustive():
     _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion)
 
 
+def test_ssh_manual_lane_selects_only_bounded_disposable_native_acceptance():
+    workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
+    events = workflow.get("on", workflow.get(True))
+    assert events["workflow_dispatch"]["inputs"]["ssh_service"]["default"] is False
+    for suffix in ("linux", "windows"):
+        job = workflow["jobs"]["ssh-service-" + suffix]
+        assert job["if"] == "${{ inputs.ssh_service }}"
+        commands = [step for step in job["steps"] if "run-standalone-tests.py" in step.get("run", "")]
+        assert len(commands) == 1
+        assert "services/ssh" in commands[0]["run"] and "--timeout 180" in commands[0]["run"]
+        if suffix == "linux":
+            assert commands[0]["env"] == {"SSH_SERVICE_NATIVE_ACCEPTANCE": "1"}
+            native = [step for step in job["steps"]
+                      if "run-plugin-tests.py agent-ssh" in step.get("run", "")]
+            assert len(native) == 1
+            assert native[0]["env"] == {"AGENT_SSH_NATIVE_DISPOSABLE": "1"}
+            assert "--allow-host-state --allow-explicit-tiers" in native[0]["run"]
+            assert "--test-file tests/test_gateway_authorization_native.py" in native[0]["run"]
+            assert "--test-file tests/test_gateway_sshd_native.py" in native[0]["run"]
+        else:
+            assert not commands[0].get("env")
+    for suffix in ("posix", "windows"):
+        assert "!inputs.ssh_service" in workflow["jobs"]["derived-diagnostics-" + suffix]["if"]
+
+
 def _assert_ci_path_gates_smoke_and_promotion_keeps_exhaustive(ci, promotion):
     import shlex
     from packaging.requirements import Requirement

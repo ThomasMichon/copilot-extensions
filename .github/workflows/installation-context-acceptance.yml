@@ -35,6 +35,10 @@ on:
         description: Run isolated PR serving and observation lifecycle contracts instead
         type: boolean
         default: false
+      ssh_service:
+        description: Run isolated SSH enrollment, native relay and real Gateway lifecycle contracts
+        type: boolean
+        default: false
       pr_artifacts:
         description: Build and verify first-party PR/Fleet artifacts and install them offline
         type: boolean
@@ -69,7 +73,7 @@ permissions:
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -90,7 +94,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -632,6 +636,53 @@ jobs:
       - name: Independent installed PR service and real process transport
         run: >-
           python tools/run-standalone-tests.py services/pr
+          --prepare --timeout 180 --admission-wait 30
+
+  ssh-service-linux:
+    if: ${{ inputs.ssh_service }}
+    name: Isolated SSH service and native relay (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Admit native prerequisites in this disposable runner only
+        run: |
+          command -v sshd
+          command -v ssh-keygen
+          sudo install -d -o root -g root -m 0755 /run/sshd
+      - name: Installed SSH host, native custody and real authenticated forwards
+        env:
+          SSH_SERVICE_NATIVE_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-standalone-tests.py services/ssh
+          --prepare --timeout 180 --admission-wait 30
+      - name: Native target authorization with StrictModes and disposable-account ancestry
+        env:
+          AGENT_SSH_NATIVE_DISPOSABLE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-ssh
+          --test-file tests/test_gateway_authorization_native.py
+          --test-file tests/test_gateway_sshd_native.py
+          --allow-host-state --allow-explicit-tiers
+
+  ssh-service-windows:
+    if: ${{ inputs.ssh_service }}
+    name: Isolated SSH control-plane service (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Installed host and real authenticated Gateway transport
+        run: >-
+          python tools/run-standalone-tests.py services/ssh
           --prepare --timeout 180 --admission-wait 30
 
   pr-artifacts-linux:

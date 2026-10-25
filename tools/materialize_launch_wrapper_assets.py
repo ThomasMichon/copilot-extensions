@@ -7,6 +7,7 @@ from pathlib import Path
 
 import launch_wrapper_assets_ref as lwar
 import uv_editable_ref as uer
+from standalone_consumers import STANDALONE_CONSUMERS
 
 
 def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
@@ -38,6 +39,7 @@ def materialize_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
     manifest_name: str | None = None,
+    reuse_existing: bool = False,
 ) -> list[str]:
     if manifest_name is None:
         return [
@@ -47,7 +49,7 @@ def materialize_into(
                 source_consumer_dir=source_consumer_dir,
                 dest_consumer_dir=dest_consumer_dir,
                 canonical_root=canonical_root, dest_root=dest_root,
-                manifest_name=name,
+                manifest_name=name, reuse_existing=reuse_existing,
             )
         ]
     try:
@@ -92,6 +94,7 @@ def materialize_into(
     if bad_ancestor is not None:
         return [f"SKIP {dest_bin}: {bad_ancestor} is a symlink -- refusing"]
 
+    retained: set[str] = set()
     for name in manifest.files:
         source = source_dir / name
         if not source.is_file():
@@ -103,10 +106,18 @@ def materialize_into(
             return [f"SKIP {source}: is a symlink -- refusing"]
         dest_file = dest_bin / name
         if dest_file.exists() or dest_file.is_symlink():
+            if (
+                reuse_existing and not dest_file.is_symlink() and dest_file.is_file()
+                and dest_file.read_bytes() == source.read_bytes()
+            ):
+                retained.add(name)
+                continue
             return [f"SKIP {dest_file}: already exists -- refusing to overwrite"]
 
     dest_bin.mkdir(parents=True, exist_ok=True)
     for name in manifest.files:
+        if name in retained:
+            continue
         source = source_dir / name
         dest_file = dest_bin / name
         shutil.copyfile(source, dest_file)
@@ -123,13 +134,16 @@ def materialize_all(dest: Path, *, canonical_root: Path) -> list[str]:
     log: list[str] = []
     dest_plugins = dest / "plugins"
     source_plugins = canonical_root / "plugins"
-    if not dest_plugins.is_dir() or not source_plugins.is_dir():
-        return log
-    for source_consumer in sorted(source_plugins.iterdir()):
-        if not source_consumer.is_dir():
-            continue
-        plugin = source_consumer.name
-        dest_consumer_dir = dest_plugins / plugin
+    consumers = (
+        sorted(path for path in source_plugins.iterdir() if path.is_dir())
+        if source_plugins.is_dir() and dest_plugins.is_dir() else []
+    )
+    consumers.extend(
+        canonical_root / name for name in STANDALONE_CONSUMERS
+        if (canonical_root / name).is_dir()
+    )
+    for source_consumer in consumers:
+        dest_consumer_dir = dest / source_consumer.relative_to(canonical_root)
         if not dest_consumer_dir.is_dir():
             continue
         log.extend(materialize_into(

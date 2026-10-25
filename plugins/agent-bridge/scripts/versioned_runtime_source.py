@@ -433,6 +433,32 @@ def assembly_hash(payload: Path) -> str:
     return _runtime().fingerprint_source(files)
 
 
+def payload_package_version(payload: Path, plugin: str) -> str:
+    """Read the selected consumer's attributed package identity."""
+    if plugin == "worktree-manager":
+        import tomllib
+
+        data = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
+        manifest = data.get("project")
+        if (
+            not isinstance(manifest, dict) or not isinstance(manifest.get("name"), str)
+            or re.sub(r"[-_.]+", "-", manifest["name"]).lower()
+            != "copilot-extensions-worktree-manager"
+        ):
+            raise SourceIdentityError("Materialized Manager project identity does not match")
+    else:
+        manifest = json.loads(
+            (payload / "plugin.json").read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_object,
+        )
+        if not isinstance(manifest, dict) or manifest.get("name") != plugin:
+            raise SourceIdentityError("Materialized plugin identity does not match the selection")
+    version = manifest.get("version")
+    if not isinstance(version, str) or not version:
+        raise SourceIdentityError("Materialized runtime has no package version")
+    return version
+
+
 def read_source_identity(
     payload: Path, package_version: str, *, plugin: str | None = None,
 ) -> SourceIdentity | None:
@@ -458,13 +484,8 @@ def read_source_identity(
     names = fields - {"schema", "version"}
     if any(not isinstance(data[name], str) or not data[name] for name in names):
         raise SourceIdentityError("Source identity fields must be nonempty strings")
-    manifest = json.loads(
-        (payload / "plugin.json").read_text(encoding="utf-8"),
-        object_pairs_hook=_unique_object,
-    )
-    if not isinstance(manifest, dict) or (
-        manifest.get("name") != data["plugin"]
-        or manifest.get("version") != package_version
+    if (
+        payload_package_version(payload, data["plugin"]) != package_version
         or data["package_version"] != package_version
         or (plugin is not None and data["plugin"] != plugin)
     ):

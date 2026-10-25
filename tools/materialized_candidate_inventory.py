@@ -12,6 +12,7 @@ STANDALONE = {
     "dispatch": Path("services") / "dispatch", "index": Path("services") / "index",
     "chat": Path("services") / "chat",
     "pr": Path("services") / "pr",
+    "ssh": Path("services") / "ssh",
     "fleet-manager": Path("fleet-manager"),
 }
 
@@ -127,7 +128,7 @@ def matrix(
     root: Path, expected: set[str], standalone: set[str],
 ) -> dict[str, list[dict[str, str | int]]]:
     supported = {"worktree-manager", *(path.as_posix() for path in STANDALONE.values())}
-    optional = {"services/chat", "services/pr"}
+    optional = {"services/chat", "services/pr", "services/ssh"}
     if not supported - optional <= standalone <= supported:
         raise CandidateValidationError("standalone recipes do not cover the validated canonical roster")
     actual = python_suites(root)
@@ -154,9 +155,10 @@ def matrix(
         ("index", ("ubuntu-latest", "windows-latest")),
         ("chat", ("ubuntu-latest", "windows-latest")),
         ("pr", ("ubuntu-latest", "windows-latest")),
+        ("ssh", ("ubuntu-latest", "windows-latest")),
         ("fleet-manager", ("ubuntu-latest", "windows-latest")),
     ):
-        if component in {"chat", "pr"} and f"services/{component}" not in standalone:
+        if component in {"chat", "pr", "ssh"} and f"services/{component}" not in standalone:
             continue
         relative = Path("worktree-manager") if component == "manager" else STANDALONE[component]
         regular(root, relative / "pyproject.toml")

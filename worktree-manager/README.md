@@ -1222,6 +1222,13 @@ planning and the existing installation driver remain the next integration
 boundary; this command adds no alternate installer or recurring worker.
 The early preflight is read-only: invalid bootstrap arguments still retain
 their existing failure scope without opening aggregate update telemetry.
+
+Released Manager payloads also carry the trusted canonical
+[source-preparation toolkit](../tools/prepare_runtime_source.md) in
+`scripts/runtime-source-tools/`. It supports Manager's standalone project as
+well as runtime plugins without executing fetched tools. This packaged
+capability does not connect the acquisition diagnostic to installation or
+remove the update refusal above.
 The existing update request's source identity includes this policy, so changing
 it after submission rejects the old request rather than running a different
 runtime selection under its name.

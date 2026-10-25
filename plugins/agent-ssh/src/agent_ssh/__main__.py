@@ -3,6 +3,7 @@
 Subcommands:
   doctor         Audit managed OpenSSH fragments without changing them.
   emit-profile   Render/write a managed SSH profile fragment.
+  gateway-profile Emit named peer routes through an existing Gateway SSH alias.
   explore        Introspect a reachable SSH target (repos, runtimes, agents).
   mesh-status    Render the calling repo's SSH machine mesh from machines.yaml.
   refresh-mesh   Re-discover live tunnel ids, re-emit the profile, and verify
@@ -426,6 +427,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     copilot_config_list.add_argument("--json", action="store_true")
     copilot_config_list.set_defaults(func=_cmd_copilot_config)
+
+    from .gateway_profile import add_parser as add_gateway_parser
+
+    add_gateway_parser(sub)
+
+    from .gateway_provider import add_parser as add_gateway_provider_parser
+
+    add_gateway_provider_parser(sub)
+
+    from .gateway_authorization import add_parser as add_gateway_authorization_parser
+
+    add_gateway_authorization_parser(sub)
 
     from .copilot_plugins import target_repo
     target_repo_parser = sub.add_parser(

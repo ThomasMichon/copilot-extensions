@@ -83,6 +83,31 @@ def test_source_identity_preserves_package_and_full_source_identity(payload: Pat
     assert identity.manifest_fields(source)["runtime_source"] == source.document()
 
 
+@pytest.mark.parametrize("expected", [None, "worktree-manager"])
+def test_manager_source_identity_uses_its_standalone_project(
+    tmp_path: Path, expected: str | None,
+) -> None:
+    payload = tmp_path / "manager"
+    payload.mkdir()
+    project = payload / "pyproject.toml"
+    project.write_text(
+        f'[project]\nname="copilot_extensions.worktree-manager"\nversion="{VERSION}"\n',
+        encoding="utf-8",
+    )
+    digest = identity.assembly_hash(payload)
+    source = identity.SourceIdentity(
+        "worktree-manager", VERSION, COMMIT, TREE, digest,
+        identity.runtime_version(VERSION, COMMIT, digest),
+    )
+    (payload / identity.SOURCE_FILE).write_text(json.dumps(source.document()), encoding="utf-8")
+    assert identity.read_source_identity(payload, VERSION, plugin=expected) == source
+    with pytest.raises(identity.SourceIdentityError, match="plugin and package"):
+        identity.read_source_identity(payload, VERSION, plugin="agent-bridge")
+    project.write_text(project.read_text().replace("copilot_extensions.worktree-manager", "other"))
+    with pytest.raises(identity.SourceIdentityError, match="project identity"):
+        identity.read_source_identity(payload, VERSION, plugin=expected)
+
+
 @pytest.mark.parametrize(
     "version", ["0.4.1-dev3", "0.4.1.dev3", "0.4.1-dev3+base", "0.4.1.dev3+base"],
 )

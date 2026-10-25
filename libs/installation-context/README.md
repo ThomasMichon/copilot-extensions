@@ -41,7 +41,11 @@ its whole working set rolled back.
   installation-management actions still require Bash 4.4+. Native dependencies
   include `awk`, `sh` and a SHA-256 command (`sha256sum`, `shasum`, or `openssl`).
   Physical-path resolution uses `realpath -m`, `readlink -f` or the canonical
-  shell fallback.
+  shell fallback. Directory-marketplace source lookup parses each catalog once,
+  returning only hex-encoded candidate fields to the existing shell path checks.
+  It still validates the entire JSON document, all inspected name fields and
+  selected source fields; duplicate/ambiguous entries and containment violations
+  remain refusals. No source identity or readiness result is cached.
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
   Missing native types compile in one batch to bound cold diagnostic startup;
   re-entry retains already-loaded types rather than recompiling them.

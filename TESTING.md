@@ -573,6 +573,29 @@ identity after clean drain and must refuse without native reads or replay writes
 This is a disk-schema/update safeguard, not an image build, automatic migration,
 cross-host writer fence or completed update/rollback lifecycle.
 
+## Optional SSH service and native relay
+
+The independent `ssh_service=true` selector runs the contained standalone
+`services/ssh` suite on Linux and Windows. It covers installed foreground
+Gateway registration, later-machine enrollment/notifications, original-request
+recovery and writer drain. The Linux lane additionally selects native
+acceptance in its disposable runner account: real OpenSSH listener custody,
+two distinct relay keys, a loopback reverse forward, a peer's permitted local
+forward and an unauthorized reverse-bind refusal. It never invokes a remote
+shell, exec, PTY or subsystem. Native target-login credentials remain distinct.
+The fixture owns one finite temporary directory in that disposable account's
+actual home so production `StrictModes` remains enabled; it does not read or
+modify existing SSH configuration. Do not select
+`SSH_SERVICE_NATIVE_ACCEPTANCE=1` in a production account.
+The Linux job also runs both target-login native fixtures in that disposable
+account. Their finite home-directory fixtures require
+`AGENT_SSH_NATIVE_DISPOSABLE=1` and the plugin runner's explicit
+`--allow-host-state --allow-explicit-tiers`; default local runs skip them rather
+than writing to an ordinary account's home or relaxing `StrictModes`.
+The Windows lane remains control-plane-only and explicitly skips Linux-native
+cases. These tests do not qualify a built native container image, normal Fleet
+placement, provider/Vault admission or a preserving production migration.
+
 ## Optional diagnostic telemetry
 
 Manager's `tests/test_launch_update_requests.py` native lane checks the user-local

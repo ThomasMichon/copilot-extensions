@@ -1,19 +1,22 @@
 # Prepare a merged-source runtime payload
 
-`prepare_runtime_source.py` materializes one runtime plugin from an exact
+`prepare_runtime_source.py` materializes one runtime plugin or standalone Manager from an exact
 merged Git commit into an installer-owned location outside its source
 checkout. It prepares first-party code; it does not install a runtime, update
 Copilot, select a marketplace, or change service supervision.
 
 Native consumers on Windows and POSIX are Agent Bridge, Codespaces,
 Containers, MCP, SSH, Machines, Pull Requests, Budget Guidance, Worktrees,
-Dispatch, Index, Logger and Vault. Manager source selection and the local
-plugin-deployment gate are separate effort slices.
+Dispatch, Index, Logger and Vault. Manager payload preparation uses its existing
+standalone project identity; Manager installation/recovery qualification,
+updater integration and the local plugin-deployment gate remain separate slices.
 
 ## Inputs and invocation
 
 Run with Python 3.11+ and Git from a checkout containing this tool and its
-canonical libraries:
+canonical libraries, or use Manager's shipped
+`scripts/runtime-source-tools/prepare_runtime_source.py` with its adjacent
+installer-owned runtime helpers:
 
 ```text
 python tools/prepare_runtime_source.py --source <clean-checkout> --commit <full-commit> --plugin agent-bridge --output <outside-checkout>
@@ -24,7 +27,7 @@ python tools/prepare_runtime_source.py --source <clean-checkout> --commit <full-
 | `--source` | Exact standalone checkout root; linked worktrees are refused. |
 | `--commit` | Full selected Git commit, reachable from the fetched source branch. |
 | `--branch` | `dev` by default; `main` is also accepted as the fetched branch. |
-| `--plugin` | One runtime plugin identifier under `plugins/`. |
+| `--plugin` | One runtime plugin identifier under `plugins/`, or `worktree-manager`. |
 | `--output` | Preparation root outside the source checkout. |
 
 The caller owns source acquisition and authentication. The tool never fetches
@@ -39,6 +42,16 @@ The canonical materializers expand file references, recursive first-party
 library references, installer-engine assets and packaged launch assets.
 Package versions and pending changefiles are unchanged. A payload with
 unresolved materialization or preexisting deployment metadata is refused.
+Already-materialized packaged assets are retained only when their bytes match
+the selected canonical source exactly; conflicting copies are never overwritten.
+
+Manager's `packaged-assets.json` ships the canonical preparer and its complete
+materializer import closure inside Manager's own released payload. Preparation
+runs those already-installed tools, never Python code from the selected
+checkout. Incoming toolkit files are copied and hashed as data for a subsequent
+installation. No sibling plugin or checkout is needed by the shipped toolkit.
+Manager's name and package version come from `pyproject.toml`; it does not gain a
+synthetic plugin manifest.
 
 The prepared directory contains `runtime-source.json`, recording:
 
@@ -100,6 +113,10 @@ concurrent preparation, changed inputs, archive paths and the real native
 installer identity/manifest functions. Native Windows additionally observes
 two preparation/reuse cycles from a GUI-subsystem parent for visible-console
 and foreground changes.
+The isolated shipped-toolkit regression prepares and reuses raw and already-
+materialized Manager inputs, rejects wrong project identity and conflicting
+assets, and deliberately poisons fetched tool bodies to detect accidental
+execution.
 
 The credential-free `merged-dev-runtime` clean-room scenario exercises the
 actual installer from a merged source commit, then checks the installed

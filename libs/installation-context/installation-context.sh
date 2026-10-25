@@ -1641,7 +1641,7 @@ resolve_legacy_snapshot_evidence() {
 
 resolve_directory_evidence() {
     local payload="$1" requested_plugin_id="$2" cursor manifest relative plugin_root source_base
-    local count name source_path candidate matches matched_name manifest_name
+    local name source_path candidate matches matched_name manifest_name records kind encoded_name encoded_source
     local -a manifests=(
         ".github/plugin/marketplace.json"
         "marketplace.json"
@@ -1656,37 +1656,47 @@ resolve_directory_evidence() {
         for relative in ${manifests[@]+"${manifests[@]}"}; do
             manifest="$cursor/$relative"
             [[ -f "$manifest" ]] || continue
-            json_optional_string_into plugin_root "$manifest" "$(path_join metadata pluginRoot)"
+            records="$(
+                INSTALLATION_CONTEXT_QUERY_PLUGIN="$requested_plugin_id" LC_ALL=C \
+                    awk -f "$JSON_QUERY" -v mode=directory "$manifest"
+            )" || fail "Cannot read directory marketplace evidence in '$manifest'."
             source_base="$cursor"
-            if [[ -n "$plugin_root" ]]; then
-                ! is_absolute "$plugin_root" || fail "Marketplace metadata.pluginRoot must be relative in '$manifest'."
-                [[ "/$plugin_root/" != */../* ]] || fail "Marketplace metadata.pluginRoot may not escape '$cursor'."
-                source_base="$(canonical_path "$cursor/$plugin_root")"
-                path_is_within "$source_base" "$cursor" ||
-                    fail "Marketplace metadata.pluginRoot escapes '$cursor'."
-            fi
-            count="$(json_length_path "$manifest" plugins)" ||
-                fail "Marketplace manifest '$manifest' has no plugins array."
             matches=0
             matched_name=""
-            for ((index_value = 0; index_value < count; index_value++)); do
-                json_optional_string_into name "$manifest" "$(path_join "$(path_join plugins "$index_value")" name)"
-                [[ -z "$requested_plugin_id" || "$name" == "$requested_plugin_id" ]] || continue
-                json_optional_string_into source_path "$manifest" "$(path_join "$(path_join plugins "$index_value")" source)"
-                [[ -n "$source_path" ]] || continue
-                ! is_absolute "$source_path" || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
-                [[ "/$source_path/" != */../* ]] || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
-                candidate="$(canonical_path "$source_base/$source_path")"
-                path_is_within "$candidate" "$cursor" ||
-                    fail "Marketplace plugin source escapes '$cursor'."
-                if [[ -e "$candidate" ]] && paths_equal "$candidate" "$payload"; then
-                    matches=$((matches + 1))
-                    matched_name="$name"
-                fi
-            done
+            while IFS=: read -r kind encoded_name encoded_source; do
+                case "$kind" in
+                    root)
+                        decode_hex_into plugin_root "$encoded_name"
+                        if [[ -n "$plugin_root" ]]; then
+                            ! is_absolute "$plugin_root" || fail "Marketplace metadata.pluginRoot must be relative in '$manifest'."
+                            [[ "/$plugin_root/" != */../* ]] || fail "Marketplace metadata.pluginRoot may not escape '$cursor'."
+                            source_base="$(canonical_path "$cursor/$plugin_root")"
+                            path_is_within "$source_base" "$cursor" ||
+                                fail "Marketplace metadata.pluginRoot escapes '$cursor'."
+                        fi
+                        ;;
+                    plugin)
+                        decode_hex_into name "$encoded_name"
+                        decode_hex_into source_path "$encoded_source"
+                        [[ -n "$source_path" ]] || continue
+                        ! is_absolute "$source_path" || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
+                        [[ "/$source_path/" != */../* ]] || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
+                        candidate="$(canonical_path "$source_base/$source_path")"
+                        path_is_within "$candidate" "$cursor" ||
+                            fail "Marketplace plugin source escapes '$cursor'."
+                        if [[ -e "$candidate" ]] && paths_equal "$candidate" "$payload"; then
+                            matches=$((matches + 1))
+                            matched_name="$name"
+                        fi
+                        ;;
+                    marketplace)
+                        decode_hex_into manifest_name "$encoded_name"
+                        ;;
+                    *) fail "Invalid directory marketplace evidence in '$manifest'." ;;
+                esac
+            done <<<"$records"
             ((matches == 1)) ||
                 fail "Marketplace manifest '$manifest' does not contain exactly one plugin entry resolving to '$payload'."
-            json_optional_string_into manifest_name "$manifest" name marketplace
             SOURCE_KIND=directory
             SOURCE_CANONICAL="directory:$(canonical_path "$cursor" true)"
             SOURCE_REF=""

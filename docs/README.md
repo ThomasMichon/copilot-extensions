@@ -35,6 +35,9 @@ venue or another platform works.
   claim ownership, and maintenance checks.
 - [Visions](../visions/README.md): standing intent, not capability evidence.
 - [Efforts](../efforts/README.md): ongoing and completed campaigns.
+- [Gateway-registered SSH service](../services/ssh/README.md): authenticated
+  enrollment, directory notifications and an optional native Linux relay,
+  composing the canonical Fleet and agent-ssh consumers.
 
 `docs/plans/` holds planning material; a plan, milestone, or screenshot is not
 proof that its subject is shipped. Confirm present-tense support in the owning

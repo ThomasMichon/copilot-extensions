@@ -33,6 +33,7 @@ valid_oid() {
 
 check_ref() {
     local head="$1" published="$2" base="" candidate resolved status
+    local -a blob_published=()
     if ! git -C "$ROOT" cat-file -e "$head^{commit}" 2>/dev/null; then
         echo "pre-push: pushed commit is unavailable; refusing unchecked publication" >&2
         return 1
@@ -42,6 +43,7 @@ check_ref() {
             echo "pre-push: published tip is unavailable; fetch it before publishing" >&2
             return 1
         fi
+        blob_published+=(--published "$published")
         if git -C "$ROOT" merge-base --is-ancestor "$published" "$head"; then
             base="$published"
         else
@@ -65,12 +67,12 @@ check_ref() {
         echo "pre-push: no related publication base; fetch the contribution/release branch" >&2
         return 1
     fi
-    local failed=0
-    "${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py" \
-        --base "$base" --git-ref "$head" </dev/null || failed=1
-    "${PY[@]}" "$ROOT/tools/check-large-files.py" \
-        --base "$base" --head "$head" </dev/null || failed=1
-    return "$failed"
+    for candidate in "${COPILOT_EXTENSIONS_GUARD_BASE:-origin/dev}" origin/main; do
+        resolved="$(git -C "$ROOT" rev-parse --verify --quiet "$candidate^{commit}")" || continue
+        blob_published+=(--published "$resolved")
+    done
+    "${PY[@]}" "$ROOT/tools/check-publication.py" \
+        --base "$base" --head "$head" "${blob_published[@]}" </dev/null
 }
 
 # Git supplies both sides of every update. Do not let nested guards consume

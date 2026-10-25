@@ -252,22 +252,23 @@ Phase 8 or universal-coexistence acceptance. The #7743 marker-only hook no-op,
 #4195 hook admission and stale-owner recovery, #6812 Manager startup, and
 held #6859 / #7833 lifetime work remain independently owned.
 
-- [ ] Obtain review of this bounded plan before implementation.
-- [ ] Reuse the canonical shell/awk parser to obtain directory-marketplace
+- [x] Obtain review of this bounded plan before implementation (#8693; exact-head
+  Copilot approval with no open issues and all required checks green).
+- [x] Reuse the canonical shell/awk parser to obtain directory-marketplace
   candidate entries in one parse, rather than reparsing all entries per
   lookup. Retain the shell-only bootstrap and its supported native
   interpreters; add no Python/jq prerequisite or persistent readiness cache.
-- [ ] Preserve strict JSON and schema behavior, duplicate/ambiguous match
+- [x] Preserve strict JSON and schema behavior, duplicate/ambiguous match
   refusal, metadata.pluginRoot, source normalization, path containment and
   selected-snapshot ownership. Missing, unsupported or invalid evidence must
   remain an explicit refusal, never an inferred source or legacy bypass.
-- [ ] Synchronize only the canonical helper's existing generated consumers.
+- [x] Synchronize only the canonical helper's existing generated consumers.
   Preserve publication consent, source ownership, runtime selection, health,
   structured output and all original deadlines.
-- [ ] Qualify real native resolver/wrapper calls with small and large directory
+- [x] Qualify real native resolver/wrapper calls with small and large directory
   marketplaces, valid and refused identities, and actual parser/child counts.
   Record equivalent before/after timing, not a mocked runtime or a wider budget.
-- [ ] Source-redeploy into the isolated full-plugin playground and exercise the
+- [x] Source-redeploy into the isolated full-plugin playground and exercise the
   same history consumer after caller exit. A faster source probe alone is not
   successful archival retrieval; retain any subsequent availability,
   configuration or lifecycle failure as its own unresolved gate.
@@ -412,6 +413,38 @@ bounded source delta inspection.
   recovery result. Source changes follow review of this amendment. The
   normal update/no-op and parent launch-validation gates remain open, and
   unrelated native ownership or recovery restrictions remain unchanged.
+
+### 2026-10-24 - Qualify the bounded directory-evidence implementation
+
+- Implemented #8679's reviewed plan from #8693 in the existing shell/awk
+  source-admission path. One strict parse emits candidate fields for the
+  existing normalization, containment and ambiguity checks; no Python/jq
+  dependency, durable cache, consent change or deadline extension was added.
+  Synchronized the 13 existing plugin consumers and the update-driver parser,
+  with patch changefiles for every affected plugin.
+- Native targeted coverage passed 24 cases with one PowerShell-only skip.
+  A separate eight-case strict-JSON corpus retained explicit refusal and
+  empty output for BOM, invalid UTF-8, unpaired surrogates, trailing documents,
+  invalid numbers and case-colliding identities. Canonical sync, install
+  contract and touched-Python lint checks passed.
+- The same real 24-entry marketplace, native `status` command and 30-second
+  deadline measured 54 whole-manifest parses and 25.583s before, versus one
+  parse and 1.322s / 0.976s afterward. All three decoded status objects were
+  equal and ready, with no newly created durable installation state.
+- Redeployed the candidate through the real installers in an isolated
+  full-plugin consumer. After correcting separately owned fixture setup,
+  the original manual and emitted tasks each completed on their first
+  attempt, and their original session histories were retrieved through
+  Bridge's supported transcript API after caller exit. An independent
+  literal evaluation passed those recovered worker/history outcomes but
+  correctly failed the initial fresh setup. This is source-consumer
+  evidence, not a clean fresh-install pass or production adoption.
+- A separate corrected fresh trial stopped during Bridge package
+  construction at its unchanged 300-second deadline, before activation,
+  binding or tasks. Preserve that failure independently; it does not
+  invalidate the measured parse reduction or prove its underlying cause.
+  Required implementation review, CI, containing promotion and authorized
+  installed rollout remain open. This effort is still Active.
 
 ### 2026-10-24 - Containing release verified; installed gates remain held
 
