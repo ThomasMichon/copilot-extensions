@@ -178,7 +178,8 @@ class PeerApproval:
                 if after is not None and requester <= after:
                     continue
                 page.append(item)
-                if len(canonical(response(requester))) > BODY_BYTES:
+                if max(len(canonical(response(requester))),
+                       len(canonical(response(None)))) > BODY_BYTES:
                     page.pop()
                     check(bool(page), "pending-item-response-limit")
                     return response(page[-1]["candidate"]["requester"])

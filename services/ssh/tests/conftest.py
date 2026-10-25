@@ -1,10 +1,20 @@
 import base64
 import struct
+import time
 
 import pytest
 
 from agent_ssh_service.config import ServiceConfig
 from fleet_manager.private_state import private_directory
+
+
+class RealtimeClock:
+    @property
+    def value(self):
+        return int(time.time())
+
+    def __call__(self):
+        return self.value
 
 
 def key(number):

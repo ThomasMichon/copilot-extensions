@@ -513,6 +513,21 @@ takeover or implementation completion is asserted.
   Linux-only skips; Ruff passes. The preceding head passed both native jobs
   in run [40187342145](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40187342145).
   Fresh current-head review and qualification remain required before merge.
+- The rebased review found a one-byte terminal-page edge: `null` can exceed a
+  one-character continuation cursor. The regression reproduces an actual
+  32,769-byte terminal response against the 32,768-byte transport bound through
+  the client/service path. Page construction now budgets both representations.
+- Qualification of the newly merged Fleet consumer also exposed its frozen
+  Gateway clock versus a restarted realtime CLI. Both native restart fixtures
+  now share the existing realtime-clock helper. Invalid local writer scopes
+  refuse before credential-runtime imports; an import guard reproduces and
+  protects that ordering without changing the CLI's fifteen-second deadline.
+- All 55 focused enrollment regressions pass against the rebuilt provider,
+  including the exact transport boundary. The latest local whole-suite run
+  passed 139 cases with six Linux-only skips but hit four native startup
+  deadlines while aggregate host CPU remained at 100%, including an unchanged
+  foreground-custody fixture. No timeout or authentication allowance was raised.
+  Fresh pinned Linux/Windows whole-suite qualification remains a merge gate.
 
 ### 2026-10-16 - Intake and current boundary
 

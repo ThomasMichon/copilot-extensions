@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import time
 
 from cryptography.hazmat.primitives import serialization
 from joserfc.jwk import ECKey
@@ -17,18 +16,9 @@ from fleet_manager.gateway_service_channel import TransportError
 from fleet_manager.ssh_approval import PeerEnrollmentClient
 from fleet_manager.ssh_directory import SSHDirectoryClient
 
-from conftest import document, enrollment
+from conftest import RealtimeClock, document, enrollment
 from test_approval import decision
 from test_gateway_integration import Rig, eventually
-
-
-class RealtimeClock:
-    @property
-    def value(self):
-        return int(time.time())
-
-    def __call__(self):
-        return self.value
 
 
 async def test_registered_peer_approval_recovery_and_restart(tmp_path):

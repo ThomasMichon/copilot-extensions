@@ -866,6 +866,12 @@ compact original decisions remain retrievable as the directory grows,
 oversized response construction refuses, capacity failure rolls back the whole
 decision transaction, and every long-identifier candidate remains reachable
 through byte-bounded pending pages.
+The exact-limit short-principal control exercises a 32,769-byte terminal
+response through the actual client/service route, then proves both cursor
+representations are budgeted and every candidate remains reachable.
+Native restart consumers share the Gateway fixture's realtime clock. Invalid
+local writer scopes also refuse before credential-runtime imports, with the
+installed CLI's existing fifteen-second refusal deadline unchanged.
 Policy-round-trip controls also prove that a retained observation is durable,
 stable across later directory growth, and remains readable as superseded after
 a generation change. New identical request aliases preserve the original

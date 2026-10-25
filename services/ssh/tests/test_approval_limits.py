@@ -122,6 +122,55 @@ async def test_maximum_fleet_pending_pages_fit_and_keep_every_candidate_reachabl
         await service.close()
 
 
+async def test_terminal_pending_page_cursor_is_counted_at_actual_transport_limit(config):
+    config, requests = full_fleet(config)
+    value = config.to_dict()
+    for index, binding in enumerate(value["bindings"]):
+        binding["principal"] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef"[index]
+    store = DirectoryStore(ServiceConfig.from_dict(value))
+    bindings = value["bindings"]
+    items = []
+    for binding, request in zip(bindings, requests):
+        candidate = store.approval._candidate(binding["principal"], request)
+        items.append({
+            "request_id": request["request_id"], "candidate": candidate,
+            "fingerprint": store.approval._fingerprint(candidate),
+        })
+        if len(canonical({
+            "schema": "agent-ssh.enrollment-pending", "version": 1,
+            "requests": items, "next": None,
+        })) > BODY_BYTES:
+            break
+    full = {
+        "schema": "agent-ssh.enrollment-pending", "version": 1,
+        "requests": items, "next": None,
+    }
+    excess = len(canonical(full)) - BODY_BYTES - 1
+    assert excess >= 0
+    for item, request in zip(items, requests):
+        trim = min(excess, len(request["request_id"]) - 1)
+        request["request_id"] = request["request_id"][:len(request["request_id"]) - trim]
+        item["request_id"] = request["request_id"]
+        excess -= trim
+    assert excess == 0 and len(canonical(full)) == BODY_BYTES + 1
+    assert len(canonical({**full, "next": items[-1]["candidate"]["requester"]})) == BODY_BYTES
+    for binding, request in zip(bindings, requests[:len(items)]):
+        store.enroll(binding["principal"], request)
+    service = SSHService(store)
+    client = PeerEnrollmentClient(Caller(service, "r" * 64))
+    try:
+        first = await client.pending()
+        assert first["next"] is not None
+        second = await client.pending(after=first["next"])
+        assert second["next"] is None
+        for page in (first, second):
+            assert len(ServiceResponse(200, (), canonical(page)).body) <= BODY_BYTES
+        actual = first["requests"] + second["requests"]
+        assert actual == items
+    finally:
+        await service.close()
+
+
 async def test_oversized_padded_recovery_reason_refuses_before_transport(config):
     service = SSHService(DirectoryStore(full_fleet(config)[0]))
     caller = Caller(service, "r" * 64)
