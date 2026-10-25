@@ -104,7 +104,7 @@ class SeedHistory:
                 raise SeedHistoryError("Local seed history requires a regular database file.")
             with self.path.open("rb") as stream:
                 header = stream.read(20)
-            if header[18:20] == b"\x01\x01" and any(
+            if (header[:16] != b"SQLite format 3\0" or header[18:20] != b"\x02\x02") and any(
                 self.path.with_name(self.path.name + suffix).exists()
                 for suffix in ("-wal", "-shm")
             ):

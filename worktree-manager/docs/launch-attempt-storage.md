@@ -174,6 +174,8 @@ read-only review never run it. Explicit launch confirmation also maintains both
 stores before saving, including in a long-running Picker or with automatic
 maintenance disabled. A failure reports only the affected store, preserves the
 draft, and prevents that launch; maintenance still attempts the other store.
+At Picker entry, the sanitized warning does not suppress independent anchor
+repair, housekeeping or heartbeat registration.
 Offline or automatic-maintenance-disabled machines physically expire input at
 the next permitted maintenance or confirmation opportunity. No scheduler is added.
 
@@ -189,7 +191,8 @@ Recognized legacy WAL is checkpointed by SQLite into DELETE mode before migratio
 a busy connection produces an explicit failure, not manual sidecar deletion.
 Read-only history access refuses WAL until maintenance instead of creating
 bookkeeping files. Unexpected WAL sidecars on DELETE-mode stores and orphaned
-sidecars with no database are errors and remain untouched for diagnosis.
+sidecars with no database, an empty file or another non-WAL header are errors
+and remain untouched for diagnosis.
 No operation deletes pending engine/daemon prompt state. These are source storage
 contracts, not proof of rollout or installed prompt acceptance.
 

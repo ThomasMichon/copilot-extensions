@@ -202,12 +202,10 @@ def run(
         from ..launch_retention import maintain
 
         retention_warning = maintain()
-        if retention_warning:
-            return retention_warning
         from .. import resident_picker
 
         if not resident_picker.wait_for_local(context.project(), finished.is_set):
-            return
+            return retention_warning
         from . import housekeeping
 
         _start_anchor_heal_check(context.project())
@@ -219,6 +217,7 @@ def run(
                     root.close()
             else:
                 picker_root = root
+        return retention_warning
 
     try:
         if bootstrap_payload is not None:

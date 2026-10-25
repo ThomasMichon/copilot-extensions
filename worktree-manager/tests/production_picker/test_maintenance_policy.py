@@ -202,15 +202,28 @@ def test_startup_policy_result_and_errors_are_delivered_through_ui_inbox(monkeyp
 
 
 @pytest.mark.parametrize("mock", [False, True])
-def test_real_picker_runs_private_retention_without_waiting_for_resident_owner(policy, monkeypatch, mock):
+@pytest.mark.parametrize("resident_ready", [False, True])
+def test_retention_warning_does_not_disable_independent_picker_housekeeping(
+    policy, monkeypatch, mock, resident_ready,
+):
     from worktree_manager import launch_retention, resident_picker
 
     calls = []
     monkeypatch.setattr(
         launch_retention, "maintain", lambda: calls.append("retention") or "retention unavailable",
     )
-    monkeypatch.setattr(resident_picker, "wait_for_local", _forbidden)
-    monkeypatch.setattr(runner, "_start_housekeeping", _forbidden)
+    monkeypatch.setattr(
+        resident_picker, "wait_for_local",
+        lambda *_args: calls.append("resident") or resident_ready,
+    )
+    monkeypatch.setattr(
+        runner, "_start_anchor_heal_check", lambda _project: calls.append("anchor"),
+    )
+    monkeypatch.setattr(runner, "_start_housekeeping", lambda: calls.append("housekeeping"))
+    def start_root():
+        calls.append("root")
+        return SimpleNamespace(close=lambda: calls.append("closed"))
+    monkeypatch.setattr(housekeeping, "start_picker_monitor_root", start_root)
 
     def picker(*, source, after_first_refresh, **kwargs):
         assert after_first_refresh() == (None if mock else "retention unavailable")
@@ -221,6 +234,8 @@ def test_real_picker_runs_private_retention_without_waiting_for_resident_owner(p
         assert runner.run("fixture", mock_mode=mock, local=True, bootstrap_payload={
             "version": 1, "project": "fixture", "default_live": False,
         }) == {"action": "cancel"}
-        assert calls == ([] if mock else ["retention"])
+        assert calls == ([] if mock else ["retention", "resident"] + (
+            ["anchor", "housekeeping", "root", "closed"] if resident_ready else []
+        ))
     finally:
         runner.context.reset()

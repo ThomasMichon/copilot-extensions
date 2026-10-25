@@ -242,6 +242,14 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   with four platform skips; the affected UI ownership/navigation packet passes
   104 cases with four skips. Real New and asynchronous Resume composer tests
   advance the clock after loading history and after physical deletion.
+- The next review found an incomplete-store hole: an empty main file could
+  allow SQLite to discard leftover WAL evidence. Every non-WAL header now
+  refuses WAL/shared-memory sidecars before opening SQLite, including empty
+  files and false WAL headers. All read/write/expiry operations preserve the
+  exact fixture bytes on refusal. A separate startup correction reports a
+  retention warning without suppressing independent anchor repair, housekeeping
+  or heartbeat ownership; confirmation still refuses launch. The focused
+  failure-path/confirmation packet passes 100 cases.
 
 ### 2026-10-25 -- Interactive local history merged; retention next
 

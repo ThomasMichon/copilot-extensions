@@ -267,3 +267,26 @@ def test_delete_mode_with_unowned_wal_sidecars_refuses_without_erasing_evidence(
         store.expire()
     assert store.path.read_bytes() == before
     assert sidecar.read_bytes() == b"unknown-retained-evidence"
+
+
+@pytest.mark.parametrize("kind", ["zero-file", "empty-sqlite", "corrupt", "false-wal-header"])
+@pytest.mark.parametrize("suffix", ["-wal", "-shm"])
+def test_incomplete_non_wal_history_never_initializes_over_leftover_evidence(tmp_path, kind, suffix):
+    store = seed_history.SeedHistory("example", tmp_path)
+    store.path.parent.mkdir()
+    if kind == "zero-file":
+        store.path.touch()
+    elif kind == "empty-sqlite":
+        with closing(sqlite3.connect(store.path)) as conn:
+            conn.execute("VACUUM")
+    elif kind == "corrupt":
+        store.path.write_bytes(b"not a SQLite header")
+    else:
+        store.path.write_bytes(b"not SQLite".ljust(18, b"!") + b"\x02\x02")
+    sidecar = store.path.with_name(store.path.name + suffix)
+    sidecar.write_bytes(b"leftover-evidence-must-survive")
+    before = {path.name: path.read_bytes() for path in store.path.parent.iterdir()}
+    for operation in (store.entries, store.cursor, store.expire, lambda: store.remember("new input")):
+        with pytest.raises(seed_history.SeedHistoryError, match="sidecar"):
+            operation()
+        assert {path.name: path.read_bytes() for path in store.path.parent.iterdir()} == before
