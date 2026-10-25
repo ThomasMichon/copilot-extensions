@@ -159,31 +159,51 @@ The following implementation/validation decomposition is
 **agent-recommended**, realizing the operator request above without taking
 over the other waves or automatic-maintenance policy.
 
-- [ ] Reuse standing Configuration list/detail/contextual-action navigation;
+- [x] Reuse standing Configuration list/detail/contextual-action navigation;
   discover Manager and the complete maintained runtime/payload-only set through
   canonical catalogs and installation resolution, never a copied roster.
-- [ ] Populate inventory off the UI thread with installed/enabled distinctions,
+- [x] Populate inventory off the UI thread with installed/enabled distinctions,
   payload/selected-runtime/observed-running versions and source provenance.
   Unknown, missing, unsupported and platform-policy outcomes remain actionable.
   Browse/refresh does not install, ensure a daemon, start workers, write sources
   or request credentials.
-- [ ] Add genuine target-scoped updates through the existing durable driver and
+- [x] Add genuine target-scoped updates through the existing durable driver and
   owning installers, extending their targeting seam where necessary. Preserve
   configured sources, dependency/readiness, publication, retention, credentials
   and recovery policy; never widen an unsupported request. Manager self-update
   uses its own seam; existing full-suite behavior is unchanged.
-- [ ] Confirm the exact affected target; retain attributable acceptance,
+- [x] Confirm the exact affected target; retain attributable acceptance,
   queued/running/terminal outcomes and refreshed actual inventory. Dismissal
   stops observation only, never service-owned execution. Busy/older owners
   expose supported retry, not a second queue or automatic scheduling.
-- [ ] Exercise real production navigation and owner forwarding with isolated
+- [x] Exercise real production navigation and owner forwarding with isolated
   synthetic inventory and installer fixtures: payload-only/absent/unknown,
   exact target and unaffected components, source immutability, failure/retry,
   disconnect/dismiss survival and refreshed versions. Use bounded,
   network-disconnected repository test selection and headless Manager UI.
-- [ ] Land runtime/changefiles and directly related documentation through
+- [x] Land runtime/changefiles and directly related documentation through
   current-head automated review and required CI. Journal only this bounded
   landed slice, distinguish release/rollout and preserve broader Phase 5 gates.
+
+**Source acceptance:** intent amendment #8879 merged before runtime #8891
+(`3e9cea6b20c48c8e19e562baec20262edf85514b`). Bounded isolated selections
+passed 182 Manager tests and 50 engine tests, including actual shipped
+payload-only manifests, production Configuration/headless SVG rendering,
+validated cell-versus-legacy transport, real synthetic installer publication,
+durable submitter exit, failure/retry and refreshed owner facts. The existing
+opt-in real Workers round-trip was skipped because no authorized live Workers
+target was supplied. F/E9, install-contract, module-size and documentation
+guards passed; required PR CI was green at the independently reviewed head.
+
+- [x] Deferred to `#352 / Phase 5 Wave 5`: fresh-machine/native Windows
+  installer and windowless descendant qualification, installed Manager/mux
+  cutover and runtime-observed UI acceptance, release qualification and
+  authorized rollout. Synthetic source/flag evidence is not native or installed
+  proof; this slice authorized no host installation, credentials or rollout.
+
+The bounded source slice is complete. Phase 5 and this parent effort remain
+Active; the next workbench waves and automatic-maintenance/setup owners above
+retain their own unchecked acceptance.
 
 **Validation:** the production UI must reach the actual target-aware owner,
 not a mock success or a whole-suite updater. Tests compare unaffected
@@ -307,6 +327,17 @@ issue and owner in the parent Journal before implementation. Historical #357
 is acceptance provenance, not a replacement for those live execution tokens.
 
 ## Journal
+
+- **2026-10-25** - Landed #8879's reviewed intent followed by #8891's
+  Installation and Updates source slice. Manager now hosts the standing
+  owner-backed inventory and contextual target confirmation; plugin requests
+  use the selected engine's durable backend and validated cell context, while
+  Manager self-update retains its own source/cutover owner. Target acquisition,
+  runtime publication and unaffected-component boundaries were exercised with
+  isolated fixtures and production UI paths. Re-read this Plan/Validation and
+  the parent Phase 5 gate: only the finite source slice closes. Native,
+  installed, release and rollout acceptance remains with #352 / Wave 5;
+  #7028 maintenance and #8545/#356 setup custody is unchanged.
 
 - **2026-10-24** - Proposed #8877's bounded Installation and Updates slice,
   claimed by `ticking-compass`, and extended the Configurator vision with its

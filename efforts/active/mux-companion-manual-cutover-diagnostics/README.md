@@ -469,6 +469,31 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ## Journal
 
+### 2026-10-25 - Same-window observer merged; native evidence retained
+
+- #8881 merged after current-head Copilot approval, required CI and native
+  qualification. Re-read this entire root before continuing. The combined
+  switching/attention row stays unchecked because question/idle attention is
+  not implemented; no historical manual/head or app-input hold is closed.
+- Final local packet: 270 passed, three platform skips, including actual
+  PSMux switching, original CLI PID retention, observer cleanup, fresh CLI
+  relaunch and pane-aware relaunch registration. Reconnect and detached
+  creation callbacks use snapshot/native-owner fences; unavailable metadata
+  cannot revive a successor or indefinitely orphan a bound observer.
+- Exact source `98a60ab111ab2a5c9aa3ec4dc6757be0a16b8b8c` passed the isolated
+  Ubuntu workflow run `40175168608`: actual tmux 3.4, one native test passed,
+  zero skips. This is not proof of rendered production chrome, real-client
+  mouse dispatch, first installation or rollout.
+- A separate disposable PSMux 3.3.5 option probe round-tripped `status=2`.
+  Indexed `status-format[0]` and `[1]` setters returned success but their
+  indexed reads were empty; scalar `status-format` did persist a value.
+  This is an unresolved rendering/capability qualification, not proof that
+  two-line chrome works or that every possible format is unsupported. Both
+  uniquely named probe sessions were cleaned up. The existing withheld
+  click-binding safety boundary and all native chrome acceptance remain.
+- The observer worktree was finalized through its owner. Continue with the
+  Graph consumer on top of the merged source, then attention and native chrome.
+
 ### 2026-10-24 - Observer review fixes and lifecycle qualification
 
 - Addressed the four findings on #8881: native session-ID option targeting
@@ -531,6 +556,51 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
   return-to-CLI action, preserving Ctrl+K's existing popup and using the
   Manager's installation-owned invocation path. Never assume pane index zero
   or repurpose session-lineage succession as allocated-sub-agent topology.
+### 2026-10-25 - Bounded graph consumer source validation
+
+- Added a secondary Graph view for reported disposition history, typed
+  directed resource references and optional retained-session observations.
+  Inbound owners, outbound claims and reported subagents remain distinct;
+  claims alone do not establish whether a PR is open.
+- The graph uses the versioned #8905 provider only for one unambiguous
+  selected head session. Reads are on demand, off the UI loop, cancel on
+  shutdown and cannot replace a refreshed snapshot with an older result.
+  Unsupported or partial evidence cannot disable Summary, Claims or Recovery.
+- The focused packet passed 108 tests: literal/narrow/long graph rendering,
+  bounded fan-out and duplicates, schema/uncertainty handling, actual JSON
+  subprocesses with target-cwd isolation, and real Textual activation,
+  refresh, optional-source failure and blocked-read dismissal. Ruff and the
+  13-plugin install-contract gate passed.
+- After integrating the merged observer, the standalone combined packet
+  passed 343 tests with three platform skips and a clean host-state audit.
+  An earlier concurrent-provisioning run had the same passing assertions but
+  failed its machine-PATH drift audit; no shared environment was rolled back
+  and the drift's source was not established. A further actual Textual
+  late-result/refresh regression passed in the five-test UI packet.
+- This is source validation only. Question/idle attention, native mux view
+  tabs, two-line claims chrome, real mux-client dispatch and installed/rollout
+  evidence remain separate, unchecked acceptance. The parent stays Active.
+
+### 2026-10-25 - Retained session metadata provider merged
+
+- #8905 merged after current-head Copilot approval and required CI. Re-read
+  this entire parent effort; the topology, attention, mux chrome and retained
+  manual/native acceptance remain open. The earlier #8822 Summary/Claims
+  source delivery and its 156-test consumer packet now close only their
+  corresponding Step 6 and source-validation rows.
+- Added the optional, versioned `session-observations` engine command, with
+  streamed retained-file tool-event counts and reported subagent lifecycle.
+  Counts are not lifetime totals; incomplete history, missing producer fields
+  and unavailable evidence remain explicit. Reported completion does not mean
+  allocation release, retirement or resource custody.
+- The final focused provider packet passed 74 tests, including real CLI
+  subprocesses over fresh synthetic state, interrupted-read byte coverage,
+  launching-task metadata and unchanged source-hosting denial. Ruff and the
+  13-plugin install-contract gate passed. CI executed the unchanged admitted
+  unit inventory after its project-routing source hash was refreshed.
+- This is provider-first source delivery, not UI integration or deployment.
+  No runtime was installed. The next slice consumes the optional contract in
+  the bounded graph presenter; unsupported providers retain existing views.
 
 ### 2026-10-24 - Reviewed intent merged; Summary/Claims source slice
 

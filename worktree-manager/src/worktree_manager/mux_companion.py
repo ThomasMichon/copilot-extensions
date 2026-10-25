@@ -46,6 +46,8 @@ from textual.widgets import (
 
 from . import engine_client as ec
 from . import companion_client as cc
+from . import companion_observations as co
+from .companion_topology import topology_view
 from . import handoff_client as hc
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
@@ -111,6 +113,8 @@ class _CompanionData:
     bundle: dict = field(default_factory=dict)
     bundle_error: str | None = None
     sessions_error: str | None = None
+    session_observation: dict | None = None
+    observation_error: str | None = "not-loaded"
 
 
 def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
@@ -342,7 +346,7 @@ class MuxCompanionApp(App):
         padding: 0;
     }
 
-    #summary {
+    #summary, #topology {
         height: auto;
         padding: 1 2;
     }
@@ -395,6 +399,8 @@ class MuxCompanionApp(App):
         self._loading = True
         self._read_cancel = Event()
         self._navigation_cancel = Event()
+        self._observation_cancel = Event()
+        self._observation_owner: _CompanionData | None = None
         self._action_message: Text | None = None
 
     def compose(self) -> ComposeResult:
@@ -407,6 +413,9 @@ class MuxCompanionApp(App):
             with TabPane("Claims", id="claims-tab"):
                 yield Static(id="claims-evidence")
                 yield DataTable(id="claims")
+            with TabPane("Graph", id="topology-tab"):
+                with VerticalScroll():
+                    yield Static(id="topology")
             with TabPane("Recovery", id="recovery-tab"):
                 yield Static(
                     "Session lineage (\u25cf marks the current head):",
@@ -452,9 +461,11 @@ class MuxCompanionApp(App):
     def on_unmount(self) -> None:
         self._read_cancel.set()
         self._navigation_cancel.set()
+        self._observation_cancel.set()
 
     @work(exclusive=True)
     async def _reload(self) -> None:
+        self._observation_cancel.set()
         self._loading = True
         self.query_one("#refresh-btn", Button).disabled = True
         self.query_one("#cutover-btn", Button).disabled = True
@@ -472,6 +483,46 @@ class MuxCompanionApp(App):
         self._loading = False
         self._refresh_view(reload=False)
         self.query_one("#refresh-btn", Button).disabled = False
+        if self.query_one("#views", TabbedContent).active == "topology-tab":
+            self._load_observations()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.pane.id == "topology-tab" and not self._loading:
+            if self._observation_owner is not self._data:
+                self._load_observations()
+
+    @work(exclusive=True, group="session-observations")
+    async def _load_observations(self) -> None:
+        data = self._data
+        self._observation_owner = data
+        heads = [row.get("id") for row in data.sessions
+                 if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]]
+        if len(heads) != 1:
+            data.observation_error = "head-session-unavailable"
+            self._update_topology()
+            return
+        cancelled = Event()
+        self._observation_cancel = cancelled
+        data.observation_error = "loading"
+        self._update_topology()
+        try:
+            result = await asyncio.to_thread(
+                co.read_session_observations, None, heads[0],
+                runner=cc.cancellable_read_runner(cancelled, cwd=self._cwd or os.getcwd()),
+            )
+            if not cancelled.is_set() and self._data is data:
+                data.session_observation = result["observation"]
+                data.observation_error = result["error"]
+                self._update_topology()
+        finally:
+            cancelled.set()
+
+    def _update_topology(self) -> None:
+        data = self._data
+        self.query_one("#topology", Static).update(topology_view(
+            data.worktree, data.bundle, data.session_observation,
+            data.bundle_error or data.observation_error,
+        ))
 
     def action_refresh(self) -> None:
         if not self._loading:
@@ -520,6 +571,7 @@ class MuxCompanionApp(App):
         self.sub_title = f"{repo} \u00b7 {branch}"
         self.query_one("#status", Static).update(self._status_text())
         self.query_one("#summary", Static).update(_summary_text(self._data))
+        self._update_topology()
         evidence, resources = _claims_view(self._data)
         self.query_one("#claims-evidence", Static).update(evidence)
         claims_table = self.query_one("#claims", DataTable)
