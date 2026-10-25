@@ -245,6 +245,22 @@ the original origin, revision and location remain unchanged in target settings.
 Known local marketplace roots and local payload versions remain strict readiness
 expectations when native observation advertises them.
 
+Reference-mode preparation can also reuse an existing native Git marketplace
+cache when no user-global registration exists. A catalog name or legacy installed
+manifest alone is insufficient. The actual clone must match the declared Git
+origin, requested commit/ref and catalog location, have unchanged selected
+catalog/payload content and required asset closure, and contain the uniquely
+declared plugin. Unrelated clone changes are not scanned. Preparation returns
+that qualified cache payload, not an unproven legacy installed copy, while
+retaining the complete Git declaration in repository settings. Its commit and
+filtered payload digest are rechecked under the publication lock; effectively
+enabled sources are qualified again before any settings are written. Ambiguous
+clones refuse. Missing or incompatible evidence follows ordinary isolated
+installation; copy mode and conflicting global registrations retain that path.
+This neither enables a plugin globally nor pins native startup to the cache's
+manifest version. The execution owner's existing startup-readiness barrier
+still gates task delivery.
+
 Each complete preparation reads ownership and authored settings together under
 the checkout lock. Publication prunes unchanged owned enablement observed in
 that initial snapshot when absent from both this preparation's payloads and

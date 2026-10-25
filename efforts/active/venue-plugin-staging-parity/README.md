@@ -257,8 +257,10 @@ below used those effective runtime versions, not a source-only patch.
   settled. The #8405 caller/preflight correction is now published and verified
   in the running controller. The subsequent namespace-identity repair #8715
   is also published and verified in the active Bridge and Dispatch. The
-  targeted-allocation recovery correction #8796 still requires its containing
-  release and authorized rollout before retained headed acceptance.
+  targeted-allocation recovery correction #8796 is published and verified
+  live; the original recovery succeeded without replacing its allocation.
+  Native preparation now needs the separately tracked #8900 availability
+  correction, its release and authorized rollout before headed acceptance.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -363,6 +365,27 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-25 - Recover the retained allocation and qualify native availability
+
+- Natural release `40151837824` published #8800 through pinned Main
+  `6ecdab6f77b42c7a24bd480584dcc54be85b3838`, recording Dev
+  `8b09a79c01bd6c1b77d6af1ee0f62d323007c3ff`. Authorized managed adoption
+  verified the correction in the actual Dispatch `0.18.102-dev1` service;
+  Bridge `0.9.163.dev1` retained its normal acquisition authority.
+- Control-only recovery succeeded on the original targeted reservation,
+  preserving its project, path and history. Later attempts positively refused
+  during plugin preparation before task delivery; they are not productive
+  headed sessions or permission to replace the retained allocation.
+- #8900 tracks origin-qualified native Git-cache availability when global
+  registration is absent. Legacy installed bytes are not accepted on catalog
+  name alone. Reference preparation retains the declared Git source and repeats
+  its commit/content checks under registration authority; copy mode retains
+  normal acquisition. This is separate from #8242's installer-cache slice.
+- The regression fails before the correction. Source contracts and a read-only
+  native-cache probe qualify this source slice; productive headed acceptance,
+  reviewed publication, authorized adoption and the other venue gates remain
+  open. The effort remains Active.
+
 ### 2026-10-25 - Activate the hosting correction and retain targeted recovery
 
 - Natural release run `40141562435` completed qualification, publication/readback
@@ -395,6 +418,10 @@ or a reason to create a daemon.
   permission, target drift, unknown ownership, active reservation, cleanup and
   native-holder controls. Publication, authorized adoption and the original
   headed native acceptance remain open; this is not a replacement test.
+- #8800 merged as `8b09a79c01bd6c1b77d6af1ee0f62d323007c3ff` after Copilot
+  approved exact head `07af052caaa2ced3766be494ffa7156557947235` with no inline
+  findings and every required check passed. Managed completion reconciled the
+  merged squash while retaining this Active effort and source worktree.
 - Container, SSH, privileged and parent issue reconciliation gates remain open.
 
 ### 2026-10-24 - Verify installed local ACP and preserve execution ownership
