@@ -110,6 +110,7 @@ _versioned_activate() {{ echo yes > '{activated}'; }}
 publish_payload_snapshot() {{ :; }}
 ok() {{ :; }}
 warn() {{ :; }}
+chg() {{ :; }}
 _fail() {{ echo "$*" >&2; }}
 eval "$(declare -f invoke_uv_pip_install_resilient | sed '1s/invoke_uv_pip_install_resilient/invoke_native_install/')"
 invoke_uv_pip_install_resilient() {{

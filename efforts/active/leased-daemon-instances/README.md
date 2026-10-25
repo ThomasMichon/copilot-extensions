@@ -798,6 +798,25 @@ caller coverage, not one launcher or one platform passing.
   lifetime authority changed. Publication, a passing fresh review/current CI
   and completion archival remain open; no runtime rollout is authorized.
 
+### 2026-10-25 - Logger batching composition
+
+- The far-side startup review returned no open issues and current-head CI
+  passed. A subsequent upstream Logger batching merge required another rebase;
+  the only conflict was its generated installer output declaration, regenerated
+  from the composed PowerShell script. All qualified custody/core source bytes
+  and all 1,800 exact admitted unit bindings remain unchanged.
+- The composed Logger batching packet passed ten tests on Windows and ten on
+  isolated offline Linux, each with eight opposite-platform skips. Both native
+  lanes exercise real cold installation and warm source refresh against
+  synthetic local bootstrap wheels, plus fail-stop and reuse controls.
+- Linux exposed a missing progress-output stub in the extracted test harness.
+  Adding that no-op stub leaves production installation and cleanup unchanged.
+  The private native-test mount was made executable for its copied interpreter;
+  repository/source mounts remained read-only, networking stayed disabled and
+  the container was removed. Required install contracts still pass for all
+  13 plugins; no runtime rollout was performed.
+- Fresh final-head review/CI, source merge and completion archival remain open.
+
 ### 2026-10-25 - Lane event worker and embedding-engine teardown
 
 - A later current-head review found two further shipped owners. The lane
