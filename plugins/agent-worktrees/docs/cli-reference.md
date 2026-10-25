@@ -1403,9 +1403,10 @@ installer or local integration runs. Owner validation, exact source pinning,
 selected/completed-slot currentness, native lifecycle, retry and outcome handling
 are unchanged. Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or
-recovery operations and never delegates to an older Manager. It does not enable
-Manager's source-backed caller, alter its independent self-source policy or
-authorize a rollout.
+recovery operations and never delegates to an older Manager. The
+[Manager caller](../../../worktree-manager/README.md#independent-runtime-source-acquisition)
+qualifies this exact provider before preparing and sending the packet; its
+independent self-source policy and rollout authorization are unchanged.
 
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 

@@ -67,8 +67,10 @@ separately authorized rollout.
 
 Manager has independent runtime-source policy and owned acquisition diagnostics,
 separate from self-update configuration, plus a shipped trusted canonical toolkit
-that prepares plugin and standalone Manager payloads. Source-backed suite execution
-is not yet connected. A selected non-marketplace policy refuses updates rather than
+that prepares plugin and standalone Manager payloads. The normal source-backed
+suite caller now qualifies the exact executing engine, acquires one source
+commit/tree and prepares its runtime portfolio before either update stage.
+Bootstrap/repair and targeted service-source execution still refuse rather than
 silently deploying marketplace code. Plugin bootstrap paths still need complete
 publication-boundary qualification.
 Worktrees now retains its original global command owner through collected
@@ -76,8 +78,9 @@ prepared-source updater execution, native publication and installed source-unava
 restoration. That bounded provider does not connect Manager's whole-suite source
 orchestration or qualify an adopter's actual data/service cutover. The engine now
 advertises and accepts a complete prepared-source suite packet through its
-existing inventory and durable update process boundary; Manager's caller
-remains unconnected and refuses non-marketplace execution.
+existing inventory and durable update process boundary; Manager's normal caller
+uses that capability without coupling its independent self-source or replacing
+the existing driver. Immutable Manager recovery and actual adoption remain open.
 
 Promotion composes versions and expands development vendor pointers into a
 self-contained `main` tree. Raw-dev non-editable installs have an existing
@@ -261,7 +264,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Ship the trusted canonical preparation toolkit inside Manager's own payload and qualify standalone Manager preparation, exact retained assets and fetched-tools-as-data isolation before connecting source-backed execution.
 - [x] **Agent-recommended integration prerequisite:** preserve Worktrees' canonical command-binding receipt at Python-owned manifest publication and qualify a separately prepared source artifact through the real native global installer, retaining its existing owner, data root and global command.
 - [x] **Agent-recommended updater provider slice:** qualify collected prepared-source runtime steps against the installed owner, exact source pin, actual selected/completed slot and original global data, preserving native execution, module fallback, machine gates and explicit older-helper refusal before connecting Manager's whole-suite source orchestration.
-- [ ] **Agent-recommended process-boundary slice:** qualify the executing engine's advertised prepared-source suite contract, durable exact input and complete eligible-portfolio admission before enabling Manager's capability-aware caller.
+- [x] **Agent-recommended process-boundary slice:** qualify the executing engine's advertised prepared-source suite contract, durable exact input and complete eligible-portfolio admission before enabling Manager's capability-aware caller.
+- [ ] **Agent-recommended normal caller slice:** qualify Manager's capability-aware, once-acquired service source and trusted preparation through the existing suite process, preserving the exact provider argv, independent Manager self-source and explicit unsupported bootstrap/repair/targeted paths.
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.

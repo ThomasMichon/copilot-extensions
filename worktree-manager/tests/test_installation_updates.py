@@ -132,7 +132,7 @@ def test_public_manager_plugin_target_refuses_unsupported_source_before_submissi
     assert manager.main(["update", "--target", "guide", "--detach", "--json"]) == 1
     receipt = json.loads(capsys.readouterr().out)
     assert receipt["state"] == "unavailable"
-    assert "source-backed suite execution is not yet available" in receipt["error"]
+    assert "source-backed execution is unavailable through this targeted/bootstrap/repair entry point" in receipt["error"]
     assert (root / "config.toml").read_bytes() == baseline
 
 
