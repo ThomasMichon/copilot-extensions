@@ -227,6 +227,61 @@ def test_registered_target_identity_precedes_observed_hostname(
         assert not allowed()
 
 
+@pytest.mark.parametrize("actual", ["windows", "linux"])
+@pytest.mark.parametrize("hostname", ["literal-host-win", "literal-host-wsl"])
+@pytest.mark.parametrize("selector", ["alias", "physical", "foreign"])
+def test_literal_native_customization_alias_keeps_update_and_launch_context(
+    tmp_path, monkeypatch, actual, hostname, selector,
+):
+    from agent_worktrees import front_door_cli
+
+    anchor = _configure(tmp_path, monkeypatch, actual, configured=False)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: hostname)
+    (anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        hostname: {"hostname": hostname, "alias": "local-alias"},
+    }}), encoding="utf-8")
+    target = {"alias": "local-alias", "physical": hostname, "foreign": "other-host"}[selector]
+    (anchor / "services.yaml").write_text(yaml.safe_dump({
+        "plugins": [{"name": "agent-example", "deploy_machines": [target]}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(reconcile, "GATE_ANCHOR", "")
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("services.yaml",))
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda repo: anchor)
+    monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda repo: "project")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo: [])
+    assert cfg.detect_machine(anchor) == "local-alias"
+    assert cfg.load_config().machine == hostname
+    assert update_gate._machine_gate_blocks(
+        "agent-example", "machine-gated", anchor,
+    ) is (selector == "foreign")
+    plan = reconcile.build_plan(anchor, cache={}, save=False)
+    assert plan["machine"] == "local-alias"
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", plan["machine"], reconcile.load_runtime_gate(anchor),
+        repo_dir=anchor, config=cfg.load_config(),
+    ) is (selector != "foreign")
+
+
+@pytest.mark.parametrize("actual", ["windows", "linux"])
+def test_literal_native_customization_retains_conflicting_profile_refusal(tmp_path, monkeypatch, actual):
+    anchor = _configure(tmp_path, monkeypatch, actual, configured=False)
+    hostname = "literal-host-win"
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: hostname)
+    (anchor / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        hostname: {
+            "hostname": hostname, "alias": "local-alias",
+            "ssh": {"environments": [{
+                "name": "wsl" if actual == "windows" else "windows", "alias": "wrong-profile",
+            }]},
+        },
+    }}), encoding="utf-8")
+    with pytest.raises(ValueError, match="conflicts"):
+        reconcile.runtime_allowed(
+            "machine-gated", "agent-example", "wrong-profile",
+            {"agent-example": {hostname}}, repo_dir=anchor, config=cfg.load_config(),
+        )
+
+
 @pytest.mark.parametrize("override_source", ["project", "dropin"])
 def test_update_gate_honors_project_machine_precedence(tmp_path, monkeypatch, override_source):
     anchor = _configure(tmp_path, monkeypatch, "windows")

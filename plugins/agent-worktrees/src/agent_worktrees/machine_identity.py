@@ -170,10 +170,17 @@ def runtime_policy_physical_machine(
             name.strip().casefold() for name in machine_identity_names(entry, include_metadata=False)
         } for entry in entries.values()
     )
-    # The context token already passed collision checks; an observation did not.
-    if requested in local_names and (
-        requested == context.execution_machine.casefold() or not registered_target
-    ):
+    if requested == context.execution_machine.casefold():
+        return context.machine
+    if selected is not None and requested in {
+        name.strip().casefold() for name in machine_identity_names(selected, include_metadata=False)
+    }:
+        # Reuse observation-aware alias precedence and profile conflict checks.
+        return resolve_local_execution_context(
+            entries, hostname=context.hostname, environment=context.environment,
+            configured_machine=machine,
+        ).machine
+    if requested in local_names and not registered_target:
         return context.machine
     target = resolve_machine_selection(entries, machine, cfg.detect_platform())
     return target.target.machine if target.entry is not None else machine
