@@ -34,11 +34,14 @@ def _functions() -> str:
 
 
 def _run(
-    script: str, *, host_name: str = "pwsh", environment: dict[str, str] | None = None,
+    script: str, *, host_name: str | None = None, environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    host = shutil.which(host_name)
+    host = (
+        shutil.which(host_name) if host_name else
+        shutil.which("pwsh") or shutil.which("powershell")
+    )
     if host is None:
-        pytest.skip(f"{host_name} unavailable")
+        pytest.skip(f"{host_name or 'PowerShell'} unavailable")
     with tempfile.TemporaryDirectory(prefix="bootstrap-system-") as temporary:
         entry = Path(temporary) / "probe.ps1"
         entry.write_text(script, encoding="utf-8-sig")
@@ -48,6 +51,19 @@ def _run(
             env=environment,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
+
+
+def test_default_host_uses_builtin_powershell_when_pwsh_is_unavailable(monkeypatch):
+    which = shutil.which
+    if which("powershell") is None:
+        pytest.skip("Windows PowerShell unavailable")
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "pwsh" else which(name))
+    try:
+        result = _run("@{edition=$PSEdition} | ConvertTo-Json -Compress")
+    except pytest.skip.Exception:
+        pytest.fail("An available built-in host must not depend on optional PowerShell 7")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["edition"] == "Desktop"
 
 
 @pytest.mark.parametrize(
@@ -266,12 +282,10 @@ def test_system_python_option_preserves_forwarded_setup_argv(enabled):
 @pytest.mark.parametrize("extra", ["--system-python", "--recover-for-repair", "--repair-update"])
 def test_system_python_rejects_repair_or_duplicate_before_acquisition(tmp_path, extra):
     root = tmp_path / "manager-root"
-    result = subprocess.run(
-        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(BOOTSTRAP),
-         "--system-python", extra],
-        env={**os.environ, "WORKTREE_MANAGER_ROOT": str(root)},
-        capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+    result = _run(
+        "$ErrorActionPreference='Stop'\n"
+        f"& {_quote(BOOTSTRAP)} --system-python {_quote(extra)}\n",
+        environment={**os.environ, "WORKTREE_MANAGER_ROOT": str(root)},
     )
     assert result.returncode != 0
     assert "cannot be repeated or combined with bootstrap repair" in result.stdout + result.stderr
