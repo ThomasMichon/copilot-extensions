@@ -319,6 +319,7 @@ def test_parent_settlement_cannot_mutate_wrong_ledger(owner, scoped_config, monk
     record = SimpleNamespace(
         machine="workstation-windows", platform="windows", worktree_id="wt-child",
         owner_ref=f"{owner}/project/wt-parent",
+        owner_claim_ref=tracking.parse_claim_ref(f"{owner}/project/wt-parent"),
     )
     monkeypatch.setattr(
         cfg, "project_dir",
@@ -505,10 +506,9 @@ def test_handoff_equal_physical_labels_do_not_bypass_space_selection(scoped_conf
     )
 
 
-def test_hostname_cannot_autoselect_declared_execution_space(scoped_config, monkeypatch):
+def test_hostname_can_select_local_customization_without_selecting_guest(scoped_config, monkeypatch):
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "workstation")
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="explicit machine"):
-        cfg.detect_machine(scoped_config.default_repo.anchor)
+    assert cfg.detect_machine(scoped_config.default_repo.anchor) == "workstation-windows"
 
 
 def test_legacy_multi_environment_registry_keeps_lifecycle_behavior(tmp_path, monkeypatch):
@@ -996,9 +996,10 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
     target.write_text("seed before", encoding="utf-8")
     record = SimpleNamespace(
         machine=scoped_config.machine, platform="windows", repo="project", worktree_id=path.stem,
-        owner_ref=None,
+        owner_ref=None, worktree_path=str(tmp_path),
     )
     lock_held = False
+    reads_under_lock = []
 
     @contextmanager
     def raced_lock(*args, **kwargs):
@@ -1011,7 +1012,7 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
             lock_held = False
 
     def fresh_record(record_path):
-        assert lock_held
+        reads_under_lock.append(lock_held)
         return record
 
     monkeypatch.setattr(tracking, "_RecordLock", raced_lock)
@@ -1027,6 +1028,7 @@ def test_seed_transaction_rechecks_owner_after_acquiring_lock(
     result = tracking_write.run_direct(verb, {
         "worktree_id": path.stem, "yaml_path": str(path), "remove_record": True,
     }, reason="fixture authority race")
+    assert any(reads_under_lock)
     assert result["error"] == "execution_space"
     assert "cross-space" in result["message"]
     assert path.read_text(encoding="utf-8") == "record before"

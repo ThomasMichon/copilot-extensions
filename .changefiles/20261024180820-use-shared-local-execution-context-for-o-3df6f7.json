@@ -1,0 +1,9 @@
+{
+  "comment": "Use shared local execution context for optional-map configuration while preserving legacy native bindings and independent receiving authority",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

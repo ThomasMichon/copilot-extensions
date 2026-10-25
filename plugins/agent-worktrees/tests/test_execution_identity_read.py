@@ -33,11 +33,17 @@ def binding(tmp_path, monkeypatch):
         )
         for key, platform in (("native-a", "windows"), ("native-b", "windows"), ("guest", "wsl"))
     }
+    (repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        key: {
+            "physical_host": entry.physical_host, "hostname": entry.hostname,
+            "execution_platform": entry.execution_platform,
+        } for key, entry in entries.items()
+    }}), encoding="utf-8")
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "sample")
     monkeypatch.setattr(cfg, "default_config_path", lambda: local)
     monkeypatch.setattr(cfg, "global_config_path", lambda: global_path)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(cfg, "detect_machine", lambda *a, **k: "native-a")
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "native-a")
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: entries)
     return local, global_path, data, entries
 

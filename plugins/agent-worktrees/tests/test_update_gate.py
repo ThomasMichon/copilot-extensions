@@ -66,8 +66,7 @@ def test_update_gate_uses_layered_execution_identity(
 
     assert cfg.load_config().machine == "local-space"
     assert cfg.load_config().configured_machine == "local-space"
-    with pytest.raises(RuntimeError, match="explicit machine configuration"):
-        cfg.detect_machine(anchor)
+    assert cfg.detect_machine(anchor) == "local-space"
     assert update_gate._machine_gate_blocks(
         "agent-example", "machine-gated", anchor if explicit_context else None,
     ) is (not allowed)
@@ -75,14 +74,36 @@ def test_update_gate_uses_layered_execution_identity(
 
 @pytest.mark.parametrize("platform", ["windows", "linux", "wsl"])
 @pytest.mark.parametrize("explicit_context", [False, True])
-def test_update_gate_does_not_promote_unconfigured_hostname(
-    tmp_path, monkeypatch, platform, explicit_context,
+@pytest.mark.parametrize("policy", ["absent", "matching", "foreign", "omitted"])
+def test_update_gate_uses_local_naming_without_bypassing_runtime_policy(
+    tmp_path, monkeypatch, platform, explicit_context, policy,
 ):
+    from agent_worktrees import front_door_cli
+
     anchor = _configure(tmp_path, monkeypatch, platform, configured=False)
-    with pytest.raises(update_gate.MachineDetectionError, match="explicit machine configuration"):
-        update_gate._machine_gate_blocks(
-            "agent-example", "machine-gated", anchor if explicit_context else None,
-        )
+    if policy != "absent":
+        (anchor / "services.yaml").write_text(yaml.safe_dump({
+            "plugins": [] if policy == "omitted" else [{
+                "name": "agent-example",
+                "deploy_machines": ["local-space" if policy == "matching" else "other-space"],
+            }],
+        }), encoding="utf-8")
+    monkeypatch.setattr(reconcile, "GATE_ANCHOR", "")
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("services.yaml",))
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda repo: anchor)
+    monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda repo: "project")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo: [])
+    assert cfg.load_config().configured_machine is None
+    assert update_gate._machine_gate_blocks(
+        "agent-example", "machine-gated", anchor if explicit_context else None,
+    ) is (policy in ("foreign", "omitted"))
+    plan = reconcile.build_plan(anchor, cache={}, save=False)
+    assert plan["machine"] == "local-space"
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", plan["machine"],
+        reconcile.load_runtime_gate(anchor), gate_present=reconcile.gate_manifest_present(anchor),
+        repo_dir=anchor, config=cfg.load_config(),
+    ) is (policy in ("absent", "matching"))
 
 
 @pytest.mark.parametrize("override_source", ["project", "dropin"])
