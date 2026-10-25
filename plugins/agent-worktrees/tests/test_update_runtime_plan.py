@@ -52,6 +52,158 @@ def portfolio(monkeypatch, tmp_path):
     return engine, peer, calls
 
 
+@pytest.fixture
+def phase_portfolio(portfolio, monkeypatch):
+    from agent_worktrees import update_acquisition, update_integration
+
+    engine, peer, calls = portfolio
+    planned = []
+    monkeypatch.setattr(
+        reconcile, "runtime_installer_environment",
+        lambda name, directory: (
+            planned.append(name) or {"PLAN_TARGET": name}, directory,
+        ),
+    )
+    monkeypatch.setattr(
+        update_acquisition, "acquire",
+        lambda name, *a, **kw: calls.append(["payload", name]) or "OK",
+    )
+    monkeypatch.setattr(
+        core, "_update_registered_plugins",
+        lambda targets: calls.append(["payloads", *sorted(targets)]) or True,
+    )
+    monkeypatch.setattr(
+        update_runtime, "_run_human_installer",
+        lambda *a, **kw: calls.append(["runtime", kw["cwd"].name]) or SimpleNamespace(status="OK"),
+    )
+    monkeypatch.setattr(update_integration, "finish",
+                        lambda *a: calls.append(["integration"]) or True)
+    monkeypatch.setattr(core, "_fast_forward_project_anchors", lambda: calls.append(["anchors"]))
+    monkeypatch.setattr(core, "_prune_stale_pivots_after_update", lambda: calls.append(["prune"]))
+    return engine, peer, calls, planned
+
+
+def _phase_args(phase, plugins=None):
+    return argparse.Namespace(
+        phase=phase, plugin=plugins, force=False, force_runtime=None,
+        skip_modules=None, no_anchor_sync=False, no_prune_pivots=False,
+    )
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+@pytest.mark.parametrize("phase", ["preflight", "runtimes"])
+def test_selected_runtime_does_not_plan_or_execute_unrelated_work(
+    phase_portfolio, monkeypatch, kind, phase,
+):
+    engine, peer, calls, planned = phase_portfolio
+    if kind == "module":
+        (engine / "modules.json").write_text(json.dumps({"modules": [{"name": peer.name}]}))
+    target = update_runtime._RegisteredPluginTarget(
+        context=engine.parent, activation=update_runtime._PluginActivation.ACTIVE,
+    )
+    discoveries = []
+    monkeypatch.setattr(
+        core, "_registered_plugin_targets",
+        lambda: discoveries.append(True) or {peer.name: target, "agent-unrelated": target},
+    )
+    assert update_cli._update_in_plugin_steps(_phase_args(phase, [peer.name])) == 0
+    assert discoveries == [True]
+    assert planned == [peer.name]
+    assert calls == ([] if phase == "preflight" else [["runtime", peer.name]])
+
+
+@pytest.mark.parametrize("phase", ["anchors", "prune"])
+def test_repository_phase_does_not_discover_plugins_or_runtimes(phase_portfolio, monkeypatch, phase):
+    _engine, _peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(core, "_registered_plugin_targets",
+                        lambda: pytest.fail("unselected plugin discovery"))
+    monkeypatch.setattr(core, "_find_installed_plugin_dir",
+                        lambda: pytest.fail("unselected payload discovery"))
+    assert update_cli._update_in_plugin_steps(_phase_args(phase)) == 0
+    assert calls == [[phase]]
+    assert planned == []
+
+
+@pytest.mark.parametrize("engine_only", [False, True])
+def test_payload_phase_only_acquires_selected_payload(phase_portfolio, monkeypatch, engine_only):
+    _engine, peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(core, "_find_installed_plugin_dir",
+                        lambda: pytest.fail("payload-only phase entered preflight"))
+    name = "agent-worktrees" if engine_only else peer.name
+    assert update_cli._update_in_plugin_steps(_phase_args("payloads", [name])) == 0
+    assert calls == ([["payload", name]] if engine_only else [["payloads", name]])
+    assert planned == []
+
+
+def test_integration_phase_uses_engine_scope_without_plugin_sweep(phase_portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, _peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(core, "_registered_plugin_targets",
+                        lambda: pytest.fail("integration enumerated plugins"))
+    monkeypatch.setattr(update_runtime_plan, "plan_modules",
+                        lambda *a, **kw: pytest.fail("integration planned modules"))
+    monkeypatch.setattr(update_runtime_plan, "plan_engine",
+                        lambda *a, **kw: pytest.fail("integration planned an installer"))
+    assert update_cli._update_in_plugin_steps(_phase_args("integration")) == 0
+    assert calls == [["integration"]]
+    assert planned == ["agent-worktrees"]
+
+
+def test_integration_phase_refuses_invalid_selected_scope(phase_portfolio, monkeypatch):
+    _engine, _peer, calls, _planned = phase_portfolio
+
+    def refuse(*args):
+        raise ValueError("selected installation context is invalid")
+
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", refuse)
+    assert update_cli._update_in_plugin_steps(_phase_args("integration")) == 1
+    assert calls == []
+
+
+@pytest.mark.parametrize("phase", ["payloads", "preflight", "runtimes"])
+def test_unknown_selected_plugin_refuses_before_any_effect(phase_portfolio, phase):
+    _engine, _peer, calls, planned = phase_portfolio
+    assert update_cli._update_in_plugin_steps(_phase_args(phase, ["agent-typo"])) == 1
+    assert calls == planned == []
+
+
+def test_selected_runtime_blocker_does_not_run_other_phases(phase_portfolio):
+    _engine, peer, calls, _planned = phase_portfolio
+    (peer / "scripts" / "install.sh").unlink()
+    assert update_cli._update_in_plugin_steps(_phase_args("runtimes", [peer.name])) == 1
+    assert calls == []
+
+
+def test_selected_peer_requires_readable_module_ownership(phase_portfolio):
+    engine, peer, calls, _planned = phase_portfolio
+    (engine / "modules.json").write_text("{")
+    assert update_cli._update_in_plugin_steps(_phase_args("runtimes", [peer.name])) == 1
+    assert calls == []
+
+
+def test_engine_only_phase_does_not_read_unrelated_module_manifest(phase_portfolio, monkeypatch):
+    from agent_worktrees import update_runtime_plan
+
+    _engine, _peer, calls, planned = phase_portfolio
+    monkeypatch.setattr(update_runtime_plan, "plan_modules",
+                        lambda *a, **kw: pytest.fail("engine-only phase read module manifest"))
+    assert update_cli._update_in_plugin_steps(_phase_args("preflight", ["agent-worktrees"])) == 0
+    assert calls == []
+    assert planned == ["agent-worktrees"]
+
+
+@pytest.mark.parametrize("kind", ["registered", "module"])
+def test_selected_runtime_failure_is_not_success_or_integration(phase_portfolio, monkeypatch, kind):
+    engine, peer, calls, _planned = phase_portfolio
+    if kind == "module":
+        (engine / "modules.json").write_text(json.dumps({"modules": [{"name": peer.name}]}))
+    monkeypatch.setattr(update_runtime, "_run_human_installer",
+                        lambda *a, **kw: SimpleNamespace(status="install exited 7"))
+    assert update_cli._update_in_plugin_steps(_phase_args("runtimes", [peer.name])) == 1
+    assert calls == []
+
+
 @pytest.mark.parametrize("kind", ["registered", "module"])
 @pytest.mark.parametrize("blocker", ["installer", "context", "deadline"])
 def test_late_required_blocker_prevents_all_installers(

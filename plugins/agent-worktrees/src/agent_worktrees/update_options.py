@@ -10,11 +10,22 @@ from pathlib import Path
 
 from . import output, update_events
 
+UPDATE_PHASES = ("payloads", "preflight", "runtimes", "anchors", "prune", "integration")
+
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--target", metavar="PLUGIN", help="Update only this installed plugin; no Manager, anchors or unrelated components")
     p.add_argument("--inventory", action="store_true", help="Read installation inventory and supported update contract without installing")
     p.add_argument("--runtime-sources", metavar="JSON", help=argparse.SUPPRESS)
+    p.add_argument(
+        "--phase", choices=UPDATE_PHASES,
+        help="Run only this diagnostic phase through the update queue, without "
+        "Manager self-update; completion is not a full update",
+    )
+    p.add_argument(
+        "--plugin", action="append", metavar="NAME",
+        help="Select a plugin for --phase payloads, preflight or runtimes (repeatable)",
+    )
     p.add_argument(
         "--auth-report",
         action="store_true",
@@ -48,12 +59,71 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
         flags += ["--runtime-sources", args.runtime_sources]
     if getattr(args, "auth_report", False):
         flags.append("--auth-report")
+    if phase := getattr(args, "phase", None):
+        flags += ["--phase", phase]
+    for name in getattr(args, "plugin", None) or ():
+        flags += ["--plugin", name]
     for name in getattr(args, "force_runtime", None) or ():
         flags += ["--force-runtime", name]
     return flags
 
 
+def update_flags(args: argparse.Namespace) -> list[str]:
+    flags: list[str] = []
+    for name in ("force", "no_anchor_sync", "no_prune_pivots", "recreate_venv"):
+        if getattr(args, name, False):
+            flags.append("--" + name.replace("_", "-"))
+    for name in ("detach", "wait", "supervised_debug"):
+        if getattr(args, name, False):
+            flags.append("--" + name.replace("_", "-"))
+    if getattr(args, "json", False) and getattr(args, "detach", False):
+        flags.append("--json")
+    flags.extend(forwarded_flags(args))
+    skip = getattr(args, "skip_modules", None)
+    if skip is not None:
+        flags.append("--skip-modules")
+        flags.extend(skip)
+    return flags
+
+
+def select_plugin_targets(selected: Collection[str], targets: Mapping[str, object]) -> dict | None:
+    unknown = set(selected) - (targets.keys() | {"agent-worktrees"})
+    if unknown:
+        output.err(f"--plugin: target not found: {', '.join(sorted(unknown))}")
+        update_events.record("runtime_preflight", "phase-selection", "--plugin target not found")
+        return None
+    return {name: target for name, target in targets.items() if name in selected}
+
+
+def check_selected_runtimes(selected: Collection[str], portfolio) -> bool:
+    ineligible = set(selected) - {step.name for step in portfolio if step.eligible}
+    if not ineligible:
+        return True
+    output.err(f"--plugin: no eligible runtime named {', '.join(sorted(ineligible))}")
+    update_events.record("runtime_preflight", "phase-selection", "--plugin target not found")
+    return False
+
+
 def validate_auth_flags(args: argparse.Namespace) -> None:
+    phase = getattr(args, "phase", None)
+    selected = set(getattr(args, "plugin", None) or ())
+    parser = argparse.ArgumentParser(prog="update")
+    if selected and phase not in {"payloads", "preflight", "runtimes"}:
+        parser.error("--plugin requires --phase payloads, preflight or runtimes")
+    if phase and any(getattr(args, name, None) is not None for name in ("target", "runtime_sources")):
+        parser.error("--phase cannot combine with --target or --runtime-sources")
+    if phase and any(getattr(args, name, False) for name in ("inventory", "auth_report", "recreate_venv")):
+        parser.error("--phase cannot combine with --inventory, --auth-report or --recreate-venv")
+    if phase and phase not in {"preflight", "runtimes"} and (
+        getattr(args, "force", False) or forced_runtimes(args)
+    ):
+        parser.error("runtime force options require --phase preflight or runtimes")
+    if selected and forced_runtimes(args) - selected:
+        parser.error("--force-runtime must name a selected --plugin")
+    if (phase == "anchors" and getattr(args, "no_anchor_sync", False)) or (
+        phase == "prune" and getattr(args, "no_prune_pivots", False)
+    ):
+        parser.error("the selected phase cannot also be skipped")
     if getattr(args, "runtime_sources", None) is not None and (
         not getattr(args, "no_manager", False)
         or getattr(args, "target", None) is not None

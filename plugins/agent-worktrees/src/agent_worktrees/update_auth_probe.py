@@ -9,8 +9,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from .repo_accounts import remote_host
-from .update_auth_process import publish_group
+from .repo_urls import remote_host
+from .update_auth_bootstrap import publish_group
 
 
 class _NoRedirect(HTTPRedirectHandler):

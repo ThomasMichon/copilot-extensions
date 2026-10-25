@@ -249,6 +249,7 @@ def plan_modules(
     *, force: bool = False, targets: Mapping[str, _RegisteredPluginTarget] | None = None,
     force_runtimes: Collection[str] = (),
     sources: Mapping[str, PreparedRuntimeSource] | None = None,
+    selected_plugins: Collection[str] = (),
 ) -> tuple[RuntimeUpdateStep, ...]:
     manifest = plugin_dir / "modules.json"
     if not manifest.exists():
@@ -271,6 +272,8 @@ def plan_modules(
     steps = []
     for mod in modules:
         name = mod["name"]
+        if selected_plugins and name not in selected_plugins:
+            continue
         pdir = plugin_dir.parent / mod.get("source", name)
         target = targets.get(name) if targets is not None else None
         if skip_modules and name in skip_modules:
@@ -293,16 +296,18 @@ def plan_portfolio(
     plugin_dir: Path, platform_name: str, skip_modules: list[str] | None, *,
     force: bool, targets: Mapping[str, _RegisteredPluginTarget],
     force_runtimes: Collection[str], sources: Mapping[str, PreparedRuntimeSource] | None = None,
-) -> tuple[RuntimeUpdateStep, tuple[RuntimeUpdateStep, ...], tuple[RuntimeUpdateStep, ...]]:
+    selected_plugins: Collection[str] = (),
+) -> tuple[RuntimeUpdateStep | None, tuple[RuntimeUpdateStep, ...], tuple[RuntimeUpdateStep, ...]]:
     """Collect the engine, module and remaining active registered runtime owners."""
     engine = plan_engine(
         plugin_dir, platform_name, force=force or "agent-worktrees" in force_runtimes,
         **({"source": sources.get("agent-worktrees")} if sources is not None else {}),
-    )
-    modules = plan_modules(
+    ) if not selected_plugins or "agent-worktrees" in selected_plugins else None
+    modules = () if set(selected_plugins) == {"agent-worktrees"} else plan_modules(
         plugin_dir, platform_name, skip_modules, force=force,
         targets=targets, force_runtimes=force_runtimes,
         **({"sources": sources} if sources is not None else {}),
+        **({"selected_plugins": selected_plugins} if selected_plugins else {}),
     )
     excluded = {step.name for step in modules} | {"agent-worktrees"} | set(skip_modules or ())
     registered = tuple(

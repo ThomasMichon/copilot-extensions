@@ -98,6 +98,47 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--no-manager` selects the standalone updater but still queues it.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
+
+### Diagnose one update phase
+
+`update --phase` selects a fixed piece of the existing updater without running
+Manager self-update or the other phases. It still uses the same durable queue,
+selected installation context, native installer plans, deadlines and custody.
+The published shell front doors bypass ordinary repair bootstrap for these
+selections. A missing engine is reported as unavailable rather than implicitly
+provisioned; use ordinary `update` when repairing the engine itself is intended.
+Use repeatable `--plugin NAME` with `payloads`, `preflight` or `runtimes` to
+select only those registered plugins:
+
+```text
+agent-worktrees update --phase payloads --plugin agent-bridge
+agent-worktrees update --phase preflight --plugin agent-bridge
+agent-worktrees update --phase runtimes --plugin agent-bridge
+agent-worktrees update --phase integration
+```
+
+`payloads` acquires only selected payloads; `preflight` validates the selected
+runtime plan without executing it; `runtimes` executes that collected plan
+against already-installed payloads without downloading other plugins.
+`anchors`, `prune` and `integration` independently run their existing local
+owners. Anchor/prune phases do not enumerate registered plugins, and local
+phases do not eagerly discover unrelated network authentication.
+
+A successful selected phase is **partial**, not full-update convergence.
+Detached/status JSON includes `phase`, `plugins` and `full_update: false`;
+telemetry does not report the whole suite as verified-current. Run ordinary
+`update` after diagnosis to qualify the complete Manager/payload/runtime/
+integration path. Existing skip and force options retain their normal meaning;
+conflicting or ineligible selections refuse rather than silently widening scope.
+Phase selection cannot combine with `--target`, `--inventory` or complete
+prepared `--runtime-sources` packets; those keep their own update contracts.
+
+Credential-routing helpers use the selected interpreter's base on Windows
+with explicit owned code roots, isolated/site-free startup and no bytecode
+writes. Simple host authorities do not load account/registry discovery or the
+general URL parser; child-process machinery is loaded only for helper replay.
+Git requests end at their protocol blank line, without waiting for EOF.
+An expired subprocess or unfinished pipe capture never reports status zero.
 The [Manager's update reference](../../worktree-manager/README.md#durable-update-execution)
 owns the shared request/lifetime contract and its current migration boundary.
 

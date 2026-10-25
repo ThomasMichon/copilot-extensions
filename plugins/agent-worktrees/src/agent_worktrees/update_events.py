@@ -85,7 +85,7 @@ _WINDOWS = os.name == "nt"
 # merely contains "not found" is not reclassified).
 _CONFIGURATION = re.compile(
     r"(?:plugin update failed: |[\w.@-]+: )?"
-    r"(?:(?:installer|powershell|source dir) not found|--force-runtime target not found"
+    r"(?:(?:installer|powershell|source dir) not found|--force-runtime target not found|--plugin target not found"
     r"|installation context invalid|invalid installer deadline|invalid runtimescope"
     r"|machine detection failed|forced namespaced runtime reconciliation is unsupported"
     r"|'copilot' cli not found)"
@@ -173,7 +173,7 @@ def record(phase: str, component: str, status: str, *, required: bool = True,
         pass
 
 
-def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
+def finish(rc: int | None, exc: BaseException | None = None, *, partial: bool = False) -> int | None:
     """Close the run and map the legacy return code onto the shared table.
 
     ``rc`` is 0 (success), 1 (failure) or a runtime installer's own exit code.
@@ -194,7 +194,7 @@ def finish(rc: int | None, exc: BaseException | None = None) -> int | None:
             run.finish(outcome, error=error)
             return rc
         if rc == 0:
-            outcome, code = _ut.VERIFIED_CURRENT, None
+            outcome, code = (_ut.SKIPPED if partial else _ut.VERIFIED_CURRENT), None
         elif rc == 4:
             outcome, code = _ut.AUTH_REQUIRED, "auth_required"
         elif rc == 1:
