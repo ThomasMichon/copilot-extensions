@@ -187,6 +187,14 @@ replace ARC's pod lifecycle, or turn a session/task lease into permanent service
 ownership. The [adoption-first sequence](runner-loadouts.md#adoption-first-priority)
 retains the existing release, provider, custody, credential and activation gates.
 
+The operator subsequently accepted reusing the existing canonical Git-backed
+coordination store for a distinct permanent service-custody record, rather than
+another store or an extended task lease. The
+[custody realization proposal](runner-service-custody.md) preserves provider
+admission, exact accepted transfer and incumbent-safe reconciliation. Its
+protocol details are agent-recommended and await source review; live adoption
+and temporary-obligation discharge remain separately gated.
+
 The [runner-loadout realization plan](runner-loadouts.md) extends this
 existing campaign and #7192; it is not a second controller or a replacement
 for #6240/#6424/#6241 and #6681 ownership. Its decomposition and validation
@@ -468,6 +476,19 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #8875 merged the operator-selected in-process Gateway/ARC source bridge
+  after exact-head Copilot approval, resolved feedback and required-source
+  checks. The managed provider confirmed completion using the Maintainer
+  exception to an additional code-owner vote; no required CI was bypassed.
+  Re-read this full Request, Plan and Validation Plan immediately after merge.
+  This delivers source composition and the qualified installed-consumer path,
+  not a deployed controller or incumbent adoption receipt. The next stretch
+  establishes durable provider/service custody and an inspected adopt-in-place
+  transition through the existing host/controller owners. Preserve the actual
+  pool's identity, capacity, isolation and in-flight work; retain temporary
+  protection until the canonical provider acknowledges durable ownership.
+  All live adoption, production binding, reconciliation, lifecycle and actual-job
+  gates above remain open. No fleet, routing, capacity or credential state changed.
 - Prepared the operator-selected in-process deployment-control source slice:
   the existing service Gateway retains the original verified caller, applies
   separate current operation policy and invokes the fixed ARC owner without a
