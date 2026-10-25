@@ -76,7 +76,11 @@ def test_real_plan_timeout_kills_renderer_and_grandchild(tmp_path, monkeypatch):
         "time.sleep(60)\n"
     )
     engine = (
-        "import subprocess,sys,time\nfrom pathlib import Path\n"
+        "import json,subprocess,sys,time\nfrom pathlib import Path\n"
+        "if 'agent-policy' in sys.argv:\n"
+        f"    print(json.dumps(dict(version=1, repository={str(tmp_path)!r}, "
+        "expose_agent=None, sources=[], denied_by=[], allowed=True)))\n"
+        "    raise SystemExit(0)\n"
         f"subprocess.Popen([sys.executable,'-c',{renderer!r}])\n"
         f"Path({str(ready)!r}).write_text('ready')\n"
         "time.sleep(60)\n"

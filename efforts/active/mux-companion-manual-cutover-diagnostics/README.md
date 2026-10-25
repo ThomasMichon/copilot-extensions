@@ -482,6 +482,14 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
   Textual tab/cutover interaction, partial failures, literal claim labels and
   blocked-producer responsiveness. Further process-boundary and native
   acceptance is retained; no installed runtime or live mux change is claimed.
+- Review identified that a default executor thread could keep the popup
+  process alive after Escape. Read cancellation now uses the Manager's
+  existing owned process/job boundary; startup, refresh and handoff-state
+  reads share that cancellation. The expanded packet passed 155 tests,
+  including a real Companion process exiting while its producer stays
+  blocked, and native Windows renderer/grandchild timeout cleanup. The latter
+  fixture now answers the current hosting-policy probe before its intentional
+  blocking resolve. No production admission check was weakened.
 - Native relay constraint from existing source: the current psmux click bind
   is deliberately withheld because it corrupts the supported root table.
   Do not silently enable it to satisfy view-tab presentation.

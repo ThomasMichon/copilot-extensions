@@ -511,7 +511,7 @@ def test_slow_refresh_keeps_textual_responsive_and_retries_initial_error(monkeyp
     finish = threading.Event()
     calls = []
 
-    def load(cwd):
+    def load(cwd, **kwargs):
         calls.append(cwd)
         if len(calls) == 1:
             return companion._CompanionData(error="temporary engine failure")
@@ -540,3 +540,46 @@ def test_slow_refresh_keeps_textual_responsive_and_retries_initial_error(monkeyp
             finish.set()
 
     asyncio.run(run())
+
+
+def test_companion_process_exits_while_owned_engine_is_blocked(tmp_path):
+    import os
+    import subprocess
+    from worktree_manager import engine_process
+
+    started = tmp_path / "producer-started"
+    producer = tmp_path / "blocked engine.py"
+    producer.write_text(
+        "import time\n"
+        "from pathlib import Path\n"
+        f"Path({str(started)!r}).write_text('started')\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    driver = tmp_path / "companion driver.py"
+    driver.write_text(
+        "import asyncio, sys\n"
+        "from pathlib import Path\n"
+        "from worktree_manager import engine_client as ec\n"
+        "from worktree_manager.mux_companion import MuxCompanionApp\n"
+        f"ec.set_engine_command([sys.executable, {str(producer)!r}])\n"
+        "async def main():\n"
+        "    app = MuxCompanionApp()\n"
+        "    async with app.run_test() as pilot:\n"
+        "        for _ in range(100):\n"
+        f"            if Path({str(started)!r}).exists(): break\n"
+        "            await asyncio.sleep(0.02)\n"
+        f"        assert Path({str(started)!r}).exists()\n"
+        "        await pilot.press('escape')\n"
+        "asyncio.run(main())\n",
+        encoding="utf-8",
+    )
+    # The producer is never released; a real process exit must cancel its owned read.
+    result = engine_process.run(
+        [sys.executable, str(driver)], timeout=8,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=dict(os.environ), stdin=subprocess.DEVNULL,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stderr
+    assert started.exists()

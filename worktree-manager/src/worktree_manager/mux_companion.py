@@ -34,6 +34,7 @@ import os
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from threading import Event
 
 from rich.text import Text
 from textual import work
@@ -111,7 +112,7 @@ class _CompanionData:
     sessions_error: str | None = None
 
 
-def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
+def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
     """Resolve the worktree containing ``cwd`` (default: the real cwd) and
     fetch its status + session lineage.
 
@@ -125,7 +126,7 @@ def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
     """
     target = cwd if cwd is not None else os.getcwd()
     try:
-        payload = ec.current_worktree_status(path=target)
+        payload = ec.current_worktree_status(path=target, runner=runner)
     except ec.EngineError as exc:
         return _CompanionData(error=str(exc))
     if not isinstance(payload, dict):
@@ -140,11 +141,11 @@ def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
     bundle_error = None
     if worktree_id:
         try:
-            sessions = ec.list_worktree_sessions(None, worktree_id)
+            sessions = ec.list_worktree_sessions(None, worktree_id, runner=runner)
         except ec.EngineError as exc:
             sessions_error = str(exc)
         try:
-            bundle = ec.worktree_status_bundle(None, worktree_id)
+            bundle = ec.worktree_status_bundle(None, worktree_id, runner=runner)
         except ec.EngineError as exc:
             bundle_error = str(exc)
 
@@ -156,7 +157,7 @@ def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
     worktree_path = payload.get("path")
     if worktree_path:
         try:
-            pending = hc.pending_handoff(None, worktree_path)
+            pending = hc.pending_handoff(None, worktree_path, runner=runner)
         except ec.EngineError:
             pending = None
 
@@ -382,6 +383,7 @@ class MuxCompanionApp(App):
         self._cwd = cwd
         self._data = _CompanionData()
         self._loading = True
+        self._read_cancel = Event()
         self._action_message: Text | None = None
 
     def compose(self) -> ComposeResult:
@@ -409,12 +411,23 @@ class MuxCompanionApp(App):
     def on_mount(self) -> None:
         self._reload()
 
+    def on_unmount(self) -> None:
+        self._read_cancel.set()
+
     @work(exclusive=True)
     async def _reload(self) -> None:
         self._loading = True
         self.query_one("#refresh-btn", Button).disabled = True
         self.query_one("#cutover-btn", Button).disabled = True
-        self._data = await asyncio.to_thread(_load_current_worktree, self._cwd)
+        cancelled = Event()
+        self._read_cancel = cancelled
+        try:
+            self._data = await asyncio.to_thread(
+                _load_current_worktree, self._cwd,
+                runner=ec.cancellable_read_runner(cancelled),
+            )
+        finally:
+            cancelled.set()
         self._loading = False
         self._refresh_view(reload=False)
         self.query_one("#refresh-btn", Button).disabled = False

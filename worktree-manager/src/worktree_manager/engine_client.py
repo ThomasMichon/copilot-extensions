@@ -915,6 +915,24 @@ def worktree_status_bundle(
     return obj
 
 
+def cancellable_read_runner(cancelled):
+    """Give an observer ownership of its read subprocesses through shutdown."""
+    from . import engine_process
+
+    def run(cmd, timeout):
+        if cancelled.is_set():
+            raise InterruptedError("owned engine read cancelled")
+        return engine_process.run(
+            cmd, timeout=timeout, cancelled=cancelled,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=_engine_environment(),
+            stdin=subprocess.DEVNULL,
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        )
+
+    return run
+
+
 def list_worktree_sessions(
     project: str,
     worktree_id: str,
