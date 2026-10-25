@@ -13,6 +13,7 @@ import uuid
 
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_custody import decode
+from .creation_launch_custody import _CreationLaunchCustodyMixin, launch_observation
 from .runtime_custody import (
     RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, encode, nonblank,
 )
@@ -71,6 +72,8 @@ class CreationRequest:
 
 def original_creation(row: sqlite3.Row | dict, kind: CreationKind) -> CreationRequest | None:
     association, facts = row["runtime_custody_json"], row["creation_facts_json"]
+    if kind == "workspace":
+        launch_observation(row)
     if association is None and facts is None:
         return None
     if association is None or facts is None:
@@ -106,7 +109,7 @@ def legacy_creation(
     return row
 
 
-class CreationJournal:
+class CreationJournal(_CreationLaunchCustodyMixin):
     def __init__(self, db: Database) -> None:
         self.db = db
 

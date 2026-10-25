@@ -5,6 +5,36 @@ Back to the [DB custody foundation](runtime-custody-foundation.md) and
 This is an internal DB and explicit local allocation foundation, not a native effect grant,
 automatic producer enrollment, public capability or restore qualification.
 
+## Original native observation prerequisite
+
+Schema 37 additionally prepares nullable native handoff, launch start/result and
+binding start/acceptance fields on the same `workspace_embodiments` row. It
+does not add a second acquisition attempt or operation ledger. Legacy rows and
+provider rows do not acquire native custody during migration.
+
+`CreationJournal.prepare_launch` retains the original allocation, key and facts
+digests, session, admission and consumer incarnation before launch preparation.
+An exact retained preparation can be observed after closure; another consumer
+cannot replace it. Separate `begin_launch` and `begin_binding` operations each
+require the original open epoch in a short FULL transaction and admit their
+original boundary only once. They do not execute an effect. A lost reply remains
+an outstanding launch or binding, never permission to retry.
+
+`report_launch` retains the exact accepted native identity and
+`report_binding` retains the original binding observation after closure.
+These observations remain distinct from first-turn admission, native
+consumption and semantic completion. Recorded handoffs, times, native identity
+and allocation cannot be cleared or replaced. Strict inventory validates them
+against the full original row and refuses inconsistent state even in a terminal
+row. Passive and migration-free adopted connections require the complete
+prepared schema and guards without repairing corruption.
+
+These DB methods are prerequisites, not a native entry point. The concrete
+creation adapter must still carry them into the shared `LocalLaunchOwner`,
+actual Host/child/ACP new, configuration, binding and first-prompt owners.
+Until that integration is selected and validated, `allocate` remains
+allocation-only and ordinary associated creation remains refused.
+
 ## Original attempts
 
 Schema 36 adds nullable original-admission and input documents to the existing

@@ -141,7 +141,7 @@ def test_legacy_creation_migration_preserves_unknown_original_history(
     assert path.read_bytes() == before
     db = Database(path)
     try:
-        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 36
+        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 37
         row, = db.execute_read(f"SELECT * FROM {creation_table(kind)}")
         assert (row["key_digest"], row["facts_digest"], row["state"], row["session_id"],
                 row["native_session_id"]) == (
