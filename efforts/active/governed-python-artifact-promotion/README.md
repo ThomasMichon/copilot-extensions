@@ -299,6 +299,13 @@ probe qualification, CI authorization and lifecycle validation remain with
       Default marketplace/bootstrap authentication, production dependency
       qualification, dependency-unchanged updates, measured defaults and
       installation savings remain open.
+- [x] Provide explicit registered-marketplace source authentication (#9005).
+      Actual installed ownership, registration and ledger select a consistent
+      native cache; independent acquisition authenticates its exact commit/tree,
+      and canonical preparation must match the installed assembly/version.
+      Custody and current source/configuration checks remain live through
+      consumption. This is a repository-only provider, not normal bootstrap
+      integration or measured production installation savings.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -322,6 +329,72 @@ probe qualification, CI authorization and lifecycle validation remain with
       immutable-slot assembly, health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
+
+#### Bootstrap-safe normal consumer _(agent-recommended; review before implementation)_
+
+The next implementation stretch closes the gap between the explicit providers
+above and an actual installer. `libs/installer-engine/installer-engine.ps1`
+and its POSIX sibling supply bootstrap helpers; they do not invoke the new
+profile owner. Worktrees' `scripts/runtime_install.py` invokes
+`installer_engine.numbered_candidate` from its existing Python lifecycle.
+Bridge still uses the existing shell construction adapter. Do not assume that
+shipping the shared Python engine makes every installer a migrated consumer.
+#9006 packages the existing command lifecycle SDK for prepared sources; retain
+that implementation and #7028's source/deployment ownership.
+
+The admission tools currently import `packaging` and repository-relative
+modules. A fresh bootstrap must neither import them from an incidental host
+environment nor install them using the admission code they are needed to run.
+Use the following ordered implementation and acceptance gates:
+
+- [ ] Extract the existing native feed-projection/capture mechanism into the
+      shared installer's standard-library layer. Keep profile selection and
+      approval in their current owner; capture consumes its retained native UV
+      transaction, not a second configuration reader. Preserve authentication,
+      OS trust, redirect policy, seasoning, unsupported-policy refusals and
+      secret-safe keyed identities. Preserve existing repository APIs through
+      thin compatibility adapters, not copied alternate implementations.
+- [ ] Admit the declared admission-tool dependency through a bounded
+      standard-library bootstrap, using the existing native compiler, retained
+      feed capture, actual wheel inspector/acquisition and immutable constructor.
+      Start with the dependency-free `packaging` wheel required by the current
+      admission code. Native UV selects its exact governed-feed version/file;
+      freeze that lock before construction and require actual metadata to have
+      no dependencies, extras or unsupported wheel layout. This restricted seed
+      must not grow a requirement/version resolver or execute a source backend.
+      Reuse the existing installation-owned immutable build-tool namespace and
+      third-party-only constructor mode, not a global mutable tooling venv.
+      Bind source/tooling bytes, interpreter, exact lock and effective policy;
+      retain custody through health and invalidate reuse on changed inputs.
+- [ ] Package the existing admission code and its complete first-party imports
+      as a canonical, self-contained installer toolkit. Retain one source of
+      truth and the existing payload-generation/materialization conventions.
+      Reuse the actual source acquisition/preparation owners; remove repository
+      path assumptions rather than reaching into another installed plugin or
+      executing a fetched repository's tooling. Run semantic profile validation
+      under the admitted tooling interpreter, never via ambient `packaging`.
+      Keep public first-party artifacts free of third-party dependency bytes.
+- [ ] Connect Worktrees' real installation lifecycle first, preserving its
+      `agent-worktrees` owner and runtime root separately from Manager's
+      `worktree-manager` component. Carry the actual installed owner through
+      self-staging. Compose real release discovery and source-provider selection;
+      do not manufacture an unavailable index or relabel a marketplace plugin
+      as Manager. Keep source, current policy, acquisition and revocation checks
+      alive through the existing health/publication/rollback owner.
+- [ ] Qualify and enable that ordinary install/update path only after its full
+      bootstrap and consumer tests pass. Missing/nonmatching artifacts may
+      select the authority's permitted governed-source fallback; invalid
+      artifacts/source never do. A tooling admission failure is not artifact
+      absence and cannot silently select an ungoverned installer. Preserve the
+      current supported path while the new lane is inert; do not gate ordinary
+      installation on artifact publication proof. Migrate other installers
+      only through their actual construction/lifecycle adapters.
+
+No new service, approval database, installation authority, constructor, source
+resolver or deployment permission is introduced. This plan does not credit
+production feed qualification, dependency-unchanged updates or installation
+savings. The parent remains Active until its complete Plan and Validation Plan
+are resolved.
 
 #### First consumer lane _(authority-lock direction; review before implementation)_
 
@@ -563,6 +636,28 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [ ] Qualify bootstrap-safe admission and the actual ordinary consumer:
+      isolated `-I -S` first-touch imports without repository paths or site
+      packages; actual governed native compilation/acquisition and installed
+      tooling health; a dependency-bearing or malformed seed, unsupported
+      configuration, changed bytes/policy and forged source all refuse before
+      publication. Prove no backend execution or unapproved endpoint request,
+      bounded child settlement and invocation-owned cleanup. Then exercise real
+      Windows/POSIX installer entry points on fresh and existing installations,
+      with artifact outage versus integrity refusal, retained unchanged reuse,
+      exact component ownership and prior-selection/rollback preservation.
+      Keep existing lifecycle-SDK packaging and mixed-version callers working.
+      Record measured cold/warm time, network and physical storage before
+      selecting default budgets or claiming a faster normal installation.
+- [x] Qualify the explicit registered-marketplace source provider. #9005's final
+      head passes required CI, all 22 selected Linux/Windows native jobs and
+      Copilot approval, with both review threads resolved. Actual Git/ledger/
+      preparation controls reject forged cached commits, changed closures,
+      ambiguous caches and version/configuration changes; preserve selected
+      older source; separate marketplace owners; honor explicit native homes
+      and empty environments; and qualify Windows source paths over 260
+      characters. This does not qualify default bootstrap, production feed/
+      closure eligibility, measured savings or rollout.
 - [ ] Implement and qualify the [feed-availability validation contract](feed-availability-validation.md#implementation-validation-plan)
       under #7529 and #4876: exact production-resolver coverage, admitted probe
       semantics, durable claim/fence recovery, real worker failover and CI
