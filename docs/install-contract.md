@@ -3582,6 +3582,9 @@ completion identity during consumption. Closed construction and reuse clamp
 each construction/retention lock wait to the held wheel-input deadline rather
 than restarting an independent wait budget.
 Nonordinary selected slot paths refuse rather than becoming apparent absence.
+Reuse compares recorded origins with installed archive origins before invoking
+module health. An origin mismatch is an integrity refusal, not permission to
+reacquire source inputs through the health-repair path.
 
 `WheelReuseInputs` is read-only constructor evidence, not cached wheel bytes
 or approval. The same engine can health-check its exact existing generation,

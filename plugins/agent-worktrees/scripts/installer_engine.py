@@ -476,12 +476,7 @@ def _verify_installed(
     probe = """
 import hashlib, importlib, importlib.metadata, json, pathlib, sys
 slot = pathlib.Path(sys.argv[1]).resolve()
-module = importlib.import_module(sys.argv[2])
-assert module.__file__ and pathlib.Path(module.__file__).resolve().is_relative_to(slot), \
-    "health module is outside the candidate runtime"
 assert sys.version_info >= (3, 11), "installer runtime requires Python 3.11+"
-if sys.argv[4]:
-    getattr(module, sys.argv[4])()
 wheel_binding = sys.argv[9]
 expected_origins = None if wheel_binding else json.loads(sys.argv[3])
 expected_extras = json.loads(sys.argv[6])
@@ -550,6 +545,9 @@ for name, expected in expected_origins.items():
     if sys.argv[5] == "fresh":
         assert origin.get("url") == expected, f"{name} was not installed from frozen input"
     elif recorded_origins is not None:
+        if sys.argv[5] == "receipt-reuse" and origin.get("url") != recorded_origins[name]:
+            print(f"{name} differs from its recorded frozen installation origin", file=sys.stderr)
+            raise SystemExit(74)
         assert origin.get("url") == recorded_origins[name], \
             f"{name} differs from its recorded frozen installation origin"
     else:
@@ -562,16 +560,25 @@ for name in excluded_packages:
     except importlib.metadata.PackageNotFoundError:
         continue
     raise AssertionError(f"excluded local package is installed: {name}")
+module = importlib.import_module(sys.argv[2])
+assert module.__file__ and pathlib.Path(module.__file__).resolve().is_relative_to(slot), \
+    "health module is outside the candidate runtime"
+if sys.argv[4]:
+    getattr(module, sys.argv[4])()
 """
     try:
         _child(
             [str(python), "-I", "-B", "-c", probe, str(slot), module, origins_argument,
-             health_callable or "", "fresh" if require_frozen_origin else "reuse",
+             health_callable or "", "fresh" if require_frozen_origin else (
+                 "receipt-reuse" if isinstance(inputs.wheel_inputs, WheelReuseInputs) else "reuse"
+             ),
              json.dumps(inputs.extras), json.dumps(inputs.local_packages), json.dumps(excluded),
              wheel_argument],
             inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
+        if isinstance(inputs.wheel_inputs, WheelReuseInputs) and getattr(error, "returncode", None) == 74:
+            raise DependencyPolicyError("Published runtime origin evidence differs from installed inputs") from error
         if require_frozen_origin:
             raise
         raise HealthRepairRequired(

@@ -20,6 +20,8 @@ Both invocations test an absolute selected UV with no UV on PATH, and a UV
 command selected from PATH. Changing the native resolver mode subsequently
 requires ordinary source admission instead of reuse; corrupt completion
 evidence still refuses before cold admission. The same hosted Manager jobs
+also change an origins-receipt URL without changing the wheel digest and
+require an integrity refusal, not cold repair or another feed request. They
 run package-version parsing and actual update-check regressions for source,
 source-profile and repaired generations.
 This does not qualify the production Manager dependency closure, default
@@ -3494,6 +3496,9 @@ and 900 seconds across the plugin. Each sub-suite also defaults to 128
 processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage.
 The pytest group parent is created with mode `0700` on POSIX, so an inherited
 shared-write umask cannot expose the fixture namespace.
+The runner resolves its temporary parent before allocating that owned sandbox,
+so Windows short TEMP aliases do not look like redirected daemon registries.
+Daemon-registry redirection and ownership refusals remain unchanged.
 PowerShell module discovery uses a sandbox-owned `PSModulePath` by default,
 so inherited host modules cannot autoload into a test. Core PowerShell commands
 and native application lookup remain available. Only the existing explicit

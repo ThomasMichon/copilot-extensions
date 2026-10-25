@@ -176,6 +176,21 @@ print(json.dumps(asdict(result)))
     assert builds.engine.runtime.current_version(root) == slot.name
     assert builds.engine.runtime.read_last_known_good(root) == slot.name
     assert not git(configured_source[1], "status", "--porcelain=v1", "--ignored")
+    proof = slot / ".runtime-input-origins.json"
+    corrupted = json.loads(receipt)
+    name = next(iter(corrupted["packages"]))
+    corrupted["packages"][name] = "file:///altered/" + corrupted["packages"][name].rsplit("/", 1)[-1]
+    proof.write_text(json.dumps(corrupted))
+    with monkeypatch.context() as integrity:
+        integrity.setattr(builds, "retain_source_runtime_inputs", lambda *args, **kwargs: pytest.fail(
+            "corrupt origin receipt reached cold source admission",
+        ))
+        with pytest.raises(builds.dependencies.DependencyPolicyError, match="origin evidence"):
+            builds.install_manager_source_runtime(plan(adopter), **arguments)
+    assert builds.engine.runtime.current_version(root) == slot.name
+    assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
+    assert len(state["requests"]) == requests
+    proof.write_bytes(receipt)
     environment(adopter, state, tmp_path, resolution="lowest")
 
     def requires_source(*args, **kwargs):

@@ -529,6 +529,7 @@ def run_plugin(
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
+    sandbox_parent = sandbox_parent.resolve(strict=True)
     with _TestSandbox(
         # Deliberately short: this sandbox root sits at the top of a path
         # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/

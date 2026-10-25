@@ -86,6 +86,33 @@ def cleanup_runner(monkeypatch, tmp_path):
     return run
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows short TEMP alias")
+def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cleanup_runner):
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
+    if not length or length >= len(buffer) or Path(buffer.value) == tmp_path:
+        pytest.skip("filesystem has no short alias for the temporary parent")
+    monkeypatch.setenv("TEMP", buffer.value)
+    observed = []
+
+    def run_contained(*args, **kwargs):
+        from agent_procutil.daemon_instances import daemon_test_lifecycle
+
+        sandbox = kwargs["sandbox"]
+        assert sandbox == sandbox.resolve(strict=True)
+        with daemon_test_lifecycle(
+            owner="short-temp-regression", registry_root=sandbox / "daemon-instances",
+        ):
+            observed.append(sandbox)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    assert cleanup_runner() == 0
+    assert observed
+
+
 def test_plugin_budget_includes_final_sandbox_cleanup(
     monkeypatch, capsys, cleanup_runner,
 ):

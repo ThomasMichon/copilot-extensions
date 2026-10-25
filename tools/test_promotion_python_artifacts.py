@@ -758,7 +758,7 @@ def resolve_toolchain_lock(*args, **kwargs):
     )
     for name in (
         "artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py",
-        "plugin_runtime_resources.py",
+        "plugin_runtime_resources.py", "native_daemon_artifacts.py",
     ):
         shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")

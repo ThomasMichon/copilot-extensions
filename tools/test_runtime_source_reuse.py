@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -311,6 +312,28 @@ def test_completion_is_rechecked_during_consumption(existing):
         with retain(existing) as source:
             marker.write_text("{")
             source.verify()
+
+
+@pytest.mark.parametrize("code", [1, 74])
+def test_origin_refusal_is_not_installed_health_repair(existing, monkeypatch, code):
+    engine = reuse.engine
+    with retain(existing) as source:
+        inputs = engine.FrozenInputs(
+            source.payload, engine._package_roots(source.payload), "fixture",
+            local_packages=source.local_packages, wheel_inputs=source.wheels,
+        )
+
+        def failed(argv, **kwargs):
+            assert "receipt-reuse" in argv
+            raise subprocess.CalledProcessError(code, argv, stderr="synthetic isolated failure")
+
+        monkeypatch.setattr(engine, "_child", failed)
+        expected = engine.DependencyPolicyError if code == 74 else engine.HealthRepairRequired
+        with pytest.raises(expected):
+            engine._verify_installed(
+                inputs, existing.slot, Path(sys.executable), "fixture_source", 0, 30,
+                require_frozen_origin=False,
+            )
 
 
 def test_same_engine_refuses_construction_from_existing_receipt(existing, monkeypatch):

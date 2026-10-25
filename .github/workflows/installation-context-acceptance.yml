@@ -814,6 +814,9 @@ jobs:
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml
       - name: Signed-copy seeding policy and actual unseeded UV install
         run: python -m pytest -q tools/test_installer_venv_seeding.py
+      - name: Short TEMP alias reaches real daemon-registry admission
+        if: runner.os == 'Windows'
+        run: python -m pytest -q tools/test_run_plugin_tests.py::test_short_temp_alias_reaches_real_daemon_registry
       - name: Exact batched closure, retries, warm edits and recovery
         run: >-
           python tools/run-plugin-tests.py agent-codespaces
