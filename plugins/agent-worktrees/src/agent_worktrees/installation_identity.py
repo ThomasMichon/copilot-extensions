@@ -37,7 +37,6 @@ def _prospective_configs(
         if state is not None and preliminary != project else dropins,
         project_raw,
     )
-    platform = cfg.detect_platform()
 
     def for_project(name: str, machine_raw: dict) -> cfg.Config:
         if not isinstance(name, str) or not name.strip():
@@ -49,6 +48,7 @@ def _prospective_configs(
         knowledge_repo = machine_raw.get("knowledge_repo") or global_raw.get("knowledge_repo") or ""
         if not isinstance(knowledge_repo, str):
             raise ValueError("knowledge_repo must be a repository name")
+        platform = machine_raw.get("platform") or global_raw.get("platform") or cfg.detect_platform()
         names = [key for key, value in machine_repos.items() if isinstance(value, dict)]
         if name not in names:
             names.append(name)

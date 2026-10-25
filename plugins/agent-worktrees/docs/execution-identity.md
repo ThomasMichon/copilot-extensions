@@ -75,6 +75,8 @@ knowledge bindings still participate. The selected source uses the ordinary
 canonical-plus-legacy map merge, including for a knowledge checkout.
 Admission checks both explicit-project loading and ordinary loading when a
 retained `repo_name` selects a different repository or drop-in scope.
+Configured platform precedence selects repository paths; actual observed
+execution still supplies local naming admission.
 Absent prospective maps do not fall back to an older remote's registered scope.
 Conflicting platform/profile bindings,
 ambiguous associations, execution-name collisions and invalid declarations
