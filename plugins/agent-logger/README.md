@@ -54,8 +54,8 @@ session-to-log pipeline out of any single bespoke service:
   hard-coded. The plugin ships **no persona** — a repository opts into styling
   through manifest fields in its organization config.
 - **Standalone runtime.** The plugin does not require a repo to be registered
-  as an agent-worktrees harness. A session-start hook cheaply stamps a
-  self-provisioning `agent-logger` binstub when hooks are available, and the
+  as an agent-worktrees harness. A session-start hook submits a background
+  `stamp` request for the self-provisioning binstub when hooks are available, and the
   operational skills include the same readiness path for hosts that only load
   skills.
 - **Local state stays local.** The runtime home (`~/.agent-logger/`, or
@@ -65,6 +65,23 @@ session-to-log pipeline out of any single bespoke service:
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
 ## Source-qualified runtimes
+
+The legacy/default-root session bootstrap uses its packaged installation Driver
+foundation, without requiring Python, `uv`, or Manager on the caller PATH.
+First use submits `stamp`; deployed-runtime drift submits `install`, retaining
+the canonical four-hour sync/prune task or timer reconciliation. `provision`
+remains service-less and is not the bootstrap drift action. Healthy runtimes,
+selected installation contexts and the shared bootstrap killswitch remain
+non-publication no-ops. No-self-provision and pinned-context controls defer
+publication; missing/skewed helpers, unsupported publication scopes and managed
+deployment report explicit readiness failures without a direct installer fallback.
+
+The 15-second hook returns one `{}`. Its launch acknowledgement names the
+Driver diagnostic log, not a durable receipt or installation success. The same
+ordinary queue/result records acceptance and the eventual outcome after the
+caller exits; no separate bootstrap lock or age-based process reaper remains.
+Cold-store provider registration (10 seconds) and exact-session guidance
+(45 seconds) retain independent hook ownership and exact payload command identity.
 
 Native `stamp`, `provision`, `install` and `update` admit publication before
 creating or reclaiming staging directories. An available bootstrap Python uses

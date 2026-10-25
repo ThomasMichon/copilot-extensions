@@ -17,6 +17,7 @@ from test_command_binding import (
     powershell_host as powershell_host,
 )
 from test_containers_first_use_publication import containers_release as containers_release
+from test_dispatch_first_use_publication import dispatch_release as dispatch_release
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot
 
@@ -29,7 +30,8 @@ def _runtime_module(fixture: dict, root: Path, output: str) -> Path:
         "Lib/site-packages" if os.name == "nt" else
         f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     )
-    (site / "agent_containers.py").write_text(f"print({output!r})\n", encoding="utf-8")
+    module = fixture["arguments"]["plugin_id"].replace("-", "_")
+    (site / f"{module}.py").write_text(f"print({output!r})\n", encoding="utf-8")
     return site
 
 
@@ -224,17 +226,21 @@ def test_cell_bound_global_never_uses_legacy_resolver_fallback(
 
 
 @pytest.mark.skipif(os.name == "nt" or POWERSHELL is None, reason="POSIX FileShare contention")
+@pytest.mark.parametrize("plugin", ["agent-containers", "agent-dispatch"])
 @pytest.mark.parametrize("retry_posix", [True, False], ids=["posix-retry", "windows-only"])
 def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
-    binding_fixture: dict, containers_release: Path, retry_posix: bool,
+    binding_fixture: dict, request: pytest.FixtureRequest, plugin: str, retry_posix: bool,
 ) -> None:
     import fcntl
 
     fixture = binding_fixture
-    environment = _adopter(fixture, "agent-containers", containers_release)
+    release = request.getfixturevalue(plugin.removeprefix("agent-") + "_release")
+    environment = _adopter(fixture, plugin, release)
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
     root = fixture["legacy"]
-    environment["AGENT_CONTAINERS_HOME"] = str(root)
+    environment[
+        "AGENT_CONTAINERS_HOME" if plugin == "agent-containers" else "AGENT_DISPATCH_INSTALL_DIR"
+    ] = str(root)
     _policy(fixture, root, fixture["arguments"], "standalone")
     scripts = fixture["payload"] / "scripts"
     helper = scripts / "installation-context/installation-context.ps1"
@@ -242,7 +248,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     for action in ("status", "probe-plugin-publication", "probe-legacy"):
         result = _run(fixture, environment, [
             POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(helper), action,
-            "-PayloadRoot", str(fixture["payload"]), "-PluginId", "agent-containers",
+            "-PayloadRoot", str(fixture["payload"]), "-PluginId", plugin,
             "-LegacyRoot", str(root),
         ], None)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -252,7 +258,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     cases = []
     for action, decision in decisions.items():
         encoded = json.dumps(decision).replace("'", "''")
-        cases.append(f" '{action}' {{ [Console]::Write('{encoded}'); exit 0 }}\n")
+        cases.append(f" '{action}' {{ Write-Output '{encoded}'; exit 0 }}\n")
     helper.write_text(
         "param([string]$Action)\n"
         "switch($Action){\n" + "".join(cases)
@@ -268,7 +274,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
         assert content.count(predicate) == 1
         gate.write_text(content.replace(predicate, "$posixContention = $false"), encoding="utf-8")
     installer_marker = root / "installer-ran"
-    (scripts / "init.ps1").write_text(
+    (scripts / ("init.ps1" if plugin == "agent-containers" else "install.ps1")).write_text(
         "param([string]$Action,[string]$InstallDir)\n"
         "[IO.File]::WriteAllText((Join-Path $InstallDir 'installer-ran'),'unexpected')\nexit 37\n",
         encoding="utf-8",
@@ -296,7 +302,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     with (root / ".provision.lock").open("a+b") as lock:
         process = subprocess.Popen(
             [POWERSHELL, "-NoLogo", "-NoProfile", "-File",
-             str(fixture["payload"] / "bin/agent-containers.ps1"), "--help"],
+             str(fixture["payload"] / "bin" / f"{plugin}.ps1"), "--help"],
             cwd=fixture["home"], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True,
         )
@@ -304,9 +310,11 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
             deadline = time.monotonic() + 10
             while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
                 time.sleep(0.01)
+            diagnostics = process.communicate(timeout=30) if process.poll() is not None else ("", "")
             assert ready.exists(), {
                 "exit": process.poll(),
                 "phases": phases.read_text() if phases.exists() else "resolver not reached",
+                "output": "".join(diagnostics),
             }
             fcntl.flock(lock, fcntl.LOCK_EX)
             proceed.write_bytes(b"continue")
@@ -329,3 +337,33 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
             if process.poll() is None:
                 process.kill()
             process.wait()
+
+
+@pytest.mark.skipif(os.name == "nt" or POWERSHELL is None, reason="POSIX non-contention I/O failure")
+@pytest.mark.parametrize("plugin", ["agent-containers", "agent-dispatch"])
+def test_powershell_provision_lock_propagates_unrelated_io_failure(
+    binding_fixture: dict, request: pytest.FixtureRequest, plugin: str,
+) -> None:
+    fixture = binding_fixture
+    release = request.getfixturevalue(plugin.removeprefix("agent-") + "_release")
+    environment = _adopter(fixture, plugin, release)
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    root = fixture["legacy"]
+    _policy(fixture, root, fixture["arguments"], "standalone")
+    lock = root / ".provision.lock"
+    lock.symlink_to(lock.name)
+    installer = fixture["payload"] / "scripts" / (
+        "init.ps1" if plugin == "agent-containers" else "install.ps1"
+    )
+    installer.write_text("throw 'installer must not run'\n", encoding="utf-8")
+    result = _run(fixture, environment, [
+        POWERSHELL, "-NoLogo", "-NoProfile", "-File",
+        str(fixture["payload"] / "bin" / f"{plugin}.ps1"), "--help",
+    ], None)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert ".provision.lock" in result.stderr
+    assert "symbolic links" in result.stderr, result.stdout + result.stderr
+    assert "installer must not run" not in result.stderr
+    assert not (root / ".provision-status").exists()
+    assert not (root / "current-version").exists()
+    assert os.readlink(lock) == lock.name

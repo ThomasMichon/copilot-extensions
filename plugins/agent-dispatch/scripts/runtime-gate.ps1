@@ -220,7 +220,9 @@ $lock = $null
 while (-not $lock) {
     try { $lock = [IO.File]::Open((Join-Path $runtimeRoot '.provision.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
     catch [IO.IOException] {
-        if (($_.Exception.HResult -band 0xffff) -notin @(32, 33)) { throw }
+        $code = $_.Exception.HResult -band 0xffff
+        $posixContention = [Environment]::OSVersion.Platform -eq [PlatformID]::Unix -and $code -eq 11
+        if ($code -notin @(32, 33) -and -not $posixContention) { throw }
         Start-Sleep -Milliseconds 200
     }
 }

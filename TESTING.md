@@ -126,6 +126,22 @@ integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
 
+## Optional Logger bootstrap adoption
+
+Logger's corresponding manual `installation-context-full.yml` portfolio
+`logger-bootstrap` runs `test_first_use_logger_bootstrap.py` and the retained
+`test_first_use_logger.py` recipes on native Windows and Ubuntu. It measures the
+actual 15-second hook and exact `{}` stdout, Python-free cold and drift callers,
+caller loss, concurrent submissions, ordinary durable receipts/results, complete
+packaged foundation and native raw-checkout snapshot mappings. Drift must run
+`install` (including isolated task/timer reconciliation), not service-less
+`provision`. Healthy no-op, failed-candidate preservation and six installed help
+consumers remain covered. The 10-second cold-store provider and 45-second
+guidance hooks run independently after bootstrap refusal, preserving exact
+payload binstub identity without configuring a host bridge or processing
+personal sessions. This is an explicit manual integration lane, not required PR
+CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollout.
+
 ## Optional CodeSpaces bootstrap adoption
 
 The manual `installation-context-full.yml` portfolio `codespaces-bootstrap`

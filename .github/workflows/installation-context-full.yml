@@ -19,6 +19,7 @@ on:
           - codespaces-recipes
           - codespaces-bootstrap
           - logger-recipes
+          - logger-bootstrap
           - bridge-contracts
           - bridge-binding
         default: context
@@ -71,6 +72,68 @@ jobs:
           -k test_bridge_cell_stamp_preserves_global_ownership
           --allow-explicit-tiers --test-timeout 60 --timeout 540
 
+  logger-bootstrap-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-bootstrap'
+    name: Logger bootstrap (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual Logger hook, packaged foundation and fixed recipe regressions
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_bootstrap.py
+          --test-file tests/test_first_use_logger.py
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
+      - name: Qualify retained bootstrap and independent hooks
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 180 --timeout 420
+  logger-bootstrap-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-bootstrap'
+    name: Logger bootstrap (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual Logger hook, packaged foundation and fixed recipe regressions
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_bootstrap.py
+          --test-file tests/test_first_use_logger.py
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
+      - name: Qualify retained bootstrap and independent hooks
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_bootstrap_check_reconcile_always_on.py
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 180 --timeout 420
   bridge-contracts-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-contracts'
     name: Bridge historical source proof (Ubuntu)

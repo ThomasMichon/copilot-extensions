@@ -1014,7 +1014,7 @@ _materialize_snapshot_libs() {
     mkdir -p "$libs_dir" || {
         _fail "Snapshot libraries directory cannot be prepared: $libs_dir"; return 1;
     }
-    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation single-instance-lease; do
+    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation single-instance-lease update-driver; do
         src="$PLUGIN_DIR/libs/$lib"
         if [[ ! -f "$src/pyproject.toml" ]]; then
             src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib" || {
@@ -1255,6 +1255,28 @@ install_package() {
     local procutil_out
     if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
       printf '%s\n' "$procutil_out" >&2
+      exit 1
+    fi
+  fi
+  local lease_dir="${PLUGIN_DIR}/libs/single-instance-lease"
+  if [ ! -f "${lease_dir}/pyproject.toml" ]; then
+    lease_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/single-instance-lease"
+  fi
+  if [ -f "${lease_dir}/pyproject.toml" ]; then
+    local lease_out
+    if ! lease_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --reinstall-package agent-single-instance-lease "${lease_dir}" --quiet); then
+      printf '%s\n' "$lease_out" >&2
+      exit 1
+    fi
+  fi
+  local driver_dir="${PLUGIN_DIR}/libs/update-driver"
+  if [ ! -f "${driver_dir}/pyproject.toml" ]; then
+    driver_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/update-driver"
+  fi
+  if [ -f "${driver_dir}/pyproject.toml" ]; then
+    local driver_out
+    if ! driver_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --reinstall-package agent-update-driver "${driver_dir}" --quiet); then
+      printf '%s\n' "$driver_out" >&2
       exit 1
     fi
   fi
