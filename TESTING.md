@@ -656,6 +656,7 @@ lock, feed admission or permission to bypass a publication hold.
 ## Optional Dispatch service replay
 
 `tools/run-plugin-tests.py agent-dispatch --test-file tests/test_delegated_replay_consumer.py
+--test-file tests/test_delegated_replay_binding.py
 --test-file tests/test_delegated_replay_transport.py` exercises the finite replay
 consumer and actual TLS/PoP Gateway/connector with isolated SQLite and replay
 stores. Dispatch's dev preparation selects the same checkout's PR and Fleet
@@ -664,6 +665,14 @@ packages; default Dispatch installs remain independent. The existing manual
 these alongside the local callback contracts on Linux and Windows. No new job,
 production credential or fleet placement is added. This does not qualify the
 unimplemented installed consumer lifecycle or production fleet budgets.
+Scoped controls retain coexisting v1/v2 rows without conversion, reject changed
+bindings and preserve older v1 client construction. Both versions exercise
+the actual watcher-to-Dispatch nonevent/restart/lost-ACK path and lost committed
+register/ACK/cancel responses through real TLS/PoP and both disk owners.
+The programmatic `server.build_app` control exercises the selected scoped
+factory through the real front door's queue, active-route checkpoint and
+lifespan/drain. Default-import protection covers that front door with neither
+optional PR nor Fleet package admitted.
 
 The shared-maintenance cardinality case in `test_waiter_maintenance.py` retains
 real cold SQLite schema creation, 40 durable waiter preparations and a bounded

@@ -32,14 +32,51 @@ not a token claim, namespace negotiation or authorization grant. The embedding
 must prove that the caller actually maps to that scope, keep that mapping stable
 across refresh/restart, and dedicate its pending view to this coordinator.
 Do not share one bounded pending queue among unrelated coordinators or change
-credentials to another principal under the same reference. Gateway capabilities
-do not currently attest a namespace. Foreign deliveries are never ACKed.
+credentials to another principal under the same reference. Legacy v1
+capabilities do not attest a namespace. Foreign deliveries are never ACKed.
 
 The durable binding also records the actual caller Gateway origin, route prefix,
 target and repository. A new binding cannot pick up an older binding's rows.
 Changing the existing caller's Gateway origin refuses a cycle; changing a
 configuration label is not permission to retarget an original request.
 Credentials, proof keys and credential callbacks never enter waiter metadata.
+
+### Explicit scoped v2 selection
+
+Pass `service_binding=<expected binding document>` to the same factory to
+select the PR client's [scoped v2 contract](../../agent-pull-requests/docs/watch-gateway.md#opt-in-scoped-v2).
+The document has exactly `fleet`, `gateway`, `slot`, `namespace`, `principal`,
+`target`, `consumer`, `account` and `repo`; target and repository must agree
+with the explicit route arguments. Obtain these nonsecret expectations from
+trusted deployment configuration, not the first capability response.
+
+The factory copies and validates that document, selects the typed v2 client,
+and adds `protocol: "agent-pull-requests.watch/v2"` plus `service_binding`
+to the durable routing binding. This is a distinct strict variant of the
+legacy five-field binding, not a rewrite of existing rows. Nested data is
+detached from caller mutation. Both variants remain readable on restart;
+indexed scope comparisons include the protocol and every expected service
+field. Changing configuration cannot pick up or modify an older binding's
+unresolved request. Preparing legacy intent with a scoped consumer, or scoped
+intent with a legacy consumer, refuses before capability IO or suspension.
+
+V2 capabilities must match the configured expectation before preparation;
+every subsequent service request carries it and is checked against the actual
+admitted scope. Caller labels remain correlation only, never credentials or
+authority. Missing scoped client support or incompatible live capabilities
+refuses this opt-in before a new wait is prepared. No v1 retry, process
+fallback, automatic record conversion or replacement identity is attempted.
+Rollback to a legacy service leaves scoped rows unresolved for the same
+capable binding to reconcile later.
+
+Omitting `service_binding` retains the existing v1 factory call and does not
+require a scoped-only PR entry point or pass new arguments to an older v1 PR client.
+Ordinary Dispatch imports still require neither optional distribution.
+A successful cycle for one selected binding does not settle other bindings'
+rows: an embedding changing selection must explicitly retain or transfer their
+existing reconciliation obligation. Do not share a bounded pending view among
+independent coordinators or treat a new configuration as permission to abandon
+old waits. Default `server.build_app`/CLI still selects no remote consumer.
 
 ## Existing coordinator cadence and shutdown
 
@@ -62,7 +99,13 @@ refuses this selection. The factory runs once per coordinator lifespan and must
 return a consumer over that exact queue and checkpoint. It does not select a
 different database or acquire credentials. The embedding still owes the actual
 authenticated scope mapping and dedicated server-side pending view above.
-The normal `server.build_app`/CLI supplies no factory and remains unchanged.
+Programmatic service composition can pass that same trusted factory to
+`server.build_app(cfg, replay_consumer_factory=replay_factory)`. The front door
+constructs its normal queue and retains its actual `_owns_active_route`
+checkpoint; it does not accept an alternative ownership callback or turn
+configuration strings into code, caller credentials or admission grants.
+CLI/default startup still supplies no factory. No environment/config selector,
+credential loader or runtime activation is introduced.
 
 The existing startup/60-second waiter-maintenance cadence admits at most one
 remote cycle. A cycle still in flight is not duplicated by another tick or
@@ -163,6 +206,9 @@ embedding. The cadence and active roster determine aggregate cost.
 
 `test_delegated_replay_consumer.py` asserts original-ID recovery, effect-before-ACK,
 generation fences, bounded scans and failure fairness.
+`test_delegated_replay_binding.py` covers strict scoped/legacy variants,
+coexisting persisted rows, changed selection without adoption, detached nested
+data and the older v1 factory signature without scoped imports.
 `test_delegated_replay_transport.py` exercises the actual TLS/PoP caller,
 Gateway/connector and disk owners, including lost responses and revocation,
 channel loss and cancellation during commit. `test_waiter_maintenance.py`
@@ -170,11 +216,17 @@ asserts one cycle for a forty-waiter roster, backoff, native-recovery progress
 under slow remote IO, active/drain fencing and coordinator-owned shutdown.
 The transport suite also drives actual coordinator lifespans through the real
 TLS path, including shutdown during a held service commit and successor recovery.
+Its programmatic `server.build_app` control selects the scoped factory over the
+actual front door's queue, refuses work under an inactive route, resumes the
+finite cycle under current fixture-owned authority, and verifies owner loss
+and lifespan drain without exposing a new authority override.
 It also composes the real `WatchService` observation loop with two Dispatch
 waits for one authorized PR target. Repeated identical native-child
 observations produce no wake, service/consumer restart preserves the original
 request/deadline/registration identities, and a later matching state change
 settles one wake per wait even when an actual committed ACK response is lost.
+Both v1 and explicitly scoped v2 run that watcher path and the lost committed
+register/ACK/cancel recovery controls.
 The native child supplies synthetic provider snapshots; this is not live forge
 credential validation or acceptance of an independent periodic evaluator.
 These are isolated source tests,
