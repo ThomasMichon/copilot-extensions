@@ -132,7 +132,7 @@ def test_receiving_parent_only_accepts_child_owner_that_can_settle(
     parent_config = configs["parent-project"]
     parent_identity = creation_identity.new_machine_identity(parent_config, "tuple-v1")
     parent = tracking.create_new_record(
-        "parent", "worktree/parent", str(tmp_path / "parent"),
+        "parent", "worktree/parent", str(Path(parent_config.default_repo.worktree_root) / "parent"),
         parent_config.repo_name, parent_identity.machine, platform,
         cfg.tracking_dir("parent-project"), machine_identity=parent_identity,
     )
@@ -150,7 +150,7 @@ def test_receiving_parent_only_accepts_child_owner_that_can_settle(
         return
     assert accepted is True
     child = tracking.create_new_record(
-        "child", "worktree/child", str(tmp_path / "child"),
+        "child", "worktree/child", str(Path(child_config.default_repo.worktree_root) / "child"),
         child_config.repo_name, child_identity.machine, platform,
         cfg.tracking_dir("child-project"), machine_identity=child_identity,
         owner_ref=owner_ref,

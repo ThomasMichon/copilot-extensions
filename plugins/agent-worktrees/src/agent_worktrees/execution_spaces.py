@@ -304,6 +304,10 @@ def require_record_mutation(record: Any, config: Any) -> None:
             raise ExecutionSpaceError("record belongs to a different execution space/platform")
         if record.repo != config.repo_name:
             raise ExecutionSpaceError("record does not belong to the receiving project")
+        from .legacy_wsl_record_locality import record_namespace_matches
+
+        if record.checkout_managed and not record_namespace_matches(record, config):
+            raise ExecutionSpaceError("record identity conflicts with the receiving worktree namespace")
         path = project_dir(record.repo) / "worktrees" / f"{record.worktree_id}.yaml"
         if path.exists():
             proven = tracking.load_record(path)

@@ -99,6 +99,16 @@ with optional registry customization, then revalidates it before allocation.
 Absent, empty or unrelated-only maps do not prevent local tuple creation.
 Conflicting local execution evidence still refuses.
 Callers cannot supply arbitrary tuple metadata through this mode.
+The JSON resolve New/short-ID lookup/Resume path likewise accepts the actual
+observed hostname and derived local execution ID without map enrollment.
+Literal hostname suffixes are observations, not requested environments.
+Registered keys, transport aliases and profiles retain target precedence,
+including foreign-platform conflicts; an explicit different environment still
+requires its own transport. Local selection does not bypass record checks:
+managed tuple records must also match the receiving project's absolute worktree
+namespace before lookup or resume can prepare a launch. Adopted external Git
+worktrees retain their independent registration and existing checkout paths;
+they are not forced into the managed allocation directory.
 Derived names retain their observation provenance: a physical customization
 ending in `-win` or `-wsl` is not reparsed as an explicit environment choice.
 Parent-obligation settlement uses the same validated execution owner, including
