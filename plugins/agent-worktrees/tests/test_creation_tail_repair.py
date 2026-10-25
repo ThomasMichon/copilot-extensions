@@ -564,7 +564,7 @@ def test_creation_rechecks_retained_authority_inside_companion_allocation_lock(
 
 @pytest.mark.parametrize("tuple_identity", [False, True])
 @pytest.mark.parametrize("parent_kind", [
-    "original", "original-lexical", "foreign", "same-physical", "missing",
+    "original", "original-lexical", "original-legacy", "foreign", "same-physical", "missing",
     "relative", "moved", "symlink",
 ])
 def test_creation_repair_preserves_only_proven_local_parent_refs(
@@ -589,6 +589,9 @@ def test_creation_repair_preserves_only_proven_local_parent_refs(
         parent_checkout = Path(os.path.relpath(parent_checkout))
     parent_identity = creation.record.machine_identity
     parent_machine = creation.record.machine
+    if parent_kind == "original-legacy":
+        parent_identity = None
+        parent_machine = creation.record.execution_machine
     platform = cfg.detect_platform()
     if parent_kind == "foreign":
         platform = "wsl" if platform != "wsl" else "windows"
@@ -645,6 +648,69 @@ def test_creation_refuses_retained_companion_with_foreign_parent(creation, monke
     code, report = _run(creation, capsys, fix=True)
     assert code == 1 and "different parent owner" in report["error"]
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.parametrize("tuple_identity", [False, True])
+@pytest.mark.parametrize("registry_kind", ["empty", "unscoped"])
+@pytest.mark.parametrize("conflict", ["platform", "binding"])
+def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
+    tmp_path, monkeypatch, capsys, tuple_identity, registry_kind, conflict,
+):
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, tuple_identity=tuple_identity, observed_identity=True,
+    )
+    actual = cfg.detect_platform()
+    parent_project = "parent-project"
+    parent_anchor = tmp_path / parent_project
+    parent_anchor.mkdir()
+    parent_root = Path(cfg.derive_worktree_root(str(parent_anchor)))
+    creation.projects[parent_project] = tmp_path / f".{parent_project}"
+    creation.projects[parent_project].mkdir()
+    parent_config = replace(
+        creation.configs["knowledge"], repo_name=parent_project,
+        repos={parent_project: cfg.RepoConfig(
+            anchor=str(parent_anchor), worktree_root=str(parent_root),
+        )},
+    )
+    creation.configs[parent_project] = parent_config
+    (creation.projects[parent_project] / "config.yaml").write_text(json.dumps({
+        "repo_name": parent_project, "repos": {parent_project: {
+            "anchor": str(parent_anchor), "worktree_root": str(parent_root),
+        }},
+    }))
+    topology = parent_anchor / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+    topology.parent.mkdir()
+    topology.write_text(json.dumps({"machines": {}}))
+    parent_checkout = parent_root / "parent"
+    parent_checkout.mkdir(parents=True)
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(parent_checkout), parent_project,
+        creation.record.execution_machine,
+        ("wsl" if actual != "wsl" else "windows") if conflict == "platform" else actual,
+        creation.projects[parent_project] / "worktrees",
+    )
+    if registry_kind == "unscoped":
+        topology.write_text(
+            json.dumps({"machines": {"other-space": {
+                "hostname": "other-host", "physical_host": "other-host",
+            }}}),
+        )
+    if conflict == "binding":
+        creation.configs[parent_project] = replace(
+            parent_config, machine="other-space", configured_machine="other-space",
+        )
+    record = tracking.load_record(creation.record.yaml_path)
+    record.owner_ref = tracking.format_claim_ref(parent.execution_machine, parent_project, "parent")
+    tracking.save_record(record)
+    before = record.yaml_path.read_bytes(), parent.yaml_path.read_bytes()
+    monkeypatch.setattr(
+        repair, "_prepare_permissions",
+        lambda *a: pytest.fail("legacy parent receiving conflict changed permissions"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and report["error"] and not report["repaired"]
+    assert (record.yaml_path.read_bytes(), parent.yaml_path.read_bytes()) == before
+    assert launch_seed_state.peek(record.yaml_path) == creation.seed
 
 
 @pytest.mark.guard
