@@ -58,7 +58,7 @@ stays out of runtime dependency resolution and ships as plain stdlib files:
 `versioned_runtime.py` owns slot identity/admission and selectors;
 `versioned_runtime_leases.py` owns kernel construction/retention/publication
 ownership; `versioned_runtime_construction.py` owns the finite attached protocol
-and shell adapters; `versioned_runtime_source.py` owns source receipts and exact
+and shell adapters; `versioned_runtime_source.py` owns complete-input fingerprints, source receipts and exact
 source-qualified recovery; `versioned_runtime_publication.py` owns created-file
 proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
 never reverse-imports a compatibility root. Each marketplace payload carries the

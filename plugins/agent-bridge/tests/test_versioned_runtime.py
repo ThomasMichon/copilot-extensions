@@ -1146,6 +1146,8 @@ def test_fingerprint_reads_overlap_with_bounded_ordered_framing(tmp_path, monkey
 
     def observed_read(path):
         nonlocal active, maximum
+        if path not in files:
+            return read_bytes(path)
         with lock:
             active += 1
             maximum = max(maximum, active)
@@ -1184,6 +1186,8 @@ def test_fingerprint_read_failure_keeps_label_order_and_settles_workers(tmp_path
 
     def failing_read(path):
         nonlocal active
+        if path not in files:
+            return read_bytes(path)
         with lock:
             active += 1
             reads.append(path)
