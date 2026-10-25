@@ -1,6 +1,7 @@
 """Classify pinned Main advancement without granting artifact or execution reuse."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from promotion_control import (
@@ -34,7 +35,7 @@ def _controls(repo: Path, entries: dict) -> set[str]:
     return set(paths)
 
 
-def _operator_state(state: dict | None) -> tuple[dict | None, bool]:
+def _operator_state(state: dict | None) -> tuple[str | None, bool]:
     if state is None:
         return None, False
     if (
@@ -42,9 +43,13 @@ def _operator_state(state: dict | None) -> tuple[dict | None, bool]:
         or not isinstance(state.get("pause_reason"), (str, type(None)))
     ):
         raise ControlPreservationError("invalid operator pause state")
-    return {
+    remaining = {
         name: value for name, value in state.items() if name not in ("paused", "pause_reason")
-    }, state["paused"]
+    }
+    try:
+        return json.dumps(remaining, sort_keys=True, allow_nan=False), state["paused"]
+    except (TypeError, ValueError) as exc:
+        raise ControlPreservationError("invalid non-operator pipeline state") from exc
 
 
 def inspect_main_transition(*, repo: Path, before: str, after: str) -> dict:

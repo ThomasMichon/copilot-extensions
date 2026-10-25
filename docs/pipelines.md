@@ -1185,6 +1185,8 @@ Main snapshots against their actual exact declarations. Only declared control
 changes and the operator's `paused`/`pause_reason` settings are control-only.
 Payload, coverage-baseline, unknown-governance, promoter-lineage and rollback
 changes require a new plan; removal of the ownership manifest also refuses.
+Non-operator state comparison preserves JSON types, including nested values;
+boolean/number substitutions and non-finite values cannot hide a policy change.
 Every changed control snapshot requires a fresh trusted execution. This
 classification does not qualify artifacts, prove equivalent construction inputs
 or authorize the old running controller to execute newer policy. The current

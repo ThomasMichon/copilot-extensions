@@ -91,6 +91,18 @@ def test_promoter_lineage_unknown_state_and_invalid_pause_are_not_controls(snaps
         inspect(snapshots)
 
 
+@pytest.mark.parametrize("before,after", [
+    (True, 1), (False, 0), (1, 1.0), ([True], [1]), ({"enabled": False}, {"enabled": 0}),
+    (float("nan"), float("nan")), (float("inf"), float("inf")),
+])
+def test_nonoperator_state_comparison_preserves_json_types_and_finite_values(snapshots, before, after):
+    _root, trees, state, blob = snapshots
+    trees[PRIOR][STATE] = blob({**state, "unknown_policy": before})
+    trees[MAIN][STATE] = blob({**state, "unknown_policy": after})
+    with pytest.raises(transition.ControlPreservationError):
+        inspect(snapshots)
+
+
 @pytest.mark.parametrize("change", ["ownership-removed", "missing-file", "mode", "alias", "ancestry"])
 def test_untrusted_or_incomplete_transition_fails(snapshots, objects, change):
     _root, trees, _state, _blob = snapshots
@@ -113,4 +125,3 @@ def test_mutable_or_invalid_input_is_rejected_before_object_access(objects, befo
     with pytest.raises(transition.ControlPreservationError):
         transition.inspect_main_transition(repo=objects[0], before=before, after=after)
     assert not objects[-1]
-

@@ -1268,6 +1268,15 @@ composer correctly returned no candidate. The fixture now changes ordinary
 payload too and asserts an actual first promotion before advancing fixture Main.
 Both hosted packets must pass the corrected immutable head before PR opening.
 
+The corrected head passed hosted CI `40158566781`: 1753 units, complete
+unit/effect/coverage packet in 27.554 seconds, coverage recorded once. Optional
+Git witness `40158586667` passed all six cases in 1.88 seconds. #8838 then opened.
+Its first current-head review found Python's boolean/number dictionary-equality
+alias in non-operator state. Seven regressions reproduced that class, including
+nested values and non-finite numbers. Canonical type-preserving comparison now
+rejects them; all 66 focused controls passed in 16.51 seconds. Fresh hosted
+qualification and re-review remain required for the corrected head.
+
 ### 2026-10-25 - Complete-source implementation merged; late controls remain
 
 #8790 merged as `28a0ff3911f02d457160dd856b448a8965204931` at
