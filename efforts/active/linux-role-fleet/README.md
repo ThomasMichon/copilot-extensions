@@ -80,6 +80,11 @@ placement is an explicit requirement; no option is a mandatory core dependency.
   controller, credential, publication/signing or Gateway/SSH source custody.
   Campaign owner retains integration and publication; implementation awaits
   the plan's merged review and an explicit execution instruction.
+- **Manager substrate slice:** #8860 owns the bounded
+  [declarative Komodo substrate lifecycle](komodo-substrate-lifecycle.md).
+  Its independent install/adopt/update/recovery source appointment does not
+  transfer client lifecycle, credential/release, SSH, workload or ARC ownership.
+  An offline role projection is not accepted as manager installation.
 
 ## Context
 
