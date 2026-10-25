@@ -127,6 +127,7 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
 @pytest.mark.parametrize("change", [
     "reselected", "substituted", "unavailable", "after-freeze", "during-copy",
     "missing-import", "manifest-array", "identity-array",
+    "invalid-installer", "invalid-fragment",
 ])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
@@ -164,6 +165,13 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
         (payload / ("payload-invocation.json" if change == "manifest-array" else "plugin.json")).write_text(
             "[]", encoding="utf-8",
         )
+    elif change in {"invalid-installer", "invalid-fragment"}:
+        script = payload / "scripts" / (
+            "installer_engine.py" if change == "invalid-installer"
+            else "installation-context/_installation_context_source.py"
+        )
+        assert script.is_file()
+        script.write_text("def broken(\n", encoding="utf-8")
     drain(root=root)
     result = status(request.id, root=root)
     assert result.spec == request.spec and result.state == "completed" and result.exit_code == 1

@@ -371,7 +371,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
                 payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
             ) != admission:
                 raise ProvisionError("owning source or installation changed while freezing provision inputs")
-        except (ProvisionError, OSError, ValueError, ImportError) as error:
+        except (ProvisionError, OSError, ValueError, ImportError, SyntaxError) as error:
             if not logger_snapshot:
                 raise
             # No installer has started; this new recipe can certify a settled refusal.
