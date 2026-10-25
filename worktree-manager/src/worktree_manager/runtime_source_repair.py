@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 from pathlib import Path
 
 from .runtime_source import ResolvedSource
@@ -41,19 +42,25 @@ def verify_engine(root: Path, pin: str | None) -> None:
     if pin is None:
         raise ValueError("Prepared engine repair has no transaction source pin")
     identity = json.loads(pin)
-    version = identity["runtime_version"]
+    base_version = identity["runtime_version"]
     manifest_path = root / "deploy-manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise ValueError("Prepared engine repair has no ordinary deployment receipt")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     runtime = _runtime_installer().runtime
     selector = root / "current-version"
+    if selector.is_symlink() or not selector.is_file():
+        raise ValueError("Prepared engine repair has no ordinary selected generation")
+    version = selector.read_text(encoding="utf-8").strip()
     slot = runtime.version_dir(root, version)
     if (
         not isinstance(manifest, dict) or manifest.get("service") != "agent-worktrees"
-        or any(manifest.get(key) != value for key, value in identity.items())
-        or selector.is_symlink() or not selector.is_file()
-        or selector.read_text(encoding="utf-8").strip() != version
+        or manifest.get("runtime_source") != identity["runtime_source"]
+        or manifest.get("runtime_version") != version
+        or not (
+            version == base_version
+            or re.fullmatch(re.escape(base_version) + r"\.repair\.[0-9a-f]{32}", version)
+        )
         or slot.is_symlink() or not slot.is_dir()
         or not isinstance(manifest.get("venv"), str) or Path(manifest["venv"]) != slot
         or not runtime.is_complete(root, version)

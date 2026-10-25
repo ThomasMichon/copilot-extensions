@@ -113,22 +113,47 @@ def _prepare(directory: Path) -> dict:
         advanced = []
 
         def invoke(command, environment, cwd):
-            result = REAL_RUN(
-                command, env=environment, cwd=cwd, capture_output=True,
-                text=True, encoding="utf-8", **no_window_kwargs(),
+            def run_native():
+                result = REAL_RUN(
+                    command, env=environment, cwd=cwd, capture_output=True,
+                    text=True, encoding="utf-8", **no_window_kwargs(),
+                )
+                assert result.returncode == 0, result.stdout + result.stderr
+                return result.returncode
+
+            run_native()
+            original = (case.runtime / "current-version").read_text().strip()
+            slot = case.runtime / "versions" / original
+            python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+            observed = REAL_RUN(
+                [str(python), "-I", "-c",
+                 "import agent_worktrees.__main__;print(agent_worktrees.__main__.__file__)"],
+                capture_output=True, text=True, env=environment, timeout=20, **no_window_kwargs(),
             )
-            assert result.returncode == 0, result.stdout + result.stderr
+            assert observed.returncode == 0, observed.stdout + observed.stderr
+            damaged = Path(observed.stdout.strip())
+            damaged.write_text('raise RuntimeError("controlled same-source engine health failure")\n')
+            retained = {path: path.read_bytes() for path in (
+                damaged, slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+            )}
+            run_native()
+            repaired = (case.runtime / "current-version").read_text().strip()
+            assert repaired != original and repaired.startswith(original + ".repair.")
+            rc = run_native()
+            assert (case.runtime / "current-version").read_text().strip() == repaired
+            assert all(path.read_bytes() == content for path, content in retained.items())
             native.append({
                 "artifact": str(cwd),
                 "pin": json.loads(environment["COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"]),
                 "owner": environment["COPILOT_PLUGIN_STAGED_FROM"],
                 "runtime_only": environment["AGENT_WORKTREES_TARGETED_UPDATE"],
+                "original": original, "repaired": repaired, "healthy_reuse": True,
             })
             _git(case.source, "switch", "-q", "dev")
             (case.fresh / "source-fixture.txt").write_text("later merged development source\n")
             advanced.append(_commit(case.source, "Advance source after repair"))
             _git(case.source, "switch", "-q", "main")
-            return result.returncode
+            return rc
 
         patch.setattr(update_bootstrap, "_wait", invoke)
         suite = []
@@ -201,7 +226,7 @@ def _prepare(directory: Path) -> dict:
             "installed": manifest["runtime_source"]["source_commit"],
             "suite": suite[0]["packet"]["sources"]["agent-worktrees"]["identity"],
             "owner_retained": manifest["commandBinding"] == original_owner,
-            "data_preserved": True, "native_constructions": len(native),
+            "data_preserved": True, "repair": native[0],
         }
 
 
@@ -213,7 +238,8 @@ def test_engine_repair_retains_one_commit_and_incumbent_data() -> None:
     assert observed["selected"] == observed["installed"] != observed["advanced"]
     assert observed["suite"]["runtime_source"]["source_commit"] == observed["selected"]
     assert observed["owner_retained"] and observed["data_preserved"]
-    assert observed["native_constructions"] == 1
+    assert observed["repair"]["original"] != observed["repair"]["repaired"]
+    assert observed["repair"]["healthy_reuse"]
 
 
 if __name__ == "__main__":

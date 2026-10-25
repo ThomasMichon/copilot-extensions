@@ -232,14 +232,17 @@ def test_prepare_engine_reads_capability_without_importing_prepared_code(
         assert repair.prepare_engine(selected) == (payload, '{"exact": "pin"}')
 
 
-@pytest.mark.parametrize("fault", ["", "manifest", "selector", "slot", "incomplete", "venv", "service"])
+@pytest.mark.parametrize("fault", [
+    "", "repair", "repair-incomplete", "manifest", "selector", "slot", "incomplete", "venv", "service",
+])
 def test_repair_requires_actual_selected_complete_source(tmp_path, monkeypatch, fault):
     root = tmp_path / "runtime"
-    version = "1.0.0.src.fixture"
+    base_version = "1.0.0.src.fixture"
+    version = base_version + ".repair." + "d" * 32 if fault.startswith("repair") else base_version
     slot = root / "versions" / version
     slot.mkdir(parents=True)
-    pin = {"runtime_version": version, "runtime_source": {"source_commit": "a" * 40}}
-    manifest = {**pin, "service": "agent-worktrees", "venv": str(slot)}
+    pin = {"runtime_version": base_version, "runtime_source": {"source_commit": "a" * 40}}
+    manifest = {**pin, "runtime_version": version, "service": "agent-worktrees", "venv": str(slot)}
     if fault == "manifest":
         manifest["runtime_source"] = {"source_commit": "b" * 40}
     if fault in {"venv", "service"}:
@@ -250,9 +253,9 @@ def test_repair_requires_actual_selected_complete_source(tmp_path, monkeypatch, 
         slot.rename(slot.with_name("retained-slot"))
     monkeypatch.setattr(repair, "_runtime_installer", lambda: SimpleNamespace(runtime=SimpleNamespace(
         version_dir=lambda r, v: r / "versions" / v,
-        is_complete=lambda *a: fault != "incomplete",
+        is_complete=lambda *a: fault not in {"incomplete", "repair-incomplete"},
     )))
-    if fault:
+    if fault not in {"", "repair"}:
         with pytest.raises(ValueError, match="did not select"):
             repair.verify_engine(root, json.dumps(pin))
     else:

@@ -3304,13 +3304,18 @@ Independent service-source engine repair has a separate native contract:
 python tools/run-manager-runtime-acceptance.py --root .validation --contract engine-source
 ```
 
-It uses the same 300-second group and 30-second assertion budgets, with one
-real engine construction in an automatically cleaned OS-temporary sandbox.
+It uses the same 300-second group and 30-second assertion budgets in an
+automatically cleaned OS-temporary sandbox.
 The existing account-isolated repair fixture supplies the registered incumbent;
 only native Copilot payload acquisition is substituted with its local published
 fixture. Manager acquires merged Dev, prepares it through trusted tools, runs
 the actual native runtime-only repair and queries the constructed engine's real
-inventory. Upstream Dev advances between repair and inventory: the complete
+inventory. It first constructs the exact source engine, damages an installed
+module, then invokes the same pinned native command twice: canonical distinct
+repair must preserve the damaged slot, and the next call must reuse the healthy
+repair without changing selection. This includes the canonical repair owner's
+control/candidate constructions, not an in-place edit or a fake successful
+native result. Upstream Dev advances between repair and inventory: the complete
 subsequent suite packet must still name the original commit/tree and artifact.
 The final suite process is intercepted to check that packet and exact selected
 argv; this does not exercise marketplace refresh or the full update portfolio.

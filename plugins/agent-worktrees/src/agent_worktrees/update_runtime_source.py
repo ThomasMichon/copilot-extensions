@@ -157,7 +157,7 @@ class PreparedRuntimeSource:
         fields = json.loads(self.identity)
         if manifest.get("service") != fields["runtime_source"]["plugin"]:
             raise ValueError("Source deployment receipt names another runtime")
-        if any(manifest.get(key) != value for key, value in fields.items()):
+        if manifest.get("runtime_source") != fields["runtime_source"]:
             return None
         marker = root / "current-version"
         if marker.is_symlink() or (marker.exists() and not marker.is_file()):
@@ -166,9 +166,15 @@ class PreparedRuntimeSource:
             selected = marker.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             return None
-        slot = root / "versions" / self.version
+        if not (
+            selected == self.version
+            or re.fullmatch(re.escape(self.version) + r"\.repair\.[0-9a-f]{32}", selected)
+        ):
+            return None
+        slot = root / "versions" / selected
         if (
-            selected != self.version or not slot.is_dir() or slot.is_symlink()
+            manifest.get("runtime_version") != selected
+            or not slot.is_dir() or slot.is_symlink()
             or not isinstance(manifest.get("venv"), str)
             or Path(manifest["venv"]) != slot
         ):
@@ -176,7 +182,7 @@ class PreparedRuntimeSource:
         try:
             result = subprocess.run(
                 [sys.executable, "-I", "-B", str(owner / "scripts" / "versioned_runtime.py"),
-                 "--root", str(root), "--json", "is-complete", self.version],
+                 "--root", str(root), "--json", "is-complete", selected],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=30, check=False, **no_window_kwargs(),
             )
@@ -193,7 +199,7 @@ class PreparedRuntimeSource:
                 f"Source completion probe failed: {result.stderr.strip() or 'invalid JSON response'}"
             ) from error
         if (
-            not isinstance(complete, dict) or complete.get("version") != self.version
+            not isinstance(complete, dict) or complete.get("version") != selected
             or type(complete.get("complete")) is not bool
             or result.returncode != (0 if complete["complete"] else 1)
         ):

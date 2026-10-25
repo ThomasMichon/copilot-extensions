@@ -2702,8 +2702,14 @@ rather than silently ignoring a required pin. Nothing retires the existing
 explicit CLI pin.
 
 A package-version match alone cannot skip a prepared-source update. Its receipt
-must match the full source identity and runtime version, select that exact
-existing completed slot, and name its venv. Completion-probe subprocess failures,
+must match the full source identity, select that completed source slot or its
+strictly named distinct repair generation, record the actual selected runtime
+version, and name its venv. A healthy selected repair remains current for the
+original exact source pin; a foreign receipt or incomplete repair does not.
+Source-backed engine construction routes the canonical health-repair-required
+outcome through its existing distinct-generation repair owner rather than
+rewriting the damaged slot. Ordinary package-only behavior is unchanged.
+Completion-probe subprocess failures,
 including timeouts, become explicit receipt failures on the collected step,
 not exceptions that abort the remaining update portfolio. Native candidate construction and
 health remain the installer's responsibility. Ordinary runtime updates clear

@@ -1452,7 +1452,12 @@ revalidates the incumbent registered command owner and default runtime root;
 the prepared native installer supplies code, not a new owner or data root.
 Repair uses the installer's existing runtime-only update mode, enforces the
 complete transaction pin and requires the actual pinned slot and deployment
-receipt to be complete. The repaired engine then supplies real inventory, and
+receipt to be complete. A corrupt completion marker or failed installed-health
+check for an existing source generation enters the engine's canonical distinct
+`repair` mode, preserving the damaged generation. An already selected healthy
+repair with the same complete source identity is reused; the source pin still
+names the original source assembly, not a different commit.
+The repaired engine then supplies real inventory, and
 the suite prepares all eligible runtimes from the same original commit/tree
 without fetching a moving branch again. Manager's own source remains independent.
 This is legacy/default-root repair; namespaced source repair refuses before

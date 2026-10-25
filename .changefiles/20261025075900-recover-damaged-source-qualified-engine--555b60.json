@@ -1,0 +1,9 @@
+{
+  "comment": "Recover damaged source-qualified engine generations through canonical distinct repair and reuse their exact healthy selection",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
