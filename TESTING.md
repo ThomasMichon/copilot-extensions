@@ -357,6 +357,9 @@ Linux fixtures explicitly construct the disposable-daemon native support with
 its canonical build helper before cold admission. The synthetic source commit
 includes that support before source materialization and identity publication;
 no launcher compiles code or mutates an accepted source assembly.
+The Python-free Bridge construction PATH retains the platform C compiler,
+assembler and linker for the source package's explicit native build; it still
+exposes no host Python or UV. This is not compiler-free host qualification.
 Acknowledged owners and foundation/queue/kernel custody settle before fixture
 cleanup, including failure paths. Registration/start effects alone use isolated
 synthetic adapters; no host task/unit or live bridge is launched. This portfolio

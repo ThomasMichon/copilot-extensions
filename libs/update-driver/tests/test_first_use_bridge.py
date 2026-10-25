@@ -286,10 +286,14 @@ def bridge_service_adapter(env):
         env["USERNAME"] = "fixture-user"
     else:
         adapter = Path(env["PATH"])
-        for name in ("seq", "xargs"):
+        for name in ("seq", "xargs", "cc", "as", "ld"):
             executable = shutil.which(name)
             assert executable, f"native installer requires {name}"
             (adapter / name).symlink_to(executable)
+        for name in ("python", "python3", "uv"):
+            assert shutil.which(name, path=env["PATH"]) is None, (
+                f"cold Bridge fixture exposes {name}"
+            )
         real_curl = (adapter / "curl").resolve()
         (adapter / "curl").unlink()
         (adapter / "curl").write_text(
