@@ -898,3 +898,24 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   no significant findings. It did not re-review or qualify every prior
   diagnostics surface. The selected source was clean and unchanged during
   review. Native hosted execution and all remaining effort gates are still open.
+- Managed publication opened draft #8826 at `57f7bd761f96905b710dc96afc59bcf485fece76`.
+  Its implementation scope matched the reviewed code; only the journal changed.
+  Required CI then failed the source-module cap: upstream growth plus the
+  bounded cleanup addition put `plugin_test_containment.py` over the limit.
+  No native acceptance was dispatched and no required check was bypassed.
+- The already-authorized retry operation, cleanup error and reaped-directory
+  removal were mechanically extracted into `tools/plugin_test_cleanup.py`.
+  The containment owner still decides reaping/retention and preserves its
+  public cleanup/error imports; package and directly executed script imports
+  use the same owning helper. Clock-injection tests now patch the helper's own
+  clock rather than its former module. Retry limits, warning, allowlist,
+  original causes and interruption behavior are unchanged. Focused native
+  sharing recovery, group cleanup, retained/unreaped, interruption and
+  aggregate-limit controls passed **48 tests, 143 deselected in 2.20 seconds**;
+  targeted Ruff passed. Source size is checked by the normal guard, not a raised
+  baseline.
+- The normal GitHub review request was accepted while the PR remained draft,
+  but no review was delivered or remained requested; draft automation skips
+  review. The bounded independent code review above is recorded separately,
+  not represented as a passing GitHub verdict. The draft and no-merge/no-rollout
+  hold remain in force.

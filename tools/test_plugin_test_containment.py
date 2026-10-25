@@ -1025,7 +1025,7 @@ def test_sandbox_cleanup_retries_only_transient_windows_errors(
     failure.winerror = winerror
     calls, sleeps = [], []
     monkeypatch.setattr(plugin_test_containment.sys, "platform", "win32")
-    monkeypatch.setattr(plugin_test_containment, "time", SimpleNamespace(
+    monkeypatch.setattr(plugin_test_containment.plugin_test_cleanup, "time", SimpleNamespace(
         monotonic=lambda: 10, sleep=sleeps.append,
     ))
 
@@ -1085,7 +1085,7 @@ def test_sandbox_cleanup_retry_expires_without_hiding_failure(
     calls, sleeps = [], []
     clock = iter([10, 14.99, 15])
     monkeypatch.setattr(plugin_test_containment.sys, "platform", "win32")
-    monkeypatch.setattr(plugin_test_containment, "time", SimpleNamespace(
+    monkeypatch.setattr(plugin_test_containment.plugin_test_cleanup, "time", SimpleNamespace(
         monotonic=lambda: next(clock), sleep=sleeps.append,
     ))
 

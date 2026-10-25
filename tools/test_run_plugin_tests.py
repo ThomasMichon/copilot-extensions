@@ -243,7 +243,7 @@ def test_reaped_group_cleanup_expiry_retains_outer_without_another_retry(
     clock = iter([10, 14.99, 15])
     allow_cleanup = False
     monkeypatch.setattr(containment.sys, "platform", "win32")
-    monkeypatch.setattr(containment, "time", SimpleNamespace(
+    monkeypatch.setattr(containment.plugin_test_cleanup, "time", SimpleNamespace(
         monotonic=lambda: next(clock), sleep=lambda delay: None,
     ))
 
