@@ -20,7 +20,6 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
 from .git_errors import GitError, _redact_args as _redact_args
@@ -95,6 +94,8 @@ def resolve_to_anchor(repo_path: Path) -> Path:
     *is* the anchor itself, tried as a fallback (#7088).
     """
     def _probe(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        from agent_procutil import no_window_kwargs
+
         return subprocess.run(
             ["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=5,
             env=repository_identity_env(), **no_window_kwargs(),
@@ -171,6 +172,8 @@ def git(
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
 
     def execute():
+        from agent_procutil import no_window_kwargs
+
         if kill_tree and timeout is not None:
             return push_timeout.run_bounded(
                 cmd, cwd=cwd, env=env, timeout=timeout,
@@ -1188,6 +1191,8 @@ def pin_git_credential(repo_path: str | Path, login: str, host: str = "github.co
     if not path.is_dir() or shutil.which("gh") is None:
         return False
     env = repository_identity_env()
+    from agent_procutil import no_window_kwargs
+
     try:
         # ``--git-dir`` (not ``--is-inside-work-tree``) so this also pins a
         # *bare* anchor repo (agent-worktrees' own pattern for a checkout

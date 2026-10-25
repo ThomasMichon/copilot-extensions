@@ -1,12 +1,49 @@
 """Fresh URL authority and exact, batched transport configuration."""
 
 import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import git_ops, pr_publish
+from agent_worktrees import git_ops, pr_publish, tracking
+from agent_worktrees.config import PRConfig
 from agent_worktrees.git_push_transport import REMOTE_TRANSPORT_SETTINGS
 from pr_test_helpers import _stub_remote_target
+
+
+def test_cold_target_import_does_not_load_native_process_helpers():
+    from agent_procutil import no_window_kwargs
+
+    script = """
+import sys
+assert "agent_procutil" not in sys.modules and "ctypes" not in sys.modules
+class RefuseNative:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in ("agent_procutil", "ctypes"):
+            raise AssertionError("target import loaded native process helpers")
+sys.meta_path.insert(0, RefuseNative())
+sys.path.insert(0, sys.argv[1])
+print("before-policy-import", flush=True)
+from agent_worktrees import git_ops
+print("git-policy-imported", flush=True)
+import faulthandler
+faulthandler.dump_traceback_later(10)
+from agent_worktrees import pr_publish, publication_deadline
+faulthandler.cancel_dump_traceback_later()
+print("target-policy-imported", flush=True)
+assert callable(git_ops.git) and callable(pr_publish.head_branch_gone)
+assert publication_deadline.validate(30) == 30
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(Path(__file__).resolve().parents[1] / "src")],
+            capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"cold target import timed out: {exc.stdout!r} {exc.stderr!r}")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.fixture
@@ -117,6 +154,45 @@ def test_remote_snapshot_refuses_a_push_destination_changed_between_reads(reposi
     monkeypatch.setattr(git_ops, "git", repoint_after_fetch)
     _, _, result = pr_publish._remote_snapshot("fork", cwd=str(repository))
     assert result.head_repo == result.head_identity == ""
+
+
+def test_head_absence_uses_one_lock_probe_and_refuses_a_recorded_repoint(
+    repository, tmp_path, monkeypatch,
+):
+    remote = tmp_path / "first.git"
+    other = tmp_path / "second.git"
+    for path in (remote, other):
+        git_ops.git("init", "--template=", "--bare", "-b", "main", str(path))
+    git_ops.git("remote", "add", "fork", str(remote), cwd=repository)
+    repo = SimpleNamespace(remote="origin", pr=PRConfig())
+    pr = tracking.PRRecord(
+        branch="feature/absent", remote="fork",
+        head_repo=git_ops.slug_from_url(str(remote)),
+        head_identity=pr_publish._identity(str(remote), str(repository)),
+    )
+    original = git_ops.git
+    calls = []
+
+    def observed(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("remote", "get-url") or "ls-remote" in args:
+            assert pr_publish._held.paths
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", observed)
+    assert pr_publish.head_branch_gone(repo, pr, str(repository)) is True
+    assert calls.count(("rev-parse", "--git-common-dir")) == 1
+    assert ("remote",) not in calls
+    assert calls.count(("remote", "get-url", "--push", "--all", "fork")) == 1
+    original("remote", "set-url", "fork", str(other), cwd=repository)
+    calls.clear()
+    assert pr_publish.head_branch_gone(repo, pr, str(repository)) is False
+    assert calls.count(("rev-parse", "--git-common-dir")) == 1
+    assert not any("ls-remote" in args for args in calls)
+    original("remote", "remove", "fork", cwd=repository)
+    calls.clear()
+    assert pr_publish.head_branch_gone(repo, pr, str(repository)) is False
+    assert not any("ls-remote" in args for args in calls)
 
 
 @pytest.mark.parametrize("detail,error", [
