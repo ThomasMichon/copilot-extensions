@@ -628,7 +628,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     # not to the daemon's own (about to change) cwd. Lexically, never
     # dereferenced: the fixed handle is a symlink that cutover repoints, and a
     # host bound to its current target would be pinned to that generation.
-    socket_path = os.path.abspath(socket_path)
+    socket_path = str(Path(socket_path).absolute())
     control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
 
     # Pin the resident daemon's CWD to the stable AGENT_MCP_HOME directory
@@ -648,6 +648,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     # there) and is never a directory anything else deletes.
     home_dir = ipc.default_home_dir()
     home_dir.mkdir(parents=True, exist_ok=True)
+    # Keep lazily imported consumers and child processes on the launch-time
+    # selection rather than resolving a relative override again after chdir.
+    os.environ["AGENT_MCP_HOME"] = str(home_dir)
     os.chdir(home_dir)
 
     server = _serve.Server(

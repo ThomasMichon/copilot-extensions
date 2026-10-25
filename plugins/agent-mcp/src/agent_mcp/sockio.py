@@ -27,8 +27,9 @@ import sys
 import threading
 from pathlib import Path
 
+from .home import default_home_dir as default_home_dir
+
 _TCP_HOST = "127.0.0.1"
-_LEGACY_ROOT = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
 
 
 class HostUnreachableError(OSError):
@@ -41,18 +42,6 @@ class HostUnreachableError(OSError):
     *handshake* keeps the old fall-back-to-direct behavior (a live host declined
     this particular attach).
     """
-
-
-def default_home_dir() -> Path:
-    """The stable ``$AGENT_MCP_HOME`` directory (default ``~/.agent-mcp``).
-
-    The one canonical, always-durable directory for this process -- never an
-    ephemeral worktree, an install-time backup dir, or any other directory
-    that can vanish out from under a long-lived resident daemon while it is
-    still running (see :func:`default_socket_path`'s own handle, which
-    already lives here).
-    """
-    return Path(os.environ.get("AGENT_MCP_HOME", Path.home() / _LEGACY_ROOT))
 
 
 def default_socket_path() -> Path:
@@ -69,7 +58,7 @@ def absolute_handle(raw: str | Path) -> str:
     spawns) to one generation. Resolution is still attempted so a symlink
     loop raises here (``RuntimeError``/``OSError``) for the caller's fallback.
     """
-    path = os.path.abspath(os.fspath(raw))
+    path = str(Path(raw).absolute())
     Path(path).resolve()
     return path
 

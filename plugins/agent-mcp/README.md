@@ -17,6 +17,23 @@ policy for custom agents or the runtime decision to delegate. Use
 ownership, readiness sections, and anti-self-delegation; use
 `delegation-guidance:delegating-work` for task decomposition.
 
+## Legacy state home
+
+The supported legacy layout uses `~/.agent-mcp` when `AGENT_MCP_HOME` is
+unset or empty. A nonempty override selects that directory; a relative value
+is made absolute against the launch directory, without collapsing `..`,
+expanding literal path text or dereferencing symlinks. Selection alone creates
+nothing; the filesystem retains its normal symlink-plus-parent semantics.
+
+Named bridge configs, overlays, default file storage, shared token caches,
+materialization and source-digest keys use this common home. The resident
+`serve` command binds the absolute selection into its process environment
+before changing cwd, so lazy consumers and descendants do not resolve a
+relative home a second time. Explicit socket paths keep their launch-directory
+meaning and may intentionally put socket-associated routing and lease files
+outside the home. This compatibility behavior neither activates installation
+cells nor migrates existing state.
+
 ## Standalone quick start
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a

@@ -37,14 +37,13 @@ import tempfile
 import time
 from pathlib import Path
 
+from ..home import default_home_dir
+
 log = logging.getLogger("agent-mcp.auth.cache")
 
 
 def _root() -> Path:
-    base = os.environ.get("AGENT_MCP_HOME")
-    _legacy = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
-    root = Path(base) if base else Path.home() / _legacy
-    return root / "token-cache"
+    return default_home_dir() / "token-cache"
 
 
 def default_key(
@@ -141,7 +140,9 @@ def write(key: str, token: str, *, ttl: str = "auto") -> bool:
     root = _root()
     try:
         root.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(root), prefix=".tmp-", suffix=".json")
+        # tempfile collapses ".."; resolve the existing destination first so
+        # symlink-plus-parent homes keep their filesystem-selected target.
+        fd, tmp = tempfile.mkstemp(dir=str(root.resolve()), prefix=".tmp-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"token": token, "exp": exp, "acquired_at": time.time()}, f)
