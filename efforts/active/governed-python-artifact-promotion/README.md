@@ -815,6 +815,16 @@ win grows with build complexity.
   Native parity tests include both malformed examples and valid compressed
   boundaries. Both fixes are synchronized through every native adopter.
   Final-head review and Linux/Windows qualification remain open.
+- The repaired policy head passes all six selected Linux/Windows jobs and
+  required CI. A fresh review found a separate stable-identity defect:
+  per-attempt acquisition counters entered the construction and health hash.
+  The generation receipt now projects only validated schema, policy and exact
+  file facts; complete counters remain available through acquisition evidence.
+  A real TLS reacquisition after unrelated index growth reuses the same healthy
+  numbered generation, while changed/removed policy still refuses reuse.
+  This regression plus existing snapshot controls passes all 34 cases locally.
+  All eight snapshot adopters are synchronized; final-head review/native
+  qualification remain open.
 
 ### 2026-10-24 - Concrete exact-wheel acquisition design approved
 

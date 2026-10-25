@@ -167,6 +167,34 @@ def test_actual_owner_native_configuration_and_tls_download_into_complete_inspec
                 )
                 assert proof.stdout.strip() == "1.0"
             assert not poison.exists()
+            route = "/simple/" + record["wheels"][0]["name"] + "/"
+            status, headers, content = state["routes"][route]
+            metadata = json.loads(content)
+            metadata["files"].append({
+                **metadata["files"][0], "filename": "unselected-2.0-py3-none-any.whl",
+            })
+            state["routes"][route] = status, headers, json.dumps(metadata).encode()
+            with acquire_wheel_inputs(
+                record["wheels"], feeds=inputs.feeds, download_origins=inputs.download_origins,
+                cutoffs=inputs.cutoffs, policy_id=inputs.policy_id, limits=limits(),
+                deadline=deadline, ssl_context=inputs.context, proxies=inputs.proxies,
+                procutil=worker_procutil(),
+            ) as reacquired:
+                repeated = reacquired.construction_inputs(profile_wheel_inputs(
+                    inputs.profile, reacquired.snapshot, max_archive_bytes=4096,
+                    max_unpacked_bytes=4096, max_metadata_bytes=4096, deadline=deadline,
+                ))
+                assert reacquired.evidence()["metadata_bytes"] > acquired.evidence()["metadata_bytes"]
+                assert repeated.receipt() == wheel_inputs.receipt()
+                assert set(repeated.receipt()["acquisition"]) == {
+                    "schema", "version", "policy_id", "files",
+                }
+                with engine.numbered_candidate(
+                    root, "1.0.0", plugin=plugin, uv=Path(shutil.which("uv")),
+                    base_python=Path(sys.executable), health_module="demo",
+                    local_packages=("demo",), wheel_inputs=repeated,
+                ) as reused:
+                    assert reused.reused and reused.payload_hash == built.payload_hash
             altered = acquired.evidence()
             altered["policy_id"] = "sha256:" + "0" * 64
             changed = replace(
@@ -180,7 +208,7 @@ def test_actual_owner_native_configuration_and_tls_download_into_complete_inspec
                         local_packages=("demo",), wheel_inputs=candidate_inputs,
                     ):
                         pytest.fail("changed or removed acquisition policy reused the generation")
-    assert len(state["requests"]) == 2
+    assert len(state["requests"]) == 4
     assert all(not path.exists() for path in paths)
 
 

@@ -3413,7 +3413,11 @@ No production caller or enabled default budget is supplied.
 the approved profile/lock. Actual policy/file bindings enter construction
 identity and installed health; changing or stripping them cannot reuse that
 generation. Legacy wheel inputs without this optional evidence keep their
-existing receipt shape. This consistency binding is not approval or offline
+existing receipt shape. Per-attempt request, redirect, byte and storage counters
+remain available through `AcquiredWheels.evidence()` but do not enter stable
+generation identity or installed health; unrelated index growth must not
+invalidate the same admitted policy and exact wheels.
+This consistency binding is not approval or offline
 reuse authority: authenticated admission, supplied revocation, source fallback,
 real release/client integration and measured production budgets remain parent
 gates.

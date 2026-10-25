@@ -157,7 +157,10 @@ class WheelInstallInputs:
             },
         }
         if self.acquisition_json is not None:
-            result["acquisition"] = self._acquisition()
+            acquisition = self._acquisition()
+            result["acquisition"] = {
+                key: acquisition[key] for key in ("schema", "version", "policy_id", "files")
+            }
         return result
 
     def _acquisition(self) -> dict:
