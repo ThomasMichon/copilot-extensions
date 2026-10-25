@@ -129,6 +129,7 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
     "missing-import", "manifest-array", "identity-array",
     "invalid-installer", "invalid-fragment",
     "metadata-project", "metadata-tool", "metadata-uv", "metadata-sources", "dependency-project",
+    "unseasoned-artifact",
 ])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
@@ -193,6 +194,11 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
             "metadata-sources": '[project]\nname="agent-logger"\n[tool.uv]\nsources="damaged"\n',
             "dependency-project": 'project="damaged"\n',
         }[change], encoding="utf-8")
+    elif change == "unseasoned-artifact":
+        (payload / "unseasoned.whl").write_bytes(b"unadmitted local artifact")
+        manifest = payload / "pyproject.toml"
+        manifest.write_text(manifest.read_text() + '\n[tool.uv.sources]\n'
+                            'unseasoned={path="unseasoned.whl"}\n', encoding="utf-8")
     drain(root=root)
     result = status(request.id, root=root)
     assert result.spec == request.spec and result.state == "completed" and result.exit_code == 1
@@ -201,6 +207,8 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
         assert "Runtime input content changed while freezing inputs" in result.log_path.read_text()
     if change.startswith("metadata-") or change == "dependency-project":
         assert "must be a table" in result.log_path.read_text()
+    if change == "unseasoned-artifact":
+        assert "local UV artifacts cannot prove release age" in result.log_path.read_text()
     assert not (installation / "executed").exists()
     assert (installation / ".install-stage").exists() == (change in {"after-freeze", "during-copy"})
 
