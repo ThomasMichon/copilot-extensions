@@ -117,11 +117,15 @@ def test_real_native_cli_health_uses_configured_not_ambient_identity(
     monkeypatch.setenv("AGENT_INDEX_INSTALLATION_ID", "ambient-spoof")
     with (tmp_path / "identity-host.log").open("w", encoding="utf-8") as output:
         with owned_python(
-            ["-c", "import sys; from agent_index_service.__main__ import main; "
+            ["-c", "import faulthandler,sys,time; "
+             "faulthandler.dump_traceback_later(10,repeat=True); "
+             "print('native-cli-interpreter-start',time.monotonic(),flush=True); "
+             "from agent_index_service.__main__ import main; "
              "raise SystemExit(main(sys.argv[1:]))", "serve", "--config", str(config_file)],
             cwd=tmp_path, stdout=output,
         ) as process:
-            deadline = time.monotonic() + 30
+            started = time.monotonic()
+            deadline = started + 30
             health = None
             while time.monotonic() < deadline:
                 try:
@@ -135,6 +139,8 @@ def test_real_native_cli_health_uses_configured_not_ambient_identity(
             assert health is not None and health.status_code == 200, (
                 tmp_path / "identity-host.log"
             ).read_text(encoding="utf-8", errors="replace")[-8000:]
+            elapsed = time.monotonic() - started
+            assert elapsed <= 30, f"measured native CLI startup {elapsed:.2f}s exceeds the original30s gate"
             assert health.json()["pid"] == process.pid
             assert health.json()["installationId"] == "persistent-native-instance"
             assert health.json()["status"] == "ok"
