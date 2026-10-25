@@ -642,16 +642,15 @@ verified answer against its actual repository or machine configuration:
 ## Validation Plan
 
 - [x] Qualify the restricted dependency-free Packaging seed (#9015).
-      The reviewed head passes required CI and all 29 selected native jobs,
+      All 29 selected native jobs pass,
       including Linux/Windows seed compilation, controlled TLS acquisition,
       actual offline tooling health/reuse and POSIX interpreter-link custody.
       The 1,824-case admitted unit packet passes with coverage under the
       unchanged 300-second bound. Actual owner CLI selection and exact frozen
       cutoffs are retained; intentionally dropped settings refuse before
       resolution or HTTP. Fresh copied-payload `-I -S` import/inspection does
-      not load ambient Packaging or repository tools. Both review threads
-      are resolved and the owner-authored current-head Comment has no open
-      findings. This does not qualify the complete toolkit or ordinary
+      not load ambient Packaging or repository tools.
+      This does not qualify the complete toolkit or ordinary
       fresh/existing installation, production feeds, enabled defaults,
       dependency-unchanged offline discovery, measured savings or rollout.
 - [x] Qualify the standard-library native feed-capture extraction (#9010).
