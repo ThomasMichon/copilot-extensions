@@ -155,6 +155,35 @@ follow the known local platform; an explicitly declared logical selector on
 the wrong platform fails closed rather than selecting its sibling.
 Standalone native Windows/Linux entries continue to work without a sibling.
 
+With [binding provenance from the selected engine bootstrap](../../plugins/agent-worktrees/docs/engine-picker-contract.md),
+the local source uses the observed OS hostname and actual Windows/WSL/Linux
+environment, plus the existing explicit machine binding when one is configured.
+Absent, empty, unrelated-only and sibling-only maps do not require enrollment:
+there is exactly one ready local source, with no SSH argv. Matching customization
+retains its canonical source key. The source, Profiles local host and per-row
+local routing use the same context; named foreign-platform/profile targets,
+ambiguity and malformed declarations still refuse. This does not rewrite
+historical record owners or bypass the engine's project/record checks.
+Local-only mode uses the same source key for its tab, list and per-row refresh,
+rather than stamping raw hostname metadata onto differently named local rows.
+Supported legacy registry keys remain the Profiles/source keys even when the
+compact execution name differs; validated legacy target spellings normalize
+to that same local execution space when no customization entry exists.
+Setup, New/AHP, maintenance and worktree-detail routing consume the selected
+`local_source_key()` contract when available; legacy sources still expose
+`LOCAL`. The raw local observation remains separate for first-paint chrome
+and compatibility. Known-provenance resolution preserves the full OS hostname,
+preferring full-hostname customization before a matching historical short-name
+customization. No map leaves that full observation intact.
+Worker setup/reload publishes the selected tuple for synchronous UI consumers;
+New, task embodiment and maintenance initiation never resolve configuration on
+the event loop. Expired or invalidated configuration is refreshed only on a
+worker. Action routing keeps the published tuple while actual engine
+project/record admission remains authoritative at execution.
+Older bootstrap responses without provenance retain their historical strict
+roster behavior; their detected `machine` scalar is not promoted to a new
+configured binding.
+
 This is a read-only compatibility projection, not a persisted-state migration:
 historical rows are not rewritten, existing canonical-over-legacy merge
 precedence remains intact, and no bridge-address or environment dimension is

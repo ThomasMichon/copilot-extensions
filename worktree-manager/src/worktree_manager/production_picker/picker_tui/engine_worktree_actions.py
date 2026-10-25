@@ -554,7 +554,7 @@ class PickerScreenWorktreeActionsMixin:
         aid, never worth failing the overlay over.
         """
         try:
-            if (m, e) == getattr(self.src, "LOCAL", None):
+            if (m, e) == self._src_local():
                 from worktree_manager import engine_client
 
                 from .. import context
@@ -590,7 +590,7 @@ class PickerScreenWorktreeActionsMixin:
         try:
             if not wt_id:
                 payload = {"error": "no worktree id"}
-            elif (m, e) == getattr(self.src, "LOCAL", None):
+            elif (m, e) == self._src_local():
                 from worktree_manager import engine_client
 
                 from .. import context
@@ -836,7 +836,8 @@ class PickerScreenWorktreeActionsMixin:
         task_id = str(ctx.get("task_id") or ctx.get("id") or "").strip()
         machine = str(ctx.get("target_machine") or ctx.get("machine") or "").strip()
         tab = self._current_tab() or {}
-        local_env = self.src.LOCAL[1] if isinstance(self.src.LOCAL, tuple) and len(self.src.LOCAL) >= 2 else None
+        local = self._src_local()
+        local_env = local[1] if isinstance(local, tuple) and len(local) >= 2 else None
         env = str(ctx.get("env") or tab.get("env") or "").strip()
         source_id = ctx.get("source_id") or tab.get("source_id")
         source_kind = ctx.get("source_kind") or tab.get("source_kind")

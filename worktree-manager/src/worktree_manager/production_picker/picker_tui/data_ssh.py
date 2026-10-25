@@ -335,7 +335,11 @@ def _build_sources():
     local_key, local_plat = _local_identity()
     local_elabel = _ENV_LABEL.get(local_plat, local_plat.title() or "?")
     config_machine = (config.machine or "").lower()
-    local_machine = roster.local_entry(entries, config_machine, local_key, local_plat)
+    current = roster.local_context(config, entries, local_key, local_plat)
+    local_machine = (
+        entries.get(current.customization_key) if current is not None
+        else roster.local_entry(entries, config_machine, local_key, local_plat)
+    )
 
     out: list[Source] = []
     for m in entries.values():
@@ -379,14 +383,11 @@ def _build_sources():
             out.append(Source(m.key, elabel, None, ready=False))
         roster.apply_display_machine(out[first_source:], m)
 
-    # Defensive fail-safe: guarantee a local source even when this machine is
-    # entirely absent from machines.yaml (a freshly-provisioned box whose
-    # self-entry hasn't reached the anchor yet, or a stale anchor checkout).
-    # Without a local source the engine has no "this host" tab and the picker
-    # crashes. The picker runs *here*, so a hostname-based local tab (from
-    # ``data_local.LOCAL``) is always the correct, safe fallback.
+    # Optional customization cannot remove the running execution space.
+    # Older bootstraps retain their raw-hostname fallback without new authority.
     if not any(s.local for s in out):
-        out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
+        key = current.execution_machine if current is not None else data_local.LOCAL[0]
+        out.append(Source(key, local_elabel, None,
                           local=True, ready=True))
     for registered in provider_sources.load(project):
         ready = bool(

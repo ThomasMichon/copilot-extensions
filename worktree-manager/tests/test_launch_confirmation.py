@@ -444,6 +444,9 @@ def refusal_screen():
         src = SimpleNamespace(is_local=unresolved_locality, LOCAL=("observer", "Win"))
         debug = ""
 
+        def _src_local(self):
+            return self.src.LOCAL
+
         def _current_tab(self):
             return {}
 

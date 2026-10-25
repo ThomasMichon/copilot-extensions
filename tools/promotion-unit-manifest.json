@@ -1887,7 +1887,7 @@
         "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "c6a423ba34a9b4922dc57d2394f7708510cb31c290e41e18172e2c3187939c16",
         "plugins/agent-worktrees/scripts/anchor_write_guard.py": "2a30cb671d5eabc13edba7f1eb682635847a65915f38a0923b6f946736240766",
         "plugins/agent-worktrees/scripts/registry_root.py": "380691bd9191b695b7590e90322a258ee83f3007d3f27e5bd432a7d59a6e21e3",
-        "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "bc017afcd4e8a02f893e9e9cc231121c60767e1825b186386d91ab648627dd7d",
+        "plugins/agent-worktrees/src/agent_worktrees/context_cli.py": "6993a9c9ddc1f7f8f23f55c063f782cedefe0ccdb9115bfa5c0cffcf324e2578",
         "plugins/agent-worktrees/src/agent_worktrees/manager_launcher_ownership.py": "96bfea0e9109527f8ea585a3b99ec2f472d9425d53f94bf56aa60bd06807679d",
         "plugins/agent-worktrees/src/agent_worktrees/mux_list_result.py": "d6f123741dd943db6bfc38c2f9d736f1cf6e0ad28bcc63644420443c17d7efa2",
         "plugins/agent-worktrees/src/agent_worktrees/project_routing.py": "a3b7750280dff6eb6c271207e61bbf103715163e1eed382f1a9fa4a992b26d65",

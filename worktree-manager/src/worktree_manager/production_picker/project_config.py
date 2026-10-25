@@ -36,6 +36,7 @@ class _ScalarCache:
         self.fallbacks: dict[tuple[str, str], str] = {}
         self.failures: dict[tuple[str, str], int] = {}
         self.epoch = 0
+        self.machine_bindings: dict[str, str | None] = {}
 
 
 _scalar_cache = _ScalarCache()
@@ -56,6 +57,13 @@ def bind_bootstrap(project: str, values: object) -> None:
     global _scalar_cache
     cache = _ScalarCache()
     if isinstance(values, dict):
+        if "configured_machine" in values:
+            binding = values["configured_machine"]
+            if binding is not None and (
+                not isinstance(binding, str) or not binding.strip()
+            ):
+                raise ValueError("configured machine binding must be a nonempty string")
+            cache.machine_bindings[project] = binding
         for field, key in (
             ("config_dir", "config-dir"), ("repo_dir", "repo-dir"), ("machine", "machine"),
             ("install_dir", "install-dir"),
@@ -118,6 +126,8 @@ class ProjectConfig:
     repo_name: str
     machine: str
     default_repo: RepoConfig
+    configured_machine: str | None = None
+    machine_binding_known: bool = False
 
 
 def _on_event_loop() -> bool:
@@ -563,6 +573,8 @@ def load_config() -> ProjectConfig:
             return ProjectConfig(
                 repo_name=repo_name, machine=machine,
                 default_repo=RepoConfig(anchor=repo_dir, default_branch=default_branch),
+                configured_machine=files.binding.machine_bindings.get(project),
+                machine_binding_known=project in files.binding.machine_bindings,
             )
         return files.get(("config", project), read)
 

@@ -114,8 +114,8 @@ inside companion allocation. Existing parent/companion references remain
 unchanged; foreign owners, namespaces and changed intent refuse.
 This slice merged in #8865 after current-head approval and required CI,
 including equivalent resolved paths and independently checked historical
-parents without nonce backfill. Complete registration and Manager
-entry-point proof and the installed validation gates below remain open.
+parents without nonce backfill. Manager entry-point proof and the installed
+validation gates below remain open.
 
 Actual configuration-loader JSON New, short-ID lookup and Resume proof merged
 in #8886. Observed hostname and derived local owner selection now work across
@@ -123,7 +123,7 @@ absent, empty, unrelated, matching, unscoped and sibling-only maps without
 borrowing registered foreign-target authority. Managed tuple records retain
 their independent receiving namespace check; real adopted external Git
 worktrees remain usable outside the managed directory. Ordinary defaults stay
-legacy; project registration, Manager and installed proof remain open.
+legacy; Manager and installed proof remain open.
 
 The project registration/installation source slice now uses the same local
 context before state preparation, separating absent customization from an
@@ -131,8 +131,9 @@ invalid declaration. Actual command tests retain configuration detection,
 scaffolding and subsequent loading, while containing runtime and terminal
 effects. The three-platform matrix covers all six map shapes, explicit binding
 provenance, literal observed suffixes and byte-preserved user configuration;
-invalid and foreign-platform controls refuse before writes. Independent review
-and merge remain required; Manager entry-point and installed proof are open.
+invalid and foreign-platform controls refuse before writes. This source slice
+merged in #8898 after current-head approval and required CI. Manager entry-point
+and installed proof are open.
 Admission checks additionally validate the effective retained global,
 project and drop-in binding, including force precedence. New global scaffolds
 do not turn a detected physical projection into an explicit binding. Scoped
@@ -141,9 +142,12 @@ identity and receipt before publishing registration or creating state.
 
 ## Validation Plan
 
-- [ ] Cross Windows, WSL and Linux source cases with absent, empty, unrelated-only
-  and matching customized manifests; ordinary local registration/load/launch
-  works without adding entries.
+- [x] Cross Windows, WSL and Linux registration/load source cases with absent,
+  empty, unrelated-only and matching customized manifests; ordinary local use
+  works without adding entries. Actual command/configuration proof merged
+  in #8898; no installed or Manager acceptance is inferred.
+- [ ] Cross Manager local-source selection and launch with the same optional-map
+  shapes, preserving configured names and actual execution authority.
 - [x] Drive actual new tuple creation, tracking, JSON, lookup and resume through
   the corrected boundary, retaining physical/environment/one-term agreement.
   Source matrix merged in #8886; installed native/guest acceptance remains a

@@ -21,7 +21,7 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
-**Current status (2026-10-24):** the containing promotion and #7743 native
+**Current status (2026-10-25):** the containing promotion and #7743 native
 self-repair gates are verified. Runtime alignment #8010 and allocation repair
 #8110 released in natural `39912447859`; bounded follow-ups #8283, #8289 and
 #8297 released through independently verified natural qualifications. Supported
@@ -42,7 +42,7 @@ versions include Manager `0.6.130-dev2`, Worktrees `1.24.249-dev2`, Bridge
 `0.9.140-dev1` and Dispatch `0.18.86-dev1`. Resume local-first identity
 implementation and the full creation/resume/installed matrix, without enabling
 ordinary tuple producers or changing existing identities. The
-[current journal](journal/2026/10.24%20progress.md) preserves the release and
+[recovery journal](journal/2026/10.24%20progress.md) preserves the release and
 guest acceptance boundary. The additive shared local-context foundation merged
 in #8652 with its final selector regressions and passing required CI.
 Configuration adoption merged in #8786. Prospective opt-in tuples and bounded
@@ -53,8 +53,12 @@ Completed launch-admission replay merged in #8857 after current-head approval
 and required CI. Interrupted creation-tail compatibility merged in #8865
 after current-head approval and required CI. Actual configuration-loader JSON
 New/short-ID lookup/Resume source proof merged in #8886, including optional-map
-and managed/external namespace boundaries. Complete harness/project
-registration and Manager entry-point proof, qualified release
+and managed/external namespace boundaries. Actual project registration/install
+source proof merged in #8898 after current-head approval and required CI,
+including retained target-map, ordinary/explicit configuration and platform-path
+precedence. The [current journal](journal/2026/10.25%20progress.md) records that
+source boundary and the contained Manager actual-reader candidate. Manager review,
+qualified release
 and installed acceptance remain open. The parent effort remains Active.
 These source merges do not establish release, installation or default activation.
 
@@ -461,7 +465,8 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
 - [ ] Review and execute the [manifest-independent local-identity amendment](manifest-independent-local-identity.md);
       machine maps customize rather than admit ordinary local use.
       The intent and corrective plan passed review in #7773; implementation and
-      installed acceptance remain open.
+      installed acceptance remain open. Registration/load source proof merged
+      in #8898; Manager source/entry and installed acceptance remain separate.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
