@@ -204,9 +204,22 @@ authorize another candidate, controller, runtime profile or package build.
 The Dev tag's automatic archive and an incremental candidate Git bundle are
 not substitutes for this complete-source proof.
 
+The source helper also supports **early original-build retention**, before a
+qualification receipt exists. `promotion_source_archive.py --build-candidate
+<commit>` retains that exact Main-child Git tree against the original signed
+source index. Its external `copilot-extensions.promotion-build-source` manifest
+has no qualification digest and cannot be consumed as qualified final source.
+After both subjects receive trusted-Main attestations, the existing publisher's
+`prepare --build-source-dir <directory>` verifies them and adds immutable
+`promotion-build-source-…zip` / `promotion-build-manifest-…json` assets to the
+same Dev release, with independent raw readback. The original code/index bytes,
+release owner and tag are unchanged. This optional source support does not
+activate Main, approve artifact reuse after a control change, issue a landing
+publication receipt or replace the final candidate archive/admission.
+
 Readiness and frozen-code reuse recognize only the bounded, hash-named
 supplementary evidence namespace for that same Dev release (at most 64
-retained packet/source/manifest assets in total). They retain earlier immutable
+retained packet/build-source/final-source/manifest assets in total). They retain earlier immutable
 generations without overwriting them. This data namespace grants no code-execution or
 qualification authority. The separately attested code/index inventory remains
 exact; foreign, malformed, duplicate or arbitrary extra assets are refused.

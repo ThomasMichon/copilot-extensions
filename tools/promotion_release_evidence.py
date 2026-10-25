@@ -17,7 +17,10 @@ from promotion_unit_contract import MAX_PACKET_FILE_BYTES
 _SHA = re.compile(r"[0-9a-f]{40}")
 MAX_EVIDENCE_BYTES = MAX_ARCHIVE_BYTES + MAX_PACKET_FILE_BYTES
 MAX_EVIDENCE_ASSETS = 64
-EVIDENCE_PREFIXES = ("promotion-unit-evidence-", "promotion-complete-source-", "promotion-source-manifest-")
+EVIDENCE_PREFIXES = (
+    "promotion-unit-evidence-", "promotion-complete-source-", "promotion-source-manifest-",
+    "promotion-build-source-", "promotion-build-manifest-",
+)
 
 
 def evidence_name(dev_sha: str, candidate_sha: str, digest: str) -> str:
@@ -33,15 +36,16 @@ def supplementary_evidence_asset(asset: dict, dev_sha: str) -> bool:
     """Admit only bounded auxiliary data; this never qualifies executable artifacts."""
     name = asset.get("name")
     match = re.fullmatch(
-        rf"promotion-(unit-evidence|complete-source|source-manifest)-{re.escape(dev_sha)}"
+        rf"promotion-(unit-evidence|complete-source|source-manifest|build-source|build-manifest)-{re.escape(dev_sha)}"
         r"-([0-9a-f]{40})-sha256-([0-9a-f]{64})\.(zip|json)",
         name,
     ) if isinstance(name, str) and isinstance(dev_sha, str) and _SHA.fullmatch(dev_sha) else None
     limits = {"unit-evidence": MAX_EVIDENCE_BYTES, "complete-source": 512 << 20,
-              "source-manifest": MAX_PACKET_FILE_BYTES}
+              "source-manifest": MAX_PACKET_FILE_BYTES, "build-source": 512 << 20,
+              "build-manifest": MAX_PACKET_FILE_BYTES}
     limit = limits[match[1]] if match else 0
     return bool(
-        match and match[4] == ("json" if match[1] == "source-manifest" else "zip")
+        match and match[4] == ("json" if match[1] in ("source-manifest", "build-manifest") else "zip")
         and asset.get("digest") == "sha256:" + match[3]
         and asset.get("state") == "uploaded"
         and type(asset.get("id")) is int and asset["id"] > 0
@@ -177,6 +181,41 @@ def publish_complete_source(
                 subject, repository=repository,
                 signer_digest=identity["control_sha"], source_digest=identity["control_sha"],
                 source_ref="refs/heads/main",
+            )
+    assets = _publish_subjects(
+        directory, subjects=subjects, repository=repository, tag=tag,
+        dev_sha=identity["dev_sha"], index=index,
+    )
+    return {
+        **identity,
+        "assets": [
+            {"filename": name, "sha256": hashlib.sha256(raw).hexdigest(), "asset_id": assets[name]["id"]}
+            for name, raw in sorted(subjects.items())
+        ],
+    }
+
+
+def publish_build_source(
+    directory: Path, *, source_directory: Path, repository: str, tag: str,
+    index: dict, candidate_sha: str, tree: str, signer_digest: str,
+) -> dict:
+    """Retain original inputs before qualification; do not issue a landing receipt."""
+    import publish_python_artifacts as publisher
+    from promotion_build_source import build_identity
+    from promotion_source_archive import read_build_assets
+
+    index_raw = (directory / publisher.INDEX_NAME).read_bytes()
+    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree)
+    if json.loads(index_raw) != index or signer_digest != identity["control_sha"]:
+        raise ValueError("original build-source publication differs from trusted admission")
+    subjects = read_build_assets(source_directory, identity=identity)
+    with tempfile.TemporaryDirectory(prefix="promotion-build-admission-") as temporary:
+        for name, raw in subjects.items():
+            subject = Path(temporary) / name
+            subject.write_bytes(raw)
+            publisher.verify_attestation_subject(
+                subject, repository=repository, signer_digest=signer_digest,
+                source_digest=signer_digest, source_ref="refs/heads/main",
             )
     assets = _publish_subjects(
         directory, subjects=subjects, repository=repository, tag=tag,

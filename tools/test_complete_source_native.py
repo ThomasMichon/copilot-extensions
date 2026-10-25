@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -18,7 +19,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attribute(tmp_path: Path):
+@pytest.mark.parametrize("profile", ["qualified", "build"])
+def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attribute(tmp_path: Path, profile):
     repo = tmp_path / "repository"
     repo.mkdir()
     hooks = tmp_path / "empty-hooks"
@@ -53,6 +55,31 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
     }
     index = {"schema_version": 2, "dev_head": main, "content_tree": tree}
     directory = tmp_path / "subjects"
+    if profile == "build":
+        from promotion_build_source import build_identity, verify_build_archive
+        from promotion_source_archive import read_build_assets
+        from promotion_unit_contract import decode_json
+
+        index.update(main_before=main, admission={
+            "signer_digest": main, "source_digest": main, "source_ref": "refs/heads/main",
+        })
+        index_path = tmp_path / "source-index.json"
+        index_path.write_bytes(canonical_bytes(index))
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("promotion_source_archive.py")),
+             "--repo", str(repo), "--directory", str(directory),
+             "--source-index", str(index_path), "--build-candidate", candidate],
+            env=environment, capture_output=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        identity = build_identity(index_path.read_bytes(), candidate_sha=candidate, tree=tree)
+        subjects = read_build_assets(directory, identity=identity)
+        manifest = decode_json(next(raw for name, raw in subjects.items() if name.endswith(".json")))
+        raw = next(raw for name, raw in subjects.items() if name.endswith(".zip"))
+        assert verify_build_archive(raw, manifest, identity=identity) == files
+        assert "qualification_digest" not in manifest
+        return
     manifest = prepare_source(directory, repo=repo, index_raw=canonical_bytes(index), receipt=receipt)
     identity = {
         **receipt, "content_tree": tree, "source_index_sha256": hashlib.sha256(canonical_bytes(index)).hexdigest(),

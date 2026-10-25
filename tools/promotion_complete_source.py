@@ -150,11 +150,10 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
     return inventory, tree(root).hex()
 
 
-def source_archive(files: dict[str, tuple[str, bytes]], *, identity: dict) -> tuple[bytes, dict]:
+def tree_archive(files: dict[str, tuple[str, bytes]], *, tree: str) -> tuple[bytes, list[dict]]:
     """Ignore export attributes: every admitted Git blob is retained without substitution."""
-    validate_identity(identity)
-    inventory, tree = _inventory(files)
-    if tree != identity["tree"]:
+    inventory, actual_tree = _inventory(files)
+    if actual_tree != tree:
         raise ValueError("complete-source inventory does not reconstruct the candidate tree")
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
@@ -167,6 +166,12 @@ def source_archive(files: dict[str, tuple[str, bytes]], *, identity: dict) -> tu
     raw = output.getvalue()
     if len(raw) > MAX_SOURCE_BYTES:
         raise ValueError("complete-source archive exceeds its byte bound")
+    return raw, inventory
+
+
+def source_archive(files: dict[str, tuple[str, bytes]], *, identity: dict) -> tuple[bytes, dict]:
+    validate_identity(identity)
+    raw, inventory = tree_archive(files, tree=identity["tree"])
     manifest = {
         "schema": SCHEMA, "version": 1, **identity,
         "archive_sha256": hashlib.sha256(raw).hexdigest(), "files": inventory,
@@ -190,13 +195,26 @@ def verify_source_archive(raw: bytes, manifest: dict, *, identity: dict) -> dict
         or len(canonical_bytes(manifest)) > MAX_PACKET_FILE_BYTES
     ):
         raise ValueError("complete-source manifest differs from the admitted generation")
+    return verify_tree_archive(raw, manifest["files"], tree=identity["tree"])
+
+
+def verify_tree_archive(
+    raw: bytes, inventory: list[dict], *, tree: str,
+) -> dict[str, tuple[str, bytes]]:
+    """Read a bounded full tree as data, independently of its admission profile."""
+    if (
+        not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_SOURCE_BYTES
+        or not isinstance(inventory, list) or not 1 <= len(inventory) <= MAX_SOURCE_FILES
+        or len(canonical_bytes(inventory)) > MAX_PACKET_FILE_BYTES
+    ):
+        raise ValueError("invalid complete-source archive inventory or byte bound")
     files, total = {}, 0
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             members = archive.infolist()
-            if len(members) != len(manifest["files"]) or archive.comment:
+            if len(members) != len(inventory) or archive.comment:
                 raise ValueError("complete-source archive inventory differs")
-            for member, expected in zip(members, manifest["files"], strict=True):
+            for member, expected in zip(members, inventory, strict=True):
                 if (
                     not isinstance(expected, dict) or set(expected) != {"path", "mode", "size", "sha256"}
                     or type(expected["size"]) is not int
@@ -214,7 +232,7 @@ def verify_source_archive(raw: bytes, manifest: dict, *, identity: dict) -> dict
                 files[member.filename] = (expected["mode"], content)
     except (zipfile.BadZipFile, KeyError, TypeError, OverflowError) as exc:
         raise ValueError("invalid complete-source archive") from exc
-    inventory, tree = _inventory(files)
-    if inventory != manifest["files"] or tree != identity["tree"]:
+    actual_inventory, actual_tree = _inventory(files)
+    if actual_inventory != inventory or actual_tree != tree:
         raise ValueError("complete-source bytes do not reconstruct the admitted full tree")
     return files

@@ -394,11 +394,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--unit-packet-dir", type=Path)
     parser.add_argument("--complete-source-dir", type=Path)
+    parser.add_argument("--build-source-dir", type=Path)
     parser.add_argument("--unit-manifest")
     parser.add_argument("--dev-root", type=Path)
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args(argv)
+    if args.build_source_dir is not None and args.operation != "prepare":
+        parser.error("original build-source retention is only available during prepare")
     if args.operation == "publish" and (
         not args.merged_commit or not args.candidate_commit or not args.dev_head
     ):
@@ -418,6 +421,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("legacy qualification cannot consume source-unit packet inputs")
     try:
         qualification_digest = None
+        if args.build_source_dir is not None and (
+            args.source_ref != "refs/heads/main" or args.source_digest != args.signer_digest
+            or not os.environ.get("ARTIFACT_VERIFY_TOKEN")
+        ):
+            raise PromotionArtifactError("original build-source retention requires independent trusted Main admission")
         if args.operation == "publish-candidate":
             if not os.environ.get("ARTIFACT_VERIFY_TOKEN"):
                 raise PromotionArtifactError("candidate publication requires independent consumer read authority")
@@ -446,6 +454,8 @@ def main(argv: list[str] | None = None) -> int:
             args.directory, repository=args.repository, signer_digest=args.signer_digest,
             source_digest=args.source_digest, source_ref=args.source_ref, repo=args.repo,
         )
+        if args.build_source_dir is not None and signed_index["schema_version"] != 2:
+            raise PromotionArtifactError("original build-source retention requires a source-owned index")
         repo = args.repo
         source_candidate = (
             args.operation == "publish-candidate" and signed_index["schema_version"] == 2
@@ -471,6 +481,18 @@ def main(argv: list[str] | None = None) -> int:
                 dev_head=args.dev_head, repo=repo,
             )
             print(f"artifact-ready: {tag}")
+        if args.build_source_dir is not None:
+            import promote_release as promotion
+            from promotion_release_evidence import publish_build_source
+
+            build_source = publish_build_source(
+                args.directory, source_directory=args.build_source_dir,
+                repository=args.repository, tag=tag, index=signed_index,
+                candidate_sha=args.candidate_commit,
+                tree=promotion._git(["rev-parse", f"{args.candidate_commit}^{{tree}}"], cwd=repo),
+                signer_digest=args.signer_digest,
+            )
+            print(f"build-source-retained: {tag}/{build_source['candidate_sha']}")
         if args.operation == "publish":
             publish_artifacts(
                 args.directory, repository=args.repository, merged_commit=args.merged_commit,
