@@ -352,8 +352,10 @@ class _SessionMonitoringMixin:
                 continue
             try:
                 async with s._turn_start_lock:
+                    # Reattachment can own lifecycle while awaiting prompt admission.
                     if (
                         self._sessions.get(sid) is not s or s.subscriber_count > 0
+                        or s._lifecycle_lock.locked()
                         or now - s.updated_at < ttl or not self._host_reapable(s)
                     ):
                         continue

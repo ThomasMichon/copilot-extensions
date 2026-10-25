@@ -363,6 +363,14 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   controls with two collection skips and verified cleanup; both contracts and
   all 814 fixtures validate. Independent current-head review and required CI
   remain owed.
+- The next independent pass reproduced a turn/lifecycle lock inversion between
+  the idle sweep and reattachment's resume prompt. The sweep now skips a
+  lifecycle-busy candidate after acquiring the turn lock, before any stop
+  notice or teardown. A deterministic two-task scheduling control fails by
+  deadlock before the correction. The 67-case idle/reattach/original-Host
+  cohort passes with two collection skips and verified cleanup. The final
+  automatic-stop custody recheck retains direct coverage; normal unassociated
+  idle retirement remains covered. Current-head review/CI remain required.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.

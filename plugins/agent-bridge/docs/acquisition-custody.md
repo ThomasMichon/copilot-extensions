@@ -91,6 +91,8 @@ the check; otherwise it reads the original session association. Only ordinary
 unassociated idle Hosts retain automatic reaping eligibility.
 The idle-TTL sweep also excludes retained custody, rechecking under the turn
 lock, after lifecycle scheduling and immediately before automatic Host retirement.
+The sweep skips a lifecycle-busy candidate after taking the turn lock, avoiding
+inversion with reattachment's lifecycle-locked resume-prompt submission.
 Its internal guard does not change explicit operator stop/reap behavior.
 New explicitly selected original local Hosts disable the existing unexpected
 and active-disconnect timeout bounds at the actual launcher. Retained quiet

@@ -13,6 +13,7 @@ from __future__ import annotations
 import time
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, Mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -167,6 +168,46 @@ async def test_reaper_skips_zero_turn_session(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_idle_reaper_does_not_invert_reattach_prompt_locks(tmp_path, monkeypatch) -> None:
+    mgr = _mgr(tmp_path, ttl=60)
+    s = _session(mgr, idle_for=120)
+    lifecycle_entered, turn_entered = asyncio.Event(), asyncio.Event()
+
+    class ObservedTurnLock(asyncio.Lock):
+        async def __aenter__(self) -> None:
+            await super().__aenter__()
+            turn_entered.set()
+
+    s._turn_start_lock = ObservedTurnLock()
+    prompt = AsyncMock(return_value=0)
+    stop = AsyncMock(wraps=mgr.stop_session)
+    monkeypatch.setattr(mgr, "_submit_prompt_locked", prompt)
+    monkeypatch.setattr(mgr, "stop_session", stop)
+
+    async def reattach(_rec, session, *, new_status, send_resume):
+        assert session is s and send_resume
+        assert session._lifecycle_lock.locked()
+        lifecycle_entered.set()
+        await turn_entered.wait()
+        await mgr.submit_prompt(session.session_id, "Synthetic reattach resume.")
+        return True
+
+    monkeypatch.setattr(mgr, "_reattach_one", reattach)
+    rec = SimpleNamespace(session_id=s.session_id, boundary="local", resume_on_reattach=True)
+    recovery = asyncio.create_task(mgr._reattach_or_note_failure(
+        rec, s, keep=SessionStatus.IDLE, codespace_availability={}, now=time.time(),
+    ))
+    await asyncio.wait_for(lifecycle_entered.wait(), 1)
+    sweep = asyncio.create_task(mgr.sweep_idle_sessions())
+    recovered, reaped = await asyncio.wait_for(asyncio.gather(recovery, sweep), 1)
+    assert recovered is True and reaped == 0
+    prompt.assert_awaited_once()
+    stop.assert_not_awaited()
+    assert not s._turn_start_lock.locked() and not s._lifecycle_lock.locked()
+    assert s.status == SessionStatus.IDLE and s.background_recovery_enabled
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("captured", [False, True])
 async def test_idle_reaper_preserves_original_native_custody(tmp_path, monkeypatch, captured):
     mgr = _mgr(tmp_path, ttl=60)
@@ -214,7 +255,13 @@ async def test_idle_reaper_rechecks_custody_after_scheduling(tmp_path, monkeypat
                 return request_stop(*args, **kwargs)
             monkeypatch.setattr(mgr.db, "request_cold_recovery_stop", requested)
         await lock.acquire()
-        task = asyncio.create_task(mgr.sweep_idle_sessions())
+        async def stop_after_turn_lock() -> None:
+            async with s._turn_start_lock:
+                await mgr.stop_session(s.session_id, reap_host=True, _automatic_reap=True)
+
+        task = asyncio.create_task(
+            mgr.sweep_idle_sessions() if boundary == "turn-lock" else stop_after_turn_lock(),
+        )
         try:
             if boundary == "turn-lock":
                 await asyncio.sleep(0)
@@ -223,7 +270,13 @@ async def test_idle_reaper_rechecks_custody_after_scheduling(tmp_path, monkeypat
             s._native_turn_transport = object()
         finally:
             lock.release()
-        assert await asyncio.wait_for(task, 5) == 0
+        if boundary == "turn-lock":
+            assert await asyncio.wait_for(task, 5) == 0
+        else:
+            from agent_bridge.runtime_custody import RuntimeCustodyError
+
+            with pytest.raises(RuntimeCustodyError, match="Automatic Host reaping"):
+                await asyncio.wait_for(task, 5)
         quiesce.assert_not_awaited()
     reap.assert_not_called()
     assert mgr._host_index.get(s.session_id) is not None

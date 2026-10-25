@@ -170,8 +170,10 @@ native transport reapable merely because its current turn is idle; retiring
 that Host requires its actual custody owner. Unassociated idle Hosts retain
 their ordinary reaping behavior.
 The existing idle-TTL sweep uses the same custody predicate under the session's
-turn lock. Its internal automatic-stop path rechecks the original live session
-after acquiring the lifecycle lock and at the final Host-retirement boundary;
+turn lock. It skips a lifecycle-busy candidate rather than waiting under that lock;
+reattachment may hold that lifecycle lock while submitting its resume prompt.
+Its internal automatic-stop path rechecks the original live session after
+acquiring the lifecycle lock and at the final Host-retirement boundary;
 late enrollment cannot turn a stale idle snapshot into reaping permission.
 Explicit operator stop/reap behavior is unchanged.
 The actual new local Host launch also sets its existing unexpected-disconnect
