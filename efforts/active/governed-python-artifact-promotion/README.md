@@ -356,7 +356,7 @@ Use the following ordered implementation and acceptance gates:
       thin compatibility adapters, not copied alternate implementations.
       Implemented and qualified in #9010; this does not admit tooling or enable
       an ordinary consumer.
-- [ ] Admit the declared admission-tool dependency through a bounded
+- [x] Admit the declared admission-tool dependency through a bounded
       standard-library bootstrap, using the existing native compiler, retained
       feed capture, actual wheel inspector/acquisition and immutable constructor.
       Start with the dependency-free `packaging` wheel required by the current
@@ -368,6 +368,9 @@ Use the following ordered implementation and acceptance gates:
       third-party-only constructor mode, not a global mutable tooling venv.
       Bind source/tooling bytes, interpreter, exact lock and effective policy;
       retain custody through health and invalidate reuse on changed inputs.
+      Implemented and qualified in #9015. The restricted seed is inert until
+      a real consumer supplies its source/policy owner; complete toolkit
+      packaging, ordinary enabling and production savings remain open.
 - [ ] Package the existing admission code and its complete first-party imports
       as a canonical, self-contained installer toolkit. Retain one source of
       truth and the existing payload-generation/materialization conventions.
@@ -638,6 +641,19 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the restricted dependency-free Packaging seed (#9015).
+      The reviewed head passes required CI and all 29 selected native jobs,
+      including Linux/Windows seed compilation, controlled TLS acquisition,
+      actual offline tooling health/reuse and POSIX interpreter-link custody.
+      The 1,824-case admitted unit packet passes with coverage under the
+      unchanged 300-second bound. Actual owner CLI selection and exact frozen
+      cutoffs are retained; intentionally dropped settings refuse before
+      resolution or HTTP. Fresh copied-payload `-I -S` import/inspection does
+      not load ambient Packaging or repository tools. Both review threads
+      are resolved and the owner-authored current-head Comment has no open
+      findings. This does not qualify the complete toolkit or ordinary
+      fresh/existing installation, production feeds, enabled defaults,
+      dependency-unchanged offline discovery, measured savings or rollout.
 - [x] Qualify the standard-library native feed-capture extraction (#9010).
       The exact admitted unit packet passes 1,800 cases with coverage inside
       its unchanged 300-second bound. All 27 selected Linux/Windows/macOS

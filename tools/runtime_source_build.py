@@ -22,8 +22,7 @@ for _library in ("installer-engine", "versioned-runtime"):
     sys.path.insert(0, str(_ROOT / "libs" / _library))
 
 import installer_engine as engine
-from build_python_artifacts import ToolchainLock
-from build_toolchain_lock import _query_marker_environment
+from build_toolchain_lock import ToolchainLock, _query_marker_environment
 from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
 from installer_wheel_inputs import WheelLimits, _check_deadline
 from installer_wheel_snapshot import WheelInstallInputs
@@ -31,7 +30,7 @@ from packaging.requirements import Requirement
 from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
-from promotion_python_artifacts import inspect_wheel
+from runtime_wheel_inspection import inspect_wheel
 from runtime_feed_configuration import retain_source_feed_inputs
 from runtime_profile import (
     SCHEMA,

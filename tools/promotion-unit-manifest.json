@@ -1824,7 +1824,19 @@
         "tools/promotion_unit_tests/test_packaging_seed.py::test_actual_seed_bytes_reject_installation_escape_before_execution[purelib]",
         "tools/promotion_unit_tests/test_packaging_seed.py::test_actual_seed_bytes_reject_installation_escape_before_execution[tag]",
         "tools/promotion_unit_tests/test_packaging_seed.py::test_actual_seed_bytes_reject_installation_escape_before_execution[record]",
-        "tools/promotion_unit_tests/test_packaging_seed.py::test_actual_seed_bytes_reject_installation_escape_before_execution[budget]"
+        "tools/promotion_unit_tests/test_packaging_seed.py::test_actual_seed_bytes_reject_installation_escape_before_execution[budget]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_runtime_and_promotion_use_one_canonical_semantic_inspector",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_promotion_still_binds_inspected_members_to_actual_source",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[generator-inspect_wheel0]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[generator-inspect_wheel1]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[record-inspect_wheel0]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[record-inspect_wheel1]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[tags-inspect_wheel0]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[tags-inspect_wheel1]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[bytes-inspect_wheel0]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[bytes-inspect_wheel1]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[deadline-inspect_wheel0]",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[deadline-inspect_wheel1]"
     ],
     "sources": {
         "tools/build_python_artifacts.py": "681155f69ab15bf8c385a34419d86bfb467703336087b7e30f69d035c9c3199c",
@@ -1952,7 +1964,7 @@
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
         "tools/plugin_runtime_resources.py": "e0b89a0d1f230d73c53fbc9d6c9315a660130076e2af48726fef133bfa6c1824",
-        "tools/promotion_python_artifacts.py": "3b553e8e12bc90988401700729d702396ee91757b49346aa05a098efd180624c",
+        "tools/promotion_python_artifacts.py": "68aec4ba662a7ec0995cbf7c3dba924faa9eb8bbb05e75dd77ce4b74e058fd3c",
         "tools/promotion_unit_contract.py": "c7f3b4a75c63faa90805c42b6e798c1158b2b096199fc5feaa547557bc5e0d44",
         "tools/promotion_unit_effects.py": "dd6f9737871e9bc6f2ae98f180529e6b5d48479df625f97326a882cfafbfc991",
         "tools/promotion_unit_packet.py": "363c6c6288c4d733c0ace951e851eca12d236dcb4d1e4dfbbbf8cf73dcc7cbab",
@@ -1996,7 +2008,7 @@
         "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
         "tools/run-promotion-unit-tests.py": "c5b49b6915248fbf308769adb357afff0ee7de91269d1c54dd0822d9b7a3d3af",
         "tools/runtime_profile.py": "3e2a25c54d9767c1757e2f8a2db42abd2bb0e51765e230d77f5582a4116221d0",
-        "tools/runtime_profile_wheels.py": "c5a0e3af27d3c342ef3e491e0964d2709047369818d29e043d90e073ccb21c9e",
+        "tools/runtime_profile_wheels.py": "aefc19e0d18e85fc037fffe11708d0830a27101fb854353e9e4e079961257659",
         "tools/standalone_consumers.py": "a038f31678a998c632b1090a5bb0c07377babe618ee36bf940536ea9b55285b5",
         "tools/standalone_python_artifacts.py": "e6230233c9328e26c3c9000e7cc19cffd375791ba33221b2e23c3da7dcaf392f",
         "tools/test_check_docs_consistency.py": "60577ce827514cc996a23c7e654a66286b83c202daea2f25e806dcb4315ba494",
@@ -2030,7 +2042,9 @@
         "libs/installer-engine/installer_packaging_seed.py": "1cdca7036d87411d2e30428d717b85dde62c265f69c24989a1a7b8e868266b74",
         "libs/installer-engine/installer_native_feed.py": "e0f8e02a2cc77465b642449e70936f3f1dbaf77029bc1145392f158e230c7dcc",
         "libs/installer-engine/installer_wheel_acquisition.py": "b9c4e670fa7d10106469827a847a64b31e017c6c2a7f75ab5930d15da24f31f2",
-        "tools/promotion_unit_tests/test_packaging_seed.py": "898e0bfa4a1bb4851a615d5ce0b9e31b1d29b653c6e82637335e5fef31f24da4"
+        "tools/promotion_unit_tests/test_packaging_seed.py": "898e0bfa4a1bb4851a615d5ce0b9e31b1d29b653c6e82637335e5fef31f24da4",
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py": "eb6029b02b7bf12842a24a668334a2d0bd501b8cff69cb464fbb90ff4c9e3a40",
+        "tools/runtime_wheel_inspection.py": "403031eea565b4f96c2e5a13e24044206096e77962454fb55619c50c106fd8ad"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_packaging_seed.py",
@@ -2114,7 +2128,8 @@
         "tools/runtime_source_wheels.py",
         "tools/runtime_source_lock.py",
         "tools/build_python_artifacts.py",
-        "tools/build_toolchain_lock.py"
+        "tools/build_toolchain_lock.py",
+        "tools/runtime_wheel_inspection.py"
     ],
     "max_seconds": 300
 }

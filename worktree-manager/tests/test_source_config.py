@@ -14,6 +14,19 @@ from worktree_manager import source_config as sc
 from worktree_manager.__main__ import main
 
 
+def test_default_root_has_one_configuration_owner(monkeypatch, tmp_path):
+    from worktree_manager import self_install
+
+    assert self_install.default_root is sc.default_root
+    monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    assert sc.default_root() == tmp_path / "home" / ".worktree-manager"
+    assert sc.config_path() == sc.default_root() / sc.CONFIG_NAME
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "selected"))
+    assert sc.default_root() == tmp_path / "selected"
+    assert sc.config_path(tmp_path / "explicit") == tmp_path / "explicit" / sc.CONFIG_NAME
+
+
 def test_defaults_when_unset(tmp_path: Path):
     root = tmp_path / "root"
     assert sc.configured_source(root) == (None, None)

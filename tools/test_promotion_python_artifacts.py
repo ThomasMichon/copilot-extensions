@@ -758,14 +758,14 @@ def resolve_toolchain_lock(*args, **kwargs):
     )
     for name in (
         "artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py",
-        "plugin_runtime_resources.py", "native_daemon_artifacts.py",
+        "plugin_runtime_resources.py", "native_daemon_artifacts.py", "runtime_wheel_inspection.py",
     ):
         shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
     shutil.copy(Path(promotion.__file__).with_name("promotion_candidate.py"), driver / "promotion_candidate.py")
     for name in (
         "promotion_python_artifacts.py", "build_python_artifacts.py", "build_toolchain_lock.py",
-        "promotion_candidate.py",
+        "promotion_candidate.py", "runtime_wheel_inspection.py",
     ):
         (repo / "tools" / name).write_text("raise RuntimeError('candidate forged toolchain provenance')")
     real_run = artifacts._run

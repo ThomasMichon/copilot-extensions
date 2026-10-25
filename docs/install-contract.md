@@ -3394,6 +3394,10 @@ budgets and a per-metadata-file budget. It compares every archive's SHA-256 and
 actual Requires-Python, Provides-Extra and Requires-Dist with the validated
 record. The shared wheel inspector checks distribution/version/tag identity,
 safe members and each RECORD entry without extracting or executing code.
+`tools/runtime_wheel_inspection.py` owns this semantic layer over the shared
+stdlib archive inspector. Runtime admission imports it without loading promotion
+or publication tooling. The promotion adapter invokes the same inspector and
+additionally binds inspected members to the selected first-party source.
 Runtime RECORD entries support SHA-256, SHA-384 and SHA-512; weak/unsupported
 algorithms refuse, while archive locks remain SHA-256. Distribution aliases and
 runtime versions compare by normalized identity. First-party promotion retains
@@ -3578,6 +3582,11 @@ the actual configured-runtime-source acquisition owner with canonical source
 preparation, the retained native compiler and the same governed feed worker.
 It uses no artifact index or fabricated release selection. An unsupported
 default marketplace source provider remains unavailable rather than guessed.
+Manager's existing `source_config.default_root` owns its configuration root;
+`self_install.default_root` re-exports that same function. Reading configured
+runtime-source policy therefore needs no Manager installer import and preserves
+the existing environment/home precedence. These narrow primitives do not yet
+package a complete installer toolkit or enable an ordinary installer.
 
 One native source lock includes declared runtime/build requirements and the
 frontend's `packaging` dependency. Its actual installation owner validates

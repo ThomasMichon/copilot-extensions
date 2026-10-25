@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import worktree_manager
+from .source_config import default_root as default_root
 
 MARKER = "current-version"
 VERSIONS_DIR = "versions"
@@ -122,15 +123,6 @@ def fetch_remote_version(
         return None
     m = _VERSION_RE.search(text)
     return m.group(1) if m else None
-
-
-def default_root() -> Path:
-    """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
-    env = os.environ.get("WORKTREE_MANAGER_ROOT")
-    if env:
-        return Path(env)
-    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
-    return home / ".worktree-manager"
 
 
 def local_bin() -> Path:
