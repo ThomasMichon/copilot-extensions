@@ -468,7 +468,7 @@ transaction execution from the existing recurring-maintenance assignment.
   reconciling `install` and the already-qualified bootstrap limited to their
   canonical installed source; do not infer adoption of command/explicit
   installer publishers, live sync/prune, custom roots/cells or rollout.
-- [ ] **Agent-recommended bounded publisher adoption:** route Logger's actual
+- [x] **Agent-recommended bounded publisher adoption:** route Logger's actual
   legacy primary, six payload targets and five auxiliary compatibility
   commands through its qualified single `provision` recipe and the same
   caller-independent queue. Preserve healthy read-only dispatch, exact
@@ -481,6 +481,21 @@ transaction execution from the existing recurring-maintenance assignment.
   cell dispatch and refuse unsupported cold cells/custom roots. Explicit
   installers, compound actions, live sync/prune, macOS and rollout remain
   separate; review this proposal before implementation.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Bridge's
+  existing legacy `stamp` and `provision` actions through the same native
+  foundation, canonical queue and frozen-input owner before changing ordinary
+  Bridge publishers. Admit only its canonical installed payload and default
+  legacy root; retain required context, own controls, exact source/root/project,
+  native staging and complete dependency closure. The
+  [bounded plan](bridge-first-use.md) preserves Bridge's actual first-install
+  registration/start effects and its platform-specific prepared-runtime
+  reconciliation rather than borrowing another plugin's service-less recipe.
+  Qualify actual materialized construction, safe installed command/module/
+  distribution identity, failed-candidate preservation, caller loss and
+  no-write refusals on native Windows/Linux with isolated effect adapters.
+  Snapshot acceptance, command/bootstrap/explicit-installer adoption, custom
+  roots/cells, live service deployment and existing lifetime/publication/
+  diagnostic custodians remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
