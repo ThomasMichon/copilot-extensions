@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Incremental Indexing Delta Pipeline](active/incremental-indexing-delta-pipeline/README.md) | Draft; source-backed audit and count-based proposal only, implementation admission pending | #9023; preserves #4222/#4220/#8733/#5302 correctness owners; generic engine first, consumer adoption separate |
 | [Repository PR Fleet Sweep](active/repository-pr-fleet-sweep/README.md) | Active; plan approved and merged, one-shot observation implementation next | #8802; existing provider, topology and claim owners retained; no service or rollout |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
 | [Vault Service](active/vault-service/README.md) | Draft; initial architecture and complete phased acceptance proposal only, implementation admission pending | #8729; Vault credential/transaction authority, stateless Manager, central/local/federated deployment; existing custody retained, no rollout |
