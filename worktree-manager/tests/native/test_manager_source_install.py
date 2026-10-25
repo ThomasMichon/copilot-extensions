@@ -64,7 +64,7 @@ def _prepare_source_repair(directory, constructed):
     source = si._runtime_installer().runtime_source
     config = root / "config.toml"
     config.write_text('[runtime_source]\nchannel = "main"\nrepo = "https://example.invalid/service.git"\n')
-    source_config.set_source(repo=str(repo), ref="dev", root=root)
+    source_config.set_source(repo=os.path.relpath(repo, directory), ref="dev", root=root)
     database = root / "continuity.sqlite"
     with sqlite3.connect(database) as connection:
         connection.executescript(
@@ -76,6 +76,7 @@ def _prepare_source_repair(directory, constructed):
     commands = {path: path.read_bytes()
                 for path in (Path(env["USERPROFILE"]) / ".local" / "bin").glob("worktree-manager*")}
     with pytest.MonkeyPatch.context() as patch:
+        patch.chdir(directory)
         for name in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"):
             patch.setenv(name, env[name])
         # No alternate data-root override: both installed interpreters resolve

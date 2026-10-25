@@ -44,5 +44,6 @@ def manager_payload(payload: Path, root: Path) -> Path:
     else:
         raise ValueError("Manager bootstrap requires its declared local process helper")
     from worktree_manager.runtime_source_self_update import fetch
+    from worktree_manager.source_config import absolute_local_source
 
-    return fetch(manager_repo(root), root)
+    return fetch(absolute_local_source(manager_repo(root)), root)

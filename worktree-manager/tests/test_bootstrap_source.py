@@ -94,6 +94,7 @@ def test_dev_uses_only_own_declared_helper_before_shared_acquisition(
         assert calls == []
     else:
         monkeypatch.chdir(tmp_path)
+        source_config.set_source(repo="./upstream", ref="dev", root=tmp_path)
         assert helper.manager_payload(tmp_path / "original", Path(".")) == tmp_path / "qualified"
         assert calls == [(str(tmp_path / "upstream"), tmp_path)]
     assert helper.sys.path == before
