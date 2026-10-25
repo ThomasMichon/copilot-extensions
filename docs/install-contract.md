@@ -3513,6 +3513,28 @@ rejection policy is shared with the existing build-tool trust owner through
 owner. Canonical installer synchronization ships both helpers with each Python
 adopter. Their presence does not enable artifact/profile consumption.
 
+The inert shared `installer_packaging_seed.retain_packaging_seed` supplies the
+admission toolkit's restricted `packaging>=23` bootstrap. It inherits the actual
+owner's held native compiler settings and frozen seasoning cutoffs, rather than
+reading ambient configuration again. A fixed metadata-only project lets that
+same native UV compiler select one exact governed-feed wheel without running a
+source backend. The bounded stdlib inspector refuses dependencies, extras,
+non-pure/platform wheels, entry points and paths outside Packaging's Python
+package/dist-info layout before the existing offline constructor can execute it.
+The owner callback must verify the independently authenticated selected source
+and supplied revocations and return the actual current installation policy.
+It runs before resolution/construction and throughout retained health/custody.
+
+This uses the existing installation-owned `.source-build-tools` namespace and
+third-party-only immutable constructor, not a shared mutable venv or another
+approval mechanism. Its exact binding includes source, effective policy,
+native lock, inspected wheel/acquisition, interpreter bytes/facts and invoked
+installer/runtime tooling bytes. Changed bindings cannot reuse the old
+generation. Windows probes use an explicit native executable path for long
+immutable-slot names. This component does not activate an ordinary runtime,
+ship a complete toolkit, connect an ordinary installer or establish production
+feed availability, enabled budgets or installation savings.
+
 The repository-only `runtime_feed_configuration.retain_native_feed_inputs`
 composes an existing release selection with freshly resolved installation
 policy and the canonical retained UV preflight. It does not implement another

@@ -789,6 +789,29 @@ jobs:
           worktree-manager/tests/test_manager_update_check.py
           libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
 
+  packaging-seed-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Stdlib Packaging seed (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &packaging-seed-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - name: Native governed seed, immutable health and isolated first touch
+        run: python -m pytest -q tools/test_installer_packaging_seed.py
+
+  packaging-seed-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Stdlib Packaging seed (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *packaging-seed-steps
+
   marketplace-source-linux:
     if: ${{ inputs.dependency_compile }}
     name: Registered marketplace source (Linux, ${{ matrix.suite }})

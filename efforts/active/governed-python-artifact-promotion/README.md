@@ -347,13 +347,15 @@ modules. A fresh bootstrap must neither import them from an incidental host
 environment nor install them using the admission code they are needed to run.
 Use the following ordered implementation and acceptance gates:
 
-- [ ] Extract the existing native feed-projection/capture mechanism into the
+- [x] Extract the existing native feed-projection/capture mechanism into the
       shared installer's standard-library layer. Keep profile selection and
       approval in their current owner; capture consumes its retained native UV
       transaction, not a second configuration reader. Preserve authentication,
       OS trust, redirect policy, seasoning, unsupported-policy refusals and
       secret-safe keyed identities. Preserve existing repository APIs through
       thin compatibility adapters, not copied alternate implementations.
+      Implemented and qualified in #9010; this does not admit tooling or enable
+      an ordinary consumer.
 - [ ] Admit the declared admission-tool dependency through a bounded
       standard-library bootstrap, using the existing native compiler, retained
       feed capture, actual wheel inspector/acquisition and immutable constructor.
@@ -636,6 +638,15 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the standard-library native feed-capture extraction (#9010).
+      The exact admitted unit packet passes 1,800 cases with coverage inside
+      its unchanged 300-second bound. All 27 selected Linux/Windows/macOS
+      native jobs pass on the reviewed head, including actual retained feed/
+      source compilation, acquisition, profile/Manager compatibility and
+      copied-payload `-I -S` first touch without Packaging or repository tools.
+      Current-head approval, no review threads and required green CI qualify
+      this mechanism only, not tooling installation, ordinary consumer
+      enablement, production feed eligibility, measured savings or rollout.
 - [ ] Qualify bootstrap-safe admission and the actual ordinary consumer:
       isolated `-I -S` first-touch imports without repository paths or site
       packages; actual governed native compilation/acquisition and installed
