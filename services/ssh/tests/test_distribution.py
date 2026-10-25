@@ -84,6 +84,11 @@ def test_container_is_nonroot_offline_and_uses_existing_role_provider():
     assert "--only-binary=:all:" in recipe and "USER 65532:65532" in recipe
     assert "STOPSIGNAL SIGTERM" in recipe and "EXPOSE" not in recipe
     assert "ARG NATIVE_RELAY=false" in recipe and "/usr/sbin/sshd" in recipe
+    assert "getent passwd 65532" in recipe and "getent group 65532" in recipe
+    assert "usermod --gid 65532 --home /data" in recipe
+    assert "install -d -m 700 -o 65532 -g 65532 /data" in recipe
+    assert "ENV HOME=/data " in recipe and "test ! -L /data" in recipe
+    assert recipe.index("pwd.getpwuid(65532)") < recipe.index("groupadd --gid 65532")
     assert [line for line in recipe.splitlines() if line.startswith("COPY ")] == [
         "COPY wheels/ /tmp/ssh-wheels/", "COPY requirements.lock /tmp/ssh-requirements.lock",
     ]

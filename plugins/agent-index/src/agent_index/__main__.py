@@ -17,9 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import (
-    no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env,
-)
+from agent_procutil import no_window_kwargs, spawn_daemon, windowless_python, windowless_python_env
 import httpx
 
 from . import http_auth

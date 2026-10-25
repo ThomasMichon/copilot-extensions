@@ -1,12 +1,19 @@
 """The SSH service's internal foreground container/host entry point."""
 
 import argparse
+import os
 from pathlib import Path
 import sys
+
+from agent_procutil.daemon_instances import daemon_entrypoint
 
 from . import __version__
 
 
+@daemon_entrypoint(
+    "agent-ssh-service", source=__file__, purpose="production",
+    runtime_root=lambda config: Path(os.path.abspath(config.to_dict()["data_dir"])),
+)
 async def _foreground(config) -> int:
     from .hosting import UnsettledRelay, run
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Attribute standalone SSH resident startup through completed native relay settlement without changing relay custody or production lifetime.",
+  "changes": [
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

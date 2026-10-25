@@ -459,3 +459,37 @@ caller coverage, not one launcher or one platform passing.
 - Current source CI passed guards and actual units. The new review findings
   still require publication, fresh review and current-head CI before merge;
   neither that pass nor this journal closes the effort or authorizes rollout.
+- Independent offline Linux replay passed all 11 Gateway lifecycle/path cases,
+  including real parent-relative TLS startup, with no skips. Frozen source and
+  installed process-library hashes matched; the test-owned container was
+  confirmed removed. The updated 1,702-unit packet passed in 216.469 seconds.
+- After the next upstream integration, all 1,704 eligible units passed in
+  179.328 seconds under the unchanged 300-second limit. Strict protocol
+  validation retained both contracts and all 814 fixtures. Kept newer module
+  ceilings by extracting Vault's unchanged pure endpoint policy; its lifetime
+  and advertisement packet passed 15 tests.
+
+### 2026-10-24 - Newly shipped SSH service integration
+
+- The rebase introduced the standalone SSH service. Its foreground now retains
+  one instance guard through service operation and unsettled relay retirement.
+  `NativeChildCustody` remains the native relay's leader/group owner. The
+  complete census distinguishes that supervised child from both resident
+  container entrypoints and names the foreground admission owner.
+- Source packets passed 78 on Windows with one platform skip and 72 on Linux
+  with seven platform skips. Independent foreground/root/census integration
+  passed 42 tests, including valid absolute paths containing parent components.
+  No native SSH-traffic or managed-rollout claim follows from these fixtures.
+- The actual SSH hash-locked image now provides UID/GID 65532 with private
+  passwd home `/data`, retaining an existing account name and prior-home
+  contents. Native-prerequisite admission still precedes account preparation.
+  Actual main/config/production admission passed without a registry override;
+  installed main matched the frozen guarded source. Parent replay also passed.
+- Two distribution cases passed inside the installed image, replacing the
+  unavailable host installed-binding lane rather than bypassing its isolated
+  import. Existing-account proof passed; linked home, foreign account/group
+  collision and missing native prerequisites refused. Downstream hosting was
+  synthetic; authentication and relay traffic are not claimed as exercised.
+- Added the SSH standalone's own changefile. Core source/native bytes remain
+  unchanged. All four source guards, module ceilings, installer contracts,
+  documentation and high-signal lint passed; owned test containers are gone.

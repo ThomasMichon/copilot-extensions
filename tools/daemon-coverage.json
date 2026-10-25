@@ -19,6 +19,7 @@
     "sc": "services/chat/src/agent_chat_service",
     "si": "services/index/src/agent_index_service",
     "sp": "services/pr/src/agent_pull_requests_service",
+    "ss": "services/ssh/src/agent_ssh_service",
     "t": "tools",
     "r": "."
   },
@@ -67,6 +68,7 @@
     "sc:hosting.py::HostedChat.__init__": "agent-chat-service",
     "si:__main__.py::_serve": "agent-index",
     "sp:hosting.py::_run_service": "agent-pull-requests-service",
+    "ss:__main__.py::_foreground": "agent-ssh-service",
     "r:plugins/agent-bridge/spikes/session-host/session_host.py::SessionHost.run": "session-host-fixture",
     "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::run_daemon": "process-hygiene-mock",
     "t:clean-room/gateway-role-tunnels/fixture_service.py::serve": "gateway-role-fixture",
@@ -118,6 +120,7 @@
     "wm:production_picker/monitor_roots.py": ["w:status_monitor_cli.py::cmd_status_monitor"],
     "fm:gateway_server.py": ["fm:gateway_server.py::serve"],
     "fm:gateway_service_server.py": ["fm:gateway_service_server.py::serve", "fm:gateway_service_server.py::build_app.lifetime", "fm:gateway_service_server.py::start"],
+    "ss:relay.py": ["ss:__main__.py::_foreground"],
     "n:self_update_dtssh.py": ["r:plugins/agent-ssh/transports/dtssh/scripts/dtssh-host-launcher.ps1"],
     "r:plugins/agent-index/scripts/cell-runtime.py": ["i:server.py::serve"],
     "r:plugins/agent-bridge/spikes/session-host/frontend.py": ["r:plugins/agent-bridge/spikes/session-host/session_host.py::SessionHost.run"],
@@ -133,7 +136,8 @@
     "t:clean-room/scenarios/leased-daemon-instances/fixtures/probe.py": ["t:clean-room/scenarios/leased-daemon-instances/fixtures/worker.py::main"],
     "r:fleet-manager/containers/gateway/Dockerfile": ["fm:gateway_service_server.py::serve"],
     "r:services/dispatch/Dockerfile": ["d:coordinator_cli.py::_cmd_serve"],
-    "r:services/pr/container/Dockerfile": ["sp:hosting.py::_run_service"]
+    "r:services/pr/container/Dockerfile": ["sp:hosting.py::_run_service"],
+    "r:services/ssh/container/Dockerfile": ["ss:__main__.py::_foreground"]
   },
   "native_entrypoints": {
     "r:plugins/agent-ssh/transports/dtssh/scripts/dtssh-host-launcher.ps1": "agent-ssh-dtssh-watchdog",
@@ -175,6 +179,8 @@
   },
   "sites": {
     "resident": {
+      "r:services/ssh/container/Dockerfile::<script>::ENTRYPOINT": 1,
+      "r:services/ssh/container/Dockerfile::<script>::CMD": 1,
       "t:clean-room/gateway-role-tunnels/fixture_service.py::_supervise::spawn_daemon": 1,
       "b:service_process_cli.py::_launch_bridge_daemon::spawn_daemon": 1,
       "b:session_host/launcher.py::launch_session_host::spawn_instance": 1,
@@ -236,6 +242,7 @@
       "r:services/pr/container/Dockerfile::<script>::CMD": 1
     },
     "supervised-service-child": {
+      "ss:relay.py::NativeRelay.run::Popen": 1,
       "d:supervisor_registration.py::SubprocessLauncher.launch::spawn_instance": 1,
       "d:companion.py::_launch_gated::Popen": 1,
       "i:engine/lifecycle.py::_spawn_engine::spawn_daemon": 1,

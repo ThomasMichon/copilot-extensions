@@ -218,6 +218,14 @@ artifact flow, then the existing lifecycle/container manager invokes:
 python -I -m agent_ssh_service --config <absolute-service-policy.json>
 ```
 
+The foreground entry point retains one daemon-instance admission through the
+registered service and any unsettled native-relay retirement. Production has
+no expiry; explicitly test-owned instances use their caller's lease. The native
+`sshd -D` process remains a supervised child under its original
+`NativeChildCustody`, not a second daemon owner. Container images must provide
+the selected UID's real passwd/home identity and a writable private state
+location; changing `HOME` alone does not select the instance registry.
+
 Credential references are loaded through Fleet's existing custody adapter.
 Current access tokens are reread for each actual admission; no provider login,
 token inference or ambient-auth fallback is added. The existing connector owns
@@ -286,8 +294,13 @@ base, a complete wheel closure and an exact-version SHA-256 `requirements.lock`.
 Build from a dedicated context containing those inputs, not a checkout or a
 home directory. Installation is offline and hash-required; UID/GID 65532 runs
 with a read-only image filesystem, bounded writable `/tmp` and an owner-private
-persistent volume below `/data`. Mount configuration, trust and credential
-references separately, read-only. No public port or Docker socket is needed
+persistent volume below `/data`.
+The image provisions the selected UID's real passwd home as private writable
+`/data`; an existing UID 65532 retains its name and prior-home contents.
+The native-relay prerequisite check still runs first and requires its approved
+base to supply the selected account and OpenSSH prerequisites already.
+Mount configuration, trust and credential references separately, read-only.
+No public port or Docker socket is needed
 by the control-plane-only container. Native deployments use the same recipe
 with `NATIVE_RELAY=true` and an approved base already containing OpenSSH,
 `/bin/false`, `/run/sshd` and the selected non-root account (UID 65532).
