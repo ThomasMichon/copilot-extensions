@@ -469,6 +469,38 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ## Journal
 
+### 2026-10-25 - Graph consumer merged; attention is the next source slice
+
+- #8916 merged after current-head Copilot approval and required CI. Re-read
+  this entire root and retain its complete manual/head, app-input and
+  complementary relay acceptance. The current task worktree was pulled
+  forward onto the confirmed merged source for continued work, not finalized.
+- Final graph/legacy consumer packet: 111 passed. Exact source
+  `1709949607a213d97f992d495ea2b86dcf7b22af` passed 77 tests with zero skips
+  on Ubuntu 24.04 / actual tmux 3.4 in workflow run `40177027971`, including
+  native pane navigation, graph contracts and real Textual consumers.
+  The earlier standalone combined Windows packet passed 343 tests with
+  three platform skips. These are source/isolated-native tiers, not rollout.
+- Fixed the reviewed missing-snapshot-key crash while retaining explicit
+  null for unavailable history. The PR description now records contract,
+  performance and documentation impact; production cold/warm latency is
+  unmeasured, not inferred from test duration.
+- Graph remains evidence-scoped: reported lifecycle is not allocation,
+  retained records are not lifetime totals, and a PR claim is not current
+  open/closed evidence. The broader topology row remains open for its
+  remaining source/status qualification; no narrower merge completes it.
+- Continue with lightweight, versioned root attention observations and a
+  cancellable single-session UI indicator, without rescanning history or
+  guessing questions from transcripts. Then qualify native two-line/click
+  chrome under the relay's existing safety boundary. No installation or
+  live configuration change is authorized by these source milestones.
+- A separate next-workspace allocation was interrupted before a tracking
+  record existed. Keyed replay correctly remains pending and targeted
+  creation repair reports the missing record, so no duplicate allocation or
+  manual state edit was attempted. Its creating session retains that
+  outstanding allocation; continuing in this existing task worktree does
+  not claim it settled.
+
 ### 2026-10-25 - Same-window observer merged; native evidence retained
 
 - #8881 merged after current-head Copilot approval, required CI and native
