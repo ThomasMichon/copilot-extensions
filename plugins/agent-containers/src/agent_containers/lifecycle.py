@@ -355,11 +355,13 @@ def inspect_container(name: str) -> dict:
     res = _docker(["inspect", name], timeout=30)
     if res.returncode != 0:
         detail = (res.stderr.strip() or res.stdout.strip())
-        if detail in {
-            f"Error: No such object: {name}",
-            f"Error: No such container: {name}",
-            f"Error response from daemon: No such container: {name}",
-        }:
+        prefixes = (
+            "error: no such object: ",
+            "error: no such container: ",
+            "error response from daemon: no such container: ",
+        )
+        if any(detail.lower().startswith(prefix) and detail[len(prefix):] == name
+               for prefix in prefixes):
             raise ContainerNotFoundError(f"docker inspect {name} failed: {detail}")
         raise RuntimeError(
             f"docker inspect {name} failed: {res.stderr.strip() or res.stdout.strip()}"

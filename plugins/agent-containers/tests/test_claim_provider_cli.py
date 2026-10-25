@@ -202,6 +202,7 @@ def test_claim_reclaim_already_gone_is_idempotent(monkeypatch, capsys):
 
 @pytest.mark.parametrize(("diagnostic", "reclaimed"), [
     ("Error: No such object: c-a", True),
+    ("error: no such object: c-a", True),
     ("Cannot connect to the Docker daemon", False),
     ("permission denied", False),
     ("Error: No such object: other-container", False),
