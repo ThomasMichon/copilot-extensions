@@ -151,7 +151,7 @@ async def _start_task_runner(app: FastAPI) -> None:
         store, runner = _create_task_runner()
         try:
             await runner.start()
-        except Exception:
+        except BaseException:
             with contextlib.suppress(Exception):
                 await runner.stop()
             raise
@@ -163,10 +163,12 @@ async def _stop_task_runner(app: FastAPI) -> None:
     runner = getattr(app.state, "task_runner", None)
     if runner is None:
         return
-    with contextlib.suppress(Exception):
-        await runner.stop()
-    app.state.task_runner = None
-    app.state.task_store = None
+    try:
+        with contextlib.suppress(Exception):
+            await runner.stop()
+    finally:
+        app.state.task_runner = None
+        app.state.task_store = None
 
 
 def _instance_receipt_path(app: FastAPI) -> Path | None:

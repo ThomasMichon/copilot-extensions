@@ -33,7 +33,7 @@ from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
 from .gateway_service_handler import PROFILE
 from .gateway_service_handler import CallerContext, RequestLifetime, ServiceRequest, ServiceResponse
-from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest
+from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest, settled
 from .gateway_service_policy import CallerGrant
 
 LOG = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ class ServiceRuntime:
                 self.authority.release_candidate(ticket.candidate)
 
     async def reload(self) -> None:
-        publication = await asyncio.to_thread(self.authority.reload)
+        publication = await settled(self.authority.reload)
         self.context = publication.snapshot.context
         self.last_error = None
         await self.sweep()

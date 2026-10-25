@@ -1116,6 +1116,17 @@ filesystem links: redirected runtime roots still fail custody checks.
 Keeper children inherit the home belonging to their selected store, even if
 the launcher's cwd or ambient home override changes afterward.
 
+The localhost SSH broker stops intake and settles accepted connections, its
+native Docker CLI children, and every control/stream worker before releasing
+daemon admission, including interrupted or failed startup. Windows children
+use a strict, retained Job that confirms descendant retirement even after the
+CLI leader exits. POSIX children retain the broker's existing process group
+and test/lease containment: cleanup reaps the exact direct child and waits for
+both pipe pumps. It does not adopt or signal a guessed descendant group; an
+inherited pipe held by a descendant keeps admission live until that pipe closes.
+Cleanup retries interrupted retirement rather than declaring unfinished work
+complete. Endpoint removal still preserves another process's replacement.
+
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
   lock file and kept backward-compatible across runtime versions;
   corrupt/unreadable state is treated as empty.

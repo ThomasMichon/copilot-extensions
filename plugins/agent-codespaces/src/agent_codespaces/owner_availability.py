@@ -17,11 +17,12 @@ Owner behaving as it did before this gate existed.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterable
 from typing import Any
+
+from .owner_beacon import owner_native_call
 
 log = logging.getLogger("agent-codespaces")
 
@@ -82,7 +83,7 @@ class AvailabilityGate:
             return set()
         if refresh or self._stale(wanted):
             try:
-                rows = await asyncio.to_thread(lambda: list(self._list()))
+                rows = await owner_native_call(lambda: list(self._list()))
             except Exception as exc:
                 log.debug("Connection Owner: listing CodeSpaces failed: %s", exc)
                 return set()

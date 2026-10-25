@@ -47,6 +47,7 @@ from .rendezvous import (
     write_endpoint,
 )
 from .service_endpoints import advertised_endpoint
+from .service_connections import VaultConnections, settle_owned
 from .winpipe import pipe_send, start_pipe_server
 
 # Service inactivity timeout (0 = never, set via --persistent)
@@ -893,9 +894,13 @@ async def handle_client(
     writer: asyncio.StreamWriter,
     service: VaultService,
     transport: str = "unknown",
+    *,
+    _connections: VaultConnections | None = None,
 ) -> None:
     peer = writer.get_extra_info("peername", "?")
     try:
+        if _connections is not None and (_connections.closing or service._shutdown):
+            return
         data = await asyncio.wait_for(reader.readline(), timeout=5.0)
         if not data:
             return
@@ -911,9 +916,15 @@ async def handle_client(
         client = request.get("_client", "")
         log.debug("< %s from %s%s", action, peer, f" client={client}" if client else "")
 
-        response = await asyncio.get_event_loop().run_in_executor(
-            None, service.handle_request, request, str(peer), transport
-        )
+        if _connections is None:
+            worker = asyncio.get_running_loop().run_in_executor(
+                None, service.handle_request, request, str(peer), transport
+            )
+        else:
+            worker = _connections.request(writer, request, str(peer), transport)
+            if worker is None:
+                return
+        response = await settle_owned(worker)
 
         ok = response.get("ok", False)
         log.debug(
@@ -932,23 +943,36 @@ async def handle_client(
     finally:
         writer.close()
         with contextlib.suppress(Exception):
-            await writer.wait_closed()
+            await settle_owned(writer.wait_closed())
 
 
 @daemon_entrypoint("agent-vault", source=__file__, purpose="production")
 async def run_server(service: VaultService, tcp_port: int | None = None) -> None:
     servers = []
+    pipe_servers: list = []
+    connections = VaultConnections(service, handle_client)
+    try:
+        await _serve(service, tcp_port, servers, pipe_servers, connections)
+    finally:
+        reason = (
+            "shutdown requested" if service._shutdown
+            else "inactivity timeout" if service.is_expired else "server stopped"
+        )
+        log.info("Stopping: %s", reason)
+        await settle_owned(connections.close(servers, pipe_servers, cleanup))
 
+
+async def _serve(service, tcp_port, servers, pipe_servers, connections):
     unix_bound = False
     if not IS_WINDOWS:
         if os.path.exists(SOCKET_PATH):
             os.unlink(SOCKET_PATH)
         unix_srv = await asyncio.start_unix_server(
-            lambda r, w: handle_client(r, w, service, transport="unix"),
+            connections.callback("unix"),
             path=SOCKET_PATH,
         )
-        os.chmod(SOCKET_PATH, 0o600)
         servers.append(unix_srv)
+        os.chmod(SOCKET_PATH, 0o600)
         unix_bound = True
         log.info("Listening on Unix socket %s", SOCKET_PATH)
 
@@ -957,7 +981,7 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     bound_port: int | None = None
     try:
         tcp_srv = await asyncio.start_server(
-            lambda r, w: handle_client(r, w, service, transport="tcp"),
+            connections.callback("tcp"),
             host="127.0.0.1",
             port=port,
         )
@@ -979,13 +1003,12 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
     # the preferred, port-free local endpoint; TCP stays as the legacy + WSL/
     # fallback path until Stage D retires it. Any pipe failure degrades cleanly to
     # TCP-only, so this can never make the daemon less reachable than today.
-    pipe_servers: list = []
     pipe_bound = False
     if IS_WINDOWS:
         try:
-            pipe_servers = await start_pipe_server(
-                PIPE_PATH, lambda r, w: handle_client(r, w, service, transport="pipe")
-            )
+            pipe_servers.extend(await start_pipe_server(
+                PIPE_PATH, connections.callback("pipe")
+            ))
             pipe_bound = bool(pipe_servers)
             if pipe_bound:
                 log.info("Listening on named pipe %s", PIPE_PATH)
@@ -1034,20 +1057,8 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         ),
     )
 
-    try:
-        while not service._shutdown and not service.is_expired:
-            await asyncio.sleep(0.5)
-    finally:
-        reason = "shutdown requested" if service._shutdown else "inactivity timeout"
-        log.info("Stopping: %s", reason)
-        for srv in servers:
-            srv.close()
-            await srv.wait_closed()
-        # Pipe servers expose close() but not wait_closed().
-        for psrv in pipe_servers:
-            with contextlib.suppress(Exception):
-                psrv.close()
-        cleanup()
+    while not service._shutdown and not service.is_expired:
+        await asyncio.sleep(0.5)
 
 
 def cleanup() -> None:

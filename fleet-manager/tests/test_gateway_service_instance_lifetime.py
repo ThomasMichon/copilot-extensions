@@ -5,6 +5,7 @@ from dataclasses import replace
 import os
 from pathlib import Path
 import socket
+import threading
 from unittest.mock import AsyncMock, Mock
 
 import aiohttp
@@ -52,6 +53,82 @@ async def challenge(serving, rig):
         async with client.get(serving.origin + "/_fleet/challenge") as response:
             assert response.status == 200
             assert set(await response.json()) == {"nonce"}
+
+
+@pytest.mark.parametrize("ending", ["startup", "shutdown", "repeated-reload-cancel"])
+def test_native_policy_reload_settles_before_admission(tmp_path, monkeypatch, ending):
+    async def scenario():
+        rig = bootstrap(tmp_path)
+        guards = observe_admission(monkeypatch)
+        blocked, entered, release, retired = (
+            threading.Event(), threading.Event(), threading.Event(), threading.Event()
+        )
+        original_reload = server.ServiceAuthority.reload
+        original_loop = server.ServiceRuntime.reload_loop
+        owners = []
+
+        def reload(authority):
+            if not blocked.is_set():
+                return original_reload(authority)
+            entered.set()
+            try:
+                assert release.wait(10)
+                return original_reload(authority)
+            finally:
+                retired.set()
+
+        async def reload_loop(state):
+            owners.append(asyncio.current_task())
+            await original_loop(state)
+
+        monkeypatch.setattr(server.ServiceAuthority, "reload", reload)
+        monkeypatch.setattr(server.ServiceRuntime, "reload_loop", reload_loop)
+        serving = None
+        closing = None
+        if ending == "startup":
+            blocked.set()
+        starting = asyncio.create_task(server.start(
+            rig.listener, rig.policy, reload_interval=0.05, clock=rig.h.clock,
+        ))
+        try:
+            if ending != "startup":
+                serving = await asyncio.wait_for(asyncio.shield(starting), 5)
+                await challenge(serving, rig)
+                blocked.set()
+            assert await asyncio.to_thread(entered.wait, 5)
+            if ending == "startup":
+                starting.cancel()
+                pending = starting
+            else:
+                closing = asyncio.create_task(serving.close())
+                while serving._close_task is None or owners[0].cancelling() == 0:
+                    await asyncio.sleep(0.001)
+                pending = serving._close_task
+                if ending == "repeated-reload-cancel":
+                    for _ in range(3):
+                        owners[0].cancel()
+                        await asyncio.sleep(0)
+            await asyncio.wait({pending}, timeout=0.05)
+            assert (
+                pending.done(), retired.is_set(), record(guards[0].receipt)["state"],
+            ) == (False, False, "running")
+            release.set()
+            if ending == "startup":
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(asyncio.shield(starting), 5)
+            else:
+                await asyncio.wait_for(asyncio.shield(closing), 5)
+            assert retired.is_set()
+            assert record(guards[0].receipt)["state"] == "finished"
+        finally:
+            release.set()
+            await asyncio.gather(starting, return_exceptions=True)
+            if serving is not None:
+                await serving.close()
+            if closing is not None:
+                await asyncio.gather(closing, return_exceptions=True)
+
+    asyncio.run(scenario())
 
 
 def test_embedded_tls_admission_spans_completed_cross_task_idempotent_close(tmp_path, monkeypatch):

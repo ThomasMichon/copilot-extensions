@@ -633,3 +633,43 @@ caller coverage, not one launcher or one platform passing.
   shape after database settlement became part of that lifecycle. Real native
   database retirement remains covered separately by the 65-test Bridge packet.
   No native/core bytes or admitted unit inputs changed in this round.
+
+### 2026-10-25 - Native retirement across remaining hosting owners
+
+- Reproduced the supervisor review finding with actual executor work still
+  running after bounded shutdown. Ordinary exit now retains admission through
+  native worker retirement, including done callbacks. Committed self-update
+  keeps its existing bounded force-exit authority; a returned or refused exit
+  retains custody and settles local work. Independent Windows replay passed
+  240 tests with one platform skip; isolated Linux passed 241.
+- Extended the same native-retirement correction to Gateway reloads, Bridge
+  discovery/provider readers, Index queue ownership transitions, CodeSpaces
+  relay constructors/transcript outcomes/beacons, Vault accepted requests,
+  container SSH broker children/pumps and Worktrees local-status workers.
+  Existing production election, cutover, detached-worker ownership and
+  recoverable-work authorities remain unchanged.
+- Independent Windows packets passed Gateway 98, Bridge 134, Index 34,
+  CodeSpaces 185, Vault 101 with one platform skip, Containers 42 with one
+  platform skip and Worktrees 228. Manager mux's 19 real-wire regressions also
+  passed independently. These packets observe actual native work and instance
+  state, not merely completion of an async facade.
+- Failed intake closure remains an unknown hold even after the last native
+  request returns. Required independent cleanup still runs after sibling
+  cleanup errors; the original error resurfaces only after settlement.
+  Bridge late attachment retains the original discovery without replay;
+  lost native completion evidence remains an explicit hold.
+- Isolated Linux packets passed CodeSpaces 184, Containers 53 with one
+  platform skip, Vault 98 with four platform skips and Worktrees 228.
+  Index passed 27 with four unavailable-FastAPI skips. Manager mux passed
+  151 with two unavailable-process-tool exclusions. Bridge's declared
+  dependency acquisition failed verified TLS; no bypass, global installation
+  or Linux Bridge pass is claimed.
+- The separate managed-mux cohost retains its existing host receipt through
+  actual native intake/cache/handler retirement without changing `shutdown()`.
+  Its full packet passed 87 independently on Windows and 86 on Linux with one
+  Windows-only skip. Mandatory monitor cleanup reaches this unchanged call
+  even after earlier cleanup errors. All delegated source slices are frozen.
+- Native/shared-process bytes and all 1,796 admitted unit source bindings
+  remain unchanged. Strict protocol validation retains two contracts and all
+  814 immutable fixtures. Final publication, fresh review and current-head CI
+  remain open; this effort remains Active. No runtime rollout is authorized.

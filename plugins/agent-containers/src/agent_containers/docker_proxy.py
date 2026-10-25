@@ -16,7 +16,9 @@ import time
 from pathlib import Path
 from typing import BinaryIO
 
-from agent_procutil import no_window_kwargs, spawn_daemon
+from agent_procutil import spawn_daemon
+
+from .docker_proxy_connection import Connection, Worker, close_socket, settle
 
 _IDLE_EXIT_SECONDS = 120.0
 
@@ -83,37 +85,12 @@ def _write_stream(destination: BinaryIO, data: bytes) -> None:
 
 
 def _serve_connection(container: str, connection: socket.socket) -> None:
-    process = subprocess.Popen(
-        _docker_command(container),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        **no_window_kwargs(),
+    owned = Connection(
+        connection, _docker_command(container), _socket_to_stream, _stream_to_socket,
     )
-    if process.stdin is None or process.stdout is None:
-        process.terminate()
-        raise RuntimeError("container SSH broker did not receive Docker pipes")
-    inbound = threading.Thread(
-        target=_socket_to_stream,
-        args=(connection, process.stdin),
-        daemon=True,
-    )
-    outbound = threading.Thread(
-        target=_stream_to_socket,
-        args=(process.stdout, connection),
-        daemon=True,
-    )
-    inbound.start()
-    outbound.start()
-    try:
-        process.wait()
-    finally:
-        with contextlib.suppress(OSError):
-            connection.close()
-        inbound.join(timeout=1)
-        outbound.join(timeout=1)
-        if process.poll() is None:
-            process.terminate()
+    owned.run()
+    if owned.error is not None:
+        raise owned.error
 
 
 def _recv_line(connection: socket.socket, *, limit: int = 16) -> bytes:
@@ -128,7 +105,7 @@ def _recv_line(connection: socket.socket, *, limit: int = 16) -> bytes:
     return bytes(data)
 
 
-def _serve_control(listener: socket.socket) -> None:
+def _serve_control(listener: socket.socket, stopping: threading.Event | None = None) -> None:
     while True:
         try:
             connection, _address = listener.accept()
@@ -136,6 +113,10 @@ def _serve_control(listener: socket.socket) -> None:
             return
         with connection:
             try:
+                if stopping is not None:
+                    connection.settimeout(0.2)
+                    if stopping.is_set():
+                        return
                 if _recv_line(connection) == b"ping\n":
                     connection.sendall(b"pong\n")
             except (ConnectionError, OSError):
@@ -148,70 +129,76 @@ def _serve_control(listener: socket.socket) -> None:
 )
 def serve(container: str, container_id: str, endpoint_file: Path) -> int:
     endpoint_file = Path(os.path.abspath(endpoint_file))
-    data_listener = socket.socket()
-    control_listener = socket.socket()
-    for listener in (data_listener, control_listener):
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        listener.bind(("127.0.0.1", 0))
-        listener.listen()
-    data_listener.settimeout(1.0)
-    endpoint_file.parent.mkdir(parents=True, exist_ok=True)
-    endpoint = {
-        "schema_version": 1,
-        "container": container,
-        "container_id": container_id,
-        "runtime": str(Path(__file__).resolve()),
-        "pid": os.getpid(),
-        "port": data_listener.getsockname()[1],
-        "control_port": control_listener.getsockname()[1],
-    }
-    temporary = endpoint_file.with_name(
-        f".{endpoint_file.name}.{os.getpid()}.tmp"
-    )
-    temporary.write_text(json.dumps(endpoint), encoding="utf-8")
-    os.replace(temporary, endpoint_file)
-    threading.Thread(
-        target=_serve_control,
-        args=(control_listener,),
-        daemon=True,
-    ).start()
-    state_lock = threading.Lock()
-    active = 0
+    listeners: list[socket.socket] = []
+    connections: list[Connection] = []
+    control: Worker | None = None
+    stopping = threading.Event()
+    temporary = endpoint_file.with_name(f".{endpoint_file.name}.{os.getpid()}.tmp")
     last_connection = time.monotonic()
-
-    def run_connection(connection: socket.socket) -> None:
-        nonlocal active, last_connection
-        try:
-            _serve_connection(container, connection)
-        finally:
-            with state_lock:
-                active -= 1
-                last_connection = time.monotonic()
-
     try:
+        for _ in range(2):
+            listener = socket.socket()
+            listeners.append(listener)
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", 0))
+            listener.listen()
+        data_listener, control_listener = listeners
+        data_listener.settimeout(1.0)
+        endpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        endpoint = {
+            "schema_version": 1,
+            "container": container,
+            "container_id": container_id,
+            "runtime": str(Path(__file__).resolve()),
+            "pid": os.getpid(),
+            "port": data_listener.getsockname()[1],
+            "control_port": control_listener.getsockname()[1],
+        }
+        temporary.write_text(json.dumps(endpoint), encoding="utf-8")
+        os.replace(temporary, endpoint_file)
+        control = Worker(
+            lambda: _serve_control(control_listener, stopping), "container-ssh-control",
+        )
+        control.start()
         while True:
+            completed = [owned for owned in connections if owned.worker.done.is_set()]
+            for owned in completed:
+                settle(owned.worker.join)
+                connections.remove(owned)
+                last_connection = time.monotonic()
             try:
                 connection, _address = data_listener.accept()
             except TimeoutError:
-                with state_lock:
-                    if (
-                        active == 0
-                        and time.monotonic() - last_connection >= _IDLE_EXIT_SECONDS
-                    ):
-                        return 0
+                if (
+                    not connections
+                    and time.monotonic() - last_connection >= _IDLE_EXIT_SECONDS
+                ):
+                    return 0
                 continue
-            with state_lock:
-                active += 1
-                last_connection = time.monotonic()
-            threading.Thread(
-                target=run_connection,
-                args=(connection,),
-                daemon=True,
-            ).start()
+            try:
+                owned = Connection(
+                    connection, _docker_command(container), _socket_to_stream, _stream_to_socket,
+                )
+            except BaseException:
+                settle(lambda: close_socket(connection))
+                raise
+            connections.append(owned)
+            last_connection = time.monotonic()
+            owned.worker.start()
     finally:
-        for listener in (data_listener, control_listener):
-            with contextlib.suppress(OSError):
-                listener.close()
+        def cleanup() -> None:
+            stopping.set()
+            for listener in listeners:
+                settle(lambda listener=listener: close_socket(listener))
+            for owned in connections:
+                settle(owned.stop)
+            for owned in connections:
+                settle(owned.worker.join)
+            if control is not None:
+                settle(control.join)
+            temporary.unlink(missing_ok=True)
+
+        settle(cleanup)
         try:
             published = json.loads(endpoint_file.read_text(encoding="utf-8"))
         except (OSError, UnicodeError, json.JSONDecodeError):

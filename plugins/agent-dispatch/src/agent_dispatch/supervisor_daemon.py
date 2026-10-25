@@ -38,7 +38,7 @@ import contextlib
 import copy
 import json
 import logging
-import os
+import os as os  # Re-export the existing self-update exit injection seam.
 import subprocess
 import time
 from collections.abc import Callable, Iterable, Mapping
@@ -2172,24 +2172,8 @@ class SupervisorDaemon(BoundedReconciliation):
                 except KeyboardInterrupt:
                     break
         finally:
-            drained = self.shutdown()
-            if self._client_factory is not None:
-                close = getattr(self.client, "close", None)
-                if callable(close):
-                    with contextlib.suppress(Exception):
-                        close()
-            if single_instance:
-                self.release_singleton()
-            if self.self_update_triggered and not drained:
-                # The handoff is committed: either native restart owns the next
-                # launch or a successor spawn returned. Avoid interpreter atexit
-                # joining stuck probe threads after every owned unit was asked
-                # to stop. This exit is a restart request, not successor proof.
-                log.warning(
-                    "supervisor self-update: probe worker outlived shutdown "
-                    "grace; forcing exit to finish the committed handoff",
-                )
-                os._exit(SELF_UPDATE_EXIT_CODE)
+            from .supervisor_retirement import finish_serving
+            finish_serving(self, single_instance=single_instance)
         if self.self_update_triggered:
             return SELF_UPDATE_EXIT_CODE
         return 0

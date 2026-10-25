@@ -145,6 +145,18 @@ Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifec
 that separates runtime-slot readiness from service reconciliation and preserves
 observed native disablement without guessing its author.
 
+Ordinary supervisor exit, including `once=True` and interruption, retains its
+daemon admission, client and singleton until tracked local work finishes and
+owned executor threads retire. Borrowed executors are not shut down.
+`shutdown()` itself remains bounded; its cached grace verdict is not proof of
+later retirement. Committed self-update keeps its existing bounded force-exit
+authority. If force-exit returns or is refused, the old admission remains until
+local settlement. Committed handoff checks owned worker termination, including
+callbacks after a future finishes, within that same grace budget; an unrelated
+borrowed idle pool is not a reason to force-exit. Client-close or singleton-release
+interruptions cannot bypass retirement, and the first interruption is preserved.
+Production receives no new expiry.
+
 `agent-dispatch` is a standalone runtime plugin. Enabling the plugin installs the
 payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
 the first `agent-dispatch` invocation self-provisions the runtime. Repos that use

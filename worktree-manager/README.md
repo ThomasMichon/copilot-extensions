@@ -21,6 +21,14 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## In-session Mux Companion
 
+The resident mux runtime retains its daemon-instance admission until its
+listening/reaper threads and every accepted wire handler have actually retired.
+Its existing bounded `shutdown()` and control ACK remain independent of that
+settlement: a runtime-owned retirement worker holds custody after the caller
+returns, including for in-process embedding and partial startup failures.
+This does not change routing, generation selection, the single-active lease,
+or production lifetime policy.
+
 `worktree-manager companion` opens the current worktree's Textual companion.
 Summary is the initial tab, showing its reported purpose and disposition.
 Claims shows the actual engine resource ledger, including the inbound owner,

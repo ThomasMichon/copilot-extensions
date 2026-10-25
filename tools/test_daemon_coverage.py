@@ -372,8 +372,17 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
     package.__path__ = []
     application = ModuleType("caller_lifecycle_fixture.app")
     application._lifespan = body
+    roster = ModuleType("caller_lifecycle_fixture.app_agent_roster")
+
+    async def stop_roster(app):
+        assert events[-1] == "cleanup"
+        assert "closed" not in events
+        events.append("roster_cleanup")
+
+    roster.stop_agent_roster_cache = stop_roster
     monkeypatch.setitem(sys.modules, package.__name__, package)
     monkeypatch.setitem(sys.modules, application.__name__, application)
+    monkeypatch.setitem(sys.modules, roster.__name__, roster)
     namespace = {
         "asynccontextmanager": asynccontextmanager, "__file__": str(source),
         "_lifespan": body, "__package__": package.__name__,
@@ -394,4 +403,7 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
             asyncio.run(run())
     else:
         asyncio.run(run())
-    assert events == ["admit", "body", "cleanup", "closed"]
+    expected = ["admit", "body", "cleanup"]
+    if relative == "plugins/agent-bridge/src/agent_bridge/app_lifecycle.py":
+        expected.append("roster_cleanup")
+    assert events == [*expected, "closed"]

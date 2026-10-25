@@ -52,6 +52,24 @@ _TERMINAL_VALUES = {s.value for s in TERMINAL}
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 
+async def _settle(task: asyncio.Task[Any]) -> Any:
+    """Defer caller cancellation until this runner-owned operation settles."""
+    cancelled = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            cancelled = True
+        except BaseException:
+            break
+    result = task.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
 def _machine_id() -> str:
     """This host's identity (matches the worker's recorded ``worker_host``)."""
     try:
@@ -296,6 +314,9 @@ class TaskRunner:
         self._index_fn: Callable[..., None] | None = None
         self._post_index_fn: Callable[[], None] | None = None
         self._task: asyncio.Task[None] | None = None
+        self._startup_task: asyncio.Task[None] | None = None
+        self._stop_task: asyncio.Task[None] | None = None
+        self._source_lock_task: asyncio.Task[Any] | None = None
         self._shutdown = False
         self._paused = False
         self._wake = asyncio.Event()
@@ -350,6 +371,16 @@ class TaskRunner:
 
     async def start(self) -> None:
         """Initialize DB, reap orphaned workers, adopt live ones, start the loop."""
+        self._shutdown = False
+        self._stop_task = None
+        self._startup_task = asyncio.create_task(self._start())
+        try:
+            await _settle(self._startup_task)
+        except BaseException:
+            await self.stop()
+            raise
+
+    async def _start(self) -> None:
         host = _machine_id()
         reaped = await asyncio.to_thread(self.store.reap_orphaned, host, _pid_alive)
         if reaped:
@@ -363,31 +394,45 @@ class TaskRunner:
         if pending > 0:
             log.info("Startup recovery: %d queued task(s)", pending)
 
-        self._shutdown = False
-        self._task = asyncio.create_task(self._worker_loop())
-        log.info("Task runner started")
+        if not self._shutdown:
+            self._task = asyncio.create_task(self._worker_loop())
+            log.info("Task runner started")
 
     async def stop(self) -> None:
         """Stop the loop + monitors. Detached workers are LEFT running — they
         survive a cutover and are re-adopted by the next service."""
         self._shutdown = True
         self._wake.set()
-        if self._task:
-            self._task.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._task
-        for mon in list(self._monitors.values()):
-            mon.cancel()
-        for mon in list(self._monitors.values()):
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._stop())
+        await _settle(self._stop_task)
+
+    async def _stop(self) -> None:
+        if self._startup_task is not None:
             with suppress(asyncio.CancelledError, Exception):
-                await mon
-        self._monitors.clear()
-        for lock in list(self._worker_locks.values()):
-            if lock is not None:
-                with suppress(Exception):
-                    lock.release()
-        self._worker_locks.clear()
-        log.info("Task runner stopped")
+                await self._startup_task
+        # A source-lock wait has not admitted a spawn and can withdraw safely.
+        if self._source_lock_task is not None and not self._source_lock_task.done():
+            self._source_lock_task.cancel()
+        try:
+            if self._task:
+                self._task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._task
+        finally:
+            monitors = list(self._monitors.values())
+            for mon in monitors:
+                mon.cancel()
+            for mon in monitors:
+                with suppress(asyncio.CancelledError, Exception):
+                    await mon
+            self._monitors.clear()
+            for lock in list(self._worker_locks.values()):
+                if lock is not None:
+                    with suppress(Exception):
+                        lock.release()
+            self._worker_locks.clear()
+            log.info("Task runner stopped")
 
     async def drain(self, *, timeout: float = 300.0, poll: float = 0.5) -> bool:
         """Pause dequeueing for a cutover; always drains clean.
@@ -499,57 +544,65 @@ class TaskRunner:
         await asyncio.sleep(2)
 
         while not self._shutdown:
-            boundary = self._recheck_governance("iteration-boundary")
-            if boundary is not None and boundary.get("status") != "ready":
-                log.warning(
-                    "Worker loop backing off at %s: %s (%s)",
-                    boundary.get("checkpoint"),
-                    boundary.get("reason"),
-                    boundary.get("status"),
-                )
-                await self._wait_for_wake(_GOVERNANCE_BACKOFF_SECONDS)
-                continue
-            # Pause (drain) or a worker already running => wait. At most one
-            # indexing worker runs at a time (serialized via _active_workers).
-            if self._paused or self._active_workers:
-                await self._wait_for_wake(5.0)
-                continue
-
-            pending = await asyncio.to_thread(self.store.get_pending_count)
-            if pending <= 0:
-                await self._wait_for_wake(10.0)
-                continue
-            before_dequeue = self._recheck_governance("pre-mutation:dequeue")
-            if before_dequeue is not None and before_dequeue.get("status") != "ready":
-                log.warning(
-                    "Worker loop refused dequeue at %s: %s (%s)",
-                    before_dequeue.get("checkpoint"),
-                    before_dequeue.get("reason"),
-                    before_dequeue.get("status"),
-                )
-                await self._wait_for_wake(_GOVERNANCE_BACKOFF_SECONDS)
-                continue
-
-            task = await asyncio.to_thread(self.store.dequeue_next)
-            if task is None:
-                await self._wait_for_wake(10.0)
-                continue
-            before_launch = self._recheck_governance("pre-mutation:launch")
-            if before_launch is not None and before_launch.get("status") != "ready":
-                await asyncio.to_thread(self.store.release_processing, task.id)
-                log.warning(
-                    "Worker loop released task %s after %s: %s (%s)",
-                    task.id,
-                    before_launch.get("checkpoint"),
-                    before_launch.get("reason"),
-                    before_launch.get("status"),
-                )
-                await self._wait_for_wake(_GOVERNANCE_BACKOFF_SECONDS)
-                continue
-
-            await self._launch_worker(task)
+            # Cancellation may not discard a dequeued claim or an unregistered
+            # spawned PID. Settle the whole ownership transition, not just its
+            # individual executor futures.
+            delay = await _settle(asyncio.create_task(self._worker_iteration()))
+            if delay is not None and not self._shutdown:
+                await self._wait_for_wake(delay)
 
         log.info("Worker loop exited")
+
+    async def _worker_iteration(self) -> float | None:
+        boundary = self._recheck_governance("iteration-boundary")
+        if boundary is not None and boundary.get("status") != "ready":
+            log.warning(
+                "Worker loop backing off at %s: %s (%s)",
+                boundary.get("checkpoint"),
+                boundary.get("reason"),
+                boundary.get("status"),
+            )
+            return _GOVERNANCE_BACKOFF_SECONDS
+        # Pause (drain) or a worker already running => wait. At most one
+        # indexing worker runs at a time (serialized via _active_workers).
+        if self._paused or self._active_workers:
+            return 5.0
+
+        pending = await asyncio.to_thread(self.store.get_pending_count)
+        if pending <= 0:
+            return 10.0
+        if self._shutdown:
+            return None
+        before_dequeue = self._recheck_governance("pre-mutation:dequeue")
+        if before_dequeue is not None and before_dequeue.get("status") != "ready":
+            log.warning(
+                "Worker loop refused dequeue at %s: %s (%s)",
+                before_dequeue.get("checkpoint"),
+                before_dequeue.get("reason"),
+                before_dequeue.get("status"),
+            )
+            return _GOVERNANCE_BACKOFF_SECONDS
+
+        task = await asyncio.to_thread(self.store.dequeue_next)
+        if task is None:
+            return 10.0
+        if self._shutdown:
+            await asyncio.to_thread(self.store.release_processing, task.id)
+            return None
+        before_launch = self._recheck_governance("pre-mutation:launch")
+        if before_launch is not None and before_launch.get("status") != "ready":
+            await asyncio.to_thread(self.store.release_processing, task.id)
+            log.warning(
+                "Worker loop released task %s after %s: %s (%s)",
+                task.id,
+                before_launch.get("checkpoint"),
+                before_launch.get("reason"),
+                before_launch.get("status"),
+            )
+            return _GOVERNANCE_BACKOFF_SECONDS
+
+        await self._launch_worker(task)
+        return None
 
     # ── Worker delegation (model A) ──────────────────────────
 
@@ -617,7 +670,20 @@ class TaskRunner:
         source_lock = None
         if self._source_lock_acquire is not None:
             source_key = task.source if task.source != "all" else "__all__"
-            source_lock = await self._source_lock_acquire(source_key)
+            self._source_lock_task = asyncio.create_task(self._source_lock_acquire(source_key))
+            try:
+                source_lock = await self._source_lock_task
+            except BaseException:
+                await asyncio.to_thread(self.store.release_processing, task.id)
+                raise
+            finally:
+                self._source_lock_task = None
+        if self._shutdown:
+            if source_lock is not None:
+                with suppress(Exception):
+                    source_lock.release()
+            await asyncio.to_thread(self.store.release_processing, task.id)
+            return
         self._worker_locks[task.id] = source_lock
         try:
             proc = await asyncio.to_thread(self._spawn_worker, task.id)
@@ -680,7 +746,9 @@ class TaskRunner:
         """
         try:
             while True:
-                rec = await asyncio.to_thread(self.store.get_task, task.id)
+                rec = await _settle(asyncio.create_task(
+                    asyncio.to_thread(self.store.get_task, task.id)
+                ))
                 if rec is not None and rec.status in _TERMINAL_VALUES:
                     break
                 if proc is not None:
@@ -696,11 +764,15 @@ class TaskRunner:
                             TaskStatus.INTERRUPTED.value,
                             "Worker exited without completing",
                         )
-                    await asyncio.to_thread(self.store.update_status, task.id, final, err)
+                    await _settle(asyncio.create_task(
+                        asyncio.to_thread(self.store.update_status, task.id, final, err)
+                    ))
                     break
                 await asyncio.sleep(1.0)
 
-            rec = await asyncio.to_thread(self.store.get_task, task.id)
+            rec = await _settle(asyncio.create_task(
+                asyncio.to_thread(self.store.get_task, task.id)
+            ))
             status = rec.status if rec is not None else TaskStatus.FAILED.value
             if status in (TaskStatus.COMPLETE.value, TaskStatus.PARTIAL.value):
                 # PARTIAL still stored real content for its non-failed sources,
@@ -712,7 +784,9 @@ class TaskRunner:
                     self.tasks_failed += 1
                 if self._post_index_fn is not None:
                     try:
-                        await asyncio.to_thread(self._post_index_fn)
+                        await _settle(asyncio.create_task(
+                            asyncio.to_thread(self._post_index_fn)
+                        ))
                     except Exception:
                         log.warning("Post-index hook failed", exc_info=True)
             elif status in (TaskStatus.FAILED.value, TaskStatus.INTERRUPTED.value):

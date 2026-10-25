@@ -101,34 +101,32 @@ def test_prepare_ssh_config_uses_windowless_broker_on_windows(monkeypatch, tmp_p
 
 
 def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
+    import io
+    from agent_containers import docker_proxy_connection
+
     seen = {}
     process = SimpleNamespace(
-        stdin=SimpleNamespace(),
-        stdout=SimpleNamespace(),
-        wait=lambda: 17,
+        stdin=io.BytesIO(),
+        stdout=io.BytesIO(),
+        wait=lambda timeout=None: 17,
         poll=lambda: 17,
     )
 
     def fake_popen(args, **kwargs):
         seen["args"] = args
         seen["kwargs"] = kwargs
-        return process
+        return process, None
 
-    monkeypatch.setattr(docker_proxy.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(docker_proxy_connection, "spawn_sync_in_kill_on_close_job", fake_popen)
     monkeypatch.setattr(
-        docker_proxy,
+        docker_proxy_connection,
         "no_window_kwargs",
         lambda: {"creationflags": 0x08000000},
     )
-    monkeypatch.setattr(
-        docker_proxy.threading,
-        "Thread",
-        lambda **kwargs: SimpleNamespace(
-            start=lambda: None,
-            join=lambda timeout=None: None,
-        ),
+    connection = SimpleNamespace(
+        close=lambda: None, shutdown=lambda _: None,
+        recv=lambda _: b"", sendall=lambda _: None,
     )
-    connection = SimpleNamespace(close=lambda: None)
 
     docker_proxy._serve_connection("repo-1", connection)
 
@@ -146,9 +144,12 @@ def test_docker_broker_uses_binary_pipes_and_suppresses_window(monkeypatch):
         "GatewayPorts=no",
     ]
     assert seen["kwargs"] == {
+        "require_job": True,
+        "allow_breakaway": False,
         "stdin": subprocess.PIPE,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.DEVNULL,
+        "bufsize": 0,
         "creationflags": 0x08000000,
     }
 

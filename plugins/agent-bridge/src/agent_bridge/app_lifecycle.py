@@ -71,6 +71,11 @@ async def lifespan(app):
             async with _lifespan(app):
                 yield
         finally:
-            db = getattr(app.state, "db", None)
-            if db is not None:
-                await close_database(db)
+            try:
+                from .app_agent_roster import stop_agent_roster_cache
+
+                await stop_agent_roster_cache(app)
+            finally:
+                db = getattr(app.state, "db", None)
+                if db is not None:
+                    await close_database(db)
