@@ -10,11 +10,53 @@ RUNTIME_PROFILE_RECOVERY = (
 )
 
 
+def _runtime_download_origins(value: Any) -> list[str]:
+    if not isinstance(value, list) or len(value) > 256:
+        _fail("runtimeProfiles.downloadOrigins must be a bounded JSON array.")
+    result = []
+    for origin in value:
+        if (
+            not isinstance(origin, str) or not origin.isascii() or len(origin) > 2048
+            or any(character.isspace() or ord(character) < 32 for character in origin)
+            or "\\" in origin
+        ):
+            _fail("runtimeProfiles.downloadOrigins requires exact HTTPS origins.")
+        try:
+            parsed = urlsplit(origin)
+            host, port = parsed.hostname, parsed.port
+            if (
+                parsed.scheme != "https" or not host
+                or parsed.username is not None or parsed.password is not None
+                or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+                or port == 0
+            ):
+                raise ValueError
+            if ":" in host:
+                if re.fullmatch(r"[0-9a-f:]+", host) is None:
+                    raise ValueError
+                ipaddress.IPv6Address(host)
+                host = "[" + host + "]"
+            elif not all(
+                re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+                for label in host.split(".")
+            ):
+                raise ValueError
+            canonical = "https://" + host
+            if port is not None and port != 443:
+                canonical += ":" + str(port)
+        except ValueError:
+            _fail("runtimeProfiles.downloadOrigins requires exact HTTPS origins.")
+        if canonical in result:
+            _fail("runtimeProfiles.downloadOrigins contains duplicate origins.")
+        result.append(canonical)
+    return sorted(result)
+
+
 def _runtime_profile_settings(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping) or not set(value) <= {
-        "allowSourceFallback", "backend",
+        "allowSourceFallback", "backend", "downloadOrigins",
     }:
-        _fail("runtimeProfiles supports only allowSourceFallback and backend.")
+        _fail("runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins.")
     result = dict(value)
     if "allowSourceFallback" in result and not isinstance(result["allowSourceFallback"], bool):
         _fail("runtimeProfiles.allowSourceFallback must be a JSON boolean.")
@@ -23,6 +65,8 @@ def _runtime_profile_settings(value: Any) -> dict[str, Any]:
         or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}", result["backend"]) is None
     ):
         _fail("runtimeProfiles.backend must be an explicit opaque capability reference.")
+    if "downloadOrigins" in result:
+        result["downloadOrigins"] = _runtime_download_origins(result["downloadOrigins"])
     return result
 
 
@@ -44,11 +88,14 @@ def _runtime_profile_selection(
         if existing_installation:
             _fail("An unprofiled runtime requires an explicit migration capability.")
         selected = "cpu"
-    return {
+    result = {
         "preferArtifact": True,
         "allowSourceFallback": settings.get("allowSourceFallback", True),
         "backend": selected,
     }
+    if settings.get("downloadOrigins"):
+        result["downloadOrigins"] = settings["downloadOrigins"]
+    return result
 
 
 def _deployment_owner(

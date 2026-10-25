@@ -21,12 +21,13 @@ import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained,
+    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _native_retained_path,
     _private_retained_root, _select_uv_executable, _temporary_inputs,
     retain_closed_wheel_install, retain_uv_install,
 )
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
-from installer_wheel_snapshot import WheelInstallInputs
+from installer_wheel_inputs import _check_deadline, _ordinary
+from installer_wheel_snapshot import WheelInstallInputs, _digest, _open, _unchanged
 
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache",
@@ -221,13 +222,15 @@ def _source_files(roots: tuple[Path, ...]) -> tuple[Path, ...]:
     return tuple(sorted(files))
 
 
-def freeze_inputs(plugin: Path, destination: Path) -> FrozenInputs:
+def freeze_inputs(plugin: Path, destination: Path, *, deadline: float | None = None) -> FrozenInputs:
     """Copy and verify all local package inputs before admitting a numbered build.
 
     The caller owns a fresh destination outside the input trees. Relative package
     layout is preserved, so transitive ``tool.uv.sources`` paths remain attributable.
     Numbered construction consumes these copies non-editably, never a live checkout.
     """
+    if deadline is not None:
+        _check_deadline(deadline)
     roots = _package_roots(plugin)
     plugin = plugin.resolve(strict=True)
     common = Path(os.path.commonpath(roots))
@@ -240,10 +243,23 @@ def freeze_inputs(plugin: Path, destination: Path) -> FrozenInputs:
     destination.mkdir(parents=True, exist_ok=False)
     try:
         for source in files:
+            if deadline is not None:
+                _check_deadline(deadline)
             target = destination / source.relative_to(common)
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, target, follow_symlinks=False)
-            shutil.copymode(source, target, follow_symlinks=False)
+            if deadline is None:
+                shutil.copyfile(source, target, follow_symlinks=False)
+            else:
+                before_copy = _ordinary(source)
+                with _open(source) as incoming, Path(_native_retained_path(target)).open("xb") as output:
+                    opened = _unchanged(source, before_copy, incoming)
+                    _digest(incoming, before_copy.st_size, deadline, destination=output)
+                    _unchanged(source, before_copy, incoming, opened=opened)
+            shutil.copymode(
+                _native_retained_path(source) if deadline is not None else source,
+                _native_retained_path(target) if deadline is not None else target,
+                follow_symlinks=False,
+            )
         frozen_roots = tuple(destination / root.relative_to(common) for root in roots)
         frozen_plugin = destination / plugin.relative_to(common)
         if _package_roots(frozen_plugin) != tuple(sorted(frozen_roots)):
@@ -257,6 +273,8 @@ def freeze_inputs(plugin: Path, destination: Path) -> FrozenInputs:
         frozen_hash = runtime.fingerprint_source(_source_files(frozen_roots))
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
+        if deadline is not None:
+            _check_deadline(deadline)
         return FrozenInputs(frozen_plugin, frozen_roots, frozen_hash)
     except BaseException:
         shutil.rmtree(destination)
@@ -290,7 +308,7 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
             raise ValueError("Closed wheels require immutable numbered construction")
         with _temporary_inputs(None) as temporary:
             root = _private_retained_root(Path(temporary)).resolve()
-            frozen = freeze_inputs(inputs.plugin, root / "source")
+            frozen = freeze_inputs(inputs.plugin, root / "source", deadline=inputs.wheel_inputs.deadline)
             if _wheel_construction_hash(
                 _construction_hash(_source_files(frozen.packages), inputs.extras, inputs.local_packages),
                 inputs.wheel_inputs,
@@ -361,15 +379,23 @@ def _child(
             env.pop(name, None)
     procutil = _procutil(inputs)
     for attempt in range(len(delays) + 1):
+        remaining = timeout
+        if inputs.wheel_inputs is not None:
+            _check_deadline(inputs.wheel_inputs.deadline)
+            remaining = min(timeout, inputs.wheel_inputs.deadline - time.monotonic())
         try:
-            return run_owned(
-                argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=timeout,
+            result = run_owned(
+                argv, cwd=cwd or Path(Path(argv[0]).resolve().anchor), env=env, timeout=remaining,
                 procutil=procutil, construction_fd=descriptor,
                 **({
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),
                 } if candidate is not None else {}),
+                **({"deadline": inputs.wheel_inputs.deadline} if inputs.wheel_inputs is not None else {}),
             )
+            if inputs.wheel_inputs is not None:
+                _check_deadline(inputs.wheel_inputs.deadline)
+            return result
         except subprocess.CalledProcessError as error:
             diagnostic = error.stdout + error.stderr
             if attempt == len(delays) or not re.search(transient, diagnostic):
@@ -380,11 +406,16 @@ def _child(
                 f"Installer child hit a transient failure; retrying in {delays[attempt]}s:\n"
                 f"{diagnostic}", file=sys.stderr, flush=True,
             )
+            if inputs.wheel_inputs is not None and (
+                inputs.wheel_inputs.deadline - time.monotonic() <= delays[attempt]
+            ):
+                _check_deadline(inputs.wheel_inputs.deadline)
+                raise TimeoutError("closed wheel acquisition/assembly deadline would expire during retry")
             time.sleep(delays[attempt])
         except subprocess.TimeoutExpired as error:
             diagnostic = f"{error.stdout or ''}{error.stderr or ''}"
             print(
-                f"Installer child timed out after {timeout}s:\n{diagnostic}",
+                f"Installer child timed out after {remaining}s:\n{diagnostic}",
                 file=sys.stderr, flush=True,
             )
             raise

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 import venv
 
@@ -122,7 +123,7 @@ def test_real_guardian_without_waitid_preserves_child_exit(guardian, tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
-@pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "launch"])
+@pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "absolute-timeout", "launch"])
 @pytest.mark.timeout(30)
 def test_retained_windows_child_preserves_outcome_and_releases_custody(
     guardian, tmp_path, outcome,
@@ -139,11 +140,13 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
         "success": [sys.executable, "-I", "-c", "print('owned')"],
         "exit": [sys.executable, "-I", "-c", "raise SystemExit(23)"],
         "timeout": [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
+        "absolute-timeout": [sys.executable, "-I", "-c", "import time; time.sleep(60)"],
         "launch": [str(tmp_path / "missing-child.exe")],
     }
     errors = {
         "exit": subprocess.CalledProcessError,
         "timeout": guardian.ChildTimeoutExpired,
+        "absolute-timeout": guardian.ChildTimeoutExpired,
         "launch": guardian.ChildLaunchError,
     }
     with runtime.construction_lease(root, "probe") as descriptor:
@@ -152,6 +155,7 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
                 commands[outcome], cwd=slot, env=dict(os.environ),
                 timeout=3, procutil=agent_procutil, construction_fd=descriptor,
                 runtime_root=root, runtime_version="probe", runtime_path=runtime_path,
+                **({"deadline": time.monotonic() + 3} if outcome == "absolute-timeout" else {}),
             )
 
         if outcome == "success":

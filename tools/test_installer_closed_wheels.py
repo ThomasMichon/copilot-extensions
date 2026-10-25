@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 import installer_dependency_policy as policy
 from installer_wheel_snapshot import retain_wheel_inputs
+from installer_wheel_inputs import WheelError
 from wheel_input_fixture import wheel_bytes
 
 
@@ -391,7 +393,7 @@ def test_closed_reuse_checks_installed_closure_origins_and_binding(tmp_path, eng
         assert engine.runtime.current_version(root) == "1.0.0"
 
 
-@pytest.mark.parametrize("failure", ["health", "cancel"])
+@pytest.mark.parametrize("failure", ["health", "cancel", "deadline"])
 def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
     tmp_path, engine, plugin, monkeypatch, failure,
 ):
@@ -418,7 +420,27 @@ def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
         monkeypatch.setattr(engine, "freeze_inputs", frozen)
         if failure == "cancel":
             monkeypatch.setattr(engine, "_construct", cancelled)
-        with pytest.raises(KeyboardInterrupt if failure == "cancel" else subprocess.CalledProcessError):
+        started = time.monotonic()
+        marker = tmp_path / "deadline-child"
+        timeouts = []
+        if failure == "deadline":
+            wheels = inspected(replace(retained, _deadline=started + 8))
+            owned = engine.run_owned
+
+            def blocked(argv, **options):
+                timeouts.append(options["timeout"])
+                return owned([
+                    sys.executable, "-I", "-c",
+                    "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
+                    str(marker),
+                ], **options)
+
+            monkeypatch.setattr(engine, "run_owned", blocked)
+        expected = {
+            "health": subprocess.CalledProcessError, "cancel": KeyboardInterrupt,
+            "deadline": (subprocess.TimeoutExpired, WheelError),
+        }[failure]
+        with pytest.raises(expected) as caught:
             with engine.numbered_candidate(
                 root, "1.0.1", plugin=plugin, uv=Path(uv), base_python=Path(sys.executable),
                 health_module="demo_pkg", health_callable="missing",
@@ -432,3 +454,101 @@ def test_closed_failure_preserves_selected_prior_and_settles_input_custody(
         with engine.runtime.construction_lease(root, "1.0.1", timeout=0):
             pass
         retained.verify()
+        if failure == "deadline":
+            from test_installer_wheel_acquisition import _running
+            if marker.is_file():
+                assert not _running(int(marker.read_text()))
+            if not isinstance(caught.value, subprocess.TimeoutExpired):
+                assert "deadline" in str(caught.value)
+            assert all(0 < timeout <= 8 for timeout in timeouts)
+            assert time.monotonic() - started < 13
+
+
+def test_prepared_closed_child_uses_actual_remaining_deadline(tmp_path, engine, plugin, monkeypatch):
+    from test_installer_wheel_acquisition import _running
+
+    frozen = engine.freeze_inputs(plugin, tmp_path / "prepared")
+    procutil = engine._procutil(frozen)
+    monkeypatch.setattr(engine, "_procutil", lambda _inputs: procutil)
+    marker = tmp_path / "owned-child"
+    root = tmp_path / "runtime"
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        with engine.runtime.construction_lease(root, "1.0.0", timeout=0) as descriptor:
+            started = time.monotonic()
+            selected = replace(wheels, snapshot=replace(retained, _deadline=started + 3))
+            with pytest.raises(subprocess.TimeoutExpired):
+                engine._child([
+                    sys.executable, "-I", "-c",
+                    "import os,pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(str(os.getpid()));time.sleep(30)",
+                    str(marker),
+                ], inputs=replace(frozen, wheel_inputs=selected), descriptor=descriptor, timeout=30)
+            assert marker.is_file() and not _running(int(marker.read_text()))
+            assert time.monotonic() - started < 6
+        with engine.runtime.construction_lease(root, "1.0.0", timeout=0):
+            pass
+
+
+def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    destination = tmp_path / "partial"
+    before = (plugin / "pyproject.toml").read_bytes()
+    deadline = time.monotonic() + 60
+    digest = engine._digest
+    calls = []
+
+    def expired(stream, limit, observed_deadline, destination=None):
+        assert observed_deadline == deadline
+        calls.append(destination)
+        return digest(stream, limit, time.monotonic() - 1, destination=destination)
+
+    monkeypatch.setattr(engine, "_digest", expired)
+    with pytest.raises(WheelError, match="deadline"):
+        engine.freeze_inputs(plugin, destination, deadline=deadline)
+    assert calls and not destination.exists()
+    assert (plugin / "pyproject.toml").read_bytes() == before
+
+
+@pytest.mark.parametrize("deadline", [0, float("inf"), True])
+def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine, plugin, deadline):
+    destination = tmp_path / "must-not-exist"
+    with pytest.raises(WheelError, match="deadline"):
+        engine.freeze_inputs(plugin, destination, deadline=deadline)
+    assert not destination.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows absolute-deadline guardian")
+def test_retained_guardian_startup_cannot_renew_an_absolute_deadline(engine, tmp_path):
+    from test_installer_wheel_acquisition import worker_procutil
+    import installer_engine_process as guardian
+
+    source = Path(guardian.__file__)
+    delayed = tmp_path / "delayed-guardian.py"
+    guardian_marker = tmp_path / "guardian-started"
+    delayed.write_text(source.read_text().replace(
+        "def _supervise_windows(args, argv):",
+        "def _supervise_windows(args, argv):\n"
+        "    Path(" + repr(str(guardian_marker)) + ").write_text('entered')\n    time.sleep(1.5)",
+    ))
+    selected = guardian._load_resource("absolute_deadline_guardian", delayed)
+    runtime = engine.runtime
+    root = tmp_path / "runtime"
+    root.mkdir()
+    slot = runtime.slot(root, "probe")
+    marker = tmp_path / "must-not-start"
+    procutil = worker_procutil()
+    with runtime.construction_lease(root, "probe") as descriptor:
+        started = time.monotonic()
+        with pytest.raises(selected.ChildTimeoutExpired):
+            selected.run_owned(
+                [sys.executable, "-I", "-c",
+                 "import pathlib,sys;pathlib.Path(sys.argv[1]).write_text('started')", str(marker)],
+                cwd=slot, env=dict(os.environ), timeout=10, deadline=started + 0.5,
+                procutil=procutil, construction_fd=descriptor,
+                runtime_root=root, runtime_version="probe", runtime_path=Path(runtime.__file__),
+            )
+        assert guardian_marker.is_file() and not marker.exists()
+        assert time.monotonic() - started < 8
+        with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
+            assert admitted

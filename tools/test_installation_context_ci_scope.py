@@ -597,6 +597,30 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
         ]
 
 
+def test_wheel_acquisition_reuses_the_existing_bounded_opt_in_lane() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    selector = trigger["workflow_dispatch"]["inputs"]["wheel_inputs"]
+    assert selector["type"] == "boolean" and selector["default"] is False
+    for name, runner in (("wheel-inputs-linux", "ubuntu-latest"), ("wheel-inputs-windows", "windows-latest")):
+        job = workflow["jobs"][name]
+        assert job["if"] == "${{ inputs.wheel_inputs }}"
+        assert job["runs-on"] == runner
+        assert job["timeout-minutes"] == 6 and not job.get("continue-on-error")
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        assert len(commands) == 2 and "pytest packaging pyyaml" in commands[0]
+        selection = commands[1].split()
+        assert selection[:4] == ["python", "-m", "pytest", "-q"]
+        assert "-k" not in selection
+        for path in (
+            "tools/test_installer_wheel_acquisition.py", "tools/test_runtime_feed_configuration.py",
+            "tools/test_installer_closed_wheels.py", "tools/test_runtime_profile_release.py",
+        ):
+            assert path in selection
+
+
 def test_watch_owner_acceptance_is_opt_in_native_and_separately_contained() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()

@@ -1,0 +1,9 @@
+{
+  "comment": "Make admitted POSIX parser models portable to Windows Python 3.11",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

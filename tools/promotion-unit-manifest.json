@@ -1697,7 +1697,7 @@
         "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[absolute-parent]"
     ],
     "sources": {
-        "libs/installer-engine/installer_dependency_policy.py": "a29a7ee450991c21b07acb0bc2406b29c69e51a1e753c777a6a5283f7ce374bb",
+        "libs/installer-engine/installer_dependency_policy.py": "dd2f24a3debc524dafb4b901111912058f596e228e7cf9085fc252174e3f83f9",
         "libs/installer-engine/installer_dependency_config.py": "76986624c2f47a09a47da97cf858a4aec3997065d2955204f9acab503f97b9c2",
         "tools/accumulate_bumps.py": "64055cbc51a33c70882ea3e6ed863ec8b34c8bdb8b3b77c297d44e6cd08eecf0",
         "tools/changefile.py": "5eb39b6273af7bec09e54c4168967a17f3c3d1e7b57d196cc1dac4763529555f",
@@ -1720,7 +1720,7 @@
         "libs/fleet-contracts/tests/test_responses.py": "1edda45861675e1337a38048cad1d9f6b87d4938030f0ada3d085dd1f4684724",
         "libs/installation-context/_installation_context_activation.py": "fe51f6f03cf0bf7757251928b598b79cf04f4d761cb58728893bcd7290da46b5",
         "libs/installation-context/_installation_context_base.py": "401925ef59a2da8991f1c4f4a8e5b8a5cfbe098feeeb02c58805669071b010c6",
-        "libs/installation-context/_installation_context_deployment.py": "2bf2c94dfcfef27e0fcf400d1502a9ec24faf7e14c4c4802d0e23cd40c78e4ee",
+        "libs/installation-context/_installation_context_deployment.py": "44d079510e54c76a4b5cc0e69aeb3328b9bee101372f62842d82c95c9e2b10bf",
         "libs/installation-context/_installation_context_files.py": "ba47edd7b0a0c9a0f46e12e13556cc86575e357005285ccb998c1176f3494086",
         "libs/installation-context/_installation_context_guest_environment.py": "8003605eb2afd012501c25ab56d51d28defab1ed8f62c3ebf6af0f1d5d76d235",
         "libs/installation-context/_installation_context_legacy_attribution.py": "871f99adfc670c3c8b87f20390256b128dbf11d2f78e1804d6bf7e6a9b91d4b6",
@@ -1868,7 +1868,7 @@
         "fleet-manager/src/fleet_manager/planning.py": "2f5f85665490121a1a8ffdd9c8d5f0bbdf08fadbeb858dd86035f138f6a6f4f5",
         "fleet-manager/src/fleet_manager/host_profile.py": "37a27641abd39690e8dd832bac5f5c19ae6885cc1cd4c1be33e3d99fe0071849",
         "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
-        "fleet-manager/tests/test_host_profile.py": "8ac1c27809fdf08916b04aa06d1c0d9a87e3918a7dd4d35579cd7e75fd4af3dc",
+        "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
         "tools/promotion_unit_tests/test_mcp_home.py": "979e26f5099c3d582fe7567318887a37ecd0c36f45cb4cc8836ea84a7d6bc634",
         "plugins/agent-mcp/src/agent_mcp/home.py": "c27b390c5771eb2b876596a973d1dbe387fa96ad7d5f75fcf51d7d0f726b7ade"
