@@ -125,6 +125,18 @@ The operator confirmed the slug and explicitly selected **runtime-only** for
 the Windows pilot. Local plugin-content sourcing is long-term intent tracked
 separately in #7031, with exclusive source replacement rather than shadowing.
 
+**Wholesale same-installation cutover clarification (2026-10-24), summary:**
+replace Main/release code with immutable merged-Dev install slots in the
+**existing global installation**, for every installed service/tool including
+Manager. Existing global binstubs and service registrations select the Dev
+generation; that generation uses the **same existing runtime configuration,
+databases and durable state** that the Main installation used. This is not a
+custom-root/cell deployment, a parallel installation or a data-copy migration.
+Installation-cell/custom-root capability is separate work, not a prerequisite
+for this wholesale transition. The [verbatim clarification](inception-transcript.md#wholesale-same-installation-cutover)
+preserves all three operator statements. Exact native change/rollback consent,
+candidate health and data-format compatibility remain required.
+
 **Execution follow-through summary:** the requested outcome covers all installed
 services and tools, including their management tools, rather than ending at a
 successful canary. A regular flow must keep the dedicated merged-dev source
@@ -224,13 +236,15 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] **Agent-recommended bounded slice:** qualify Bridge command-side first use before provision trace/status/root/lock writes, with actual standalone reachability, healthy managed invocation, helper skew and independently selected installation scope.
 - [x] **Agent-recommended bounded slice:** qualify Dispatch command-side first use through the canonical required-context dispatcher contract, preserving legacy defaults for unrelated version-1 manifests and actual selected-cell scope.
 - [x] **Agent-recommended bounded slice:** qualify Containers payload/global first-use publication before state writes, exact canonical root and retained-cell binding, fresh-provision publisher binding, healthy dispatch and cross-platform lock custody under #7030; do not infer native adoption or installation-driver migration.
-- [ ] **Agent-recommended capability follow-up:** qualify Dispatch's native scoped staging/service publication before replacing explicit cold-cell/custom-root command readiness with provisioning.
+- [x] Deferred to `#7030`: **Agent-recommended capability follow-up:** qualify Dispatch's native scoped staging/service publication before replacing explicit cold-cell/custom-root command readiness with provisioning. This separate installation-cell/custom-root capability is outside the wholesale same-global-installation cutover and is not its readiness gate; its explicit unsupported outcome remains intact.
+- [ ] **Agent-recommended bounded scoped-publication slice:** preserve Dispatch's existing global primary/board commands, or their absence, during actual custom-root/cell stamping while retaining scoped helpers and healthy selected/ordinary-shell invocation; do not infer native scoped staging or service readiness.
 - [x] **Agent-recommended review follow-up:** restore and qualify serialized no-flock stale-lock recovery in Bridge's retained command gate under #7030, separately from its merged publication-admission slice.
 - [x] **Agent-recommended retained-binding follow-up:** qualify Bridge's actual scoped stamp preserving existing global commands byte-for-byte or leaving them absent, plus ordinary-shell active-cell dispatch and publisher/pointer-loss/deactivation controls under #7030; do not assume its scoped installer emits cell-bound globals.
-- [ ] **Agent-recommended cross-platform contention follow-up:** qualify Dispatch's PowerShell/POSIX provisioning-lock contention and healthy-owner reuse under #7030; preserve explicit refusal of unrelated I/O failures and the separate scoped-publication capability gate.
+- [x] **Agent-recommended cross-platform contention follow-up:** qualify Dispatch's PowerShell/POSIX provisioning-lock contention and healthy-owner reuse under #7030; preserve explicit refusal of unrelated I/O failures and the separate scoped-publication capability gate.
 - [ ] Keep adapters thin and enforce drift-compatible service interaction without implicit runtime replacement.
 
 ### Phase 4 - Integrate Manager-owned runtime source selection
+- [ ] Replace Main/release code through the existing global installation roots, binstubs and service registrations with immutable merged-Dev slots, preserving the same existing runtime configuration, databases and durable state; do not introduce custom roots, installation cells or a parallel data store for this cutover.
 - [ ] **Agent-recommended alignment qualification:** prove forward/reverse current-generation replacement, including same-package/different-source selection, with preferred compatible handoff and bounded identity-checked cold takeover when contracts break or drain fails; use identity inequality, not version ordering.
 - [ ] Maintain a separate installation source with main, stable/exact pin and opt-in merged-dev selection resolved once per run.
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
@@ -721,6 +735,8 @@ implementation, rollout or parent completion is declared.
   service/process/credential or configuration action through this intake.
 
 ## Validation Plan
+
+- [ ] **Wholesale same-installation cutover:** every inventoried global binstub and applicable serving process executes its selected immutable merged-Dev slot while retaining the Main installation's existing runtime data/configuration identity. Prove actual installed/serving code identity and continuity of representative existing state; a new cell, copied database, changed data root or synthetic fresh profile does not satisfy this gate. Qualify data-format compatibility and supported recovery before a rollback; do not assume that sharing data makes arbitrary older code compatible.
 
 - [ ] G1: Resolve EVERY directly retained #4015 original/refined all-service and EIGHT
   #4058 Bridge Plan/Validation/continuing Coordination clause at its original finite

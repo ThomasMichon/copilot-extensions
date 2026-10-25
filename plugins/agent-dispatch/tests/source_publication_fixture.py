@@ -83,6 +83,8 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = $PSScriptRoot
 $PluginDir = Split-Path -Parent $ScriptDir
 $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
+$legacyInstallDir = $InstallDir
+$publishLegacyNames = $true
 $LocalBin = Join-Path $env:USERPROFILE '.local/bin'
 $PkgSrcDir = Join-Path $PluginDir 'src'
 $SrcVersion = '1.2.3-dev4'
@@ -131,6 +133,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="$HOME/.agent-dispatch"
+LEGACY_INSTALL_DIR="$INSTALL_DIR"
+SERVICE_SUFFIX=""
 LOCAL_BIN="$HOME/.local/bin"
 PKG_SRC_DIR="$PLUGIN_DIR/src"
 SRC_VERSION="{PACKAGE}"
@@ -251,6 +255,16 @@ def environment(tmp_path: Path) -> dict[str, str]:
         system = Path(env["SYSTEMROOT"])
         paths.extend((str(system / "System32"), str(system)))
     else:
+        test_bin = Path(env["HOME"]) / "test-bin"
+        test_bin.mkdir(exist_ok=True)
+        getent = test_bin / "getent"
+        getent.write_text(
+            "#!/bin/sh\n"
+            'printf "fixture:x:%s:%s:fixture:%s:/bin/sh\\n" "$(id -u)" "$(id -g)" "$HOME"\n',
+            encoding="utf-8",
+        )
+        getent.chmod(0o755)
+        paths.insert(0, str(test_bin))
         paths.extend(os.defpath.split(os.pathsep))
     env["PATH"] = os.pathsep.join(dict.fromkeys(paths))
     env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
@@ -288,6 +302,12 @@ def stage(tmp_path: Path, *, broken_b: bool = False):
         ):
             shutil.copy2(SCRIPTS / relative, scripts / relative)
         shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
+        if os.name != "nt":
+            helper = scripts / "installation-context/installation-context.ps1"
+            text = helper.read_text(encoding="utf-8")
+            original = "$passwdHome = [CePosixAccount]::Home()"
+            assert text.count(original) == 1
+            helper.write_text(text.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
         for ext in ("sh", "ps1"):
             (scripts / f"install.{ext}").write_bytes(script(ext).encode("utf-8"))
         package = payload / "src" / "agent_dispatch"

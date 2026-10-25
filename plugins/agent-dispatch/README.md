@@ -185,11 +185,19 @@ remain fatal rather than becoming an indefinite contention wait.
 An active installation cell or explicitly selected custom root uses its own
 healthy runtime, never another root. Cold cell/custom-root provisioning reports
 explicit unsupported readiness: Dispatch's native installer still stages under
-the default legacy home and has not adopted scoped staging/service publication.
+the default legacy home and scoped service publication is not yet qualified.
 An otherwise permissive policy does not authorize using that legacy installer
 against a cell. Use the owning installation's explicit management path; this
 command-side adoption does not enable a new deployment owner or background
 publisher.
+
+An explicit scoped stamp copies its selected-root metadata and runtime helpers,
+but preserves existing global primary/board compatibility launchers byte-for-byte
+or leaves them absent. Only a default legacy-root install publishes those global
+names. Scoped stamping is not proof of isolated staging or service readiness.
+Launcher ownership compares actual directory identity, not the case-folded
+service-name suffix: equivalent legacy path spellings retain publication, while
+distinct case-sensitive directories do not acquire global commands.
 
 The actual process-boundary portfolio is the explicit T3 suite
 `libs/payload-invocation/tests/test_dispatch_first_use_publication.py`. Run it
@@ -199,6 +207,10 @@ The shared OS-contention and unrelated-I/O controls are in
 `libs/payload-invocation/tests/test_containers_review_regressions.py`, selected
 with `-k "cold_caller or unrelated_io"`. These process-boundary controls are not
 part of required unit-only PR CI.
+Scoped-stamp ownership and healthy retained-command controls are in
+`libs/payload-invocation/tests/test_dispatch_scoped_publication.py`, also exposed
+by the explicit `dispatch-binding` manual portfolio described in
+[TESTING.md](../../TESTING.md#optional-dispatch-scoped-stamp-binding).
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: coordinator and
