@@ -45,8 +45,9 @@ if (-not $hostExe) {
 
 $runtimeRoot = $legacyRoot
 $context = ''
-$copilotHome = Join-Path $(if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }) '.copilot'
-$durableHome = Join-Path $env:USERPROFILE '.copilot-extensions'
+$userHomePath = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$copilotHome = Join-Path $userHomePath '.copilot'
+$durableHome = Join-Path $userHomePath '.copilot-extensions'
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
     1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }

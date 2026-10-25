@@ -223,6 +223,31 @@ def test_relative_exclusions_use_child_location_without_rewriting_sdk_arguments(
     assert read["args"][-1] == r".\relative runtime"
 
 
+@pytest.mark.parametrize("namespaced", (False, True))
+def test_absent_userprofile_preserves_powershell_home_fallback(binding_fixture, host, namespaced):
+    environment = _fixture(binding_fixture, route="unavailable", namespaced=namespaced)
+    environment.pop("USERPROFILE", None)
+    environment["TEST_FALLBACK_HOME"] = str(binding_fixture["home"])
+    script = binding_fixture["payload"] / "scripts/runtime-gate.ps1"
+    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    result = subprocess.run(
+        [host, "-NoProfile", "-NonInteractive", "-Command",
+         "Set-Variable -Name HOME -Value $env:TEST_FALLBACK_HOME -Force; "
+         f"& {quote(script)} version; exit $LASTEXITCODE"],
+        env=environment, cwd=binding_fixture["home"], capture_output=True,
+        text=True, encoding="utf-8", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == ["version"]
+    assert result.stderr == ""
+    assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == [
+        str(binding_fixture["legacy"]),
+        str(binding_fixture["home"] / ".copilot-extensions/marketplaces"),
+    ]
+    reads = [json.loads(line) for line in Path(environment["TEST_READ_LOG"]).read_text().splitlines()]
+    assert reads == [{"route": "native"}] * (2 if namespaced else 1)
+
+
 @pytest.mark.parametrize("forwarded", (
     [], [""], ["version"],
     ["prune", "--max", 5, 'echo "quoted & pipes | ; !" \u00e9\u6d4b\u8bd5', "C:\\space path\\"],

@@ -252,6 +252,36 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-24 - Corrected native cost and retained PowerShell home fallback
+
+- Rebuilt both normal installations from corrected source `b5905b6d62` in a
+  separate fresh profile: Worktrees completed in 214.453 seconds and Containers
+  in 63.266 seconds, both with zero exit and no stderr. Generated deployed
+  global Worktrees commands match the ordinary legacy frontdoor, not a payload
+  wrapper. Host selectors and source bytes remain unchanged.
+- Repeated only the combined evaluator comparison after the native alias
+  correction: PowerShell 5.1 native/admitted pairs measured 4.117/2.591,
+  3.614/2.185 and 3.858/2.515 seconds; pwsh measured 3.278/2.444,
+  3.168/2.134 and 3.152/2.197. All twelve complete SDK JSON values, zero
+  exits and empty stderr agree. Every pair retains 0.834-1.526 seconds
+  of benefit with native drive-root admission and compilation included.
+  No unchanged whole-provider cohort was retried or credited.
+- The second review confirmed both original findings resolved but identified
+  another Medium issue in its summary: initial durable-home construction
+  required `USERPROFILE` even for POSIX pwsh with an explicit runtime root.
+  Both gates now derive Copilot and durable homes from the native evaluator's
+  shared `USERPROFILE`-or-`$HOME` fallback. No SDK algorithm changes.
+- Eight new absent-`USERPROFILE` legacy/namespaced ABI controls and eight
+  selected-route controls pass on both Windows hosts/adopters. The other
+  previously passing consumer logic and native helper are unchanged.
+  An exact-owned, network-disabled, read-only probe of the existing Linux
+  clean-room base confirmed no `pwsh`; its temporary container was removed.
+  Windows ABI controls are not a native POSIX-pwsh pass. POSIX shell dispatch
+  remains untouched; no new tool installation or held venue substitutes.
+- Current-head review/CI and merge remain required. The parent retains its
+  actual 9.378-second whole-discovery failure, further owner-coordinated
+  startup work, release/control adoption and authorized installed acceptance.
+
 ### 2026-10-24 - Native alias and provenance-home review corrections
 
 - #8789's first review found two concrete boundaries. Native controls
