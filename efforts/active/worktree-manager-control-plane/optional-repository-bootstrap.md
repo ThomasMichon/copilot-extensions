@@ -316,13 +316,11 @@ GCM/browser authentication, tool-less provisioning, native POSIX or external
 machine qualification. The unchecked full-entry and attended acceptance items
 above remain open. Merge/release/rollout are separate and no rollout was made.
 
-The first review of #8944 identified a real replacement-ref gap: Git could
-report the approved HEAD and a clean virtual replacement tree while the setup
-bytes belonged to another commit. A real Git regression reproduced admission
-and attempted interpreter selection before the fix. Shared source qualification
-and every revalidation now read unreplaced objects; clone and explicit checkout
-also disable replacement objects without changing or deleting user refs.
-Three real replacement-tree controls cover plan, apply and revalidation.
-The focused packet also checked ordinary source inspection/setup and the native
-pinned HTTPS consumer. A checkout-argument assertion caught a missing flag in
-the first fix; it and the real pinned consumer passed after correction.
+Shared source qualification and every revalidation read unreplaced objects;
+clone and explicit checkout also disable replacement objects without changing
+or deleting user refs. An approved HEAD paired with a clean virtual replacement
+tree cannot authorize setup bytes from another commit. Three real Git controls
+cover plan, apply and revalidation; normal source inspection/setup and the native
+pinned HTTPS consumer cover the corresponding accepted paths. Acquisition
+argument controls require replacement-object suppression for both clone and
+explicit checkout.
