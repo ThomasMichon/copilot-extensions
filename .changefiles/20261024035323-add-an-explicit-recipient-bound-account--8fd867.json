@@ -1,0 +1,13 @@
+{
+  "comment": "Add an explicit recipient-bound account credential relay alongside unchanged scoped Gateway and legacy protocols; keep cached legacy readers current after indexing commits.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

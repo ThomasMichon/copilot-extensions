@@ -20,6 +20,7 @@ import threading
 import time
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -123,7 +124,13 @@ class ContentStore(_ContentFtsWorkerMixin):
         import lancedb
 
         self._source_domain = domain_for(db_path)
-        self._db = lancedb.connect(str(db_path))
+        # Legacy API readers and indexing workers hold independent connections.
+        # Source-aware stores already fence explicit checkout_latest themselves.
+        consistency = (
+            {"read_consistency_interval": timedelta(0)}
+            if self._source_domain is None else {}
+        )
+        self._db = lancedb.connect(str(db_path), **consistency)
         self._db_path = str(db_path)
         self._table_name = table_name
         self._table = None

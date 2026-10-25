@@ -1,5 +1,15 @@
 # agent-index-service
 
+`installation_id` is an optional explicit, persistent host-config identity.
+When selected, it is projected as `AGENT_INDEX_NATIVE_INSTALLATION_ID` into the
+hosted core and `/health`; ambient identity variables are never accepted as
+configuration. Native identity does not grant plugin-cell startup or selection
+authority; existing `AGENT_INDEX_INSTALLATION_ID` transaction checks remain
+unchanged for plugin cells. Native
+deployments that require identity-bound health must configure this scalar and
+bind the same real identity at their Gateway. Absence preserves the legacy
+unconfigured identity; null/empty/control-containing values are rejected.
+
 For independently owned fresh state, the explicit host option
 `store: {layout: source-aware-v1}` enables the core's
 [cold source-aware layout](../../plugins/agent-index/docs/source-aware-store.md).

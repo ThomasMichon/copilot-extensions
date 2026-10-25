@@ -131,6 +131,11 @@ class StagedRelay:
             )
             # asyncio now owns the socket; retain only its public server handle.
             self._socket = None
+            if self._relay.account_relay is not None:
+                await asyncio.wait_for(
+                    self._relay.account_relay.prepare(),
+                    timeout=self._deadline.remaining(),
+                )
             self._deadline.remaining()
             self.verify()
             self._prepared = True
@@ -149,6 +154,8 @@ class StagedRelay:
         self._deadline.remaining()
         if not self._prepared or self._active:
             raise PrivateIPCError(Refusal.AUTHORITY)
+        if self._relay.account_relay is not None:
+            self._relay.account_relay.activate()
         self._relay._server = self._transport
         self._relay.stats.start_time = time.time()
         self._active = True
@@ -160,6 +167,8 @@ class StagedRelay:
             return
         self._closed = True
         self._active = False
+        if self._relay.account_relay is not None:
+            self._relay.account_relay.close()
         if self._socket is not None:
             self._socket.close()
         if self._transport is not None:
@@ -174,6 +183,10 @@ class StagedRelay:
         """Bound owned async cleanup outside any routing fence."""
         self.close()
         try:
+            if self._relay.account_relay is not None:
+                await asyncio.wait_for(
+                    self._relay.account_relay.stop(), timeout=deadline.remaining(),
+                )
             if self._transport is not None:
                 await asyncio.wait_for(
                     self._transport.wait_closed(), timeout=deadline.remaining(),
