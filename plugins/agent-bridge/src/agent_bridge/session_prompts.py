@@ -673,8 +673,14 @@ class _SessionPromptMixin:
     def _host_reapable(self, session: Session) -> bool:
         """Is the child safe to free? True only when its turn has completed and
         no background sub-agents are still running (#51)."""
-        return (session.status == SessionStatus.IDLE
-                and not session.has_active_background_tasks)
+        if (
+            session.status != SessionStatus.IDLE or session.has_active_background_tasks
+            or session._native_turn_transport is not None
+        ):
+            return False
+        from .acquisition_launch_owner import session_association
+
+        return session_association(self, session) is None
 
     def _is_codespace_target(self, target: "SpawnTarget") -> bool:
         """True if this target is a CodeSpace boundary agent -- structured

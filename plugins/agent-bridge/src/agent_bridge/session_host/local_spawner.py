@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..acquisition_launch_owner import AcquisitionLaunchOwner
+    from ..local_launch_owner import LocalLaunchOwner
     from .spawner import SpawnedHost
 
 
@@ -26,7 +26,7 @@ class LocalSpawner:
     async def spawn(
         self, child_argv: list[str], *, cwd: str | None = None,
         env: dict[str, str] | None = None, session_id: str = "",
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> SpawnedHost:
         from .. import __version__
         from . import spawner as core

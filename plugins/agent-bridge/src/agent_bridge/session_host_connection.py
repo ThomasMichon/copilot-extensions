@@ -16,7 +16,7 @@ from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
-    from .acquisition_launch_owner import AcquisitionLaunchOwner
+    from .local_launch_owner import LocalLaunchOwner
     from .local_launch_preparation import PreparedLocalLaunch
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
@@ -49,7 +49,7 @@ class _SessionHostConnectionMixin:
         effort: str | None = None,
         parity_fault_result: dict[str, Any] | None = None,
         prepared_local_launch: PreparedLocalLaunch | None = None,
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).

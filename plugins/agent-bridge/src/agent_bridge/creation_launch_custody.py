@@ -77,6 +77,17 @@ def launch_observation(row: sqlite3.Row | dict, handoff_id: str | None = None) -
     )
     if row["state"] not in expected_states:
         raise RuntimeCustodyError("Creation state disagrees with its original native observations")
+    turn_index = row["turn_index"]
+    prompt = decode(row["creation_facts_json"])["prompt"]
+    if (
+        turn_index is not None and (
+            type(turn_index) is not int or turn_index != 0
+            or row["state"] not in ("delivering", "complete") or not prompt
+        )
+        or row["state"] == "delivering" and turn_index is None
+        or row["state"] == "complete" and bool(prompt) != (turn_index is not None)
+    ):
+        raise RuntimeCustodyError("Creation first-turn observation changed")
     return {
         "handoff": handoff, "started_at": started, "result": result,
         "binding_started_at": binding_started, "binding_accepted_at": binding_accepted,
@@ -213,3 +224,52 @@ class _CreationLaunchCustodyMixin:
                     (now, request.key_digest),
                 )
             return launch_observation(self._launch_row(conn, request), handoff_id)
+
+    def begin_delivery(
+        self, request: CreationRequest, installation: RuntimeInstallation,
+        admission: RuntimeAdmission, handoff_id: str, *, turn_index: int,
+    ) -> None:
+        if type(turn_index) is not int or turn_index != 0:
+            raise RuntimeCustodyError("Creation first prompt requires its original zero turn")
+        identity = self.db._runtime_installation(installation)
+        with self.db._runtime_transaction(write=True) as conn:
+            self.db._runtime_admission(conn, identity, admission, cohort="Creation first prompt")
+            row = self._launch_row(conn, request, admission)
+            report = launch_observation(row, handoff_id)
+            if (
+                report is None or report["binding_accepted_at"] is None
+                or row["state"] != "bound" or row["turn_index"] is not None
+            ):
+                raise RuntimeCustodyError("Creation first prompt remains held; do not replay")
+            conn.execute(
+                "UPDATE workspace_embodiments SET state='delivering',turn_index=? WHERE key_digest=?",
+                (turn_index, request.key_digest),
+            )
+
+    def complete_launch(self, request: CreationRequest, handoff_id: str) -> None:
+        """Observe a retained binding and, when requested, its exact first-turn row."""
+        with self.db._runtime_transaction(write=True) as conn:
+            row = self._launch_row(conn, request)
+            report = launch_observation(row, handoff_id)
+            if report is None or report["binding_accepted_at"] is None:
+                raise RuntimeCustodyError("Creation completion has no original accepted binding")
+            prompt = decode(request.facts_json)["prompt"]
+            if prompt:
+                turns = conn.execute(
+                    "SELECT session_id,turn_index,prompt,runtime_custody_json FROM turns "
+                    "WHERE acquisition_delivery_id=?", (f"creation:{request.key_digest}",),
+                ).fetchall()
+                if len(turns) != 1 or (
+                    turns[0]["session_id"] != row["session_id"]
+                    or turns[0]["turn_index"] != row["turn_index"]
+                    or turns[0]["prompt"] != prompt
+                    or turns[0]["runtime_custody_json"] != row["runtime_custody_json"]
+                ):
+                    raise RuntimeCustodyError("Creation completion lacks its original prompt admission")
+            elif row["turn_index"] is not None:
+                raise RuntimeCustodyError("Creation without a prompt cannot acquire a first turn")
+            if row["state"] != "complete":
+                conn.execute(
+                    "UPDATE workspace_embodiments SET state='complete' WHERE key_digest=?",
+                    (request.key_digest,),
+                )

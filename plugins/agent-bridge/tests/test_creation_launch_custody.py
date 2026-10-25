@@ -156,6 +156,34 @@ def test_creation_launch_two_sqlite_owners_admit_only_original_once(native_creat
         assert sorted(pool.map(begin, range(2))) == [False, True]
 
 
+def test_creation_first_prompt_keeps_original_zero_index_and_unknown(native_creation):
+    db, owner, producer, admission, journal, request, handoff = native_creation
+    with pytest.raises(RuntimeCustodyError, match="remains held"):
+        journal.begin_delivery(request, owner, admission, handoff["id"], turn_index=0)
+    journal.begin_launch(request, owner, admission, handoff["id"], now=10)
+    journal.report_launch(request, handoff["id"], native_session_id="native-a", now=11)
+    journal.begin_binding(request, owner, admission, handoff["id"], now=12)
+    journal.report_binding(request, handoff["id"], now=13)
+    for index in (-1, 1, True):
+        with pytest.raises(RuntimeCustodyError, match="zero turn"):
+            journal.begin_delivery(request, owner, admission, handoff["id"], turn_index=index)
+    journal.begin_delivery(request, owner, admission, handoff["id"], turn_index=0)
+    with pytest.raises(RuntimeCustodyError, match="remains held"):
+        journal.begin_delivery(request, owner, admission, handoff["id"], turn_index=0)
+    for index in (None, 1):
+        with pytest.raises(sqlite3.IntegrityError, match="retained"):
+            db.execute_write(
+                "UPDATE workspace_embodiments SET turn_index=? WHERE key_digest=?",
+                (index, request.key_digest),
+            )
+    close(db, owner, producer)
+    with pytest.raises(RuntimeCustodyError, match="prompt admission"):
+        journal.complete_launch(request, handoff["id"])
+    assert journal.read(request)["state"] == "delivering"
+    assert journal.read(request)["turn_index"] == 0
+    assert not db.execute_read("SELECT * FROM turns")
+
+
 @pytest.mark.parametrize("mode", ["normal", "readonly", "adopted"])
 def test_creation_launch_damaged_current_schema_never_repairs(native_creation, mode):
     db, _owner, _producer, _admission, _journal, _request, _handoff = native_creation

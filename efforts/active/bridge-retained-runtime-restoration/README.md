@@ -264,6 +264,36 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
 
 ## Journal
 
+### 2026-10-24 - Original local creation native source controls
+
+- Extend the original workspace embodiment row with a prospective launch
+  handoff, one-shot Host/native and binding observations, and the retained
+  first-prompt zero index. The concrete `CreationLaunchOwner` reuses the
+  acquisition adapter's shared live Host/child/ACP checks without an
+  acquisition request or a second attempt ledger.
+- An explicitly selected `CreationFrontend.start` carries the full retained
+  target/options/prompt through existing allocation, local preparation, actual
+  Host/child/new/configuration, final binding subprocess and original-turn
+  owners. An independent exact-workspace native-head readback proves binding
+  before transport capture. Partial outcomes stay held; completed replay is
+  observational even after closure. Ordinary routes/defaults remain unchanged.
+- The coupled synthetic-process/storage lane passes 261 controls, with two
+  collection-capability skips and verified cleanup. Actual local Host/child/SDK
+  cases cover configuration, unknown native/binding replies, closure at
+  binding/capture/first-turn boundaries and ordinary lifecycle refusal.
+- The broader lane exposed a real idle-detach custody defect: graceful detach
+  advertised an associated Host as reapable, racing the retained-Host check.
+  Captured subprocess output identified server closure after self-reaping.
+  Two deterministic controls reproduced the predicate failure before the fix.
+  Host status/detach now short-circuit captured native custody and otherwise
+  require an unassociated durable session. The real shutdown control checks
+  `detach(False)`; ordinary unassociated idle reaping remains covered.
+- Fresh committed-source schema-37 HTTP evidence, preference-authority capture,
+  canonical readers and normal independent source review/merge remain owed.
+  No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
+  provider/background/remote, native/platform, compatibility, restoration and
+  separately authorized running adoption remain open.
+
 ### 2026-10-24 - Original local allocation subprocess source merged
 
 - #8869 merged as `d21b76a59f48fecd5be11b24c0ee99c33fce7176` after independent

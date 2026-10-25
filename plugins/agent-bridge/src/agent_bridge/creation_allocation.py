@@ -7,18 +7,39 @@ import hashlib
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+import uuid
 
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_executor import executor
-from .acquisition_launch_owner import require_local
+from .local_launch_owner import require_local
 from .creation_custody import CreationJournal, CreationRequest
 from .frontend_process import frontend_producer, require_frontend_process
 from .runtime_custody import RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, RuntimeProducer
 
 if TYPE_CHECKING:
     from .db import Database
+    from .creation_launch_owner import CreationLaunchOwner
+    from .session_manager import Session
     from .session_manager import SessionManager
     from .transport import SpawnTarget
+
+
+def creation_request(
+    target: SpawnTarget, key: str, prompt: str | None, options: dict[str, Any],
+) -> CreationRequest:
+    require_local(target)
+    if not target.project or target.worktree_id or target.explicit_cwd or target.native_resume_id is not None:
+        raise RuntimeCustodyError("Original allocation requires a new local project workspace")
+    if not isinstance(key, str) or not key.strip() or len(key) > 1024:
+        raise AcquisitionRefused("creation_key_invalid", "creation key must be non-empty and at most 1024 characters")
+    digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
+    request = CreationRequest.capture("workspace", digest, {
+        "target": json.loads(target.to_json()), "options": options, "prompt": prompt,
+    })
+    owner_ref = json.loads(request.facts_json)["options"].get("caller_owner_ref")
+    if owner_ref is not None and (type(owner_ref) is not str or not owner_ref.strip()):
+        raise RuntimeCustodyError("Original allocation requires a nonblank owner reference")
+    return request
 
 
 @dataclass(frozen=True)
@@ -49,6 +70,25 @@ class CreationFrontend:
             effect=effect,
         )
 
+    def prepare(self, request: CreationRequest) -> CreationLaunchOwner:
+        from .creation_launch_owner import CreationLaunchOwner
+
+        self.require_current()
+        handoff = CreationJournal(self.db).prepare_launch(
+            request, self.installation, self.admission, consumer_incarnation=uuid.uuid4().hex,
+        )
+        return CreationLaunchOwner(
+            self, request, handoff["consumer"]["session_id"], handoff["id"],
+        )
+
+    async def start(
+        self, target: SpawnTarget, *, key: str, prompt: str | None = None, **options: Any,
+    ) -> tuple[Session, dict]:
+        """Selected internal local creation; no public route or automatic enrollment."""
+        from .creation_local_launch import start
+
+        return await start(self, target, key=key, prompt=prompt, **options)
+
     async def allocate(
         self, target: SpawnTarget, *, key: str, prompt: str | None = None, **options: Any,
     ) -> dict:
@@ -57,22 +97,12 @@ class CreationFrontend:
         from .workspace_creation import allocate_workspace
 
         self.require_current(effect=False)
-        require_local(target)
-        if not target.project or target.worktree_id or target.explicit_cwd:
-            raise RuntimeCustodyError("Original allocation requires a new local project workspace")
-        if not isinstance(key, str) or not key.strip() or len(key) > 1024:
-            raise AcquisitionRefused("creation_key_invalid", "creation key must be non-empty and at most 1024 characters")
+        request = creation_request(target, key, prompt, options)
         original_target = replace(target)
-        digest = hashlib.sha256(json.dumps([target.project, key]).encode()).hexdigest()
-        request = CreationRequest.capture("workspace", digest, {
-            "target": json.loads(target.to_json()), "options": options, "prompt": prompt,
-        })
         retained = json.loads(request.facts_json)
         owner_ref = retained["options"].get("caller_owner_ref")
-        if owner_ref is not None and (type(owner_ref) is not str or not owner_ref.strip()):
-            raise RuntimeCustodyError("Original allocation requires a nonblank owner reference")
         journal = CreationJournal(self.db)
-        with executor(self.db, f"creation:{digest}"):
+        with executor(self.db, f"creation:{request.key_digest}"):
             row = journal.claim(request, self.installation, self.admission)
             if row["state"] == "allocated" and row["worktree_json"] is not None:
                 return row

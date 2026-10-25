@@ -12,7 +12,7 @@ COLUMNS = {name: "TEXT" if name.endswith("_json") else "REAL" for name in LAUNCH
 
 def schema_triggers() -> dict[str, str]:
     result = {}
-    for column in (*COLUMNS, "native_session_id", "worktree_json"):
+    for column in (*COLUMNS, "native_session_id", "worktree_json", "turn_index"):
         name = f"workspace_creation_{column}_retained"
         result[name] = (
             f"CREATE TRIGGER IF NOT EXISTS {name} BEFORE UPDATE OF {column} ON workspace_embodiments "

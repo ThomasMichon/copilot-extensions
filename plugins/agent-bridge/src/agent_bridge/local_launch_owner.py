@@ -48,6 +48,7 @@ class LocalLaunchOwner(ABC):
         frontend: LocalLaunchFrontend
         session_id: str
         native_session_id: str | None
+        handoff_id: str
 
     _session: Session | None = field(default=None, init=False)
     _target: SpawnTarget | None = field(default=None, init=False)

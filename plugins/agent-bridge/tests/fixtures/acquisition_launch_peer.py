@@ -17,16 +17,21 @@ def main() -> None:
         method = message.get("method")
         if method == "initialize":
             result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
-        elif method in ("session/new", "session/load", "session/prompt"):
+        elif method in ("session/new", "session/load", "session/prompt", "session/set_config_option"):
             with sqlite3.connect(Path(database).absolute().as_uri() + "?mode=ro", uri=True) as conn:
                 conn.row_factory = sqlite3.Row
+                creation = delivery.startswith("creation:")
                 row = conn.execute(
-                    "SELECT * FROM acquisition_attempts WHERE delivery_id=?", (delivery,),
+                    "SELECT * FROM workspace_embodiments WHERE key_digest=?" if creation
+                    else "SELECT * FROM acquisition_attempts WHERE delivery_id=?",
+                    (delivery.removeprefix("creation:") if creation else delivery,),
                 ).fetchone()
                 assert row is not None and row["launch_started_at"] is not None
                 handoff = json.loads(row["launch_handoff_json"])
                 assert handoff["admission"] == row["runtime_custody_json"]
                 if method == "session/prompt":
+                    if creation:
+                        assert row["binding_accepted_at"] is not None and row["turn_index"] == 0
                     turn = conn.execute(
                         "SELECT * FROM turns WHERE acquisition_delivery_id=?", (delivery,),
                     ).fetchone()
@@ -42,8 +47,17 @@ def main() -> None:
             if method == "session/new":
                 assert handoff["consumer"]["native_session_id"] is None
                 result = {"sessionId": "synthetic-created"}
+                if creation:
+                    result["configOptions"] = [
+                        {"id": name, "name": name, "type": "select", "currentValue": "initial",
+                         "options": [{"value": "initial", "name": "initial"}, {"value": desired, "name": desired}]}
+                        for name, desired in (("model", "fixture-model"), ("reasoning_effort", "high"))
+                    ]
             elif method == "session/load":
                 assert handoff["consumer"]["native_session_id"] == message["params"]["sessionId"]
+                result = {}
+            elif method == "session/set_config_option":
+                assert creation and row["launch_result_json"] is not None
                 result = {}
             else:
                 result = {"stopReason": "end_turn"}

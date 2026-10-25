@@ -85,6 +85,10 @@ Session insertion, shutdown stop and recovery-enable writes preserve the
 durable association's automatic-recovery exclusion. Hydration excludes
 associated history even if an older recovery flag was enabled. Startup and
 direct Host reattachment refuse that association before adopting another client.
+Ordinary Host status and graceful detach also retain that custody: an idle
+associated Host is not marked reapable. A captured native owner short-circuits
+the check; otherwise it reads the original session association. Only ordinary
+unassociated idle Hosts retain automatic reaping eligibility.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates
@@ -97,10 +101,11 @@ The concrete acquisition adapter retains its original request and journal.
 checks, one-shot native invocation and configuration fences. After acceptance,
 `LocalHostTransport` retains those actual references and the complete original
 handoff document for the existing turn protocol; `AcquisitionHostTransport`
-remains its compatibility name. This extraction does not enroll creation or
-another cohort, select a new launcher, or make retained observations into
-effect authority. Original keyed creation still needs its own same-row launch
-handoff and concrete adapter before it can use these shared checks.
+remains its compatibility name. The separately selected
+[original keyed-creation adapter](creation-custody.md) uses the same live effect
+checks with its own same-row handoff and concrete owner, not an acquisition
+request or another attempt ledger. Neither adapter enrolls a cohort by default
+or makes retained observations into effect authority.
 
 The newly launched local Host receives a stripped, original-acquisition context,
 not a transferable grant. Its actual child owner rechecks the original

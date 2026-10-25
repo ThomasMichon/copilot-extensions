@@ -161,10 +161,14 @@ def require_resume_owner(
 
 def require_start_owner(
     manager: SessionManager, target: SpawnTarget, session_id: str | None,
-    owner: AcquisitionLaunchOwner | None,
+    owner: LocalLaunchOwner | None,
 ) -> None:
     if owner is None:
         return
+    from .creation_launch_owner import CreationLaunchOwner
+
+    if type(owner) not in (AcquisitionLaunchOwner, CreationLaunchOwner):
+        raise RuntimeCustodyError("Local creation requires its concrete original launch owner")
     owner.require_current()
     require_local(target)
     if (
