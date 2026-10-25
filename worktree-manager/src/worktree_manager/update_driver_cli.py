@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
+
 _CONTEXT_KEYS = (
     "AGENT_HOME",
     "AGENT_WORKTREES_UPDATE_CONTEXT",
@@ -19,6 +21,7 @@ _CONTEXT_KEYS = (
     "WORKTREE_MANAGER_ROOT",
     "WORKTREE_MANAGER_ENGINE_ARGV",
     "WORKTREE_MANAGER_ENGINE_CMD",
+    TIMEOUT_ENV,
     "CE_UPDATE_AUTH",
 )
 
@@ -109,8 +112,8 @@ def source_identity() -> dict[str, object]:
 
 def request_context() -> dict[str, str]:
     from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
-
     context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
+    acquisition_timeout(context)
     accepted = inherited_engine_command()
     if accepted is not None:
         context[ENGINE_ARGV_ENV] = json.dumps(accepted)
@@ -167,8 +170,8 @@ def _report(request, *, as_json: bool) -> None:
 def cmd_update_request(rest: list[str]) -> int:
     import update_driver as driver
 
-    from . import __main__ as manager
     from .engine_client import EngineError
+    from .update_orchestration import extract_project
 
     options, forwarded = parse_options(rest)
     request = None
@@ -205,7 +208,7 @@ def cmd_update_request(rest: list[str]) -> int:
         if "--auth-report" in forwarded:
             from . import engine_client
 
-            project, args = manager._extract_project(forwarded)
+            project, args = extract_project(forwarded)
             return engine_client.run_engine_passthrough(
                 project, ["update", "--no-manager", *args, *(["--json"] if options.json else [])],
             )
@@ -219,8 +222,10 @@ def cmd_update_request(rest: list[str]) -> int:
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
                         raise driver.StateError("Manager source changed after submission; submit a new request")
                     custody.assert_owned()
+                    from . import __main__ as manager
+
                     return manager._cmd_update(forwarded)
-        project, _args = manager._extract_project(forwarded)
+        project, _args = extract_project(forwarded)
         cwd = Path.cwd().resolve()
         spec = driver.RequestSpec(
             backend="manager", argv=tuple(forwarded), project=project or "",

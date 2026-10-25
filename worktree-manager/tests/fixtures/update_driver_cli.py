@@ -7,9 +7,9 @@ import os
 import sys
 import time
 from pathlib import Path
+from types import ModuleType
 
 import update_driver
-from worktree_manager import __main__ as manager
 from worktree_manager import engine_client
 from worktree_manager import update_driver_cli as boundary
 
@@ -17,6 +17,7 @@ from worktree_manager import update_driver_cli as boundary
 def main() -> int:
     boundary.source_identity = lambda: {"repo": "fixture-source", "ref": "fixed"}
     engine_client.installed_engine_command = lambda: ["synthetic-marker-provider"]
+    engine_client.accept_inherited_engine_command()
     if sys.argv[1] in {"submit", "submit-only"}:
         original = update_driver.runtime_command
 
@@ -28,8 +29,8 @@ def main() -> int:
         update_driver.runtime_command = command
         if sys.argv[1] == "submit-only":
             update_driver.ensure_worker = lambda *args, **kwargs: None
-            return manager.main(["update", "--detach", *sys.argv[2:]])
-        return manager.main(["update", *sys.argv[2:]])
+            return boundary.cmd_update_request(["--detach", *sys.argv[2:]])
+        return boundary.cmd_update_request(sys.argv[2:])
 
     def execute(rest):
         events = Path(os.environ["UPDATE_DRIVER_TEST_EVENTS"])
@@ -38,6 +39,9 @@ def main() -> int:
                 "phase": "start", "pid": os.getpid(), "time": time.time(),
                 "provider": engine_client.engine_base_command(),
                 "arguments": list(rest),
+                "acquisition_budget": os.environ.get(
+                    "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC",
+                ),
             }) + "\n")
             stream.flush()
         print("synthetic canonical updater started", file=sys.stderr, flush=True)
@@ -46,8 +50,12 @@ def main() -> int:
             stream.write(json.dumps({"phase": "end", "pid": os.getpid(), "time": time.time()}) + "\n")
         return 6
 
+    # Only the product body is synthetic; queue, worker and custody remain real.
+    manager = ModuleType("worktree_manager.__main__")
     manager._cmd_update = execute
-    return manager.main(sys.argv[2:])
+    sys.modules[manager.__name__] = manager
+    assert sys.argv[2] == "update"
+    return boundary.cmd_update_request(sys.argv[3:])
 
 
 if __name__ == "__main__":
