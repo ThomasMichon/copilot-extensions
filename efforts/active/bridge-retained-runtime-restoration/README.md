@@ -146,8 +146,9 @@ require their own review and qualification.
       exclusions. Other creation/background/host/remote cohorts and full
       installed qualification remain open. The internal
       [keyed-creation DB foundation](../../../plugins/agent-bridge/docs/creation-custody.md)
-      merged in #8823; actual allocation/native effect-owner
-      integration remains open.
+      merged in #8823. Its separately selected local allocation subprocess
+      fence merged in #8869; ground-owner child qualification, native creation,
+      provider and remaining effect-owner integration stay open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -262,6 +263,24 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original local allocation subprocess source merged
+
+- #8869 merged as `d21b76a59f48fecd5be11b24c0ee99c33fce7176` after independent
+  exact-head approval `5641768659` on
+  `ca0b75c32be27ad19a2e2c134a0ae243506a6186`, required green CI and resolution
+  of the closed-epoch replay finding. Original allocated replay remains
+  observational after closure or draining; new preparation and spawn still
+  require the original open epoch.
+- The bounded original allocation row/executor/subprocess owner is source
+  coverage, not native or ground-child filesystem qualification. The final
+  focused allocation and actual synthetic Host/child/ACP regression lane passed
+  101 tests, following the coupled 235-case creation/storage/workspace portfolio.
+- Re-read every Plan and Validation Plan item after merge. Continue original
+  creation custody through the actual local Host/child/native and prompt owners
+  without a second operation ledger or a legacy downgrade. Full Phase 1/1b,
+  provider/background/remote coverage, compatibility, guarded installer
+  restoration and separately authorized platform/running adoption remain open.
 
 ### 2026-10-24 - Original local allocation owner under validation
 
