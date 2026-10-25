@@ -92,6 +92,16 @@ that actual owner, then admits the original handoff immediately before its
 `Popen`. A closure or owner change after the one-shot commit leaves it
 outstanding, never eligible for another launch.
 
+The concrete acquisition adapter retains its original request and journal.
+`LocalLaunchOwner` owns the shared live Session/target/Host/child/ACP reference
+checks, one-shot native invocation and configuration fences. After acceptance,
+`LocalHostTransport` retains those actual references and the complete original
+handoff document for the existing turn protocol; `AcquisitionHostTransport`
+remains its compatibility name. This extraction does not enroll creation or
+another cohort, select a new launcher, or make retained observations into
+effect authority. Original keyed creation still needs its own same-row launch
+handoff and concrete adapter before it can use these shared checks.
+
 The newly launched local Host receives a stripped, original-acquisition context,
 not a transferable grant. Its actual child owner rechecks the original
 frontend parent PID/birth, database file identity, epoch, producer, request

@@ -15,6 +15,7 @@ from zdd.diagnostics import process_start_time
 from agent_bridge.acp_client import AcpClient
 from agent_bridge.acquisition_journal import AcquisitionJournal
 from agent_bridge.acquisition_launch_owner import AcquisitionFrontend
+from agent_bridge.local_launch_owner import LocalLaunchOwner
 from agent_bridge.acquisition_runtime import AcquisitionRuntime
 from agent_bridge.models import SessionStatus
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeProducer
@@ -61,6 +62,19 @@ def test_acquisition_launch_final_host_fence_observes_closure(local_launch):
     with pytest.raises(RuntimeCustodyError, match="open epoch"):
         rig.owner.begin_host()
     assert AcquisitionJournal(rig.db).read_launch(rig.original)["started_at"] is None
+
+
+def test_acquisition_launch_shared_owner_keeps_concrete_original_journal(local_launch):
+    rig = local_launch
+    assert isinstance(rig.owner, LocalLaunchOwner)
+    assert rig.owner.worktree_id == rig.original.worktree_id
+    assert rig.owner.read_launch() == AcquisitionJournal(rig.db).read_launch(
+        rig.original, rig.owner.handoff_id,
+    )
+    rig.owner.begin_host()
+    assert rig.owner.read_launch()["stage"] == "starting"
+    assert rig.owner.read_launch()["result"] is None
+    assert not rig.db.execute_read("SELECT * FROM workspace_embodiments")
 
 
 def test_acquisition_launch_final_host_is_once_and_keeps_unknown(local_launch):
