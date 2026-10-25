@@ -30,6 +30,26 @@ def base_python() -> Path:
     return Path(getattr(sys, "_base_executable", sys.executable)).resolve(strict=True)
 
 
+def source_install_selection(
+    payload: Path, version: str, selected: Path | None,
+) -> tuple[str, bool]:
+    """Resolve requested source identity without constructing or publishing."""
+    identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
+    if identity is None:
+        return version, True
+    if selected is None or not (
+        selected.name == identity.runtime_version
+        or selected.name.startswith(identity.runtime_version + ".repair.")
+    ):
+        return identity.runtime_version, False
+    matches = runtime.is_complete(selected.parent.parent, selected.name)
+    if matches:
+        matches = runtime_source.read_source_identity(
+            selected / "payload", version, plugin="worktree-manager",
+        ) == identity
+    return identity.runtime_version, matches
+
+
 @contextmanager
 def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
     """Retain a healthy target; never publish selectors during construction."""
@@ -76,8 +96,13 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             process_retention=True, reuse_generations=identity is None,
             expected_source_identity=runtime_source.manifest_fields(identity),
         )
+        current = runtime.current_version(root)
+        if (
+            identity is not None and current and current.startswith(generation + ".repair.")
+            and runtime.is_complete(root, current)
+        ):
+            generation = current
         if runtime.version_dir(root, generation).exists() and not runtime.is_complete(root, generation):
-            current = runtime.current_version(root)
             family = current and (
                 current == generation or current.startswith(generation + "+repair.")
                 or current.startswith(generation + ".repair.")

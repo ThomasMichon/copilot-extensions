@@ -1290,6 +1290,17 @@ the new code: the successor starts on a fresh loopback port, status writers
 follow the routed active endpoint first, and the predecessor drains accepted
 status-apply work plus its current republish cycle before retiring.
 
+For a prepared source payload, `self_install(..., dry_run=True)` compares the
+full retained source identity and assembled bytes, not just the package version.
+It reports the selected source/repair slot and marker on exact reuse, or the
+requested immutable generation when a different source is planned. Invalid
+source evidence is an explicit error; dry-run does not construct or publish.
+Apply still runs installed health before reuse. A selected healthy repair of
+the same source generation is reused instead of repeatedly rebuilding repairs
+from a damaged base slot. Neither path changes the existing config/data root.
+This prepared-payload contract does not yet make the independent `[source]`
+Git/tarball acquisition source-qualified.
+
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the
 engine it drives, and writes `~/.copilot-extensions/update/update-status.json`.
