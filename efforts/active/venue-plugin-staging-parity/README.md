@@ -428,6 +428,18 @@ or a reason to create a daemon.
   bit with the committed mode; Windows does not inherit POSIX bit semantics.
   Controlled-stat tests cover both platforms, and native POSIX chmod controls
   are included for POSIX runners rather than claimed exercised on Windows.
+- The mode/path head passed 363 tests with three platform skips in 547.67
+  seconds and clean host-state readback. The next review found excluded payload
+  roots producing vacuous content proof and cache-root directory checks outside
+  the unavailable-inventory guard. Additional failing-first coverage reproduced
+  a deleted required file below a sibling Gitlink.
+- Excluded payload roots now refuse optional reuse, initial cache-root checks
+  share the enumeration fallback, and committed ancestors are verified by
+  depth before selected-file proof. Direct and nested Gitlinks with clean,
+  modified or deleted files all refuse. A broad recursive metadata prototype
+  qualified the real cache in 15.89 seconds; replacing it with exact ancestor
+  queries restored read-only qualification to 1.50 seconds without changing
+  deadlines or scanning unrelated working-tree content.
 
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 

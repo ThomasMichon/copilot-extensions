@@ -190,7 +190,15 @@ def inventory_item(
     if location.is_absolute() or ".." in location.parts:
         return None
     catalogs = cache / "marketplaces"
-    if not catalogs.is_dir():
+    try:
+        if not catalogs.is_dir():
+            return None
+        candidates = sorted(catalogs.iterdir())
+    except OSError:
+        logging.getLogger("plugin-resolve").warning(
+            "%s native cache inventory is unavailable (unreadable-cache); "
+            "ordinary acquisition remains available", source,
+        )
         return None
     cwd = execution_cwd or home
     env = execution_environment({
@@ -219,14 +227,6 @@ def inventory_item(
 
     from .reflection import _allowed, subset
 
-    try:
-        candidates = sorted(catalogs.iterdir())
-    except OSError:
-        logging.getLogger("plugin-resolve").warning(
-            "%s native cache inventory is unavailable (unreadable-cache); "
-            "ordinary acquisition remains available", source,
-        )
-        return None
     matches = []
     for candidate in candidates:
         try:
@@ -287,6 +287,8 @@ def inventory_item(
             continue
         references: set[Path] = set()
         try:
+            if not _allowed(payload.relative_to(candidate)):
+                raise ValueError("Native cache payload root is excluded from content proof")
             declared = Path(catalog.plugin_root) / catalog.plugins[name].source.strip()
             _require_unlinked_path(candidate, root / declared)
             content = subset(candidate, payload, referenced_paths=references)
@@ -300,6 +302,24 @@ def inventory_item(
                     break
             paths.append(str(payload.relative_to(candidate)))
             paths.extend(str(member.relative_to(candidate)) for member in sorted(references))
+            ancestors: dict[int, set[str]] = {}
+            for value in paths:
+                relative = Path(value)
+                if not _allowed(relative):
+                    continue
+                for parent in relative.parents:
+                    if parent.parts:
+                        ancestors.setdefault(len(parent.parts), set()).add(str(parent))
+            for depth in sorted(ancestors):
+                parents = git(
+                    candidate, "ls-tree", "-z", "--full-tree", head, "--",
+                    *sorted(ancestors[depth]),
+                )
+                if parents is None:
+                    raise ValueError("Native cache ancestor proof is unavailable")
+                for row in parents.split("\0"):
+                    if row and row.split(None, 1)[0] != "040000":
+                        raise ValueError("Native cache path traverses a non-tree committed ancestor")
             tree = git(candidate, "ls-tree", "-r", "-z", "--full-tree", head, "--", *paths)
             if tree is None:
                 continue

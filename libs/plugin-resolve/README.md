@@ -256,6 +256,10 @@ bytes when the index has `assume-unchanged` or `skip-worktree` entries.
 Every file in the reflected closure must have one of those verified ordinary
 blobs; required files inside sibling submodules cannot inherit the parent
 repository's proof and retain ordinary acquisition.
+Committed ancestor entries are checked by depth without recursively scanning
+unrelated trees, so a deleted required file below a Gitlink cannot disappear
+from the proof. Payload roots excluded by reflection cannot qualify through
+an empty archive.
 On POSIX, the owner executable bit must also match the committed Git mode even
 when `core.filemode` suppresses status reporting. Windows retains its native
 non-POSIX mode semantics.
@@ -282,6 +286,7 @@ Git qualification probes keep their 30-second deadline; a probe timeout reports
 an ineligible candidate and leaves ordinary acquisition available.
 An inaccessible native-cache directory likewise reports unavailable inventory
 without preventing ordinary installation.
+That guard includes the initial cache-root directory check as well as enumeration.
 Permission errors while inspecting or resolving an individual candidate are
 reported as ineligible catalog evidence and do not abort that fallback.
 Git filename output decodes losslessly with `surrogateescape`, so non-UTF-8

@@ -684,28 +684,33 @@ def test_unselected_lower_priority_catalog_changes_do_not_prevent_reuse(
     }
 
 
-@pytest.mark.parametrize("modified", [False, True])
+@pytest.mark.parametrize("modified", ["clean", "modified", "deleted"])
+@pytest.mark.parametrize("layout", ["direct", "nested"])
 def test_sibling_submodule_asset_cannot_escape_committed_byte_proof(
     native_inventory,
     monkeypatch,
     modified,
+    layout,
 ):
     target, _home, clone, definition, environment = native_inventory
-    support = clone / "support"
+    relative = Path("support") if layout == "direct" else Path("deps") / "support"
+    support = clone / relative
     init_checkout(support)
     (support / "guide.md").write_bytes(b"required submodule guide")
     git(support, "add", ".")
     git(support, "commit", "--quiet", "-m", "submodule fixture")
     scripts = clone / "catalog-a" / "helper" / "scripts"
     scripts.mkdir()
-    (scripts / "use.txt").write_text("../../support/guide.md")
-    git(clone, "add", "catalog-a", "support")
+    (scripts / "use.txt").write_text("../../" + relative.as_posix() + "/guide.md")
+    git(clone, "add", "catalog-a", str(relative))
     git(clone, "commit", "--quiet", "-m", "required submodule asset fixture")
     definition["source"]["ref"] = "HEAD"
-    assert git(clone, "ls-files", "--stage", "--", "support").startswith("160000 ")
-    if modified:
+    assert git(clone, "ls-files", "--stage", "--", str(relative)).startswith("160000 ")
+    if modified == "modified":
         (support / "guide.md").write_text("modified submodule bytes")
-    assert not git(clone, "status", "--porcelain", "--", "support/guide.md")
+    elif modified == "deleted":
+        (support / "guide.md").unlink()
+    assert not git(clone, "status", "--porcelain", "--", str(relative / "guide.md"))
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
@@ -821,3 +826,47 @@ def test_native_posix_executable_mode_drift_prevents_reuse(
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
+
+
+@pytest.mark.parametrize("modified", [False, True])
+def test_excluded_payload_root_cannot_supply_unverified_inventory(
+    native_inventory,
+    monkeypatch,
+    modified,
+):
+    target, _home, clone, definition, environment = native_inventory
+    root = clone / "catalog-a"
+    hidden = root / ".venv" / "helper"
+    hidden.parent.mkdir()
+    (root / "helper").rename(hidden)
+    catalog = json.loads((root / "marketplace.json").read_text())
+    catalog["plugins"][0]["source"] = ".venv/helper"
+    atomic_json(root / "marketplace.json", catalog)
+    git(clone, "add", "--force", ".")
+    git(clone, "commit", "--quiet", "-m", "excluded payload root fixture")
+    definition["source"]["ref"] = "HEAD"
+    if modified:
+        (hidden / "marker.txt").write_text("unverified hidden payload")
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+def test_cache_root_permission_error_preserves_installation_fallback(
+    native_inventory,
+    monkeypatch,
+    caplog,
+):
+    target, _home, clone, definition, environment = native_inventory
+    original = Path.is_dir
+
+    def inaccessible(path):
+        if path == clone.parent:
+            raise PermissionError("synthetic cache root denied")
+        return original(path)
+
+    monkeypatch.setattr(Path, "is_dir", inaccessible)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert "unreadable-cache" in caplog.text
