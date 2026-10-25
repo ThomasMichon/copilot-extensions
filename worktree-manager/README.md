@@ -43,6 +43,8 @@ identity refuse rather than guessing pane zero. Reattachment preserves a
 recorded same-owner CLI while native evidence is unavailable, and removes it
 only when native inventory confirms its loss. Snapshot-fenced registration
 cannot overwrite a concurrently created CLI identity.
+Replacing a conflicting recorded native incarnation also requires current
+native session evidence; a delayed reconnect cannot displace its successor.
 The observer uses the constructed runtime's bootstrap, not source or `uv`.
 Concurrent callers serialize lookup and creation for that native CLI
 incarnation. While open, the observer checks only its registered CLI's native

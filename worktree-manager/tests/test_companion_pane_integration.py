@@ -358,6 +358,8 @@ def test_reconnect_preserves_only_proven_incumbent_cli(monkeypatch, case):
 
 
 def test_register_reconnect_retains_cli_but_new_incarnation_clears_it(tmp_path, monkeypatch):
+    from worktree_manager import mux_discovery
+
     monkeypatch.setattr(mux_mapping_registry, "default_root", lambda: tmp_path)
     monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *args, **kwargs: True)
     monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *args, **kwargs: {"applied": True})
@@ -370,6 +372,9 @@ def test_register_reconnect_retains_cli_but_new_incarnation_clears_it(tmp_path, 
     assert main([*base, "--session-incarnation=$7:100"]) == 0
     entry = mux_mapping_registry.get_mapping("example", "one", root=tmp_path)
     assert entry["panes"] == [{"pane_id": "%42", "role": "cli", "live": True}]
+    monkeypatch.setattr(mux_discovery, "run_mux_child", lambda *args, **kwargs: SimpleNamespace(
+        returncode=0, stdout="managed\t1\t$8:200\tworkspace\n",
+    ))
     assert main([*base, "--session-incarnation=$8:200"]) == 0
     entry = mux_mapping_registry.get_mapping("example", "one", root=tmp_path)
     assert entry["session_incarnation"] == "$8:200"

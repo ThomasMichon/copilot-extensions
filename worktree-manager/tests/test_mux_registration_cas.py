@@ -136,3 +136,33 @@ def test_unknown_reconnect_probe_preserves_same_incarnation_cli(owner, monkeypat
     monkeypatch.setattr(mux_daemon_cli, "run_mux_child", unavailable)
     assert mux_daemon_cli._register_reconnect(owner)["applied"]
     assert registry.get_mapping("example", "one")["panes"] == _cli()
+
+
+@pytest.mark.parametrize("native", ["successor", "requested", "unknown", "wrong-path"])
+def test_initial_lookup_conflict_requires_native_proof_before_replacement(owner, monkeypatch, native):
+    from worktree_manager import mux_discovery
+
+    successor = dict(owner, session_incarnation="$8:200", panes=_cli("%99"))
+    registry.register_next_mapping(successor)
+    before = registry.get_mapping("example", "one")
+    probes = []
+
+    def inventory(command, **kwargs):
+        probes.append(command)
+        if native == "unknown":
+            raise RuntimeError("native inventory unavailable")
+        incarnation = "$8:200" if native == "successor" else owner["session_incarnation"]
+        path = owner["worktree_path"] if native != "wrong-path" else owner["worktree_path"] + "-other"
+        return SimpleNamespace(returncode=0, stdout=f"managed\t1\t{incarnation}\t{path}\n")
+
+    monkeypatch.setattr(mux_discovery, "run_mux_child", inventory)
+    result = mux_daemon_cli._register_reconnect(owner)
+    assert probes and probes[0][1] == "list-sessions"
+    if native == "requested":
+        assert result["applied"]
+        current = registry.get_mapping("example", "one")
+        assert current["session_incarnation"] == owner["session_incarnation"]
+        assert current["panes"] == []
+    else:
+        assert not result["applied"]
+        assert registry.get_mapping("example", "one") == before

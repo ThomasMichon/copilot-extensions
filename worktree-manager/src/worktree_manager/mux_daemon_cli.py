@@ -72,13 +72,27 @@ def _register_reconnect(payload: dict) -> dict:
             incumbent = get_mapping(payload.get("project"), payload.get("worktree_id"))
         except (OSError, ValueError, RuntimeError):
             return {"applied": False, "reason": "registry-unavailable"}
-        if attempt and (
-            not incumbent or incumbent.get("live") is not True
+        conflict = incumbent is not None and (
+            incumbent.get("live") is not True
             or any(incumbent.get(field) != payload.get(field) for field in (
                 "project", "worktree_id", "mux_bin", "mux_session", "session_incarnation", "worktree_path",
             ))
-        ):
+        )
+        if attempt and (incumbent is None or conflict):
             return {"applied": False, "reason": "mapping-changed"}
+        if conflict and re.fullmatch(r"\$[0-9]+:[0-9]+", str(incumbent.get("session_incarnation", ""))):
+            from .mux_discovery import confirm_native_session
+
+            if any(not isinstance(payload.get(field), str) or not payload[field] for field in (
+                "mux_bin", "mux_session", "session_incarnation", "worktree_path",
+            )):
+                return {"applied": False, "reason": "session-unconfirmed"}
+            try:
+                confirmed = confirm_native_session(payload, connected_only=False)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                return {"applied": False, "reason": "enumeration-unavailable"}
+            if not confirmed.get("applied"):
+                return confirmed
         reconciled = dict(payload, panes=_reconnect_cli_panes(payload, incumbent))
         result = register_next_mapping(reconciled, expected=incumbent)
         if result.get("reason") == "mapping-changed":
