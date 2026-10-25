@@ -95,7 +95,7 @@ _Machine = TypeVar("_Machine", bound=MachineIdentity)
 
 
 def _profile_conflicts(entry: MachineIdentity, name: str, environment: str) -> bool:
-    if name.casefold() == entry.key.casefold():
+    if name.strip().casefold() == entry.key.strip().casefold():
         return False
     for env in getattr(entry, "ssh_environments", ()):
         if not isinstance(env.alias, str) or env.alias.casefold() != name.casefold() or env.name is None:

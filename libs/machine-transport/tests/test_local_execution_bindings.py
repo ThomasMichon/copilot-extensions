@@ -4,6 +4,7 @@ import pytest
 
 from machine_transport import (
     MachineEntry,
+    SSHEnvironment,
     resolve_local_execution_context,
     resolve_machine_selection,
 )
@@ -295,6 +296,39 @@ def test_normalized_native_key_binding_keeps_original_customization_key(
     assert context == resolve_local_execution_context(entries, hostname="raw-host", environment=environment)
     assert (context.machine, context.execution_machine, context.customization_key) == ("desk", "desk", " desk ")
     assert entries == before
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("foreign_profile", [False, True])
+def test_normalized_key_keeps_precedence_over_a_conflicting_profile(
+    environment: str, foreign_profile: bool,
+) -> None:
+    profile = SSHEnvironment("linux" if environment == "windows" else "windows", "desk")
+    entry = MachineEntry(
+        " desk ", "", hostname="raw-host", ssh_environments=[] if foreign_profile else [profile],
+    )
+    entries = {entry.key: entry}
+    if foreign_profile:
+        entries["other"] = MachineEntry("other", "", ssh_environments=[profile])
+    if foreign_profile and environment != "wsl":
+        for configured in (None, "desk"):
+            with pytest.raises(ValueError, match="conflicts"):
+                resolve_local_execution_context(
+                    entries, hostname="raw-host", environment=environment, configured_machine=configured,
+                )
+        return
+    baseline = resolve_local_execution_context(entries, hostname="raw-host", environment=environment)
+    assert resolve_local_execution_context(
+        entries, hostname="raw-host", environment=environment, configured_machine="desk",
+    ) == baseline
+
+
+def test_normalized_binding_refuses_multiple_equivalent_registry_keys() -> None:
+    entries = {key: MachineEntry(key, "", hostname="raw-host") for key in ("desk", " desk ")}
+    with pytest.raises(ValueError, match="ambiguous"):
+        resolve_local_execution_context(
+            entries, hostname="raw-host", environment="linux", configured_machine="DESK",
+        )
 
 
 @pytest.mark.parametrize("scoped_neighbor", [False, True])

@@ -185,7 +185,10 @@ def resolve_local_execution_context(
         configured = configured_machine.strip()
         if "\0" in configured:
             raise IdentityError("configured machine must not contain a null byte")
-        if not any(configured.casefold() == key.casefold() for key in registry) and any(
+        keys = [key for key in registry if configured.casefold() == key.strip().casefold()]
+        if len(keys) > 1:
+            raise IdentityError(f"configured machine {configured!r} has ambiguous normalized keys")
+        if not keys and any(
             _profile_conflicts(entry, configured, platform) for entry in registry.values()
         ):
             raise IdentityError("configured SSH profile conflicts with the current execution environment")
@@ -197,12 +200,8 @@ def resolve_local_execution_context(
         }
         legacy_display_selector = any(char.isspace() for char in configured)
         target_registry = {
-            key: replace(
+            (key.strip() if key in keys else key): replace(
                 entry,
-                compatibility_aliases=(
-                    (*entry.compatibility_aliases, entry.key.strip())
-                    if entry.key != entry.key.strip() else entry.compatibility_aliases
-                ),
                 hostname="" if entry.hostname.strip().casefold() == observed.casefold() else entry.hostname,
                 display_name=entry.display_name if (
                     legacy_display_selector or entry.display_name.casefold() in local_displays

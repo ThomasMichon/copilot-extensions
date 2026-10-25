@@ -125,7 +125,9 @@ or presentation conversion cannot bypass that check. The scan includes other
 entries' projected execution keys, not just their original presentation labels.
 Registry-key whitespace does not change a literal OS observation.
 Configured native bindings also match trimmed legacy keys while retaining the
-original customization key. Contextual legacy display selection does not change
+original customization key and key precedence over SSH profile aliases.
+Multiple normalized keys remain ambiguous; foreign execution-key collisions
+still fail. Contextual legacy display selection does not change
 when unrelated scoped entries are present, and a selected physical family
 constrains guest candidates even when another key resembles its shorthand.
 An unnamed legacy SSH
