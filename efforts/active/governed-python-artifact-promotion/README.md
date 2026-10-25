@@ -801,6 +801,21 @@ win grows with build complexity.
   revocation/offline reuse, real release/client/helper integration, measured
   defaults, publication and rollout gates; it remains **Active**.
 
+### 2026-10-24 - Acquisition published-head native and review repairs
+
+- #8820's initial head passes required CI and both Linux/Windows wheel-input
+  and retained dependency-compile jobs. Windows runtime-policy acceptance
+  passes, but Linux rejects 15 invalid-origin cases with malformed JSON:
+  the helper's command-substitution failure did not propagate through the
+  enclosing captured snapshot. The caller now explicitly fails that snapshot
+  so the existing owner returns a structured invalid-policy result.
+- Review also identified malformed IPv6 boundary groups accepted by POSIX but
+  rejected by Python. The shared native validator now rejects stray leading
+  and trailing colons while retaining valid `::`, `::1` and `1::` forms.
+  Native parity tests include both malformed examples and valid compressed
+  boundaries. Both fixes are synchronized through every native adopter.
+  Final-head review and Linux/Windows qualification remain open.
+
 ### 2026-10-24 - Concrete exact-wheel acquisition design approved
 
 - #8728 merged as `a8f3464ae4121d97360d2c5a9b8c68160a223c7f`.

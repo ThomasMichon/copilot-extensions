@@ -167,6 +167,7 @@ def test_download_origins_are_optional_canonical_and_bound_to_policy_identity(ad
     ["https://files.example#fragment"], ["https://files.example\n"],
     ["https://files.example\\other"], ["https://files.example:0"],
     ["https://files.example:65536"], ["https://files.example", "https://FILES.example:443/"],
+    ["https://[1:2:3:4:5:6:7:8:]"], ["https://[:1::2]"],
     ["https://files.example"] * 257,
 ])
 def test_invalid_download_origins_block_policy_without_mutation(adopter, origins):

@@ -1216,6 +1216,8 @@ valid_ipv6() {
     local address="$1" left right group count=0 compressed=false
     local -a groups=()
     [[ "$address" =~ ^[0-9A-Fa-f:]+$ && "$address" != *:::* ]] || return 1
+    [[ "$address" != :* || "$address" == ::* ]] || return 1
+    [[ "$address" != *: || "$address" == *:: ]] || return 1
     if [[ "$address" == *::* ]]; then
         compressed=true
         left="${address%%::*}"
@@ -4924,7 +4926,8 @@ deployment_policy_snapshot() {
                     profile_value="$(json_quote "$profile_value")"
                     ;;
                 downloadOrigins)
-                    profile_value="$(runtime_download_origins "$document" "$(path_join runtimeProfiles "$field")")"
+                    profile_value="$(runtime_download_origins "$document" "$(path_join runtimeProfiles "$field")")" ||
+                        fail "runtimeProfiles.downloadOrigins is invalid."
                     ;;
                 *) fail "runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins." ;;
             esac

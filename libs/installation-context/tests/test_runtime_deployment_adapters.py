@@ -32,6 +32,11 @@ DOWNLOAD_PROFILES = {
         "https://other.example:8443", "https://FILES.example:443/",
     ]},
     "profile-download-ipv6": {"downloadOrigins": ["https://[2001:0DB8:0000::1]:443/"]},
+    "profile-download-ipv6-boundaries": {"downloadOrigins": [
+        "https://[::]", "https://[::1]", "https://[1::]",
+    ]},
+    "profile-download-ipv6-trailing-group": {"downloadOrigins": ["https://[1:2:3:4:5:6:7:8:]"]},
+    "profile-download-ipv6-leading-group": {"downloadOrigins": ["https://[:1::2]"]},
     "profile-download-duplicate": {"downloadOrigins": ["https://files.example", "https://FILES.example:443/"]},
     "profile-download-string": {"downloadOrigins": "https://files.example"},
     "profile-download-userinfo": {"downloadOrigins": ["https://user:password@files.example"]},
