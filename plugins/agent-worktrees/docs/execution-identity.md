@@ -192,7 +192,9 @@ cannot be reconstructed must still pass ordinary ownership checks.
 The receiving project, actual environment and any qualified parent retain
 independent record/namespace authority. A knowledge companion additionally
 requires its own current receiving-project anchor, worktree root, platform and
-execution binding; the parent alone cannot authorize it. Missing companions
+execution binding; the parent alone cannot authorize it. Equivalent resolved
+checkout/parent paths retain their stored spelling; relative paths, symlinks
+and escapes from the receiving root do not qualify. Missing companions
 use the original pair allocation, with authority rechecked inside its allocation
 lock. Existing companions keep their original identity and owner/pair references.
 Every repeated repair check binds the complete retained seed, including text and

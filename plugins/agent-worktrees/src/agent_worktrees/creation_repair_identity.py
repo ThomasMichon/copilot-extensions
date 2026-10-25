@@ -8,8 +8,25 @@ from machine_transport import resolve_local_execution_context
 
 from . import config as cfg, creation_identity, execution_spaces, state_root, tracking
 from . import repos
-from .legacy_wsl_record_locality import record_namespace_matches
+from .tracking_claims import ANCHOR_ID
 from .worktree_machine_identity import WorktreeMachineIdentity
+
+
+def _repair_namespace_matches(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
+    """Preserve equivalent stored path spelling inside the exact receiving root."""
+    repo = config.repos.get(record.repo)
+    if repo is None:
+        return False
+    checkout = Path(record.worktree_path)
+    anchor = record.worktree_id == ANCHOR_ID
+    root = Path(repo.anchor if anchor else repo.worktree_root).expanduser()
+    if not root.is_absolute() or not checkout.is_absolute() or checkout.is_symlink():
+        return False
+    expected = root.resolve() if anchor else root.resolve() / record.worktree_id
+    return (
+        checkout.resolve() == expected
+        and (not checkout.exists() or checkout.is_dir())
+    )
 
 
 def _observed_original_owner(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
@@ -61,8 +78,8 @@ def require_retained_record(record: tracking.WorktreeRecord, config: cfg.Config)
     receiving = execution_spaces.project_record_config(record)
     if (
         not record.creation_nonce
-        or not record_namespace_matches(record, config)
-        or not record_namespace_matches(record, receiving)
+        or not _repair_namespace_matches(record, config)
+        or not _repair_namespace_matches(record, receiving)
         or Path(receiving.default_repo.anchor).resolve() != Path(config.default_repo.anchor).resolve()
         or not _observed_original_owner(record, receiving)
     ):
@@ -85,7 +102,7 @@ def require_retained_record(record: tracking.WorktreeRecord, config: cfg.Config)
             raise ValueError("retained creation parent owner does not match its ledger")
         parent_config = execution_spaces.project_record_config(parent)
         if _observed_original_owner(parent, parent_config):
-            if not parent.creation_nonce or not record_namespace_matches(parent, parent_config):
+            if not parent.creation_nonce or not _repair_namespace_matches(parent, parent_config):
                 raise ValueError("retained creation parent has no receiving-project record proof")
         else:
             resolved, _, error = execution_spaces.resolve_owner_record_path(record.owner_ref, receiving)

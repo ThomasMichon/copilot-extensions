@@ -359,7 +359,7 @@ def test_creation_reuses_companion_after_parent_stamp_failure(native_creation, m
 
 
 @pytest.mark.parametrize("tuple_identity", [False, True])
-@pytest.mark.parametrize("tail", ["missing", "retained", "paired"])
+@pytest.mark.parametrize("tail", ["missing", "retained", "paired", "lexical"])
 def test_creation_repairs_original_native_pair_after_optional_naming(
     tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, tail,
 ):
@@ -367,6 +367,10 @@ def test_creation_repairs_original_native_pair_after_optional_naming(
         tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
         tuple_identity=tuple_identity, observed_identity=True,
     )
+    if tail == "lexical":
+        checkout = Path(creation.record.worktree_path)
+        creation.record.worktree_path = str(checkout / ".." / checkout.name)
+        tracking.save_record(creation.record)
     seed_before = launch_seed_state.state_path(creation.record.yaml_path).read_bytes()
     if tail != "missing":
         original = worktree_creation._stamp_and_compose_paired_knowledge
@@ -559,7 +563,10 @@ def test_creation_rechecks_retained_authority_inside_companion_allocation_lock(
 
 
 @pytest.mark.parametrize("tuple_identity", [False, True])
-@pytest.mark.parametrize("parent_kind", ["original", "foreign", "same-physical", "missing"])
+@pytest.mark.parametrize("parent_kind", [
+    "original", "original-lexical", "foreign", "same-physical", "missing",
+    "relative", "moved", "symlink",
+])
 def test_creation_repair_preserves_only_proven_local_parent_refs(
     tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, parent_kind,
 ):
@@ -568,7 +575,18 @@ def test_creation_repair_preserves_only_proven_local_parent_refs(
         tuple_identity=tuple_identity, observed_identity=True,
     )
     parent_checkout = creation.roots["harness"] / "parent"
-    parent_checkout.mkdir()
+    if parent_kind == "moved":
+        parent_checkout = tmp_path / "elsewhere" / "parent"
+    if parent_kind == "symlink":
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        parent_checkout.symlink_to(elsewhere, target_is_directory=True)
+    else:
+        parent_checkout.mkdir(parents=True)
+    if parent_kind == "original-lexical":
+        parent_checkout = parent_checkout / ".." / parent_checkout.name
+    elif parent_kind == "relative":
+        parent_checkout = Path(os.path.relpath(parent_checkout))
     parent_identity = creation.record.machine_identity
     parent_machine = creation.record.machine
     platform = cfg.detect_platform()
@@ -598,12 +616,12 @@ def test_creation_repair_preserves_only_proven_local_parent_refs(
             }},
         }))
         creation.configs[name] = replace(creation.configs[name], machine="friendly-space")
-    if parent_kind != "original":
+    if not parent_kind.startswith("original"):
         monkeypatch.setattr(
             repair, "_prepare_permissions", lambda *a: pytest.fail("foreign parent changed permissions"),
         )
     code, report = _run(creation, capsys, fix=True)
-    assert code == (0 if parent_kind == "original" else 1), report["error"]
+    assert code == (0 if parent_kind.startswith("original") else 1), report["error"]
     assert launch_seed_state.peek(record.yaml_path) == creation.seed
     assert parent.yaml_path.read_bytes() == parent_before
 
