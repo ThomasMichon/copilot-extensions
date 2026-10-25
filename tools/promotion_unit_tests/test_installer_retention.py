@@ -1,4 +1,4 @@
-"""Retained-input work bounds; native construction stays in the development suite."""
+"""Retained-input work bounds; threaded readers stay in the development suite."""
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
@@ -58,6 +58,7 @@ def retention_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(policy, "_native_retained_path", str)
     monkeypatch.setattr(policy._configuration, "native_retained_path", str)
     monkeypatch.setattr(policy, "_select_uv_executable", lambda value: value)
+    monkeypatch.setattr(policy, "_bounded_content_map", lambda check, inputs: [check(item) for item in inputs])
     monkeypatch.setattr(
         policy.subprocess, "run",
         lambda command, **_kwargs: CompletedProcess(command, 0, SETTINGS, ""),
