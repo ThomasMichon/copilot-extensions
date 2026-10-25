@@ -7,7 +7,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import update_driver
-from agent_procutil import direct_python
 from agent_worktrees import __main__ as engine
 from agent_worktrees import front_door_cli, update_cli
 
@@ -63,7 +62,7 @@ def main():
             )
             project, flags = manager._extract_project(rest)
             engine_client.set_engine_command([
-                direct_python(sys.executable)[0], str(Path(__file__).resolve()), "return",
+                sys.executable, str(Path(__file__).resolve()), "return",
             ])
             return engine_client.run_engine_passthrough(
                 project, ["update", "--no-manager", *flags],
@@ -111,7 +110,7 @@ def main():
     if sys.argv[1] == "execute" and os.environ.get("UPDATE_DRIVER_TEST_MANAGER") == "1":
         canonical = update_cli.cmd_update
         update_cli._usable_worktree_manager = lambda: [
-            direct_python(sys.executable)[0], str(Path(__file__).resolve()), "manager",
+            sys.executable, str(Path(__file__).resolve()), "manager",
         ]
         engine._usable_worktree_manager = update_cli._usable_worktree_manager
 
