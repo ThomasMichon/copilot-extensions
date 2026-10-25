@@ -11,8 +11,11 @@ change) can show as "fails to resolve" even though it's reachable.
 Used by:
 - sessionStart hook (warn only, never blocks) -- the launcher fetches the anchor
   pre-launch, so the behind-count is accurate there without a second fetch.
-- Finalization flow (blocks on dirty anchor, warns on stash/behind)
 - CLI: ``agent-worktrees anchor-check`` (pass ``--fetch`` for a fresh count)
+
+Publication does not call this full status/stash/history inventory. It keeps
+the source workspace cleanliness check and Git's guarded checkout/fast-forward
+operations instead.
 """
 
 from __future__ import annotations

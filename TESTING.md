@@ -1,6 +1,6 @@
 # Testing copilot-extensions
 
-How to run the plugin test suites, the fast gates to run before a push, and the
+How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
 > This is the canonical testing guide. [`AGENTS.md`](AGENTS.md) links here and
@@ -3122,7 +3122,7 @@ Missing or malformed checkpoints fail rather than waiving closure validation.
 The targeted tests cover existing and missing objects, exact remote/revision
 selection, failed preparation and a real unreferenced Git commit.
 
-The pre-push agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
+The CI agent-bridge contract guard (`tools/check-agent-bridge-contracts.py`)
 requires Git 2.45+ for enforced `GIT_NO_LAZY_FETCH` support; older versions
 fail before object reads, including in partial clones. This contributor
 validation requirement is stricter than the general installation minimum.

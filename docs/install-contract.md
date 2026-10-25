@@ -9,7 +9,8 @@ shared install module resolved at install or runtime. Shared primitives such as
 resolved from a common location, so each installed plugin still ships everything
 it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
-manually or wire it as a git `pre-push` hook).
+explicitly while developing; publication validation belongs in CI, not a
+git `pre-push` hook).
 
 Runtime installation and communication compatibility are separate contracts.
 For a new or changed CLI/service boundary, apply

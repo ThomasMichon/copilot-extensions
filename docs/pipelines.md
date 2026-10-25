@@ -9,6 +9,46 @@ and reactive automation this repo runs. `CONTRIBUTING.md` owns contributor
 requirements); this doc owns the *infrastructure* those steps run on top
 of — link here rather than restating any of it.
 
+## Branch-only local publication
+
+The repository pre-push hook and installed Worktrees shim perform branch/ref
+policy only. The shim embeds the existing resolved PR/protected-branch policy
+at normal hook installation; rerun the existing hook installer after changing
+that policy. Installing a payload alone does not refresh a previously installed
+shim. Pre-commit is unchanged.
+
+| Validation outside automatic local publication | CI owner |
+| --- | --- |
+| `check-no-internal-identifiers.py`, including local live sweeps | Trusted `workflow-lockdown-guard` required job: pinned PR base/head, existing repository-secret denylists, `--ci` sanitized output and live sweeps disabled |
+| `check-large-files.py` (already removed from local hooks) | Same required job: resulting file blobs in the pinned PR base/head final diff; preserve the existing source-CI and explicit full-audit lanes, without complete object-history scans |
+| Generic `validate_hook`, `validate_paths`, legacy `tools/worktree/validate-core.ps1` | Adopting repository's required CI: move its command/contract there before adopting this policy; this source repository configures none of these hooks |
+| Contract/install, module-size, lint, version/changefiles, documentation, structure and vendor checks | Existing `ci.yml` `checks` job; these were already outside this repository's pre-push path |
+
+The trusted required workflow checks out only `github.workflow_sha`. Candidate
+commits are fetched/read as inert Git objects, never checked out or executed.
+The required job fails on either publication-validator failure. As with other
+`pull_request_target` changes, this new coverage becomes live only after the
+workflow is promoted to `main`; a green check from the older definition does
+not prove it ran. Do not activate the revised repository/managed hooks before
+that trusted `main` definition is available. Landing source on `dev` is not
+hook-activation or installation authority. Do not mistake `PR gate (required check)`'s name for live
+ruleset enrollment: inspect the provider rules.
+
+Worktrees no longer executes custom/core/legacy source validation during
+`push-changes` or finalize's publication path. Existing explicit validation
+commands remain available. Explicit review/scope policies, claims bookkeeping,
+clean-source/ref custody, required PR policy and remote merge gates are not
+disabled. No claims backend or network call is added to pre-push. Preserved
+foreign hooks still run; branch-only managed hooks cannot promise that an
+unknown chained hook is fast.
+
+Direct publication also omits the automatic anchor-hygiene inventory
+(untracked-inclusive status, stash listing and upstream-history count).
+These are machine-local maintenance diagnostics, not CI source validators;
+`anchor-check` remains their explicit owner. Source-workspace cleanliness,
+expected-branch/ref checks and Git's non-forced checkout/fast-forward refusal
+remain in the publication path to preserve local work.
+
 ## Standalone PR job admission
 
 The existing manual `installation-context-full.yml` workflow additionally accepts
@@ -1629,11 +1669,11 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > of embedding a Python literal. Its version guard requires the declared
 > resolver assignment, keeping admitted unit code unchanged during allocation.
 >
-> **Enforced by `tools/check-version-consistency.py`** (pre-push): fails
+> **Enforced by `tools/check-version-consistency.py`** (CI): fails
 > if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`
 > versions disagree.
 >
-> **Enforced by `tools/check-changefile-presence.py`** (pre-push + CI,
+> **Enforced by `tools/check-changefile-presence.py`** (CI,
 > PR-diff scoped, against `dev`): fails the push/PR if a plugin's content
 > changed **without** a pending changefile naming it. A change to **any
 > file under `plugins/<p>/`** requires a changefile for `<p>`; a change to

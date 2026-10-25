@@ -423,6 +423,10 @@ class TestInstallHooks:
             assert shim.exists()
             text = shim.read_text()
             assert hooks._SHIM_MARKER in text
+            if name == "pre-push":
+                assert "agent-worktrees hook" not in text
+                assert "aw_check_update" in text
+                continue
             assert f"hook {name}" in text
             # The PR guard is gated on AGENT_WORKTREES_HOOKS=1 ...
             assert 'if [ "$AGENT_WORKTREES_HOOKS" = "1" ]' in text
@@ -459,7 +463,7 @@ class TestInstallHooks:
         local = hdir / "pre-push.local"
         local.write_bytes(b"#!/bin/sh\nexit 53\n")
         hooks.install_hooks(anchor)
-        assert target.read_text() == hooks._SHIM_TEMPLATE.format(name="pre-push")
+        assert target.read_text() == hooks._pre_push_shim(anchor)
         assert local.read_bytes() == b"#!/bin/sh\nexit 53\n"
 
     def test_preserves_foreign_hook(self, anchor_and_worktree):

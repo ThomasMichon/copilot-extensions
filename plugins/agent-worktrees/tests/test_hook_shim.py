@@ -27,7 +27,9 @@ def _shell():
 
 
 @pytest.fixture
-def shim(tmp_path):
+def shim(tmp_path, monkeypatch):
+    monkeypatch.setattr(hooks, "_pr_enabled", lambda cwd: False)
+    monkeypatch.setattr(hooks, "_protected_branches", lambda cwd: [])
     shell = _shell()
     directory = tmp_path / "hooks with spaces"
     directory.mkdir()
@@ -40,14 +42,17 @@ def shim(tmp_path):
     )
     dirname.chmod(0o755)
     calls, arguments, stdin = (tmp_path / name for name in ("calls", "arguments", "stdin"))
-    payload = "refs/heads/source old refs/heads/target new\nsecond update line\n"
+    payload = f"refs/heads/source {'a' * 40} refs/heads/target {'b' * 40}\n" * 2
 
     def run(
         name="pre-push", *, enabled="1", authorized="1", cli=True,
-        cli_exit=0, local=True, local_exit=0,
+        cli_exit=0, local=True, local_exit=0, pr=False, protected=(), payload_override=None,
     ):
+        monkeypatch.setattr(hooks, "_pr_enabled", lambda cwd: pr)
+        monkeypatch.setattr(hooks, "_protected_branches", lambda cwd: list(protected))
         hook = directory / name
-        hook.write_text(hooks._SHIM_TEMPLATE.format(name=name), encoding="utf-8", newline="\n")
+        text = hooks._pre_push_shim(tmp_path) if name == "pre-push" else hooks._SHIM_TEMPLATE.format(name=name)
+        hook.write_text(text, encoding="utf-8", newline="\n")
         hook.chmod(0o755)
         if cli:
             command = binaries / "agent-worktrees"
@@ -80,10 +85,15 @@ def shim(tmp_path):
         started = time.monotonic()
         result = subprocess.run(
             [shell, hook.as_posix(), "origin", "fixture-target"], cwd=tmp_path,
-            input=payload, capture_output=True, text=True, env=env, timeout=5,
+            input=(payload if payload_override is None else payload_override).encode("utf-8"),
+            capture_output=True, env=env, timeout=5,
             **no_window_kwargs(),
         )
         elapsed = time.monotonic() - started
+        result = subprocess.CompletedProcess(
+            result.args, result.returncode,
+            result.stdout.decode("utf-8", "replace"), result.stderr.decode("utf-8", "replace"),
+        )
         return result, elapsed
 
     return run, calls, arguments, stdin, payload
@@ -108,11 +118,37 @@ def test_authorized_push_needs_neither_runtime_nor_local_hook(shim):
     assert not any(path.exists() for path in (calls, arguments, stdin))
 
 
+@pytest.mark.parametrize("ref,head,accepted", [
+    ("refs/heads/trunk", "a" * 40, True),
+    ("refs/heads/trunk", "0" * 40, False),
+    ("refs/heads/worktree/private", "a" * 40, False),
+    ("refs/heads/feature", "0" * 40, True),
+    ("refs/tags/fixture", "a" * 40, True),
+])
+def test_installed_shim_uses_resolved_policy_and_chains_exact_stdin(shim, ref, head, accepted):
+    run, calls, arguments, stdin, _ = shim
+    payload = f"HEAD {head} {ref} {'b' * 40}\n"
+    result, _ = run(pr=True, protected=("trunk",), payload_override=payload)
+    assert (result.returncode == 0) is accepted, result.stderr
+    assert not calls.exists()
+    assert arguments.exists() is accepted
+    if accepted:
+        assert stdin.read_text() == payload
+
+
+@pytest.mark.parametrize("payload", ["not-a-ref-update\n", f"HEAD {'z' * 40} refs/heads/feature {'b' * 40}\n"])
+def test_installed_shim_refuses_malformed_stdin_without_runtime(shim, payload):
+    run, calls, arguments, stdin, _ = shim
+    result, _ = run(payload_override=payload)
+    assert result.returncode != 0
+    assert not any(path.exists() for path in (calls, arguments, stdin))
+
+
 @pytest.mark.parametrize("name,enabled,authorized,invoke", [
-    ("pre-push", "1", None, True),
-    ("pre-push", "1", "0", True),
-    ("pre-push", "1", "true", True),
-    ("pre-push", "1", "", True),
+    ("pre-push", "1", None, False),
+    ("pre-push", "1", "0", False),
+    ("pre-push", "1", "true", False),
+    ("pre-push", "1", "", False),
     ("pre-commit", "1", "1", True),
     ("pre-push", None, "1", False),
     ("pre-push", "0", "1", False),
@@ -131,7 +167,7 @@ def test_existing_guard_selection_and_local_chain_are_unchanged(
     assert stdin.read_text() == payload
 
 
-@pytest.mark.parametrize("name,authorized", [("pre-push", None), ("pre-commit", "1")])
+@pytest.mark.parametrize("name,authorized", [("pre-commit", "1")])
 def test_runtime_guard_refusal_still_blocks_the_local_hook(shim, name, authorized):
     run, calls, arguments, stdin, _ = shim
     result, _ = run(name, authorized=authorized, cli_exit=41)
