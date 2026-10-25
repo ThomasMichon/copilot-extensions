@@ -9,6 +9,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ import pytest
 from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
+    installer_functional_timeout,
     isolate_installer_environment,
     snapshot_tree_manifest,
 )
@@ -29,7 +31,7 @@ from .test_installer_engine_adoption import (
     _fake_uv,
 )
 
-pytestmark = pytest.mark.timeout(60)
+pytestmark = pytest.mark.timeout(installer_functional_timeout(60))
 
 
 @pytest.fixture(scope="module", params=["source", "materialized"])
@@ -92,7 +94,8 @@ def _native(copy_layout, tmp_path, body: str):
     )
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(script)],
-        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=45,
+        env=env, cwd=tmp_path, capture_output=True, text=True,
+        timeout=installer_functional_timeout(45),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         check=False,
     )
@@ -304,11 +307,22 @@ def test_materialization_preserves_actual_symbolic_link_refusal(copy_layout, tmp
     assert snapshot_tree_manifest(working) == before
 
 
+def _complete_snapshot_library_fixture(working: Path, payload: Path) -> None:
+    project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
+    for spec in project["tool"]["uv"]["sources"].values():
+        name = Path(spec["path"]).name
+        shutil.copytree(
+            REPO / "libs" / name, working / "libs" / name, dirs_exist_ok=True,
+        )
+
+
 def test_stamp_missing_library_preserves_published_selection(copy_layout, tmp_path):
     root, _payload, _engine, _guard = copy_layout
     working = tmp_path / "fixture"
     shutil.copytree(root, working)
     payload = working / "plugins" / PLUGIN.name
+    _complete_snapshot_library_fixture(working, payload)
+    assert (working / "libs" / "ssh-manager" / "pyproject.toml").is_file()
     for parent in (payload / "libs", working / "libs"):
         library = parent / "ssh-manager"
         if library.exists():
@@ -336,7 +350,8 @@ def test_stamp_missing_library_preserves_published_selection(copy_layout, tmp_pa
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(payload / "scripts" / "install.ps1"),
          "stamp", "-InstallDir", str(install)],
-        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=45,
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        timeout=installer_functional_timeout(45),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         check=False,
     )

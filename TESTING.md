@@ -94,8 +94,8 @@ The first command is run against both canonical and normally materialized
 source for complete installer qualification. Keep the combined sequence,
 including materializer integration, preparation and cleanup, within a finite
 7200-second caller-owned containment envelope. The profile is opt-in and logged:
-the adoption module's item hang guard is 180 seconds instead of 60; its three
-45-second native subprocess hang guards become 135 seconds; group and plugin
+the adoption and copy modules' item hang guards are 180 seconds instead of 60;
+their 45-second native subprocess hang guards become 135 seconds; group and plugin
 aggregate guards become 900 and 2700 seconds instead of 300 and 900.
 The runner's unmarked-item default remains 30 seconds. All other fixture
 deadlines remain unchanged.

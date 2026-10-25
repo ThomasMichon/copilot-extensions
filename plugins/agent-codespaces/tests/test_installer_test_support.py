@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import stat
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,27 +31,78 @@ def test_installer_functional_profile_refuses_unknown_values(monkeypatch, profil
         installer_functional_timeout(45)
 
 
-@pytest.mark.parametrize("profile,multiplier", [("standard", 1), ("busy-host-functional", 3)])
-def test_installer_functional_profile_reaches_module_and_native_harness(
-    monkeypatch, tmp_path, profile, multiplier,
-):
-    monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
+def _contract_module(module_name, monkeypatch):
+    if module_name == "test_snapshot_copy_contract":
+        # Synthetic runner collections can cache a stub under this sibling name.
+        monkeypatch.setitem(
+            sys.modules, f"{__package__}.test_installer_engine_adoption",
+            _contract_module("test_installer_engine_adoption", monkeypatch),
+        )
     spec = importlib.util.spec_from_file_location(
-        f"{__package__}.profile_adoption_control",
-        Path(__file__).with_name("test_installer_engine_adoption.py"),
+        f"{__package__}.profile_{module_name}_control",
+        Path(__file__).with_name(f"{module_name}.py"),
     )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("profile,multiplier", [("standard", 1), ("busy-host-functional", 3)])
+@pytest.mark.parametrize("module_name", ["test_installer_engine_adoption", "test_snapshot_copy_contract"])
+def test_installer_functional_profile_reaches_module_and_native_harness(
+    monkeypatch, tmp_path, profile, multiplier, module_name,
+):
+    monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
+    module = _contract_module(module_name, monkeypatch)
     assert module.pytestmark.args == (60 * multiplier,)
     observed = []
     monkeypatch.setattr(
         module.subprocess, "run",
         lambda command, **kwargs: observed.append((command, kwargs)) or "completed",
     )
-    assert module._run("sh", "exit 0", tmp_path, {}) == "completed"
+    if module_name == "test_installer_engine_adoption":
+        assert module._run("sh", "exit 0", tmp_path, {}) == "completed"
+    else:
+        monkeypatch.setattr(module, "_fake_uv", lambda *_args: None)
+        monkeypatch.setattr(module, "isolate_installer_environment", lambda *_args: None)
+        layout = (tmp_path, tmp_path, tmp_path / "engine.ps1", "")
+        assert module._native(layout, tmp_path, "exit 0") == "completed"
     assert observed[0][1]["timeout"] == 45 * multiplier
     assert observed[0][1]["check"] is False
+
+
+def test_missing_library_fixture_populates_all_declared_sources(monkeypatch, tmp_path):
+    module = _contract_module("test_snapshot_copy_contract", monkeypatch)
+    canonical = tmp_path / "canonical"
+    working = tmp_path / "working"
+    payload = working / "plugins" / "fixture"
+    payload.mkdir(parents=True)
+    names = ("repository-policy", "update-driver", "ssh-manager", "future-library")
+    (payload / "pyproject.toml").write_text(
+        "[tool.uv.sources]\n" + "".join(
+            f'package-{index} = {{ path = "../../libs/{name}" }}\n'
+            for index, name in enumerate(names)
+        ),
+        encoding="utf-8",
+    )
+    for name in names:
+        source = canonical / "libs" / name
+        source.mkdir(parents=True)
+        (source / "pyproject.toml").write_text(f"name = '{name}'\n", encoding="utf-8")
+        (source / ".content").write_bytes(bytes(range(256)))
+    engine = working / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "sentinel").write_bytes(b"preserved engine")
+    monkeypatch.setattr(module, "REPO", canonical)
+    before = snapshot_tree_manifest(canonical)
+    module._complete_snapshot_library_fixture(working, payload)
+    assert snapshot_tree_manifest(canonical) == before
+    for name in names:
+        assert snapshot_tree_manifest(working / "libs" / name) == snapshot_tree_manifest(
+            canonical / "libs" / name,
+        )
+    assert (engine / "sentinel").read_bytes() == b"preserved engine"
 
 
 @pytest.fixture
