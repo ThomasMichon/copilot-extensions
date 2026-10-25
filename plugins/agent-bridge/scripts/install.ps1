@@ -2747,7 +2747,11 @@ function Invoke-Provision {
 
         Write-Step 'Repairing never-ran S4U scheduled task as the default interactive AtLogOn task...'
         $pwsh = Get-PwshPath
-        & $pwsh -NoProfile -ExecutionPolicy Bypass -File $repair
+        $repairHostArguments = @()
+        if ([Environment]::GetCommandLineArgs() -icontains '-NonInteractive') {
+            $repairHostArguments += '-NonInteractive'
+        }
+        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair
         $repairExit = $LASTEXITCODE
         if ($repairExit -ne 0) {
             Write-Fail "Scheduled-task repair failed (exit $repairExit)"
