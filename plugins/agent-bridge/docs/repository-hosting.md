@@ -85,6 +85,11 @@ installation configuration or silently omit admission. The `session-host-agent` 
 applies an explicit cwd override before resolving
 the local launch. Plan cwd is authoritative for both the child process and
 ACP session creation; a configured anchor is not substituted for it.
+Far-side instance admission also spans the original startup operation and
+provider enumeration/native sampling retirement. Cancellation waits for that
+original work without replaying it or launching a Session Host afterward.
+Removed providers retain their original native holders; cancelled holders
+with unknown native completion keep admission rather than claiming retirement.
 
 Native worktree resume, singleton initialization, UI task start/resume and CLI
 embodiment check before import, ownership/reservation gates, mux creation or seed

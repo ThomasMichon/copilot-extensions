@@ -765,6 +765,39 @@ caller coverage, not one launcher or one platform passing.
 - Current-head publication, fresh review/CI and completion archival remain
   open. No runtime rollout is authorized.
 
+### 2026-10-25 - Far-side resolver startup retirement
+
+- The next review found that cancelling far-side startup could close admission
+  while a shielded provider enumeration and its native command remained live.
+  Four native controls reproduced premature finished state, including a
+  sampling tail after an otherwise successful return.
+- The original startup operation is now shielded and retained rather than
+  cancelled or replayed. A cancelled caller does not subsequently launch a
+  Session Host. Cleanup retains exact provider read tasks and raw sampling
+  futures, including removed providers, and waits through repeated caller
+  interruption. Original cancellation survives a later resolver failure.
+  Cancellation of an already-started owner with no native completion proof
+  remains an explicit UNKNOWN hold, not a new operation or false retirement.
+- The complete Windows Session Host/resolver packet passed 218 tests with four
+  platform skips. Seven focused controls then passed independently, including
+  a real child-process UNKNOWN-owner control after its native worker retired.
+  A race in the regression fixture itself was removed by waiting for actual
+  startup completion before removing its provider, not by adding a sleep.
+  Resolver-compatibility doubles now use the existing permitted-provider policy
+  fixture and current CLI receiver contract; production policy is unchanged.
+- Six isolated Linux probes executed the exact runner and CLI-list source
+  bodies with native subprocesses, raw futures and repeated cancellation.
+  An additional Linux child-process control proved UNKNOWN admission remains
+  held after native process retirement. This is exact-source/native-boundary
+  evidence, not a full Linux Bridge-stack pass: the retained QA image does not
+  carry that dependency closure, and no new Linux dependencies were acquired.
+  Source future-annotation semantics were retained in the extraction. All
+  test-owned processes, containers and sandboxes were removed.
+- The caller census, source ceilings, required lint and all 1,800 exact unit
+  bindings remain valid. No native/core bytes, protocol fixture or production
+  lifetime authority changed. Publication, a passing fresh review/current CI
+  and completion archival remain open; no runtime rollout is authorized.
+
 ### 2026-10-25 - Lane event worker and embedding-engine teardown
 
 - A later current-head review found two further shipped owners. The lane
