@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 
@@ -19,8 +20,10 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("python_exit", [0, 17])
-def test_bootstrap_progress_keeps_command_exit_and_stdout(tmp_path, python_exit):
+@pytest.mark.parametrize(
+    ("python_exit", "incomplete_checkout"), [(0, False), (17, False), (0, True)],
+)
+def test_bootstrap_progress_keeps_command_exit_and_stdout(tmp_path, python_exit, incomplete_checkout):
     repo = _source_repo(tmp_path)
     root = tmp_path / "manager-root"
     root.mkdir()
@@ -29,6 +32,19 @@ def test_bootstrap_progress_keeps_command_exit_and_stdout(tmp_path, python_exit)
     )
     tools = tmp_path / "tools"
     _fake_tools(tools, uv_exit=0, python_exit=python_exit)
+    if incomplete_checkout:
+        real_git = shutil.which("git")
+        assert real_git is not None
+        missing = root / "staging" / "worktree-manager" / "README.md"
+        adapter = tools / "git"
+        adapter.write_text(
+            f"#!/bin/sh\n{shlex.quote(real_git)} \"$@\"\ncode=$?\n"
+            'if [ "$code" -eq 0 ]; then\ncase " $* " in\n'
+            f'  *" checkout "*) rm -- {shlex.quote(str(missing))} ;;\n'
+            'esac\nfi\nexit "$code"\n',
+            encoding="utf-8",
+        )
+        adapter.chmod(0o755)
     home = tmp_path / "home"
     home.mkdir()
     environment = {
@@ -40,6 +56,12 @@ def test_bootstrap_progress_keeps_command_exit_and_stdout(tmp_path, python_exit)
         [BASH, str(BOOTSTRAP), "--version"],
         env=environment, capture_output=True, text=True, timeout=20,
     )
+    if incomplete_checkout:
+        assert result.returncode != 0
+        assert "source checkout is incomplete or changed" in result.stderr
+        assert "refusing Manager construction" in result.stderr
+        assert not (root / "current-version").exists()
+        return
     assert result.returncode == python_exit, result.stdout + result.stderr
     assert result.stdout == ""
     progress = [

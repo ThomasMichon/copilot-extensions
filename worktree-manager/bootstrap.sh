@@ -129,6 +129,10 @@ if [ "$have_git" -eq 1 ]; then
     fi
     git -C "$STAGING" fetch --depth 1 -- "$REPO" "$REF"
     git -C "$STAGING" -c core.hooksPath= checkout -q --detach FETCH_HEAD
+    if ! git -C "$STAGING" diff --quiet --no-ext-diff --no-textconv HEAD --; then
+        _bootstrap_progress 'Git source checkout is incomplete or changed; refusing Manager construction.' failed
+        exit 1
+    fi
     payload_parent="$STAGING"
 else
     # Derive the codeload tarball URL from the (GitHub) source; a non-GitHub

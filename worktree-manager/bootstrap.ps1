@@ -228,10 +228,15 @@ if ($HaveGit) {
         Write-BootstrapProgress "git fetch of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
     }
-    git -C $Staging -c core.hooksPath= checkout -q --detach FETCH_HEAD
+    git -C $Staging -c core.longpaths=true -c core.hooksPath= checkout -q --detach FETCH_HEAD
     if ($LASTEXITCODE -ne 0) {
         Write-BootstrapProgress "git checkout of $Repo@$Ref failed (exit $LASTEXITCODE)." failed
         exit $LASTEXITCODE
+    }
+    git -C $Staging -c core.longpaths=true diff --quiet --no-ext-diff --no-textconv HEAD --
+    if ($LASTEXITCODE -ne 0) {
+        Write-BootstrapProgress 'Git source checkout is incomplete or changed; refusing Manager construction.' failed
+        exit 1
     }
     $PayloadParent = $Staging
 } else {
