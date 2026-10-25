@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import logging
 import os
 import stat
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 from .conventions import (
@@ -217,8 +219,16 @@ def inventory_item(
 
     from .reflection import _allowed, subset
 
+    try:
+        candidates = sorted(catalogs.iterdir())
+    except OSError:
+        logging.getLogger("plugin-resolve").warning(
+            "%s native cache inventory is unavailable (unreadable-cache); "
+            "ordinary acquisition remains available", source,
+        )
+        return None
     matches = []
-    for candidate in sorted(catalogs.iterdir()):
+    for candidate in candidates:
         if not candidate.is_dir():
             continue
         if candidate.is_symlink() or getattr(candidate.lstat(), "st_reparse_tag", 0):
@@ -314,6 +324,9 @@ def inventory_item(
                 committed.add(relative)
             if path.relative_to(candidate) not in committed:
                 raise ValueError("Native cache catalog is not in the selected commit")
+            with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
+                if any(Path(member.name) not in committed for member in archive):
+                    raise ValueError("Native cache closure contains unverified files")
             metadata, entry = publication_metadata(root, source)
             catalog_metadata(source, plugin_manifest(payload), metadata, entry)
         except (OSError, ValueError):

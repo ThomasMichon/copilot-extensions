@@ -253,6 +253,9 @@ catalog/payload content and required asset closure, and contain the uniquely
 declared plugin. Selected ordinary files are hashed directly against their Git
 blob identities in the requested commit; status alone cannot prove unchanged
 bytes when the index has `assume-unchanged` or `skip-worktree` entries.
+Every file in the reflected closure must have one of those verified ordinary
+blobs; required files inside sibling submodules cannot inherit the parent
+repository's proof and retain ordinary acquisition.
 Checkout transformations that change those bytes retain ordinary acquisition.
 The selected catalog and all higher-priority catalog locations participate in
 the proof even when currently missing; deleted native catalogs cannot silently
@@ -274,6 +277,8 @@ installation; malformed/unreadable catalogs and invalid payload closures are
 reported as ineligible cache candidates rather than blocking that fallback.
 Git qualification probes keep their 30-second deadline; a probe timeout reports
 an ineligible candidate and leaves ordinary acquisition available.
+An inaccessible native-cache directory likewise reports unavailable inventory
+without preventing ordinary installation.
 Git filename output decodes losslessly with `surrogateescape`, so non-UTF-8
 POSIX filenames do not abort the optional qualification path.
 Catalog plugin entries must be objects and owner/location metadata must be valid.

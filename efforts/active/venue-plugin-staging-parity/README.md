@@ -409,6 +409,15 @@ or a reason to create a daemon.
   Higher-priority catalog paths are included even when deleted, lower-priority
   unrelated catalogs remain excluded, and Git filename decoding is lossless.
   Final reviewed-head validation remains open; no live adoption is claimed.
+- The committed-byte head then passed the complete contained suite: 354 tests,
+  one platform skip, 709.19 seconds and clean host-state readback. The next
+  concrete review identified referenced files below a sibling Gitlink, which
+  parent path-scoped probes can omit, and cache-directory enumeration denial.
+- Both findings have failing-first controls. Every reflected closure member
+  must now belong to the verified ordinary-blob set; clean or modified sibling
+  submodule files without that parent proof retain ordinary acquisition.
+  Enumeration errors report bounded unavailable-inventory diagnostics rather
+  than aborting installation fallback. Final-head validation remains open.
 
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 

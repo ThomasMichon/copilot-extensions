@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -679,3 +680,50 @@ def test_unselected_lower_priority_catalog_changes_do_not_prevent_reuse(
     assert prepare(request(target, definition), environment=environment) == {
         "helper@git-fixture": str(catalog_root / "helper"),
     }
+
+
+@pytest.mark.parametrize("modified", [False, True])
+def test_sibling_submodule_asset_cannot_escape_committed_byte_proof(
+    native_inventory,
+    monkeypatch,
+    modified,
+):
+    target, _home, clone, definition, environment = native_inventory
+    support = clone / "support"
+    init_checkout(support)
+    (support / "guide.md").write_bytes(b"required submodule guide")
+    git(support, "add", ".")
+    git(support, "commit", "--quiet", "-m", "submodule fixture")
+    scripts = clone / "catalog-a" / "helper" / "scripts"
+    scripts.mkdir()
+    (scripts / "use.txt").write_text("../../support/guide.md")
+    git(clone, "add", "catalog-a", "support")
+    git(clone, "commit", "--quiet", "-m", "required submodule asset fixture")
+    definition["source"]["ref"] = "HEAD"
+    assert git(clone, "ls-files", "--stage", "--", "support").startswith("160000 ")
+    if modified:
+        (support / "guide.md").write_text("modified submodule bytes")
+    assert not git(clone, "status", "--porcelain", "--", "support/guide.md")
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+def test_unreadable_cache_directory_uses_ordinary_installation(
+    native_inventory,
+    monkeypatch,
+    caplog,
+):
+    target, _home, clone, definition, environment = native_inventory
+    original = Path.iterdir
+
+    def unreadable(path):
+        if path == clone.parent:
+            raise PermissionError("synthetic cache enumeration denied")
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", unreadable)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert "unreadable-cache" in caplog.text
