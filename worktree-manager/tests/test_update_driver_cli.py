@@ -117,6 +117,7 @@ def test_queue_captures_consumed_provider_without_restoring_ambient_transport(qu
 
 
 def test_source_identity_preserves_explicit_selection(tmp_path, monkeypatch):
+    from worktree_manager.runtime_source_config import RuntimeSource
     from worktree_manager import self_install
 
     monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
@@ -126,6 +127,7 @@ def test_source_identity_preserves_explicit_selection(tmp_path, monkeypatch):
         "root": str(tmp_path.resolve()),
         "repo": "https://example.invalid/tools.git",
         "ref": "0123456789abcdef",
+        "runtime_source": RuntimeSource().document(),
     }
 
 

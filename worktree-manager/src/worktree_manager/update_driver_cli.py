@@ -86,7 +86,8 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     return options, forwarded
 
 
-def source_identity() -> dict[str, str]:
+def source_identity() -> dict[str, object]:
+    from .runtime_source_config import configured_source
     from .self_install import default_root, manager_ref, manager_repo
     from .source_config import absolute_local_source
 
@@ -102,6 +103,7 @@ def source_identity() -> dict[str, str]:
         "root": str(root),
         "repo": repo,
         "ref": manager_ref(root),
+        "runtime_source": configured_source(root).document(),
     }
 
 

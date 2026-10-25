@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -139,9 +140,14 @@ class WheelInstallInputs:
     snapshot: WheelSnapshot
     binding_json: str
     distributions: tuple[tuple[str, str, str, str], ...]
+    acquisition_json: str | None = None
+
+    @property
+    def deadline(self) -> float:
+        return self.snapshot._deadline
 
     def receipt(self) -> dict:
-        return {
+        result = {
             "construction": "closed-wheels",
             "lock_id": "sha256:" + hashlib.sha256(self.binding_json.encode("ascii")).hexdigest(),
             "binding": json.loads(self.binding_json),
@@ -150,6 +156,64 @@ class WheelInstallInputs:
                 for name, version, filename, digest in self.distributions
             },
         }
+        if self.acquisition_json is not None:
+            acquisition = self._acquisition()
+            result["acquisition"] = {
+                key: acquisition[key] for key in ("schema", "version", "policy_id", "files")
+            }
+        return result
+
+    def _acquisition(self) -> dict:
+        try:
+            record = json.loads(self.acquisition_json)
+            counters = {
+                "metadata_bytes", "wheel_bytes", "request_count", "redirect_count",
+                "control_bytes", "temporary_highwater_bytes",
+            }
+            if (
+                not isinstance(record, dict)
+                or set(record) != counters | {"schema", "version", "policy_id", "files"}
+                or record["schema"] != "copilot-extensions.wheel-acquisition"
+                or type(record["version"]) is not int or record["version"] != 1
+                or self.acquisition_json != json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", record["policy_id"]) is None
+                or any(type(record[key]) is not int or record[key] < 0 for key in counters)
+                or not isinstance(record["files"], list) or len(record["files"]) != len(self.snapshot.paths)
+            ):
+                raise ValueError
+            seen, total = set(), 0
+            for item in record["files"]:
+                _check_deadline(self.deadline)
+                if not isinstance(item, dict) or set(item) != {
+                    "filename", "sha256", "size", "feed", "uploaded", "source_origins", "yanked", "withdrawn",
+                }:
+                    raise ValueError
+                name = item["filename"]
+                if (
+                    name in seen or name not in self.snapshot.paths
+                    or item["sha256"] != self.snapshot.digests[name]
+                    or type(item["size"]) is not int or item["size"] != self.snapshot._records[name][3]
+                    or re.fullmatch(r"sha256:[0-9a-f]{64}", item["feed"]) is None
+                    or not isinstance(item["uploaded"], str) or len(item["uploaded"]) > 64
+                    or datetime.fromisoformat(item["uploaded"]).tzinfo is None
+                    or not isinstance(item["source_origins"], list) or not item["source_origins"]
+                    or any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in item["source_origins"])
+                    or item["yanked"] is not False or item["withdrawn"] is not False
+                ):
+                    raise ValueError
+                seen.add(name)
+                total += item["size"]
+            if (
+                total != record["wheel_bytes"] or seen != set(self.snapshot.paths)
+                or record["temporary_highwater_bytes"] != max(record["control_bytes"] + total, 2 * total)
+                or record["request_count"] < sum(len(item["source_origins"]) for item in record["files"])
+            ):
+                raise ValueError
+            return record
+        except WheelError:
+            raise
+        except (ValueError, TypeError, KeyError):
+            raise WheelError("wheel acquisition facts differ from retained construction inputs") from None
 
     def verify(self) -> None:
         if not isinstance(self.snapshot, WheelSnapshot):
@@ -182,6 +246,8 @@ class WheelInstallInputs:
             expected[filename] = digest
         if expected != self.snapshot.digests:
             raise WheelError("wheel construction facts differ from retained inputs")
+        if self.acquisition_json is not None:
+            self._acquisition()
         self.snapshot.verify()
 
 

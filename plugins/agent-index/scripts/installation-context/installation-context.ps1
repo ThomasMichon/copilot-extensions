@@ -4304,6 +4304,59 @@ function Test-RuntimeDeploymentOwnerEqual($Actual, $Expected) {
     return $true
 }
 
+function Get-RuntimeDownloadOrigins($Value) {
+    if ($Value -isnot [array] -or $Value.Count -gt 256) {
+        Fail 'runtimeProfiles.downloadOrigins must be a bounded JSON array.'
+    }
+    $result = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($origin in $Value) {
+        if ($origin -isnot [string] -or $origin.Length -gt 2048 -or $origin -cnotmatch '\A[!-~]+\z') {
+            Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.'
+        }
+        $match = [regex]::Match($origin, '\A(?i:https)://([^/?#@%\\]+)(?:/)?\z')
+        if (-not $match.Success) { Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.' }
+        $authority = $match.Groups[1].Value
+        if ($authority.StartsWith('[')) {
+            $parts = [regex]::Match($authority, '\A\[([0-9A-Fa-f:]+)\](?::([0-9]*))?\z')
+            $address = $null
+            if (-not $parts.Success -or
+                -not [Net.IPAddress]::TryParse($parts.Groups[1].Value, [ref]$address) -or
+                $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetworkV6) {
+                Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.'
+            }
+            $hostName = '[' + $parts.Groups[1].Value.ToLowerInvariant() + ']'
+        }
+        else {
+            $parts = [regex]::Match($authority, '\A([^:]+)(?::([0-9]*))?\z')
+            if (-not $parts.Success) { Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.' }
+            $hostName = $parts.Groups[1].Value.ToLowerInvariant()
+            foreach ($label in $hostName.Split('.')) {
+                if ($label -cnotmatch '\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z') {
+                    Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.'
+                }
+            }
+        }
+        $rawPort = $parts.Groups[2].Value
+        $port = 443
+        if ($rawPort.Length -gt 0) {
+            $trimmed = $rawPort.TrimStart('0')
+            if ($trimmed.Length -eq 0 -or $trimmed.Length -gt 5) {
+                Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.'
+            }
+            $port = [int]$trimmed
+            if ($port -eq 0 -or $port -gt 65535) {
+                Fail 'runtimeProfiles.downloadOrigins requires exact HTTPS origins.'
+            }
+        }
+        $canonical = 'https://' + $hostName
+        if ($port -ne 443) { $canonical += ':' + [string]$port }
+        if ($result.Contains($canonical)) { Fail 'runtimeProfiles.downloadOrigins contains duplicate origins.' }
+        $result.Add($canonical)
+    }
+    $result.Sort([StringComparer]::Ordinal)
+    return ,$result.ToArray()
+}
+
 function Read-RuntimeDeploymentPolicy(
     $Resolution,
     [string]$ResolvedCopilotHome,
@@ -4389,7 +4442,10 @@ function Read-RuntimeDeploymentPolicy(
                         Fail 'runtimeProfiles.backend must be an explicit opaque capability reference.'
                     }
                 }
-                else { Fail 'runtimeProfiles supports only allowSourceFallback and backend.' }
+                elseif ($property.Name -ceq 'downloadOrigins') {
+                    $property.Value = (Get-RuntimeDownloadOrigins $property.Value)
+                }
+                else { Fail 'runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins.' }
             }
         }
         $managed = Get-RuntimeDeploymentProperty $policy 'managed'

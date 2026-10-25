@@ -389,6 +389,28 @@ per-chunk source copying as well as compilation and consumption. The same option
 `dependency_compile=true` Linux/Windows lane runs these controls, not required
 unit CI. They do not qualify private-feed policy, wheel admission or deployment.
 
+`tools/test_installer_wheel_acquisition.py` uses a public test-only localhost TLS
+certificate/key and real owned workers to check exact file/redirect trust,
+credential isolation, file policy, inclusive byte/storage limits, blocked DNS,
+trickling headers/body and cleanup. `tools/test_runtime_feed_configuration.py`
+composes the actual owner resolver and native UV preflight with TLS download,
+complete-profile inspection and a real offline numbered runtime. It verifies
+actual installed distributions/health and acquisition-policy receipt binding,
+with poisoned ambient CA/proxy/resolver/cache settings. Source selection,
+supported native configuration, stable policy identity and unsupported-provider/
+constraint refusals are distinct controls. Release-verifier backend responses
+remain synthetic; no live-feed or production approval is claimed.
+The existing opt-in `wheel_inputs=true` Linux/Windows jobs include both suites;
+their six-minute budget and required unit-only CI roster are unchanged.
+Native deployment-reader cases also cover `downloadOrigins` parity. A real
+constructor timeout control proves the shared deadline settles its child and
+lease, removes partial inputs and preserves the selected healthy prior.
+Windows controls retain a wheel whose path exceeds 260 characters and observe
+two real console-worker cycles from a `pythonw.exe` parent, with zero surfaced
+windows or foreground transitions. Storage thresholds measure file-content
+bytes, including control/helper copies; filesystem allocation overhead and
+enabled budgets still require the parent effort's separate measurements.
+
 `python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
 synthetic wheel archives, streamed digest/RECORD checks, independent selected
 metadata mutations, ambiguous/linked/encrypted members, compressed metadata

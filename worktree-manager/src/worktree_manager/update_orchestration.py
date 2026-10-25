@@ -2,7 +2,24 @@
 
 from __future__ import annotations
 
+import sys
+
 from .update_events import UpdateRun
+
+
+def preflight_runtime_source(run: UpdateRun | None = None) -> bool:
+    from .runtime_source_config import require_marketplace
+
+    try:
+        require_marketplace()
+    except (OSError, ValueError) as error:
+        if run is None:
+            print(f"Runtime source: {error}", file=sys.stderr)
+        else:
+            run.say(str(error), state="failed")
+            run.record_engine_error(str(error), missing=False)
+        return False
+    return True
 
 
 def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
@@ -24,6 +41,9 @@ def run_update_steps(
 ) -> int:
     from . import engine_client as ec
     from .self_install import SelfUpdateResult, self_update
+
+    if not preflight_runtime_source(run):
+        return 1
 
     with run.self_update_phase():
         su = (

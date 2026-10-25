@@ -288,7 +288,7 @@ class HostProfileTests(unittest.TestCase):
         selector.select.return_value = [(SimpleNamespace(fileobj=streams[0]), 1)]
         with (mock.patch.object(host.subprocess, "Popen", return_value=process) as spawn,
               mock.patch("selectors.DefaultSelector", return_value=selector),
-              mock.patch.object(os, "set_blocking"), mock.patch.object(os, "read", return_value=b"syntax error /private/example"),
+              mock.patch.object(os, "set_blocking", create=True), mock.patch.object(os, "read", return_value=b"syntax error /private/example"),
               mock.patch.object(signal, "SIGKILL", 9, create=True)):
             with self.assertRaisesRegex(host.ProfileError, "^parser-syntax-error$"):
                 self.real_parser("validate", Path("/etc/apparmor.d/example"))
@@ -367,7 +367,7 @@ class HostProfileTests(unittest.TestCase):
             with (mock.patch.object(host.subprocess, "Popen", return_value=process),
                   mock.patch("selectors.DefaultSelector", return_value=selector),
                   mock.patch.object(host.time, "monotonic", side_effect=clock),
-                  mock.patch.object(os, "set_blocking"), mock.patch.object(os, "read", return_value=b"x" * (host.LIMIT + 1)),
+                  mock.patch.object(os, "set_blocking", create=True), mock.patch.object(os, "read", return_value=b"x" * (host.LIMIT + 1)),
                   mock.patch.object(os, "killpg", create=True) as terminate,
                   mock.patch.object(signal, "SIGKILL", 9, create=True)):
                 with self.assertRaisesRegex(host.ProfileError, "outcome-unknown"):
@@ -408,7 +408,7 @@ class HostProfileTests(unittest.TestCase):
         process.wait.side_effect = interrupted_wait
         with (mock.patch.object(host.subprocess, "Popen", return_value=process),
               mock.patch("selectors.DefaultSelector", return_value=selector),
-              mock.patch.object(os, "set_blocking"), mock.patch.object(os, "killpg", side_effect=retire),
+              mock.patch.object(os, "set_blocking", create=True), mock.patch.object(os, "killpg", side_effect=retire),
               mock.patch.object(host.time, "sleep")):
             with self.assertRaises(KeyboardInterrupt):
                 self.real_parser("add", Path("/etc/apparmor.d/example"))
@@ -432,7 +432,7 @@ class HostProfileTests(unittest.TestCase):
                 self.parser_waitid.return_value = status
                 with (mock.patch.object(host.subprocess, "Popen", return_value=process),
                       mock.patch("selectors.DefaultSelector", return_value=selector),
-                      mock.patch.object(os, "set_blocking")):
+                      mock.patch.object(os, "set_blocking", create=True)):
                     with self.assertRaisesRegex(host.ProfileError, "custody|identity"):
                         self.real_parser("add", Path("/etc/apparmor.d/example"))
                 self.parser_killpg.assert_not_called()
@@ -466,7 +466,7 @@ class HostProfileTests(unittest.TestCase):
 
                 with (mock.patch.object(host.subprocess, "Popen", return_value=process),
                       mock.patch("selectors.DefaultSelector", return_value=selector),
-                      mock.patch.object(os, "set_blocking"),
+                      mock.patch.object(os, "set_blocking", create=True),
                       mock.patch.object(os, "killpg", side_effect=release) as terminate,
                       mock.patch.object(host.time, "sleep")):
                     with self.assertRaisesRegex(host.ProfileError, "custody|identity"):
@@ -643,7 +643,8 @@ class HostProfileTests(unittest.TestCase):
         with (mock.patch.object(host.subprocess, "Popen", return_value=process),
               mock.patch("selectors.DefaultSelector", return_value=selector),
               mock.patch.object(host.time, "monotonic", side_effect=[0, 31]),
-              mock.patch.object(host.time, "sleep"), mock.patch.object(os, "set_blocking"),
+              mock.patch.object(host.time, "sleep"),
+              mock.patch.object(os, "set_blocking", create=True),
               mock.patch.object(os, "killpg", create=True) as terminate,
               mock.patch.object(signal, "SIGKILL", 9, create=True)):
             with self.assertRaisesRegex(host.ProfileError, "outcome-unknown"):

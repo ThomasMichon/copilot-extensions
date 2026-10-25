@@ -1445,7 +1445,10 @@ def _cmd_update(rest: list[str]) -> int:
     """
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
+    from .update_orchestration import preflight_runtime_source
 
+    if not preflight_runtime_source():
+        return 1
     prepared = prepare_update(rest)
     if prepared.exit_code:
         return prepared.exit_code
@@ -1501,6 +1504,7 @@ def main(argv: list[str] | None = None) -> int:
         print("  update --request-status ID [--json]        read a durable request without installing")
         print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
         print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
+        print("  runtime-source show|set|reset|resolve  independent runtime source policy/acquisition; no install")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
@@ -1570,6 +1574,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_self_install(args[1:])
     if args and args[0] == "source":
         return _cmd_source(args[1:])
+    if args and args[0] == "runtime-source":
+        from .runtime_source_cli import main as runtime_source
+
+        return runtime_source(args[1:])
     if args and args[0] == "update":
         from .update_driver_cli import cmd_update_request
         return cmd_update_request(args[1:])

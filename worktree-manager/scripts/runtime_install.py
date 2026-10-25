@@ -273,13 +273,22 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Bootstrap repair is only valid for update")
     os.environ.pop("__PYVENV_LAUNCHER__", None)
     os.environ["WORKTREE_MANAGER_ROOT"] = str(args.root.resolve())
+    # Bootstrap update must honor the same policy before installing Manager.
+    sys.path.insert(0, str(args.payload / "src"))
+    if command[:1] == ["update"]:
+        from worktree_manager.runtime_source_config import require_marketplace
+
+        try:
+            require_marketplace(args.root)
+        except (OSError, ValueError) as error:
+            print(f"Runtime source: {error}", file=sys.stderr)
+            return 1
     if args.repair_update:
         from update_entry import validate_manager_ownership
 
         prior_commands = validate_manager_ownership(args.root, args.payload)
     # Only bootstrap installer modules are read from source. Application execution
     # happens below under the constructed interpreter and retention bootstrap.
-    sys.path.insert(0, str(args.payload / "src"))
     from worktree_manager.self_install import self_install
 
     if args.recover_adopted is not None:
