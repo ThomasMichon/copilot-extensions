@@ -36,9 +36,13 @@ def pr_identity(url: str) -> tuple[str, str, int] | None:
             continue
         if index < 2 or index + 2 != len(parts) or not parts[-1].isdigit():
             continue
-        number = int(parts[-1])
-        slug = claims_find_cli._pr_repo(SimpleNamespace(repo="", url=url))
-        prefix = "/".join(parts[:index - 2])
+        try:
+            number = int(parts[-1])
+            slug = claims_find_cli._pr_repo(SimpleNamespace(repo="", url=url))
+        except ValueError:
+            return None
+        azure = index >= 3 and parts[index - 2] == "_git" and part.lower() == "pullrequest"
+        prefix = "/".join(parts[:index - (3 if azure else 2)])
         authority = claims_find_cli.canonical_authority(
             parsed.netloc + ("/" + prefix if prefix else "")
         )
@@ -136,7 +140,12 @@ def collect_local(repo: str, config: cfg.Config) -> dict:
                 "recorded_state": obligation.get("state", ""),
             })
         for pr in record.prs or []:
-            slug = claims_find_cli._pr_repo(pr)
+            try:
+                slug = claims_find_cli._pr_repo(pr)
+                number = claims_find_cli._pr_number(pr)
+            except ValueError as error:
+                errors.append({**root, "error": f"tracked PR identity could not be parsed: {error}"})
+                continue
             if "/" not in slug:
                 errors.append({**root, "error": "tracked PR repository identity is unavailable"})
                 continue
@@ -145,7 +154,6 @@ def collect_local(repo: str, config: cfg.Config) -> dict:
             if project not in authorities:
                 authorities[project] = claims_find_cli._authority_resolver(project)
             authority = authorities[project](slug, pr.provider or "")
-            number = claims_find_cli._pr_number(pr)
             if authority is None or number is None:
                 errors.append({**root, "error": "tracked PR authority or number is unavailable"})
             claims.append({

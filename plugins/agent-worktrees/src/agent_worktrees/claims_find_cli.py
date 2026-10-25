@@ -77,10 +77,11 @@ def _pr_repo(pr) -> str:
     from urllib.parse import urlparse
 
     parts = [p for p in urlparse(pr.url or "").path.split("/") if p]
-    if "_git" in parts:  # Azure DevOps: .../<project>/_git/<repo>/pullrequest/<n>
-        i = parts.index("_git")
-        if 1 <= i < len(parts) - 1:
-            return f"{parts[i - 1]}/{parts[i + 1]}"
+    if (
+        len(parts) >= 5 and parts[-4] == "_git"
+        and parts[-2].lower() == "pullrequest" and parts[-1].isdigit()
+    ):
+        return f"{parts[-5]}/{parts[-3]}"
     for i, part in enumerate(parts):
         if (
             re.fullmatch(r"pull(?:s|-?requests?)?", part)

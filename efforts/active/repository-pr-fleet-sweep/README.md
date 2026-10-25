@@ -311,3 +311,16 @@ fail-closed observation policy. This remains a finite read-only command and a
 below-altitude publication implementation fix, with no daemon, installer,
 new dependency or rollout. Final exact-head Linux, full review, required CI,
 implementation merge and source-effort closeout remain open.
+
+The next exact candidate passed its complete manual Ubuntu packet, including
+both publication guards and native POSIX timeout/quoting. Full review then
+identified two further parsing defects: a GitHub repository named `_git`
+entered the Azure branch, and one malformed tracked URL aborted a whole cell.
+The shared parser now recognizes only the actual Azure terminal suffix and
+retains its organization authority. Candidate parse failures become explicit
+root errors while valid candidates and held peers remain visible. Six added
+regressions exercise real persisted collection as well as the pure parser;
+the rebased Windows packet passes212 cases/four platform skips.
+The optional workflow also preserves newly merged Logger/pane portfolios;
+the sweep job is placed away from their shared insertion boundary.
+Current-head review, required CI and Linux remain necessary after this fix.

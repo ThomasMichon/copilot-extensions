@@ -77,7 +77,10 @@ def test_foreign_authority_cannot_claim_same_number():
     assert result["associations"][0]["provider_state"] == "unknown"
 
 
-@pytest.mark.parametrize("slug", ["example/pull", "pull/widgets", "pull/123", "pulls/pull-requests"])
+@pytest.mark.parametrize("slug", [
+    "example/pull", "pull/widgets", "pull/123", "pulls/pull-requests",
+    "example/_git", "_git/widgets",
+])
 def test_keyword_named_repository_claims_keep_terminal_identity(slug):
     url = f"https://github.com/{slug}/pull/7"
     assert pr_sweep.pr_identity(url) == ("github.com", slug, 7)
@@ -89,6 +92,12 @@ def test_keyword_named_repository_claims_keep_terminal_identity(slug):
 def test_repository_keyword_under_provider_prefix_does_not_become_authority():
     assert pr_sweep.pr_identity("https://forge.example/prefix/example/pull/pulls/7") == (
         "forge.example/prefix", "example/pull", 7,
+    )
+
+
+def test_azure_pr_suffix_keeps_organization_authority_and_project_repository():
+    assert pr_sweep.pr_identity("https://dev.azure.com/org/project/_git/widgets/pullrequest/7") == (
+        "dev.azure.com/org", "project/widgets", 7,
     )
 
 
@@ -234,6 +243,40 @@ def test_unreadable_record_does_not_hide_valid_peer(local_records, tmp_path):
     result = pr_sweep.collect_local(REPO, conf)
     assert any(root["worktree_id"] == "valid" for root in result["roots"])
     assert result["errors"]
+
+
+def test_keyword_repository_held_claim_survives_collection(local_records):
+    save, conf = local_records
+    repo = "example/_git"
+    url = f"https://github.com/{repo}/pull/7"
+    save("host", "keyword-root", [tracking.ResourceClaim(
+        kind="pr", ref=url, state=obligations.ACTIVE,
+    )])
+    result = pr_sweep.collect_local(repo, conf)
+    assert not result["errors"]
+    assert [(r["repo"], r["number"], r["authority"]) for r in result["claims"]] == [
+        (repo, 7, "github.com"),
+    ]
+
+
+@pytest.mark.parametrize("repo", [REPO, ""])
+def test_malformed_candidate_keeps_valid_same_root_and_peer_claims(local_records, repo):
+    save, conf = local_records
+    save("host", "mixed", prs=[
+        tracking.PRRecord(repo=repo, number=None, url="https://["),
+        tracking.PRRecord(repo=REPO, number=1, url=f"https://github.com/{REPO}/pull/1"),
+    ])
+    save("source", "peer", [tracking.ResourceClaim(
+        kind="pr", ref=f"{REPO}#1", state=obligations.ACTIVE,
+    )])
+    result = pr_sweep.collect_local(REPO, conf)
+    assert {r["worktree_id"] for r in result["claims"]} == {"mixed", "peer"}
+    assert any(e["worktree_id"] == "mixed" and "could not be parsed" in e["error"]
+               for e in result["errors"])
+    joined = pr_sweep.join_inventory(REPO, provider(), [cell(result["claims"], result["errors"])])
+    assert not joined["complete"]
+    assert len(joined["prs"][0]["claimants"]) == 1
+    assert len(joined["prs"][0]["candidates"]) == 1
 
 
 @pytest.mark.parametrize("child", ["worker-a/source/missing", "worker-b/source/child", "worker-a/host/root"])
