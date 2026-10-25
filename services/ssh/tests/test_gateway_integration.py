@@ -92,7 +92,14 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
                 owner.result()
             return "service-a" in rig.state.channels
 
-        await eventually(registered, timeout=30)
+        try:
+            await eventually(registered, timeout=30)
+        except asyncio.TimeoutError:
+            if diagnostic is not None:
+                diagnostic.seek(0)
+                pytest.fail("Installed SSH host did not register: "
+                            + diagnostic.read(4096).decode("utf-8", errors="replace"))
+            raise
         assert rig.state.channels["service-a"].caller_context
 
         def client(principal, key):
@@ -116,7 +123,11 @@ async def test_registered_service_delivers_later_join_to_authenticated_connected
             if update.revision == 3:
                 updated.set()
 
+        rig.state.stopping = True
         watch = asyncio.create_task(first.watch(watch_stop, accept))
+        await asyncio.sleep(0.1)
+        assert not watch.done(), "A real challenge-stage 503 permanently retired the watch"
+        rig.state.stopping = False
         await milestone(initial, watch)
         with pytest.raises(TransportError, match="ssh-enrollment-refused"):
             await second.enroll(enrollment())

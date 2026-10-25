@@ -4,6 +4,7 @@ import struct
 import pytest
 
 from agent_ssh_service.config import ServiceConfig
+from fleet_manager.private_state import private_directory
 
 
 def key(number):
@@ -46,4 +47,6 @@ def enrollment(index=0):
 
 @pytest.fixture
 def config(tmp_path):
-    return ServiceConfig.from_dict(document(tmp_path))
+    root = tmp_path / "state"
+    private_directory(root)
+    return ServiceConfig.from_dict(document(root))

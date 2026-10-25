@@ -21,13 +21,13 @@ from test_gateway_sshd import config
 
 
 @pytest.mark.timeout(60)
-def test_native_listener_login_refresh_withdrawal_and_preservation(tmp_path):
+def test_native_listener_login_refresh_withdrawal_and_preservation(native_target_root):
     sshd, keygen, ssh = (shutil.which(name) for name in ("sshd", "ssh-keygen", "ssh"))
     if not all((sshd, keygen, ssh)):
         pytest.skip("Native OpenSSH server, client and key generator are required")
     if os.name != "nt" and os.geteuid() == 0:
         pytest.skip("This fixture requires a non-root current-user OpenSSH server")
-    root = tmp_path / "native ingress"
+    root = native_target_root / "native ingress"
     if os.name == "nt":
         authorization._windows_create_directory(root)
     else:

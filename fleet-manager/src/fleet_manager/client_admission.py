@@ -12,6 +12,7 @@ import time
 
 from . import artifact_staging
 from .planning import PlanError, canonical, decode, identifier, integer, record
+from .private_state import windows_private as _windows_private
 from .release_selection import ReleaseSelection
 from .staging_cleanup import _windows_handle
 
@@ -61,87 +62,6 @@ def _selection(value, identity):
     if len(value["components"]) > 256:
         raise PlanError("selected client closure exceeds its component bound")
     return value
-
-
-def _windows_private(path):
-    """Accept owner-private grants for the path and its inherited state."""
-    import ctypes
-    from ctypes import wintypes
-
-    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.GetCurrentProcess.restype = wintypes.HANDLE
-    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
-    kernel.LocalFree.argtypes = (ctypes.c_void_p,)
-    advapi.OpenProcessToken.argtypes = (
-        wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE),
-    )
-    advapi.GetTokenInformation.argtypes = (
-        wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
-        ctypes.POINTER(wintypes.DWORD),
-    )
-    advapi.ConvertSidToStringSidW.argtypes = (
-        ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
-    )
-    advapi.GetNamedSecurityInfoW.argtypes = (
-        wintypes.LPWSTR, ctypes.c_int, wintypes.DWORD,
-        ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_void_p),
-    )
-    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
-    advapi.GetAce.argtypes = (
-        ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(ctypes.c_void_p),
-    )
-
-    def sid_text(sid):
-        text = ctypes.c_void_p()
-        if not advapi.ConvertSidToStringSidW(sid, ctypes.byref(text)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            return ctypes.wstring_at(text)
-        finally:
-            kernel.LocalFree(text)
-
-    token = wintypes.HANDLE()
-    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)):
-        raise ctypes.WinError(ctypes.get_last_error())
-    try:
-        size = wintypes.DWORD()
-        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(size))
-        if not size.value:
-            raise ctypes.WinError(ctypes.get_last_error())
-        data = ctypes.create_string_buffer(size.value)
-        if not advapi.GetTokenInformation(token, 1, data, size, ctypes.byref(size)):
-            raise ctypes.WinError(ctypes.get_last_error())
-        user = sid_text(ctypes.cast(data, ctypes.POINTER(ctypes.c_void_p))[0])
-    finally:
-        kernel.CloseHandle(token)
-    owner, acl, descriptor = (ctypes.c_void_p() for _ in range(3))
-    error = advapi.GetNamedSecurityInfoW(
-        str(path), 1, 5, ctypes.byref(owner), None, ctypes.byref(acl), None,
-        ctypes.byref(descriptor),
-    )
-    if error:
-        raise ctypes.WinError(error)
-    try:
-        if not owner.value or sid_text(owner) != user or not acl.value:
-            raise PlanError("client admission path is not private to its owner")
-        # OWNER RIGHTS is confined to the current user, whose ownership was checked above.
-        allowed = {user, "S-1-3-4", "S-1-5-18", "S-1-5-32-544"}
-        # ACL's fixed header stores AceCount after its four-byte prefix.
-        count = ctypes.c_ushort.from_address(acl.value + 4).value
-        for index in range(count):
-            ace = ctypes.c_void_p()
-            if not advapi.GetAce(acl, index, ctypes.byref(ace)):
-                raise ctypes.WinError(ctypes.get_last_error())
-            kind = ctypes.c_ubyte.from_address(ace.value).value
-            if kind == 1:
-                continue
-            if kind != 0 or sid_text(ace.value + 8) not in allowed:
-                raise PlanError("client admission root has an unsupported or shared access grant")
-    finally:
-        kernel.LocalFree(descriptor)
 
 
 @contextmanager

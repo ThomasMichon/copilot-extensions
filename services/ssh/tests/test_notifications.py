@@ -4,7 +4,9 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from single_instance_lease import AlreadyRunningError, SingleInstance
 
+from agent_ssh_service import hosting
 from agent_ssh_service.gateway import SSHService
 from agent_ssh_service.store import DirectoryStore
 from agent_ssh_service.config import SSHServiceError
@@ -234,9 +236,19 @@ async def test_cancelled_handler_settles_its_disk_worker_before_returning(config
         handler.cancel()
         await asyncio.sleep(0.02)
         assert not handler.done() and not finished.is_set()
+        handler.cancel()
+        closing = asyncio.create_task(service.close())
+        await asyncio.sleep(0.02)
+        closing.cancel()
+        await asyncio.sleep(0.02)
+        closing.cancel()
+        await asyncio.sleep(0.02)
+        assert not handler.done() and not closing.done() and not finished.is_set()
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await handler
+        with pytest.raises(asyncio.CancelledError):
+            await closing
         assert finished.is_set()
         assert service.store.snapshot()["directory"]["revision"] == 1
     finally:
@@ -254,3 +266,67 @@ async def test_foreign_data_directory_is_not_adopted_before_credentials_or_lease
         await run(config)
     assert foreign.read_text("utf-8") == "preserve"
     assert not (Path(root) / "directory.sqlite3").exists()
+
+
+@pytest.mark.parametrize("operation", ["enrollment", "reconciliation"])
+async def test_repeated_host_and_handler_cancellation_retains_actual_writer_lease(
+    config, monkeypatch, operation,
+):
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+    selected = request("principal-worker-a", "POST", "/enroll", canonical(enrollment()))
+    enroll = DirectoryStore.enroll
+
+    def blocked():
+        started.set()
+        try:
+            assert release.wait(10)
+        finally:
+            finished.set()
+
+    def blocked_enrollment(store, *args, **kwargs):
+        blocked()
+        return enroll(store, *args, **kwargs)
+
+    class Connector:
+        def __init__(self, *, handler, **_):
+            self.binding = handler
+
+        async def run(self, stop):
+            service = self.binding.handle.__self__
+            if operation == "reconciliation":
+                service.reconcile_relay = blocked
+            pending = asyncio.create_task(self.binding.handle(selected))
+            try:
+                await stop.wait()
+            finally:
+                selected.lifetime.close()
+                pending.cancel()
+                await asyncio.sleep(0)
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    monkeypatch.setattr(hosting, "ServiceConnector", Connector)
+    monkeypatch.setattr(hosting, "load_service_credentials",
+                        lambda **_: SimpleNamespace(access_token=None, proof_key=None))
+    if operation == "enrollment":
+        monkeypatch.setattr(DirectoryStore, "enroll", blocked_enrollment)
+    owner = asyncio.create_task(run(config))
+    contender = SingleInstance(config.to_dict()["data_dir"], service="agent-ssh-service")
+    try:
+        assert await asyncio.to_thread(started.wait, 3)
+        owner.cancel()
+        await asyncio.sleep(0.02)
+        owner.cancel()
+        await asyncio.sleep(0.02)
+        assert not owner.done() and not finished.is_set()
+        with pytest.raises(AlreadyRunningError):
+            contender.acquire()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+        assert finished.is_set()
+        contender.acquire()
+    finally:
+        release.set()
+        await asyncio.gather(owner, return_exceptions=True)
+        contender.release()

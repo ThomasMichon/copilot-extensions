@@ -565,6 +565,11 @@ The fixture owns one finite temporary directory in that disposable account's
 actual home so production `StrictModes` remains enabled; it does not read or
 modify existing SSH configuration. Do not select
 `SSH_SERVICE_NATIVE_ACCEPTANCE=1` in a production account.
+The Linux job also runs both target-login native fixtures in that disposable
+account. Their finite home-directory fixtures require
+`AGENT_SSH_NATIVE_DISPOSABLE=1` and the plugin runner's explicit
+`--allow-host-state --allow-explicit-tiers`; default local runs skip them rather
+than writing to an ordinary account's home or relaxing `StrictModes`.
 The Windows lane remains control-plane-only and explicitly skips Linux-native
 cases. These tests do not qualify a built native container image, normal Fleet
 placement, provider/Vault admission or a preserving production migration.

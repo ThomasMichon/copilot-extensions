@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 
 from fleet_manager.credential_references import load_service_credentials
 from fleet_manager.gateway_service_connector import ServiceConnector
+from fleet_manager.private_state import private_directory, windows_private
 from single_instance_lease import SingleInstance
 
 from .config import ServiceConfig, absolute, check
-from .gateway import SSHService
+from .gateway import SSHService, _drain
 from .store import DirectoryStore
 
 
@@ -19,6 +21,25 @@ class UnsettledRelay(RuntimeError):
     def __init__(self, relay, lease):
         self.relay, self.lease = relay, lease
         super().__init__("native-relay-cleanup-unconfirmed")
+
+    async def settle(self) -> None:
+        from agent_procutil.native_child import NativeChildCleanupError
+
+        while True:
+            if self.relay.custody is not None:
+                try:
+                    self.relay.process.returncode = self.relay.custody.retire()
+                except NativeChildCleanupError:
+                    pass
+                else:
+                    self.lease.release()
+                    return
+            logging.getLogger(__name__).error(
+                "ssh-native-relay-cleanup-unconfirmed code=foreground-custody-retained")
+            try:
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                continue
 
 
 async def registered_lifetime(connector, relay, stop) -> None:
@@ -41,7 +62,7 @@ async def registered_lifetime(connector, relay, stop) -> None:
             finally:
                 readiness.cancel()
                 stopping.cancel()
-                await asyncio.gather(readiness, stopping, return_exceptions=True)
+                await _drain(readiness, stopping)
         tasks.append(asyncio.create_task(connector.run(stop)))
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
@@ -49,10 +70,12 @@ async def registered_lifetime(connector, relay, stop) -> None:
         check(stop.is_set(), "registered-ssh-lifetime-ended")
     finally:
         stop.set()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results, interrupted = await _drain(*tasks)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
+        if interrupted:
+            raise asyncio.CancelledError
 
 
 async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> None:
@@ -61,10 +84,14 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
         return
     selected = config.to_dict()
     root = absolute(selected["data_dir"])
-    root.mkdir(mode=0o700, exist_ok=True)
-    check(root.is_dir() and (os.name == "nt" or (
-        root.stat().st_uid == os.getuid() and root.stat().st_mode & 0o077 == 0
-    )), "service-data-directory-not-private")
+    private_directory(root)
+    if os.name == "nt":
+        for name in ("directory.sqlite3", "directory.sqlite3-journal",
+                     "directory.sqlite3-wal", "directory.sqlite3-shm", "agent-ssh-service.lock"):
+            path = absolute(str(root / name))
+            if path.exists():
+                check(path.is_file() and path.stat().st_nlink == 1, "invalid-directory-store")
+                windows_private(path)
     check((root / "directory.sqlite3").exists() or not any(root.iterdir()),
           "unowned-service-data-directory")
     credentials = load_service_credentials(
@@ -98,10 +125,16 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
         )
         await registered_lifetime(connector, relay, stop)
     finally:
+        result, interrupted = [], False
         if service is not None:
-            await service.close()
+            result, interrupted = await _drain(asyncio.create_task(service.close()))
         for selected_signal, handler in previous.items():
             signal.signal(selected_signal, handler)
         if relay is not None and relay.process is not None and relay.process.returncode is None:
             raise UnsettledRelay(relay, lease)
         lease.release()
+        for failure in result:
+            if isinstance(failure, BaseException):
+                raise failure
+        if interrupted:
+            raise asyncio.CancelledError

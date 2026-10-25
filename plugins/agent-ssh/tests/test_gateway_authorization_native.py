@@ -20,7 +20,8 @@ from test_gateway_authorization import arguments
 from test_gateway_provider import key
 
 
-def test_running_native_sshd_consumes_key_changes_and_denies_forwarding(tmp_path, capsys):
+def test_running_native_sshd_consumes_key_changes_and_denies_forwarding(native_target_root, capsys):
+    tmp_path = native_target_root
     sshd, keygen, ssh = (shutil.which(name) for name in ("sshd", "ssh-keygen", "ssh"))
     if not all((sshd, keygen, ssh)):
         pytest.skip("Native OpenSSH server, client and key generator are required")

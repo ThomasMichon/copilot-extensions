@@ -1,5 +1,5 @@
 {
-  "comment": "Add the Gateway-registered SSH enrollment/public-directory service, bounded connected-machine notifications and an optional owned forward-only native Linux relay with distinct generation-bound relay keys.",
+  "comment": "Add the Gateway-registered SSH enrollment/public-directory service, bounded connected-machine notifications and an optional owned forward-only native Linux relay with distinct generation-bound relay keys. Retain foreground writer/native custody through unconfirmed retirement and repeated cancellation; create and verify owner-private Windows state before credentials or persistence.",
   "changes": [
     {
       "plugin": "services/ssh",

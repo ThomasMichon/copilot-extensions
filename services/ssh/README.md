@@ -45,7 +45,11 @@ one on an existing enrollment needs a new generation. They are not added to the
 public target-login directory.
 
 The local data directory must be dedicated and owner-private. The foreground
-host holds the canonical single-instance lease before opening its SQLite
+host creates it atomically with a protected current-account ACL on Windows,
+and validates existing ownership, access grants and retained state before
+reading credentials or acquiring the writer lease. Shared state is refused,
+never silently adopted or repaired. The foreground host holds the canonical
+single-instance lease before opening its SQLite
 store. Configuration revision and per-target generation floors, exact service
 ownership, public bindings and original request/content correlations survive
 restart. Lower or equal-revision changed configuration refuses; removing a
@@ -112,6 +116,7 @@ TLS, JWT/DPoP verification, attachment, bounded requests and reconnect backoff.
 SIGINT/SIGTERM withdraw the channel and notification waits before releasing
 the local writer lease. Cancellation waits for each owned disk transaction to
 settle; it cannot release the writer while an orphaned worker still commits.
+Repeated cancellation also waits for those transactions and channel cleanup.
 Do not run two hosts against one retained volume.
 
 This entry point is not a bespoke install/cutover command. Standalone lifecycle,
@@ -137,6 +142,9 @@ a foreign listener or an exited child never counts as readiness. Native failure
 withdraws the Gateway channel. Normal stop retires and confirms the complete
 owned child group before releasing the host's writer lease. Unconfirmed cleanup
 retains the original process and lease in an explicit error, not a success.
+The CLI stays in the foreground and retries retirement through that original
+kernel custody. SIGINT/SIGTERM or repeated task cancellation cannot release
+the writer early; the process reports failure only after cleanup settles.
 The outer lifecycle owner must also contain descendants on abrupt host death;
 for a container, that is the existing container process namespace/lifecycle.
 

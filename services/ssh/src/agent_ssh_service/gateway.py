@@ -16,6 +16,17 @@ from .config import SSHServiceError, check
 from .store import DirectoryStore
 
 
+async def _drain(*tasks):
+    """Settle owned work even if the caller is cancelled more than once."""
+    settlement = asyncio.gather(*tasks, return_exceptions=True)
+    interrupted = False
+    while True:
+        try:
+            return await asyncio.shield(settlement), interrupted
+        except asyncio.CancelledError:
+            interrupted = True
+
+
 class SSHService:
     def __init__(self, store: DirectoryStore, *,
                  reconcile_relay: Callable[[], None] | None = None):
@@ -24,20 +35,26 @@ class SSHService:
         self.changed = asyncio.Condition()
         self.waiters = 0
         self.closed = False
+        self.workers = set()
+        self.closing = None
         config = store.config.to_dict()
         self.binding = HandlerBinding(config["fleet"], config["gateway"], self.handle)
         self.owner = (config["fleet"], config["gateway"], config["slot"])
 
     async def _disk(self, operation, *args, **kwargs):
+        check(not self.closed, "service-draining")
         worker = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+        self.workers.add(worker)
         try:
             return await asyncio.shield(worker)
         except asyncio.CancelledError:
-            result = await asyncio.gather(worker, return_exceptions=True)
+            result, _ = await _drain(worker)
             if isinstance(result[0], Exception):
                 logging.getLogger(__name__).warning(
                     "ssh-directory-worker-withdrawn code=transaction-refused")
             raise
+        finally:
+            self.workers.discard(worker)
 
     def _checkpoint(self, request: ServiceRequest) -> None:
         request.lifetime.check()
@@ -118,5 +135,16 @@ class SSHService:
 
     async def close(self) -> None:
         self.closed = True
-        async with self.changed:
-            self.changed.notify_all()
+
+        async def settle():
+            async with self.changed:
+                self.changed.notify_all()
+            await _drain(*tuple(self.workers))
+
+        if self.closing is None:
+            self.closing = asyncio.create_task(settle())
+        result, interrupted = await _drain(self.closing)
+        if isinstance(result[0], BaseException):
+            raise result[0]
+        if interrupted:
+            raise asyncio.CancelledError
