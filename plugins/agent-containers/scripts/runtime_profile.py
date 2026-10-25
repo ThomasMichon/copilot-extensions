@@ -15,6 +15,7 @@ import sys
 import tempfile
 import uuid
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 
 _runtime_spec = importlib.util.spec_from_file_location(
@@ -37,6 +38,7 @@ _source_spec.loader.exec_module(source)
 
 PROFILE_SCHEMA = "copilot-extensions.agent-containers.runtime-profile"
 PROFILE_FILE = "runtime-profile.json"
+EXECUTION_SCHEMA = "copilot-extensions.agent-containers.provider-execution"
 PROFILES = ("base", "provider-exec")
 LIBRARIES = (
     "agent-procutil",
@@ -83,6 +85,82 @@ def _write_json(path: Path, value: dict) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _execution_contract() -> dict:
+    return {"schema": EXECUTION_SCHEMA, "version": 1, "retainedCreation": False}
+
+
+def _validate_execution_contract(value: object) -> bool:
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema", "version", "retainedCreation"}
+        or value["schema"] != EXECUTION_SCHEMA
+        or type(value["version"]) is not int
+        or value["version"] != 1
+        or type(value["retainedCreation"]) is not bool
+    ):
+        raise RuntimeError("Invalid Containers provider execution declaration")
+    return value["retainedCreation"]
+
+
+@dataclass(frozen=True)
+class ExecutionSelection:
+    """Read-only slot identity, not admission, retention or native custody."""
+
+    python: Path
+    runtime_version: str
+    payload_hash: str
+    profile: str
+    contract_version: int
+    retained_creation: bool
+
+
+def select_execution(root: Path) -> ExecutionSelection:
+    """Read the declaration of the canonical selected slot without provisioning.
+
+    Keep this result with its exact interpreter; invoking a mutable payload shim
+    later does not execute this selection. Callers still need the canonical
+    retention owner and final provider/native admission before any launch.
+    """
+    root = Path(os.path.abspath(root.expanduser()))
+    python = runtime.resolve_python(root)
+    if python is None:
+        raise RuntimeError("No completed Containers execution runtime is selected")
+    slot = python.parent.parent
+    if slot.parent != root / "versions" or slot.name.casefold() == runtime.DEV_VERSION:
+        raise RuntimeError("Containers execution declaration requires an immutable slot")
+    admission = runtime.check_admission(root, slot.name, payload_hash=None)
+    if admission not in (runtime.ADMIT_REUSE, runtime.ADMIT_CONTENT_CONFLICT):
+        raise RuntimeError(f"Selected Containers execution runtime is not complete: {admission}")
+    value = _read_json(slot / PROFILE_FILE)
+    required = {"packageVersion", "profile", "payloadHash", "executionContract"}
+    if "executionContract" not in value:
+        raise RuntimeError("Selected Containers runtime has no provider execution declaration")
+    if (
+        not required.issubset(value)
+        or set(value) - required - {"runtimeSource"}
+        or not isinstance(value["packageVersion"], str)
+        or not value["packageVersion"]
+        or value["profile"] not in PROFILES
+        or not isinstance(value["payloadHash"], str)
+        or re.fullmatch(r"[0-9a-f]{64}", value["payloadHash"]) is None
+    ):
+        raise RuntimeError("Invalid selected Containers slot profile")
+    version = value["packageVersion"]
+    profile_version = f"{version}{'.' if '+' in version else '+'}{value['profile']}"
+    if source.package_version(slot.name) != profile_version:
+        raise RuntimeError("Selected Containers slot identity conflicts with its profile")
+    retained = _validate_execution_contract(value["executionContract"])
+    admission = runtime.check_admission(
+        root, slot.name, payload_hash=value["payloadHash"],
+    )
+    if admission != runtime.ADMIT_REUSE:
+        raise RuntimeError(f"Selected Containers execution runtime is not reusable: {admission}")
+    return ExecutionSelection(
+        python=python, runtime_version=slot.name, payload_hash=value["payloadHash"],
+        profile=value["profile"], contract_version=1, retained_creation=retained,
+    )
 
 
 def selected_profile(root: Path, requested: str | None = None) -> str:
@@ -281,7 +359,13 @@ def provision(
             venv_python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             reused = admission == runtime.ADMIT_REUSE
             if reused:
-                if _read_json(slot / PROFILE_FILE) != expected:
+                recorded = _read_json(slot / PROFILE_FILE)
+                if "executionContract" in recorded:
+                    declaration = recorded.pop("executionContract")
+                    _validate_execution_contract(declaration)
+                    if declaration != _execution_contract():
+                        raise RuntimeError("Completed Containers slot has a conflicting declaration")
+                if recorded != expected:
                     raise RuntimeError("Completed Containers slot has a conflicting profile")
             elif admission == runtime.ADMIT_CONSTRUCT:
                 completed = False
@@ -329,7 +413,10 @@ def provision(
                     _check_source(payload, version, identity)
                     if _fingerprint(payload, libraries) != fingerprint:
                         raise RuntimeError("Containers source changed during runtime construction")
-                    _write_json(slot / PROFILE_FILE, expected)
+                    _write_json(
+                        slot / PROFILE_FILE,
+                        {**expected, "executionContract": _execution_contract()},
+                    )
                     runtime.mark_complete(root, runtime_version, payload_hash=fingerprint)
                     completed = True
                 finally:
