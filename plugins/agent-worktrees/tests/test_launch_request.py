@@ -57,7 +57,8 @@ def admission_config(tmp_path, monkeypatch):
             }},
         }), encoding="utf-8")
     return request.cfg.Config(
-        srcroot=str(tmp_path), machine="test", platform="windows", repo_name="demo-repo",
+        srcroot=str(tmp_path), machine="test", configured_machine="test",
+        platform="windows", repo_name="demo-repo",
         repos={"demo-repo": request.cfg.RepoConfig(
             anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"), default_branch="dev",
         )},

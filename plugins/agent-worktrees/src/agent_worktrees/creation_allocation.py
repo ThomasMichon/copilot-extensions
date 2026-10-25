@@ -124,17 +124,22 @@ class AdmittedAllocation:
             machine_identity=identity,
         )
 
-    def require_current(self, config: cfg.Config) -> None:
-        """Revalidate namespace and owner without choosing another representation."""
+    def require_namespace(self, config: cfg.Config) -> None:
+        """Validate the receiving namespace, not execution-owner authority."""
         self.from_fields(self.to_fields())
-        execution_spaces.require_current_execution_space(config)
         if (
             self.project != config.repo_name
             or _canonical_path(self.anchor) != _canonical_path(config.default_repo.anchor)
             or _canonical_path(self.worktree_root) != _canonical_path(config.default_repo.worktree_root)
             or self.platform != cfg.detect_platform()
-            or self.platform != config.platform
         ):
+            raise ValueError("Stored New allocation conflicts with the current project/platform namespace")
+
+    def require_current(self, config: cfg.Config) -> None:
+        """Revalidate namespace and owner without choosing another representation."""
+        execution_spaces.require_current_execution_space(config)
+        self.require_namespace(config)
+        if self.platform != config.platform:
             raise ValueError("Stored New allocation conflicts with the current project/platform namespace")
         if self.machine_identity is not None:
             if new_machine_identity(config, "tuple-v1") != self.machine_identity:

@@ -155,6 +155,18 @@ receipt, separate from the generated worktree name. Replaying the same request
 recovers that receipt's original allocation. Short-allocation receipts must
 agree with their recorded worktree ID, timestamp and suffix; inconsistent
 receipts are refused without rewriting the worktree record or staged prompt.
+Completed receipts with a complete allocation also prove the original record,
+creation nonce, owner/pair evidence, checkout and receiving project namespace
+before applying naming compatibility. New admissions retain the observed
+execution origin, so a later optional machine-map customization does not
+invalidate an otherwise identical completed replay. Older receipts are not
+backfilled: an original OS-derived identity can be independently reconstructed,
+but an unprovable former custom owner still requires ordinary ownership checks.
+The same-request replay and status read preserve the original record and seed;
+they do not grant mutation or seed-replacement authority. Fresh/unstarted
+allocations, first completion, Resume and actual seed writes keep their ordinary
+execution-authority checks. Consumed or superseded intent cannot be restored by
+replaying its admission.
 Existing worktrees and historical
 UUID-suffixed admissions retain their exact names, including during creation
 repair and paired-knowledge recovery.

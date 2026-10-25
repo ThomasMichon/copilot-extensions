@@ -99,8 +99,10 @@ new completed receipts, checks the actual receiving namespace and unchanged
 record/nonce/relationships, and returns the original allocation after optional
 customization. Older receipts remain unchanged; raw OS-derived owners can be
 reconstructed, while an unproven former custom owner still refuses rather than
-allocating a replacement. Complete launch admission and creation-tail repair
-remain open, as do the rest of the source and installed validation gates below.
+allocating a replacement. This sub-slice merged in #8852 after current-head
+approval and required CI, including unchanged legacy platform-override replay.
+Complete launch admission and creation-tail repair remain open, as do the rest
+of the source and installed validation gates below.
 
 ## Validation Plan
 
