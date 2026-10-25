@@ -236,6 +236,12 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   documents now remain empty mappings for selected/supplier anchor resolution,
   while missing machine files still preserve supplier fallback. The expanded
   Windows and frozen-source POSIX packets both pass 223 cases.
+- A second review exposed unsplit legacy multi-profile alias reselection and
+  agent/X11 forwarding inherited from SSH configuration. Such ambiguous entries
+  now refuse before connection rather than selecting a default profile; SSH
+  explicitly disables agent and X11 forwarding as well as port forwards.
+  Non-default alias refusal and transport-argument regressions bring both
+  passing Windows and frozen-source POSIX packets to 225 cases.
 - This slice closes neither whole-attempt terminal outcomes nor remote private
   detail, containing release, authorized rollout, original New/cold Resume
   conversation/acceptance proof or cleanup. Both parent efforts remain Active.
