@@ -1024,11 +1024,14 @@ def _run_production_picker(project: str, *, initial_decision=None) -> int:
             if not decision.get("is_local", True) and opts.get("ahp"):
                 print("error: AHP is supported only for same-machine launches.")
                 return 1
+            if opts.get("bare_resume"):
+                print("error: Bare resume is retired from Manager; use Resume in Actions.")
+                return 1
             machine, environment = _remote_machine_env(decision)
             return _run_launch(picker_app.LaunchRequest(
                 project=str(decision.get("project") or project or ""),
                 worktree_id=str(worktree_id),
-                mode="bare-resume" if opts.get("bare_resume") else "resume",
+                mode="resume",
                 title=str(decision.get("title") or "") or None,
                 no_mux=bool(opts.get("no_mux")),
                 ahp=bool(opts.get("ahp")),
@@ -1234,6 +1237,10 @@ def _execute_launch(req) -> int:
 
     attempt_id = getattr(req, "attempt_id", None)
 
+    if getattr(req, "mode", "resume") == "bare-resume":
+        print("error: Bare resume is retired from Manager; use Resume in Actions.")
+        return launch_observations.refuse(attempt_id)
+
     use_ahp = bool(getattr(req, "ahp", False))
     script = (
         _relocated_launch_script()
@@ -1287,7 +1294,7 @@ def _execute_launch(req) -> int:
         if getattr(req, "machine", None):
             print("error: AHP is supported only for same-machine launches")
             return launch_observations.refuse(attempt_id)
-        if req.mode in {"base", "bare-resume"}:
+        if req.mode == "base":
             print("error: AHP requires an agent-worktrees-managed worktree")
             return launch_observations.refuse(attempt_id)
         launch_observations.observe(attempt_id, "launch-requested")
@@ -1530,7 +1537,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         same, against deterministic mock data (no live")
         print("                         engine/session state required); real Picker,")
         print("                         real project identity, faked worktree/pivot data")
-        print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
+        print("                         (in the Picker: l launch/resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
         print("  mux-daemon <run|ensure|register|remove|show|status|recovery-evidence>  (managed mux)")
         print()

@@ -73,7 +73,6 @@ from .inbox import Inbox
 from .engine_live_screens import MsgViewScreen, ProgressScreen, SessionsViewScreen
 from .engine_loading import PendingBindingScreen, PickerScreenLoadingMixin
 from .engine_maintenance_actions import PickerScreenMaintenanceActionsMixin
-from .engine_prompt_dialog import PromptDlgScreen
 from .engine_model import PickerScreenModelMixin
 from .engine_pivot_actions import PickerScreenPivotActionsMixin
 from .engine_pivots import PickerScreenPivotsMixin
@@ -138,7 +137,6 @@ __all__ = [
     "PivotFormScreen",
     "ProfConfirmScreen",
     "ProgressScreen",
-    "PromptDlgScreen",
     "QuitConfirmScreen",
     "ResetConfirmScreen",
     "ScopeDlgScreen",
@@ -580,7 +578,10 @@ class PickerApp(App):
     PickerScreen > OptionList#nf-body-data:focus {
         background-tint: $surface 0%;
     }
-    PickerScreen > OptionList#nf-body-data > .option-list--option-highlighted,
+    PickerScreen > OptionList#nf-body-data:blur
+        > .option-list--option-highlighted {
+        background: $surface; color: $foreground; text-style: none;
+    }
     PickerScreen > OptionList#nf-body-data:focus
         > .option-list--option-highlighted {
         background: #ffaf00; color: black; text-style: bold;

@@ -255,6 +255,11 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     from . import remote_dispatch
     from .client_authority import client_authority
 
+    if getattr(args, "limit_per_category", False) and (
+        not getattr(args, "board", False) or getattr(args, "category", None) != "all"
+    ):
+        print("agent-dispatch: --limit-per-category requires --board --category all", file=sys.stderr)
+        return 2
     if client_authority(args) == "legacy" and remote_dispatch.is_peer_machine(args.machine):
         return _core()._browse_peer(args, "inbox")
     machine = args.machine
@@ -283,8 +288,12 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
             "submitted,completed,abandoned,dead_letter"
         )
         with _core()._client(args) as c:
-            tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit,
-                           category=getattr(args, "category", None))
+            tasks_by_id = {}
+            for category in _board_cli.board_categories(args):
+                for task in c.list(repo=None, status=status, label=args.label, limit=args.limit,
+                                   category=category):
+                    tasks_by_id[task["id"]] = task
+            tasks = list(tasks_by_id.values())
             def _relay_fetch_many(
                 refs: list[tuple[str, str]]
             ) -> dict[tuple[str, str], dict | None]:

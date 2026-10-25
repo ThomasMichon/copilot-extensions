@@ -14,10 +14,73 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Win32 consoleless-parent control")
+def test_policy_reads_do_not_show_windows_from_consoleless_parent(tmp_path):
+    import mux_windows_observer as observer
+
+    python = Path(getattr(sys, "_base_executable", sys.executable))
+    pythonw = python.with_name("pythonw.exe")
+    shell = shutil.which("pwsh")
+    if not pythonw.is_file() or not shell:
+        pytest.skip("native Python GUI interpreter and PowerShell required")
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "bin" / "launch-session.ps1").read_text(encoding="utf-8")
+    start = source.index("function Test-AutomaticMaintenance {")
+    function = source[start:source.index("\n}\n", start) + 3].replace(
+        "$PSScriptRoot", f"'{root / 'bin'}'",
+    )
+    home = tmp_path / "manager"
+    home.mkdir()
+    script = tmp_path / "policy.ps1"
+    script.write_text("\n".join([
+        "$ErrorActionPreference='Stop'",
+        f"$VenvPython='{python}'",
+        "function Write-SetupLog { param($Message, $Level) }",
+        function,
+        "if (-not (Test-AutomaticMaintenance)) { throw 'default policy refused' }",
+        f"[IO.File]::WriteAllText('{home / 'config.toml'}', '[maintenance]' + \"`nautomatic = false\")",
+        "Start-Sleep -Milliseconds 200",
+        "if (Test-AutomaticMaintenance) { throw 'disabled policy admitted' }",
+    ]), encoding="utf-8-sig")
+    result = tmp_path / "result"
+    parent = tmp_path / "parent.py"
+    parent.write_text(
+        "import subprocess\nfrom pathlib import Path\n"
+        f"code=subprocess.call({[shell, '-NoProfile', '-File', str(script)]!r}, "
+        "creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+        f"Path({str(result)!r}).write_text(str(code))\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ, WORKTREE_MANAGER_ROOT=str(home))
+    proc = subprocess.Popen(
+        [str(pythonw), str(parent)], env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    owned, visible, foreground = {proc.pid}, set(), set()
+    try:
+        deadline = time.monotonic() + 25
+        while proc.poll() is None and time.monotonic() < deadline:
+            owned.update(observer.descendants(proc.pid, observer.processes()))
+            windows, active = observer.windows()
+            visible.update(set(windows.values()) & owned)
+            if active in owned:
+                foreground.add(active)
+            time.sleep(.025)
+        assert proc.wait(timeout=2) == 0
+        assert result.read_text() == "0"
+        assert not visible and not foreground, (visible, foreground)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+
 @pytest.mark.parametrize("shell", ["pwsh", "powershell", "bash"])
 @pytest.mark.parametrize("mode", [
     "detach", "wait", "no-update", "no-reconcile", "failed", "worker-refused", "old-engine",
-    "no-project",
+    "no-project", "maintenance-off", "maintenance-invalid", "maintenance-unreadable",
 ])
 def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, shell, mode):
     if shell == "bash" and os.name != "posix":
@@ -51,9 +114,19 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
     stage.write_text(json.dumps(dict(stage_done=True, plugin_changed=True)))
     log = tmp_path / "setup.log"
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), PYTHONPATH=str(tmp_path))
+    policy_root = home / ".worktree-manager"
+    policy_root.mkdir()
+    env["WORKTREE_MANAGER_ROOT"] = str(policy_root)
+    blocked = mode.startswith("maintenance-")
+    if mode == "maintenance-off":
+        (policy_root / "config.toml").write_text("[maintenance]\nautomatic = false")
+    elif mode == "maintenance-invalid":
+        (policy_root / "config.toml").write_text("[maintenance]\nautomatic = 'false'")
+    elif mode == "maintenance-unreadable":
+        (policy_root / "config.toml").mkdir()
     env.pop("WORKTREE_NO_RECONCILE", None)
     env.pop("WORKTREE_BLOCKING_INSTALL", None)
-    if mode == "wait":
+    if mode == "wait" or blocked:
         env["WORKTREE_BLOCKING_INSTALL"] = "1"
     if mode == "no-reconcile":
         env["WORKTREE_NO_RECONCILE"] = "1"
@@ -63,7 +136,9 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
 
         def function(name):
             start = source.index(f"function {name} {{")
-            return source[start:source.index("\n}\n", start) + 3]
+            return source[start:source.index("\n}\n", start) + 3].replace(
+                "$PSScriptRoot", f"'{root / 'bin'}'"
+            )
 
         script = "\n".join([
             "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true",
@@ -76,8 +151,11 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
             f"$noUpdate=${'true' if mode == 'no-update' else 'false'}",
             *(function(name) for name in (
                 "Format-SetupLine", "Write-SetupLog", "Write-SetupStatus",
-                "Invoke-SetupCommand", "Invoke-UpdateApply",
+                "Test-AutomaticMaintenance", "Invoke-SetupCommand", "Invoke-UpdateApply",
+                "Start-UpdateStage",
             )),
+            "function Start-Job { throw 'policy admitted blocked background stage' }",
+            "Start-UpdateStage" if blocked else "",
             f"function Resolve-RuntimePython {{ '{python}' }}",
             "Invoke-UpdateApply -WithReconcile",
             "Invoke-UpdateApply -WithReconcile",
@@ -99,11 +177,15 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
         script = "\n".join([
             "set -euo pipefail",
             f"PYTHON={shlex.quote(python)}; LAUNCH_PROJECT={shlex.quote('' if mode == 'no-project' else 'fixture-project')}",
+            f"_MANAGER_POLICY_DIR={shlex.quote(str(root / 'bin'))}",
             f"_NO_UPDATE={'1' if mode == 'no-update' else '0'}; _UPDATE_APPLIED=''; _STAGE_PID=''",
             f"SETUP_LOG={shlex.quote(str(log))}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
             f"_LAUNCH_ADMITTED=1; _LAUNCH_POLICY_PATH={shlex.quote(str(tmp_path))}",
             f"admit_launch_target() {{ [[ \"$1\" == {shlex.quote(str(tmp_path))} ]]; }}",
-            functions, function("_run_launch_request"), function("invoke_update_apply"),
+            functions, function("automatic_maintenance_enabled"),
+            function("_run_launch_request"), function("invoke_update_apply"),
+            function("start_update_stage"),
+            "start_update_stage" if blocked else "",
             f"resolve_runtime_python() {{ printf '%s\\n' {shlex.quote(python)}; }}",
             "invoke_update_apply 1", "invoke_update_apply 1",
             f"printf 'handoff' > {shlex.quote(str(handoff))}",
@@ -120,8 +202,14 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
     assert result.stdout == "" and result.stderr == ""
     observed = [
         json.loads(line)[0 if mode == "no-project" else 2:]
-        for line in calls.read_text().splitlines()
+        for line in (calls.read_text().splitlines() if calls.exists() else [])
     ]
+    if blocked:
+        assert observed == []
+        report = log.read_text(encoding="utf-8-sig")
+        assert "Automatic maintenance not admitted" in report
+        assert ("disabled" if mode == "maintenance-off" else "blocked") in report
+        return
     if mode == "wait":
         assert observed[0] == ["launch-update", "bootstrap", "--defer-worktrees"]
         expected_stage = ["launch-update", "staged", "--status", str(stage)]
@@ -151,7 +239,9 @@ def test_native_launch_submits_fixed_phases_and_preserves_progress(tmp_path, she
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "bash"])
-def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monkeypatch, shell):
+@pytest.mark.parametrize("followup", ["coalesce", "other-project"])
+@pytest.mark.timeout(120)  # Three 20s handoffs, 20s cold-owner handshake, 30s drain.
+def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monkeypatch, shell, followup):
     if shell == "bash" and os.name != "posix":
         pytest.skip("POSIX native launcher")
     if shell == "pwsh" and (os.name != "nt" or not shutil.which(shell)):
@@ -209,6 +299,7 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
     env["PYTHONPATH"] = os.pathsep.join([
         str(tmp_path), str(worktrees_source), str(policy_source), os.environ.get("PYTHONPATH", ""),
     ])
+    env["WORKTREE_MANAGER_ROOT"] = str(home / ".worktree-manager")
     for name in (
         "WORKTREE_NO_UPDATE", "WORKTREE_NO_RECONCILE", "WORKTREE_BLOCKING_INSTALL",
         "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT",
@@ -222,7 +313,9 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
 
         def function(name):
             start = source.index(f"function {name} {{")
-            return source[start:source.index("\n}\n", start) + 3]
+            return source[start:source.index("\n}\n", start) + 3].replace(
+                "$PSScriptRoot", f"'{root / 'bin'}'"
+            )
 
         script = "\n".join([
             "$ErrorActionPreference='Stop'; $PSNativeCommandUseErrorActionPreference=$true",
@@ -234,7 +327,8 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
             "$script:LaunchProject='fixture'; $noUpdate=$false",
             *(function(name) for name in (
                 "Format-SetupLine", "Write-SetupLog", "Write-SetupStatus",
-                "Invoke-SetupCommand", "Invoke-UpdateApply", "Start-UpdateStage",
+                "Test-AutomaticMaintenance", "Invoke-SetupCommand",
+                "Invoke-UpdateApply", "Start-UpdateStage",
             )),
             "function Start-Job { throw 'healthy launch started shell-owned staging' }",
             "if($null -ne (Start-UpdateStage)){throw 'unexpected stage handle'}",
@@ -254,13 +348,15 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
         script = "\n".join([
             "set -euo pipefail",
             f"PYTHON={shlex.quote(python)}; LAUNCH_PROJECT=fixture",
+            f"_MANAGER_POLICY_DIR={shlex.quote(str(root / 'bin'))}",
             "_NO_UPDATE=''; _UPDATE_APPLIED=''; _STAGE_PID=''",
             f"SETUP_LOG={shlex.quote(str(log))}; _SETUP_LOG_DIR={shlex.quote(str(tmp_path))}",
             f"_LAUNCH_ADMITTED=1; _LAUNCH_POLICY_PATH={shlex.quote(str(tmp_path))}",
             f"admit_launch_target() {{ [[ \"$1\" == {shlex.quote(str(tmp_path))} ]]; }}",
             source[source.index("setup_log() {"):source.index("\n# Write header")],
             *(function(name) for name in (
-                "_run_launch_request", "invoke_update_apply", "start_update_stage",
+                "automatic_maintenance_enabled", "_run_launch_request",
+                "invoke_update_apply", "start_update_stage",
             )),
             "start_update_stage", "[[ -z \"$_STAGE_PID\" ]]",
             f"printf 'entered' > {shlex.quote(str(shell_entered))}",
@@ -272,10 +368,10 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
     queue_root = home / ".copilot-extensions" / "update-driver"
     requests = ()
     try:
-        for cycle in range(4):
+        for cycle in range(3 if followup == "coalesce" else 2):
             shell_entered.unlink(missing_ok=True)
             client_entered.unlink(missing_ok=True)
-            if cycle == 3:
+            if cycle == 1 and followup == "other-project":
                 source = fixture.read_text(encoding="utf-8-sig")
                 source = source.replace(
                     "$script:LaunchProject='fixture'", "$script:LaunchProject='other-project'",
@@ -299,14 +395,16 @@ def test_native_handoffs_precede_real_driver_installer_completion(tmp_path, monk
             assert "failed (exit" not in report, report
             assert not finished.exists(), "handoff joined the gated installer"
             if cycle == 0:
-                deadline = time.monotonic() + 8
+                deadline = time.monotonic() + 20
                 while not started.exists() and time.monotonic() < deadline:
                     time.sleep(.02)
                 assert started.exists(), report
             requests = driver.status(root=queue_root)
-        assert len(requests) == 3, "equivalent pending work coalesces without losing another project"
-        assert [request.state for request in requests] == ["running", "pending", "pending"]
-        assert [request.spec.project for request in requests] == ["fixture", "fixture", "other-project"]
+        assert len(requests) == 2, "equivalent pending work coalesces; another project stays distinct"
+        assert [request.state for request in requests] == ["running", "pending"]
+        assert [request.spec.project for request in requests] == [
+            "fixture", "fixture" if followup == "coalesce" else "other-project",
+        ]
         assert all(request.spec.backend == "engine-launch-update" for request in requests)
     finally:
         gate.write_text("continue")

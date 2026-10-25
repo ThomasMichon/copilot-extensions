@@ -69,10 +69,9 @@ def _registration_scope(args: argparse.Namespace) -> tuple[str | None, str]:
 
 
 def _supervisor_runtime_status_path(scope: str) -> Path:
-    from .config import run_dir
-    from .single_instance import lock_path_for
+    from .supervisor_status_io import runtime_status_path
 
-    return lock_path_for(run_dir(), scope).with_suffix(".status.json")
+    return runtime_status_path(scope)
 
 
 def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:

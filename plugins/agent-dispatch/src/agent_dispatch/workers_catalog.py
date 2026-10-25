@@ -73,9 +73,9 @@ def _template_defaults(fragment: dict) -> dict:
 def _observation() -> dict:
     from .remote_dispatch import local_machine
     from .supervisor_registration import supervisor_lease_scope
-    from .supervise_cli import _read_supervisor_runtime_status
+    from .supervisor_status_io import read_status, runtime_status_path
     scope = supervisor_lease_scope(local_machine(), os.environ.get("AGENT_DISPATCH_ENV", "default"))
-    payload, error = _read_supervisor_runtime_status(scope)
+    payload, error = read_status(runtime_status_path(scope))
     if error or not payload:
         return {"known": False, "reason": error or "no local supervisor receipt"}
     updated = payload.get("updated_at")
@@ -223,6 +223,34 @@ def _catalog_components(
             "kind": "unknown", "components": [], "components_basis": "unknown",
             "component_errors": [message],
         }
+
+
+def builtin_template_rows() -> list[dict]:
+    rows = []
+    for name, fragment in templates().items():
+        kind = fragment["kind"]
+        prerequisite = (
+            "Supply a unique instance name and complete JSON declaration. "
+            + ("Requires repository root, repo, source, task_label, cadence_seconds, forge "
+               "identity, reservation and any referenced evaluator/worker identity dependencies."
+               if kind == "repository-issue-loop" else
+               "Requires complete emitter discovery/evaluator policy and pool inputs."
+               if kind == "reviewer-loop" else
+               "Choose watched labels, placement/filter, capacity and worker body.")
+        )
+        rows.append(_cards({
+            "id": f"template:{name}", "title": name, "group": "Available templates",
+            "description": TEMPLATE_DESCRIPTIONS[name],
+            "provenance": "agent-dispatch built-in recipe",
+            "validity": "fragment" if name != "worker-pool" else "template",
+            "enabled": "not-instantiated", "activity": "not-applicable",
+            "editable": "false", "instantiable": "true", "prerequisites": prerequisite,
+            "dependency_status": "inputs-required", "dependency_errors": [],
+            "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
+            "kind": kind, "components": [], "components_basis": "template",
+        }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
+           "before saving or publishing. The template/source remains unchanged."))
+    return rows
 
 
 def catalog() -> dict:
@@ -390,29 +418,7 @@ def catalog() -> dict:
         if declaration.fleet.enabled:
             body += "\n\nFleet hosts are probed by FleetSpawner at dispatch time; readiness is unknown here."
         rows.append(_cards(row, body))
-    for name, fragment in templates().items():
-        kind = fragment["kind"]
-        prerequisite = (
-            "Supply a unique instance name and complete JSON declaration. "
-            + ("Requires repository root, repo, source, task_label, cadence_seconds, forge "
-               "identity, reservation and any referenced evaluator/worker identity dependencies."
-               if kind == "repository-issue-loop" else
-               "Requires complete emitter discovery/evaluator policy and pool inputs."
-               if kind == "reviewer-loop" else
-               "Choose watched labels, placement/filter, capacity and worker body.")
-        )
-        rows.append(_cards({
-            "id": f"template:{name}", "title": name, "group": "Available templates",
-            "description": TEMPLATE_DESCRIPTIONS[name],
-            "provenance": "agent-dispatch built-in recipe",
-            "validity": "fragment" if name != "worker-pool" else "template",
-            "enabled": "not-instantiated", "activity": "not-applicable",
-            "editable": "false", "instantiable": "true", "prerequisites": prerequisite,
-            "dependency_status": "inputs-required", "dependency_errors": [],
-            "revision": digest(fragment), "fields": _fields("", _template_defaults(fragment)),
-            "kind": kind, "components": [], "components_basis": "template",
-        }, f"Template: {name}\n\n{prerequisite}\n\nValidation refuses missing inputs/dependencies "
-           "before saving or publishing. The template/source remains unchanged."))
+    rows.extend(builtin_template_rows())
     if errors:
         for row in rows:
             if "pool_toggleable" in row:
@@ -453,6 +459,9 @@ def catalog() -> dict:
 def command(args: argparse.Namespace) -> int:
     try:
         if args.workers_command == "catalog":
+            if getattr(args, "stream", False):
+                from .workers_catalog_stream import stream_catalog
+                return stream_catalog()
             result = catalog()
         else:
             fields = {}
@@ -468,12 +477,15 @@ def command(args: argparse.Namespace) -> int:
         print(json.dumps(result, indent=2))
         return 1 if result.get("activation") == "failed" else 0
     except (RegistrarError, OSError, ValueError, KeyError, TypeError) as exc:
+        if getattr(args, "stream", False):
+            print(json.dumps({"type": "error", "message": f"Workers discovery failed: {exc}"}), flush=True)
         print(f"agent-dispatch workers: {exc}", file=sys.stderr)
         return 2
 
 
 def register_commands(sub) -> None:
     listing = sub.add_parser("catalog", help="read-only local worker instances, source declarations and templates")
+    listing.add_argument("--stream", action="store_true", help="stream known templates before source discovery")
     listing.set_defaults(func=command)
     save = sub.add_parser("save", help="save user-local configuration; activation requires explicit consent")
     save.add_argument("id")

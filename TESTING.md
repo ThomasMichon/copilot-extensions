@@ -575,6 +575,16 @@ cross-host writer fence or completed update/rollback lifecycle.
 
 ## Optional diagnostic telemetry
 
+Manager's `tests/test_launch_update_requests.py` native lane checks the user-local
+automatic-maintenance veto in both Windows shells and POSIX Bash, including
+malformed/unreadable policy and preserved launch continuation. Its real-driver
+control separates pending-request coalescing from a distinct project and keeps
+each native handoff's 20-second bound. The enclosing integration item has a
+120-second aggregate budget for up to three handoffs, a cold-owner handshake,
+and canonical drain; this is not a production timeout or required-unit CI
+expansion. Run it with `tools/run-plugin-tests.py worktree-manager --test-file
+tests/test_launch_update_requests.py`.
+
 Manager's source-native consumer lane is documented in
 [`worktree-manager/docs/source-observation.md`](worktree-manager/docs/source-observation.md).
 Select its `test_performance_observation.py`, `test_performance_native.py` and

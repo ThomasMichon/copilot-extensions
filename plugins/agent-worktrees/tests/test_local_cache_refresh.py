@@ -50,6 +50,10 @@ def _copy_workspace_seed(tmp_path_factory):
         if build:
             with _published_seed_environment(tmp_path_factory):
                 subprocess.run(["git", "init", "--quiet", str(root)], check=True, capture_output=True)
+                subprocess.run(
+                    ["git", "-C", str(root), "config", "core.autocrlf", "false"],
+                    check=True, capture_output=True,
+                )
         return root
 
 

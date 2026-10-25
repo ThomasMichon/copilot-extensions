@@ -99,8 +99,7 @@ class PickerScreenMaintenanceActionsMixin:
         a bare orphan the cwd-keyed lock-scan never registered (#662/#1416) still
         reaps, and a bound-but-unclassifiable-or-detached Copilot is no longer
         stranded. After it finishes the touched machines reload, so the row
-        re-renders without the stale bound process -- ready for a fresh Open /
-        Bare resume.
+        re-renders without the stale bound process -- ready for a fresh Open / Resume.
         """
         recs = [recs] if isinstance(recs, dict) else list(recs)
         live = [r for r in recs if type(self)._reclaimable(r)]
@@ -321,16 +320,12 @@ class PickerScreenMaintenanceActionsMixin:
         self.app.result = decision
         self.app.exit()
         return True
-    def _resume_decision(self, rec, no_mux=False, ahp=False, bare_resume=False,
+    def _resume_decision(self, rec, no_mux=False, ahp=False,
                           seed_prompt=""):
         """Build the resume decision for a worktree row/submenu selection.
 
         ``no_mux`` (the Open sub-menu toggle, #1343) launches directly without
-        the PSMux/TMux wrapper. ``bare_resume`` (two-step restore) creates the
-        worktree's mux but launches Copilot in HOME with no --resume, so a CLI
-        bug that fails to start in a repo/worktree cwd is dodged; the operator
-        finishes with a manual ``/resume <id>``. ``seed_prompt``
-        (resume-prompt-durable-seed-and-mux-fix Phase 2, "Resume prompt…")
+        the PSMux/TMux wrapper. ``seed_prompt``
         is an optional prompt queued as this resume's next interactive turn,
         forwarded end-to-end the same way "New worktree…"'s own seed is.
         """
@@ -351,8 +346,6 @@ class PickerScreenMaintenanceActionsMixin:
             opts["no_mux"] = True
         if ahp:
             opts["ahp"] = True
-        if bare_resume:
-            opts["bare_resume"] = True
         if seed_prompt:
             opts["seed_prompt"] = seed_prompt
         if opts:
@@ -426,6 +419,13 @@ class PickerScreenMaintenanceActionsMixin:
                               f"{n} bridge/system worktree(s)")
                 if self.sel not in self.stops():
                     self.sel = self.default_sel()
+            elif btn == "TM":
+                self.include_maintenance = not getattr(self, "include_maintenance", False)
+                self.top = self._data_top = 0
+                self.debug = (
+                    "Tasks: work + maintenance" if self.include_maintenance
+                    else "Tasks: work only (maintenance hidden)"
+                )
             elif btn == "K":
                 self._open_cleanup()
             elif btn == "SY":

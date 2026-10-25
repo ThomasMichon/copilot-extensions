@@ -28,7 +28,7 @@ SPEC = {
 
 def manifest():
     return {
-        "schema_version": 1, "label": "Examples", "list": ["provider", "list"],
+        "schema_version": 1, "label": "Examples", "list": ["provider", "list", "--machine", "{machine}"],
         "view_actions": [{
             "key": "recover", "label": "Retained responses", "kind": "internal", "verb": "recover-forms",
         }],
@@ -628,13 +628,13 @@ def test_recovered_submit_refreshes_original_scope_without_polling(
             picker = app.query_one(PickerScreen)
             await _wait_for_initial_setup(pilot, picker)
             runtime = picker._pivot_runtime(reg)
-            monkeypatch.setattr(runtime, "invalidate", lambda: invalidated.append(True))
+            monkeypatch.setattr(runtime, "invalidate", invalidated.append)
             monkeypatch.setattr(runtime, "ensure", lambda scope: refreshed.append(scope))
             monkeypatch.setattr(picker, "_pivot_scope_key", lambda: "unrelated-current-machine")
             picker._run_form_recovery(path, record, receipt=outcome == "receipt")
             await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
             mutated = outcome in ("success", "uncertain")
-            assert invalidated == ([True] if mutated else [])
+            assert invalidated == (["" if account_scoped else "host"] if mutated else [])
             assert refreshed == (["" if account_scoped else "host"] if mutated else [])
             assert path.exists() and str(path) in str(app.screen.query_one("#command-result", Static).content)
     asyncio.run(run())
@@ -649,7 +649,7 @@ def test_recovered_uncertain_submit_replaces_real_cached_rows_without_polling(tm
         sys.executable, "-c",
         "import json,sys;from pathlib import Path;"
         "print(json.dumps([dict(id='task-one',title='Answered' if Path(sys.argv[1]).exists() else 'Waiting')]))",
-        str(tmp_path / "accepted.json"),
+        str(tmp_path / "accepted.json"), "--machine", "{machine}",
     ))
     record = original(reg)
     path = retain_request(tmp_path / "drafts", record)

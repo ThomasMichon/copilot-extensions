@@ -278,11 +278,11 @@ class PickerScreenRuntimeMixin:
         if now - self._last_pivot_poll < poll_secs:
             return
         self._last_pivot_poll = now
-        scope = self._pivot_scope_key()
-        if scope is None:
-            return
         try:
-            self._pivot_runtime(reg).repoll(scope)
+            from .registered_scopes import request_scopes
+            runtime = self._pivot_runtime(reg)
+            for scope in request_scopes(self, reg):
+                runtime.repoll(scope)
         except Exception:
             pass
     def _maybe_refresh_worker_pivots(self):
@@ -307,7 +307,8 @@ class PickerScreenRuntimeMixin:
             if reg is None or getattr(reg, "worker", None) is None:
                 continue
             try:
-                scope = "" if reg.account_scoped else self._pivot_machine_id()
+                from .registered_scopes import read_scope
+                scope = read_scope(reg, self._pivot_machine_id())
                 if scope is None:
                     continue
                 rt = self._pivot_runtime(reg)
@@ -368,7 +369,10 @@ class PickerScreenRuntimeMixin:
             busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
-            self._apply_loader_records()
+            if self.list_view.query.strip():
+                self._wt_remap(self._apply_loader_records)
+            else:
+                self._apply_loader_records()
             self._settle_initial_local_after_refresh()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0

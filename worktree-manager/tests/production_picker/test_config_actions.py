@@ -273,11 +273,16 @@ def test_config_command_failure_is_visible_without_unconfirmed_mutation(
     asyncio.run(run())
 
 
-def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scenario", ["disable", "enable", "absent", "ambiguous"])
+def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch, scenario):
     """Opt in with a prepared dispatch interpreter; never touches host declarations."""
     dispatch_python = os.environ.get("WORKERS_CONFIG_TEST_PYTHON")
     if not dispatch_python:
         pytest.skip("set WORKERS_CONFIG_TEST_PYTHON for the cross-distribution acceptance lane")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     root = Path(__file__).resolve().parents[3]
     source = root / "plugins" / "agent-dispatch" / "src"
     assert source.is_dir() and Path(dispatch_python).is_file()
@@ -296,8 +301,16 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
         "name": "fixture", "kind": "dir", "location": str(declaration_dir), "owner": "repo:fixture",
     }]), encoding="utf-8")
     overrides = tmp_path / "overrides.json"
+    override_id = f"logical:repo:fixture:{pool_name}"
+    if scenario == "enable":
+        overrides.write_text(json.dumps({
+            override_id: {"disabled": True, "reason": "fixture setup"},
+        }), encoding="utf-8")
+    initial_override = overrides.read_bytes() if overrides.exists() else None
     monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(registrar))
     monkeypatch.setenv("AGENT_DISPATCH_OVERRIDES", str(overrides))
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "fixture-host")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "install"))
     prefix = [
         dispatch_python, "-c",
         f"import sys; sys.path.insert(0, {str(source)!r}); "
@@ -322,13 +335,14 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
             await _wait_for_initial_setup(pilot, scr)
             screen = await _open(scr, pilot)
             assert isinstance(screen, CreateActionScreen), scr.debug
-            assert not overrides.exists() and declaration.read_bytes() == original
+            assert (overrides.read_bytes() if overrides.exists() else None) == initial_override
+            assert declaration.read_bytes() == original
             await pilot.press("escape")
-            assert not overrides.exists()
-            for toggle in ("disable", "enable"):
-                screen = await _open(scr, pilot)
-                assert isinstance(screen, CreateActionScreen), scr.debug
-                await _fill_and_apply(screen, pilot, action=toggle, reason="acceptance proof")
+            assert (overrides.read_bytes() if overrides.exists() else None) == initial_override
+            screen = await _open(scr, pilot)
+            assert isinstance(screen, CreateActionScreen), scr.debug
+            if scenario in ("disable", "enable"):
+                await _fill_and_apply(screen, pilot, action=scenario, reason="acceptance proof")
                 before = overrides.read_bytes() if overrides.exists() else None
                 await pilot.press("enter")
                 await _wait(pilot, lambda: not screen._confirming)
@@ -350,35 +364,29 @@ def test_workers_picker_real_override_round_trip(tmp_path, monkeypatch):
                     env=tasks._child_process_env(), creationflags=no_window_flags(),
                 )
                 effective = json.loads(listed.stdout)["overridden_off"]
-                override_id = f"logical:repo:fixture:{pool_name}"
-                if toggle == "disable":
+                if scenario == "disable":
                     assert state[override_id]["disabled"] is True
                     assert effective == [override_id]
                 else:
                     assert override_id not in state
                     assert effective == []
                 assert declaration.read_bytes() == original
-            for stale in ("absent", "ambiguous"):
-                screen = await _open(scr, pilot)
-                assert isinstance(screen, CreateActionScreen), f"{stale}: {scr.debug}"
-                before = overrides.read_bytes()
-                if stale == "absent":
+            else:
+                before = overrides.read_bytes() if overrides.exists() else None
+                if scenario == "absent":
                     declaration.write_text(
                         json.dumps({"name": "replacement", "kind": "supervised-lane"}),
                         encoding="utf-8",
                     )
                 else:
                     (declaration_dir / "duplicate.json").write_bytes(original)
+                current_declaration = declaration.read_bytes()
                 await _fill_and_apply(screen, pilot)
                 await pilot.press("left", "enter")
                 await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
                             and not app.screen.pending)
                 assert "failed" in scr.debug
-                assert overrides.read_bytes() == before
-                await pilot.press("escape")
-                declaration.write_bytes(original)
-                if stale == "ambiguous":
-                    (declaration_dir / "duplicate.json").unlink()
-                assert declaration.read_bytes() == original
+                assert (overrides.read_bytes() if overrides.exists() else None) == before
+                assert declaration.read_bytes() == current_declaration
 
     asyncio.run(run())

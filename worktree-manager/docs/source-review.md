@@ -58,7 +58,10 @@ complete installed Dispatch runtime with coordinator autostart disabled, not
 its self-provisioning payload shim. Its command and state root come from the
 same selection and are bound in that call's environment, never by changing
 the parent process environment. The Worktrees command is retained with its
-owner root for the review session. Other contributed reads and streaming
+owner root for the review session. Workers uses the qualified cancellable
+one-shot JSON catalog even when its ordinary manifest enables streaming.
+The declaration does not admit `--stream`, `--subscribe` or arbitrary catalog
+options in this mode. Other contributed reads and streaming
 providers show an explicit unqualified/unavailable error rather than running
 arbitrary declared commands. Missing or outdated owners remain unavailable;
 the candidate does not repair them or fabricate a healthy empty result.

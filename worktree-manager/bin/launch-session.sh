@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+_MANAGER_POLICY_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || _MANAGER_POLICY_DIR=""
+
 # ---------------------------------------------------------------------------
 # Setup log — per-launch log file with PID disambiguation
 # ---------------------------------------------------------------------------
@@ -572,6 +574,19 @@ _UPDATE_APPLIED=""
 # applied via the installer but NOT re-exec'd mid-flight: a launcher change
 # takes effect on the NEXT launch (stage-next).
 
+automatic_maintenance_enabled() {
+    local diagnostic
+    if [[ -z "$_MANAGER_POLICY_DIR" ]]; then
+        setup_log WARN 'Automatic maintenance policy location unavailable'
+        return 1
+    fi
+    if diagnostic="$("$PYTHON" "$_MANAGER_POLICY_DIR/check-automatic-maintenance.py" 2>&1)"; then
+        return 0
+    fi
+    setup_log WARN "Automatic maintenance not admitted: $diagnostic"
+    return 1
+}
+
 start_update_stage() {
     # Spawn the background stage (marketplace download + fingerprint + plan).
     # Output is discarded so it never writes to the Picker's terminal.
@@ -579,6 +594,7 @@ start_update_stage() {
     [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]] && return 0
     [[ "$_LAUNCH_ADMITTED" == 1 ]] || return 3
     admit_launch_target "$_LAUNCH_POLICY_PATH" maintenance || return 3
+    automatic_maintenance_enabled || return 0
     setup_log INFO 'Starting background update stage (stage-update)'
     ( "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 ) &
     _STAGE_PID=$!
@@ -594,6 +610,7 @@ invoke_update_apply() {
     _SHOW_LAUNCH_STATUS="${2:-0}"
     [[ -n "$_UPDATE_APPLIED" ]] && return 0
     _UPDATE_APPLIED=1
+    automatic_maintenance_enabled || return 0
     local _SETUP_PROGRESS_DIR="" _SETUP_PROGRESS_PID="" _SETUP_PROGRESS_JOB="" _SETUP_PROGRESS_SEQUENCE=0 _SETUP_PROGRESS_FAILED=0
     if [[ -z "${WORKTREE_BLOCKING_INSTALL:-}" ]]; then
         local _automatic_args=(-m agent_worktrees)
@@ -660,6 +677,7 @@ for value in [
         # No usable staged result (stage failed, or a peer launch held the
         # lock): stage inline so the marketplace pull still happens.
         if [[ "$stage_done" != "True" || "$skipped" == "locked" ]]; then
+            automatic_maintenance_enabled || { _stop_setup_progress; return 0; }
             setup_status INFO 'Background download unavailable; downloading the plugin update now...'
             "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 || true
             _parse_stage_status
@@ -710,6 +728,7 @@ for value in [
 _run_launch_request() {
     local scope="$1" label="$2"
     shift 2
+    automatic_maintenance_enabled || return 0
     _setup_progress_begin "$scope"
     local result=()
     if "$@" 2>&1 | while IFS= read -r line || [[ -n "$line" ]]; do setup_log INFO "$line"; done; then

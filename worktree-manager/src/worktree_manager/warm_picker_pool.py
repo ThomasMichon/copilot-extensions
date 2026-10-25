@@ -114,6 +114,10 @@ class WarmPickerPool:
         self._slots.remove(slot)
 
     def _spawn(self) -> None:
+        from .manager_config import automatic_maintenance_enabled
+
+        if not automatic_maintenance_enabled():
+            return
         if self.owner_start is None or self.context is None:
             return
         identifier = secrets.token_hex(12)

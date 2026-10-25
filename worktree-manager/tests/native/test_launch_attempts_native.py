@@ -164,11 +164,11 @@ _UI_WRITER = """
 import asyncio, os, pathlib, sys
 from uuid import UUID
 from textual.app import App
+from types import SimpleNamespace
 from worktree_manager import launch_confirmation
 from worktree_manager.launch_attempts import LaunchAttempts
 from worktree_manager.production_picker import context
-from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
-from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
+from worktree_manager.production_picker.picker_tui.engine_dialogs import SubMenuScreen
 from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
 root, attempt_id, boundary = sys.argv[1:]
 os.environ["WORKTREE_MANAGER_ROOT"] = root
@@ -183,16 +183,22 @@ def interrupted(store, ident, **intent):
 LaunchAttempts.record_intent = interrupted
 async def run():
     app = App()
-    dialog = PromptDlgScreen("Resume", "Prompt", launch_decision={
-        "action": "resume", "is_local": True, "worktree_id": "native-worktree",
-        "options": {"no_mux": True},
-    })
+    engine = SimpleNamespace(
+        real_ops=True, src=SimpleNamespace(), _run_bg=lambda *a, **kw: None,
+        _resume_decision=lambda rec, **options: {
+            "action": "resume", "is_local": True, "worktree_id": "native-worktree",
+            "options": options,
+        },
+    )
+    dialog = SubMenuScreen(
+        {"is_local": True, "raw": {"id": "native-worktree"}}, ["Resume"], engine=engine,
+    )
+    dialog._no_mux = True
     async with app.run_test() as pilot:
         app.push_screen(dialog, lambda _: pathlib.Path(root, "effect").write_text("launched"))
         await pilot.pause()
         dialog.query_one(SeedPromptField).load_text("  native exact text\\nsecond line\\n")
-        dialog.on_focus_group_activated(
-            FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"))
+        dialog.on_option_list_option_selected(SimpleNamespace(option_index=0))
         await asyncio.sleep(15)
 asyncio.run(run())
 raise SystemExit("confirmation worker never reached the selected crash boundary")
@@ -204,9 +210,9 @@ from worktree_manager.launch_attempts import LaunchAttempts
 store = LaunchAttempts(pathlib.Path(sys.argv[1]))
 detail = store.detail(sys.argv[2], include_input=True)
 assert detail["action"] == "resume" and detail["worktree_id"] == "native-worktree"
-assert detail["surface"] == "resume-prompt"
+assert detail["surface"] == "worktree-actions"
 assert detail["input"]["prompt"] == "  native exact text\\nsecond line\\n"
-assert detail["input"]["options"] == {"no_mux": True, "title": None}
+assert detail["input"]["options"] == {"no_mux": True, "ahp": False, "title": None}
 assert [event["phase"] for event in detail["events"]] == ["confirmed"]
 assert not pathlib.Path(sys.argv[1], "effect").exists()
 print(json.dumps({"exact_input": True, "launch_effect": False}))
@@ -232,8 +238,8 @@ def test_native_confirmation_handler_acknowledges_before_slow_storage(
 ):
     from textual.app import App
     from worktree_manager.production_picker import context
-    from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
-    from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
+    from types import SimpleNamespace
+    from worktree_manager.production_picker.picker_tui.engine_dialogs import SubMenuScreen
 
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     context.set_project("example")
@@ -250,20 +256,27 @@ def test_native_confirmation_handler_acknowledges_before_slow_storage(
         app = App()
         async with app.run_test() as pilot:
             for _ in range(20):
-                dialog = PromptDlgScreen("Resume", "Prompt")
+                engine = SimpleNamespace(
+                    real_ops=True, src=SimpleNamespace(), _run_bg=lambda *a, **kw: None,
+                    _resume_decision=lambda rec, **options: {
+                        "action": "resume", "is_local": True, "worktree_id": "native-worktree",
+                        "options": options,
+                    },
+                )
+                dialog = SubMenuScreen(
+                    {"is_local": True, "raw": {"id": "native-worktree"}}, ["Resume"], engine=engine,
+                )
                 completed = []
                 app.push_screen(dialog, completed.append)
                 await pilot.pause()
                 start = time.perf_counter_ns()
-                dialog.on_focus_group_activated(
-                    FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"),
-                )
+                dialog.on_option_list_option_selected(SimpleNamespace(option_index=0))
                 samples.append((time.perf_counter_ns() - start) / 1_000_000)
                 assert completed == [] and dialog.is_mounted
                 async with asyncio.timeout(10):
                     while not completed:
                         await pilot.pause(0.01)
-                assert completed == [True]
+                assert completed == [("Resume", False, False, "")]
 
     try:
         asyncio.run(run())

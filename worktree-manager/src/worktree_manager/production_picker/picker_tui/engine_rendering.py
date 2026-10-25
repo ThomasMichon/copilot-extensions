@@ -76,13 +76,16 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
         except Exception:
             kind, nrows = None, -1
         wt = tuple(sorted(self.wt_sel.ids)) if hasattr(self, "wt_sel") else ()
+        from .source_read_notices import failed_worktree_reads
         return (W, H, self.sel, self.top, self._data_top, kind, self.htab,
                 self.machine_idx, self.btn_idx, getattr(self, "pcol", 0),
                 nrows, wt, getattr(self, "pulse", 0),
                 getattr(self, "update_state", None),
                 getattr(self, "manager_update_state", None),
+                getattr(self, "include_maintenance", False),
                 getattr(self, "debug", None),
-                self.cmd_mode, self.list_view.query, self.list_view.sort_index)
+                self.cmd_mode, self.list_view.query, self.list_view.sort_index,
+                tuple(failed_worktree_reads(self)) if kind == "worktrees" else ())
     def _build_body_split(self, width, sel=None):
         """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
         fixed machine-scope + button chrome vs the scrolling data -- by driving
@@ -316,7 +319,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             elif state == "loading":
                 marker, marker_style = self.spin(), C_LOAD
             elif state == "failed":
-                marker, marker_style = "✗", C_WARN
+                marker, marker_style = "WT✗", C_WARN
             else:
                 marker, marker_style = "✓", C_READY
             t.append(marker, style=self._hl(marker_style, sel, focused))
@@ -344,7 +347,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             elif state == "loading":
                 mk, mkb = self.spin(), C_LOAD
             elif state == "failed":
-                mk, mkb = "✗", C_WARN
+                mk, mkb = "WT✗", C_WARN
             else:
                 mk, mkb = "✓", C_READY
             t.append(mk, style=self._hl(mkb, sel, focused))
@@ -422,8 +425,8 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             # dropping either the scope or the 'o' key would read as a
             # possible fleet count, or make the modal undiscoverable.
             n = len(self._orphans)
-            t.append(f"  ⚠{n}(local,'o')" if compact
-                      else f"  ⚠ {n} orphaned (local, 'o')",
+            t.append(f"  ⚠{n} local obligation(s) · o" if compact
+                      else f"  ⚠ {n} local re-homed obligation(s) · o details",
                       style=C_WARN)
         return t
     def _top_pad(self, W, more_above, scrolled):
@@ -745,7 +748,8 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
                 left.append_text(mgr_seg)
             # Update indicator (#1430): spinner while the launcher stages the
             # marketplace update, ✓ when current, ↻ when an update is staged.
-            seg = self._update_seg(upd_focused)
+            seg = (None if getattr(self, "manager_update_state", "idle") == "available"
+                   else self._update_seg(upd_focused))
             if seg is not None:
                 left.append_text(seg)
                 if present["update_text"] and self.update_state in ("available", "paused"):
@@ -905,7 +909,15 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             # looks like it did nothing. The tick keeps this at ~10 fps.
             dbg = f"· {self.spin()} {self._busy_label}… "
         else:
-            dbg = f"· {self.debug} "
+            status = self.debug
+            if status == "loading" and self._kind() == "registered":
+                state, _rows, _error = self._task_state()
+                status = f"{self._reg_pivot().label}: " + {
+                    "loading": "reading declared scope(s)",
+                    "error": "read failed or incomplete; see source errors",
+                    "ready": "read settled",
+                }.get(state, state)
+            dbg = f"· {status} "
         f.append(dbg.rjust(max(1, W - f.cell_len)), style=C_DIM)
         if f.cell_len > W:
             f = Text(f.plain[:W])

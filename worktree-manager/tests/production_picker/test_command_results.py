@@ -211,7 +211,9 @@ def test_completed_text_action_invalidates_an_older_inflight_list(
     }
     if form:
         action.update(kind="form", fields_from="card.request_input")
-    reg = pivots.parse_manifest(_manifest(action), name="example", source_path="fixture.json")
+    manifest = _manifest(action)
+    manifest["list"] = ["provider", "--machine", "{machine}"]
+    reg = pivots.parse_manifest(manifest, name="example", source_path="fixture.json")
     runtime = tasks.RegisteredPivotRuntime(reg)
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
     calls = []
@@ -236,16 +238,20 @@ def test_completed_text_action_invalidates_an_older_inflight_list(
             monkeypatch.setattr(screen, "_pivot_scope_key", lambda: "original-scope")
             runtime.ensure("original-scope")
             await _wait(pilot, entered.is_set)
-            generation = runtime._gen
+            runtime._cache["original-scope"] = ("ready", [{"id": "sample-task"}], "")
+            generation = runtime._scope_generations.get("original-scope", 0)
             if form:
                 screen._run_pivot_form_submit(
-                    reg, reg.actions[0], {"task_id": "sample-task"}, "Sample", {},
+                    reg, reg.actions[0], {"task_id": "sample-task", "machine": "original-scope"}, "Sample", {},
                 )
             else:
-                screen._run_task_action(reg, reg.actions[0], {"id": "sample-task"})
+                screen._run_task_action(reg, reg.actions[0], {
+                    "id": "sample-task", "_manager_scope": "original-scope",
+                })
             monkeypatch.setattr(screen, "_pivot_scope_key", lambda: "other-scope")
             await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
-            assert runtime._gen > generation
+            assert runtime._scope_generations["original-scope"] > generation
+            assert runtime._gen == 0 and "other-scope" not in runtime._scope_generations
             release.set()
             await _wait(pilot, lambda: finished.is_set() and runtime.get("original-scope")[0] == "idle")
             runtime.ensure("original-scope")

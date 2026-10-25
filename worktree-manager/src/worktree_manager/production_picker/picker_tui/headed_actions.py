@@ -92,8 +92,7 @@ def open_worktree_cli_headed(screen, rec, *, no_mux: bool = False, ahp: bool = F
     AHP-required worktree reaches ``new_window``'s explicit rejection
     instead of silently ignoring the toggle -- just adding
     ``new_window=True`` and running it directly instead of exiting the
-    Picker through ``_decide``. (Composing with the separate "Bare resume"
-    menu entry is not supported; that remains its own top-level verb.) Runs
+    Picker through ``_decide``. Runs
     on a background thread (``screen._run_bg``) since opening the new window
     still shells out; reports success/failure through ``screen.debug``
     rather than raising through action dispatch.

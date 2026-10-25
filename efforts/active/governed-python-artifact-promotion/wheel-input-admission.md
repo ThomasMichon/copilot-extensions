@@ -129,6 +129,83 @@ supplied revocation and unchanged admitted reuse. A missing file can be a typed
 availability outcome. An untrusted source, malformed admission evidence or
 integrity failure cannot become that outcome.
 
+## Next transaction: authority-selected source fallback
+
+Deliver the explicit source fallback transaction, not another source-identity
+receipt presented as authentication. This continues the parent's existing
+source-build requirement and uses the same admission, inspection, construction
+and installed-health owners. Review this concrete continuation before code.
+
+1. **Enter through the actual installation authority.** Re-resolve its owner
+   and effective source policy, retain its permitted fallback trigger, and use
+   its existing independently selected source-acquisition/authentication path.
+   A `SourceIdentity`, prepared assembly hash or caller-provided matching JSON
+   proves consistency only. Bind the held source bytes back to the actual
+   selected repository/release and immutable commit/tree before executing
+   source code. Where the existing owner acquires merged Git source, retain
+   that owner's exact source selection and acquisition checks; where it
+   authenticates an installed release, retain that existing verification.
+   Do not introduce a second approver, a mandatory personal approval file,
+   a generic `approved=True` escape or a dependency on artifact publication.
+2. **Keep absence distinct from integrity failure.** The existing
+   `InstallationProfilePlan` supplies source mode and its actual trigger.
+   Missing discovery, absent compatible assets and a refused artifact closure
+   may request permitted source mode; supplied corrupt/foreign source or
+   artifact evidence remains fatal. Source mode must work with no artifact
+   index, bundle or manifest. Recheck the selected source against the retained
+   source/configuration inventory throughout the existing transaction.
+3. **Obtain exact files through the native resolver, not a new resolver.**
+   Extend the existing retained source compiler's result to carry the native
+   selected-wheel witness for its exact target, extras and governed settings.
+   Its current version/hash-set export alone does not select a filename.
+   Bind actual compatible filenames/hashes before acquisition; do not guess a
+   wheel name, let admission choose a substitute version, or reinterpret a
+   source lock as an approved artifact profile. Initially require third-party
+   wheels and explicitly refuse/defer a source-only third-party dependency
+   before executing its backend. Keep #6941's candidate-input work with its
+   existing author.
+4. **Reuse the existing acquisition boundary.** Compose the source plan with
+   the same actual installation/native-feed capture and bounded exact-file
+   worker used by #8820, without fabricating a release-profile selection or
+   another UV precedence reader. Preserve named credentials, OS/explicit-CA
+   trust, seasoning, yank/withdrawal and pre-request redirect checks.
+   Unsupported providers defer before requests rather than silently relaxing
+   policy. One declared deadline and finite count/byte/storage limits cover
+   resolution, acquisition, source preparation and assembly.
+5. **Build the trusted first-party source with admitted build inputs.**
+   Use the existing first-party build/retained-source machinery, not a new
+   installer or mutable shared environment. Lock and admit all build
+   dependencies before backend execution; disable further network, ambient
+   resolver/cache discovery and unlisted backend dependencies. Inspect the
+   resulting first-party wheel and every selected dependency, then pass the
+   complete exact set to the existing offline immutable constructor. Prove
+   the real installed closure and health; an argv plan or successful wheel
+   build alone is not completion. Publication/activation stays with the
+   existing installation owner after health succeeds; foreground payload
+   publication must not wait for this runtime transaction.
+6. **Persist the actual source-mode admission.** The existing installation
+   receipt binds the independently authenticated source identity/digest,
+   exact fallback lock/files, target/extras, policy, mode and trigger. It must
+   not claim to realize an unavailable artifact lock or require an artifact
+   manifest. Keep attempt counters outside stable identity. Matching retained
+   admission permits offline unchanged reuse; changed policy, source,
+   target, mode, lock or supplied revocation refuses reuse before activation.
+   An unadmitted cache entry cannot manufacture that proof.
+7. **Qualify the complete explicit transaction before enabling callers.**
+   On fresh Windows and available POSIX inputs, use a real controlled source
+   acquisition and governed TLS feed with absent/unavailable artifact paths.
+   Prove a distinct source lock can succeed when the artifact closure is
+   blocked, while blocked source/build inputs and integrity failures preserve
+   the healthy prior. Exercise actual backend isolation, independent venvs,
+   offline matching reuse and supplied invalidation without public-feed
+   escape. Record the actual source mode, trigger and installed health.
+   Broader provider/default enablement and rollout remain separate gates.
+
+This transaction must remain usable without a successfully built, signed or
+published artifact set. Existing publication and source/candidate owners retain
+their scopes; source fallback does not wait for their artifact availability
+proof or take over their open work.
+
 ## Validation and completion
 
 - [x] The bounded archive/file-inspection component and complete-profile byte
@@ -143,15 +220,15 @@ integrity failure cannot become that outcome.
 - [ ] Fresh and cached inputs follow the same validator. An unadmitted cache
   entry cannot manufacture approval; changed policy/revocation, target, mode,
   profile, source or artifact identity invalidates retained reuse.
-- [ ] A real isolated child assembles a tiny exact wheel closure with poisoned
+- [x] A real isolated child assembles a tiny exact wheel closure with poisoned
   ambient resolver/cache settings and unavailable network. Verify installed
   distributions and health, not merely the planned argv.
-- [ ] Failure/cancellation retains the healthy prior generation, settles owned
+- [x] Failure/cancellation retains the healthy prior generation, settles owned
   children and removes only invocation-owned partial inputs. No selector moves
   before the existing completion/activation boundary.
-- [ ] Native Windows and available POSIX/fresh-environment paths cover changed
+- [x] Native Windows and available POSIX/fresh-environment paths cover changed
   consumers; record unavailable lanes rather than crediting skips as passes.
-- [ ] Existing profile, source, dependency-policy, retained-construction and
+- [x] Existing profile, source, dependency-policy, retained-construction and
   vendoring guards pass with normal review/CI. Record concrete component
   delivery separately from authenticated consumer enabling and installed proof.
 
@@ -160,6 +237,23 @@ an explicit named receiving objective accepts a residual. The parent effort
 retains all acquisition, platform, fallback, retention and rollout obligations.
 
 ## Journal
+
+### Bounded acquisition merged; source and reuse authority remain open, 2026-10-24
+
+#8820 merged as `68223a35d34a77773d65a263e2bb8b140fe0c63b` after final-head
+required CI, all six selected Linux/Windows native jobs and a clean
+owner-authored Comment review with no retained findings. Controlled TLS and
+native owner/configuration capture now feed the existing complete-profile
+inspection and offline numbered constructor. Invalid-policy failures remain
+structured refusals; native IPv6 decisions agree. Real reacquisition after
+unrelated index growth preserves healthy generation reuse because attempt
+counters remain diagnostics, not stable identity.
+
+The checked integration items credit this explicit component with fresh
+fixtures, actual installed health and failure preservation, not production
+consumer enabling. Unadmitted-cache/source approval, supplied revocation,
+broader provider support, independent source fallback, measured defaults and
+real release/client/helper acceptance remain open under the parent effort.
 
 ### Component merged; authority/acquisition integration remains open, 2026-10-24
 

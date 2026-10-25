@@ -31,7 +31,7 @@ CARD = {"title": "A question", "body": "Read this", "status": "Waiting"}
 
 def manifest(spec=SPEC):
     return {
-        "schema_version": 1, "label": "Examples", "list": ["provider", "list"],
+        "schema_version": 1, "label": "Examples", "list": ["provider", "list", "--machine", "{machine}"],
         "actions": [{
             "key": "answer", "label": "Answer", "kind": "form", "fields_from": "card.fields",
             "run": ["provider", "answer", "{fields}"], "draft": deepcopy(spec),
@@ -307,8 +307,8 @@ def test_native_open_restores_shared_answer_and_reset_rebases_only_its_draft_rev
             if fails:
                 return False, "card or shared draft changed; refresh"
             return True, json.dumps({**rec, "revision": "absent", "draft": None})
-        def invalidate(self):
-            pass
+        def invalidate(self, scope):
+            assert scope == "host"
         def ensure(self, scope):
             assert scope == "host"
 
@@ -408,8 +408,8 @@ def test_verified_save_then_two_resets_and_restart_never_revive_cleared_answers(
             else:
                 owner.update(revision="absent", draft=None)
             return True, json.dumps(owner)
-        def invalidate(self):
-            pass
+        def invalidate(self, scope):
+            assert scope == "host"
         def ensure(self, scope):
             pass
 
@@ -431,9 +431,14 @@ def test_verified_save_then_two_resets_and_restart_never_revive_cleared_answers(
             empty_path = saved._draft_path()
             failed_path.append(empty_path)
             picker = app.query_one(PickerScreen)
-            await _wait(pilot, lambda: "save" in calls and (
-                picker.debug.startswith("Save") or picker.debug.startswith("Shared Save")
-            ))
+            try:
+                async with asyncio.timeout(5):
+                    await _wait(pilot, lambda: "save" in calls and (
+                        isinstance(app.screen, SubmitErrorScreen)
+                        if cleanup_fails else not empty_path.exists()
+                    ))
+            except TimeoutError:
+                pytest.fail(f"Save did not settle: calls={calls!r}, debug={picker.debug!r}")
             if cleanup_fails:
                 assert empty_path.exists() and isinstance(app.screen, SubmitErrorScreen)
                 app.screen.action_ack()

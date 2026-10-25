@@ -611,12 +611,46 @@ $script:StageJob = $null
 # itself is applied via the installer but NOT re-exec'd mid-flight: a launcher
 # change takes effect on the NEXT launch (stage-next).
 
+function Test-AutomaticMaintenance {
+    $process = $null
+    try {
+        $policy = Join-Path $PSScriptRoot 'check-automatic-maintenance.py'
+        $startInfo = [Diagnostics.ProcessStartInfo]::new()
+        $startInfo.FileName = $VenvPython
+        $startInfo.Arguments = '"' + $policy + '"'
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardInput = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $process = [Diagnostics.Process]::Start($startInfo)
+        $process.StandardInput.Close()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit(10000)) {
+            $process.Kill()
+            $process.WaitForExit()
+            throw 'Manager maintenance policy read timed out'
+        }
+        [Threading.Tasks.Task]::WaitAll($stdout, $stderr)
+        if ($process.ExitCode -eq 0) { return $true }
+        $diagnostic = $stdout.Result + $stderr.Result
+        Write-SetupLog "Automatic maintenance not admitted: $diagnostic" 'WARN'
+    } catch {
+        Write-SetupLog "Automatic maintenance policy unavailable: $_" 'WARN'
+    } finally {
+        if ($null -ne $process) { $process.Dispose() }
+    }
+    return $false
+}
+
 function Start-UpdateStage {
     # Spawn the background stage (marketplace download + fingerprint + plan).
     # Runs headless in a job so it never writes to the Picker's console.
     if ($noUpdate -or -not $env:WORKTREE_BLOCKING_INSTALL) { return $null }
     if (-not $script:LaunchAdmitted) { throw 'Launch maintenance requires target admission' }
     Assert-LaunchTarget -Path $script:LaunchPolicyPath -Operation maintenance
+    if (-not (Test-AutomaticMaintenance)) { return $null }
     try {
         Write-SetupLog 'Starting background update stage (stage-update)'
         return Start-Job -Name 'aw-stage-update' -ScriptBlock {
@@ -637,6 +671,7 @@ function Invoke-SetupCommand {
         [string[]]$CommandArgv,
         [string]$Scope, [string]$Label
     )
+    if (-not (Test-AutomaticMaintenance)) { return 0 }
     $exe = $CommandArgv[0]
     $rest = @($CommandArgv | Select-Object -Skip 1)
     $actionTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -689,6 +724,7 @@ function Invoke-UpdateApply {
     # Enable console status echo for interactive launches (the caller passes
     # -ShowStatus on the Picker exec / refresh paths, never on direct dispatch).
     $script:ShowLaunchStatus = [bool]$ShowStatus
+    if (-not (Test-AutomaticMaintenance)) { return }
 
     if (-not $env:WORKTREE_BLOCKING_INSTALL) {
         $includeReconcile = $WithReconcile -and $env:WORKTREE_NO_RECONCILE -ne '1'
@@ -722,6 +758,7 @@ function Invoke-UpdateApply {
         # No usable staged result (stage failed, or a peer launch held the
         # lock): run one inline so the marketplace pull still happens.
         if (-not $status -or -not $status.stage_done -or $status.skipped -eq 'locked') {
+            if (-not (Test-AutomaticMaintenance)) { return }
             Write-SetupStatus 'Background download unavailable; downloading the plugin update now...'
             & $VenvPython -m agent_worktrees stage-update *> $null
             if (Test-Path $statusFile) {

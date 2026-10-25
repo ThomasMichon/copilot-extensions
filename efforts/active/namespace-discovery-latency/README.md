@@ -252,6 +252,53 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-24 - Reject the first import experiment after real-command comparison
+
+- The bounded candidate deferred installation/session-registration imports and
+  retained complete ordinary metadata output, dispatch and legacy exports.
+  Its native packet passed 404 cases with four native POSIX FIFO cases skipped;
+  the complete effect-free packet passed 1694 cases with production-call
+  coverage and the unchanged 300-second budget.
+- Fresh normal baseline and candidate installations used the same materialized
+  source, differing only in the two composition-root inputs. Installed origins,
+  exact source hashes and complete bound state-root JSON were verified through
+  the normal global legacy command, not a direct-Python peer.
+- All three alternating fresh-process comparisons were slower for the candidate:
+  baseline/candidate seconds were 2.578/2.938, 2.296/2.735 and 2.204/2.281.
+  This fails the reviewed meaningful-benefit gate. The import implementation
+  and its experimental admission changes were withdrawn before publication;
+  the private evidence and source backup remain available.
+- The same packet exposed real fixture prerequisites: launch paths must exist
+  before repository admission, and byte-exact copy fixtures must not inherit
+  newline conversion. Retain those test-only corrections with the actual
+  repository-policy and Git-safety gates intact. After withdrawing the runtime
+  experiment, the two corrected fixture files passed 210 cases in 130.06
+  seconds, with the four native POSIX FIFO cases unavailable on Windows.
+- The eight-second complete-discovery gate remains open; the last whole
+  observation is still the retained 9.378-second failure. No unchanged whole
+  cohort, Bridge namespace read, installed update or held venue action followed
+  the rejected comparison. Trace the existing Docker preflight next and seek
+  separate review before implementing another mechanism.
+
+### 2026-10-24 - Existing CLI import-closure plan reviewed; implementation next
+
+- #8818 actually merged as `a1a15d4c9e7d934d02fac5818e3f194865f4cae6`.
+  Copilot approved exact head `1649857c8353bdb39743eb67b9a518c2d7878f85`
+  in review `5641153270`; complete inline/comment/thread reads found no
+  feedback. Required PR gate `40154084601`, source attribution and workflow
+  lockdown passed. Managed Maintainer completion was verified separately.
+- Re-read the parent and sub-plan after merge. The next action is tracing the
+  existing state-root/lazy-dispatch import closure before a minimal source
+  change, preserving its full behavior and concrete peer ownership.
+  No import optimization, new launcher or native-frontdoor change is implemented.
+- Retain the actual 9.378-second whole-command failure and the parent's native,
+  release/control and installed-consumption obligations. The effort stays
+  Active; source-component and plan merges do not close it.
+- Preserved the merged plan source on another backup and verified its actual
+  merge is in fetched Dev before advancing the clean worktree with no unmerged
+  commits to replay. No routine retry against the known deleted PR ref, stash,
+  hard reset, finalize or installed update was used.
+
 ### 2026-10-24 - Selector and two-adopter source slice merged; parent continues
 
 - #8789 actually merged as `6913ea9c57cb46d02646bd2bfb05869ad5ec44b8`.

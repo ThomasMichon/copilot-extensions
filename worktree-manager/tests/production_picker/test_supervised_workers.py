@@ -87,6 +87,7 @@ def _worker_pivot(name="agent-codespaces", account_scoped=True):
     return types.SimpleNamespace(
         name=name, worktree_field="worktree", group_field="group",
         account_scoped=account_scoped, worker=spec,
+        list_cmd=("fixture", "--machine", "{machine}") if not account_scoped else ("fixture",),
     )
 
 

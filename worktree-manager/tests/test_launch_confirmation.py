@@ -11,12 +11,11 @@ from textual.widgets import Static
 from worktree_manager import launch_confirmation as confirmation
 from worktree_manager.launch_attempts import LaunchAttemptError, LaunchAttempts
 from worktree_manager.production_picker import context
-from worktree_manager.production_picker.picker_tui.engine_dialogs import ScopeDlgScreen
+from worktree_manager.production_picker.picker_tui.engine_dialogs import ScopeDlgScreen, SubMenuScreen
 from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
 from worktree_manager.production_picker.picker_tui.engine_maintenance_actions import (
     PickerScreenMaintenanceActionsMixin,
 )
-from worktree_manager.production_picker.picker_tui.engine_prompt_dialog import PromptDlgScreen
 from worktree_manager.production_picker.picker_tui.seed_prompt_field import SeedPromptField
 
 
@@ -35,9 +34,38 @@ async def settled(pilot, predicate):
 
 
 def activate(dialog):
+    if isinstance(dialog, SubMenuScreen):
+        dialog.on_option_list_option_selected(SimpleNamespace(option_index=0))
+        return
     dialog.on_focus_group_activated(
         FocusGroup.Activated(dialog.query_one(FocusGroup), 0, "confirm"),
     )
+
+
+def resume_dialog(*, enabled=True):
+    def decision(_record, *, no_mux, ahp, seed_prompt):
+        return {
+            "action": "resume", "is_local": True, "worktree_id": "wt-original",
+            "machine": "target", "env": "Win",
+            "options": {"no_mux": no_mux, "ahp": ahp, "seed_prompt": seed_prompt},
+        }
+
+    engine = SimpleNamespace(
+        real_ops=enabled, src=SimpleNamespace(), _resume_decision=decision,
+        _run_bg=lambda *_args, **_kwargs: None,
+    )
+    dialog = SubMenuScreen(
+        {"is_local": True, "machine": "target", "env": "Win", "raw": {"id": "wt-original"}},
+        ["Resume"], engine=engine,
+    )
+    dialog._no_mux = True
+    return dialog
+
+
+def accepted(dialog):
+    return [True] if isinstance(dialog, ScopeDlgScreen) else [
+        ("Resume", True, False, dialog._prompt_rec["primary"].text.strip())
+    ]
 
 
 @pytest.mark.parametrize("scope", [False, True])
@@ -51,10 +79,7 @@ def test_composer_saves_exact_snapshot_before_dismissal_and_stays_responsive(
                 "target": ("target", "Win"), "section": 1,
                 "opts": [{"label": "No Mux", "on": True}],
             }, show_prompt=True, launch_local=True)
-            if scope else PromptDlgScreen("Resume", "Prompt", launch_decision={
-                "action": "resume", "is_local": True, "worktree_id": "wt-original",
-                "machine": "target", "env": "Win", "options": {"no_mux": True},
-            })
+            if scope else resume_dialog()
         )
         entered, release = threading.Event(), threading.Event()
         main_thread = threading.get_ident()
@@ -93,13 +118,15 @@ def test_composer_saves_exact_snapshot_before_dismissal_and_stays_responsive(
             finally:
                 release.set()
             await settled(pilot, lambda: bool(outcomes))
-            assert outcomes == [True]
-            entry = LaunchAttempts(private_root).detail(dialog.attempt_id, include_input=True)
-            assert entry["surface"] == ("new-dialog" if scope else "resume-prompt")
+            assert outcomes == accepted(dialog)
+            entry = LaunchAttempts(private_root).detail(
+                dialog.launch_decision["attempt_id"], include_input=True,
+            )
+            assert entry["surface"] == ("new-dialog" if scope else "worktree-actions")
             assert entry["input"]["prompt"] == raw
             assert entry["input"]["options"]["no_mux"] is True
             assert entry["machine"] == "target" and entry["environment"] == "Win"
-            assert dialog.seed_prompt == raw.strip()
+            assert dialog.launch_decision["options"]["seed_prompt"] == raw.strip()
             assert len(LaunchAttempts(private_root).entries()) == 1
     asyncio.run(run())
 
@@ -119,7 +146,7 @@ def test_error_after_commit_keeps_draft_and_reuses_identity_on_explicit_retry(
 
         monkeypatch.setattr(LaunchAttempts, "record_intent", ambiguous)
         app, outcomes, notices = App(), [], []
-        dialog = PromptDlgScreen("Resume", "Prompt")
+        dialog = resume_dialog()
         monkeypatch.setattr(dialog, "notify", lambda text, **_: notices.append(text))
         async with app.run_test() as pilot:
             app.push_screen(dialog, outcomes.append)
@@ -132,7 +159,7 @@ def test_error_after_commit_keeps_draft_and_reuses_identity_on_explicit_retry(
             assert "private draft" not in notices[0] and "private draft" not in caplog.text
             activate(dialog)
             await settled(pilot, lambda: bool(outcomes))
-            assert ids[0] == ids[1] and outcomes == [True]
+            assert ids[0] == ids[1] and outcomes == accepted(dialog)
             assert len(LaunchAttempts(private_root).entries()) == 1
     asyncio.run(run())
 
@@ -145,7 +172,7 @@ def test_storage_failure_never_dismisses_or_changes_draft(private_root, monkeypa
 
         monkeypatch.setattr(LaunchAttempts, "record_intent", fail)
         app, outcomes, notices = App(), [], []
-        dialog = PromptDlgScreen("Resume", "Prompt")
+        dialog = resume_dialog()
         monkeypatch.setattr(dialog, "notify", lambda text, **_: notices.append(text))
         async with app.run_test() as pilot:
             app.push_screen(dialog, outcomes.append)
@@ -246,7 +273,7 @@ def test_cancelled_draft_does_not_create_an_attempt(private_root, scope):
     async def run():
         dialog = (
             ScopeDlgScreen({"opts": []}, show_prompt=True)
-            if scope else PromptDlgScreen("Resume", "Prompt")
+            if scope else resume_dialog()
         )
         app, outcomes = App(), []
         async with app.run_test() as pilot:
@@ -255,7 +282,7 @@ def test_cancelled_draft_does_not_create_an_attempt(private_root, scope):
             dialog.query_one(SeedPromptField).load_text("unconfirmed")
             dialog.action_cancel()
             await settled(pilot, lambda: bool(outcomes))
-            assert outcomes == [False]
+            assert outcomes == [False if scope else None]
             assert LaunchAttempts(private_root).entries() == []
             assert not LaunchAttempts(private_root).path.exists()
     asyncio.run(run())
@@ -274,7 +301,7 @@ def test_mock_composer_confirmation_never_persists(private_root, monkeypatch, sc
     async def run():
         dialog = (
             ScopeDlgScreen({"opts": []}, show_prompt=True, journal_enabled=False)
-            if scope else PromptDlgScreen("Resume", "Prompt", journal_enabled=False)
+            if scope else resume_dialog(enabled=False)
         )
         app, outcomes = App(), []
         async with app.run_test() as pilot:
@@ -283,29 +310,44 @@ def test_mock_composer_confirmation_never_persists(private_root, monkeypatch, sc
             dialog.query_one(SeedPromptField).load_text("synthetic mock input")
             activate(dialog)
             await settled(pilot, lambda: bool(outcomes))
-            assert outcomes == [True]
-            assert dialog.seed_prompt == "synthetic mock input"
-            assert dialog.attempt_id is None
+            assert outcomes == accepted(dialog)
+            if scope:
+                assert dialog.seed_prompt == "synthetic mock input"
+                assert dialog.attempt_id is None
+            else:
+                assert dialog.launch_decision is None
             assert not LaunchAttempts(private_root).path.exists()
     asyncio.run(run())
 
 
 def test_mock_resume_entry_forwards_the_persistence_boundary(monkeypatch):
-    from types import SimpleNamespace
-    from worktree_manager.production_picker.picker_tui import resume_prompt_actions
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("Mock inline Resume attempted durable confirmation")
 
-    dialogs = []
-    row = {"raw": {"id": "mock-worktree"}, "is_local": True}
-    screen = SimpleNamespace(
-        real_ops=False, debug="",
-        _find_internal_worktree=lambda *_: (row, None),
-        _session_action_verbs=lambda _: ["Resume prompt\u2026"],
-        _resume_decision=lambda *_args, **_kw: {"action": "resume", "is_local": True},
-        app=SimpleNamespace(push_screen=lambda dialog, _callback: dialogs.append(dialog)),
-    )
-    resume_prompt_actions.open_resume_prompt(screen, row)
-    assert len(dialogs) == 1
-    assert dialogs[0]._journal_enabled is False
+    monkeypatch.setattr(confirmation, "confirm_before_effect", forbidden)
+    assert resume_dialog(enabled=False)._confirm_prompt_resume("mock input") is False
+
+
+def test_refused_inline_resume_is_durable_and_keeps_the_draft(private_root, monkeypatch):
+    async def run():
+        app, outcomes, notices = App(), [], []
+        dialog = resume_dialog()
+        monkeypatch.setattr(dialog, "notify", lambda text, **_: notices.append(text))
+        async with app.run_test() as pilot:
+            app.push_screen(dialog, outcomes.append)
+            await pilot.pause()
+            dialog._ahp = True
+            field = dialog.query_one(SeedPromptField)
+            field.load_text("retained private prompt")
+            activate(dialog)
+            await settled(pilot, lambda: bool(notices))
+            assert app.screen is dialog and outcomes == []
+            assert field.text == "retained private prompt"
+            entry = LaunchAttempts(private_root).entries()[0]
+            detail = LaunchAttempts(private_root).detail(entry["attempt_id"], include_input=True)
+            assert detail["input"]["prompt"] == field.text
+            assert [event["phase"] for event in detail["events"]] == ["confirmed", "refused"]
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("action,options,expected", [
@@ -411,7 +453,7 @@ def refusal_screen():
     return RefusalScreen()
 
 
-@pytest.mark.parametrize("entry", ["resume", "open", "bare", "new-window", "task-open"])
+@pytest.mark.parametrize("entry", ["resume", "open", "new-window", "task-open"])
 def test_unresolved_confirmed_action_retains_target_options_and_refusal(
     private_root, monkeypatch, entry,
 ):
@@ -437,7 +479,7 @@ def test_unresolved_confirmed_action_retains_target_options_and_refusal(
                 open_worktree_cli_headed(owner, row, no_mux=True, ahp=True)
             else:
                 assert owner._decide(owner._resume_decision(
-                    row, no_mux=True, ahp=True, bare_resume=entry == "bare",
+                    row, no_mux=True, ahp=True,
                 )) is False
             await settled(pilot, lambda: bool(notices))
             assert app.screen is owner and getattr(app, "result", None) is None
@@ -446,7 +488,7 @@ def test_unresolved_confirmed_action_retains_target_options_and_refusal(
             detail = LaunchAttempts(private_root).detail(entries[0]["attempt_id"], include_input=True)
             assert detail["machine"] == row["machine"] and detail["environment"] == row["env"]
             assert detail["action"] == {
-                "bare": "bare-resume", "new-window": "resume", "task-open": "open",
+                "new-window": "resume", "task-open": "open",
             }.get(entry, entry)
             assert detail["surface"] == (
                 entry if entry in {"new-window", "task-open"} else "picker-action"
@@ -496,20 +538,14 @@ def test_mock_unresolved_action_never_creates_journal(private_root, monkeypatch,
 
 
 def test_opening_unavailable_resume_prompt_is_not_a_confirmed_launch(private_root, monkeypatch):
-    from worktree_manager.production_picker.picker_tui.resume_prompt_actions import open_resume_prompt
-
     async def run():
         app, notices = App(), []
-        owner = refusal_screen()
-        row = {"raw": {"id": "selected-worktree"}, "machine": "selected-host", "env": "POSIX"}
-        monkeypatch.setattr(owner, "notify", lambda text, **_: notices.append(text))
-        monkeypatch.setattr(owner, "_find_internal_worktree", lambda *_: (row, None))
-        monkeypatch.setattr(owner, "_session_action_verbs", lambda _: ["Resume prompt\u2026"])
+        dialog = resume_dialog()
+        dialog._rec["is_local"] = False
+        monkeypatch.setattr(dialog, "notify", lambda text, **_: notices.append(text))
         async with app.run_test():
-            await app.push_screen(owner)
-            open_resume_prompt(owner, row)
-            assert app.screen is owner and getattr(app, "result", None) is None
-            assert owner.debug == "Locality snapshot is not ready."
+            await app.push_screen(dialog)
+            assert not dialog.query_one("#sub-prompt").display
             assert notices == [] and not LaunchAttempts(private_root).path.exists()
     asyncio.run(run())
 

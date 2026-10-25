@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 
 try:
@@ -36,9 +37,15 @@ class RestartRecoveryConfig:
 
 
 @dataclass(frozen=True)
+class MaintenanceConfig:
+    automatic: bool = True
+
+
+@dataclass(frozen=True)
 class ManagerConfig:
     ahp: AhpConfig = AhpConfig()
     restart_recovery: RestartRecoveryConfig = RestartRecoveryConfig()
+    maintenance: MaintenanceConfig = MaintenanceConfig()
 
 
 def _load(path: Path) -> dict:
@@ -73,6 +80,29 @@ def _restart_recovery(data: dict) -> RestartRecoveryConfig:
     return RestartRecoveryConfig(**raw)
 
 
+def _maintenance(data: dict) -> MaintenanceConfig:
+    raw = data.get("maintenance", {})
+    if not isinstance(raw, dict):
+        raise ManagerConfigError("maintenance must be a TOML table")
+    unknown = raw.keys() - {"automatic"}
+    if unknown:
+        raise ManagerConfigError(f"unknown maintenance setting: {sorted(unknown)[0]}")
+    if "automatic" in raw and type(raw["automatic"]) is not bool:
+        raise ManagerConfigError("maintenance.automatic must be a boolean")
+    return MaintenanceConfig(**raw)
+
+
+def automatic_maintenance_enabled() -> bool:
+    """Re-read policy at admission; unreadable policy never authorizes effects."""
+    try:
+        return load_config().maintenance.automatic
+    except ManagerConfigError as exc:
+        logging.getLogger(__name__).warning(
+            "Automatic maintenance blocked by Manager configuration: %s", exc
+        )
+        return False
+
+
 def load_config(root: Path | None = None) -> ManagerConfig:
     """Load the shared ``~/.worktree-manager/config.toml`` surface."""
     data = _load(config_path(root))
@@ -103,6 +133,7 @@ def load_config(root: Path | None = None) -> ManagerConfig:
         )
     return ManagerConfig(
         restart_recovery=_restart_recovery(data),
+        maintenance=_maintenance(data),
         ahp=AhpConfig(
             endpoint_url=endpoint.strip(),
             account=account.strip(),

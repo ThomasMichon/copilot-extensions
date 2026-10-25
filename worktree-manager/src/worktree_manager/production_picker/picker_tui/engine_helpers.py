@@ -598,13 +598,9 @@ ACTION_DESC = {
     "Stop": "Stop this worktree's Mux/Copilot wrapper now (graceful "
             "double-Ctrl-C, then a hard mux kill) so a following Open "
             "starts a fresh TMux/PSMux + Copilot.",
-    "Bare resume": "Two-step restore: create this worktree's Mux, but launch "
-                   "Copilot in HOME with no --resume (dodges a CLI bug that "
-                   "fails to start in a repo/worktree cwd). Finish with a "
-                   "manual /resume <id> (id shown above).",
     "Reclaim": "Kill the exact Copilot process(es) holding this session's lock "
                "(bare orphans a mux Stop cannot reach) AND delete any residual "
-               "inuse.<pid>.lock, so it can be re-Opened or Bare-resumed "
+               "inuse.<pid>.lock, so it can be re-Opened or resumed "
                "cleanly.",
     "Restore": "Recover this unreachable active session in one step: use the "
                "platform remux primitive, then immediately resume/attach it "

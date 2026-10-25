@@ -84,6 +84,25 @@ class LegendScreen(ModalScreen[None]):
         for token, meaning in self._MARKER_MEANINGS:
             t.append(f"  {token:<8}", style=C_WARN if "*" in token else C_LABEL)
             t.append(f" {meaning}\n", style=C_DIM)
+        t.append(
+            "\nSource reads\n", style=C_HEADER,
+        )
+        t.append(
+            "  WT✗ means the Worktrees source read failed in that environment.\n"
+            "  It does not establish whole-machine reachability or stop state;\n"
+            "  another pivot or sibling environment may still be available.\n",
+            style=C_DIM,
+        )
+        t.append(
+            "\nLocal re-homed obligations\n", style=C_HEADER,
+        )
+        t.append(
+            "  The o-details count is a local retained-claim journal, not a count\n"
+            "  of ORPHAN worktrees (no merge base) or unreachable machines.\n"
+            "  Unknown claim confirmation/coverage is incomplete evidence,\n"
+            "  never proof that an obligation is settled or a resource stopped.\n",
+            style=C_DIM,
+        )
         t.append("\nMaintenance disposition\n", style=C_HEADER)
         for level in ("SAFE", "REVIEW", "UNSAFE"):
             t.append(f"  {DISPO_MARK[level]} {level:<8}", style=C_DISPO[level])
