@@ -673,3 +673,18 @@ caller coverage, not one launcher or one platform passing.
   remain unchanged. Strict protocol validation retains two contracts and all
   814 immutable fixtures. Final publication, fresh review and current-head CI
   remain open; this effort remains Active. No runtime rollout is authorized.
+
+### 2026-10-25 - Composed upstream qualification
+
+- Rebased the frozen integration onto current `dev`, preserving every upstream
+  protocol fixture/provenance record and the shared native/process bytes.
+  Regenerated installer declarations from the composed scripts and synchronized
+  one stale vendored Bridge engine line from its canonical owner.
+- The composed Session Host packet passed 211 tests with four platform skips,
+  covering retained acquisition/creation owners and local child liveness.
+- The exact 1,796-unit packet passed again with only the documented minimal
+  tooling in 222.438 seconds, below the unchanged 300-second ceiling. Every
+  admitted source fingerprint remains exact; no nodes or effect guards were
+  removed. Strict protocol and install-contract checks passed.
+- Source publication, a passing current review and current-head CI remain
+  open. The effort is still Active and no runtime rollout is authorized.
