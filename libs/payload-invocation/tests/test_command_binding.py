@@ -198,6 +198,87 @@ def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture
     assert _resolve(binding_fixture)["reason"] == "legacy-ownership-missing"
 
 
+@pytest.mark.parametrize("lifecycle_state", [None, "complete", "pending"])
+def test_retained_owner_does_not_require_original_publisher(
+    binding_fixture: dict, lifecycle_state: str | None,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    receipt = _publish(fixture)
+    path = fixture["legacy"] / "deploy-manifest.json"
+    manifest = primitive.read_json(path)
+    if lifecycle_state is not None:
+        manifest["commandLifecycle"] = {
+            "version": 1, "state": lifecycle_state,
+            "owner": {key: value for key, value in receipt.items() if key != "payloadRoot"},
+        }
+        _write(path, manifest)
+    fixture["payload"].rename(fixture["payload"].with_name("publisher-unavailable"))
+    bootstrap = fixture["legacy"] / "versions/retained/.runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    arguments = {**fixture["arguments"], "payload_root": bootstrap}
+    before = path.read_bytes()
+    with binding._load_lifecycle()._lock(primitive, arguments) as lock:
+        if lifecycle_state == "pending":
+            with pytest.raises(binding.CommandOwnershipConflict, match="not complete"):
+                binding.retained_legacy_binding(primitive, lock, **arguments)
+        else:
+            result = binding.retained_legacy_binding(primitive, lock, **arguments)
+            assert result["commandBinding"] == receipt
+            assert result == {
+                key: manifest[key] for key in ("commandBinding", "commandLifecycle") if key in manifest
+            }
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("field", [
+    "version", "pluginId", "runtimeRoot", "environment", "installationId",
+    "sourceFingerprint", "source", "payloadRoot", "lifecycle", "lock", "policy",
+    "null-lifecycle", "managed-policy",
+])
+def test_retained_owner_rejects_invalid_incumbent_or_authority(
+    binding_fixture: dict, field: str,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    _publish(fixture)
+    path = fixture["legacy"] / "deploy-manifest.json"
+    manifest = primitive.read_json(path)
+    receipt = manifest["commandBinding"]
+    if field == "version":
+        receipt[field] = True
+    elif field in ("pluginId", "runtimeRoot", "installationId", "sourceFingerprint"):
+        receipt[field] = "foreign"
+    elif field == "environment":
+        receipt[field] = {**receipt[field], "homeRealPath": str(fixture["home"] / "foreign")}
+    elif field == "source":
+        receipt[field]["record"] += "foreign"
+    elif field == "payloadRoot":
+        receipt[field] = "relative"
+    elif field == "lifecycle":
+        manifest["commandLifecycle"] = {"version": 1, "state": "complete", "owner": {}}
+    elif field == "null-lifecycle":
+        manifest["commandLifecycle"] = None
+    elif field == "policy":
+        _write(fixture["legacy"] / "runtime-deployment.json", {"invalid": True})
+    elif field == "managed-policy":
+        decision = primitive.resolve_runtime_deployment(**fixture["arguments"])
+        _write(fixture["legacy"] / "runtime-deployment.json", {
+            "schema": primitive.RUNTIME_DEPLOYMENT_SCHEMA, "version": 1, "managed": True,
+            "owner": primitive._deployment_owner(decision, fixture["arguments"]),
+        })
+    _write(path, manifest)
+    arguments = fixture["arguments"]
+    lock_arguments = {
+        **arguments, "legacy_root": fixture["legacy"].with_name("foreign"),
+    } if field == "lock" else arguments
+    before = path.read_bytes()
+    with binding._load_lifecycle()._lock(primitive, lock_arguments) as lock:
+        with pytest.raises(binding.CommandOwnershipConflict):
+            binding.retained_legacy_binding(primitive, lock, **arguments)
+    assert path.read_bytes() == before
+
+
 def test_command_binding_owned_legacy_and_retained_pointer(binding_fixture: dict) -> None:
     receipt = _publish(binding_fixture)
     pointer = binding_fixture["home"] / ".copilot-extensions/agent-worktrees/runtime-root"

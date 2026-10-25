@@ -188,6 +188,9 @@ def test_governance_forwards_the_callers_lock_budget(monkeypatch, tmp_path):
     owner.durable_home = tmp_path
     owner.initial = ({}, {"marketplaceId": "test", "cellRoot": str(tmp_path / "cell")})
     owner.publication_locks = ()
+    owner.command_lock = None
+    owner.retained_binding = None
+    owner._retained_bootstrap = lambda: False
     observed = []
 
     class Lock:

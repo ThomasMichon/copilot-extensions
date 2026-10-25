@@ -210,3 +210,30 @@ def test_native_prepared_source_preserves_managed_global_owner(
         )
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT value FROM retained").fetchall() == [("existing state",)]
+    selected_python = Path(manifest["venv"]) / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    missing_owner = tmp_path / "removed-development-checkout"
+    run([
+        str(selected_python), "-I", "-B", "-c",
+        "import pathlib,sys;"
+        "sys.path.insert(0,str(pathlib.Path(sys.prefix)/'.runtime-bootstrap'));"
+        "import versioned_runtime as runtime;"
+        "runtime.claim_dev(pathlib.Path(sys.argv[1]),sys.argv[2],previous_version=sys.argv[3])",
+        str(root), str(missing_owner), previous,
+    ], "claim retained development generation")
+    # Exercise standalone restoration after its publisher and source have gone.
+    policy_path.rename(tmp_path / "retained-managed-policy.json")
+    owner.rename(tmp_path / "removed-installed-publisher")
+    checkout.rename(tmp_path / "removed-source-checkout")
+    run([
+        str(selected_python), "-I", "-B", "-m", "agent_worktrees",
+        "dev-release", "--owner", str(missing_owner), "--json",
+    ], "release attributed development generation", 180)
+    restored = json.loads((root / "deploy-manifest.json").read_text())
+    assert (root / "current-version").read_text().strip() == previous
+    assert restored["commandBinding"] == before["commandBinding"]
+    assert {
+        path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
+        for path in (config, database)
+    } == {path: retained[path] for path in (config, database)}

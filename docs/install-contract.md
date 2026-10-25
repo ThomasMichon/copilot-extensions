@@ -3708,6 +3708,17 @@ the existing global command, runtime root and durable state remain addressed
 by the original installation identity. Namespaced publication retains its
 existing receipt and lock path.
 
+An installed Worktrees `dev-release` can restore a completed retained slot even
+when the original checkout and installed publisher are unavailable. Its exact
+completed-slot bootstrap validates the incumbent command receipt's normalized
+source, installation root and current environment, retaining the original
+publisher identity rather than attributing the bootstrap as a new source.
+Lifecycle evidence must be absent or complete for that same owner. Legacy
+publication custody precedes whole-operation cutover custody and is reused
+through nested settlement. This restoration does not override managed-deployment
+policy, admit unfinished lifecycle evidence, or grant ordinary source publishers
+permission to copy an incumbent receipt.
+
 Reuse also runs an isolated installed-origin health probe under retention. Its
 historical, non-editable local origin remains attributable to this runtime's
 frozen-input staging root even after that build's snapshot is removed. Failed
