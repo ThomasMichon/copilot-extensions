@@ -55,11 +55,16 @@ class SpawnRearmMixin:
                 or latest["state"] not in {SpawnState.DEFERRED, SpawnState.FAILED}
                 or latest["session_handle"] or latest["release_requested"]
                 or latest["conversation_retired"]
-                or latest["worktree_ownership"] not in {"created", "reused"}
+                or latest["worktree_ownership"] not in {"created", "reused", "targeted"}
                 or latest["conclusion_state"] == "pending"
                 or any(row["state"] in SpawnState.ACTIVE for row in rows)
             ):
                 raise TaskError("fresh acquisition reservation fence changed or remains active")
+            if latest["worktree_ownership"] == "targeted" and (
+                task.affinity.get("worktree") != worktree
+                or task.target_worktree not in {None, worktree}
+            ):
+                raise TaskError("fresh acquisition target no longer matches the retained worktree")
             foreign = conn.execute(
                 "SELECT key FROM spawn_reservations WHERE (worktree=? OR inherited_worktree=?) AND task_id!=? "
                 "AND state IN ('reserving','spawned','cold','releasing') LIMIT 1",

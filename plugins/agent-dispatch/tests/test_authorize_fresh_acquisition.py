@@ -11,12 +11,23 @@ from agent_dispatch.queue import TaskError
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
-@pytest.fixture
-def recovery(tmp_path):
+@pytest.fixture(params=["created", "reused", "targeted"])
+def recovery(tmp_path, request):
     queue = TaskQueue(tmp_path / "tasks.db")
-    task = queue.create("review", exclusive_key="review:example:1")
+    targeted = request.param == "targeted"
+    task = queue.create(
+        "review", exclusive_key="review:example:1",
+        affinity={"worktree": "worktree-a"} if targeted else None,
+        target_worktree="worktree-a" if targeted else None,
+    )
     reservation, _ = queue.reserve_spawn(task.id)
-    queue.record_spawn_worktree(reservation.key, worktree="worktree-a", ownership="created")
+    if targeted:
+        assert reservation.worktree == "worktree-a"
+        assert reservation.worktree_ownership == "targeted"
+    queue.record_spawn_worktree(
+        reservation.key, worktree="worktree-a", ownership=request.param,
+        allocation_project="example-project", worktree_path=str(tmp_path / "worktree-a"),
+    )
     queue.defer_spawn(reservation.key, detail="historical owner capability unavailable")
     args = {
         "reservation_key": reservation.key, "worktree": "worktree-a",
@@ -40,6 +51,11 @@ def test_authorization_advances_generation_and_preserves_attempt(recovery):
     assert next_attempt.worktree_ownership == "reused"
     assert next_attempt.conversation_retired is True
     assert next_attempt.session_handle is None
+    assert next_attempt.allocation_project == original.allocation_project
+    assert next_attempt.worktree_path == original.worktree_path
+    assert next_attempt.creation_key == original.creation_key
+    assert next_attempt.allocation_reservation_key == original.allocation_reservation_key
+    assert queue.get_reservation(reservation.key).worktree_ownership == original.worktree_ownership
     with queue._connect() as conn:
         notes = [row["note"] for row in conn.execute(
             "SELECT note FROM task_events WHERE task_id=?", (task.id,),
@@ -47,6 +63,36 @@ def test_authorization_advances_generation_and_preserves_attempt(recovery):
     assert any("history preserved" in (note or "") and reservation.key in note for note in notes)
     with pytest.raises(TaskError):
         queue.authorize_fresh_acquisition(task.id, **args)
+
+
+@pytest.mark.parametrize("recovery", ["targeted"], indirect=True)
+@pytest.mark.parametrize("changed_target", ["affinity", "target", "missing-affinity"])
+def test_targeted_authorization_refuses_changed_target_without_mutation(recovery, changed_target):
+    queue, task, reservation, args = recovery
+    with queue._connect() as conn:
+        if changed_target == "affinity":
+            conn.execute("UPDATE tasks SET affinity=? WHERE id=?", (
+                json.dumps({"worktree": "other"}), task.id,
+            ))
+        elif changed_target == "target":
+            conn.execute("UPDATE tasks SET target_worktree='other' WHERE id=?", (task.id,))
+        else:
+            conn.execute("UPDATE tasks SET affinity='{}' WHERE id=?", (task.id,))
+        conn.commit()
+    with pytest.raises(TaskError, match="target"):
+        queue.authorize_fresh_acquisition(task.id, **args)
+    assert queue.get(task.id).generation == task.generation
+    assert queue.get_reservation(reservation.key).conversation_retired is False
+
+
+@pytest.mark.parametrize("recovery", ["targeted"], indirect=True)
+def test_affinity_only_targeted_allocation_retains_explicit_recovery(recovery):
+    queue, task, reservation, args = recovery
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET target_worktree=NULL WHERE id=?", (task.id,))
+        conn.commit()
+    assert queue.authorize_fresh_acquisition(task.id, **args)["launched"] is False
+    assert queue.get_reservation(reservation.key).worktree_ownership == "targeted"
 
 
 @pytest.mark.parametrize("change", [
@@ -84,7 +130,7 @@ def test_active_exclusive_key_contender_without_worktree_refuses(recovery):
     assert queue.get(task.id).generation == task.generation
 
 
-@pytest.mark.parametrize("blocker", ["held", "claimed", "cleanup", "handle", "foreign"])
+@pytest.mark.parametrize("blocker", ["held", "claimed", "cleanup", "handle", "foreign", "ownership"])
 def test_authorization_refuses_owner_cleanup_and_foreign_reservations(recovery, blocker):
     queue, task, reservation, args = recovery
     with queue._connect() as conn:
@@ -96,6 +142,8 @@ def test_authorization_refuses_owner_cleanup_and_foreign_reservations(recovery, 
             conn.execute("UPDATE spawn_reservations SET conclusion_state='pending' WHERE key=?", (reservation.key,))
         elif blocker == "handle":
             conn.execute("UPDATE spawn_reservations SET session_handle='native-old' WHERE key=?", (reservation.key,))
+        elif blocker == "ownership":
+            conn.execute("UPDATE spawn_reservations SET worktree_ownership='unknown' WHERE key=?", (reservation.key,))
         conn.commit()
     if blocker == "foreign":
         foreign_task = queue.create("other")
