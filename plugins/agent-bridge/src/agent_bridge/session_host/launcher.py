@@ -52,7 +52,7 @@ from .host import SessionHost
 from .osutil import child_preexec
 
 if TYPE_CHECKING:
-    from ..acquisition_launch_owner import AcquisitionLaunchOwner
+    from ..local_launch_owner import LocalLaunchOwner
 
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
@@ -218,7 +218,7 @@ def launch_session_host(
     host_version: str = "",
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
-    acquisition_launch: AcquisitionLaunchOwner | None = None,
+    acquisition_launch: LocalLaunchOwner | None = None,
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -268,10 +268,14 @@ def launch_session_host(
     child_env.pop(_ACQUISITION_ENV, None)
     if acquisition_launch is not None:
         from ..acquisition_launch_owner import AcquisitionLaunchOwner
+        from ..creation_launch_owner import CreationLaunchOwner
         from ..runtime_custody import RuntimeCustodyError
 
-        if type(acquisition_launch) is not AcquisitionLaunchOwner or session_id != acquisition_launch.session_id:
-            raise RuntimeCustodyError("Local Host launch requires its original acquisition owner")
+        if (
+            type(acquisition_launch) not in (AcquisitionLaunchOwner, CreationLaunchOwner)
+            or session_id != acquisition_launch.session_id
+        ):
+            raise RuntimeCustodyError("Local Host launch requires its original local owner")
         child_env[_ACQUISITION_ENV] = acquisition_launch.child_context(child_argv, cwd)
 
     spawn_options = host_spawn_kwargs()
@@ -441,7 +445,7 @@ async def _spawn_child(
     spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
     admission = child_env.pop(_ACQUISITION_ENV, None)
     if admission is not None:
-        from ..acquisition_host_admission import require_child_admission
+        from ..local_host_admission import require_child_admission
 
         require_child_admission(
             admission, cwd=cwd or os.getcwd(),
@@ -495,7 +499,7 @@ async def run_host(
     admission = (env or {}).get(_ACQUISITION_ENV) or os.environ.get(_ACQUISITION_ENV)
     before_exec = None
     if admission is not None:
-        from ..acquisition_host_admission import require_child_admission
+        from ..local_host_admission import require_child_admission
 
         def before_exec() -> None:
             require_child_admission(admission, cwd=cwd or os.getcwd(), session_id=session_id, argv=child_argv)

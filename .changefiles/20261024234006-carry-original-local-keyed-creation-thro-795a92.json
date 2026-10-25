@@ -1,0 +1,9 @@
+{
+  "comment": "Carry original local keyed creation through shared Host, native, binding and first-turn owners without replay or ordinary idle reaping.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

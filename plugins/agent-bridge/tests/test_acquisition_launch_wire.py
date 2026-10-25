@@ -63,10 +63,16 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     frontend = AcquisitionFrontend.capture(rig.runtime, identity, admission)
     audit = tmp_path / "received.jsonl"
     peer = Path(__file__).parent / "fixtures" / "acquisition_launch_peer.py"
-    handles = []
-    from agent_bridge.session_host import spawner
+    handles, captures = [], []
+    from agent_bridge.session_host import launcher, spawner
 
     original_launch = spawner.launch_session_host
+    original_tail_capture = launcher._CrashTailCapture
+
+    def capture_tail(*args, **kwargs):
+        capture = original_tail_capture(*args, **kwargs)
+        captures.append(capture)
+        return capture
 
     def record_launch(*args, **kwargs):
         handle = original_launch(*args, **kwargs, state_dir=tmp_path / "host-state")
@@ -80,6 +86,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
         )
 
     monkeypatch.setattr(spawner, "launch_session_host", record_launch)
+    monkeypatch.setattr(launcher, "_CrashTailCapture", capture_tail)
     monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
     monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock())
     monkeypatch.setattr(SessionManager, "_connect_via_session_host", _SessionHostConnectionMixin._connect_via_session_host)
@@ -184,9 +191,13 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                 assert rig.runtime.store.journal.read_launch(continuation)["started_at"] is None
                 assert session._native_turn_transport is retained_owner
             elif mode == "shutdown-rehydrate":
+                detach = session.client.session_host_client.detach
+                detach_spy = AsyncMock(wraps=detach)
+                monkeypatch.setattr(session.client.session_host_client, "detach", detach_spy)
                 await rig.manager.stop_session(
                     session.session_id, cancel_turn=False, allow_background_recovery=True,
                 )
+                detach_spy.assert_awaited_once_with(False)
                 assert handles[0].proc.poll() is None
                 stored = rig.db.get_session(session.session_id)
                 assert not stored["background_recovery_enabled"]
@@ -209,7 +220,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                     )
                 with pytest.raises(RuntimeCustodyError, match="prompt"):
                     await successor.submit_prompt(session.session_id, "must not recover")
-                assert retained.client is None and handles[0].proc.poll() is None
+                assert retained.client is None and handles[0].proc.poll() is None, captures[0].tail_text()
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         assert [item["method"] for item in received] == (
             [f"session/{kind}"] if mode in ("drop-reply", "close-before-capture")

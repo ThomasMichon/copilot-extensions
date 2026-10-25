@@ -146,8 +146,9 @@ require their own review and qualification.
       exclusions. Other creation/background/host/remote cohorts and full
       installed qualification remain open. The internal
       [keyed-creation DB foundation](../../../plugins/agent-bridge/docs/creation-custody.md)
-      merged in #8823; actual allocation/native effect-owner
-      integration remains open.
+      merged in #8823. Its separately selected local allocation subprocess
+      fence merged in #8869; ground-owner child qualification, native creation,
+      provider and remaining effect-owner integration stay open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -262,6 +263,61 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original local creation native source controls
+
+- Extend the original workspace embodiment row with a prospective launch
+  handoff, one-shot Host/native and binding observations, and the retained
+  first-prompt zero index. The concrete `CreationLaunchOwner` reuses the
+  acquisition adapter's shared live Host/child/ACP checks without an
+  acquisition request or a second attempt ledger.
+- An explicitly selected `CreationFrontend.start` carries the full retained
+  target/options/prompt through existing allocation, local preparation, actual
+  Host/child/new/configuration, final binding subprocess and original-turn
+  owners. An independent exact-workspace native-head readback proves binding
+  before transport capture. Partial outcomes stay held; completed replay is
+  observational even after closure. Ordinary routes/defaults remain unchanged.
+- The coupled synthetic-process/storage lane passes 261 controls, with two
+  collection-capability skips and verified cleanup. Actual local Host/child/SDK
+  cases cover configuration, unknown native/binding replies, closure at
+  binding/capture/first-turn boundaries and ordinary lifecycle refusal.
+- The broader lane exposed a real idle-detach custody defect: graceful detach
+  advertised an associated Host as reapable, racing the retained-Host check.
+  Captured subprocess output identified server closure after self-reaping.
+  Two deterministic controls reproduced the predicate failure before the fix.
+  Host status/detach now short-circuit captured native custody and otherwise
+  require an unassociated durable session. The real shutdown control checks
+  `detach(False)`; ordinary unassociated idle reaping remains covered.
+- Genuine schema-37 HTTP-50 write/no-write capture from
+  `658772f6b9cd9472f82e1c0bff5a8c583ef85831` executes both installation modes
+  and preserves 69 outputs, every historical packet and complete provenance.
+  The three current Host-authority vectors reproduce from
+  `e50c813cc85d424db13ff4c33d039b37588a4ab7`, which retains that implementation
+  and HTTP evidence. The coupled reader/publication/authority lane passes 204
+  controls, with two collection skips; both contracts and all 814 fixtures pass.
+  Scoped module, installation and documentation checks pass. Normal independent
+  source review/CI/merge remain owed.
+  No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
+  provider/background/remote, native/platform, compatibility, restoration and
+  separately authorized running adoption remain open.
+
+### 2026-10-24 - Original local allocation subprocess source merged
+
+- #8869 merged as `d21b76a59f48fecd5be11b24c0ee99c33fce7176` after independent
+  exact-head approval `5641768659` on
+  `ca0b75c32be27ad19a2e2c134a0ae243506a6186`, required green CI and resolution
+  of the closed-epoch replay finding. Original allocated replay remains
+  observational after closure or draining; new preparation and spawn still
+  require the original open epoch.
+- The bounded original allocation row/executor/subprocess owner is source
+  coverage, not native or ground-child filesystem qualification. The final
+  focused allocation and actual synthetic Host/child/ACP regression lane passed
+  101 tests, following the coupled 235-case creation/storage/workspace portfolio.
+- Re-read every Plan and Validation Plan item after merge. Continue original
+  creation custody through the actual local Host/child/native and prompt owners
+  without a second operation ledger or a legacy downgrade. Full Phase 1/1b,
+  provider/background/remote coverage, compatibility, guarded installer
+  restoration and separately authorized platform/running adoption remain open.
 
 ### 2026-10-24 - Original local allocation owner under validation
 
