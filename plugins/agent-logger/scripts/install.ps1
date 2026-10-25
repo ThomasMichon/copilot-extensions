@@ -1536,14 +1536,31 @@ log = Path(__file__).resolve().parent.parent / "logs" / "session-sync.log"
 log.parent.mkdir(parents=True, exist_ok=True)
 with log.open("w", encoding="utf-8") as output:
     try:
-        result = subprocess.run(
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from versioned_runtime import resolve_python
+        runtime = resolve_python(log.parent.parent)
+        if runtime is None:
+            raise RuntimeError("Cannot resolve installed sync runtime")
+        sys.path.insert(0, str(runtime.parent.parent / "Lib" / "site-packages"))
+        from agent_procutil import spawn_sync_in_kill_on_close_job
+        process, job = spawn_sync_in_kill_on_close_job(
             [sys.argv[1], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
              "Bypass", "-File", sys.argv[2]],
+            require_job=True, allow_breakaway=False,
             stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW,
             env={**os.environ, "PYTHONUTF8": "1"},
         )
-        code = result.returncode
+        try:
+            code = process.wait(timeout=25 * 60)
+        except subprocess.TimeoutExpired:
+            print("session-sync: scheduled operation timed out; terminating owned descendants",
+                  file=output, flush=True)
+            code = 124
+        finally:
+            if job is not None:
+                job.terminate_and_wait(10)
+            process.wait(timeout=5)
     except Exception:
         traceback.print_exc(file=output)
         code = 1

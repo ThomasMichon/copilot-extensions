@@ -599,6 +599,32 @@ Reviewers confirm that the statement and documentation match the final diff.
 Treat a missing assessment or inaccurate affected documentation as unfinished
 work.
 
+### Contract impact (required for CLI and service-boundary changes)
+
+Commands, arguments, defaults, exit codes and JSON exchanges are service
+contracts, even when the caller and receiver ship from this repository.
+For a new or changed independently deployed boundary, include a **Contract
+impact** statement in the PR description and follow
+[`service-contract-evolution`](docs/patterns/service-contract-evolution.md):
+
+1. Name the boundary and old/new semantics, contract identity/version and
+   supported peer range or capabilities. State whether the change can instead
+   stay inside the existing owning operation with backward-compatible config.
+2. Identify how the caller discovers support from the selected executable
+   runtime or running peer, not the latest payload or package-version equality.
+   Preserve strict rejection of unknown CLI syntax and required policy semantics.
+3. State the provider-first **expand, migrate, contract** sequence, including
+   missing legacy metadata, deprecation and supported upgrade/rollback behavior.
+   A single PR or release does not establish lockstep deployment.
+4. Name focused parser/process or transport tests for both mixed-version
+   directions, new/new behavior, rollback and truthful incompatibility errors.
+   Do not add exhaustive matrices to required PR CI.
+
+Reviewers treat an unsupported mandatory new invocation, a silent downgrade of
+required behavior, or an omitted/inaccurate assessment as unfinished work.
+This requirement governs changed boundaries; a guidance-only PR must distinguish
+its policy changes from still-unimplemented runtime support.
+
 ### Graceful cutover impact (required for resident-daemon changes)
 
 Any PR that introduces or materially changes a **long-lived resident daemon**

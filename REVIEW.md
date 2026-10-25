@@ -195,6 +195,19 @@ specifically when reviewing a pull request, not a replacement for them.
   Documentation-impact statement actually matches the final diff
   (`CONTRIBUTING.md`, "Documentation impact") -- flag a missing or
   inaccurate one.
+- **CLI and service contract impact.** Apply CONTRIBUTING.md's required
+  **Contract impact** assessment and
+  `docs/patterns/service-contract-evolution.md` to changed process/transport
+  boundaries. Flag assumptions that deployed peers upgrade together,
+  unconditional new commands/arguments without supported-peer selection,
+  package versions mistaken for contract support, and retirement without an
+  upgrade/rollback window. Keep unknown-argument rejection strict; do not
+  recommend silently ignoring flags or weakening mandatory policy as a
+  compatibility fix. Require focused mixed-version parser/process coverage
+  and a rationale for new preflight RPCs when the owning operation could read
+  backward-compatible config internally. Scope findings to changed boundaries;
+  guidance-only adoption does not claim or require implementing every legacy
+  service in the same PR.
 - **Graceful cutover impact.** When a PR introduces or materially changes a
   long-lived resident daemon, confirm the PR description's required
   **Graceful cutover impact** statement exists and matches the diff

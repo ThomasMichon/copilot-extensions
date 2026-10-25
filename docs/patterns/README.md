@@ -107,6 +107,16 @@ Invariants are **must-always-hold contracts between a vision and the code** — 
 narrow set of properties a change may never quietly break. They are the enforceable
 core of the principles above; a reviewer checks a change against these.
 
+- **CLI and service contracts tolerate declared version skew.** A changed
+  independently deployed boundary declares contract support separately from
+  package versions against the executable runtime or running peer. Preserve
+  strict CLI parsing; expand receiver support before migrating callers and
+  retire old forms only after the supported upgrade/rollback window. Prefer
+  owner-internal config enforcement over unnecessary new prerequisite RPCs.
+  See [service-contract-evolution](service-contract-evolution.md). (Serves
+  *Vision plugin-services* `version-skew-tolerant-contracts` and
+  `interoperate-across-version-skew`.)
+
 - **Communication silence and process lifetime are separate clocks.** Services,
   CLIs and tools use a short communication deadline renewed by every received
   target update, including events a consumer does not semantically handle, and
@@ -386,6 +396,7 @@ the exemplars, and the vision it serves):
 | [telemetry-qos-engagement](telemetry-qos-engagement.md) | Proposed QoS/Engagement measurement semantics, OTel span/event/metric mapping, failure buckets and the source-owned event catalog; no runtime adoption claim |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
+| [service-contract-evolution](service-contract-evolution.md) | Strict CLI syntax and versioned process/transport contracts: active-runtime support metadata, provider-first expand/migrate/contract rollout, additive config semantics and focused upgrade/rollback coverage |
 | [service-lifecycle-supervision](service-lifecycle-supervision.md) | Least-privilege lifecycle tiers (user-mode ensure → scheduled activation → system service → container), stable register-once launchers, and cutover-safe updates |
 | [versioned-singleton-manager](versioned-singleton-manager.md) | How a host's native service manager's own view of "is this service running" stays coherent across a spawn-new-retire-old cutover — a thin process the service manager tracks permanently, which claims every descendant (Linux subreaper / Windows Job Object), distinguishes a planned cutover handoff from a real crash via the daemon's own `active.json`, and updates itself in place (`execve` on Linux; a Task-Scheduler restart relayed through a short-lived bridge process on Windows) |
 | [ephemeral-process-reaping](ephemeral-process-reaping.md) | Why detaching a process to survive its parent (SSH drop, env-var scoping, terminal close) removes the parent's own ability to clean it up, and how to pair it with a liveness-polling reaper (not just a graceful-shutdown hook) that fires on every death path |

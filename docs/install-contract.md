@@ -11,6 +11,18 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+Runtime installation and communication compatibility are separate contracts.
+For a new or changed CLI/service boundary, apply
+[service-contract-evolution](patterns/service-contract-evolution.md): publish
+versioned support metadata with the owning immutable runtime slot, distinguish
+it from package/build versions, and resolve the contract of the actual selected
+runtime or running daemon. A newer payload or a staged slot never establishes
+live peer support. Plan provider-first expansion, conditional caller migration,
+and retirement after the supported upgrade/rollback window; installation
+reconciliation is not a substitute for interoperability while skewed.
+This is a design requirement, not a claim that every existing installer already
+publishes such metadata; per-boundary adoption remains separately tracked.
+
 Interrupted installation-context directory-lock recovery has a standalone,
 stdlib-only entry independent of broken command dispatch. The
 [canonical recovery contract](../libs/installation-context/README.md) preserves
