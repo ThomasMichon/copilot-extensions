@@ -208,7 +208,7 @@ def _inspect(
 
     try:
         roots = engine._package_roots(payload)
-    except engine.DependencyPolicyError as error:
+    except RuntimeError as error:
         raise ProvisionError(f"owning source dependencies refused: {error}") from error
     if any(not root.is_relative_to(payload) for root in roots):
         raise ProvisionError("first-use provisioning requires a self-contained owning payload")

@@ -130,7 +130,7 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
     "invalid-installer", "invalid-fragment",
     "metadata-project", "metadata-tool", "metadata-uv", "metadata-sources", "dependency-project",
     "unseasoned-artifact",
-    "symlink-loop",
+    "symlink-loop", "dependency-loop",
 ])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
@@ -155,15 +155,18 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
                           '        Path(source).write_bytes(Path(source).read_bytes() + b"\\n# fixture source mutation\\n")\n'
                           '    return result\n'
                           'shutil.copyfile = _mutating_copyfile\n', encoding="utf-8")
-    elif change == "dependency-project":
-        dependency = payload / "libs/fixture-dependency"
+    elif change in {"dependency-project", "dependency-loop"}:
+        dependency_path = (
+            "libs/retained/dependency" if change == "dependency-loop" else "libs/fixture-dependency"
+        )
+        dependency = payload / dependency_path
         dependency.mkdir(parents=True)
         (dependency / "pyproject.toml").write_text(
             '[project]\nname="fixture-dependency"\nversion="1.0.0"\n', encoding="utf-8",
         )
         metadata = payload / "pyproject.toml"
         metadata.write_text(metadata.read_text() + '\n[tool.uv.sources]\n'
-                            'fixture-dependency={path="libs/fixture-dependency"}\n', encoding="utf-8")
+                            f'fixture-dependency={{path="{dependency_path}"}}\n', encoding="utf-8")
     request = provision.enqueue(payload, installation, project, root=root)
     if change == "reselected":
         (installation / "payload-dir").write_text(str(payload.with_name("other")), encoding="utf-8")
@@ -171,10 +174,11 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
         (payload / "scripts/install.ps1").write_text("exit 99\n", encoding="utf-8")
     elif change == "unavailable":
         payload.rename(payload.with_name("unavailable"))
-    elif change == "symlink-loop":
-        payload.rename(payload.with_name("retained-before-loop"))
+    elif change in {"symlink-loop", "dependency-loop"}:
+        linked = payload if change == "symlink-loop" else payload / "libs/retained"
+        linked.rename(linked.with_name("retained-before-loop"))
         try:
-            payload.symlink_to(payload.name, target_is_directory=True)
+            linked.symlink_to(linked.name, target_is_directory=True)
         except OSError as error:
             if os.name == "nt" and error.winerror == 1314:
                 pytest.skip("native directory symlink privilege unavailable")
