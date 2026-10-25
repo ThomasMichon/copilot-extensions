@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Incremental Indexing Delta Pipeline](active/incremental-indexing-delta-pipeline/README.md) | Draft; source-backed audit and count-based proposal only, implementation admission pending | #9023; preserves #4222/#4220/#8733/#5302 correctness owners; generic engine first, consumer adoption separate |
-| [Repository PR Fleet Sweep](active/repository-pr-fleet-sweep/README.md) | Active; plan approved and merged, one-shot observation implementation next | #8802; existing provider, topology and claim owners retained; no service or rollout |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
 | [Vault Service](active/vault-service/README.md) | Draft; initial architecture and complete phased acceptance proposal only, implementation admission pending | #8729; Vault credential/transaction authority, stateless Manager, central/local/federated deployment; existing custody retained, no rollout |
 | [Installation-Independent Sessions](active/installation-independent-sessions/README.md) | Active; Linux uninstall prerequisite validated and Manager uninstall contract reviewed; interactive survival open | #8669 / #8864; retains #5579 and installer/updater owners; no host rollout |
@@ -145,6 +144,7 @@ that pattern to this repository.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Repository PR Fleet Sweep](2026/10/25%20repository-pr-fleet-sweep/README.md) | Done; complete one-shot census, selected original-root observations and bounded publication repair merged in #8855 with approval, required CI and native Windows/Linux proof | #8802; source-only delivery, no runtime rollout; broader #7039 ownership retained |
 | [Leased Daemon Instances](2026/10/25%20leased-daemon-instances/README.md) | Done; complete shared/native instance custody, finite disposable lifetimes and normal installer cleanup merged in #8720; Windows/Linux qualification recorded | #8403; production cutover and existing custody preserved; no runtime rollout |
 | [Native Mux Launch Contract](2026/10/23%20native-mux-launch-contract/README.md) | Done for bounded source delivery; terminal custody, connected status and selected-directory repairs merged in #8031 | #7962 retains human/native qualification, release and authorized rollout; no installed changes |
 | [Generation-Bound Guidance](2026/10/23%20generation-bound-guidance/README.md) | Done for bounded source delivery; generation reuse, protected partial publication and late notices merged in #8045 | #7943 retains full native entry, cold-bootstrap, release and installed acceptance; no rollout |

@@ -4,7 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent plan and implementation PRs from one source worktree
 - **Created:** 2026-10-25
-- **Status:** Active
+- **Status:** Done
+- **Completed:** 2026-10-25
 - **Vision:** `visions/plugins/agent-worktrees/pull-requests/README.md` (provider-neutral operations and foreign-repo addressing); `visions/agent-fabric/README.md` (legible cross-machine responsibility)
 - **Umbrella issue:** #8802
 - **Sub-issues:** #7039 (bounded publication-performance prerequisite)
@@ -105,20 +106,20 @@ read-only and useful without any particular downstream report or topology.
 
 ### Phase 3 - Validate, document and complete
 
-- [ ] Add focused provider, joining, selection and command-contract tests, plus
+- [x] Add focused provider, joining, selection and command-contract tests, plus
   real process-boundary checks for Windows/POSIX invocation and cancellation.
   Preserve unrelated owner processes and all production deadlines.
-- [ ] Exercise the one-shot command in an isolated synthetic local setup and
+- [x] Exercise the one-shot command in an isolated synthetic local setup and
   an already-admitted remote setup when available. Excluded/held targets receive
   no probe. Record unavailable validation lanes rather than provisioning them.
-- [ ] Update the authoritative agent-worktrees CLI/claim documentation and
+- [x] Update the authoritative agent-worktrees CLI/claim documentation and
   discoverability pointer. Add the required plugin changefile(s), publish the
   implementation and drive review/CI to a verified merge.
-- [ ] Resolve the measured publication-performance blocker under #7039 without
+- [x] Resolve the measured publication-performance blocker under #7039 without
   bypassing a check or increasing the30-second deadline. Preserve complete
   published-object novelty and all existing size/path/type/refusal contracts;
   verify native publication, not just a subprocess timeout.
-- [ ] Record source/release state honestly and close the source effort.
+- [x] Record source/release state honestly and close the source effort.
   Runtime installation or fleet rollout needs separate explicit authorization;
   retain any outstanding adoption responsibility with a named tracked owner.
 
@@ -141,13 +142,13 @@ read-only and useful without any particular downstream report or topology.
 - [x] Invoke the real CLI against synthetic process/provider fixtures and prove
   no mutation, first-use provisioning, authentication bootstrap, background
   worker, service, claim settlement or global account switch occurs.
-- [ ] Run the focused suites through the repository test runner, touched-source
+- [x] Run the focused suites through the repository test runner, touched-source
   lint and applicable install-contract checks. Do not enlarge required CI with
   an exhaustive fleet or external-provider matrix.
-- [ ] Record native Windows and POSIX/remote checks, including bounded failure
+- [x] Record native Windows and POSIX/remote checks, including bounded failure
   and descendant cleanup. Unavailable lanes remain unverified with a reason;
   mocked tests alone are not native transport qualification.
-- [ ] Complete documentation-impact review, actual PR review and required CI;
+- [x] Complete documentation-impact review, actual PR review and required CI;
   verify the implementation PR merged before declaring source completion.
 
 ## Proposal
@@ -345,3 +346,31 @@ the actual canonical resolver fixed all seven failures. The final seven-file
 isolated Windows packet passes223 cases/four platform skips, source lint and
 all13 install contracts pass. Documentation was reassessed and updated for
 these account/identity/error guarantees. No deadline, review or CI gate changed.
+
+### 2026-10-25 - Source delivery complete
+
+Implementation #8855 actually merged at09:36:10 UTC as
+`4c0b59f7e00eb23cc56a97b9e060f1ebf93643a0`, from exact head
+`eec54162f0c74170ea1c54bec99ddb5ef4be489a`. Full review approved that
+head at09:23:12 with no open issues or unresolved threads. Required CI
+run40179948486 passed, including its actual PR gate; optional Ubuntu
+run40180281447 passed the sweep, guard and native POSIX packet on that
+same head. Windows evidence remains223 passes/four POSIX skips, plus
+67 guard tests and all13 install contracts. Managed publication and merge
+completed with real hooks and unchanged deadlines; the repository-authorized
+exception affected only the additional CODEOWNER vote, not CI or review.
+
+Validation tiers are resolved: unit/contract tests and actual synthetic CLI,
+process, tag-publication and POSIX consumer checks passed. Synthetic first-use
+state was exercised; no installer or first-provisioning behavior changed.
+Live scoped provider reads completed without cell probes. A deployed remote
+candidate lane was unavailable because no candidate installation or held-route
+probe was authorized; native isolated Linux and selected real process boundaries
+are qualified, not represented as installed fleet acceptance.
+
+The approved deliverable is source-only. Release promotion and consumer rollout
+remain the normal authorized deployment owners' responsibility; this effort
+owns no outstanding installation task and claims no live rollout. The separate
+broader #7039 performance objective is not closed by this bounded prerequisite.
+All Plan and Validation items above are resolved, and the source effort is Done.
+Durable operating truth remains in the command docs, not this archive.
