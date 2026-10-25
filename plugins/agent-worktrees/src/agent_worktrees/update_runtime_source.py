@@ -6,16 +6,75 @@ import dataclasses
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from agent_procutil import no_window_kwargs
 
 from .installation_probe import strict_json_object
 
+if TYPE_CHECKING:
+    from .update_runtime_plan import RuntimeUpdateStep
+
 PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
+SOURCES_SCHEMA = "copilot-extensions.prepared-runtime-sources"
+SOURCES_CONTRACT = 1
+
+
+def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
+    """Decode a complete queued selection; absence alone means marketplace."""
+    if raw is None:
+        return None
+    packet = json.loads(raw, object_pairs_hook=strict_json_object)
+    if (
+        not isinstance(packet, dict) or set(packet) != {"schema", "version", "sources"}
+        or packet["schema"] != SOURCES_SCHEMA or type(packet["version"]) is not int
+        or packet["version"] != SOURCES_CONTRACT
+        or not isinstance(packet["sources"], dict) or not packet["sources"]
+    ):
+        raise ValueError("Unsupported prepared-runtime-sources packet")
+    sources: dict[str, PreparedRuntimeSource] = {}
+    selection: tuple[str, str] | None = None
+    for name, record in packet["sources"].items():
+        if (
+            not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)
+            or not isinstance(record, dict) or set(record) != {"payload", "identity"}
+            or not isinstance(record["payload"], str) or not record["payload"]
+            or not Path(record["payload"]).is_absolute()
+        ):
+            raise ValueError(f"Invalid prepared-runtime-sources entry: {name}")
+        source = PreparedRuntimeSource(Path(record["payload"]), json.dumps(record["identity"]))
+        identity = json.loads(source.identity)["runtime_source"]
+        commit, tree = identity.get("source_commit"), identity.get("source_tree")
+        if (
+            identity["plugin"] != name or not source.payload.is_dir()
+            or not isinstance(commit, str) or not isinstance(tree, str)
+            or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit)
+            or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", tree)
+        ):
+            raise ValueError(f"Prepared runtime selection does not identify {name}")
+        if selection is not None and selection != (commit, tree):
+            raise ValueError("Prepared runtimes must use one exact source commit and tree")
+        selection = commit, tree
+        sources[name] = source
+    return sources
+
+
+def check_source_coverage(
+    sources: Mapping[str, PreparedRuntimeSource], steps: Sequence[RuntimeUpdateStep],
+) -> None:
+    eligible = {step.name for step in steps if step.eligible}
+    missing, unexpected = eligible - sources.keys(), sources.keys() - eligible
+    details = [
+        f"{label}: {', '.join(sorted(names))}"
+        for label, names in (("missing", missing), ("unexpected", unexpected)) if names
+    ]
+    if details:
+        raise ValueError("Prepared runtime portfolio differs from eligible runtimes; " + "; ".join(details))
 
 
 @dataclasses.dataclass(frozen=True)

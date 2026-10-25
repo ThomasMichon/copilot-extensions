@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from threading import Event
@@ -47,6 +48,7 @@ from textual.widgets import (
 from . import engine_client as ec
 from . import companion_client as cc
 from . import companion_observations as co
+from . import companion_attention as ca
 from .companion_topology import topology_view
 from . import handoff_client as hc
 
@@ -115,6 +117,8 @@ class _CompanionData:
     sessions_error: str | None = None
     session_observation: dict | None = None
     observation_error: str | None = "not-loaded"
+    attention: dict | None = None
+    attention_error: str | None = "not-loaded"
 
 
 def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
@@ -326,10 +330,14 @@ class MuxCompanionApp(App):
         padding: 1 2;
     }
 
-    #lineage-label, #claims-evidence {
+    #lineage-label, #claims-evidence, #attention {
         padding: 0 2;
         color: #b2b2b2;
         text-style: bold;
+    }
+
+    #attention {
+        height: auto;
     }
 
     #lineage {
@@ -401,11 +409,16 @@ class MuxCompanionApp(App):
         self._navigation_cancel = Event()
         self._observation_cancel = Event()
         self._observation_owner: _CompanionData | None = None
+        self._attention_cancel = Event()
+        self._attention_busy = False
+        self._attention_next = 0.0
+        self._observer_pane = os.environ.get("TMUX_PANE")
         self._action_message: Text | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         yield Static(Text("Loading current worktree..."), id="status")
+        yield Static(ca.attention_text(None, "loading"), id="attention")
         with TabbedContent(initial="summary-tab", id="views"):
             with TabPane("Summary", id="summary-tab"):
                 with VerticalScroll():
@@ -434,6 +447,7 @@ class MuxCompanionApp(App):
 
     def on_mount(self) -> None:
         self._reload()
+        self.set_interval(5, self._poll_attention)
         if self._cli_pane and all(self._observer_identity):
             self._poll_cli()
             self.set_interval(1, self._poll_cli)
@@ -462,10 +476,17 @@ class MuxCompanionApp(App):
         self._read_cancel.set()
         self._navigation_cancel.set()
         self._observation_cancel.set()
+        self._attention_cancel.set()
 
     @work(exclusive=True)
     async def _reload(self) -> None:
         self._observation_cancel.set()
+        self._attention_cancel.set()
+        self._attention_busy = False
+        self._attention_next = 0.0
+        self._data.attention = None
+        self._data.attention_error = "loading"
+        self._update_attention()
         self._loading = True
         self.query_one("#refresh-btn", Button).disabled = True
         self.query_one("#cutover-btn", Button).disabled = True
@@ -483,6 +504,7 @@ class MuxCompanionApp(App):
         self._loading = False
         self._refresh_view(reload=False)
         self.query_one("#refresh-btn", Button).disabled = False
+        self._poll_attention(force=True)
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
 
@@ -523,6 +545,62 @@ class MuxCompanionApp(App):
             data.worktree, data.bundle, data.session_observation,
             data.bundle_error or data.observation_error,
         ))
+
+    def _poll_attention(self, *, force=False) -> None:
+        if self._loading or self._attention_busy or (
+            not force and (time.monotonic() < self._attention_next
+                           or self._data.attention_error == "head-changed-refresh-required")
+        ):
+            return
+        self._attention_busy = True
+        self._load_attention(force=force)
+
+    @work(exclusive=True, group="session-attention")
+    async def _load_attention(self, *, force=False) -> None:
+        data, cancelled = self._data, Event()
+        self._attention_cancel = cancelled
+        self._attention_busy = True
+        try:
+            if self._cli_pane and not force:
+                from .companion_lifecycle import observer_visible
+
+                project, worktree_id, incarnation = self._observer_identity
+                visible = await asyncio.to_thread(
+                    observer_visible, project, worktree_id, self._observer_pane, incarnation,
+                )
+                if visible is not True:
+                    return
+            heads = [row.get("id") for row in data.sessions
+                     if row.get("is_head") is True and isinstance(row.get("id"), str) and row["id"]]
+            if len(heads) != 1 or not data.worktree.get("id"):
+                result = {"attention": None, "error": "head-session-unavailable"}
+            else:
+                result = await asyncio.to_thread(
+                    ca.read_session_attention, None, data.worktree["id"], heads[0],
+                    runner=cc.cancellable_read_runner(cancelled, cwd=self._cwd or os.getcwd()),
+                )
+            if not cancelled.is_set() and self._data is data:
+                data.attention, data.attention_error = result["attention"], result["error"]
+                self._attention_next = time.monotonic() + (30 if result["error"] else 5)
+                self._update_attention()
+        finally:
+            cancelled.set()
+            if self._attention_cancel is cancelled:
+                self._attention_busy = False
+
+    def _update_attention(self) -> None:
+        data = self._data
+        self.query_one("#attention", Static).update(ca.attention_text(
+            data.attention, data.attention_error,
+        ))
+        button = self.query_one("#view-btn", Button)
+        label = "Return to CLI" if self._cli_pane else "Show Summary pane"
+        if self._cli_pane and data.attention and data.attention["availability"] == "observed":
+            if data.attention["rest"] == "awaiting-operator":
+                label = "CLI (last: input)"
+            elif data.attention["rest"] == "idle":
+                label = "CLI (last: idle)"
+        button.label = label
 
     def action_refresh(self) -> None:
         if not self._loading:
@@ -571,6 +649,7 @@ class MuxCompanionApp(App):
         self.sub_title = f"{repo} \u00b7 {branch}"
         self.query_one("#status", Static).update(self._status_text())
         self.query_one("#summary", Static).update(_summary_text(self._data))
+        self._update_attention()
         self._update_topology()
         evidence, resources = _claims_view(self._data)
         self.query_one("#claims-evidence", Static).update(evidence)

@@ -45,6 +45,9 @@ def _bundle(worktree_id="wt-ab12", *, confirmed=True):
 def _fake_status_bundle(monkeypatch):
     original = cc.worktree_status_bundle
     monkeypatch.setattr(cc, "worktree_status_bundle", lambda *a, **k: _bundle())
+    monkeypatch.setattr(companion.ca, "read_session_attention", lambda *a, **kw: {
+        "attention": None, "error": "attention-unavailable",
+    })
     return original
 
 

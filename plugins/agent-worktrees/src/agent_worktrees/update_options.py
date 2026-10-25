@@ -14,6 +14,7 @@ from . import output, update_events
 def add_update_options(p: argparse.ArgumentParser) -> None:
     p.add_argument("--target", metavar="PLUGIN", help="Update only this installed plugin; no Manager, anchors or unrelated components")
     p.add_argument("--inventory", action="store_true", help="Read installation inventory and supported update contract without installing")
+    p.add_argument("--runtime-sources", metavar="JSON", help=argparse.SUPPRESS)
     p.add_argument(
         "--auth-report",
         action="store_true",
@@ -43,6 +44,8 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
     flags: list[str] = []
     if getattr(args, "target", None) is not None:
         flags += ["--target", args.target]
+    if getattr(args, "runtime_sources", None) is not None:
+        flags += ["--runtime-sources", args.runtime_sources]
     if getattr(args, "auth_report", False):
         flags.append("--auth-report")
     for name in getattr(args, "force_runtime", None) or ():
@@ -51,6 +54,17 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 
 def validate_auth_flags(args: argparse.Namespace) -> None:
+    if getattr(args, "runtime_sources", None) is not None and (
+        not getattr(args, "no_manager", False)
+        or getattr(args, "target", None) is not None
+        or any(getattr(args, name, False) for name in (
+            "inventory", "auth_report", "request_status", "recovery_status",
+            "recover_after_restart", "recover_for_repair",
+        ))
+    ):
+        argparse.ArgumentParser(prog="update").error(
+            "--runtime-sources requires a suite update with --no-manager"
+        )
     target = getattr(args, "target", None)
     if target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", target):
         argparse.ArgumentParser(prog="update").error("--target requires a nonempty plugin identifier")

@@ -152,8 +152,9 @@ require their own review and qualification.
       actual native/platform qualification, provider and remaining effect-owner
       integration stay open. Original provider native-handoff storage merged in
       #8935 as an internal prerequisite, not provider effect-owner mediation.
-      Review the [provider boundary specialization](provider-custody.md) before
-      extending the existing provider binding/admission and guest/native owners.
+      The [provider boundary specialization](provider-custody.md) cleared review
+      in #8940; provider-first support and actual provider binding/admission and
+      guest/native integration remain unimplemented.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -268,6 +269,52 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-25 - Refuse provider selection at the local creation owner
+
+- The provider-first trace reaches the payload-owned runtime gate and canonical
+  versioned-runtime selector. Namespace resolution can return a mutable shim
+  whose later invocation selects a different completed runtime. A package
+  stamp, resolver process or readiness response cannot qualify that future
+  execution; no new support declaration is inferred.
+- Before integrating provider custody, close the concrete local adapter gap:
+  `CreationFrontend.prepare` must reject a provider request before its generic
+  journal can prepare a provider handoff. The concrete local launch owner also
+  rejects direct construction for a provider. Existing provider DB observations
+  remain readable and cannot be relabeled as local responsibility.
+- Twelve new synthetic refusal controls cover fresh, claimed, prepared,
+  outstanding and accepted provider attempts in open/closed epochs, plus
+  invalid request objects. The focused local allocation/native and provider
+  creation selection passes 153 controls with two reported skips. Rejection
+  changes neither original provider state nor inventory revision; ordinary
+  provider creation and positive local creation remain covered.
+- Genuine source `21c5c606d0a2d063e5b2b31d92cae5d75001c640` executes the
+  current HTTP-50 capture in both fixture installation modes. Write and
+  no-write flows each validate all 69 outputs; complete historical provenance
+  remains preserved. The source registry passes two contracts and 814
+  fixtures without changing wire generations or classifying the source away.
+- This is a local selection prerequisite under the reviewed provider boundary,
+  not provider negotiation, native qualification, release or running adoption.
+  Continue provider-first support against the actual selected execution owner;
+  keep binding/admission and guest/native ownership unsupported until their
+  own implementation and review. Every full-cohort Plan/Validation item stays
+  open.
+
+### 2026-10-25 - Provider boundary proposal merged; provider-first source next
+
+- #8940 merged as `1017ab87c66640b36a41850a9e2ec5bc9d808d18` after
+  independent approval of exact head `bb77d38c3f3c871d889f5922d45878fe58bd8281`,
+  with no open findings and required checks successful.
+- Re-read the full Plan and Validation Plan after the merge. This closes the
+  proposal-review prerequisite only; no full-cohort item or native/platform,
+  compatibility, restoration or adoption gate closes.
+- Begin the first bounded provider-first source prerequisite at the existing
+  attributed resolver/selected-runtime boundary. Keep unsupported custody
+  explicit until the actual binding/admission and guest/native owners enforce
+  it; do not infer support from readiness, physical pinning or payload version.
+- Reconciled only the owned source worktree past its provider-confirmed squash,
+  retaining the reviewed tip. The effort stays Active; no runtime activation,
+  provider execution or deployment was performed.
 
 ### 2026-10-25 - Select the actual provider custody boundary
 

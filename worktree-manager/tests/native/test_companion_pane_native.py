@@ -11,18 +11,19 @@ import uuid
 
 import pytest
 
-from worktree_manager import companion_pane, mux_daemon, mux_daemon_cli, mux_mapping_registry
+from worktree_manager import companion_lifecycle, companion_pane, mux_daemon, mux_daemon_cli, mux_mapping_registry
 from _manager_process_fixture import synthetic_runtime
 
 
 pytestmark = pytest.mark.skipif(
-    os.name != "nt" or not shutil.which("psmux") or not shutil.which("pwsh"),
+    os.name != "nt" or not (os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux"))
+    or not shutil.which("pwsh"),
     reason="Native Windows PSMux and PowerShell are required",
 )
 
 
 def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
-    binary = shutil.which("psmux")
+    binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     session = "companion-proof-" + uuid.uuid4().hex
     cwd = tmp_path / "checkout with spaces"
     cwd.mkdir()
@@ -34,7 +35,7 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         "import json,os,sys,time\n"
         "from pathlib import Path\n"
         "from worktree_manager.companion_lifecycle import cli_alive\n"
-        f"Path({str(observed)!r}).write_text(json.dumps({{'argv':sys.argv[1:],'prefix':sys.prefix,'pid':os.getpid()}}))\n"
+        f"Path({str(observed)!r}).write_text(json.dumps({{'argv':sys.argv[1:],'prefix':sys.prefix,'pid':os.getpid(),'pane':os.environ.get('TMUX_PANE')}}))\n"
         "options=dict(zip(sys.argv[1::2],sys.argv[2::2]))\n"
         "for _ in range(900):\n"
         " if cli_alive(options['--project'],options['--worktree-id'],options['--cli-pane'],"
@@ -96,6 +97,8 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         assert observed.exists(), mux("capture-pane", "-p", "-t", observer)
         receipt = json.loads(observed.read_text(encoding="utf-8"))
         assert Path(receipt["prefix"]).resolve() == slot.resolve()
+        assert receipt["pane"] == observer
+        assert companion_lifecycle.observer_visible("example", "fixture", observer, incarnation) is False
         assert receipt["argv"] == [
             "--cli-pane", cli, "--cwd", str(cwd.resolve()),
             "--project", "example", "--worktree-id", "fixture",

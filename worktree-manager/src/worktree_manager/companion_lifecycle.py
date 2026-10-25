@@ -17,6 +17,42 @@ _ended: set[tuple[str, str, str]] = set()
 _lock = Lock()
 
 
+def observer_visible(
+    project: str, worktree_id: str, pane_id: str | None, session_incarnation: str,
+) -> bool | None:
+    """Best-effort native visibility; uncertainty never licenses background reads."""
+    if not isinstance(pane_id, str) or not _PANE.fullmatch(pane_id):
+        return None
+    try:
+        mapping = get_mapping(project, worktree_id)
+        if (
+            not isinstance(mapping, dict) or mapping.get("project") != project
+            or mapping.get("worktree_id") != worktree_id or mapping.get("live") is not True
+            or mapping.get("session_incarnation") != session_incarnation
+            or not isinstance(session_incarnation, str)
+            or not _INCARNATION.fullmatch(session_incarnation)
+        ):
+            return None
+        raw = _call(
+            mapping, "display-message", "-p", "-t", pane_id,
+            "#{pane_id}\t#{session_id}:#{session_created}\t#{pane_dead}\t"
+            "#{pane_active}\t#{window_active}\t#{window_zoomed_flag}\t#{session_attached}",
+            timeout=2,
+        )
+    except (KeyError, OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        return None
+    row = raw.split("\t")
+    if len(row) != 7 or row[0] != pane_id:
+        return None
+    if (
+        row[1] != session_incarnation or any(flag not in {"0", "1"} for flag in row[2:6])
+        or not row[6].isdigit() or len(row[6]) > 10
+    ):
+        return None
+    return row[2] == "0" and row[4] == "1" and int(row[6]) > 0 and (
+        row[3] == "1" or row[5] == "0")
+
+
 def _finished(key: tuple[str, str, str]) -> bool:
     with _lock:
         _ended.add(key)

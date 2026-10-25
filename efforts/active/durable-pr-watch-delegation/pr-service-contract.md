@@ -182,6 +182,11 @@ select a different account, local owner or second subscriber.
 
 ## Scoped replay selection amendment _(agent-recommended; proposed)_
 
+The provider/client realization is documented in the
+[Gateway adapter](../../../plugins/agent-pull-requests/docs/watch-gateway.md#opt-in-scoped-v2).
+Scoped Dispatch durable intent and ordinary coordinator selection remain
+separate pending steps of this reviewed amendment.
+
 The current optional embedding constructs a replay consumer, but the normal
 Dispatch `server.build_app` does not select one. Its v1 client's strict
 five-field capabilities response proves operation support, not the current

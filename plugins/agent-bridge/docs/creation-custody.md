@@ -36,6 +36,12 @@ This is an internal DB prerequisite only. No provider subprocess, transport,
 Host or native effect selects these methods yet, and ordinary associated
 provider creation still refuses before launch. Actual provider effect-owner
 mediation and remote custody qualification remain separate gates.
+The local `CreationFrontend.prepare` refuses provider requests before journal
+preparation, and `CreationLaunchOwner` cannot be constructed for them. An
+existing provider handoff or native acceptance does not make a local effect
+owner responsible for that provider; rejected selection leaves the original
+provider row and inventory revision unchanged. Ordinary unassociated provider
+creation is unaffected.
 
 For workspaces, `CreationJournal.prepare_launch` retains the original allocation, key and facts
 digests, session, admission and consumer incarnation before launch preparation.

@@ -45,7 +45,11 @@ def installed(tmp_path, monkeypatch):
 def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeypatch):
     monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("browse acquired a payload"))
     before = {p: p.read_bytes() for root in installed.values() for p in root.rglob("*") if p.is_file()}
-    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    facts = owner.inventory()
+    assert facts["runtime_sources"] == {
+        "schema": "copilot-extensions.prepared-runtime-sources", "version": 1,
+    }
+    rows = {row["id"]: row for row in facts["entries"]}
     assert rows["agent-example"]["payload"] == "2"
     assert rows["agent-example"]["selected"] == "1"
     assert rows["agent-example"]["running"] == "0"

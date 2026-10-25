@@ -701,6 +701,9 @@ def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:
             "--test-file", "tests/test_watch_gateway.py",
             "--test-file", "tests/test_watch_gateway_transport.py",
             "--test-file", "tests/test_watch_observer.py",
+            "--test-file", "tests/test_watch_replay_client.py",
+            "--test-file", "tests/test_watch_replay_binding.py",
+            "--test-file", "tests/test_watch_replay_client_transport.py",
             "--max-files-per-sub-suite", "2",
         ]
         assert commands[1]["run"].split() == [

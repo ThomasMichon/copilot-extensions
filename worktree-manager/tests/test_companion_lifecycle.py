@@ -51,6 +51,40 @@ def test_exact_live_cli_is_read_only_and_uses_only_native_inventory(owner):
     assert "session_path" not in owner.calls[0][1][-1]
 
 
+@pytest.mark.parametrize("flags,expected", [
+    ("0\t1\t1\t1\t1", True),
+    ("0\t0\t1\t0\t1", True),
+    ("0\t0\t1\t1\t1", False),
+    ("0\t1\t0\t1\t1", False),
+    ("1\t1\t1\t1\t1", False),
+    ("0\t1\t1\t1\t", None),
+    ("0\tmaybe\t1\t1\t1", None),
+])
+def test_visibility_requires_native_owner_and_visible_attached_pane(owner, monkeypatch, flags, expected):
+    calls = []
+
+    def native(mapping, *args, **kw):
+        calls.append((args, kw))
+        assert args[0] == "display-message"
+        return "%99\t$7:100\t" + flags
+
+    monkeypatch.setattr(lifecycle, "_call", native)
+    assert lifecycle.observer_visible("example", "one", "%99", "$7:100") is expected
+    assert all(call[1] == {"timeout": 2} for call in calls)
+    assert lifecycle.observer_visible("example", "one", None, "$7:100") is None
+    assert lifecycle.observer_visible("example", "one", "%99", "$8:200") is None
+    assert len(calls) == 1
+
+
+def test_detached_visibility_ignores_synthetic_client_listings(owner, monkeypatch):
+    def native(mapping, *args, **kw):
+        assert args[0] == "display-message"
+        return "%99\t$7:100\t0\t1\t1\t1\t0"
+
+    monkeypatch.setattr(lifecycle, "_call", native)
+    assert lifecycle.observer_visible("example", "one", "%99", "$7:100") is False
+
+
 @pytest.mark.parametrize("case", [
     "missing-cli", "missing-cli-observer-without-path", "dead-cli",
     "dead-cli-without-path", "empty-native", "native-successor",

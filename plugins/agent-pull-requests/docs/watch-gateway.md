@@ -84,6 +84,41 @@ core's 24 KiB/16-event bound. Responses are JSON with `Cache-Control: no-store`.
 Pending reads first durably sweep elapsed deadlines; they never ACK events.
 All other replay, retention and exact-completion semantics are unchanged.
 
+### Opt-in scoped v2
+
+The same adapter also serves `agent-pull-requests.watch/v2` at
+`/v2/watch/<target>/<operation>`. V1 routes and their strict response shapes
+remain supported unchanged; no retirement or automatic migration is scheduled.
+
+V2 requires a `ReplayStore` with its existing durable `ReplayServiceIdentity`.
+Its `GET capabilities` adds only `binding` to the v1 capability fields and
+sets protocol v2. The binding has exactly `fleet`, `gateway`, `slot`,
+`namespace`, `principal`, `target`, `consumer`, `account` and `repo`.
+It describes only the admitted caller's selected mapping, not other callers,
+registrations or credentials.
+
+Each v2 POST has exactly `{"binding": <expected binding>, "request": <v1 payload>}`.
+The expected binding restricts the already-admitted operation; it cannot
+select or authorize a scope. Actual identity comes from Gateway context,
+scope from trusted configuration, and namespace/service identity from the
+bound store. The adapter compares them before storage access and again at the
+existing transaction checkpoints, including before reads, pending timeout
+sweeps and commits. The persisted identity and namespace are still validated
+under the real disk lock. A missing service binding or unequal expected
+binding returns `409 {"error":"watch_binding_mismatch"}` without current
+field values; malformed envelopes return 400. Successful operation bodies
+retain v1 receipt/batch semantics.
+
+Configure the expected binding from trusted deployment input, not by trusting
+the first capability response. A later target remap is refused even if an
+earlier capability probe succeeded. A refusal does not settle an earlier
+uncertain operation or license a replacement request. Configuration is fixed
+for an adapter lifetime; these checks are not a distributed reconfiguration or
+revocation barrier, and an already-started commit can still finish.
+No new identity header, Gateway policy RPC, entity tag or credential source
+is introduced. Dispatch's scoped durable-intent and ordinary coordinator
+selection remain separate consumer work.
+
 Malformed input is `400`, unbound/expired callers are `403`, unknown paths are
 `404`, wrong methods `405`, oversized bodies `413`, and non-JSON bodies `415`.
 Draining, capacity or transaction-lock contention returns explicit `503`
@@ -111,6 +146,13 @@ Construct `ReplayClient(caller, route_prefix="/api", target="project",
 repo="example/project")` with the trusted route prefix, opaque alias and
 expected repository. The prefix is Gateway-facing; the expected repository
 checks returned events and is never sent as an authority label.
+Omitting `binding` selects v1 exactly as before. To select v2 explicitly,
+also pass a frozen `watch_replay_binding.ReplayBinding` with the expected
+deployment fields; its target and repository must match the client route.
+V2 sends that expectation in every POST envelope. Capability validation
+requires exact equality with the configured binding; it never learns or
+updates the expectation from a response. `ReplayCapabilities.binding` is
+that immutable binding for v2, or `None` for v1.
 `await client.capabilities()` validates the exact versioned protocol,
 operations, batch bounds and receipt retention. Missing/incompatible
 capabilities refuse rather than silently selecting a legacy waiter.
@@ -167,7 +209,7 @@ protocol. This module starts no resident process or new lifecycle supervisor.
 ## Focused validation
 
 ```text
-python tools/run-plugin-tests.py agent-pull-requests --test-file tests/test_watch_replay_store.py --test-file tests/test_watch_gateway.py --test-file tests/test_watch_gateway_transport.py --test-file tests/test_watch_replay.py --test-file tests/test_watch_replay_client.py --test-file tests/test_watch_replay_client_transport.py
+python tools/run-plugin-tests.py agent-pull-requests --test-file tests/test_watch_replay_store.py --test-file tests/test_watch_gateway.py --test-file tests/test_watch_gateway_transport.py --test-file tests/test_watch_replay.py --test-file tests/test_watch_replay_client.py --test-file tests/test_watch_replay_binding.py --test-file tests/test_watch_replay_client_transport.py
 ```
 
 The tests reuse Fleet's actual synthetic-issuer/TLS/PoP/WebSocket fixture:
@@ -175,6 +217,11 @@ configured subject isolation, header/body spoof refusal, lost response
 reconciliation, adapter/connector replacement from disk, exact ACK retry and
 policy withdrawal all cross the real serving path. A separate real child
 process proves transaction-lock contention and restart reconciliation.
+Scoped controls cover every expected binding field, malformed envelopes,
+selection changes under disk custody, and refusal before state decode.
+Real transport controls exercise v1/v2 original-ID recovery, scope remapping
+after capability discovery, and an old-route provider rollback that refuses
+v2 without retrying v1 or replacing the original pending registration.
 Cancellation/drain and eight-operation bounds have focused handler tests.
 The real TLS tests pause before replay lookup and inside an already-started
 atomic write, then exercise both policy withdrawal and channel loss. Publication

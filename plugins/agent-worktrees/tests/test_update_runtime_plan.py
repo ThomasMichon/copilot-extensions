@@ -215,3 +215,63 @@ def test_native_update_preflight_prevents_real_installer_side_effect(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Required runtime preflight failed" in result.stdout + result.stderr
     assert "PREFLIGHT_BLOCKED_WITHOUT_ACTIVATION" in result.stdout
+
+
+@pytest.mark.parametrize("kind", ["module", "registered"])
+@pytest.mark.parametrize("change", ["none", "missing", "extra", "changed-artifact"])
+def test_whole_update_keeps_prepared_sources_and_original_owners(
+    portfolio, monkeypatch, tmp_path, kind, change,
+):
+    from agent_worktrees import update_integration
+    from agent_worktrees.update_runtime_source import PIN_ENV, PreparedRuntimeSource
+    from test_update_runtime_sources import packet
+
+    engine, peer, calls = portfolio
+    if kind == "module":
+        (engine / "modules.json").write_text(json.dumps({"modules": [{"name": peer.name}]}))
+    artifacts = tmp_path / "prepared"
+    artifacts.mkdir()
+    data = packet(artifacts, (engine.name, peer.name))
+    if change == "missing":
+        del data["sources"][peer.name]
+    if change == "extra":
+        data["sources"].update(packet(artifacts, ("inactive",))["sources"])
+    for name in data["sources"]:
+        artifact = artifacts / name
+        (artifact / "scripts").mkdir()
+        (artifact / "scripts/install.sh").write_text("exit 0\n")
+        (artifact / "plugin.json").write_bytes((engine / "plugin.json").read_bytes())
+    validated, executed = [], []
+
+    def validate(source, name, owner, environment):
+        validated.append((name, owner, source.payload))
+        if change == "changed-artifact" and name == peer.name:
+            raise ValueError("prepared payload bytes changed")
+
+    monkeypatch.setattr(PreparedRuntimeSource, "validate", validate)
+    monkeypatch.setattr(PreparedRuntimeSource, "deployed_version", lambda *a: None)
+    monkeypatch.setattr(update_cli, "_run_engine_installer", lambda *a, **kw: (
+        executed.append(kw["source_step"]) or 0
+    ))
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda step: (
+        executed.append(step) or "OK"
+    ))
+    monkeypatch.setattr(update_integration, "finish", lambda *a: True)
+    args = argparse.Namespace(
+        no_manager=True, runtime_sources=json.dumps(data), skip_modules=None,
+        no_anchor_sync=True, no_prune_pivots=True,
+    )
+    assert update_cli._update_in_plugin_steps(args) == (0 if change == "none" else 1)
+    assert len(executed) == (2 if change == "none" else 0)
+    if change == "none":
+        assert validated == [
+            (engine.name, engine, artifacts / engine.name),
+            (peer.name, peer, artifacts / peer.name),
+        ]
+        for step in executed:
+            assert step.payload == (engine if step.name == engine.name else peer)
+            assert step.artifact == artifacts / step.name
+            assert step.environment[PIN_ENV] == step.source.identity
+            assert step.environment["COPILOT_PLUGIN_STAGED_FROM"] == str(step.payload)
+            assert step.runtime_root == tmp_path / step.name
+    assert calls == [["copilot", "plugin", "update", "agent-worktrees@copilot-extensions"]]

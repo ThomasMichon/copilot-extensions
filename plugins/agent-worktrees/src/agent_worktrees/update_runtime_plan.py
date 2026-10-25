@@ -234,6 +234,7 @@ def plan_modules(
     plugin_dir: Path, platform_name: str, skip_modules: list[str] | None,
     *, force: bool = False, targets: Mapping[str, _RegisteredPluginTarget] | None = None,
     force_runtimes: Collection[str] = (),
+    sources: Mapping[str, PreparedRuntimeSource] | None = None,
 ) -> tuple[RuntimeUpdateStep, ...]:
     manifest = plugin_dir / "modules.json"
     if not manifest.exists():
@@ -268,9 +269,39 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
+                **({"source": sources.get(name)} if sources is not None else {}),
             )
         steps.append(step)
     return tuple(steps)
+
+
+def plan_portfolio(
+    plugin_dir: Path, platform_name: str, skip_modules: list[str] | None, *,
+    force: bool, targets: Mapping[str, _RegisteredPluginTarget],
+    force_runtimes: Collection[str], sources: Mapping[str, PreparedRuntimeSource] | None = None,
+) -> tuple[RuntimeUpdateStep, tuple[RuntimeUpdateStep, ...], tuple[RuntimeUpdateStep, ...]]:
+    """Collect the engine, module and remaining active registered runtime owners."""
+    engine = plan_engine(
+        plugin_dir, platform_name, force=force or "agent-worktrees" in force_runtimes,
+        **({"source": sources.get("agent-worktrees")} if sources is not None else {}),
+    )
+    modules = plan_modules(
+        plugin_dir, platform_name, skip_modules, force=force,
+        targets=targets, force_runtimes=force_runtimes,
+        **({"sources": sources} if sources is not None else {}),
+    )
+    excluded = {step.name for step in modules} | {"agent-worktrees"} | set(skip_modules or ())
+    registered = tuple(
+        plan_registered(
+            name, platform_name, force=force or name in force_runtimes,
+            gate_context=target.context,
+            **({"source": sources.get(name)} if sources is not None else {}),
+        )
+        for name, target in sorted(targets.items())
+        if target.required and name not in excluded
+        and not (skip_modules is not None and not skip_modules)
+    )
+    return engine, modules, registered
 
 
 def plan_engine(

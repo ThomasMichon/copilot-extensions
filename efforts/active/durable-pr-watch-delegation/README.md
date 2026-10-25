@@ -378,9 +378,10 @@ existing serving/consumer contract, not a second watcher or evaluator._
   original identities across restart and one wake per event after lost ACK.
   Source confirmed by #8927. This finite proof does not close live provider credentials, the
   independent evaluator route, image or installed/fleet acceptance.
-- [ ] Review the [scoped replay selection amendment](pr-service-contract.md#scoped-replay-selection-amendment-agent-recommended-proposed)
+- [x] Review the [scoped replay selection amendment](pr-service-contract.md#scoped-replay-selection-amendment-agent-recommended-proposed)
   before implementing a parallel opt-in v2 binding contract. Preserve strict v1
-  wire/record compatibility, original identities and default native operation.
+  wire/record compatibility, original identities and default native operation
+  (confirmed by #8938; implementation and qualification remain below).
 - [ ] Implement and qualify current service/consumer binding at every replay
   operation, then wire explicit optional coordinator composition through its
   existing lifetime, active-route and credential owners. No configuration label
@@ -734,6 +735,23 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Merge the scoped replay selection contract
+
+- #8938 merged as `edde802ec4819310f6e4e19cae015b4a387dbd4b` from
+  approved head `1daa5bab124dfd5bac51b52009c1128ade4ed53b`.
+  Copilot review `5642584036` approved without findings; full reviews and
+  review/issue comments were read. Required checks passed, as did local
+  documentation consistency and whitespace validation.
+- Re-read the current parent intent, Coordination, relevant Plan/Validation
+  and journal after merge. Close only the proposal-review item. The parallel
+  opt-in v2 contract retains v1 and requires expected binding comparison at
+  the real operation boundary, not a capability-only or configuration-label
+  authority check.
+- Continue provider-first implementation and real transport compatibility
+  qualification, then scoped durable intent and explicit optional coordinator
+  composition. No runtime, credentials, image or deployment was enabled by
+  this documentation-only merge. The parent remains Active.
 
 ### 2026-10-25 - Merge actual watcher/client source qualification
 
