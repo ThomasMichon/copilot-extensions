@@ -42,7 +42,7 @@ and the parent effort's remaining completion gates stay open.
   do not change through launch, refresh, attempted action and exit.
 - [x] Run the existing affected Manager test lane, touched-file lint and
   repository contracts; document unavailable platform or external lanes.
-- [ ] Land the reviewed implementation and return to the parent effort's
+- [x] Land the reviewed implementation and return to the parent effort's
   installed acceptance and completion gates.
 
 This is a trusted developer review mode, not a sandbox for hostile candidate
@@ -58,7 +58,7 @@ current owner-published rows, refused eleven exercised effect paths, retained
 the same existing owner endpoint and ten protected files, and removed its
 disposable state. Captures remain local because they contain real data.
 Contributed Workers discovery succeeded. An earlier read reached the existing
-deadline and showed an error, not a healthy empty catalog; the final candidate
+deadline and showed an error, not a healthy empty catalog; one qualified candidate
 read and rendered 144 real catalog entries within that unchanged deadline.
 Neither result claims save/activation or installed acceptance.
 
@@ -94,6 +94,16 @@ catalog command and its selected state root atomically. Real child reads using
 the provider's own path resolver select the non-default root both without an
 inherited override and with a conflicting override; the parent environment is
 unchanged.
+
+Implementation #8723 merged as
+`d24a5d2a8269cd9e666e8ce4046bdfff24053242`, after approval of
+`74d8948e3de4c5c787416b008acba2713f39f6ae`, required green CI and resolved
+review threads. The latest revised native UI run rendered/refreshed 222 current
+rows and refused thirteen effect paths, including both bulk confirmations,
+with the same owner endpoint, ten protected files unchanged and temporary state
+removed. The older installed Workers provider again showed its unchanged read
+deadline explicitly. The Coordinator has resumed the parent installed-acceptance
+slice; this source-only delivery does not close that gate.
 
 This developer mode does not change installation/bootstrap, so a fresh-machine
 installation lane is not applicable; absent-owner refusal is tested instead.

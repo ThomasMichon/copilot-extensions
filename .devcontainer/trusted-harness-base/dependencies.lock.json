@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "minimum_age_seconds": 604800,
+  "platform": "linux/amd64",
+  "base": {
+    "image": "mcr.microsoft.com/devcontainers/python@sha256:ca7b20585cf65295cd0cef8ae8f02a008c1c85e83909d1e2af8d19706d3f34ee",
+    "index_digest": "sha256:7876580dc67fd460fd962f004cbeb480027e9bbc0657096f1087db11f9eaff39",
+    "config_digest": "sha256:8adb231de276bf2178265e634e73373a1999652542c8e580ee77cd09e8eb97de",
+    "published_at": "2025-07-10T11:43:47.764186Z",
+    "evidence": "https://mcr.microsoft.com/v2/devcontainers/python/blobs/sha256:8adb231de276bf2178265e634e73373a1999652542c8e580ee77cd09e8eb97de",
+    "python_version": "3.12.11"
+  },
+  "apt": {
+    "snapshot": "https://snapshot.debian.org/archive/debian/20261001T000000Z/",
+    "suite": "bookworm",
+    "published_at": "2026-07-11T10:16:37Z",
+    "release_sha256": "abcf5882746e0f68171f41adbb4ac01b74b49d62d203379befb9265804311a4f",
+    "packages_xz_sha256": "9e0b5aabb2465b3d2e7a7fe27f9913846277833f7a2826e7767acccff5b588c5",
+    "evidence": "https://snapshot.debian.org/archive/debian/20261001T000000Z/dists/bookworm/Release",
+    "packages": {
+      "ca-certificates": "20230311+deb12u1",
+      "curl": "7.88.1-10+deb12u15",
+      "dbus-user-session": "1.14.10-1~deb12u1",
+      "gh": "2.23.0+dfsg1-1",
+      "openssh-client": "1:9.2p1-2+deb12u10",
+      "openssh-server": "1:9.2p1-2+deb12u10",
+      "sudo": "1.9.13p3-1+deb12u4",
+      "systemd": "252.39-1~deb12u2",
+      "systemd-sysv": "252.39-1~deb12u2",
+      "tmux": "3.3a-3"
+    }
+  },
+  "archives": {
+    "node": {
+      "version": "22.15.0",
+      "npm_version": "10.9.2",
+      "published_at": "2025-04-22T00:00:00Z",
+      "url": "https://nodejs.org/dist/v22.15.0/node-v22.15.0-linux-x64.tar.xz",
+      "sha256": "dafe2e8f82cb97de1bd10db9e2ec4c07bbf53389b0799b1e095a918951e78fd4",
+      "evidence": "https://nodejs.org/dist/v22.15.0/SHASUMS256.txt",
+      "strip_components": 1
+    },
+    "copilot": {
+      "version": "1.0.98",
+      "published_at": "2026-10-14T19:52:33Z",
+      "url": "https://github.com/github/copilot-cli/releases/download/v1.0.98/copilot-linux-x64.tar.gz",
+      "sha256": "87ddb4b3f98462b7cb13c0a6857c68ee410ec9673e2e5f64ee5bedad45825b05",
+      "evidence": "https://github.com/github/copilot-cli/releases/download/v1.0.98/SHA256SUMS.txt",
+      "strip_components": 0
+    },
+    "uv": {
+      "version": "0.12.6",
+      "published_at": "2026-08-25T19:41:07Z",
+      "url": "https://github.com/astral-sh/uv/releases/download/0.12.6/uv-x86_64-unknown-linux-gnu.tar.gz",
+      "sha256": "8681d8921e7d520fb368991dcf5f9c1905b80f5bf2a265a0ed085c8d8e342477",
+      "evidence": "https://api.github.com/repos/astral-sh/uv/releases/tags/0.12.6",
+      "strip_components": 1
+    }
+  }
+}
