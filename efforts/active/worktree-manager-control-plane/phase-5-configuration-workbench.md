@@ -26,6 +26,16 @@ Explicit delta requests may be routed through agent-dispatch to maintenance
 workers, with clean outcome evaluation. Build effort plans to drive this vision.
 No private originating identifiers or transcript are included here.
 
+**Installation and Updates operator request (verbatim, 2026-10-24):**
+
+> Something added an "Automatic maintenance" overlay popup thing in Worktree Manager. That's...interesting. We should add a Configuration section relating to Installation and Updates, to show the complete set of maintained services, their current versions, and provide updaters for each plugin
+
+The bounded implementation is claimed by `ticking-compass` under #8877.
+The existing launch callback is not an instruction to remove its status
+semantics. Automatic-maintenance #7028 and acquisition/setup/trust/readiness
+#8545/#356 retain their owners; historical #357 is closed and its unchecked
+acceptance remains here.
+
 ## Ownership and Prior Art
 
 | Surface | Owner and existing foundation | Boundary |
@@ -143,6 +153,46 @@ traceable; unavailable pool leaves local controls working and sources read-only.
 - [ ] Report published versus installed/runtime-observed versions separately;
   transfer any remaining rollout or domain implementation to a named tracker.
 
+### Installation and Updates - bounded vertical slice (#8877)
+
+The following implementation/validation decomposition is
+**agent-recommended**, realizing the operator request above without taking
+over the other waves or automatic-maintenance policy.
+
+- [ ] Reuse standing Configuration list/detail/contextual-action navigation;
+  discover Manager and the complete maintained runtime/payload-only set through
+  canonical catalogs and installation resolution, never a copied roster.
+- [ ] Populate inventory off the UI thread with installed/enabled distinctions,
+  payload/selected-runtime/observed-running versions and source provenance.
+  Unknown, missing, unsupported and platform-policy outcomes remain actionable.
+  Browse/refresh does not install, ensure a daemon, start workers, write sources
+  or request credentials.
+- [ ] Add genuine target-scoped updates through the existing durable driver and
+  owning installers, extending their targeting seam where necessary. Preserve
+  configured sources, dependency/readiness, publication, retention, credentials
+  and recovery policy; never widen an unsupported request. Manager self-update
+  uses its own seam; existing full-suite behavior is unchanged.
+- [ ] Confirm the exact affected target; retain attributable acceptance,
+  queued/running/terminal outcomes and refreshed actual inventory. Dismissal
+  stops observation only, never service-owned execution. Busy/older owners
+  expose supported retry, not a second queue or automatic scheduling.
+- [ ] Exercise real production navigation and owner forwarding with isolated
+  synthetic inventory and installer fixtures: payload-only/absent/unknown,
+  exact target and unaffected components, source immutability, failure/retry,
+  disconnect/dismiss survival and refreshed versions. Use bounded,
+  network-disconnected repository test selection and headless Manager UI.
+- [ ] Land runtime/changefiles and directly related documentation through
+  current-head automated review and required CI. Journal only this bounded
+  landed slice, distinguish release/rollout and preserve broader Phase 5 gates.
+
+**Validation:** the production UI must reach the actual target-aware owner,
+not a mock success or a whole-suite updater. Tests compare unaffected
+payload/runtime/anchor and source bytes, exercise durable lifecycle results,
+and verify observer loss cannot invent cancellation/completion. Run F/E9 lint,
+install-contract and module-size guards. Fresh-install/native and installed
+rollout remain explicit separately owned gates when unavailable; no production
+installation, credentials or host configuration are used for source validation.
+
 ## Validation Plan
 
 | Gate | Required evidence |
@@ -257,6 +307,12 @@ issue and owner in the parent Journal before implementation. Historical #357
 is acceptance provenance, not a replacement for those live execution tokens.
 
 ## Journal
+
+- **2026-10-24** - Proposed #8877's bounded Installation and Updates slice,
+  claimed by `ticking-compass`, and extended the Configurator vision with its
+  standing inventory and component-scoped update intent. Planning only;
+  runtime implementation begins after this amendment's reviewed merge.
+  Existing wave, automatic-maintenance and setup owners retain custody.
 
 - **2026-10-22** - Recorded the complete original/inherited #357 acceptance
   for reviewed tracker consolidation and routed live coordination through the
