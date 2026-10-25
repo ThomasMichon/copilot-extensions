@@ -405,7 +405,9 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
                 from agent_procutil._linux_pidfd import open_pidfd
                 descriptor = open_pidfd(int(frame.split()[0].partition(":")[2]))
                 assert not _pidfd_exited(descriptor), diagnostic()
-            follower = subprocess.Popen(command("stamp"), **kwargs)
+            follower, _follower_log = native_recipe_runner.start(
+                command("stamp"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+            )
             if job is not None:
                 job.close()
                 job = None
@@ -519,12 +521,21 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
             (adapter / "mode").unlink(missing_ok=True)
     manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     assert manifest["source"]["kind"] == "marketplace"
-    project_file = payload / "pyproject.toml"
-    project_file.write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', 'version = "99.0.0"',
-                                   project_file.read_text()), encoding="utf-8")
     (payload / "src/agent_bridge/__init__.py").write_text(
         'raise RuntimeError("fixture failed Bridge candidate")\n', encoding="utf-8",
     )
+    changed = native_recipe_runner.run(
+        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+    )
+    # Windows' prepared target only reconciles its task; POSIX's install path
+    # refuses different content for the already-completed immutable version.
+    assert (changed.returncode == 0) is (os.name == "nt"), changed.stdout + changed.stderr + diagnostic()
+    assert status(root=root)[-1].state == "completed"
+    assert (installation / "current-version").read_text().strip() == selected
+    assert completion.read_bytes() == complete
+    project_file = payload / "pyproject.toml"
+    project_file.write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', 'version = "99.0.0"',
+                                   project_file.read_text()), encoding="utf-8")
     # A new version has no prepared target slot on either native installer.
     failed = native_recipe_runner.run(
         command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
