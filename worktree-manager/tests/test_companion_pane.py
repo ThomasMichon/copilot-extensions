@@ -190,6 +190,28 @@ def test_old_observer_never_returns_to_reused_successor_pane(mux):
     assert not any(call[0] == "select-pane" for call in state.calls)
 
 
+def test_navigation_guard_storage_failure_is_visible(mux, monkeypatch, tmp_path):
+    state, cwd = mux
+    root = tmp_path / "not-a-directory"
+    root.write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(pane, "default_root", lambda: root)
+    with pytest.raises(pane.PaneError, match="guard unavailable"):
+        pane.switch("show", cwd)
+    assert not any(call[0] == "split-window" for call in state.calls)
+
+
+def test_registry_storage_failure_is_visible(mux, monkeypatch):
+    state, cwd = mux
+
+    def unavailable(*args):
+        raise OSError("registry unavailable")
+
+    monkeypatch.setattr(pane, "get_mapping", unavailable)
+    with pytest.raises(pane.PaneError, match="identity is unavailable"):
+        pane.switch("show", cwd)
+    assert not state.calls
+
+
 def test_concurrent_processes_publish_only_one_observer(tmp_path):
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"splits": 0, "observer": None, "panes": []}), encoding="utf-8")

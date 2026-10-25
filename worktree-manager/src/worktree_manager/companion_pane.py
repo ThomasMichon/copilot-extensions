@@ -58,9 +58,9 @@ def _navigation_guard(mapping: dict, cli: str, cancelled=None):
         "project", "worktree_id", "mux_session", "session_incarnation",
     )) + "\0" + cli
     folder = default_root() / "companion-panes"
-    folder.mkdir(parents=True, exist_ok=True)
     path = folder / (hashlib.sha256(key.encode()).hexdigest() + ".lock")
     try:
+        folder.mkdir(parents=True, exist_ok=True)
         with path.open("a+b") as handle:
             deadline = time.monotonic() + 10
             while not _try_lock_file_once(handle):
@@ -84,7 +84,10 @@ def _target(cwd: str, cli_pane: str | None, runner=None, cancelled=None) -> tupl
     project, worktree_id = status.get("repo"), status.get("id")
     if not project or not worktree_id:
         raise PaneError("The current worktree has no registered mux identity.")
-    mapping = get_mapping(str(project), str(worktree_id))
+    try:
+        mapping = get_mapping(str(project), str(worktree_id))
+    except (OSError, ValueError) as exc:
+        raise PaneError(f"The registered mux identity is unavailable: {exc}") from exc
     if not mapping or not mapping.get("live"):
         raise PaneError("The current worktree has no live mux mapping.")
     if Path(str(mapping.get("worktree_path") or "")).resolve() != Path(
