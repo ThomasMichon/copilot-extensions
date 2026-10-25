@@ -738,3 +738,34 @@ caller coverage, not one launcher or one platform passing.
 - The four review corrections are implemented and qualified, but publication,
   a passing fresh review, current-head CI and completion archival remain open.
   The effort stays Active; no runtime rollout is authorized.
+
+### 2026-10-25 - Lane event worker and embedding-engine teardown
+
+- A later current-head review found two further shipped owners. The lane
+  supervisor's bounded Bridge-event close could return while stream opening
+  was blocked, and the embedding-engine lifespan skipped teardown when an
+  exception was thrown into its bare yield. Both failures were reproduced
+  with real admitted records and live native work.
+- Lane shutdown now retains the original wake, native worker witness and
+  stream inventory until actual retirement and confirmed stream closure.
+  The bounded close API, event cursor, wake/election and recovery ownership
+  remain unchanged. Independent Windows replay passed 332 tests across the
+  full Supervisor file and event-worker controls; isolated Linux passed 61.
+  Legacy Windows/Linux native witness paths were exercised explicitly;
+  no macOS venue was available for the legacy Mach path.
+- Engine teardown now always runs in a protected finally, stops new inference,
+  joins the idle task, and settles already-admitted inference before unloading.
+  The existing activity counter includes response conversion after the GPU
+  lock is released. A private executor Future preserves native completion
+  through repeated/global task cancellation without closing a caller's shared
+  executor. Original application errors survive later cleanup failures.
+- The frozen Windows engine packet passed 71 tests with three platform skips,
+  including 21 real-FastAPI lifespan controls and ten exact-source native
+  controls. The retained Linux runtimes lacked FastAPI; no new dependencies or
+  models were acquired. Instead, ten direct probes executed the exact source
+  lifespan/control functions with real locks, native threads and admission.
+  This is explicitly native/control evidence, not a full Linux ASGI pass or
+  real GPU/model qualification. All 434 Linux snapshot files and 28 installed
+  shared-process Python files were verified; the container was removed.
+- Current source review/CI/publication and completion archival remain open.
+  The effort remains Active; no runtime rollout is authorized.

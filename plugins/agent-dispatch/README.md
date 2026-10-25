@@ -2869,6 +2869,13 @@ new SSH command. Prompt turn-end wakeups will return only through a cursor-based
 Agent Bridge event subscription over a shared persistent carrier; until then,
 `--no-reactive` and `--reactive-interval` are accepted as compatibility no-ops.
 
+When a Bridge event wake is attached, lane shutdown retains admission and the
+original worker/stream objects until native worker retirement and confirmed
+stream closure. The wake's `close()` remains bounded; the lane's final cleanup
+waits through interruptions or failed close attempts and rethrows the first
+error only after settlement. Thread facade state is not retirement proof.
+This adds no event replay, cursor change, credential store or production expiry.
+
 The bare `supervise` above runs the loop in the foreground. The
 `supervise register|status|list|remove` subcommands instead manage durable
 **registrations** — a caller registers a unit (a lane, schedule, emitter, or

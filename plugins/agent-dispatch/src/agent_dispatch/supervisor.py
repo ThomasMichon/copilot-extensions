@@ -3784,6 +3784,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         Push delivery changes latency only; the timeout always preserves ordinary
         fixed-interval reconciliation as the correctness floor.
         """
+        event_wake = self.event_wake
         try:
             while True:
                 boundary = self._recheck_governance("iteration-boundary")
@@ -3812,5 +3813,5 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 except KeyboardInterrupt:
                     return
         finally:
-            if self.event_wake is not None:
-                self.event_wake.close()
+            if event_wake is not None:
+                event_wake.close_and_wait()
