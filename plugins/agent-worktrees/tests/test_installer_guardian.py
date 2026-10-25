@@ -29,6 +29,37 @@ def guardian():
     return module
 
 
+@pytest.mark.parametrize("with_deadline,with_capture", [
+    (False, False), (False, True), (True, False), (True, True),
+])
+def test_retained_dispatch_preserves_deadline_and_capture_options(
+    guardian, monkeypatch, tmp_path, with_deadline, with_capture,
+):
+    monkeypatch.setattr(guardian, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(guardian.time, "monotonic", lambda: 10)
+    calls = []
+    result = subprocess.CompletedProcess(["owned-child"], 0, "owned output", "")
+
+    def retained(argv, **kwargs):
+        calls.append(kwargs)
+        return result
+
+    monkeypatch.setattr(guardian, "_retained_windows", retained)
+    helper = tmp_path / "installer_diagnostics.py"
+    assert guardian.run_owned(
+        ["owned-child"], cwd=tmp_path, env={}, timeout=30,
+        procutil=SimpleNamespace(), construction_fd=0, runtime_root=tmp_path,
+        runtime_version="probe", runtime_path=tmp_path / "runtime.py",
+        deadline=15 if with_deadline else None,
+        diagnostics_path=helper if with_capture else None,
+    ) is result
+    assert calls[0]["timeout"] == (5 if with_deadline else 30)
+    assert calls[0].get("deadline") == (15 if with_deadline else None)
+    assert calls[0].get("diagnostics_path") == (helper if with_capture else None)
+    assert ("deadline" in calls[0]) is with_deadline
+    assert ("diagnostics_path" in calls[0]) is with_capture
+
+
 @pytest.mark.parametrize("state,exited", [("S\n", False), ("Z\n", True), ("Z+\n", True)])
 def test_missing_waitid_uses_nonreaping_process_state(guardian, monkeypatch, state, exited):
     monkeypatch.setattr(guardian, "os", SimpleNamespace())

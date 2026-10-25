@@ -1027,3 +1027,28 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   unchanged prologue. The 13-plugin install contract, synchronization and
   targeted Ruff pass. Bounded claims apply to diagnostic forwarding, not a new
   global output owner. No source merge, native-lane result or rollout is claimed.
+- Named-defect verification confirmed both writer-lifecycle repairs, without
+  claiming runtime qualification. The held source was committed at
+  `fd7ac3f6406ecaddc694265e988b4faf396b4d96`. Its managed push hit the existing
+  30-second transport deadline after successful identifier/blob guards; a fresh
+  provider read positively confirmed that exact draft head reached GitHub.
+- Current-head PR CI did not start because the provider reported a dirty merge
+  ref. The PR's base snapshot still named `a88812a84e`, but a separate live
+  `git/ref/heads/dev` read showed `235e97636d`; the stale PR snapshot was not
+  treated as the current base. A preserved local backup preceded reconciliation.
+  The rebase retains the new SSH/source-profile lanes and the upstream absolute
+  guardian deadline alongside opted-in diagnostic capture. Four option-dispatch
+  controls cover neither/either/both inputs and passed in **0.52 seconds;
+  13.72 seconds including preparation and cleanup**; the selector-union guards
+  passed separately. No deadline, ownership or qualification hold was relaxed.
+- A subsequent fetch advanced the base to `0d8e4c8603`. The original five
+  published commits were replayed in order, retaining their authors and full
+  messages. The reconciliation also retains the newer native manifest-builder
+  controls and Logger command portfolio guard. Recovery backups preserve both
+  the published head and the earlier locally reconciled candidate; no
+  publication bookkeeping was hand-edited.
+- Against that reconciled base, canonical-copy synchronization passes, both
+  focused workflow-contract guards pass, and the four deadline/capture dispatch
+  controls pass in **0.47 seconds; 5.43 seconds including preparation and
+  cleanup**. Targeted Ruff also passes. These are source-contract checks, not
+  another native timing retry or hosted acceptance result.
