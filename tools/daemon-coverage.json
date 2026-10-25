@@ -290,6 +290,7 @@
       "wm:update_bootstrap.py::_wait::Popen": 1,
       "wm:production_picker/picker_tui/engine_worker_actions.py::PickerScreenWorkerActionsMixin._open_bridge_ui::Popen": 1,
       "wm:production_picker/picker_tui/engine_worktree_actions.py::PickerScreenWorktreeActionsMixin._embody_task_cli._work::Popen": 1,
+      "r:plugins/agent-containers/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-logger/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-worktrees/scripts/command_lifecycle.py::run_lifecycle::Popen": 1,
       "r:plugins/agent-worktrees/scripts/runtime_install.py::install::Popen": 1,
