@@ -32,8 +32,11 @@ class EmitterError(ValueError):
     """A malformed command-emitter spec."""
 
 
-def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> None:
+def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False, snapshot=None) -> None:
     """Validate shape before admission; only held work resolves resources."""
+    snapshot_options = (
+        {"snapshot": snapshot.with_execution(execution=True)} if snapshot is not None else {}
+    )
     if not isinstance(spec, dict):
         raise EmitterError("emitter spec must be a JSON object")
     if not isinstance(spec.get("id"), str) or not spec["id"]:
@@ -85,6 +88,7 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
             validate_config(
                 builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources,
                 worker_identity_cwd=spec.get("worker_identity_cwd"),
+                **snapshot_options,
             )
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
@@ -99,7 +103,9 @@ def validate_spec(spec: dict[str, Any], *, resolve_resources: bool = False) -> N
         from ..effort_driver_loops import validate_config
 
         try:
-            validate_config(effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources)
+            validate_config(
+                effort_builtin, cwd=spec.get("cwd"), resolve_resources=resolve_resources, **snapshot_options,
+            )
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:

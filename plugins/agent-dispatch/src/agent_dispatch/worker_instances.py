@@ -132,7 +132,9 @@ def _atomic(path: Path, value: dict) -> None:
                 staging.unlink()
 
 
-def validate_configuration(name: str, document: object, repo_root: str = "") -> tuple[dict, tuple]:
+def validate_configuration(
+    name: str, document: object, repo_root: str = "", *, snapshot=None,
+) -> tuple[dict, tuple]:
     if not isinstance(document, dict):
         raise RegistrarError("declaration: expected a JSON object")
     if document.get("name") not in (None, name):
@@ -150,7 +152,7 @@ def validate_configuration(name: str, document: object, repo_root: str = "") -> 
         raise RegistrarError("this template requires repo_root for worker identity and dependency resolution")
     data = {**document, "name": name, "owner": OWNER}
     declarations = rd.expand_declaration_document(
-        data, directory=root or active_dir(), repo_root=root,
+        data, directory=root or active_dir(), repo_root=root, snapshot=snapshot,
     )
     if not declarations:
         raise RegistrarError("configuration expands to no declarations")
@@ -217,11 +219,12 @@ def _validate_evaluator_dependency(declaration, resources) -> None:
 
 def _validate_dependencies(
     declarations: tuple, repo_root: str, *, available_declarations: tuple | None = None,
+    snapshot=None,
 ) -> None:
     from .registrations import RegistrationKind
     from .repository_resources import RepositoryResourceSnapshot
 
-    resources = RepositoryResourceSnapshot(execution=False)
+    resources = snapshot or RepositoryResourceSnapshot(execution=False)
     for declaration in declarations:
         if declaration.fleet.enabled and not shutil.which("ssh"):
             raise RegistrarError("missing fleet dependency: ssh transport")

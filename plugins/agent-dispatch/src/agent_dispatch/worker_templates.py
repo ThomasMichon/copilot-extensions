@@ -342,10 +342,11 @@ def _read_source(
 
 def discover_templates(
     activation: ActivationReport, *, _definitions: dict | None = None,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> tuple[list[dict], dict]:
     """Enumerate inert provider rows and separately scoped completeness findings."""
     findings: list[dict] = []
-    snapshot = RepositoryResourceSnapshot(execution=False)
+    snapshot = snapshot or RepositoryResourceSnapshot(execution=False)
     sources = []
     for finding in activation.findings:
         _finding(findings, "plugin-activation", "activation-finding", str(finding))

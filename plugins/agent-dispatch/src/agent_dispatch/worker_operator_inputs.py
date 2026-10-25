@@ -148,7 +148,7 @@ def selected_source(source_id: str, revision: str, *, definitions=None, activati
     }}
 
 
-def materialize(selected: dict, values: dict, name: str, repo_root: str) -> dict:
+def materialize(selected: dict, values: dict, name: str, repo_root: str, *, snapshot=None) -> dict:
     if selected.get("builtin") == "worker-pool":
         from .worker_instances import POOL_TEMPLATE
         if not values["label"].strip():
@@ -160,10 +160,10 @@ def materialize(selected: dict, values: dict, name: str, repo_root: str) -> dict
             "repos": values["repos"], "concurrency": int(values["concurrency"]),
         }
     from .worker_template_materialization import materialize_template
-    return materialize_template(selected, {"params": values}, name, repo_root)
+    return materialize_template(selected, {"params": values}, name, repo_root, snapshot=snapshot)
 
 
-def verify_record(record: dict, *, definitions=None, activation=None) -> tuple[dict, dict]:
+def verify_record(record: dict, *, definitions=None, activation=None, snapshot=None) -> tuple[dict, dict]:
     from .worker_instances import digest, validate_configuration
 
     binding = record.get("operator_inputs")
@@ -185,14 +185,17 @@ def verify_record(record: dict, *, definitions=None, activation=None) -> tuple[d
         raise RegistrarError("Stored operator inputs do not match the declared controls.")
     root = record["configuration"]["repo_root"]
     data, _ = validate_configuration(
-        record["name"], materialize(selected, values, record["name"], root), root,
+        record["name"], materialize(selected, values, record["name"], root, snapshot=snapshot),
+        root, snapshot=snapshot,
     )
     if digest({"declaration": data, "repo_root": root}) != record["revision"]:
         raise RegistrarError("Stored operator inputs do not describe the saved configuration.")
     return selected, values
 
 
-def project(row: dict, fields: list[dict] | None, *, record=None, definitions=None, activation=None) -> None:
+def project(
+    row: dict, fields: list[dict] | None, *, record=None, definitions=None, activation=None, snapshot=None,
+) -> None:
     row.update(operator_instantiable="false", operator_editable="false")
     if record is None:
         if fields is None:
@@ -202,7 +205,9 @@ def project(row: dict, fields: list[dict] | None, *, record=None, definitions=No
         row["operator_fields"] = form(fields, repo_root=row.get("source", {}).get("root", ""))
     else:
         try:
-            selected, values = verify_record(record, definitions=definitions, activation=activation)
+            selected, values = verify_record(
+                record, definitions=definitions, activation=activation, snapshot=snapshot,
+            )
             row["operator_fields"] = form(
                 source_fields(selected), name=record["name"],
                 repo_root=record["configuration"]["repo_root"], values=values,

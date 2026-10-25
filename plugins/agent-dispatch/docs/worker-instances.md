@@ -223,7 +223,9 @@ draft/published comparison retain their existing meaning. Safe retries also
 fingerprint the exact input fields, not merely the template ID/revision.
 Editing re-resolves the **original exact** source revision and verifies that
 its old parameter values still produce the saved configuration. Catalog
-refresh shares one source discovery across these checks; edits therefore
+refresh shares one source discovery and one read-only resource snapshot/deadline
+across dependency and operator-binding checks. Execution admission is unchanged;
+Save source rechecks start fresh operations. Edits therefore
 depend on source availability. Source changes, including cosmetic index
 changes, missing providers and mismatched saved values make human editing
 unavailable rather than silently selecting a newer template. Save checks again

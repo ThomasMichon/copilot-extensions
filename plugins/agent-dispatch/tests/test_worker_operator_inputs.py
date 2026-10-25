@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ from agent_dispatch.registrar import RegistrarError
 from agent_dispatch.worker_operator_inputs import CONTRACT, parse_fields, verify_record
 from agent_dispatch.workers_catalog import catalog
 from tests.test_worker_template_materialization import isolated, pool, provider  # noqa: F401
+from tests.test_worker_templates import registered_root
 
 
 def controlled(*, extra=None):
@@ -245,6 +247,115 @@ def test_locked_binding_drift_refuses_partial_edit_but_preserves_exact_concurren
         "label": "other" if identical else "fixture",
         "unused": "original" if identical else "concurrent",
     }
+
+
+@pytest.mark.parametrize("kind", ["supervised-lane", "emitter"])
+@pytest.mark.parametrize("unavailable", [False, "fast", "timeout"])
+def test_catalog_shares_supplier_lookup_and_deadline_across_bound_instances(monkeypatch, tmp_path, kind, unavailable):
+    from agent_dispatch import repository_resources
+
+    supplier = tmp_path / "supplier"
+    supplier.mkdir()
+    document = pool() if kind == "supervised-lane" else {
+        "kind": "emitter",
+        "spec": {"id": "{name}", "command": [sys.executable, "producer.py"],
+                 "cwd": ".", "interval_seconds": 60},
+    }
+    (supplier / "base.json").write_text(json.dumps(document))
+    (supplier / "producer.py").write_text("print('[]')", encoding="utf-8")
+    clock, calls, failing = [0.0], [], [False]
+    monkeypatch.setattr(repository_resources, "monotonic", lambda: clock[0])
+
+    def lookup(*args, **kwargs):
+        assert args == ("repos", "find", "library", "--registered-only", "--json")
+        assert 0 < kwargs["timeout"] <= 15
+        calls.append("library")
+        if failing[0]:
+            if failing[0] == "timeout":
+                clock[0] += 16
+            return None
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps(registered_root("library", supplier)), stderr="",
+        )
+
+    monkeypatch.setattr(repository_resources, "run_agent_worktrees_capture", lookup)
+    path, row = provider({"extends": "repo:library:base.json"}, kind=kind)
+    index = path.parent / "index.json"
+    data = json.loads(index.read_text())
+    data["templates"][0]["operator_fields"] = [{
+        "name": "label", "type": "text", "label": "Watched label",
+        "description": "Choose the source-owned lane.", "default": "fixture",
+    }]
+    data["templates"].append({**data["templates"][0], "id": "second"})
+    index.write_text(json.dumps(data))
+    rows = [entry for entry in catalog()["entries"] if entry["id"].startswith("template:provider:")]
+    assert len(rows) == 2
+    for number in range(4):
+        selected = rows[number % 2]
+        before = len(calls)
+        wi.save_instance(selected["id"], selected["revision"], {
+            "name": f"local-{number}", "param_label": "fixture",
+        }, operator_inputs=True)
+        assert len(calls) > before, "Save reused a completed catalog's resource snapshot"
+    calls.clear()
+    failing[0] = unavailable
+    for expected in (1, 2):
+        configured = [entry for entry in catalog()["entries"] if entry["group"] == "Configured"]
+        assert len(configured) == 4
+        assert all(entry["operator_editable"] == str(not unavailable).lower() for entry in configured)
+        assert calls == ["library"] * expected
+
+
+def test_shared_snapshot_views_preserve_admission_and_lookup_deadline(monkeypatch, tmp_path):
+    from agent_dispatch import repository_resources
+
+    clock, calls = [0.0], []
+    monkeypatch.setattr(repository_resources, "monotonic", lambda: clock[0])
+
+    def lookup(name, **kwargs):
+        calls.append(name)
+        return tmp_path, "reference"
+
+    monkeypatch.setattr(repository_resources, "_registered_repository", lookup)
+    snapshot = repository_resources.RepositoryResourceSnapshot(execution=False)
+    assert snapshot.root("library") == tmp_path
+    clock[0] = 14
+    executable = snapshot.with_execution(execution=True)
+    with pytest.raises(RegistrarError, match="execution is refused"):
+        executable.root("library")
+    assert snapshot.root("library") == tmp_path
+    clock[0] = 16
+    with pytest.raises(RegistrarError, match="shared 15s budget"):
+        executable.root("another")
+    assert calls == ["library"]
+    assert repository_resources.RepositoryResourceSnapshot(execution=False).root("library") == tmp_path
+    assert calls == ["library", "library"]
+
+
+@pytest.mark.parametrize("builtin", ["repository_issue_loop", "effort_driver_loop"])
+def test_emitter_shared_snapshot_preserves_loop_execution_admission(monkeypatch, tmp_path, builtin):
+    from agent_dispatch import effort_driver_loops, repository_issue_loops, repository_resources
+    from agent_dispatch.producers.emitter import validate_spec
+
+    calls = []
+    monkeypatch.setattr(
+        repository_resources, "_registered_repository",
+        lambda name, **kwargs: calls.append(name) or (tmp_path, "reference"),
+    )
+    snapshot = repository_resources.RepositoryResourceSnapshot(execution=False)
+    assert snapshot.root("library") == tmp_path
+    received = []
+
+    def validate(data, *, snapshot, **kwargs):
+        received.append(snapshot)
+        with pytest.raises(RegistrarError, match="execution is refused"):
+            snapshot.root("library")
+
+    module = repository_issue_loops if builtin == "repository_issue_loop" else effort_driver_loops
+    monkeypatch.setattr(module, "validate_config", validate)
+    validate_spec({"id": "fixture", builtin: {}, "interval_seconds": 60}, resolve_resources=True, snapshot=snapshot)
+    assert len(received) == 1 and calls == ["library"]
+    assert snapshot.root("library") == tmp_path
 
 
 @pytest.mark.parametrize("stage", ["catalog", "save", "retry", "edit", "refuse"])

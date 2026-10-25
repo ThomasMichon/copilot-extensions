@@ -279,6 +279,7 @@ def catalog() -> dict:
     from .overrides import load_overrides
     from .worker_templates import discover_templates
     from .worker_operator_inputs import project
+    from .repository_resources import RepositoryResourceSnapshot
 
     activation = cache(resolve_active_plugins)
     errors = []
@@ -290,7 +291,10 @@ def catalog() -> dict:
     overrides = overridden_off_ids(load_overrides(overrides_path()))
     observed = _observation()
     definitions = {}
-    provider_rows, template_discovery = discover_templates(activation(), _definitions=definitions)
+    resources = RepositoryResourceSnapshot(execution=False)
+    provider_rows, template_discovery = discover_templates(
+        activation(), _definitions=definitions, snapshot=resources,
+    )
     rows = []
     for index, error in enumerate(errors):
         rows.append(_cards({
@@ -307,10 +311,13 @@ def catalog() -> dict:
         draft_errors = []
         declarations = ()
         try:
-            _, declarations = validate_configuration(record["name"], conf["declaration"], conf["repo_root"])
+            _, declarations = validate_configuration(
+                record["name"], conf["declaration"], conf["repo_root"], snapshot=resources,
+            )
             _validate_dependencies(
                 declarations, conf["repo_root"],
                 available_declarations=report.combined.declarations,
+                snapshot=resources,
             )
         except RegistrarError as exc:
             draft_errors.append(str(exc))
@@ -330,6 +337,7 @@ def catalog() -> dict:
                 )
                 _, active_declarations = validate_configuration(
                     record["name"], loaded_conf["declaration"], loaded_conf["repo_root"],
+                    snapshot=resources,
                 )
                 active_conf = loaded_conf
         except (RegistrarError, OSError, UnicodeError) as exc:
@@ -414,7 +422,9 @@ def catalog() -> dict:
                 "runtime readiness are unknown here; the existing FleetSpawner probes "
                 "them at dispatch time. An all-asleep fleet defers without reserving tasks."
             )
-        project(row, None, record=record, definitions=definitions, activation=activation())
+        project(
+            row, None, record=record, definitions=definitions, activation=activation(), snapshot=resources,
+        )
         rows.append(_cards(row, body))
     for declaration in report.combined.declarations:
         if declaration.owner == OWNER and declaration.name in local_names:
@@ -441,6 +451,7 @@ def catalog() -> dict:
         try:
             _validate_dependencies(
                 (declaration,), "", available_declarations=report.combined.declarations,
+                snapshot=resources,
             )
         except RegistrarError as exc:
             row.update(dependency_status="invalid-or-missing", dependency_errors=[str(exc)])
