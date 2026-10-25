@@ -89,6 +89,10 @@ PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.
 Execution uses the selected checkout as cwd with inherited stdio. No command
 string evaluation, arbitrary extra arguments or interpreter installation occurs.
+On Windows, the explicitly trusted PowerShell entry uses process-scoped
+`-ExecutionPolicy Bypass`, matching the toolkit's installer invocation. It does
+not persist an execution-policy change or override higher-precedence Group Policy;
+an enforced refusal is still failure.
 Native Windows attended calls retain their actual console for Git, the setup
 entry and its descendants; redirected/background calls remain windowless.
 Both paths explicitly inherit native standard descriptors so a headless child

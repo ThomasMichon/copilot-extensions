@@ -257,7 +257,8 @@ def _call(setup: Setup, mode: str) -> Outcome:
             "result_file": str(result),
         }), encoding="utf-8")
         if setup.runtime == "powershell":
-            argv = [executable, "-NoLogo", "-NoProfile", "-File", str(setup.script),
+            policy = ["-ExecutionPolicy", "Bypass"] if os.name == "nt" else []
+            argv = [executable, "-NoLogo", "-NoProfile", *policy, "-File", str(setup.script),
                     "-RequestFile", str(request)]
         else:
             argv = [executable, str(setup.script), "--request-file", str(request)]

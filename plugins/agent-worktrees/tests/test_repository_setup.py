@@ -203,6 +203,44 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows PowerShell fallback")
+def test_trusted_windows_powershell_uses_only_process_policy(
+    source: Path, tmp_path: Path, monkeypatch,
+) -> None:
+    powershell = shutil.which("powershell")
+    assert powershell is not None
+    selected = consumer(source, """
+if ((Get-ExecutionPolicy -Scope Process) -ne 'Bypass') { throw 'Wrong process policy' }
+[IO.File]::WriteAllText($r.result_file, '{"version":1,"status":"ready","message":"Owner checked"}')
+""")
+    monkeypatch.setenv("PSExecutionPolicyPreference", "Restricted")
+    monkeypatch.setattr(setup, "_interpreter", lambda runtime: powershell)
+    marker = tmp_path / "not-executed.txt"
+    control = tmp_path / "policy-control.ps1"
+    control.write_text(
+        "[IO.File]::WriteAllText('" + str(marker).replace("'", "''") + "', 'ran')\n",
+        encoding="utf-8",
+    )
+    refused = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-File", str(control)],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert refused.returncode != 0 and not marker.exists()
+    before = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-Command",
+         "Get-ExecutionPolicy -List | ConvertTo-Json -Compress"],
+        capture_output=True, text=True, check=True, **no_window_kwargs(),
+    ).stdout
+    assert setup.run(selected, apply=False, trusted=True).status == "ready"
+    after = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-Command",
+         "Get-ExecutionPolicy -List | ConvertTo-Json -Compress"],
+        capture_output=True, text=True, check=True, **no_window_kwargs(),
+    ).stdout
+    assert before == after
+    assert os.environ["PSExecutionPolicyPreference"] == "Restricted"
+
+
 def test_real_consumer_accepts_caller_scratch_linked_ancestor(source: Path, monkeypatch) -> None:
     selected = consumer(source, """
 [IO.File]::WriteAllText($r.result_file, '{"version":1,"status":"ready","message":"Owner checked"}')
