@@ -212,11 +212,12 @@ def test_windows_launcher_encodes_wrapped_psmux_pane_argv():
     assert "[IO.File]::WriteAllText($paneArgsFile, $argsJson)" in ps
     assert '$paneArgsFile.Replace("\'", "\'\'")' in ps
     pane_start = ps.index('    Write-SetupLog "psmux: creating session $sessName"')
-    pane_create = ps.index("& $script:AwPsmuxBin new-session -d -s $sessName", pane_start)
+    pane_create = ps.index("Invoke-AwPsmuxFromHome -CommandArgs $psmuxArgs", pane_start)
     assert "-EncodedCommand" not in ps[pane_start:pane_create]
     assert "$paneCmd = $wrapPrefix + $cmd" not in ps
-    assert "& $script:AwPsmuxBin new-session -d -s $sessName" in ps
-    assert "-c $plan.work_dir @envFlags @paneCmd" in ps
+    assert "'new-session', '-d', '-s', $sessName" in ps[pane_start:pane_create]
+    assert "'-c', [string]$plan.work_dir" in ps[pane_start:pane_create]
+    assert ") + $envFlags + $paneCmd" in ps[pane_start:pane_create]
 
 
 def test_windows_launcher_applies_psmux_passthrough_per_session():

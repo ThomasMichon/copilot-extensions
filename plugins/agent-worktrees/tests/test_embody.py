@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import embody_resume, sessions, worktree_identity
+from agent_worktrees import agent_policy, embody_resume, sessions, worktree_identity
 
 
 # -- build_mux_new_session_argv (pure) --------------------------------------
@@ -146,8 +146,14 @@ def _stub_config(monkeypatch):
         default_repo = type(
             "Repo",
             (),
-            {"worktree_root": str(Path.home() / "test-worktrees")},
+            {
+                "worktree_root": str(Path.home() / "test-worktrees"),
+                "anchor": Path("/w/anchor"),
+            },
         )()
+    # These orchestration units use synthetic paths; real hosting admission
+    # remains covered independently by test_repository_agent_policy.py.
+    monkeypatch.setattr(agent_policy, "require", lambda *a, **k: None)
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
     monkeypatch.setattr(
         m,
@@ -1082,6 +1088,7 @@ class TestCmdEmbody:
 
 # -- cmd_embody --anchor: deliver directly in the anchor, no worktree ------
 def _stub_anchor_config(monkeypatch, *, repo_name="example-web", anchor="/w/anchor"):
+    _stub_config(monkeypatch)
     class _Cfg:
         repos = {}
         default_repo = type("Repo", (), {"anchor": anchor})()
@@ -1105,10 +1112,7 @@ class TestCmdEmbodyAnchor:
         assert "mutually exclusive" in capfd.readouterr().out
 
     def test_anchor_requires_active_project(self, monkeypatch, capfd):
-        class _Cfg:
-            repo_name = None
-            default_repo = type("Repo", (), {"anchor": ""})()
-        monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
+        _stub_anchor_config(monkeypatch, repo_name=None, anchor="")
         rc = m.cmd_embody(_ns(anchor=True))
         assert rc == 2
         assert "requires an active project" in capfd.readouterr().out

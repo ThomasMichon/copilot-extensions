@@ -1,0 +1,13 @@
+{
+  "comment": "Launch Windows mux creation from resolved user home while preserving the selected pane worktree, arguments, and exit behavior.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

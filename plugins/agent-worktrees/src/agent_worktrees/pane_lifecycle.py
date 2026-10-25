@@ -16,7 +16,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from . import activity, output
+from . import activity, mux_creation, output
 
 # Provisional, intentionally overridable signatures for "Copilot exited cleanly"
 # seen in a pane capture. Liveness remains the authoritative gone/not-gone
@@ -163,7 +163,7 @@ def pane_create(
         if create_kind == "new-window":
             argv = sessions.build_mux_new_window_argv(
                 worktree_id,
-                work_dir,
+                mux_creation.pane_work_dir(work_dir),
                 cmd,
                 env,
                 mux=mux,
@@ -174,14 +174,14 @@ def pane_create(
         else:
             argv = sessions.build_mux_new_session_argv(
                 worktree_id,
-                work_dir,
+                mux_creation.pane_work_dir(work_dir),
                 cmd,
                 env,
                 mux=mux,
                 initial_prompt=initial_prompt,
                 prompt_receipt=str(receipt_path),
             )
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        result = mux_creation.run(argv)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
         if not isinstance(exc, subprocess.TimeoutExpired):
             sessions.cleanup_mux_pane_args(argv)
