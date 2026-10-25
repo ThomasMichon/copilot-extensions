@@ -1854,8 +1854,7 @@ def fingerprint_source(paths) -> str:
     def _frame(data: bytes) -> bytes:
         return len(data).to_bytes(8, "big") + data
 
-    digest = hashlib.sha256()
-    for f in sorted(entries, key=_label):
+    def _read_data(f: Path) -> bytes:
         kind = entries[f]
         if kind == "symlink":
             try:
@@ -1896,6 +1895,11 @@ def fingerprint_source(paths) -> str:
                 data = f.read_bytes()
             except OSError as exc:
                 raise OSError(f"fingerprint_source: could not read {f}: {exc}") from exc
+        return data
+
+    digest = hashlib.sha256()
+
+    def _update(f: Path, data: bytes) -> None:
         digest.update(_frame(_label(f).encode("utf-8")))
         # The entry's kind is framed as ITS OWN length-prefixed record,
         # never concatenated into `data` as a string prefix: a regular
@@ -1903,8 +1907,30 @@ def fingerprint_source(paths) -> str:
         # "target text" must never hash identically to that symlink (or
         # vice versa) just because the two kind tags were distinguished
         # only by unframed leading bytes.
-        digest.update(_frame(kind.encode("utf-8")))
+        digest.update(_frame(entries[f].encode("utf-8")))
         digest.update(_frame(data))
+
+    ordered = sorted(entries, key=_label)
+    if len(ordered) < 2:
+        for f in ordered:
+            _update(f, _read_data(f))
+    else:
+        from collections import deque
+        from concurrent.futures import ThreadPoolExecutor
+
+        batch_size = 4
+        with ThreadPoolExecutor(
+            max_workers=batch_size, thread_name_prefix="runtime-fingerprint",
+        ) as pool:
+            for offset in range(0, len(ordered), batch_size):
+                pending = deque(
+                    (f, pool.submit(_read_data, f))
+                    for f in ordered[offset:offset + batch_size]
+                )
+                while pending:
+                    f, future = pending.popleft()
+                    _update(f, future.result())
+                    del future
     return digest.hexdigest()
 
 

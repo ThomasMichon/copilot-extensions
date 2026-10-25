@@ -40,6 +40,15 @@ health before reuse. No marker, timestamp, or package file is rewritten; failed
 health requires explicit repair, and a generation with different content cannot
 be selected as a successful reuse.
 
+## Source fingerprinting
+
+`fingerprint_source()` retains its complete input, symlink and framed-digest
+contract while overlapping content reads in batches of at most four. Frames
+are hashed in label order regardless of read completion order; failures remain
+fail-closed and all in-flight readers settle before return or error. Each call
+reads current bytes again: there is no persistent content-hash cache or
+background reader. Single-entry fingerprints need no worker pool.
+
 ## Why this is vendored, not a package
 
 Unlike the other `libs/*` entries, this is **not** an installable package and has
