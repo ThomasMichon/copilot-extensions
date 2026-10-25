@@ -324,6 +324,14 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
         def read_count():
             return len(reads.read_text().splitlines()) if reads.exists() else 0
 
+        async def completed_cycle(consumer):
+            for _ in range(100):
+                result = await consumer.cycle()
+                if not result["blocked"]:
+                    return result
+                await asyncio.sleep(0.05)
+            raise AssertionError("service replay cycle remained blocked")
+
         async with running(tmp_path) as rig:
             async def service_access():
                 return rig.access("service-a", 1)
@@ -398,7 +406,7 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
                 before = read_count()
                 await eventually(lambda: read_count() >= before + 3, timeout=10)
                 for _ in range(3):
-                    await consumer.cycle()
+                    await completed_cycle(consumer)
                     assert all(not queue.list_run_waiter_wakes(task_id) for task_id in tasks)
                 await eventually(
                     lambda: owner._last_cycle is not None and owner._last_cycle["observed"] == 1,
@@ -419,7 +427,7 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
             try:
                 await eventually(lambda: successor.status()["ready"], timeout=10)
                 consumer, caller = new_consumer(queue, rig)
-                await consumer.cycle()
+                await completed_cycle(consumer)
                 for task_id in tasks:
                     waiter = queue.get_active_run_waiter(task_id)
                     assert waiter["delegation"]["replay"] == originals[task_id]
@@ -456,9 +464,8 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
                     wakes = restored.list_run_waiter_wakes(task_id)
                     assert len(wakes) == 1
                 for _ in range(3):
-                    await recovered.cycle()
+                    assert (await completed_cycle(recovered))["events"] == 0
                 assert all(len(restored.list_run_waiter_wakes(task_id)) == 1 for task_id in tasks)
-                assert (await recovered.client.pending()).events == ()
                 assert rig.backends[0].requests == []
             finally:
                 await successor.close(timeout=5)
