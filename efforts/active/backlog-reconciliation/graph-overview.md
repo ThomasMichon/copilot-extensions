@@ -268,6 +268,36 @@ explicitly metadata-only pending their own author/custody/body admission.
 Eight numeric and three existing ROOT intakes have now been received.
 Initial research layers and discovery provenance remain unchanged.
 
+## Sixth delivered consolidation
+
+Batch 96 considered ten acquisition issues. Only **#6887 was superseded
+into OPEN #6076**, after complete direct Plan, paired Validation and continuing
+Coordination delivery and full actual-body/discussion readback. The final
+12,912-byte body preserves its entire 1,830-byte original, all discussion,
+seventeen unchecked rows and one new transfer marker. The accepted rejection
+of an empty-owner-ledger/missing-receipt waiver survives; the safe routine-retry
+outcome remains planned, not completed.
+
+The other nine tokens remain OPEN. In particular, #4125's all-creator
+active/recent discovery and #5843's generic carrier uncertainty are broader
+than this Dispatch acquisition intake; their conditional scope extensions
+were not accepted or partially transferred. Actual legacy/native/installed
+custody and the whole nine-case #7116 report remain independent.
+See the [dated checkpoint](<journal/2026/10.24 acquisition-family-96.md>).
+
+The audited census records **920 whole-queue open at 2026-10-24
+18:49:14 PDT**: 751 original-cohort, 169 inflow, 673 eligible and 247 untouched
+excluded-author issues, still 191 above the fixed checkpoint. Three new
+arrivals outweighed this unit's one administrative closure.
+
+The graph retains **716 historical eligible identities**: 673 open and
+43 closed, comprising 36 audited graph supersessions and seven external
+changes with no credit. The previously pending #8773-#8781 and #8787 now have
+37 finite clauses and 31 typed discovery links, with no receiving or
+completion credit. New #8796, #8797 and #8802 remain metadata-only.
+Nine numeric and three existing ROOT intakes have been received; the original
+research layers and provenance remain unchanged.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
