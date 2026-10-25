@@ -10,6 +10,27 @@ not native/process-survival or installed qualification.
 
 ### Independent atomic creation and local facade
 
+Foundation v1 `0bb18607` has a reproduced genuine-reader-start defect and is
+superseded, not silently blessed by its earlier green selection. The v2
+fail-first run captured exactly `[False, False, False]` after native thread
+creation raised before a worker existed; the pending-launch and after-launch
+controls passed. Evidence:
+`.venv-tools/r1a-foundation-v2-reader-failfirst-20261024.log`.
+
+The narrow correction distinguishes a synchronous launch failure from an
+uncertain or actually started launch using the owned thread's pending
+registration and identity/start state under a nonblocking registry lock.
+It preserves interruption custody and retries an unavailable proof without
+waiting or renewing D. Actual CPython 3.11.9/3.12.14 ordering is captured in
+`.venv-tools/r1a-foundation-v2-thread-start-contract-20261024.log`.
+
+Updated affected selection: **143 passed, 99 deselected**; shared selection:
+**37 passed, 1 native case deselected**. These include the no-created-worker,
+pending-start, after-start RuntimeError, pre-start interruption and busy-lock
+controls. Raw receipt:
+`.venv-tools/r1a-foundation-v2-reader-green-20261024.log`.
+No native, receiver/authority or integration qualification is inferred.
+
 Final affected selection: **138 passed, 99 deselected**; canonical shared
 atomic/Job selection: **37 passed, 1 native case deselected**. Raw receipt:
 `.venv-tools/r1a-atomic-final-units-20261024.log` (15.53 seconds plugin pytest /

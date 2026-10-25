@@ -28,6 +28,17 @@ completed readers. Later retained settlement is zero-wait: no new observation,
 clock renewal or PID/census lookup. It never uses a closed handle as proof of
 empty containment.
 
+A synchronous reader launch `RuntimeError` is not treated as a running reader
+forever. Settlement checks the owned thread's pending-launch registration,
+native identity and start event together under a nonblocking acquisition of
+the standard threading registry lock. Only an absent pending launch plus
+never-recorded identity/start proves no worker was created. It does not infer
+this from `is_alive() == False`. A busy/unavailable registry, pending launch,
+or interruption stays unconfirmed; an actually started reader still requires
+completion and join. Missing bookkeeping fails closed. The checked CPython
+3.11/3.12 ordering is retained with the test evidence; this introduces no
+global cache or renewed deadline.
+
 ## Caller obligations
 
 `ObservationCleanupError` carries the actual pending process/Job objects.
