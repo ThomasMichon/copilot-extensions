@@ -159,16 +159,24 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
     assert job["runs-on"] == route
     checkout = job["steps"][0]
     assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
-    commands = [step["run"] for step in job["steps"] if "run" in step]
-    assert "os.environ['GITHUB_SHA']" in commands[0]
+    identity = next(step for step in job["steps"] if step.get("id") == "source")
+    assert "os.environ['GITHUB_SHA']" in identity["run"]
+    tooling = next(step for step in job["steps"] if step.get("id") == "tooling")
+    assert tooling["run"] == "python tools/run-plugin-tests.py agent-worktrees --prepare-only"
+    families = [
+        step for step in job["steps"] if step.get("name", "").startswith("Qualify ")
+    ]
+    commands = [step["run"] for step in families]
     expected = {
         "tests/test_update_auth.py", "tests/test_update_driver.py",
         "tests/test_update_launch_cli.py", "tests/test_update_entry.py",
         "tests/test_update_entry_windows.py",
     }
     assert all(any(path in command for command in commands) for path in expected)
-    for command in commands[1:]:
+    for step in families:
+        command = step["run"]
         assert "tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers" in command
+        assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
         assert not any(flag in command for flag in (
             "--test-timeout", "--timeout", "--plugin-timeout", "--allow-host-state",
         ))

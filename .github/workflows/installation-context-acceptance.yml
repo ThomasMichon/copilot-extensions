@@ -141,24 +141,30 @@ jobs:
         with:
           version: "0.12.6"
       - name: Record exact update qualification source
+        id: source
         run: >-
           python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Prepare isolated update test tooling
+        id: tooling
+        run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
       - name: Qualify bounded native credential routing
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_update_auth.py
       - name: Qualify real queued engine and fixed launch requests
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_update_driver.py
           --test-file tests/test_update_launch_cli.py
       - name: Qualify POSIX selected-phase front doors
-        if: runner.os == 'Linux'
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Linux' }}
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_update_entry.py -k selected_update_phase
       - name: Qualify Windows selected-phase front doors
-        if: runner.os == 'Windows'
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Windows' }}
         run: >-
           python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
           --test-file tests/test_update_entry_windows.py -k selected_update_phase

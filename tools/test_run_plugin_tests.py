@@ -113,6 +113,37 @@ def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cl
     assert observed
 
 
+@pytest.mark.parametrize("noncanonical", [False, True])
+def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
+    monkeypatch, tmp_path, cleanup_runner, noncanonical,
+):
+    from agent_procutil import _daemon_instance_store as store
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    requested = nested / ".." if noncanonical else tmp_path
+    monkeypatch.setenv("TEMP", str(requested))
+    original = runner._TestSandbox
+    parents = []
+
+    class CanonicalSandbox(original):
+        def __init__(self, *args, **kwargs):
+            parent = Path(kwargs["dir"])
+            assert parent == parent.resolve(strict=True)
+            parents.append(parent)
+            super().__init__(*args, **kwargs)
+
+    def admitted(*args, **kwargs):
+        root = kwargs["sandbox"] / "daemon-instances"
+        assert store._root(root, create=True) == root
+        return 0
+
+    monkeypatch.setattr(runner, "_TestSandbox", CanonicalSandbox)
+    monkeypatch.setattr(runner, "run_contained", admitted)
+    assert cleanup_runner() == 0
+    assert parents == [tmp_path.resolve()]
+
+
 def test_plugin_budget_includes_final_sandbox_cleanup(
     monkeypatch, capsys, cleanup_runner,
 ):

@@ -304,7 +304,11 @@ gh workflow run installation-context-acceptance.yml \
 ```
 
 Both jobs check out and record the immutable dispatch SHA without persisting
-credentials. The existing five-second auth budget, twenty-second worker bound,
+credentials. The canonical plugin runner resolves its disposable temp parent
+before creating the private sandbox, including Windows short-path aliases;
+daemon-registry indirection checks remain enabled. Independent test families
+still run after an earlier assertion failure when setup succeeded; any failure
+keeps the job red. The existing five-second auth budget, twenty-second worker bound,
 thirty-second test-item limit and runner aggregate limits remain unchanged.
 The fifteen-minute job envelope includes governed tooling preparation, not a
 production deadline exception. Selection suppresses default diagnostic-copy
