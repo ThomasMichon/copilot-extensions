@@ -207,14 +207,22 @@ def _enrich_local_agents(
     agents: dict[str, AgentConfig],
     machines: dict[str, MachineConfig],
     local_execution_space: str | None = None,
+    *,
+    resolved_local_identity: tuple[str | None, str] | None = None,
 ) -> None:
     """Set display_name and description on auto-discovered agents."""
     from . import agent_registry as compat
 
-    machine, platform = (
-        compat._detect_local_machine(machines, local_execution_space)
-        if local_execution_space is not None else compat._detect_local_machine(machines)
-    )
+    if resolved_local_identity is not None:
+        if local_execution_space is not None:
+            raise ValueError("resolved local identity cannot override an explicit selector")
+        key, platform = resolved_local_identity
+        machine = machines[key] if key is not None else None
+    else:
+        machine, platform = (
+            compat._detect_local_machine(machines, local_execution_space)
+            if local_execution_space is not None else compat._detect_local_machine(machines)
+        )
     if not machine:
         return
 
@@ -238,6 +246,8 @@ def _find_covering_agent(
     registry: dict[str, AgentConfig],
     machines: dict[str, MachineConfig],
     local_execution_space: str | None = None,
+    *,
+    resolved_local_identity: tuple[str | None, str] | None = None,
 ) -> str | None:
     """Return the name of a registry agent that covers a local agent, or None."""
     if not local_agent.project:
@@ -245,17 +255,15 @@ def _find_covering_agent(
 
     from . import agent_registry as compat
 
-    machine, platform = (
-        compat._detect_local_machine(machines, local_execution_space)
-        if local_execution_space is not None else compat._detect_local_machine(machines)
+    resolver = compat.AgentResolver(
+        registry, machines, local_execution_space=local_execution_space,
+        resolved_local_identity=resolved_local_identity,
     )
+    machine, platform = resolver._local_machine, resolver._local_platform
     if not machine:
         return None
 
     env_name = platform
-    resolver = compat.AgentResolver(
-        registry, machines, local_execution_space=local_execution_space,
-    )
     for name, agent in registry.items():
         if agent.auto_discovered or agent.derived or agent.project != local_agent.project:
             continue

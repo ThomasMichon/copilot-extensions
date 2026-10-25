@@ -210,6 +210,9 @@ space. Automatic discovery considers all same-platform host-family candidates,
 even when one registered key exactly matches the observed hostname. A host
 registered only for another platform remains remote-only, including when
 adopted profiles list native and guest spaces separately.
+The combined inventory supplies one in-memory local selection reused for each
+profile and discovery/coverage pass; no derived selector is persisted. Unrelated
+scoped remotes do not change a selected unscoped host's legacy local transport.
 Scoped discovery never uses SSH/selection aliases as OS-hostname evidence, and
 an explicit different hostname is not overridden by a matching key or group label.
 Scoped remote-only selections retain no loopback route during same-platform

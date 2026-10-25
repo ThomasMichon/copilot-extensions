@@ -360,6 +360,9 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     from .execution_identity import resolve_execution_space
 
     selector = resolve_execution_space(cfg, all_machines)
+    combined_local, local_platform = _detect_local_machine(all_machines, selector)
+    local_key = combined_local.key if combined_local else None
+    local_identity = (local_key, local_platform)
     for profile_name, profile, machines in loaded_profiles:
         if profile.agents_config:
             agents_path = Path(profile.agents_config).expanduser()
@@ -377,11 +380,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             log.info("Control-plane project '%s' (from %s)", cp_project, cp_source)
         repo_root = Path(profile.machines_yaml).expanduser().resolve().parent
         related = _load_related_entries(repo_root)
-        local_machine, local_platform = (
-            _detect_local_machine(machines, selector) if selector in machines
-            else (None, _detect_platform()) if selector is not None
-            else _detect_local_machine(machines)
-        )
+        local_machine = machines.get(local_key) if local_key is not None else None
         from .config import load_repo_bridge_config
 
         repo_cfg = load_repo_bridge_config(repo_root)
@@ -403,7 +402,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     discovered = discover_local_agents()
     if discovered and all_machines:
         _enrich_local_agents(
-            discovered, all_machines, selector,
+            discovered, all_machines, resolved_local_identity=local_identity,
         )
     for name, agent in discovered.items():
         if name in all_agents:
@@ -413,7 +412,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             )
             continue
         covering = _find_covering_agent(
-            agent, all_agents, all_machines, selector,
+            agent, all_agents, all_machines, resolved_local_identity=local_identity,
         )
         if covering:
             log.info(
@@ -430,7 +429,7 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
             all_agents,
             all_machines,
             topology_errors=topology_errors,
-            local_execution_space=selector,
+            resolved_local_identity=local_identity,
         )
         log.info(
             "Resolver built: %d machines, %d agents (%d derived, %d auto-discovered)",

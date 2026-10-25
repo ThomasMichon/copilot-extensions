@@ -196,6 +196,62 @@ def test_unbound_topology_reaches_service_readiness(source, tmp_path, monkeypatc
         assert app.state.resolver._local_machine.key == "native"
 
 
+def test_combined_observation_drives_real_split_profile_derivation_once(source, tmp_path, monkeypatch):
+    import yaml
+
+    monkeypatch.setattr(agent_registry, "_detect_platform", lambda: "wsl")
+    monkeypatch.setattr("socket.gethostname", lambda: "observed-host")
+    topologies = {}
+    for key, platform, hostname in (
+        ("native", "windows", "observed-host"), ("guest", "wsl", ""),
+    ):
+        path = tmp_path / f"{key}.yaml"
+        path.write_text(yaml.safe_dump({
+            "control_plane": {"project": "control"},
+            "machines": {key: {
+                "hostname": hostname, "physical_host": "shared-family",
+                "execution_platform": platform,
+                "ssh": {"ready": False, "environments": [{
+                    "name": platform, "alias": key + "-ssh",
+                    "shell": "pwsh" if platform == "windows" else "bash",
+                }]},
+            }},
+        }), encoding="utf-8")
+        topologies[key] = TopologyProfile(machines_yaml=str(path))
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    repos = [
+        {"name": name, "agent": True, "paths": {"wsl": str(checkout)}}
+        for name in ("control", "library")
+    ]
+    monkeypatch.setattr(agent_registry, "load_local_repos", lambda: repos)
+    monkeypatch.setattr(agent_registry, "load_elevated_projects", lambda: set())
+    monkeypatch.setattr(agent_registry, "_register_namespace_resolvers", lambda resolver: None)
+    local_agent = AgentConfig(name="library", project="library", auto_discovered=True)
+    monkeypatch.setattr(agent_registry, "discover_local_agents", lambda: {"library": local_agent})
+    detected = []
+    original = agent_registry._detect_local_machine
+
+    def observe(*args, **kwargs):
+        detected.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(agent_registry, "_detect_local_machine", observe)
+    cfg = ServiceConfig(topologies=topologies)
+    resolver = agent_registry.build_resolver(cfg)
+    assert detected == [1]
+    assert resolver._local_machine.key == "guest"
+    assert resolver._local_platform == "wsl"
+    assert "guest" in resolver.agents
+    assert "library@guest" in resolver.agents
+    assert local_agent.display_name == "guest (WSL)"
+    assert cfg.local_execution_space is None
+    resolver._own_plugin_args = lambda *args: []
+    resolver._related_plugin_args = lambda *args: []
+    assert resolver.resolve("guest").type == "local"
+    assert resolver.resolve("library@guest").type == "local"
+
+
 @pytest.mark.parametrize("file", [False, True])
 def test_invalid_source_under_existing_repository_is_not_promoted(source, monkeypatch, file):
     from agent_bridge import service_start_cli

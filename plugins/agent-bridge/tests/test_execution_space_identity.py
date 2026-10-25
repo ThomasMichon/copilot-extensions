@@ -329,6 +329,49 @@ def test_legacy_only_topology_keeps_explicit_local_selection():
     assert platform == "windows"
 
 
+@pytest.mark.parametrize("collision", ["none", "ssh-alias", "key", "shared-alias"])
+def test_selected_unscoped_local_host_keeps_local_routing_in_mixed_inventory(collision):
+    from agent_bridge.resolver_runtime import capture_resolver, restore_resolver
+    from agent_bridge.routes.worktrees import _is_local_target
+
+    local = MachineConfig(
+        key="legacy", display_name="Local", hostname="workstation",
+        ssh_environments=[SshEnvironment("windows", "local-ssh", shell="pwsh")],
+    )
+    remote = MachineConfig(
+        key="remote", display_name="Remote", hostname="another-host",
+        physical_host="another-host", execution_platform="linux", ssh_ready=True,
+        ssh_environments=[SshEnvironment("linux", "remote-ssh", shell="bash")],
+    )
+    if collision == "ssh-alias":
+        remote.ssh_environments[0].alias = "workstation"
+    elif collision == "key":
+        remote.key = "workstation"
+    elif collision == "shared-alias":
+        remote.ssh_environments[0].alias = "local-ssh"
+    agents = {"local": AgentConfig(
+        name="local", host=local.key, project="control", ssh_environment="windows",
+    )}
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        original = AgentResolver(agents, {local.key: local, remote.key: remote})
+        restored = restore_resolver(capture_resolver(original))
+        for resolver in (original, restored):
+            resolver._own_plugin_args = lambda *args: []
+            resolver._related_plugin_args = lambda *args: []
+            target = resolver.resolve("local")
+            assert target.type == "local"
+            assert target.execution_space_key is None
+            host = target.host or agents["local"].host
+            assert resolver.is_local_transport(host)
+            assert _is_local_target(host, resolver)
+            assert not resolver.is_local_transport(
+                remote.ssh_environments[0].alias, execution_space_key=remote.key,
+            )
+            if collision != "none":
+                assert not resolver.is_local_transport(remote.ssh_environments[0].alias)
+
+
 def test_targeting_and_locality_use_distinct_registered_keys():
     spaces = _spaces()
     agents = {
