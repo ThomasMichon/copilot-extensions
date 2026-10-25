@@ -559,7 +559,6 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
                 except OSError as error:
                     if (
                         getattr(error, "winerror", None) not in (5, 32, 33)
-                        or not runtime._is_transient_lock(error)
                         or attempt == runtime._AV_RETRY_ATTEMPTS - 1
                     ):
                         raise
