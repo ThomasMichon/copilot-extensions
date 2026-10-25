@@ -693,8 +693,10 @@ class _SessionResumeMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .acquisition_launch_owner import require_unassociated_session
         from .hosting_policy import require_session_hosting
 
+        require_unassociated_session(self, session, operation="resync")
         hosting_fence = await require_session_hosting(self, session, operation="resync")
         return await self._resync_session_admitted(session_id, hosting_fence=hosting_fence)
 
@@ -704,8 +706,10 @@ class _SessionResumeMixin:
     ) -> int:
         """Retain recovery admission only after repository hosting is allowed."""
         session = self._sessions[session_id]
+        from .acquisition_launch_owner import require_unassociated_session
         from .cold_outages import latest
 
+        require_unassociated_session(self, session, operation="resync")
         if latest(self._db, session_id) is not None:
             await self.resume_session(session_id, drain=False, allow_recreate=False)
             return len(session.event_log.get_events(0)) if session.event_log else 0
@@ -720,6 +724,7 @@ class _SessionResumeMixin:
             from .hosting_policy import require_session_hosting
 
             await require_session_hosting(self, session, operation="resync", fence=hosting_fence)
+            require_unassociated_session(self, session, operation="resync")
             core = _core()
             if session.status == SessionStatus.RUNNING:
                 turn_live = (

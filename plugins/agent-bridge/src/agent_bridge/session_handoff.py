@@ -205,6 +205,10 @@ class _SessionHandoffMixin:
         """
         turn_index = session.turn_count
         native_owner = session._native_turn_transport
+        if native_owner is None:
+            from .acquisition_launch_owner import require_unassociated_session
+
+            require_unassociated_session(self, session, operation="handoff prompt")
         native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
         custody = ({
             "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,

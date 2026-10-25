@@ -77,6 +77,8 @@ retained host for that session; missing inventory is not absence. Live reuse,
 remote/provider/elevated targets, legacy resume, reattachment, recreation and
 background recovery are not selected. An associated pending acquisition or
 session cannot downgrade to the ordinary recovery/resume path.
+History resync also refuses associated sessions before client teardown and
+rechecks their association under the lifecycle lock.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates
@@ -108,6 +110,11 @@ its Host transport into the [existing original-turn protocol](native-turn-custod
 The acquisition's prompt and later selected turns use the same retained
 turn handoff and final SDK gate, not an unassociated prompt after launch.
 Acceptance is still not attributed consumption or semantic completion.
+Until the accepted transport is captured, the original client refuses ordinary
+prompt sends. Session prompt and handoff admission also refuse a durable
+association without its turn owner, including after a failed capture or reload.
+Capture failure preserves the accepted launch observation; it never authorizes
+an unassociated turn.
 
 ## Cost and source controls
 
@@ -118,6 +125,8 @@ frontend checks do not re-ensure indexes. The existing FULL original-acquisition
 and turn commits remain the durability boundaries. No new subprocess, service,
 network request, tree/hash walk or full-history scan is added. Only the selected
 local Host opens the same database passively at its child/exec boundaries.
+Prompt and handoff admission without an installed turn owner add one local
+primary-key lookup on the existing connection to refuse a retained association.
 
 The focused source controls cover closure across worker scheduling, one-shot
 commit, child creation, native RPC and consecutive configuration effects;

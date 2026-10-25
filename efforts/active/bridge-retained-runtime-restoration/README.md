@@ -281,6 +281,17 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   existing collection skips. Normal review and merge remain pending.
   A concurrent lifecycle handoff is also excluded at the launch owner's
   actual native effect boundary.
+- Source review identified two remaining replay paths: resync could replace
+  an unresolved associated load, and capture failure after native acceptance
+  could leave ordinary prompt admission unassociated. Resync now refuses
+  before teardown and rechecks under its lifecycle lock; the original client
+  and durable-session prompt/handoff paths remain fenced until capture.
+  Accepted launch observations remain intact. Two additional real-Host
+  synthetic cases close admission before capture, and lost-load recovery plus
+  under-lock controls prove no replacement launch or prompt escapes.
+  Expanded validation passed 1,273 controls; its remaining stale provider/
+  durable-session fixture was corrected and the focused 104-control
+  acquisition/resync selection then passed. No runtime denial was relaxed.
 - Retained the original HTTP-50 capture checkpoint unchanged at
   `refs/tags/contract-evidence/http50-d5219b038a431a9579fed66a1c1ea71fdfad7a77`.
   Provider ref and commit-object reads confirm the original identity; the

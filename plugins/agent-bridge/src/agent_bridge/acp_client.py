@@ -326,6 +326,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._connection: ClientSideConnection | None = None
         self._acp_session_id: str | None = None
         self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
+        self._acquisition_launch: AcquisitionLaunchOwner | None = None
 
         # Auto-approve all permission requests (agent-bridge default).
         # Ignored when on_permission is set.

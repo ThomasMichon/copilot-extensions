@@ -25,12 +25,13 @@ from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.session_prompts import _SessionPromptMixin
 from agent_bridge.transport import SpawnTarget
 from test_acquisition_runtime import req, rig as rig
-from test_runtime_custody import installation
+from test_runtime_custody import close, installation
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind,mode", [
     ("new", "reply"), ("load", "reply"), ("new", "drop-reply"), ("load", "drop-reply"),
+    ("new", "close-before-capture"), ("load", "close-before-capture"),
 ])
 async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, mode: str,
@@ -69,6 +70,16 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     # An explicit empty test baseline, not inferred absence in an installation.
     rig.manager._host_index._flush()
     original = req()
+    if mode == "close-before-capture":
+        from agent_bridge.acquisition_host_transport import AcquisitionHostTransport
+
+        original_capture = AcquisitionHostTransport.capture
+
+        def close_before_capture(cls, launch, session):
+            close(rig.db, identity, producer)
+            return original_capture(launch, session)
+
+        monkeypatch.setattr(AcquisitionHostTransport, "capture", classmethod(close_before_capture))
     if kind == "load":
         target = SpawnTarget(
             type="local", cwd=str(tmp_path), worktree_id="worktree-a",
@@ -97,6 +108,25 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                 await asyncio.wait_for(rig.runtime.acquire(original, custody=frontend), 15)
             with pytest.raises(RuntimeCustodyError, match="held"):
                 await rig.runtime.acquire(original, custody=frontend)
+            if kind == "load":
+                close(rig.db, identity, producer)
+                spawn = AsyncMock(side_effect=AssertionError("must not spawn"))
+                monkeypatch.setattr(core, "spawn", spawn)
+                with pytest.raises(RuntimeCustodyError, match="resync"):
+                    await rig.manager.resync_session(session.session_id)
+                spawn.assert_not_awaited()
+        elif mode == "close-before-capture":
+            with pytest.raises(RuntimeCustodyError, match="open epoch"):
+                await asyncio.wait_for(rig.runtime.acquire(original, custody=frontend), 15)
+            session = next(s for s in rig.manager.list_sessions() if s.acp_session_id)
+            assert session.status == SessionStatus.IDLE
+            assert session._native_turn_transport is None
+            with pytest.raises(RuntimeCustodyError, match="prompt"):
+                await rig.manager.submit_prompt(session.session_id, "must not send")
+            with pytest.raises(RuntimeCustodyError, match="not been captured"):
+                await session.client.send_prompt("must not send directly")
+            assert session.turn_count == 0
+            assert rig.db.get_turn(session.session_id, 0) is None
         else:
             result = await asyncio.wait_for(rig.runtime.acquire(original, custody=frontend), 15)
             session = rig.manager.get_session(result.session_id)
@@ -108,14 +138,14 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
             assert turn["native_accepted_at"] is not None and turn["native_consumed_at"] is None
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         assert [item["method"] for item in received] == (
-            [f"session/{kind}"] if mode == "drop-reply" else [f"session/{kind}", "session/prompt"]
+            [f"session/{kind}"] if mode != "reply" else [f"session/{kind}", "session/prompt"]
         )
         assert len(handles) == 1
         assert {item["pid"] for item in received} == {handles[0].child_pid}
         row = rig.db.execute_read("SELECT * FROM acquisition_attempts")[0]
         assert {item["handoff"] for item in received} == {json.loads(row["launch_handoff_json"])["id"]}
         assert row["runtime_custody_json"] == admission.document()
-        assert (row["launch_result_json"] is not None) == (mode == "reply")
+        assert (row["launch_result_json"] is not None) == (mode != "drop-reply")
         assert rig.db.runtime_custody_inventory(identity)["restore_qualified"] is False
     finally:
         for session in rig.manager.list_sessions():

@@ -225,6 +225,7 @@ class AcquisitionLaunchOwner:
             raise RuntimeCustodyError("Acquisition host or child birth is unavailable")
         self._host, self._client, self._connection = host, client, client._connection
         self._host_process, self._host_pid, self._child_pid = host.proc, host.host_pid, host.child_pid
+        client._acquisition_launch = self
 
     def _require_transport(self, client: AcpClient) -> None:
         host = self._host
@@ -275,14 +276,26 @@ class AcquisitionLaunchOwner:
         return invoke
 
 
+def session_association(manager: SessionManager, session: Session) -> str | None:
+    """Read the original session association without enrolling or repairing it."""
+    rows = manager.db.execute_read(
+        "SELECT runtime_custody_json FROM sessions WHERE id=?", (session.session_id,),
+    )
+    return rows[0]["runtime_custody_json"] if rows else None
+
+
+def require_unassociated_session(
+    manager: SessionManager, session: Session, *, operation: str,
+) -> None:
+    if session_association(manager, session) is not None:
+        raise RuntimeCustodyError(f"Admitted acquisition {operation} requires its actual original owner")
+
+
 def require_resume_owner(
     manager: SessionManager, session: Session, owner: AcquisitionLaunchOwner | None,
     *, drain: bool, allow_recreate: bool,
 ) -> None:
-    rows = manager.db.execute_read(
-        "SELECT runtime_custody_json FROM sessions WHERE id=?", (session.session_id,),
-    )
-    association = rows[0]["runtime_custody_json"] if rows else None
+    association = session_association(manager, session)
     if owner is None:
         if association is not None:
             raise RuntimeCustodyError("Admitted acquisition resume requires its actual original owner")

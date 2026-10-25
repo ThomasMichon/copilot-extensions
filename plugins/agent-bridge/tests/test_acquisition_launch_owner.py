@@ -321,3 +321,42 @@ async def test_acquisition_launch_associated_session_cannot_auto_resume(local_la
     with pytest.raises(RuntimeCustodyError, match="actual original owner"):
         await rig.runtime.manager.resume_session(rig.session.session_id)
     assert rig.runtime.store.journal.read_launch(rig.original)["started_at"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("late_association", [False, True])
+async def test_acquisition_launch_resync_rechecks_original_association_before_teardown(
+    local_launch, monkeypatch, late_association,
+):
+    from agent_bridge import session_manager as core
+
+    rig = local_launch
+    rig.session.status = SessionStatus.IDLE
+    rig.session.acp_session_id = "retained-native"
+    client = SimpleNamespace(shutdown=AsyncMock())
+    rig.session.client = client
+    spawn = AsyncMock(side_effect=AssertionError("must not spawn"))
+    monkeypatch.setattr(core, "spawn", spawn)
+    if late_association:
+        from agent_bridge import acquisition_launch_owner
+
+        original_association = acquisition_launch_owner.session_association
+
+        def observe_association_under_lock(manager, session):
+            if not session._lifecycle_lock.locked():
+                return None
+            return original_association(manager, session)
+
+        async def prepared(*_args, **_kwargs):
+            return SimpleNamespace()
+
+        monkeypatch.setattr(acquisition_launch_owner, "session_association", observe_association_under_lock)
+        monkeypatch.setattr(
+            "agent_bridge.hosting_policy.require_session_hosting", prepared,
+        )
+    with pytest.raises(RuntimeCustodyError, match="resync"):
+        await rig.runtime.manager.resync_session(rig.session.session_id)
+    client.shutdown.assert_not_awaited()
+    spawn.assert_not_awaited()
+    assert rig.session.client is client
+    assert rig.session.status == SessionStatus.IDLE
