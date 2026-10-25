@@ -184,6 +184,48 @@ source-supported discovery links do not establish receiving acceptance or
 independently verify reported providers. New #8754 is metadata-only pending
 its own admission.
 
+## Fourth delivered consolidation
+
+Batch 94 considered ten repository-intent and tracking-integrity issues.
+Eight redundant trackers were superseded only after actual complete
+receiving acceptance and current readback:
+
+| Unfinished outcome | Superseded tracker | Existing receiving home |
+|--------------------|--------------------|-------------------------|
+| Late-target resolution, contribution posture, complete startup workflow guidance, local-only sync and legacy shadow-state alternatives | #2095, #2562, #4089, #4228, #5299 | OPEN #4173 |
+| Honest unreadable-record evidence, complete cross-project protective queries and approved exact-record integrity repair | #2558, #2706, #7097 | Active authoritative-daemon ROOT and OPEN #3761 |
+
+The ROOT intake actually merged through reviewed #8764, including direct
+local and actual global Validation, continuing Coordination and a dated
+Journal. All incumbent bytes, 29 checked rows, prior #4120 acceptance and
+inline/linked history survive. The complete current ROOT was read back.
+The same PR reviewed the full numeric draft; actual #4173 delivery and
+whole-body/discussion readback separately preserved its exact 89-byte prefix,
+34 unchecked rows and five transfer markers. No product implementation,
+native qualification, release or rollout was completed.
+
+**#3585 and all six inherited #3558 rows remain independently OPEN** under
+the existing head-succession Phase 2 owner. Its complete daemon dependency
+reference does not transfer discovery/root-report custody or add a daemon
+completion gate. #4173 retains its entire authoritative-model decision;
+#3761 and all independently assigned, claimed and installed-acceptance
+responsibilities remain.
+
+All ten public dispositions, original discussions, receiving contracts and
+actual custody were audited before the next census: **913 whole-queue open
+at 2026-10-24 17:41:35 PDT**, comprising 755 original-cohort and 158 inflow.
+There are 666 eligible open issues and 247 untouched excluded-author issues,
+still 184 above the fixed checkpoint.
+
+The historical graph union remains **703 identities**. Thirty-seven are now
+closed: 31 audited graph-scope supersessions and six external changes with
+no credit. Newly closed #8332/#8754 were confirmed metadata-only; their
+current bodies were not read, and #8754 closed before semantic admission.
+No new eligible arrival was observed. The initial research layers remain
+unchanged; actually delivered transfers are a separate operational layer,
+not deductions from thematic edges. Six numeric and three existing ROOT
+intakes have now been received through this graph-first campaign.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
