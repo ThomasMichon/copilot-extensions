@@ -112,6 +112,14 @@ def test_target_rejects_widening_or_repair_flags(flags):
         update_driver_cli.parse_options(["--target", "guide", *flags])
 
 
+@pytest.mark.parametrize("arguments", [
+    ["--target", ""], ["--target="], ["--target", " "],
+])
+def test_manager_rejects_empty_target_before_submission(arguments):
+    with pytest.raises(SystemExit):
+        update_driver_cli.parse_options(arguments)
+
+
 def test_durable_history_distinguishes_acceptance_running_failure_and_completion(inventory, tmp_path, monkeypatch):
     import update_driver
 
@@ -125,12 +133,28 @@ def test_durable_history_distinguishes_acceptance_running_failure_and_completion
     assert ui._operations()["guide"]["state"] == "queued"
     request.state = "running"
     assert "Building selected" in ui._operations()["guide"]["progress"]
+    spec.argv = ("--target=other", "--target=guide")
+    assert ui._operations()["guide"]["state"] == "running"
+    spec.argv = ("--target=other", "--target", "guide")
+    assert ui._operations()["guide"]["state"] == "running"
     request.state, request.exit_code = "completed", 1
     assert ui._operations()["guide"]["state"] == "failed"
     request.exit_code = 0
     assert ui._operations()["guide"]["state"] == "succeeded"
     spec.source = "other-installation"
     assert ui._operations() == {}
+
+
+@pytest.mark.parametrize("shape", ["reference", "inventory"])
+def test_known_roster_uses_both_canonical_marketplace_result_shapes(inventory, monkeypatch, shape):
+    import plugin_resolve
+    from plugin_resolve import inventory as plugin_inventory
+
+    result = {shape: {"marketplace_root" if shape == "reference" else "catalog_root": "/synthetic/catalog"}}
+    monkeypatch.setattr(plugin_inventory, "installed_item", lambda *a: result)
+    monkeypatch.setattr(plugin_resolve, "load_marketplace", lambda path: SimpleNamespace(plugins={"catalog-only": object()}))
+    rows = {row["id"]: row for row in ui.inventory()["entries"]}
+    assert "catalog-only" in rows and not rows["catalog-only"]["updatable"]
 
 
 def test_durable_submission_uses_existing_owner_not_an_observer_queue(inventory, monkeypatch, tmp_path, capsys):

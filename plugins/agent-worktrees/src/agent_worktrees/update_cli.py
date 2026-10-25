@@ -298,7 +298,7 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
 
 
 def _update_in_plugin_steps(args: argparse.Namespace) -> int:
-    if getattr(args, "target", None):
+    if getattr(args, "target", None) is not None:
         from .installation_updates import update_target
 
         return update_target(args.target)

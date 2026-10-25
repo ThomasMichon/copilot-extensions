@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+import contextlib
 import json
 import re
+import sys
 
 from . import config, output, reconcile, update_events, update_options, update_runtime, update_runtime_plan
 
@@ -97,7 +99,9 @@ def inventory():
 
 def print_inventory():
     try:
-        print(json.dumps(inventory()))
+        with contextlib.redirect_stdout(sys.stderr):
+            result = inventory()
+        print(json.dumps(result))
         return 0
     except (OSError, ValueError) as error:
         output.err(f"Installation inventory: {error}")
@@ -127,6 +131,11 @@ def update_target(name: str) -> int:
         update_events.record("payload_refresh", f"{name}@{reconcile.MARKETPLACE}", status)
         if not status.startswith("OK"):
             return 1
+        acquired = reconcile.core_installed_payload_dir(name)
+        if acquired is None:
+            raise ValueError("Acquired payload is unavailable; inspect acquisition and retry")
+        if not target.required and reconcile.manifest_runtime_scope(acquired) != "none":
+            raise ValueError("Acquired release now requires a runtime; enable through configuration before updating its runtime")
         step = target_plan(name, target)
         if step.blocked:
             raise ValueError(step.status)

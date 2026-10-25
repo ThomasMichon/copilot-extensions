@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections.abc import Collection, Mapping
 from pathlib import Path
 
@@ -40,7 +41,7 @@ def forced_runtimes(args: argparse.Namespace) -> frozenset[str]:
 def forwarded_flags(args: argparse.Namespace) -> list[str]:
     """The options above, rebuilt for forwarding through the Manager seam."""
     flags: list[str] = []
-    if getattr(args, "target", None):
+    if getattr(args, "target", None) is not None:
         flags += ["--target", args.target]
     if getattr(args, "auth_report", False):
         flags.append("--auth-report")
@@ -50,6 +51,9 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 
 def validate_auth_flags(args: argparse.Namespace) -> None:
+    target = getattr(args, "target", None)
+    if target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", target):
+        argparse.ArgumentParser(prog="update").error("--target requires a nonempty plugin identifier")
     if getattr(args, "inventory", False) and (
         getattr(args, "skip_modules", None) is not None
         or any(getattr(args, name, False) for name in (

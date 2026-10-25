@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -85,6 +86,8 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-non-repository", action="store_true")
     canonical.add_argument("--auth-environment", action="store_true")
     parsed = canonical.parse_args(forwarded)
+    if parsed.target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parsed.target):
+        parser.error("--target requires a nonempty component identifier")
     if parsed.target is not None and any((
         parsed.force, parsed.force_runtime, parsed.skip_modules is not None,
         parsed.recreate_venv, parsed.repair_engine, parsed.auth_report,

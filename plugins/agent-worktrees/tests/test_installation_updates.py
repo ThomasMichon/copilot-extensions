@@ -160,6 +160,45 @@ def test_real_update_parser_routes_inventory_without_execution(monkeypatch):
         parser.parse_args(["update", "--target-plugin-typo", "guide"])
 
 
+@pytest.mark.parametrize("target", ["", " ", "../plugin"])
+def test_empty_or_invalid_target_is_never_dropped_into_suite(installed, monkeypatch, target):
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("invalid target acquired"))
+    args = argparse.Namespace(target=target)
+    with pytest.raises(SystemExit):
+        update_options.validate_auth_flags(args)
+    assert update_options.forwarded_flags(args) == ["--target", target]
+    assert update_cli._update_in_plugin_steps(args) == 1
+
+
+def test_inventory_warnings_stay_on_stderr_not_in_json(installed, monkeypatch, capsys):
+    original = update_runtime._registered_plugin_targets
+
+    def warned():
+        print("Warning: activation metadata unavailable")
+        return original()
+
+    monkeypatch.setattr(update_runtime, "_registered_plugin_targets", warned)
+    assert owner.print_inventory() == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["contract"] == 1
+    assert "activation metadata" in captured.err
+
+
+def test_payload_only_scope_change_cannot_install_disabled_runtime(installed, monkeypatch):
+    inactive = update_runtime._RegisteredPluginTarget(None, update_runtime._PluginActivation.INACTIVE)
+    monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {"guide": inactive})
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", lambda name, *a, **k:
+        update_runtime_plan.RuntimeUpdateStep(name, "runtime_reconcile", installed[name], status="payload-only"))
+
+    def acquire(*args, **kwargs):
+        (installed["guide"] / "plugin.json").write_text('{"name":"guide","version":"3","runtimeScope":"universal"}')
+        return "OK"
+
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", acquire)
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda *a: pytest.fail("disabled runtime installed"))
+    assert owner.update_target("guide") == 1
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
 def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
     name = "agent-example"

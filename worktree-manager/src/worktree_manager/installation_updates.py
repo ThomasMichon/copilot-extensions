@@ -14,6 +14,16 @@ from . import __version__, engine_client
 PIVOT_NAME = "manager-installation-updates"
 
 
+def _stored_target(arguments):
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
+    parser.add_argument("--target")
+    try:
+        parsed, _unknown = parser.parse_known_args(arguments)
+    except argparse.ArgumentError as error:
+        raise ValueError(f"Invalid durable update target: {error}") from error
+    return parsed.target
+
+
 def _engine_rows(payload):
     fields = {"id", "title", "kind", "enabled", "installed", "payload", "selected", "running", "source", "updatable", "limitation"}
     if not isinstance(payload, dict) or type(payload.get("contract")) is not int or payload["contract"] != 1:
@@ -83,12 +93,11 @@ def _operations():
     source = _source_key()
     for request in update_driver.status():
         argv = request.spec.argv
-        if request.spec.backend != "manager" or request.spec.source != source or "--target" not in argv:
+        if request.spec.backend != "manager" or request.spec.source != source:
             continue
-        index = argv.index("--target") + 1
-        if index >= len(argv):
+        target = _stored_target(argv)
+        if target is None:
             continue
-        target = argv[index]
         state = request.state
         if state == "completed":
             state = "succeeded" if request.exit_code == 0 else "failed"
@@ -133,7 +142,10 @@ def inventory():
 
         home, cache = inventory_paths(Path.cwd(), None)
         item = installed_item("agent-worktrees@copilot-extensions", home, cache)
-        catalog_root = item["reference"].get("marketplace_root")
+        catalog_root = (
+            item.get("reference", {}).get("marketplace_root")
+            or item.get("inventory", {}).get("catalog_root")
+        )
         installed_catalog = load_marketplace(catalog_root) if catalog_root else None
         if installed_catalog is not None:
             known.update({name: "" for name in installed_catalog.plugins})
