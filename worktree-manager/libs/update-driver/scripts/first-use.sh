@@ -72,9 +72,10 @@ if [[ "$installer_action" == install && "$plugin" != agent-logger ]]; then
     printf 'Fixed install action requires Logger.\n' >&2; exit 1
 fi
 if [[ "$plugin" == agent-logger ]]; then
-    for helper in command_binding.py command_lifecycle.py; do
+    for helper in command_binding.py command_lifecycle.py installer_engine.py \
+        installation-context/installation_context.py; do
         [[ -f "$payload/scripts/$helper" ]] || {
-            printf 'Logger first use requires its canonical lifecycle helpers.\n' >&2; exit 1;
+            printf 'Logger first use requires its complete materialized installation and lifecycle helpers.\n' >&2; exit 1;
         }
     done
 fi
@@ -93,18 +94,21 @@ if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == ag
 fi
 if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
     installation_hint="${prefix}_INSTALLATION_ID"
-    [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" &&
-        "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
-        "$(basename -- "$payload")" == "$plugin" ]] || {
+    [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" && (
+        ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
+          "$(basename -- "$payload")" == "$plugin" ) ||
+        ( "$plugin" == agent-logger && "$installer_action" == provision &&
+          "$(dirname -- "$payload")" == "$runtime/snapshots" ) ) ]] || {
         printf '%s first use requires its canonical installed payload and default legacy root.\n' "$label" >&2
         exit 1
     }
 fi
-if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh ]]; then
+if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" == agent-logger ]]; then
     label='Pull Requests'; [[ "$plugin" != agent-ssh ]] || label=SSH
+    [[ "$plugin" != agent-logger ]] || label=Logger
     [[ "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
-          ( "$plugin" != agent-ssh || "$(basename -- "$payload")" == "$plugin" ) ) ||
+          ( "$plugin" == agent-pull-requests || "$(basename -- "$payload")" == "$plugin" ) ) ||
         "$(dirname -- "$payload")" == "$runtime/snapshots" ) ]] || {
         printf '%s first use requires its canonical installed payload or selected legacy snapshot.\n' "$label" >&2
         exit 1

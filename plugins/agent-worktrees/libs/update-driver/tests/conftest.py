@@ -288,3 +288,23 @@ def owning_logger(owning_codespaces):
         payload / "payload-invocation.json",
     )
     return payload, installation.with_name(".agent-logger"), project
+
+
+@pytest.fixture
+def selected_logger_snapshot(owning_logger):
+    from test_first_use import primitive
+
+    payload, installation, project = owning_logger
+    captured = primitive(payload).resolve_context(
+        payload_root=payload, plugin_id="agent-logger", project_root=project,
+    )
+    snapshot = installation / "snapshots/1.0.0-retained"
+    shutil.copytree(payload, snapshot)
+    (snapshot / "snapshot-provenance.json").write_text(json.dumps({
+        "schema": "copilot-extensions.legacy-snapshot-source", "version": 2,
+        "snapshotId": snapshot.name, "payloadVersion": "1.0.0", "resolution": captured,
+    }), encoding="utf-8")
+    (installation / "payload-dir").write_text(str(snapshot), encoding="utf-8")
+    (installation / "stamped-version").write_text("1.0.0", encoding="utf-8")
+    payload.rename(payload.with_name("unavailable-installed-payload"))
+    return snapshot, installation, project

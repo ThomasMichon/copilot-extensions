@@ -36,6 +36,7 @@ def observe(predicate, timeout, diagnostic):
     ("owning_payload", "provision"), ("owning_pull_requests", "provision"),
     ("owning_ssh", "provision"), ("owning_codespaces", "provision"),
     ("owning_logger", "provision"), ("owning_logger", "install"),
+    ("selected_logger_snapshot", "provision"),
 ])
 def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
     request, payload_fixture, installer_action, area, native_window_observation,
@@ -154,7 +155,9 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
         assert foundation_status(root=root).state == "completed"
         assert foundation_status(root=root).operation_id == operation.operation_id
         frozen = Path((installation / "source-path").read_text().strip()).parent
-        if payload_fixture in {"owning_pull_requests", "owning_ssh", "owning_codespaces", "owning_logger"}:
+        if payload_fixture in {
+            "owning_pull_requests", "owning_ssh", "owning_codespaces", "owning_logger", "selected_logger_snapshot",
+        }:
             assert frozen.parent.parent == installation / ".install-stage"
             assert frozen.parent.name.startswith(request.id + "-")
         else:

@@ -19,6 +19,7 @@ from update_driver import first_use as provision
 from update_driver.foundation_inputs import GENERATED, PACKAGES
 
 from test_first_use import primitive
+from test_first_use_codespaces_bootstrap import hook_command
 from test_first_use_genesis import observe
 from test_first_use_native import native_command
 from test_first_use_vault import cold_environment, native_genesis
@@ -332,6 +333,16 @@ def test_actual_logger_stamp_keeps_snapshot_and_six_commands_without_runtime(mat
     assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
     pointer = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
     assert pointer.parent == installation / "snapshots"
+    assert provision.inspect(pointer, installation, project)["plugin"] == "agent-logger"
+    bootstrap = subprocess.run(
+        hook_command(pointer, project, installation.parent),
+        env={**os.environ, "COPILOT_PLUGIN_ROOT": str(pointer)}, cwd=project,
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert bootstrap.returncode == 3 and bootstrap.stdout == "{}" and bootstrap.stderr, (
+        bootstrap.stdout + bootstrap.stderr
+    )
+    assert not (installation.parent / ".copilot-extensions/update-driver").exists()
     for command, _module in provision.LOGGER_COMMANDS:
         assert (installation.parent / ".local/bin" / (command + ".ps1" if os.name == "nt" else command)).is_file()
     assert not (installation / "current-version").exists()
