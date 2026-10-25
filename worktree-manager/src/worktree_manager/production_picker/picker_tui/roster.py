@@ -17,6 +17,8 @@ the engine then falls back to its built-in default axes.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
+import socket
 from typing import TYPE_CHECKING
 
 from machine_transport import (
@@ -127,10 +129,22 @@ def local_context(
     """Use observed local authority only with attributable binding provenance."""
     if not getattr(config, "machine_binding_known", False):
         return None
-    return resolve_local_execution_context(
-        entries, hostname=hostname, environment=execution_platform,
+    observed = socket.gethostname()
+    current = resolve_local_execution_context(
+        entries, hostname=observed, environment=execution_platform,
         configured_machine=config.configured_machine,
     )
+    if (
+        config.configured_machine is None and current.customization_key is None
+        and current.machine.casefold() == observed.casefold()
+        and hostname.casefold() != observed.casefold()
+    ):
+        short = resolve_local_execution_context(
+            entries, hostname=hostname, environment=execution_platform,
+        )
+        if short.customization_key is not None or short.machine.casefold() != hostname.casefold():
+            return replace(short, hostname=observed)
+    return current
 
 
 def host_cols():
@@ -165,8 +179,6 @@ def local_host():
     with the grid. Falls back to ``data_local.LOCAL`` (hostname-based) when the
     local machine is not represented in the roster.
     """
-    import socket
-
     from . import data_local
 
     host_key = socket.gethostname().split(".")[0].lower()

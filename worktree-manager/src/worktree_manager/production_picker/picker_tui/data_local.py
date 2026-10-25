@@ -199,7 +199,8 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def _source_key() -> tuple[str, str]:
+def local_source_key() -> tuple[str, str]:
+    """Selected source identity; ``LOCAL`` remains the legacy OS observation."""
     try:
         cfg.project_name()
     except RuntimeError:
@@ -210,7 +211,7 @@ def _source_key() -> tuple[str, str]:
 
 def machines():
     """Machine-tab descriptors. Slice 1: the local machine only."""
-    m, e = _source_key()
+    m, e = local_source_key()
     return [(f"{m} {e}", m, e, True)]
 
 
@@ -359,7 +360,7 @@ def load(
     competing caller-side answer.
     """
     derive.NOW = _dt.datetime.now()
-    local = _source_key() if machine is None or env is None else (machine, env)
+    local = local_source_key() if machine is None or env is None else (machine, env)
     machine = machine if machine is not None else local[0]
     env = env if env is not None else local[1]
     norm_source = {
@@ -395,7 +396,7 @@ def refresh_one(worktree_id: str, machine: str | None = None,
                 env: str | None = None, *, runner=None):
     """Read ONE current slot -- the picker's per-row Refresh."""
     derive.NOW = _dt.datetime.now()
-    local = _source_key() if machine is None or env is None else (machine, env)
+    local = local_source_key() if machine is None or env is None else (machine, env)
     machine = machine if machine is not None else local[0]
     env = env if env is not None else local[1]
     rows = list(

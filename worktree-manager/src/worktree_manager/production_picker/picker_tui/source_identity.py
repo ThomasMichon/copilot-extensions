@@ -7,6 +7,12 @@ MACHINE_SSH_KIND = "machine-ssh"
 PROVIDER_EXEC_KIND = "provider-exec"
 
 
+def local_key(source: object) -> tuple[str, str] | None:
+    """Selected local source identity, with the historical source fallback."""
+    resolve = getattr(source, "local_source_key", None)
+    return resolve() if callable(resolve) else getattr(source, "LOCAL", None)
+
+
 def machine_ssh_id(machine: str, env: str) -> str:
     """Return the canonical identity for a machine/environment source."""
     machine_part = quote(machine.strip().casefold(), safe="-._~")

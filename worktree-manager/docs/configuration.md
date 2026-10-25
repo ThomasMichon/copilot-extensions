@@ -169,6 +169,12 @@ rather than stamping raw hostname metadata onto differently named local rows.
 Supported legacy registry keys remain the Profiles/source keys even when the
 compact execution name differs; validated legacy target spellings normalize
 to that same local execution space when no customization entry exists.
+Setup, New/AHP, maintenance and worktree-detail routing consume the selected
+`local_source_key()` contract when available; legacy sources still expose
+`LOCAL`. The raw local observation remains separate for first-paint chrome
+and compatibility. Known-provenance resolution preserves the full OS hostname,
+preferring full-hostname customization before a matching historical short-name
+customization. No map leaves that full observation intact.
 Older bootstrap responses without provenance retain their historical strict
 roster behavior; their detected `machine` scalar is not promoted to a new
 configured binding.

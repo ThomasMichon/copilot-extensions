@@ -27,6 +27,7 @@ from agent_procutil import no_window_flags
 
 from ... import engine_client
 from .. import context
+from .source_identity import local_key
 
 # Per-item lifecycle states (mirror the progress sub-dialog glyphs).
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
@@ -90,7 +91,7 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
 
     *items* are engine record dicts (collision-safe ``selection_id`` +
     ``raw.id`` + ``machine`` / ``env``). Local items
-    (machine/env == ``src.LOCAL``) call the attributable provider JSON CLI;
+    (machine/env == the selected local source key) call the attributable provider JSON CLI;
     remote items call the same project CLI over SSH via
     ``data_ssh.remote_op_argv``. A target that resolves to neither (unknown /
     *not-ready, or no remote argv builder on the source) yields a failed task.
@@ -99,7 +100,7 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
         project = context.project()
     elif not project.strip():
         raise ValueError("project must not be empty")
-    local = getattr(src, "LOCAL", None)
+    local = local_key(src)
     tasks = []
     for w in items:
         wt_id = (w.get("raw") or {}).get("id")

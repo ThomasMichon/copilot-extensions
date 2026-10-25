@@ -8,6 +8,7 @@ import threading
 
 from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
+from .source_identity import local_key
 
 # Local and SSH New prompts share target-owned staging, with or without mux.
 # Bare/Anchor have no supported worktree Copilot prompt handoff.
@@ -475,7 +476,7 @@ class PickerScreenMaintenanceActionsMixin:
              "hint": "new worktree, no Copilot bootstrap"},
             {"label": "No Mux", "on": False, "hint": "skip PSMux/TMux wrapper"},
         ]
-        if (tm, te) == self.src.LOCAL:
+        if (tm, te) == local_key(self.src):
             opts.append({
                 "label": "AHP",
                 "on": False,
@@ -492,7 +493,7 @@ class PickerScreenMaintenanceActionsMixin:
                "opts": opts}
         show_prompt = _SEED_PROMPT_ENABLED
         scr = ScopeDlgScreen(
-            dlg, show_prompt=show_prompt, launch_local=(tm, te) == self.src.LOCAL,
+            dlg, show_prompt=show_prompt, launch_local=(tm, te) == local_key(self.src),
             journal_enabled=self.real_ops,
         )
 
