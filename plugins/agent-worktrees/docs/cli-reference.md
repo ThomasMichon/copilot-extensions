@@ -1401,7 +1401,14 @@ eligible runtime must have exactly one source record; missing, unexpected,
 inactive or now-gated selections block the whole runtime portfolio before any
 installer or local integration runs. Owner validation, exact source pinning,
 selected/completed-slot currentness, native lifecycle, retry and outcome handling
-are unchanged. Omitting the option retains ordinary marketplace runtime delivery.
+are retained. Profile-qualified sources additionally use the
+[installed owner's target contract](../../agent-containers/docs/runtime-source-target.md):
+the actual target is separate from the original source pin and is revalidated
+before every attempt. Inventory advertises this support through additive
+`runtime_sources.target_contract: {schema: "copilot-extensions.runtime-source-target", version: 1}`.
+An old engine or missing/conflicting owner planner requires tooling upgrade,
+never profile substitution. Queued source records remain exactly `payload` and
+`identity`. Omitting the option retains ordinary marketplace runtime delivery.
 This suite-only input cannot combine with target/authentication/inspection or
 recovery operations and never delegates to an older Manager. The
 [Manager caller](../../../worktree-manager/README.md#independent-runtime-source-acquisition)

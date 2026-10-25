@@ -38,6 +38,11 @@ parse_arguments() {
 }
 # Resolve caller-relative roots before self-staging changes the working directory.
 parse_arguments "$@"
+if [[ "$ACTION" != stamp && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" &&
+    -z "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET+x}" ]]; then
+    _fail "Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction."
+    exit 1
+fi
 case "$PROFILE" in ""|base|provider-exec) ;; *) _fail "Unknown runtime profile: $PROFILE"; exit 2 ;; esac
 case "$INSTALL_DIR" in ""|/*) ;; *) INSTALL_DIR="$PWD/$INSTALL_DIR" ;; esac
 set -- "$ACTION"

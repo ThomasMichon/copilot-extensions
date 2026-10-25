@@ -41,6 +41,8 @@ _source_spec.loader.exec_module(source)
 
 PROFILE_SCHEMA = "copilot-extensions.agent-containers.runtime-profile"
 PROFILE_FILE = "runtime-profile.json"
+TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
+TARGET_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET"
 EXECUTION_SCHEMA = "copilot-extensions.agent-containers.provider-execution"
 PROFILES = ("base", "provider-exec")
 LIBRARIES = (
@@ -322,6 +324,54 @@ def _check_selected_source(identity, expected_identity: str | None) -> None:
         raise RuntimeError("Containers source identity changed after runtime selection")
 
 
+@dataclass(frozen=True)
+class RuntimeTarget:
+    package_version: str
+    identity: source.SourceIdentity | None
+    profile: str
+    runtime_version: str
+
+    def document(self, root: Path) -> dict:
+        if self.identity is None:
+            raise RuntimeError("Source target planning requires a prepared source identity")
+        return {
+            "schema": TARGET_SCHEMA, "version": 1, "plugin": "agent-containers",
+            "runtime_root": str(root.resolve()), "source": source.manifest_fields(self.identity),
+            "profile": self.profile, "runtime_version": self.runtime_version,
+        }
+
+
+def _select_target(
+    root: Path, payload: Path, requested: str | None,
+    expected_source_version: str | None, expected_source_identity: str | None,
+) -> RuntimeTarget:
+    version = _package_version(payload)
+    identity = source.read_source_identity(payload, version, plugin="agent-containers")
+    selected_version = identity.runtime_version if identity else version
+    if expected_source_version is not None and expected_source_version != selected_version:
+        raise RuntimeError("Containers source identity changed after runtime selection")
+    _check_selected_source(identity, expected_source_identity)
+    profile = selected_profile(root, requested)
+    profile_version = f"{version}{'.' if '+' in version else '+'}{profile}"
+    runtime_version = (
+        source.runtime_version(profile_version, identity.source_commit, identity.assembly_hash)
+        if identity else profile_version
+    )
+    return RuntimeTarget(version, identity, profile, runtime_version)
+
+
+def plan_source(
+    root: Path, payload: Path, *, expected_source_version: str,
+    expected_source_identity: str,
+) -> dict:
+    """Read installed profile policy and bind its target without provisioning."""
+    root = Path(os.path.abspath(root.expanduser()))
+    payload = Path(os.path.abspath(payload.expanduser()))
+    return _select_target(
+        root, payload, None, expected_source_version, expected_source_identity,
+    ).document(root)
+
+
 def stamp_source(
     root: Path, payload: Path, expected_version: str, *, expected_identity: str | None = None,
 ) -> Path:
@@ -362,18 +412,20 @@ def provision(
         raise RuntimeError("uv is required; unrestricted pip fallback is not supported")
     root = Path(os.path.abspath(root.expanduser()))
     payload = Path(os.path.abspath(payload.expanduser()))
-    version = _package_version(payload)
-    identity = source.read_source_identity(payload, version, plugin="agent-containers")
-    selected_version = identity.runtime_version if identity else version
-    if expected_source_version is not None and expected_source_version != selected_version:
-        raise RuntimeError("Containers source identity changed after runtime selection")
-    _check_selected_source(identity, expected_source_identity)
-    profile = selected_profile(root, requested)
-    profile_version = f"{version}{'.' if '+' in version else '+'}{profile}"
-    runtime_version = (
-        source.runtime_version(profile_version, identity.source_commit, identity.assembly_hash)
-        if identity else profile_version
+    target = _select_target(
+        root, payload, requested, expected_source_version, expected_source_identity,
     )
+    version, identity = target.package_version, target.identity
+    profile, runtime_version = target.profile, target.runtime_version
+    if identity is not None and source.SOURCE_PIN_ENV in os.environ and TARGET_ENV not in os.environ:
+        raise RuntimeError(
+            "Prepared-source transaction requires a frozen source target; "
+            "upgrade the update engine before profile construction"
+        )
+    if TARGET_ENV in os.environ:
+        expected_target = json.loads(os.environ[TARGET_ENV], object_pairs_hook=_unique_object)
+        if json.dumps(expected_target, sort_keys=True) != json.dumps(target.document(root), sort_keys=True):
+            raise RuntimeError("Containers source target changed after runtime selection")
     libraries = _library_roots(payload, prepared=identity is not None)
     fingerprint = _fingerprint(payload, libraries)
     root.mkdir(parents=True, exist_ok=True)
@@ -493,9 +545,22 @@ def main() -> int:
     parser.add_argument("--tsv", action="store_true")
     parser.add_argument("--expected-source-version")
     parser.add_argument("--expected-source-identity")
-    parser.add_argument("--stamp-source", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--stamp-source", action="store_true")
+    mode.add_argument("--plan-source", action="store_true")
     args = parser.parse_args()
     try:
+        if args.plan_source:
+            if (
+                not args.expected_source_version or not args.expected_source_identity
+                or args.python or args.uv or args.profile or args.tsv
+            ):
+                raise RuntimeError("Source target planning requires only the exact source selection")
+            print(json.dumps(plan_source(
+                args.root, args.payload, expected_source_version=args.expected_source_version,
+                expected_source_identity=args.expected_source_identity,
+            ), sort_keys=True))
+            return 0
         if args.stamp_source:
             if not args.expected_source_version:
                 raise RuntimeError("Source stamping requires an exact selected source version")

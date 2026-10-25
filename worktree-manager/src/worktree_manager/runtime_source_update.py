@@ -7,6 +7,7 @@ import re
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from collections.abc import Iterator
+from pathlib import Path
 
 from . import engine_client as ec
 from .runtime_source import ResolvedSource, acquire
@@ -16,6 +17,8 @@ from .self_install import default_root
 
 SCHEMA = "copilot-extensions.prepared-runtime-sources"
 CONTRACT = 1
+TARGET_SCHEMA = "copilot-extensions.runtime-source-target"
+PROVIDER_SCHEMA = "copilot-extensions.runtime-source-target-provider"
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,48 @@ def _targets(inventory: dict, arguments: list[str]) -> list[str]:
     return sorted(names)
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate source target declaration key: {key}")
+        result[key] = value
+    return result
+
+
+def _check_target_support(inventory: dict, records: dict) -> None:
+    """An old V1 engine may not silently ignore required profile semantics."""
+    for name, record in records.items():
+        path = Path(record["payload"]) / "runtime-source-target.json"
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise ValueError("Source target declaration must be an ordinary file")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+        except FileNotFoundError:
+            if name == "agent-containers":
+                raise ValueError(
+                    "Containers requires a source target declaration; upgrade its source tooling "
+                    "before updating this profile-owning runtime"
+                ) from None
+            continue
+        if (
+            not isinstance(value, dict) or set(value) != {"schema", "version", "planner"}
+            or value["schema"] != PROVIDER_SCHEMA or type(value["version"]) is not int
+            or value["version"] != 1 or not isinstance(value["planner"], str)
+            or re.fullmatch(r"scripts/[a-z][a-z0-9_]*\.py", value["planner"]) is None
+        ):
+            raise ValueError("Unsupported source target declaration")
+        capability = inventory["runtime_sources"].get("target_contract")
+        if (
+            not isinstance(capability, dict) or capability.get("schema") != TARGET_SCHEMA
+            or type(capability.get("version")) is not int or capability["version"] != 1
+        ):
+            raise ValueError(
+                "Selected engine lacks required source target planning support. No update was run; "
+                "upgrade that engine through its existing marketplace/setup flow first."
+            )
+
+
 def prepare_suite(
     project: str | None, arguments: list[str], *, environment: dict[str, str] | None = None,
     runtime_source: ResolvedSource | None = None,
@@ -115,5 +160,6 @@ def prepare_suite(
     output = default_root().absolute() / "runtime-sources/prepared"
     with (nullcontext(runtime_source) if runtime_source is not None else acquire(selection)) as resolved:
         records = {name: _prepare(tool, resolved, name, output) for name in names}
+    _check_target_support(inventory, records)
     packet = json.dumps({"schema": SCHEMA, "version": CONTRACT, "sources": records}, sort_keys=True)
     return PreparedSuite([*arguments, "--runtime-sources", packet], command)

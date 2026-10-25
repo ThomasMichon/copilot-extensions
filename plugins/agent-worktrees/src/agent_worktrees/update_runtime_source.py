@@ -19,6 +19,7 @@ from .installation_probe import strict_json_object
 
 if TYPE_CHECKING:
     from .update_runtime_plan import RuntimeUpdateStep
+    from .update_runtime_target import SourceRuntimeTarget
 
 PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
 SOURCES_SCHEMA = "copilot-extensions.prepared-runtime-sources"
@@ -141,7 +142,9 @@ class PreparedRuntimeSource:
         if not (owner / "scripts" / "command_binding.py").is_file():
             raise ValueError("Installed payload has no command lifecycle helper")
 
-    def deployed_version(self, root: Path, owner: Path) -> str | None:
+    def deployed_version(
+        self, root: Path, owner: Path, *, target: SourceRuntimeTarget | None = None,
+    ) -> str | None:
         """Only the selected slot and its complete source receipt can be current."""
         path = root / "deploy-manifest.json"
         try:
@@ -157,7 +160,12 @@ class PreparedRuntimeSource:
         fields = json.loads(self.identity)
         if manifest.get("service") != fields["runtime_source"]["plugin"]:
             raise ValueError("Source deployment receipt names another runtime")
-        if manifest.get("runtime_source") != fields["runtime_source"]:
+        if json.dumps(manifest.get("runtime_source"), sort_keys=True) != json.dumps(
+            fields["runtime_source"], sort_keys=True,
+        ):
+            return None
+        expected_version = target.version if target else self.version
+        if target is not None and manifest.get("runtime_profile") != target.profile:
             return None
         marker = root / "current-version"
         if marker.is_symlink() or (marker.exists() and not marker.is_file()):
@@ -167,8 +175,10 @@ class PreparedRuntimeSource:
         except FileNotFoundError:
             return None
         if not (
-            selected == self.version
-            or re.fullmatch(re.escape(self.version) + r"\.repair\.[0-9a-f]{32}", selected)
+            selected == expected_version
+            or (target is None and re.fullmatch(
+                re.escape(expected_version) + r"\.repair\.[0-9a-f]{32}", selected,
+            ))
         ):
             return None
         slot = root / "versions" / selected
@@ -179,10 +189,18 @@ class PreparedRuntimeSource:
             or Path(manifest["venv"]) != slot
         ):
             return None
+        hash_arguments: list[str] = []
+        if target is not None:
+            from .update_runtime_target import profile_hash
+
+            digest = profile_hash(slot, target, fields["runtime_source"])
+            if digest is None:
+                return None
+            hash_arguments = ["--expect-hash", digest]
         try:
             result = subprocess.run(
                 [sys.executable, "-I", "-B", str(owner / "scripts" / "versioned_runtime.py"),
-                 "--root", str(root), "--json", "is-complete", selected],
+                 "--root", str(root), "--json", "is-complete", selected, *hash_arguments],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=30, check=False, **no_window_kwargs(),
             )
@@ -204,7 +222,7 @@ class PreparedRuntimeSource:
             or result.returncode != (0 if complete["complete"] else 1)
         ):
             raise ValueError("Source completion probe returned an invalid result")
-        return self.version if complete["complete"] else None
+        return expected_version if complete["complete"] else None
 
     def lifecycle_argv(
         self, owner: Path, name: str, root: Path, project: Path, argv: tuple[str, ...],

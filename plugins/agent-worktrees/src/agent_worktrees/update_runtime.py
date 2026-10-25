@@ -556,7 +556,10 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     if step.source is not None:
         assert step.runtime_root is not None
         assert step.project_root is not None
-        receipt = functools.partial(step.source.deployed_version, step.runtime_root, step.payload)
+        receipt = functools.partial(
+            step.source.deployed_version, step.runtime_root, step.payload,
+            target=step.source_target,
+        )
 
     def execute(argv: tuple[str, ...]) -> str:
         try:
@@ -565,6 +568,12 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
                 assert step.runtime_root is not None
                 assert step.project_root is not None
                 step.source.validate(step.name, step.payload, step.environment)
+                from .update_runtime_target import check_target
+
+                check_target(
+                    step.source_target, step.source, step.name, step.payload,
+                    step.runtime_root, step.environment,
+                )
                 command = step.source.lifecycle_argv(
                     step.payload, step.name, step.runtime_root, step.project_root, argv,
                 )

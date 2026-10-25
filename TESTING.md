@@ -46,6 +46,26 @@ errors or extending the original deadline.
 Expired source-lock consumption retains an active typed subprocess timeout
 and its diagnostics; successful consumption still checks the outer deadline.
 
+## Optional native source-profile updater witness
+
+Set `COPILOT_TEST_NATIVE_SOURCE_PROFILE=1` and select
+`plugins/agent-worktrees/tests/test_source_profile_native.py` through the bounded
+test runner. The two native-shell cases exercise base and provider-exec source
+construction through the actual collected updater and canonical lifecycle
+helper, selected-profile currentness, installed code/global CLI help, retained
+config and SQLite file identity, and unchanged completion reuse in disposable
+homes. Native source calls do not pass a profile override. The fixture reuses
+the existing copied-account adapter on POSIX; production OS-profile resolution
+is unchanged. Its synthetic source receipt is not merged-source provenance.
+
+The 270-second item and finite child/install bounds remain inside the existing
+bounded runner. Short fixture names avoid Windows native-extension DLL path
+limits; no production root or system setting changes. This is opt-in, not a
+new required CI matrix, fleet/role enablement, full portfolio rollout, production
+data-format compatibility or performance qualification. Companion unit controls
+are Containers' `test_runtime_source_target.py`, Worktrees'
+`test_update_runtime_target.py` and Manager's `test_runtime_source_update.py`.
+
 > This is the canonical testing guide. [`AGENTS.md`](AGENTS.md) links here and
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).

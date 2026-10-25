@@ -90,6 +90,92 @@ def test_refuses_second_packet_and_missing_engine() -> None:
         update._targets(document, [])
 
 
+@pytest.mark.parametrize("capability", [
+    None, {}, {"schema": update.TARGET_SCHEMA, "version": True},
+    {"schema": update.TARGET_SCHEMA, "version": 2},
+    {"schema": "foreign", "version": 1},
+    {"schema": update.TARGET_SCHEMA, "version": 1},
+])
+def test_required_profile_target_uses_actual_engine_capability(
+    tmp_path: Path, capability: dict | None,
+) -> None:
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "runtime-source-target.json").write_text(json.dumps({
+        "schema": update.PROVIDER_SCHEMA, "version": 1, "planner": "scripts/runtime_profile.py",
+    }), encoding="utf-8")
+    actual = inventory("agent-worktrees")
+    actual["runtime_sources"]["target_contract"] = capability
+    records = {"agent-containers": {"payload": str(payload), "identity": {}}}
+    if capability == {"schema": update.TARGET_SCHEMA, "version": 1} and type(capability["version"]) is int:
+        update._check_target_support(actual, records)
+    else:
+        with pytest.raises(ValueError, match="No update was run"):
+            update._check_target_support(actual, records)
+    assert set(records["agent-containers"]) == {"payload", "identity"}
+
+
+def test_legacy_unprofiled_sources_keep_v1_engine_support(tmp_path: Path) -> None:
+    update._check_target_support(
+        inventory("agent-worktrees"), {"agent-worktrees": {"payload": str(tmp_path), "identity": {}}},
+    )
+    with pytest.raises(ValueError, match="requires a source target declaration"):
+        update._check_target_support(
+            inventory("agent-worktrees"),
+            {"agent-containers": {"payload": str(tmp_path), "identity": {}}},
+        )
+
+
+def test_required_target_refusal_precedes_both_update_stages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager import update_events
+
+    enable()
+    monkeypatch.setattr(ec, "engine_base_command", lambda: ["old-v1-engine"])
+    monkeypatch.setattr(ec, "run_json", lambda *args, **kwargs:
+                        inventory("agent-worktrees", "agent-containers"))
+    monkeypatch.setattr(update, "_preparer", lambda: tmp_path / "trusted-preparer")
+
+    @contextmanager
+    def acquire(selection: config.RuntimeSource):
+        yield ResolvedSource(selection, tmp_path, "a" * 40, "b" * 40, "a" * 40)
+
+    def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> dict:
+        payload = tmp_path / name
+        payload.mkdir()
+        if name == "agent-containers":
+            (payload / "runtime-source-target.json").write_text(json.dumps({
+                "schema": update.PROVIDER_SCHEMA, "version": 1,
+                "planner": "scripts/runtime_profile.py",
+            }), encoding="utf-8")
+        return {"payload": str(payload), "identity": {}}
+
+    monkeypatch.setattr(update, "acquire", acquire)
+    monkeypatch.setattr(update, "_prepare", prepare)
+    monkeypatch.setattr(update_events, "_ut", None)
+    monkeypatch.setattr(self_install, "self_update", lambda **kwargs: pytest.fail("no self-update"))
+    monkeypatch.setattr(ec, "run_engine_passthrough", lambda *args, **kwargs: pytest.fail("no suite"))
+    run = update_events.UpdateRun()
+    assert update_orchestration.run_update_steps([], run, version="1") == 1
+    assert run.finish(1) == 1
+
+
+@pytest.mark.parametrize("value", [
+    {"schema": "foreign", "version": 1, "planner": "scripts/runtime_profile.py"},
+    {"schema": update.PROVIDER_SCHEMA, "version": True, "planner": "scripts/runtime_profile.py"},
+    {"schema": update.PROVIDER_SCHEMA, "version": 1, "planner": "../foreign.py"},
+])
+def test_invalid_source_target_declaration_is_not_an_ignored_optional_field(
+    tmp_path: Path, value: dict,
+) -> None:
+    (tmp_path / "runtime-source-target.json").write_text(json.dumps(value), encoding="utf-8")
+    with pytest.raises(ValueError, match="Unsupported source target"):
+        update._check_target_support(
+            inventory("agent-worktrees"), {"agent-containers": {"payload": str(tmp_path)}},
+        )
+
+
 @pytest.mark.parametrize("scoped", [False, True])
 def test_one_selection_frozen_provider_and_persistent_packet(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, scoped: bool,

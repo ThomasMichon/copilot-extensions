@@ -1480,6 +1480,10 @@ argv, including call-scoped ownership rather than a stale inherited handle.
 The engine remains authoritative for complete portfolio admission, native
 installation, retries and outcomes; no alternate installer or recurring worker
 is introduced. Marketplace plugin-content refresh remains independent.
+Prepared payloads that require profile-qualified targets also require the actual
+engine's additive target capability before either update stage; see the
+[owned target contract](../plugins/agent-containers/docs/runtime-source-target.md).
+An old V1 source engine is sufficient only for the supported unprofiled baseline.
 
 Fresh suite repair can also honor that independent policy when the installed
 engine cannot provide inventory yet. It acquires one service-source selection,

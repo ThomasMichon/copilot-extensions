@@ -271,6 +271,10 @@ and reuses an already-completed matching slot. Even `--force` never rewrites a
 completed slot. A failed requested profile does **not** fall back silently: the
 old active runtime remains selected and the saved intent is retried next time.
 The deploy manifest records package version separately from runtime slot/profile.
+Prepared-source suite updates preserve that distinction through the
+[owned source-target planning contract](docs/runtime-source-target.md).
+The payload ships the canonical lifecycle helper through `installerLifecycle`;
+this does not change its existing dispatcher or publication policy.
 Profile changes start no service, SSH listener, Docker container or fleet.
 Helper packages are installed non-editably into that slot; health checks reject
 code resolved from a mutable source checkout outside it.

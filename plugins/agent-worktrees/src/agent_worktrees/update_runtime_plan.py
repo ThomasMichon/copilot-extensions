@@ -20,6 +20,7 @@ from . import reconcile
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
     from .update_runtime_source import PreparedRuntimeSource
+    from .update_runtime_target import SourceRuntimeTarget
 
 
 @dataclasses.dataclass(frozen=True)
@@ -37,6 +38,7 @@ class RuntimeUpdateStep:
     fallback_argv: tuple[str, ...] = ()
     deadline_s: int = 0
     source: PreparedRuntimeSource | None = None
+    source_target: SourceRuntimeTarget | None = None
     project_root: Path | None = None
 
     def __post_init__(self) -> None:
@@ -60,11 +62,14 @@ def _select_inputs(
     try:
         environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
         environment = dict(environment)
+        source_target = None
         if source is not None:
             from . import update_runtime as runtime
             from .update_runtime_source import PIN_ENV
+            from .update_runtime_target import TARGET_ENV, plan_target
 
             environment.pop(PIN_ENV, None)
+            environment.pop(TARGET_ENV, None)
             scope = reconcile.manifest_runtime_scope(source.payload)
             if scope not in {"universal", "machine-gated"}:
                 raise ValueError("Prepared payload does not declare an installable runtime scope")
@@ -76,6 +81,9 @@ def _select_inputs(
             except runtime.MachineDetectionError as error:
                 return dataclasses.replace(step, status=f"machine detection failed: {error}")
             source.validate(step.name, step.payload, environment)
+            source_target = plan_target(source, step.name, step.payload, root, environment)
+            if source_target is not None:
+                environment[TARGET_ENV] = source_target.document
             project = (project or Path.cwd()).resolve()
             environment.update({
                 PIN_ENV: source.identity,
@@ -84,7 +92,11 @@ def _select_inputs(
             })
         return dataclasses.replace(
             step, source=source, environment=environment, runtime_root=root,
-            target_version=source.version if source else reconcile.payload_version(step.payload),
+            source_target=source_target,
+            target_version=(
+                source_target.version if source_target else
+                source.version if source else reconcile.payload_version(step.payload)
+            ),
             project_root=project,
         )
     except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
@@ -95,7 +107,9 @@ def _select_inputs(
 def _deployed_version(step: RuntimeUpdateStep) -> str | None:
     if step.source is not None:
         assert step.runtime_root is not None
-        return step.source.deployed_version(step.runtime_root, step.payload)
+        return step.source.deployed_version(
+            step.runtime_root, step.payload, target=step.source_target,
+        )
     return reconcile.runtime_deployed_version(step.name, root=step.runtime_root)
 
 

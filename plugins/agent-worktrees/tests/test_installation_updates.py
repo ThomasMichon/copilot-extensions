@@ -48,6 +48,7 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     facts = owner.inventory()
     assert facts["runtime_sources"] == {
         "schema": "copilot-extensions.prepared-runtime-sources", "version": 1,
+        "target_contract": {"schema": "copilot-extensions.runtime-source-target", "version": 1},
     }
     rows = {row["id"]: row for row in facts["entries"]}
     assert rows["agent-example"]["payload"] == "2"

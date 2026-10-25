@@ -1,0 +1,9 @@
+{
+  "comment": "Require actual engine target-planning support before forwarding profile-qualified prepared-source portfolios.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

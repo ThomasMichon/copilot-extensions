@@ -38,6 +38,11 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ((Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) -and $Action -ne 'stamp' -and
+    -not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET)) {
+    throw 'Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction.'
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
