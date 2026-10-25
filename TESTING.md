@@ -3664,6 +3664,11 @@ live-host rollout.
 
 Supported Manager removal has its own explicit native contract:
 
+The admitted pure packet also covers batch-custody input refusal in
+`tools/promotion_unit_tests/test_manager_uninstall.py`, before filesystem
+ownership can be acquired. Real lease contention and removal remain in the
+separate functional/native portfolios, not the unit-only CI packet.
+
 ```text
 python tools/run-manager-runtime-acceptance.py --root .validation --contract uninstall
 ```

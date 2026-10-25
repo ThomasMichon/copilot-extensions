@@ -275,8 +275,9 @@ def _plan(root: Path, *, daemon_held: bool = False) -> dict:
 
 def _remove(root: Path, plan: dict, removed: list[str]) -> None:
     publication = runtime._runtime_component("versioned_runtime_publication")
+    leases = runtime._runtime_component("versioned_runtime_leases")
     with _daemon_custody(root, create=True):
-        with runtime.batch_removal_custody(root, plan["versions"]):
+        with leases.batch_removal_custody(root, plan["versions"]):
             with publication.target_leases(root, plan["integrations"]):
                 _remove_locked(root, plan, removed, publication)
 

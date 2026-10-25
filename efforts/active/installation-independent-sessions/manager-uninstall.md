@@ -160,3 +160,13 @@ termination, credential change or installed rollout is authorized by this plan.
   acceptance or a production deadline change. All diagnostic instrumentation
   was removed. A manual fresh-Windows lane now exercises the unchanged native
   operation before this prerequisite can be considered complete.
+- Draft #8955 at `18c7e5ea77ec6e142b933b06e3374a47d646a194` passed the
+  fresh Windows native removal/reinstall lane. The frozen Linux shipping-head
+  native flow also passed in 60.88 seconds without skips. Required CI then
+  identified a one-line growth of the grandfathered SDK facade and missing
+  positive unit admission for the changed lease component.
+- The correction keeps batch custody in its existing SDK component rather
+  than growing the facade, and admits pure invalid-input controls with exact
+  source/test hashes. It does not widen the module-size baseline, add actors
+  to unit CI or waive either required check. Final-head validation and normal
+  review remain required.
