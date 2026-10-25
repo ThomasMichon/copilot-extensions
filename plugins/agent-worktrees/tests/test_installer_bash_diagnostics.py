@@ -25,10 +25,12 @@ def test_python_reserved_attempt_enters_native_bash_without_bootstrap_python(tmp
     directory = Path(environment["COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY"])
     receipt = directory / "attempt.json"
     if formatting != "canonical":
-        record = json.loads(receipt.read_text())
+        record = json.loads(receipt.read_text(encoding="utf-8"))
         if formatting == "wrong-plugin":
             record["plugin"] = "another-plugin"
-        receipt.write_text(json.dumps(record, indent=2).replace('": ', '"\n:\t') + "\n")
+        receipt.write_text(
+            json.dumps(record, indent=2).replace('": ', '"\n:\t') + "\n", encoding="utf-8",
+        )
     result = subprocess.run(
         [native_bash(), "-c", """
 set -euo pipefail
@@ -49,8 +51,8 @@ exit 37
     else:
         assert len(writers) == 1
         writer = writers[0].name.removesuffix(".start.json")
-        assert "native reservation entered" in (directory / f"{writer}.log").read_text()
-        assert json.loads((directory / f"{writer}.completed.json").read_text())["exit"] == 37
+        assert "native reservation entered" in (directory / f"{writer}.log").read_text(encoding="utf-8")
+        assert json.loads((directory / f"{writer}.completed.json").read_text(encoding="utf-8"))["exit"] == 37
         assert not (directory / "completed.json").exists(), "reservation caller owns attempt completion"
 
 
@@ -58,7 +60,7 @@ exit 37
 def test_actual_installer_exit_trap_composes_release_and_native_writer_completion(
     tmp_path, native_exit, release_failure,
 ):
-    source = (SCRIPTS / "install.sh").read_text()
+    source = (SCRIPTS / "install.sh").read_text(encoding="utf-8")
     function = re.search(r"^_installer_exit\(\) \{\n.*?^\}", source, re.MULTILINE | re.DOTALL)
     assert function, "the actual installer must own one composed exit function"
     traps = re.findall(r"^trap .* EXIT$", source, re.MULTILINE)
@@ -90,11 +92,11 @@ _release_versioned_slot_lease() {
     assert result.returncode == native_exit, result.stderr
     assert json.loads(result.stdout) == {"native": native_exit}
     assert ("WARNING: installer lease cleanup failed" in result.stderr) is release_failure
-    assert release.read_text() == "released\n"
+    assert release.read_text(encoding="utf-8") == "released\n"
     attempts = list((tmp_path / ".copilot-extensions" / "installer-diagnostics").iterdir())
     assert len(attempts) == 1
     writers = list(attempts[0].glob("*.completed.json"))
-    assert len(writers) == 1 and json.loads(writers[0].read_text())["exit"] == native_exit
-    assert json.loads((attempts[0] / "completed.json").read_text())["exit"] == native_exit
-    archive = "\n".join(path.read_text() for path in attempts[0].glob("*.log"))
+    assert len(writers) == 1 and json.loads(writers[0].read_text(encoding="utf-8"))["exit"] == native_exit
+    assert json.loads((attempts[0] / "completed.json").read_text(encoding="utf-8"))["exit"] == native_exit
+    archive = "\n".join(path.read_text(encoding="utf-8") for path in attempts[0].glob("*.log"))
     assert ("installer lease cleanup failed" in archive) is release_failure
