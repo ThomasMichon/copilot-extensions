@@ -77,6 +77,9 @@ def test_unscoped_guest_tuple_builds_local_source_and_local_task_command(monkeyp
         source_tabs = data_ssh.source_tabs(sources)
         debug = ""
 
+        def _src_local(self):
+            return local.key
+
         def _current_tab(self):
             return next(tab for tab in self.source_tabs if tab["source_id"] == local.source_id)
 

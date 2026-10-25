@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .inbox import ensure_inbox
 from .selection import ListSelection
+from .source_identity import local_key
 from .. import update_stage
 from ... import picker_review
 
@@ -618,32 +619,16 @@ class PickerScreenRuntimeMixin:
                 ),
                 None,
             )
-            # Warm ``self.src.LOCAL`` unconditionally, off the render thread
-            # (this method already runs on the setup/reload worker thread),
-            # even when ``local`` was already found via ``source_tabs`` above
-            # (the real ``data_ssh`` source always sets a ``"local"`` key per
-            # tab, so the ``if local is None:`` fallback below was otherwise
-            # dead in practice). ``data_ssh.LOCAL`` is a PEP 562 module
-            # attribute resolved lazily on first access (see
-            # ``data_ssh._resolve_local()``) and memoized forever after --
-            # that first resolution reads
-            # ``worktree_manager.production_picker.project_config``'s
-            # ``lru_cache``-backed project/machine lookups (a real file read
-            # plus an ``engine_client`` cross-process call the first time;
-            # free on every call after, module-wide). It must be touched HERE
-            # so that one-time cost lands on this worker thread, not left for
-            # whichever later render-thread comparison (e.g.
-            # ``_wt_submenu_verbs()``'s ``(machine, env) == self.src.LOCAL``,
-            # reached the instant the operator opens ANY worktree row's
-            # Actions menu) touches it first (#picker-menu-open-latency).
+            # Keep selected-identity/config warmup on this reload worker.
+            # Legacy sources may still resolve LOCAL through a lazy IPC read.
             with self._load_config_cache_scope():
                 try:
-                    self.src.LOCAL
+                    local_key(self.src)
                 except Exception:
                     pass
                 if local is None:
                     try:
-                        local = self.src.LOCAL
+                        local = local_key(self.src)
                     except Exception:
                         local = self._source_local
                 try:

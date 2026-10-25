@@ -22,7 +22,10 @@ from agent_worktrees.worktrees_runtime import WorktreesRuntime
 def resident(tmp_path, monkeypatch):
     anchor = tmp_path / "anchor"
     anchor.mkdir()
-    policy = SimpleNamespace(headless=False, machine="fixture-host", default_repo=SimpleNamespace(anchor=str(anchor)))
+    policy = SimpleNamespace(
+        headless=False, machine="fixture-host", configured_machine="fixture-host",
+        default_repo=SimpleNamespace(anchor=str(anchor)),
+    )
     loads = []
     monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path / project)
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)

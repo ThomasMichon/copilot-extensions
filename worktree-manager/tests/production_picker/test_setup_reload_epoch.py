@@ -195,6 +195,9 @@ class _SetupRaceScreen(
     def default_sel(self):
         return ("L", 0)
 
+    def _kind(self):
+        return "worktrees"
+
     def stops(self):
         return [("L", 0)]
 
@@ -1260,8 +1263,8 @@ def test_setup_reload_applies_pivots_and_rows_from_one_epoch(
                 await pilot.pause()
                 await asyncio.sleep(0.01)
 
-            assert seen == [(("beta Tasks",), "beta")]
-            assert tuple(screen.htabs) == ("beta Tasks",)
+            assert seen == [(("beta Tasks", "Installation & Updates"), "beta")]
+            assert tuple(screen.htabs) == ("beta Tasks", "Installation & Updates")
             assert screen.data[0]["title"] == "beta"
 
     asyncio.run(run())
@@ -1341,7 +1344,7 @@ def test_non_live_mount_paints_skeleton_before_blocked_load_returns(
 
             assert screen._setup_completion_event.is_set()
             assert screen._busy_label is None
-            assert tuple(screen.htabs) == ("Loaded Tasks",)
+            assert tuple(screen.htabs) == ("Loaded Tasks", "Installation & Updates")
             assert screen.data[0]["title"] == "loaded"
 
     asyncio.run(run())

@@ -66,7 +66,7 @@ def test_codespaces_view_action_actual_click_and_modal(monkeypatch, auth_state, 
                 self.refreshed += 1
                 self.summary = {"auth_status": "ready", "auth_account": "example-user"}
 
-        def invalidate(self):
+        def invalidate(self, scope=None):
             self.invalidated += 1
 
         def close(self):
@@ -855,12 +855,15 @@ def test_clean_modal_cancel_is_noop():
     asyncio.run(run())
 
 
-def test_progress_screen_confirm_gate_cancel_via_keyboard():
+def test_progress_screen_confirm_gate_cancel_via_keyboard(monkeypatch):
     """#88 F4: the maintenance progress run is a native ProgressScreen. A
     beyond-clean (gated) run opens the modal in its confirm-gate state; Esc
     through the real keyboard pipeline cancels it -- the screen dismisses and the
     engine clears the run without touching anything."""
     src = _maint_source()
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    monkeypatch.setattr(data_ssh, "machine_key_map", lambda: {})
 
     async def run():
         app = PickerApp(src, live=False, mock_mode=True)
@@ -8367,7 +8370,7 @@ def _write_tasks_manifest(directory):
     manifest = {
         "label": "Tasks",
         "after": "Worktrees",
-        "list": [sys.executable],
+        "list": [sys.executable, "--machine", "{machine}"],
         "entry": {
             "id": "id", "title": "title", "worktree": "target_worktree",
             "subtitle": "repo_name", "badges": ["labels"],
@@ -8484,7 +8487,9 @@ def test_registered_pivot_inserted_between_worktrees_and_maintenance(tmp_path, m
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
             await pilot.pause()
-            assert scr.htabs == ["Worktrees", "Tasks", "Maintenance", "Profiles"]
+            assert scr.htabs == [
+                "Worktrees", "Tasks", "Maintenance", "Profiles", "Installation & Updates",
+            ]
             assert scr._kind(1) == "registered"
             assert scr._kind(2) == "maintenance"     # built-ins shifted, not renumbered logic
             assert scr._kind(3) == "profiles"
@@ -8519,7 +8524,12 @@ def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
             scr.refresh()
             await pilot.pause()
 
-            assert scr._task_rows() == rows
+            actual = scr._task_rows()
+            assert [
+                {key: value for key, value in row.items() if not key.startswith("_manager_")}
+                for row in actual
+            ] == rows
+            assert all(row["_manager_scope_state"] == "ready" for row in actual)
             # One ('T', i) stop per task; machine sub-nav ('M') present.
             zones = [z for z, _ in scr.stops()]
             assert zones.count("T") == 2
@@ -9040,7 +9050,7 @@ def test_worktree_claiming_task_uses_the_rows_own_machine_not_the_selected_tab()
     holder = _pickerscreen_holder()
     inst = holder.__new__(holder)
     reg = types.SimpleNamespace(name="agent-dispatch", worktree_field="target_worktree",
-                                 group_field="group")
+                                 group_field="group", list_cmd=("tasks", "{machine}"))
     remote_task = {"id": "t4", "target_worktree": "remote-win-20260101-000000-abcd",
                     "group": "Started"}
     inst.pivots = [{"kind": "registered", "pivot": reg}]
@@ -10851,7 +10861,7 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             assert not _cfg_menu_open(scr)
             labels = [scr.htabs[index] for index in scr._config_pivots()]
             assert labels[0] == "Profiles"
-            assert labels[1:] == ["SSH", "MCP"]
+            assert labels[1:] == ["SSH", "MCP", "Installation & Updates"]
 
             await pilot.press("right")
             await pilot.pause()

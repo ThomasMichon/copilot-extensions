@@ -16,6 +16,7 @@ from textual.widgets import Static
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .inbox import Inbox, ensure_inbox
 from .selection import ListSelection
+from .source_identity import local_key
 from .. import project_config as cfg
 
 #: Supplies a unique suffix for ``_apply_from_worker``'s inbox slot name,
@@ -447,32 +448,15 @@ class PickerScreenLoadingMixin:
             ),
             None,
         )
-        # Warm ``self.src.LOCAL`` here even when ``local`` was already found
-        # above from ``tabs``: on a live source (``data_ssh``), ``LOCAL`` is a
-        # module-level attribute resolved lazily on FIRST access (PEP 562
-        # ``__getattr__``, see ``data_ssh._resolve_local()``) and memoized
-        # forever after -- but that first resolution itself reads
-        # ``worktree_manager.production_picker.project_config``'s
-        # ``lru_cache``-backed project/machine lookups (a real file read plus
-        # an ``engine_client`` cross-process call the first time; free on
-        # every call after, module-wide, regardless of any scope). This
-        # method runs on a background thread (``_setup_live_async``'s
-        # worker), so its unconditional touch here pays that one-time cost
-        # off the render thread. Without it, whichever render-thread call
-        # site compares against ``self.src.LOCAL`` FIRST -- e.g.
-        # ``_wt_submenu_verbs()``'s ``(machine, env) == self.src.LOCAL``,
-        # reached synchronously the first time the operator opens ANY
-        # worktree's Actions menu -- pays that first real cost instead,
-        # reproducing as a UI freeze with no spinner (it blocks before
-        # anything mounts) on the very first Enter press of a session
-        # (#picker-menu-open-latency).
+        # Warm selected identity on this worker, even when tabs already supplied
+        # it. Legacy sources can still resolve LOCAL lazily through config/IPC.
         try:
-            self.src.LOCAL
+            local_key(self.src)
         except Exception:
             pass
         if local is None:
             try:
-                local = self.src.LOCAL
+                local = local_key(self.src)
             except Exception:
                 local = None
         try:

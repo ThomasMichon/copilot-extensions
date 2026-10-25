@@ -586,6 +586,9 @@ def refusal_screen():
         def refresh(self):
             pass
 
+        def _src_local(self):
+            return ("host", "Win")
+
     def unready(*args):
         raise RuntimeError("Locality is not ready")
 
