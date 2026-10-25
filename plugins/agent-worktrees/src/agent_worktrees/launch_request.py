@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from . import config as cfg
-from . import creation_allocation, launch_admission, launch_seed_state, tracking, tracking_write
+from . import creation_allocation, creation_replay, launch_admission, launch_seed_state, tracking, tracking_write
 from .creation_identity import IdentityMode, validate_mode
 from .execution_spaces import ExecutionSpaceError, project_record_config, require_project_record_mutation
 from .worktree_naming import parse_session_worktree_id, session_worktree_id
@@ -144,6 +144,10 @@ def _validate_admission(receipt: object, request_id: str) -> dict:
         if "allocation" not in receipt or not receipt.get("creation_complete"):
             raise ValueError("Invalid stored launch admission record identity")
         creation_allocation.validate_record_evidence(receipt["record_identity"])
+    if "execution_origin" in receipt:
+        if "allocation" not in receipt:
+            raise ValueError("Invalid stored launch admission execution origin")
+        creation_replay.validate_origin(receipt["execution_origin"])
     return receipt
 
 
@@ -162,15 +166,19 @@ def _require_replay_identity(receipt: dict, args: dict) -> None:
         raise ValueError("Launch request identity was reused for different intent")
 
 
-def _require_complete_record(receipt: dict, record: tracking.WorktreeRecord) -> None:
+def _require_complete_record(
+    receipt: dict, record: tracking.WorktreeRecord, config: cfg.Config | None = None,
+) -> None:
     if not receipt.get("creation_complete"):
         raise ValueError("Admitted New creation is incomplete; inspect before launch")
     allocation = creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
-    allocation.require_current(project_record_config(record))
     allocation.require_record(record, nonce=receipt["creation_nonce"])
     creation_allocation.require_record_evidence(record, receipt["record_identity"])
     if record.status in ("finalized", "archived") or not Path(allocation.path).is_dir():
         raise ValueError("Stored New allocation checkout is unavailable or retired; inspect, do not recreate")
+    receiving = config if config is not None else project_record_config(record)
+    allocation.require_namespace(receiving)
+    creation_replay.require_completed_record(record, receiving, receipt)
 
 
 def _apply_admit(args: dict) -> dict:
@@ -216,6 +224,7 @@ def _apply_admit(args: dict) -> dict:
                 )
                 receipt["allocation"] = allocation.to_fields()
                 receipt["worktree_id"] = allocation.worktree_id
+                receipt["execution_origin"] = creation_replay.execution_origin(config)
             _validate_admission(receipt, args["request_id"])
             record_path = directory / f"{receipt['worktree_id']}.yaml"
             if "allocation" not in receipt and record_path.exists():
@@ -286,9 +295,9 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
             creation_allocation.AdmittedAllocation.from_fields(receipt["allocation"])
             if "allocation" in receipt else None
         )
-        if admitted is not None:
-            admitted.require_current(config)
         if not path.exists():
+            if admitted is not None:
+                admitted.require_current(config)
             if receipt.get("accepted") or receipt.get("creation_started"):
                 raise ValueError(
                     "Admitted creation was started but its record is unavailable; "
@@ -336,7 +345,7 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
         if admitted is not None:
             record = tracking.load_record(path)
             completed = _read_admission(directory, request_id)
-            _require_complete_record(completed, record)
+            _require_complete_record(completed, record, config)
         _dispatch("launch_request_stage", {
             "tracking_dir": str(directory), "request_id": request_id,
             "fingerprint": fingerprint, "text": request["text"],
@@ -364,10 +373,15 @@ def _apply_stage(args: dict) -> dict:
         ):
             record = tracking.load_record(path)
             agent_policy.require(record.worktree_path)
-            require_project_record_mutation(record)
             if "allocation" in receipt:
                 _require_complete_record(receipt, record)
+            else:
+                require_project_record_mutation(record)
             seed = launch_seed_state.peek(path)
+            if seed is not None and seed.seed_id == receipt["seed_id"] and (
+                seed.kind != receipt["kind"] or seed.text != args["text"]
+            ):
+                raise ValueError("Launch-seed identity was reused for a different intent")
             if receipt.get("accepted"):
                 if seed is None or seed.seed_id != receipt["seed_id"]:
                     raise ValueError("Admitted launch intent is completed or superseded")
@@ -386,13 +400,15 @@ def _apply_stage(args: dict) -> dict:
                     revision = max(revision, durable["revision"])
                 if revision != receipt["prior_revision"]:
                     raise ValueError("Launch intent changed after admission; refusing replacement")
+                require_project_record_mutation(record)
                 launch_seed_state._apply_stage({
                     "yaml_path": str(path), "worktree_id": path.stem,
                     "seed_id": receipt["seed_id"], "kind": receipt["kind"],
                     "text": args["text"],
                 })
-            receipt["accepted"] = True
-            tracking._atomic_write(admission, json.dumps(receipt) + "\n")
+            if not receipt.get("accepted"):
+                receipt["accepted"] = True
+                tracking._atomic_write(admission, json.dumps(receipt) + "\n")
         return {"accepted": True}
 
 
