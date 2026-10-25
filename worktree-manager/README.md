@@ -1308,7 +1308,13 @@ data root and mux cutover owner are unchanged. Acquisition, preparation or
 receipt failures are reported without an unqualified fallback; this mode
 requires Git. Main and other refs retain their existing Git/GitHub-tarball
 path and are not yet source-qualified by this contract. The standalone
-bootstrap's source-fetch path is not changed by Manager self-update support.
+bootstrap's Python adapter applies the same Dev qualification before constructing
+Manager, using only its own declared process helper and trusted preparer under
+an isolated base interpreter. A supplied prepared Manager payload is validated
+and retained exactly rather than resolving Dev again. Recovery-only and adopted
+recovery entries do not acquire another Manager source. Service-source
+bootstrap/repair still refuses before Manager installation; qualifying Manager
+does not authorize an engine update from a different source.
 
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the

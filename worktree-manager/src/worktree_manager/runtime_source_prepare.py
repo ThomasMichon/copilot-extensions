@@ -8,7 +8,7 @@ import sys
 
 from agent_procutil import no_window_kwargs
 
-from . import engine_client as ec
+from .engine_environment import _engine_environment
 from .runtime_source import ResolvedSource
 from .self_install import _runtime_installer, running_payload_dir
 
@@ -35,7 +35,7 @@ def prepare(tool: Path, resolved: ResolvedSource, name: str, output: Path) -> di
     try:
         result = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            stdin=subprocess.DEVNULL, env=ec._engine_environment(),
+            stdin=subprocess.DEVNULL, env=_engine_environment(),
             timeout=600, check=False, **no_window_kwargs(),
         )
     except subprocess.SubprocessError as error:

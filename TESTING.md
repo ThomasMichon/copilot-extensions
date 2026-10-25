@@ -3225,8 +3225,13 @@ failures from source-plus-repair identities below a deep checkout. It constructs
 real non-editable same-package source generations. Manager's explicit Dev
 self-update acquires a clean standalone fixture's merged `dev` tip using its
 own trusted preparer, independently of a different service-source policy.
+The first apply runs the actual standalone Python bootstrap adapter under an
+isolated base interpreter without site packages. Its cold construction uses the
+same four-build group rather than an additional fixture or timeout allowance.
 The lane refuses a subsequently dirtied acquisition checkout without changing
-the installed selection, repairs an intentionally
+the installed selection through both self-update and bootstrap, while an already
+qualified exact payload remains reusable without resolving that dirty checkout.
+It repairs an intentionally
 damaged installed module into a distinct slot, then reuses that exact healthy
 repair. Dry-run reports the actual source selection; the damaged slot and its
 completion/origin receipts remain unchanged.
@@ -3235,7 +3240,8 @@ the same fixture-default data root without a root override, report their actual
 installed prefix/module/generation, and read the original SQLite witness and
 schema version. Config, database bytes/file identity and global command contents
 are preserved. This is synthetic compatible-state continuity, not qualification
-of production data migrations, standalone bootstrap acquisition or host rollout.
+of production data migrations, the shell bootstrap's download/prerequisite
+transport, service-source engine repair or host rollout.
 
 The archived normal-updater consumer has its own explicit Windows contract:
 

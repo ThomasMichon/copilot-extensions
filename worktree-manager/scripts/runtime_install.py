@@ -316,6 +316,15 @@ def main(argv: list[str] | None = None) -> int:
     # happens below under the constructed interpreter and retention bootstrap.
     from worktree_manager.self_install import self_install
 
+    install_payload = args.payload
+    if args.recover_adopted is None:
+        from source_acquisition import manager_payload
+
+        try:
+            install_payload = manager_payload(args.payload, args.root)
+        except (OSError, ValueError, RuntimeError, ImportError) as error:
+            print(f"Manager source acquisition refused: {error}", file=sys.stderr)
+            return 1
     if args.recover_adopted is not None:
         evidence = json.loads(args.recover_adopted.read_text(encoding="utf-8"))
         if evidence.get("root") != str(args.root.resolve()):
@@ -357,7 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.repair_update:
             result = self_install(
-                args.payload, root=args.root, dry_run=False,
+                install_payload, root=args.root, dry_run=False,
                 _before_publish=lambda: validate_manager_ownership(
                     args.root, args.payload, expected=prior_commands,
                 ),
@@ -365,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
                 _transactional_activation=True,
             )
         else:
-            result = self_install(args.payload, root=args.root, dry_run=False)
+            result = self_install(install_payload, root=args.root, dry_run=False)
         if result.action == "error":
             print(result.reason, file=sys.stderr)
             return 1
