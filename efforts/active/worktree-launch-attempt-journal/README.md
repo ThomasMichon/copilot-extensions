@@ -233,6 +233,15 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   authorized rollout remain owed.
   Outcome filtering, selected-machine sweeps and installed local/SSH prompt
   acceptance are still parent completion gates.
+- Review identified two real read-side gaps: malformed legacy timestamps could
+  pass SQLite's numeric comparison, and already-loaded composer caches could
+  outlive their deadline. Reads now validate legacy timestamps under one
+  read-only snapshot. Both history loaders retain original deadlines; cached
+  navigation drops expired text and edits without overwriting the current draft
+  or reviving them after clock rollback. The review-fix packet passes 123 cases
+  with four platform skips; the affected UI ownership/navigation packet passes
+  104 cases with four skips. Real New and asynchronous Resume composer tests
+  advance the clock after loading history and after physical deletion.
 
 ### 2026-10-25 -- Interactive local history merged; retention next
 

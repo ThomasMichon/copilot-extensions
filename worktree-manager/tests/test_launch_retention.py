@@ -239,6 +239,10 @@ def test_invalid_legacy_timestamps_are_not_reinterpreted_or_given_a_new_deadline
     with closing(sqlite3.connect(store.path)) as conn, conn:
         conn.execute("UPDATE seeds SET submitted_at=? WHERE id=2", (timestamp,))
     before = store.path.read_bytes()
+    for read in (store.entries, store.cursor):
+        with pytest.raises(seed_history.SeedHistoryError, match="timestamp"):
+            read()
+        assert store.path.read_bytes() == before
     with pytest.raises(seed_history.SeedHistoryError, match="timestamp"):
         store.expire()
     assert store.path.read_bytes() == before

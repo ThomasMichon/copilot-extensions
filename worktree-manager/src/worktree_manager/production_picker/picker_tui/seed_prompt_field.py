@@ -22,7 +22,7 @@ class SeedPromptField(_AutoExpandTextArea):
             return
         try:
             self.seed_store = SeedHistory(context.project())
-            self.seed_cursor = HistoryCursor(self.seed_store.entries())
+            self.seed_cursor = self.seed_store.cursor()
         except (SeedHistoryError, RuntimeError) as exc:
             self.notify(str(exc), severity="error")
 
@@ -67,7 +67,13 @@ class SeedPromptField(_AutoExpandTextArea):
             event.key == "down" and row == self.document.line_count - 1
         )
         if older or newer:
-            text = self.seed_cursor.move(self.text, 1 if older else -1)
+            try:
+                text = self.seed_cursor.move(self.text, 1 if older else -1)
+            except SeedHistoryError as exc:
+                event.prevent_default()
+                event.stop()
+                self.notify(str(exc), severity="error")
+                return
             if text is not None:
                 event.prevent_default()
                 event.stop()

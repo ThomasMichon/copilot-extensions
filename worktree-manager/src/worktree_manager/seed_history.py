@@ -62,11 +62,23 @@ def _has_history_schema(conn: sqlite3.Connection) -> bool:
     return True
 
 
-def _cutoff() -> float:
+def _timestamp() -> float:
     now = time.time()
     if not math.isfinite(now) or now < 0:
         raise SeedHistoryError("Local seed history clock is invalid.")
-    return now - RETENTION_SECONDS
+    return now
+
+
+def _cutoff() -> float:
+    return _timestamp() - RETENTION_SECONDS
+
+
+def _validate_legacy_timestamps(conn: sqlite3.Connection) -> None:
+    if conn.execute(
+        "SELECT 1 FROM seeds WHERE typeof(submitted_at) NOT IN ('real', 'integer') "
+        "OR submitted_at < 0 OR submitted_at > ? LIMIT 1", (sys.float_info.max,),
+    ).fetchone():
+        raise SeedHistoryError("Local seed history has an invalid submission timestamp.")
 
 
 class SeedHistory:
@@ -111,7 +123,7 @@ class SeedHistory:
             except FileNotFoundError:
                 pass  # SQLite can remove an optional sidecar when another connection commits.
 
-    def entries(self) -> list[str]:
+    def _entries(self) -> list[tuple[str, float]]:
         try:
             if not self._exists():
                 return []
@@ -122,17 +134,34 @@ class SeedHistory:
                 raise SeedHistoryError("Local WAL seed history requires retention maintenance.")
             uri = self.path.absolute().as_uri() + "?mode=ro"
             with closing(sqlite3.connect(uri, timeout=5, uri=True)) as conn:
+                conn.execute("BEGIN")
                 if not _has_history_schema(conn):
                     return []
-                return [
-                    row[0] for row in conn.execute(
-                        "SELECT prompt FROM seeds WHERE project = ? AND submitted_at > ? "
-                        "ORDER BY id DESC",
-                        (self.project, _cutoff()),
-                    )
-                ]
+                if conn.execute("PRAGMA user_version").fetchone()[0] == 0:
+                    _validate_legacy_timestamps(conn)
+                rows = conn.execute(
+                    "SELECT prompt, submitted_at FROM seeds WHERE project = ? AND submitted_at > ? "
+                    "ORDER BY id DESC",
+                    (self.project, _cutoff()),
+                ).fetchall()
+                if any(
+                    not isinstance(timestamp, (int, float)) or not math.isfinite(timestamp)
+                    or timestamp < 0 for _, timestamp in rows
+                ):
+                    raise SeedHistoryError("Local seed history has an invalid submission timestamp.")
+                return rows
         except (OSError, sqlite3.Error) as exc:
             raise SeedHistoryError("Could not read local seed history.") from exc
+
+    def entries(self) -> list[str]:
+        return [prompt for prompt, _timestamp in self._entries()]
+
+    def cursor(self) -> HistoryCursor:
+        rows = self._entries()
+        return HistoryCursor(
+            [prompt for prompt, _timestamp in rows],
+            expires_at=[timestamp + RETENTION_SECONDS for _prompt, timestamp in rows],
+        )
 
     @contextmanager
     def _write(self) -> Iterator[sqlite3.Connection]:
@@ -158,11 +187,7 @@ class SeedHistory:
                         "prompt TEXT NOT NULL, submitted_at REAL NOT NULL)"
                     )
                 if conn.execute("PRAGMA user_version").fetchone()[0] == 0:
-                    if conn.execute(
-                        "SELECT 1 FROM seeds WHERE typeof(submitted_at) NOT IN ('real', 'integer') "
-                        "OR submitted_at < 0 OR submitted_at > ? LIMIT 1", (sys.float_info.max,),
-                    ).fetchone():
-                        raise SeedHistoryError("Local seed history has an invalid submission timestamp.")
+                    _validate_legacy_timestamps(conn)
                     conn.execute(_INDEX)
                     conn.execute(f"PRAGMA application_id={_APPLICATION_ID}")
                     # V1 means a legacy freelist scrub must still finish.
@@ -190,8 +215,9 @@ class SeedHistory:
             return
         try:
             self._exists()
+            now = _timestamp()
             with self._write() as conn:
-                conn.execute("DELETE FROM seeds WHERE submitted_at <= ?", (_cutoff(),))
+                conn.execute("DELETE FROM seeds WHERE submitted_at <= ?", (now - RETENTION_SECONDS,))
                 previous = conn.execute(
                     "SELECT prompt FROM seeds WHERE project = ? ORDER BY id DESC LIMIT 1",
                     (self.project,),
@@ -199,7 +225,7 @@ class SeedHistory:
                 if previous is None or previous[0] != prompt:
                     conn.execute(
                         "INSERT INTO seeds(project, prompt, submitted_at) VALUES (?, ?, ?)",
-                        (self.project, prompt, time.time()),
+                        (self.project, prompt, now),
                     )
         except (OSError, sqlite3.Error) as exc:
             raise SeedHistoryError(
@@ -208,15 +234,34 @@ class SeedHistory:
 
 
 class HistoryCursor:
-    def __init__(self, entries: list[str]) -> None:
+    def __init__(self, entries: list[str], *, expires_at: list[float] | None = None) -> None:
+        if expires_at is not None and len(expires_at) != len(entries):
+            raise ValueError("History cursor deadlines must match its entries.")
         self.entries = entries
+        self._expires_at = expires_at
+        self._next_expiry = min(expires_at, default=math.inf) if expires_at is not None else math.inf
+        self._expired: set[int] = set()
         self.index = -1
         self.edits: dict[int, str] = {}
 
     def move(self, current: str, direction: int) -> str | None:
+        if self._expires_at is not None:
+            now = _timestamp()
+            if now >= self._next_expiry:
+                self._next_expiry = math.inf
+                for index, deadline in enumerate(self._expires_at):
+                    if deadline <= now:
+                        self._expired.add(index)
+                        self.entries[index] = ""
+                        self.edits.pop(index, None)
+                    else:
+                        self._next_expiry = min(self._next_expiry, deadline)
         target = self.index + direction
+        while 0 <= target < len(self.entries) and target in self._expired:
+            target += direction
         if target < -1 or target >= len(self.entries):
             return None
-        self.edits[self.index] = current
+        if self.index not in self._expired:
+            self.edits[self.index] = current
         self.index = target
         return self.edits.get(target, "" if target == -1 else self.entries[target])

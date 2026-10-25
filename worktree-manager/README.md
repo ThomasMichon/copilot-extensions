@@ -878,7 +878,8 @@ paste buffer. Reopen the composer and press **Up/Down** to recall older/newer
 seeds; multiline cursor movement remains available until the first/last text
 line, and **Ctrl+Up/Down** recalls history from anywhere. Browsing back past the
 newest entry restores the current unsent draft, including edits made while
-browsing.
+browsing. Both composer caches keep each entry's original expiry deadline and
+exclude expired entries during navigation without replacing the current draft.
 
 History is per project, survives Manager restarts and runtime updates, and
 retains exact submitted text locally under `WORKTREE_MANAGER_ROOT` (or the

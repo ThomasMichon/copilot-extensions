@@ -193,6 +193,14 @@ sidecars with no database are errors and remain untouched for diagnosis.
 No operation deletes pending engine/daemon prompt state. These are source storage
 contracts, not proof of rollout or installed prompt acceptance.
 
+Prompt-history reads validate legacy timestamps before the cutoff query, so
+SQLite's type-ordering rules cannot turn malformed text or infinity into an
+indefinite deadline. Both composer history loaders carry original expiry
+deadlines into navigation caches. Navigation drops expired cached text and edits
+without re-reading SQLite or overwriting the current draft; already-expired
+entries cannot revive if the clock moves backward. A cached entry's deadline
+never restarts when the composer opens.
+
 ## Reproducible checks
 
 Run the ordinary storage and existing-history units through the repository's
