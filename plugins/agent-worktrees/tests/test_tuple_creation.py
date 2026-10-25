@@ -105,11 +105,15 @@ def test_tuple_refusal_precedes_allocation(
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
-@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching", "sibling-only"])
+@pytest.mark.parametrize("map_kind,physical_name", [
+    ("absent", "friendly-host"), ("empty", "friendly-host"), ("unrelated", "friendly-host"),
+    ("matching", "friendly-host"), ("sibling-only", "friendly-host"),
+    ("sibling-only", "friendly-wsl"), ("sibling-only", "friendly-win"),
+])
 @pytest.mark.parametrize("kind", ["session", "bridge", "system"])
 def test_actual_local_tuple_creation_without_map_enrollment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    platform: str, map_kind: str, kind: str,
+    platform: str, map_kind: str, physical_name: str, kind: str,
 ) -> None:
     config = _setup(tmp_path, monkeypatch, platform=platform)
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host-wsl")
@@ -121,12 +125,12 @@ def test_actual_local_tuple_creation_without_map_enrollment(
         }},
         "matching": {"local-space": {
             "hostname": "Observed-Host-wsl", "execution_platform": platform,
-            "physical_host": "friendly-host",
+            "physical_host": physical_name,
         }},
         "sibling-only": {"sibling-space": {
             "hostname": "Observed-Host-wsl",
             "execution_platform": "windows" if platform == "wsl" else "wsl",
-            "physical_host": "friendly-host",
+            "physical_host": physical_name,
         }},
     }
     if map_kind == "absent":
@@ -135,7 +139,7 @@ def test_actual_local_tuple_creation_without_map_enrollment(
         topology.write_text(yaml.safe_dump({"machines": maps[map_kind]}))
     config = replace(config, machine=cfg.detect_machine(config.default_repo.anchor))
     monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
-    physical = "friendly-host" if map_kind in ("matching", "sibling-only") else "observed-host-wsl"
+    physical = physical_name if map_kind in ("matching", "sibling-only") else "observed-host-wsl"
     execution = "local-space" if map_kind == "matching" else physical + (
         "-wsl" if platform == "wsl" else ""
     )

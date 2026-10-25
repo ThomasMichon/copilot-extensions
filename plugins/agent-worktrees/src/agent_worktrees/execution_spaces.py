@@ -137,10 +137,7 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
-            caller = resolve_machine_selection(
-                registry_for_config(config), config.machine, cfg.detect_platform(),
-            )
-            caller_key = caller.entry.key if caller.entry is not None else config.machine
+            caller_key = current_execution_context(config).execution_machine
             if not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
@@ -230,10 +227,19 @@ def _current_execution_context(
             "configured execution-space key and platform must match the current execution platform"
         )
     try:
+        binding = getattr(config, "configured_machine", None)
         context = resolve_local_execution_context(
             entries, hostname=cfg.socket.gethostname(), environment=platform,
-            configured_machine=config.machine,
+            configured_machine=binding,
         )
+        if binding is None and config.machine.casefold() not in {
+            context.hostname.casefold(), context.execution_machine.casefold(),
+        }:
+            # Retain established Config bindings supplied by legacy callers.
+            context = resolve_local_execution_context(
+                entries, hostname=context.hostname, environment=platform,
+                configured_machine=config.machine,
+            )
     except ValueError as exc:
         raise ExecutionSpaceError(f"current execution identity is invalid: {exc}") from exc
     current = entries.get(context.customization_key) if context.customization_key else None

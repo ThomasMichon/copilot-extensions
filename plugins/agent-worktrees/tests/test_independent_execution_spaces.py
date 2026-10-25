@@ -632,6 +632,55 @@ def test_known_parent_io_failure_reports_unconfirmed_settlement(
     assert "PermissionError" in warnings[0]
 
 
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
+    tmp_path, monkeypatch, platform,
+):
+    from agent_worktrees import creation_identity, obligations
+
+    (tmp_path / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "sibling-space": {
+            "hostname": "raw-host", "physical_host": "friendly-host",
+            "execution_platform": "windows" if platform == "wsl" else "wsl",
+        },
+    }}))
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine=cfg.detect_machine(tmp_path),
+        platform=platform, repo_name="project",
+        repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / (name or "project"))
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    identity = creation_identity.new_machine_identity(config, "tuple-v1")
+    records = cfg.tracking_dir("project")
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(tmp_path / "trees" / "parent"),
+        "project", identity.machine, platform, records, machine_identity=identity,
+    )
+    parent.resources = [tracking.ResourceClaim(
+        kind="worktree", ref=f"{config.machine}/project/child", state=obligations.ACTIVE,
+    )]
+    tracking.save_record(parent)
+    child = tracking.create_new_record(
+        "child", "worktree/child", str(tmp_path / "trees" / "child"),
+        "project", identity.machine, platform, records, machine_identity=identity,
+        owner_ref=f"{config.machine}/project/parent",
+    )
+    successes, warnings = [], []
+    execution_spaces.settle_parent_obligation(
+        child, config, "child", output=SimpleNamespace(ok=successes.append, warn=warnings.append),
+    )
+    assert warnings == []
+    assert len(successes) == 1
+    saved = tracking.load_record(parent.yaml_path)
+    assert saved.resources[0].state == obligations.AT_REST
+    assert saved.resources[0].ref == f"{config.machine}/project/child"
+
+
 @pytest.mark.parametrize(("body", "error"), [
     ("repo: project\n", "KeyError"),
     ("repo: project\nworktree_id: wt-parent\nbranch: worktree/wt-parent\n"

@@ -99,6 +99,10 @@ with optional registry customization, then revalidates it before allocation.
 Absent, empty or unrelated-only maps do not prevent local tuple creation.
 Conflicting local execution evidence still refuses.
 Callers cannot supply arbitrary tuple metadata through this mode.
+Derived names retain their observation provenance: a physical customization
+ending in `-win` or `-wsl` is not reparsed as an explicit environment choice.
+Parent-obligation settlement uses the same validated execution owner, including
+when the map customizes only the native or guest sibling.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names
