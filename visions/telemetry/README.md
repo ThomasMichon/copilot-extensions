@@ -4,7 +4,7 @@
   Extensions tools and services, with sinks owned by the adopting harness
 - **Scope:** leaf (cross-cutting capability)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-24
 - **Reality docs:** [Suite architecture](../../docs/architecture.md) ·
   [Dispatch telemetry seam](../../plugins/agent-dispatch/src/agent_dispatch/telemetry.py) ·
   [Bridge telemetry seam](../../plugins/agent-bridge/src/agent_bridge/telemetry.py)
@@ -42,6 +42,11 @@ nothing and remains fully useful.
   context. The transport does not change attribution, privacy or trace meaning.
 - **Independent local diagnostics.** Owner-local logs, status and diagnostic
   tools remain usable without export and without access to a configured sink.
+- **User-controlled shared attribution.** Shared observations use stable,
+  purpose-scoped keyed pseudonyms whose secret remains with the participating
+  user across their approved machines. Controlled local/internal diagnostics
+  may retain explicitly admitted raw attribution; that permission does not
+  extend to shared consumers.
 
 ## Features
 
@@ -97,6 +102,15 @@ to its concepts; **a JSON stream or an HTTP request is not automatically OTLP**.
 A consumer claiming OTLP support must actually satisfy that protocol rather
 than relabel an arbitrary envelope.
 
+### self-lookup-without-identity-disclosure
+
+A participating user can readily find their own shared telemetry using their
+own telemetry key, without sending that key or depending on a particular
+machine's login name. Shared consumers may group opaque owners, machines,
+worktrees and sessions, but cannot resolve a real person through a supplied
+identity directory, recovery secret or central re-identification key. Any
+disclosure linking a person to their telemetry is that user's voluntary act.
+
 ## Behaviors
 
 ### initiating-harness-follows-the-operation
@@ -142,6 +156,30 @@ session and process identifiers remain correlation attributes, not fabricated
 trace or span identifiers. An uninstrumented hop is unknown, not a made-up span;
 missing measurements and dropped events are not zero cost or successful work.
 
+### truthful-attribution-roles
+
+The producer, observed subject and collecting process remain distinguishable.
+Native session identity is not silently relabeled as an intermediary's session,
+and routing targets are not evidence of an actor's actual execution location.
+Unavailable attribution and service-only activity remain explicit rather than
+borrowing the collector's user or session.
+
+### shared-privacy-before-delivery
+
+Shared records are minimized before shared serialization, storage or export.
+Pseudonymizing selected fields does not admit identifying content elsewhere in
+the record, nor does a missing key permit raw fallback. Users retain custody of
+telemetry-purpose secrets; no shared escrow or public recovery marker supplies
+shared attribution. Independent internal diagnostics remain usable when optional
+shared delivery is unavailable.
+
+Privacy covers the whole ingestion and lookup boundary, not just event labels.
+Authentication, network/access and query audit metadata must not silently join
+opaque telemetry to real users. Timestamps, small cohorts and behavioral
+correlation also require explicit privacy assessment. Keyed identifiers alone
+are not an anonymity guarantee; shared deployment requires a reviewed
+identity-separation boundary without weakening authentication or access control.
+
 ### preserve-existing-integrations
 
 Common hooks extend or compose the existing fail-open telemetry seams and
@@ -163,6 +201,9 @@ subject of [Process Telemetry](../process-telemetry/README.md).
 - No prescribed event schema, API, configuration filename, port, wire envelope,
   library extraction or implementation sequence. These belong below vision
   altitude, not in standing intent.
+- No tenant/global re-identification secret, central key escrow, automatic
+  public-identity correlation or requirement to disclose a user's identity in
+  order to find their own telemetry.
 
 ## See Also
 
