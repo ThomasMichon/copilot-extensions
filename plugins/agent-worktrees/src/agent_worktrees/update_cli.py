@@ -64,7 +64,7 @@ def add_parsers(sub) -> None:
     from .update_launch_cli import add_parsers as add_launch_parsers
 
     add_launch_parsers(sub)
-    p = sub.add_parser("update", help="Re-deploy from repo")
+    p = sub.add_parser("update", help="Re-deploy from repo", allow_abbrev=False)
     mode = p.add_mutually_exclusive_group()
     mode.add_argument("--detach", action="store_true", help="Submit a durable update request without waiting")
     mode.add_argument("--wait", action="store_true", help="Observe the durable update through completion (default)")
@@ -300,6 +300,14 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
 
 
 def _update_in_plugin_steps(args: argparse.Namespace) -> int:
+    from .update_runtime_source import check_source_coverage, parse_sources
+
+    try:
+        sources = parse_sources(getattr(args, "runtime_sources", None))
+    except (OSError, ValueError) as error:
+        output.err(f"Runtime source selection: {error}")
+        _events.record("runtime_preflight", "runtime-sources", f"invalid source selection: {error}")
+        return 1
     if getattr(args, "target", None) is not None:
         from .installation_updates import update_target
 
@@ -355,26 +363,18 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     force = getattr(args, "force", False)
     forced = update_options.forced_runtimes(args)
     skip_modules = getattr(args, "skip_modules", None)
-    engine_step = update_runtime_plan.plan_engine(
-        plugin_dir, plat, force=force or "agent-worktrees" in forced,
-    )
-    module_plan = update_runtime_plan.plan_modules(
+    engine_step, module_plan, registered_plan = update_runtime_plan.plan_portfolio(
         plugin_dir, plat, skip_modules, force=force,
-        targets=registered_targets, force_runtimes=forced,
-    )
-    excluded = {step.name for step in module_plan} | {"agent-worktrees"}
-    if skip_modules:
-        excluded.update(skip_modules)
-    registered_plan = tuple(
-        update_runtime_plan.plan_registered(
-            name, plat, force=force or name in forced,
-            gate_context=target.context,
-        )
-        for name, target in sorted(registered_targets.items())
-        if target.required and name not in excluded
-        and not (skip_modules is not None and not skip_modules)
+        targets=registered_targets, force_runtimes=forced, sources=sources,
     )
     portfolio = (engine_step, *module_plan, *registered_plan)
+    if sources is not None:
+        try:
+            check_source_coverage(sources, portfolio)
+        except ValueError as error:
+            output.err(f"Runtime preflight: {error}; no runtime installers will run")
+            _events.record("runtime_preflight", "runtime-sources", f"invalid source selection: {error}")
+            return 1
     if not update_options.check_forced_runtimes(
         args, registered_targets, plugin_dir,
         eligible={step.name for step in portfolio if step.eligible},

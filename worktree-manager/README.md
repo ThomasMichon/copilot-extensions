@@ -37,6 +37,34 @@ retained file, not unique calls or lifetime totals. Missing, partial, stale and
 unsupported evidence remain visible. Reported completion is not agent retirement.
 Refresh reloads the graph; leaving the app cancels its owned reads.
 
+The optional attention strip shows the selected head CLI's **last-reported**
+busy, idle or awaiting-operator state and transition timestamp. Continuity
+remains unknown: this is not proof of a currently pending question or of no
+pending input. The Return to CLI button may read **CLI (last: input)** or
+**CLI (last: idle)**; it only navigates and never answers or approves anything.
+The selected engine's versioned `session-attention` contract is optional;
+unsupported, malformed or absent evidence leaves attention unknown without
+disabling Summary, Claims, Graph or Recovery. Intent/question/transcript text
+is neither read nor displayed.
+
+Attention has its own cancellable worker and single-flight reads. A five-second
+timer revalidates only the displayed worktree's head, then reads that head's
+bounded pulse through at most two engine calls (five-second timeout each).
+Failure/unknown evidence backs off for at least 30 seconds. A changed head
+clears the nudge and pauses reads until Refresh; refresh/reopen invalidates
+the prior selection, and late results cannot replace it. No history scan,
+fleet scan, persistent cache or new service is added. In a same-window
+observer, periodic engine reads require native evidence that its exact pane
+and original incarnation are visible with an attached client; hidden/unknown
+visibility pauses them. Native visibility uses one exact-pane query with a
+two-second bound. It reads `session_attached` rather than treating a nonempty
+client listing as proof: PSMux can synthesize such a listing while detached.
+Opening or explicitly refreshing permits one foreground snapshot even if
+visibility cannot be established. The popup polls only for its own lifetime.
+Leaving either view cancels owned engine reads. Production cold/warm latency
+and rendered/native-client attention acceptance are not inferred from these
+polling/timeout limits.
+
 Recovery retains session lineage and the explicit, human-gated Cut over action
 for an already-prepared handoff. Selecting a tab never triggers cutover.
 The existing Ctrl+K popup also offers **Show Summary pane**. It opens or
@@ -63,7 +91,7 @@ otherwise-ended CLI session alive indefinitely or adopt a successor pane.
 An already-bound observer continues checking its pinned native owner if
 registry or CLI metadata disappears.
 
-Attention indicators and two-line clickable mux chrome
+Native two-line clickable mux chrome and installed attention qualification
 remain tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
 
 ## Set up the harness

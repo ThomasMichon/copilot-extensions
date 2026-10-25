@@ -632,6 +632,9 @@ jobs:
           --test-file tests/test_watch_gateway.py
           --test-file tests/test_watch_gateway_transport.py
           --test-file tests/test_watch_observer.py
+          --test-file tests/test_watch_replay_client.py
+          --test-file tests/test_watch_replay_binding.py
+          --test-file tests/test_watch_replay_client_transport.py
           --max-files-per-sub-suite 2
       - name: Independent installed PR service and real process transport
         run: >-

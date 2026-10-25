@@ -19,10 +19,12 @@ from agent_bridge import acquisition_authority, workspace_creation
 from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.creation_allocation import CreationFrontend
 from agent_bridge.creation_custody import CreationJournal, CreationRequest
+from agent_bridge.creation_launch_owner import CreationLaunchOwner
 from agent_bridge.db import Database
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeProducer
 from agent_bridge.transport import SpawnTarget
 from test_runtime_custody import close, installation
+from test_creation_custody import creation_request
 
 
 @pytest.fixture
@@ -59,6 +61,58 @@ def allocation(session_manager, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         frontend=frontend, manager=session_manager, target=target, worktree=worktree,
         request=request, calls=calls, command=command,
     )
+
+
+@pytest.mark.parametrize("state", ["fresh", "claimed", "prepared", "outstanding", "accepted"])
+@pytest.mark.parametrize("closed", [False, True])
+def test_local_creation_frontend_refuses_provider_without_changing_custody(
+    allocation, state: str, closed: bool,
+) -> None:
+    rig = allocation
+    request = creation_request("provider")
+    journal = CreationJournal(rig.db)
+    if state != "fresh":
+        journal.claim(request, rig.identity, rig.admission)
+    handoff = None
+    if state in ("prepared", "outstanding", "accepted"):
+        handoff = journal.prepare_launch(
+            request, rig.identity, rig.admission, consumer_incarnation="original-provider",
+        )
+    if state in ("outstanding", "accepted"):
+        journal.begin_launch(request, rig.identity, rig.admission, handoff["id"], now=10)
+    if state == "accepted":
+        journal.report_launch(request, handoff["id"], native_session_id="provider-native", now=11)
+    if closed:
+        close(rig.db, rig.identity, rig.producer)
+    rows = rig.db.execute_read("SELECT * FROM provider_embodiments")
+    before = [dict(row) for row in rows]
+    epoch = rig.db.runtime_epoch(rig.identity)
+    with pytest.raises(RuntimeCustodyError, match="original workspaces only"):
+        rig.frontend.prepare(request)
+    with pytest.raises(RuntimeCustodyError, match="original workspaces only"):
+        CreationLaunchOwner(
+            rig.frontend, request, "not-a-local-session",
+            handoff["id"] if handoff else "not-a-local-handoff",
+        )
+    assert [dict(row) for row in rig.db.execute_read("SELECT * FROM provider_embodiments")] == before
+    assert rig.db.runtime_epoch(rig.identity) == epoch
+    if handoff:
+        assert journal.read_launch(request)["handoff"] == handoff
+    for table in ("workspace_embodiments", "acquisition_attempts", "sessions", "turns"):
+        assert not rig.db.execute_read(f"SELECT * FROM {table}")
+    assert not rig.calls
+    rig.manager.start_session.assert_not_awaited()
+
+
+@pytest.mark.parametrize("original", [None, object()])
+def test_local_creation_frontend_refuses_non_request_before_journal(allocation, original) -> None:
+    rig = allocation
+    before = rig.db.runtime_epoch(rig.identity)
+    with pytest.raises(RuntimeCustodyError, match="original workspaces only"):
+        rig.frontend.prepare(original)
+    assert rig.db.runtime_epoch(rig.identity) == before
+    assert not rig.db.execute_read("SELECT * FROM workspace_embodiments")
+    assert not rig.db.execute_read("SELECT * FROM provider_embodiments")
 
 
 @pytest.mark.asyncio

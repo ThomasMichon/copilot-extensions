@@ -62,6 +62,8 @@ jobs:
           --test-file tests/native/test_companion_pane_tmux.py
           --test-file tests/test_companion_topology.py
           --test-file tests/test_companion_observations.py
+          --test-file tests/test_companion_attention.py
+          --test-file tests/test_companion_attention_ui.py
           --test-file tests/test_companion_topology_ui.py --test-timeout 120
       - name: Qualify bounded root attention process contract
         run: >-
@@ -264,8 +266,8 @@ jobs:
           --allow-explicit-tiers --test-timeout 60 --timeout 540
 
   pane-argv-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pane-argv'
-    name: File-based pane argv (Windows)
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'pane-argv' || inputs.portfolio == 'mux-companion')
+    name: Native PSMux 3.3.6 (isolated session)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -295,6 +297,7 @@ jobs:
           if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
           "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
       - name: Qualify actual pane producers and owned teardown
+        if: inputs.portfolio == 'pane-argv'
         env:
           PSMUX_FILE_LAUNCH_E2E: "1"
           UV_PYTHON: "3.12"
@@ -302,6 +305,16 @@ jobs:
         run: |
           python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
           python tools/run-plugin-tests.py worktree-manager --test-file tests/test_pane_args_file.py -k real_psmux --allow-explicit-tiers
+      - name: Qualify native Companion attention and navigation
+        if: inputs.portfolio == 'mux-companion'
+        env:
+          UV_PYTHON: "3.12"
+        run: >-
+          python tools/run-plugin-tests.py worktree-manager
+          --test-file tests/native/test_companion_pane_native.py
+          --test-file tests/test_companion_attention.py
+          --test-file tests/test_companion_attention_ui.py
+          --allow-explicit-tiers --test-timeout 120
 
   bridge-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'

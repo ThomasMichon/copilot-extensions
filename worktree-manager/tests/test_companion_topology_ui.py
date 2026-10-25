@@ -3,10 +3,18 @@
 import asyncio
 from threading import Event
 
+import pytest
 from textual.widgets import Static, TabbedContent
 
 from worktree_manager import mux_companion as companion
 from test_companion_observations import envelope
+
+
+@pytest.fixture(autouse=True)
+def no_ambient_attention(monkeypatch):
+    monkeypatch.setattr(companion.ca, "read_session_attention", lambda *a, **kw: {
+        "attention": None, "error": "attention-unavailable",
+    })
 
 
 def data():

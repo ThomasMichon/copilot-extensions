@@ -433,6 +433,11 @@ def test_real_standalone_first_stamp_uses_declared_human_adapter(shell, plugin, 
         assets.append("source-runtime.ps1")
     for name in assets:
         shutil.copyfile(source / "scripts" / name, scripts / name)
+    if plugin == "agent-containers":
+        shutil.copytree(
+            source / "scripts" / "installation-context", scripts / "installation-context",
+        )
+        shutil.copyfile(source / "plugin.json", payload / "plugin.json")
     if plugin == "agent-machines":
         context = scripts / "installation-context"
         context.mkdir()
