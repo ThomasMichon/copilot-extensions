@@ -101,6 +101,7 @@ class BridgeEventWorker:
         self._witness: _Witness | None = None
         self._error: BaseException | None = None
         self._retired = False
+        self._lock = threading.Lock()
 
     def run(self, target: Callable[[], None]) -> None:
         try:
@@ -113,16 +114,17 @@ class BridgeEventWorker:
             target()
 
     def retired(self) -> bool:
-        if self._retired:
+        with self._lock:
+            if self._retired:
+                return True
+            if not self._ready.is_set():
+                return False
+            if self._error is not None:
+                raise self._error
+            if self._witness is None:
+                raise RuntimeError("Bridge worker retirement witness missing")
+            if not self._witness.check():
+                return False
+            self._retired = True
+            self._witness.release()
             return True
-        if not self._ready.is_set():
-            return False
-        if self._error is not None:
-            raise self._error
-        if self._witness is None:
-            raise RuntimeError("Bridge worker retirement witness missing")
-        if not self._witness.check():
-            return False
-        self._retired = True
-        self._witness.release()
-        return True

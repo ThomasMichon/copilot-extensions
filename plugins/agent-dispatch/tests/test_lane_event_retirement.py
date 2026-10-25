@@ -15,6 +15,37 @@ from agent_dispatch.supervisor import Supervisor
 from agent_procutil.daemon_instances import INSTANCE_ENV, daemon_test_lifecycle, inspect_instances
 
 
+def test_concurrent_worker_retirement_disposes_its_witness_once():
+    worker = bridge_event_worker.BridgeEventWorker()
+    entered, second, release = threading.Event(), threading.Event(), threading.Event()
+    checks, releases, results = [], [], []
+
+    def check():
+        checks.append(True)
+        entered.set()
+        if len(checks) == 2:
+            second.set()
+        assert release.wait(3)
+        return True
+
+    worker._witness = bridge_event_worker._Witness(check, lambda: releases.append(True))
+    worker._ready.set()
+    threads = [threading.Thread(target=lambda: results.append(worker.retired())) for _ in range(2)]
+    try:
+        threads[0].start()
+        assert entered.wait(2)
+        threads[1].start()
+        second.wait(0.2)
+    finally:
+        release.set()
+        for thread in threads:
+            if thread.ident is not None:
+                thread.join(3)
+                assert not thread.is_alive()
+    assert results == [True, True]
+    assert releases == [True]
+
+
 @pytest.mark.parametrize("outcome", [
     "interrupt", "startup", "repeated", "close-error", "done", "stream-close",
     "worker-close-error", "worker-swap", "lane-swap", "proof-error",

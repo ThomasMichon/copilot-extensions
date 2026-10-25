@@ -769,3 +769,21 @@ caller coverage, not one launcher or one platform passing.
   shared-process Python files were verified; the container was removed.
 - Current source review/CI/publication and completion archival remain open.
   The effort remains Active; no runtime rollout is authorized.
+
+### 2026-10-25 - Witness disposal and composed artifact validation
+
+- Independent integration found a concurrent witness-disposal race in the new
+  lane helper: two close callers could both pass the native-retirement check
+  and dispose the same witness. A deterministic failing test reproduced two
+  disposals. A lock now serializes that one transition without changing native
+  proof, first-error or unknown-disposal/no-replay semantics.
+- The final focused lane packet passed 62 on Windows and 62 on isolated Linux,
+  including native/legacy witnesses and the concurrent-disposal control. Linux
+  verified 2,095 snapshot files and all 28 installed shared-process Python
+  files; its test-owned container and sandboxes were removed.
+- Upstream resource-selection changes were composed with native-generated
+  wheel member validation, preserving both inputs and the complete admitted
+  unit packet. All 80 artifact-source/native-artifact tests passed with one
+  platform skip. No shared native/process bytes or protocol fixtures changed.
+- Publication, a passing current review/CI and completion archival remain open.
+  No runtime rollout is authorized.
