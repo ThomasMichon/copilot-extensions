@@ -27,7 +27,7 @@ from test_gateway_service_handler import connect_handler
 pytest_plugins = ["test_loadout_preparation"]
 
 
-def service(root: Path, published, *, authorize=None):
+def service(root: Path, published, *, authorize=None, acquisition_seconds=30):
     store = PreparationStore(root / "prepared.sqlite", fleet="fleet-a", installation="preparation-a")
     observations = ObservationStore(root / "observations.sqlite", authority="authority-a",
                                     installation="gateway-installation")
@@ -45,8 +45,31 @@ def service(root: Path, published, *, authorize=None):
         store=store, observations=observations, origin=origin, project="loadouts",
         authorize=authorize or (lambda _context: ReviewScope("account-a", "policy-1", True)),
         inventory=inventory,
+        **({"acquisition_seconds": acquisition_seconds} if acquisition_seconds is not None else {}),
     )
     return controller, document
+
+
+def test_default_acquisition_limit_and_explicit_deadline_refusal(tmp_path, repositories):
+    publish_fleet(repositories)
+    default, _ = service(tmp_path, repositories, acquisition_seconds=None)
+    assert default.acquisition_seconds == 15
+    with pytest.raises(PlanError, match="invalid prepared loadout service binding"):
+        service(tmp_path, repositories, acquisition_seconds=31)
+
+    async def scenario():
+        async with running(tmp_path) as rig:
+            controller, _ = service(tmp_path, repositories, acquisition_seconds=0.001)
+            await connect_handler(rig, controller.binding().handle)
+            blocked = await client(rig).refresh()
+            assert blocked["candidate"]["status"] == "blocked"
+            assert blocked["candidate"]["reason"] == "preparation-deadline-exceeded"
+            assert blocked["candidate"]["plan_digest"] is None
+            assert blocked["candidate"]["plan_bytes"] == 0
+            assert blocked["decision"] is None
+            assert not blocked["activation_authorized"] and not blocked["live_readiness_verified"]
+            assert rig.backends[0].requests == []
+    asyncio.run(scenario())
 
 
 def publish_fleet(published):

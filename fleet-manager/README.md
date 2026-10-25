@@ -10,6 +10,8 @@ The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
 no production Gateway/index offload or managed install/update/uninstall,
 telemetry sink or fleet resource mutation is claimed.
 Broader fleet delivery remains the [canonical effort](../efforts/active/linux-role-fleet/README.md).
+The explicit local-owner SDK binding below is not activated by those default
+CLI roles and does not establish a production controller or adopted fleet.
 
 The opt-in [service Gateway SDK](docs/gateway-service-profile.md) includes a
 finite authenticated caller and accepts a code-registered provider-neutral
@@ -73,6 +75,9 @@ It consumes the exact reviewed preparation and a separately content-bound
 runtime permit; it is not enabled by the planner or an SDK review. Production
 controller wiring, complete lifecycle, support-owner authentication and live
 readiness/job acceptance remain open. It never supervises ARC pods through Komodo.
+Its opt-in in-process Gateway binding uses the original verified caller and
+independent content-bound operation admission; it does not activate that binding
+in the ordinary CLI or adopt an incumbent release.
 
 The separate, explicit Linux-root [host profile bootstrap](docs/host-profiles.md)
 owns one fixed, enforcing trusted-systemd AppArmor profile. Its module CLI

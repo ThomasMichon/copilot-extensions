@@ -94,6 +94,13 @@ credential transfer, new capacity or workflow routing. A source merge,
 configuration row, observer callback or synthetic receipt is not proof of
 durable ownership or a functioning controller.
 
+The operator selected an **in-process deployment-control module in the designated
+Gateway**, rather than another controller service. Durable service-custody records
+and provider-enforced refusal of unrelated borrowing/stop/delete are required,
+including during Gateway unavailability. Implement and review the source first;
+this integration choice is not approval to install, activate or migrate a live
+controller. Existing identity/provider and lifecycle owners remain authoritative.
+
 ### 1. Template and allocation composition
 
 Extend the existing installed fleet-manager package rather than adding a

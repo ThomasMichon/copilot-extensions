@@ -20,6 +20,8 @@ from .gateway_service_context import (
     ServiceContext, ServicePolicyError, identifier, parse_context, require,
 )
 from .runtime_identity import IdentityError, IdentityVerifier, VerifiedIdentity
+from .operations import OperationIntent
+from .runtime_admission import AdmissionAuthority, Permit
 
 MAX_CALLER_GRANTS = 256
 MAX_SERVICE_CANDIDATES = 64
@@ -416,3 +418,34 @@ class ServiceAuthority:
                 return False
             del self._callers[grant.generation]
             return True
+
+    def authorize_operation(
+        self, grant: CallerGrant, intent: OperationIntent, admission: AdmissionAuthority, *,
+        authority: str, role: str, installation: str, checkpoint: Callable[[], None],
+    ) -> Permit:
+        """Bind local execution to the original verified request, never wire context.
+
+        The embedding checkpoint must also match the actual current route/local
+        owner and request lifetime. It performs no I/O and remains attached to
+        every permit checkpoint. Separate operation policy grants the effect.
+        Authority names the registered backend, not this Gateway's routing name.
+        """
+        require(type(intent) is OperationIntent and type(admission) is AdmissionAuthority
+                and callable(checkpoint), "invalid-operation-binding")
+        identifier(authority)
+        with self._lock:
+            scope = self.revalidate_caller(grant)
+            require(scope.method == "POST", "method-denied")
+            record = self._callers[grant.generation]
+            identity = record.identity
+
+        def current() -> None:
+            self.revalidate_caller(grant)
+            require(checkpoint() is None, "invalid-operation-binding")
+
+        permit = admission.authorize(
+            identity, intent, role=role, installation=installation, checkpoint=current)
+        if (permit.fleet, permit.authority) != (self._fleet, authority):
+            admission.discard(permit)
+            raise ServicePolicyError("operation-owner-mismatch")
+        return permit

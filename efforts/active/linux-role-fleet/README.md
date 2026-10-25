@@ -209,6 +209,10 @@ credential-provider work stays with its current owners.
   admission and managed-owner execution remain open; review is not a grant.
 - [ ] Carry the typed runner declaration through the real supported deployment
   owner with complete support closure, bounded outcomes and no raw command API.
+  #8597 supplies fixed admitted Helm convergence with canonical operation,
+  exact-content grants, durable local resource custody and live owned-spec
+  checks. Production controller binding, actual support-owner authentication
+  and complete lifecycle/adoption remain open; this is not an adoption receipt.
 - [ ] Formally adopt the existing runner pool into durable fleet/controller
   ownership, prove noninterference and session-independent reconciliation, then
   retire manual tweaks and the temporary agent-held protection through the
@@ -464,6 +468,49 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- Prepared the operator-selected in-process deployment-control source slice:
+  the existing service Gateway retains the original verified caller, applies
+  separate current operation policy and invokes the fixed ARC owner without a
+  second controller or serialized permit. Exact code/slot/route/lifetime scope,
+  refusal proof consumption, final-clock expiry and accepted native-work drain
+  remain enforced. Local registration is not reported as backend readiness.
+  Native owner/local controls passed 64; original outbound families passed 22
+  and 38. All four built/offline-installed SDK identity/UNKNOWN
+  cells passed, including the real TLS SDK caller, native protocol process and
+  original journal replay. Those fixtures are not a live Helm/ARC deployment.
+  After pull-forward, the complete installed module passed five controls using
+  its shared immutable wheel, per-case 120-second enforcement and the existing
+  600-second component envelope; each SDK consumer still owns a fresh process
+  and target. Complete rebased package-closure and dependency-free installed
+  designer controls also passed. The original grouped
+  admission/profile packet had one 15-second cold-child timeout; that exact
+  unchanged child passed in 6.80 seconds when isolated, not an aggregate timing
+  guarantee. Explicit test-only wheel/probe budgets and supported functional
+  acquisition configuration are documented in `TESTING.md`; production defaults
+  and effect/publication limits are unchanged. Linux/macOS, full host clean-room
+  and live adoption remain unexercised in this slice. Source review/publication
+  is the next gate, not completion. Durable provider protection, incumbent-safe
+  adoption, production source/policy/artifact/support binding, reconciliation
+  and actual-job qualification remain open; no live fleet state changed.
+- #8597 merged the concrete ARC Helm owner prerequisite as
+  `c8b3fceb05fa6d69510ae0eee0a18c998bda3d00` after actual exact-head Copilot
+  approval and required-source checks. Its fixed operation binds the entire
+  selected deployment, preserves UNKNOWN without replay, refuses foreign-fleet
+  permits and terminating/drifted live resources, and releases refused local
+  permits without refunding proof evidence. The latest source and rebuilt
+  installed owner/admission packets each passed 107 controls; unchanged
+  persistence/replay and two-node recovery retain their separate qualification.
+  The combined shared-host packet exceeded its unchanged wall budget, so no
+  aggregate latency pass is claimed. The real offline official-chart lane is
+  distinct from native protocol fixtures; the unavailable Linux carrier and
+  unexercised live deployment remain explicit. One operator-approved temporary
+  publication deadline preserved every hook/check/review and left the ordinary
+  setting unchanged. Re-read this full Request, Plan and Validation Plan after
+  merge. The next stretch prioritizes actual adopt-in-place provider/service
+  custody and Gateway controller binding, preserving incumbent identity and
+  policy rather than manually tuning or recreating the pool. No live pool,
+  capacity, routing, credential or deployment state changed. Durable adoption,
+  its temporary-protection discharge and all broader parent gates remain open.
 - #8535 merged the published-source preparation and review SDK as
   `b1cd2b1a1712dd4f6b4ac815e050b10fcfd990b1` after exact-head Copilot approval,
   complete resolved-thread review and actual required-source checks. Acquisition
