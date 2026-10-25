@@ -752,9 +752,14 @@ class ContainerResolver:
         if not restricted:
             from .hosting_policy import guarded_launch
 
+            instance_id = getattr(info, "container_id", None)
+            inspection = await asyncio.to_thread(lifecycle.inspect_container, instance_id or name)
+            if not instance_id or inspection.get("Id") != instance_id:
+                raise RuntimeError("container instance changed before namespace SSH preparation")
+            validate_session_owner(fleet, (inspection.get("Config") or {}).get("Labels") or {})
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
-                name,
+                instance_id,
                 user,
             )
             spec["container"] = {

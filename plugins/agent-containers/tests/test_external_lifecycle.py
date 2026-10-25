@@ -145,6 +145,27 @@ def test_external_prefix_cannot_borrow_different_label(external):
     assert lifecycle_blocker(external, "pilot-1", {FLEET_LABEL: "other"})
 
 
+def test_managed_fleet_with_overlapping_prefix_is_not_external(external):
+    external.fleets["pilot-tools"] = FleetConfig()
+    assert lifecycle_blocker(external, "pilot-tools-1", {FLEET_LABEL: "pilot-tools"}) is None
+
+
+@pytest.mark.parametrize(("configured", "observed"), [
+    ("external", "agent-containers"), ("agent-containers", "external"),
+])
+def test_namespace_refuses_owner_mismatch_before_ssh(monkeypatch, configured, observed):
+    info = member(owner=observed)
+    selected = ContainersConfig(fleets={"pilot": FleetConfig(lifecycle_owner=configured)})
+    monkeypatch.setattr(resolver, "load_config", lambda: selected)
+    monkeypatch.setattr(resolver, "get_container", lambda *args: info)
+    monkeypatch.setattr(lifecycle, "inspect_container", lambda *args: record(info))
+    monkeypatch.setattr(resolver, "prepare_ssh_config", lambda *a: pytest.fail("SSH projection"))
+    monkeypatch.setattr(resolver, "get_lease", lambda *args: None)
+    monkeypatch.setattr(resolver, "payload_command_argv", lambda: ["agent-containers"])
+    with pytest.raises(RuntimeError, match="lifecycle owner does not match"):
+        asyncio.run(resolver.ContainerResolver().resolve_spec(info.name))
+
+
 @pytest.mark.parametrize("state", ["running", "exited"])
 def test_external_readiness_never_starts(external, monkeypatch, state):
     info = member(state=state)
