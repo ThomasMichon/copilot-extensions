@@ -17,7 +17,9 @@ from agent_logger.config import Config, load_config
 from agent_logger.sync import engine
 from agent_logger.sync.lock import sync_lock
 from agent_logger.usage_capture import capture_usage
-from agent_logger.usage_sqlite import UsageRowLimitError, read_sqlite_usage
+from agent_logger.usage_sqlite import (
+    UsageReadError, UsageRowLimitError, UsageTimeLimitError, read_sqlite_usage,
+)
 from agent_logger.usage_ledger import (
     ARTIFACT, UsageEvidenceError, evidence_lock_path, merge_session_evidence,
 )
@@ -121,8 +123,9 @@ def test_usage_capture_retains_oversized_session_failure_and_captures_siblings(t
     assert (sessions["healthy"] / ARTIFACT).is_file()
 
 
+@pytest.mark.parametrize("error", [UsageRowLimitError, UsageTimeLimitError])
 def test_usage_split_releases_failed_reader_buffers_before_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error,
 ) -> None:
     from agent_logger import usage_capture
 
@@ -138,7 +141,7 @@ def test_usage_split_releases_failed_reader_buffers_before_retry(
         discarded = DiscardedRows()
         live.add(discarded)
         if len(session_ids) > 1:
-            raise UsageRowLimitError("row budget")
+            raise error("reader budget")
         return {}
 
     for index in range(4):
@@ -147,6 +150,91 @@ def test_usage_split_releases_failed_reader_buffers_before_retry(
     assert capture_usage(tmp_path, None).complete
     assert calls == [4, 2, 1, 1, 2, 1, 1]
     assert not live
+
+
+def test_usage_capture_partitions_expired_scope_without_widening_reader_limits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    sessions = _large_store(tmp_path, {f"s{index}": 2 for index in range(4)})
+    calls = []
+
+    def expired_scope(path: Path, session_ids: set[str], **kwargs) -> dict:
+        assert not kwargs
+        calls.append(len(session_ids))
+        if len(session_ids) > 1:
+            return read_sqlite_usage(path, session_ids, timeout=1e-12)
+        return read_sqlite_usage(path, session_ids)
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", expired_scope)
+
+    result = capture_usage(tmp_path, None)
+
+    assert result.complete
+    assert result.updated == 4
+    assert calls == [4, 2, 1, 1, 2, 1, 1]
+    for session in sessions.values():
+        evidence = json.loads((session / ARTIFACT).read_bytes())
+        stored = [row for row in evidence["records"] if row["source"] == "session-store"]
+        assert sum(row["multiplicity"] for row in stored) == 2
+
+
+def test_usage_time_partition_retains_last_good_and_stops_at_individual_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    sessions = _large_store(tmp_path, {f"s{index}": 2 for index in range(4)})
+    assert capture_usage(tmp_path, None).complete
+    retained = (sessions["s2"] / ARTIFACT).read_bytes()
+    calls = []
+
+    def expired_scope(path: Path, session_ids: set[str]) -> dict:
+        calls.append(frozenset(session_ids))
+        if len(session_ids) > 1 or "s2" in session_ids:
+            return read_sqlite_usage(path, session_ids, timeout=1e-12)
+        return read_sqlite_usage(path, session_ids)
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", expired_scope)
+    result = capture_usage(tmp_path, None)
+    assert result.failures == (
+        "s2: session-store capture: accounting store read exceeded time budget",
+    )
+    assert not result.complete
+    assert len(calls) == 7
+    assert calls.count(frozenset({"s2"})) == 1
+    assert (sessions["s2"] / ARTIFACT).read_bytes() == retained
+
+
+def test_usage_time_partition_has_finite_worst_case_and_does_not_retry_other_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_logger import usage_capture
+
+    _large_store(tmp_path, {f"s{index}": 1 for index in range(32)})
+    calls = []
+
+    def expired(path: Path, session_ids: set[str]) -> dict:
+        calls.append(len(session_ids))
+        raise UsageTimeLimitError("time budget")
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", expired)
+    result = capture_usage(tmp_path, None)
+    assert len(calls) == 63
+    assert calls.count(1) == 32
+    assert len(result.failures) == 32
+
+    calls.clear()
+
+    def unsafe(path: Path, session_ids: set[str]) -> dict:
+        calls.append(len(session_ids))
+        raise UsageReadError("unsafe source")
+
+    monkeypatch.setattr(usage_capture, "read_sqlite_usage", unsafe)
+    result = capture_usage(tmp_path, None)
+    assert calls == [32]
+    assert result.failures == ("session-store capture: unsafe source",)
 
 
 @pytest.mark.parametrize("include", [None, {"s1"}])

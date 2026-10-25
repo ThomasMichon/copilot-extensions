@@ -95,6 +95,9 @@ does not authorize unrelated host changes, destructive cleanup or gate bypass.
 - [x] Avoid re-reading unchanged historical prefixes on every periodic pass.
   Keep cached state rebuildable and bounded, and keep conversation content out
   of accounting records. _(agent-recommended)_
+- [ ] Resolve the remaining multi-session SQLite wall-budget failures through
+  bounded scope reduction, preserving the five-second and 20,000-row reader
+  limits and explicit failures when an individual scope still cannot fit.
 
 ### Phase 3 - Bound and resume the real scheduled operation
 
@@ -272,3 +275,45 @@ existing behavior or permission to change evidence semantics.
   and duplicates no selector rules. All twelve native controls pass, including
   both shell generations, slot collection between cycles and tree cleanup;
   eleven POSIX cases skip on Windows. Install contracts and touched lint pass.
+- #8808 merged as `1587a895b96e7192c489b8b12073cfb68011ecde`
+  after current-head approval, green required CI and resolution of its upgrade
+  finding. Source changes are complete. The remaining Phase 3 gate is a containing
+  release and successful authorized unified rollout; Phase 4 still requires two
+  actual scheduled-consumer observations before effort completion.
+- Containing release observed on Main `10f7206cb2cf166c91c30b1f0c3621df050419d6`
+  as agent-logger `0.3.85-dev1`. Pinned release bytes contain the final live
+  resolver, required no-breakaway Job, timeout exit 124 and bounded resumable
+  accounting. Started the previously authorized normal unified updater;
+  neither update startup nor release publication is installed-consumer success.
+- The normal unified rollout ended with engine-repair exit 124 after 573.0
+  seconds. The Manager cutover succeeded, and
+  read-only doctor reports one healthy engine generation with no cutover in
+  progress, but the overall update failed before proving the plugin rollout.
+  No guard or process was force-cleared. Started one ordinary idempotent retry
+  under existing rollout authorization; per-plugin recovery remains unapproved.
+- The ordinary retry installs and verifies Logger `0.3.85-dev1`, including
+  byte-for-byte accounting/transfer source and the exact generated GUI launcher
+  against the pinned containing release. Its overall result is still failed
+  because Bridge's separate cutover timed out; no shared service was manually
+  restarted or altered to clear that result.
+- The first final released scheduled cycle observes no new console windows or
+  foreground transitions and no recurrence of the original directory error.
+  Transfer finishes in 96.366 seconds, but two multi-session SQLite reads exceed
+  the existing five-second budget, so exit 1 is correctly retained. Missing
+  historical transcripts and bounded deferred reads remain explicit.
+- Read-only native profiling finds an indexed 159 MB store: the largest
+  individual session has 8,023 rows and reads in 0.300 seconds. A heavy
+  multi-session scope reaches the unchanged row limit in about 0.6 seconds.
+  The remaining timeout branch currently lacks the row-budget branch's bounded
+  partitioning. Extend that same scope-reduction contract, not the deadline,
+  and retain failed single-session reads rather than classifying them complete.
+- The regression first reproduces that unhandled expired-scope failure. Typed
+  wall-budget exhaustion now partitions outside the failed reader's exception
+  lifetime, just like row exhaustion; SQLite VM cancellation is distinguished
+  only when this reader's own budget callback caused it.
+- The combined accounting/transfer packet passes 473 tests with three platform
+  skips. Controls cover exact multiplicity after partitioning, both limits,
+  failed-buffer release, last-good retention, one failing leaf without retry,
+  the 63-read worst case for a 32-session batch, and no partitioning of unrelated
+  unsafe-source errors. Touched lint and thirteen install contracts pass.
+  Publication, release and actual scheduled requalification remain pending.
