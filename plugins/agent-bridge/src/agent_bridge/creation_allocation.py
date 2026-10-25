@@ -71,8 +71,9 @@ class CreationFrontend:
         )
 
     def prepare(self, request: CreationRequest) -> CreationLaunchOwner:
-        from .creation_launch_owner import CreationLaunchOwner
+        from .creation_launch_owner import CreationLaunchOwner, require_workspace_creation
 
+        require_workspace_creation(request)
         self.require_current()
         handoff = CreationJournal(self.db).prepare_launch(
             request, self.installation, self.admission, consumer_incarnation=uuid.uuid4().hex,

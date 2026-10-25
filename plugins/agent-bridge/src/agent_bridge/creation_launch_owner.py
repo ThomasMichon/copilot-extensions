@@ -16,6 +16,11 @@ if TYPE_CHECKING:
     from .creation_allocation import CreationFrontend
 
 
+def require_workspace_creation(request: CreationRequest) -> None:
+    if type(request) is not CreationRequest or request.kind != "workspace":
+        raise RuntimeCustodyError("Local creation launch custody supports original workspaces only")
+
+
 @dataclass
 class CreationLaunchOwner(LocalLaunchOwner):
     frontend: CreationFrontend
@@ -23,6 +28,9 @@ class CreationLaunchOwner(LocalLaunchOwner):
     session_id: str
     handoff_id: str
     native_session_id: None = None
+
+    def __post_init__(self) -> None:
+        require_workspace_creation(self.request)
 
     @property
     def worktree_id(self) -> str:
