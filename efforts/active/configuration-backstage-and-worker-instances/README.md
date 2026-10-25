@@ -193,14 +193,14 @@ not replace installed acceptance or authorize deployment.
 
 - [x] Clear current-head review and required CI for every implementation and documentation slice.
 - [x] Audit the monitor drain path and publish bounded diagnostics for its waits, blockers, timing and outcomes. _Audit/source merged in #6807; read-only installed trace inspection confirmed phase timings, category counts and a clean unforced drain. Configuration/Workers acceptance remains separate._
-- [ ] Support the generated-main consumer repairs and the reviewed pre-merge candidate-validation slice under #6237/#6838 without duplicating retained PRs. _Source repairs, gate #6851 and bootstrap #6867 merged; candidate #6938 merged, but immutable-main CI `38865507739` failed. Fix-forward and qualified containing-release proof remain open. (agent-recommended implementation approach)_
+- [x] Support the generated-main consumer repairs and the reviewed pre-merge candidate-validation slice under #6237/#6838 without duplicating retained PRs. _The retained correction #8508 cleared containing-release qualification and publication; normal promotion #8550 merged. Installed rollout and acceptance remain separate. (agent-recommended implementation approach)_
 - [ ] Confirm normal promotion to main, run the unified local update, and verify the installed Manager/provider versions exercise the redesigned Configuration surface.
 - [ ] Review and deliver the [resident repository map amendment](resident-repository-map.md), then repeat the installed Workers acceptance without increasing its existing deadline.
 - [ ] Reconcile all Plan and Validation Plan items, archive the completed effort, release its binding, and finalize owned worktrees. _(agent-recommended)_
 
 ### Source-review slice - Read-only inner loop
 
-- [ ] Review and deliver the [source-review inner loop](source-review-inner-loop.md): run the production Picker from a source candidate against real owner reads, without live mutations or promotion between review rounds.
+- [x] Review and deliver the [source-review inner loop](source-review-inner-loop.md): run the production Picker from a source candidate against real owner reads, without live mutations or promotion between review rounds. _#8723 merged after current-head approval and required green CI._
 
 ### Direct retained repository-contribution authority from #7179
 
@@ -285,7 +285,7 @@ empty/broken.
 - [x] Targeted tests and real consumer-boundary integration exercise the combined Manager/provider path; record Windows and Linux coverage and the reason for any skipped clean-room or live-venue lane. _(agent-recommended)_
 - [ ] Documentation navigation/assets pass existing guards, and the final installed local surface matches the promoted source.
 - [ ] A single bounded read returns the daemon-produced registered-repository map; Workers does not issue a lookup per repository, and stale/unavailable inventory is not accepted as current empty inventory.
-- [ ] Source-review validation proves real owner data reaches the candidate UI, actions cannot mutate live state, candidate identity is visible, and installed selectors/service ownership remain unchanged; fixture captures alone do not satisfy this check.
+- [x] Source-review validation proves real owner data reaches the candidate UI, actions cannot mutate live state, candidate identity is visible, and installed selectors/service ownership remain unchanged; fixture captures alone do not satisfy this check.
 
 - [ ] G7179-1. Resolve EVERY direct P7179/V7179/C7179 repository-activation
   contribution-authority clause at its original finite scope: indeterminate
@@ -336,12 +336,7 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 Historical entries are preserved in dated journals. The Plan and Validation Plan
 above remain the completion gate; journal milestones do not close the effort.
 
-2026-10-24: #8686 merged the reviewed #8678 source-review amendment after an
-approving current-head review and required green CI. Implementation now proceeds
-against the existing resident feed and explicit read-only execution boundaries.
-No installed rollout, service recovery or activation was performed. Parent
-installed acceptance and all remaining Plan/Validation gates stay open.
-
+- [2026-10-24 - source-review delivery and retained installed acceptance](journal/2026/10.24-source-review-and-installed-acceptance.md)
 - [2026-10-23 - installed acceptance and resident repository map](journal/2026/10.23-installed-acceptance-and-repository-map.md)
 - [2026-10-19 - reviewed documentation corrections](journal/2026/10.19-reviewed-documentation-corrections.md)
 - [2026-10-16 - configuration acceptance](journal/2026/10.16-configuration-acceptance.md)
