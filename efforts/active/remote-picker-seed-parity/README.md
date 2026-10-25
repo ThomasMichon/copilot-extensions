@@ -167,6 +167,20 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #8961 merged binding-free Bridge startup after current-head
+  approval and required CI. Discovery no longer requires source-project
+  machine binding; explicit selectors and effect-side ownership remain.
+  This removes a source readiness prerequisite only. Containing release,
+  authorized rollout, actual local/SSH conversation evidence and every
+  remaining Phase 3 gate stay open.
+- **2026-10-24** -- #8641 merged original native-session observations with
+  current-head approval, no open findings and required CI. Qualified
+  Linux/WSL source witnesses can join exact execution/incarnation/epoch and
+  backend PID/birth evidence; prompt acceptance remains explicitly unknown.
+  Native positive and unavailable-registration/observation controls passed.
+  Re-read both canonical efforts after merge. Joined inspection, retention,
+  containing release, authorized rollout, installed local/SSH same-conversation
+  proof and cleanup remain open; no Phase 3 completion is claimed.
 - **2026-10-24** -- #8627 merged prompt-free deferred execution receipts with
   current-head approval and required CI. Attempt/resolution/parent IDs now
   reach the cooperative backend boundary; OS spawn, seed claim and observed

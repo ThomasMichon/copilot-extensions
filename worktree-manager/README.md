@@ -1017,6 +1017,52 @@ Seedless remote planning records forwarding only, while target resolution
 records its own machine-local preparation. Missing or mismatched receipts stop
 execution without automatically repeating allocation. Full prompts remain in
 the protected Manager journal, not in these engine metadata receipts.
+
+#### Read saved launch attempts
+
+`worktree-manager launch-attempts --json` reads bounded, local saved-intent
+metadata without starting the engine. Filter with `--project`, `--action`,
+`--machine`, `--environment`, `--provider`, `--venue`, `--after` (inclusive Unix
+seconds), and `--before` (exclusive). `--limit` is 1-100. When `has_more` is
+true, pass both returned `next_before` and `next_before_id` as `--before` and
+`--before-id`; the ID tie-breaker preserves equal-timestamp entries.
+
+`worktree-manager launch-attempts <attempt-id> --json` reads one protected
+intent and its Manager events, then queries the installed engine once for that
+project's **local** receipts. The selected target in the intent is not evidence
+that a remote target was contacted by this read. Explicit request IDs in the
+current Manager event page and engine resolution page allow matching local
+target-admission receipts to be joined;
+unavailable target receipts remain missing, not successful.
+
+Use `--event-limit` (1-1000) and `--after-sequence` for Manager event pages.
+Use `--receipt-limit` (1-100) and `--receipt-after` with the engine's returned
+`next_after` for receipt pages. Each page declares incompleteness independently;
+an absent terminal event or an incomplete page is not a whole-attempt verdict.
+An unavailable/incompatible engine preserves the saved local detail with an
+explicit source error and nonzero exit, without invoking setup or replay.
+Per-receipt read errors remain in the engine response.
+
+Only `--include-input` with an exact attempt ID selects protected prompt/options.
+Expired or erased input refuses that request; list and ordinary detail never
+select its text. Resolution, launcher exit, seed claim and original native-session
+observations remain separate evidence. `prompt_acceptance` stays `unknown`,
+including after a zero exit or a qualified native-session join. These commands
+do not launch, repair, expire, retry or sweep other machines. Interactive history,
+outcome aggregation, selected-machine sweeps and legacy-history retention
+integration are not supplied by this CLI reader.
+
+The explicit cross-runtime source lane is
+`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_launch_history_cli_native.py`.
+Set `WORKTREE_MANAGER_TEST_ENGINE_ARGV` to a JSON array naming a prepared
+candidate engine interpreter/entry command. The lane runs the real Manager
+entry and engine CLI against isolated synthetic intent, checking metadata and
+explicit input in separate cases and verifying unchanged fixture state.
+It is not a required-unit-CI matrix, a latency qualification, installed
+Copilot acceptance or permission to provision a runtime.
+
+#### SSH admission and pending intent
+
 Arbitrary prompt text is
 encoded, not interpolated into the remote shell. Requests are limited to an
 7 KiB UTF-8 envelope, including JSON metadata, to stay within remote command

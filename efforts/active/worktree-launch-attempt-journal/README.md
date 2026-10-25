@@ -53,8 +53,9 @@ effects. Truthful unresolved-locality refusal recording merged in #8574 and Mana
 boundary observations merged in #8588. Negotiated remote prompted admission and
 target receipt binding merged in #8605. Local and seedless resolution receipts
 and both-hop attempt propagation merged in #8615. Deferred process and
-seed-claim/return observations merged in #8627. Native conversation and
-accepted-turn correlation remains incomplete. Engine activity
+seed-claim/return observations merged in #8627. Qualified original Linux/WSL
+native-session observations merged in #8641; accepted-turn correlation and
+joined Manager inspection remain incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
@@ -77,6 +78,18 @@ The operator confirmed `worktree-launch-attempt-journal` and **90 days** of
 full-prompt retention. The preceding report requires crash-resistant prompt
 preservation and SSH creation delegated with the seed to the selected venue,
 which owns execution beyond that boundary.
+
+### Follow-up: active Open regression
+
+The operator also reported:
+
+> Bug to fix in current agent-worktres and worktree-manager while we are here: using Open on any active workreee in Worktree Manager yields this:
+
+The reported parser error names `--require-agent-hosting`,
+`--require-launch-attempt` and `--launch-attempt-id`, followed by the Manager's
+resolution-receipt compatibility refusal. The long command listing is omitted.
+The existing hosting, receipt-ownership and uncertain-launch contracts still
+apply while restoring active Open through a coherent installed pair.
 
 The following decomposition and detailed evidence rules are agent-recommended.
 
@@ -186,6 +199,89 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+### 2026-10-24 -- Bounded local inspection prepared
+
+- Added a discoverable Manager CLI list/detail path. Lists query protected
+  metadata without starting the engine; explicit detail joins the existing
+  local engine receipt owners across their versioned CLI boundary.
+- Time, action, project and venue filters stay in the journal query. Separate
+  intent, event and receipt cursors retain incomplete-page evidence; equal-time
+  intent rows use an ID tie-breaker. Private input still requires an exact-ID
+  opt-in and respects its original expiry.
+- The engine bounds one exact attempt directory and projects only validated
+  resolution, execution, historical native-session and matching admission
+  evidence. Missing, corrupt and incompatible sources remain explicit.
+  Admission acceptance and process exit never become accepted-turn evidence.
+- Focused source tests cover privacy, read-only missing/corrupt state, limits,
+  pagination and receipt identity. The real Windows Manager-to-engine process
+  lane passes metadata and explicit-input cases with unchanged fixture state.
+  A frozen committed-source export on native Linux storage passes the engine
+  packet and the Manager journal/CLI/cross-runtime packet. Earlier attempts
+  stalled on mounted-source filesystem I/O before tests; they are not passes.
+  No installed Copilot acceptance or latency qualification is claimed.
+- This is not the whole Phase 4 item: interactive history, outcome aggregation,
+  selected-machine sweeps, legacy retention and installed acceptance remain
+  open. Both parent objectives remain Active.
+
+### 2026-10-24 -- Active Open installation mismatch identified
+
+- The current Manager selects an older complete engine runtime that lacks the
+  launch-receipt arguments, while a newer installed payload contains them.
+  The parser refusal therefore occurs before Open can return an attachment
+  plan; it is not permission to strip the required receipt checks.
+- The promoted release already makes hosting enforcement intrinsic in #8703
+  and retains the launch-receipt contract. Drive the normal registered-source
+  unified updater to reconcile the installed pair, then verify the actual
+  Manager-to-engine Open boundary. Do not hand-edit deployed packages or
+  mistake a refreshed payload for a selected, compatible runtime.
+- The normal update advanced Manager but could not start its durable worker,
+  so the older engine remains selected and the update stays pending. A bounded
+  inert diagnostic authenticates the WMI bootstrap, then observes its real
+  Job-membership check refuse startup; cleanup is confirmed. This matches
+  the existing #6859 / held #7833 repair, not an argument-parsing workaround.
+  The existing owner has also recorded that adding the WMI breakaway flag
+  alone did not establish independent lifetime. Do not introduce a competing
+  broker, deploy the held draft or relax the ownership proof.
+- Keep all diagnostic roots and workers headless. No foreground updater
+  fallback or deployed-code patch was used while diagnosing this refusal.
+- Publication of this inspection slice also exposed the fixed short push
+  budget: its two independent read-only pre-push guards exceed that budget
+  when serialized. The operator selected configured-only identifier checks
+  without automatic cross-repository discovery, and final-diff file-size
+  enforcement in required CI because contributions are squash-merged.
+  #8953 merged that policy and removed the expensive history scan without
+  changing the publication deadline. The earlier parallel-guard experiment
+  is superseded and is not part of this inspection slice.
+
+### 2026-10-25 -- Binding-free Bridge prerequisite merged
+
+- #8961 merged startup topology discovery without mandatory source-project
+  machine binding, following current-head approval and required CI. Optional
+  canonical selectors remain validated; effect-side ownership is unchanged.
+- The affected source packet covers combined-profile locality, remote-only
+  capture/restore and key/SSH-alias collisions. These are source contracts,
+  not evidence that a running service or installed launch path changed.
+- Promotion, authorized rollout, the held updater repair and actual active
+  Open / New / cold Resume verification remain separate incomplete gates.
+
+### 2026-10-24 -- Native observation slice merged; joined inspection next
+
+- #8641 merged with current-head approval, no open findings and required CI
+  passing. Both parent trackers remain open. Verified all 13 authored file
+  blobs against the provider-confirmed merge before advancing the source.
+- Review corrections preserve unknown outcomes for missing execution receipts
+  while retaining corruption errors. The actual backend process now forbids
+  direct writes in the native qualification lane; unavailable registration and
+  unavailable observation each fail their negative control without a receipt.
+- Re-read this effort and the remote parity effort after merge. No broad
+  Phase 3 or validation checkbox is closed: native-session observation is not
+  accepted-turn, installed same-conversation or end-to-end outcome proof.
+- Next, expose bounded joined inspection using the existing protected journal
+  and receipt owners. Preserve metadata-only defaults, explicit private-input
+  retrieval, unknown/interrupted outcomes and per-source errors. Retention,
+  legacy history integration, selected sweeps and installed acceptance remain
+  open; neither rollout nor objective completion is implied by this merge.
 
 ### 2026-10-24 -- Original native-session association prepared
 

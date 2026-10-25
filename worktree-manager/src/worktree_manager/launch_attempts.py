@@ -329,20 +329,35 @@ class LaunchAttempts:
     def entries(
         self, *, limit: int = 100, before: float | None = None,
         project: str | None = None, action: str | None = None,
+        after: float | None = None, machine: str | None = None,
+        environment: str | None = None, provider: str | None = None,
+        venue_id: str | None = None, before_id: str | None = None,
     ) -> list[dict]:
         """Read bounded metadata only; absent storage remains absent."""
         try:
             if type(limit) is not int or not 1 <= limit <= 1000:
                 raise ValueError("Invalid launch-journal read limit")
-            if before is not None and (not math.isfinite(before) or before < 0):
-                raise ValueError("Invalid launch-journal time filter")
+            for timestamp in (before, after):
+                if timestamp is not None and (not math.isfinite(timestamp) or timestamp < 0):
+                    raise ValueError("Invalid launch-journal time filter")
+            if before_id is not None:
+                _identity(before_id)
+                if before is None:
+                    raise ValueError("Launch cursor requires its timestamp")
             if action is not None and action not in _ACTIONS:
                 raise ValueError("Invalid launch-journal action filter")
             if not self._exists():
                 return []
             clauses, values = [], []
+            if before_id is not None:
+                clauses.append("(submitted_at<? OR (submitted_at=? AND attempt_id<?))")
+                values.extend((before, before, before_id))
             for column, value, operator in (
-                ("submitted_at", before, "<"), ("project", project, "="), ("action", action, "="),
+                ("submitted_at", before if before_id is None else None, "<"),
+                ("project", project, "="), ("action", action, "="),
+                ("submitted_at", after, ">="), ("machine", machine, "="),
+                ("environment", environment, "="), ("provider", provider, "="),
+                ("venue_id", venue_id, "="),
             ):
                 if value is not None:
                     clauses.append(f"{column}{operator}?")

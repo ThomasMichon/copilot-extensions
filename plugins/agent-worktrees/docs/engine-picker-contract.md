@@ -165,7 +165,7 @@ verified target request receipt described below. Structured target admission
 uses that existing durable version-2 receipt and requires a non-null attempt
 when the new fence is present. No resolution receipt proves process start,
 native conversation identity, prompt acceptance or retry eligibility. Native
-acceptance integration, joined history readers and sweeps remain separate work.
+acceptance integration, interactive history and sweeps remain separate work.
 
 The explicit source integration lane is
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_attempt_native.py`.
@@ -226,10 +226,44 @@ never manufactures success or grants automatic replay.
 
 Record-backed seedless/custom launchers expose only the wrapper process unless
 their backend boundary supplies its own evidence. Base plans without a record
-retain resolution evidence only. Joined Manager history, retention, sweeps and
+retain resolution evidence only. Interactive Manager history, retention, sweeps and
 accepted-turn evidence remain separate work. In particular,
 the optional resident prompt-receipt adapter's missing qualified backend is
 unavailable, not evidence that a prompt was absent or accepted.
+
+### Read-only launch-attempt inspection
+
+`<project> launch-attempts <attempt-id> --json [--limit 1..100] [--after <cursor>]`
+returns `worktree-launch-attempt-inspection` version 1 for this machine's local
+project tracking directory. It does not resolve a launch, contact a target,
+read seed text, boot a monitor or mutate state. Manager consumes it over the
+existing CLI process boundary, not by importing the plugin.
+
+The envelope binds `attempt_id` and `scope: local-project`, with `receipts`,
+`admissions`, `errors`, `has_more`, `next_after` and
+`prompt_acceptance: unknown`. Receipt rows identify their `source`
+(`resolution`, `execution`, or `native`), exact `operation_id` and validated
+`evidence`. Native evidence uses the historical identity/epoch/ancestry join,
+not a new liveness probe or prompt-acceptance inference. Missing, corrupt,
+oversized or indirect sources report fixed error codes without echoing bytes.
+
+The reader visits one exact attempt directory, at most 1001 directory entries,
+and at most 100 receipt rows per page. Each file retains its owner's 16 KiB
+budget. An over-budget directory returns an explicit error with no arbitrary
+partial listing. Names are ordered lexically; when `has_more` is true, pass
+`next_after` unchanged as `--after`. Pagination is a live read, not a frozen
+snapshot: late writes may require a fresh first page. Files are never repaired.
+
+Up to 16 distinct admission references (explicit `--request-id` hints plus IDs
+from the current resolution-receipt page) can add projected target-admission
+evidence, only when the stored version-2 receipt binds the same attempt.
+Excess references produce an explicit error rather than unbounded reads.
+The projection excludes fingerprints, allocation paths and arbitrary fields.
+`admission_accepted` means request admission, not accepted Copilot input.
+Historical inspection does not require the checkout still to exist and does
+not read pending seed state. Missing references remain per-source errors.
+No envelope or individual event authorizes replay or claims whole-attempt
+success; absence of receipts and incomplete pages remain unknown.
 
 The explicit source lane
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_launch_execution_native.py`

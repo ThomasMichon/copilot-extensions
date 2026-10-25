@@ -1536,6 +1536,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  launch-attempts [ID] [--json] [--include-input]")
+        print("                         read saved local intent and prompt-free engine receipts; never retry")
         print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
         print("                         preview the Windows Terminal fragment a project would emit")
         print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
@@ -1568,6 +1570,9 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "launch-attempts":
+        from .launch_history_cli import main as launch_history
+        return launch_history(args[1:])
     if args and args[0] == "terminal-fragment":
         return _cmd_terminal_fragment(args[1:])
     if args and args[0] == "profiles":
