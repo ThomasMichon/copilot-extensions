@@ -100,6 +100,26 @@ def test_manager_plugin_submission_uses_engine_identity_not_manager_queue(invent
     assert calls == [(None, ["update", "--no-manager", "--target", "guide", "--detach", "--json"])]
 
 
+def test_public_manager_plugin_target_refuses_unsupported_source_before_submission(
+    inventory, tmp_path, monkeypatch, capsys,
+):
+    import update_driver
+    from worktree_manager.runtime_source_config import RuntimeSource, set_source
+
+    root = self_install.default_root()
+    root.mkdir()
+    set_source(RuntimeSource(channel="dev", allow_dev=True), root=root)
+    baseline = (root / "config.toml").read_bytes()
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("unsupported source queued"))
+    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda *a, **k: pytest.fail("source policy bypassed"))
+    assert manager.main(["update", "--target", "guide", "--detach", "--json"]) == 1
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["state"] == "unavailable"
+    assert "source-backed suite execution is not yet available" in receipt["error"]
+    assert (root / "config.toml").read_bytes() == baseline
+
+
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])
 def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatch, target):
     from worktree_manager import update_bootstrap

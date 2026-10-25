@@ -260,7 +260,9 @@ def cmd_update_request(rest: list[str]) -> int:
                     return manager._cmd_update(forwarded)
         if options.target is not None and options.target != "worktree-manager":
             from . import engine_client
+            from .runtime_source_config import require_marketplace
 
+            require_marketplace()
             project, arguments = extract_project(forwarded)
             observer = [
                 "--" + name.replace("_", "-")
