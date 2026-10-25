@@ -368,7 +368,9 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     project = cfg.project_name()
     try:
-        machine, plat, machine_entry = local_registration_identity(repo_dir, args.machine)
+        machine, plat, machine_entry = local_registration_identity(
+            repo_dir, args.machine, project, force=getattr(args, "force", False),
+        )
     except (OSError, RuntimeError, ValueError, YAMLError) as error:
         output.err(f"Local installation identity refused: {error}")
         return 1
@@ -419,7 +421,7 @@ def _install_project(
 
     # Deploy global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
-    _core_helper("_write_global_config", _write_global_config)(machine, plat, repo_dir.parent)
+    _core_helper("_write_global_config", _write_global_config)(args.machine, plat, repo_dir.parent)
     if not config_path.exists() or args.force:
         _core_helper("_write_config", _write_config)(config_path, repo_dir, machine, plat, project)
     else:
@@ -612,7 +614,9 @@ def cmd_register(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        machine, plat, machine_entry = local_registration_identity(repo_dir, args.machine)
+        machine, plat, machine_entry = local_registration_identity(
+            repo_dir, args.machine, project, force=getattr(args, "force", False),
+        )
     except (OSError, RuntimeError, ValueError, YAMLError) as error:
         output.err(f"Local registration identity refused: {error}")
         return 1
@@ -667,7 +671,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Write global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
-    _core_helper("_write_global_config", _write_global_config)(machine, plat, repo_dir.parent)
+    _core_helper("_write_global_config", _write_global_config)(args.machine, plat, repo_dir.parent)
     # Resolve agent exposure up front: explicit flags win, else the repos.yaml
     # classification, else default ON (adopting a repo means working in it).
     # A no-agent adoption is worked programmatically (create --json) rather than

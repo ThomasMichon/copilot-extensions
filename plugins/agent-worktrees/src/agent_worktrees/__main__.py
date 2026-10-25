@@ -4996,13 +4996,14 @@ def _resolve_copilot() -> str | None:
 
 
 def _write_global_config(
-    machine: str,
+    machine: str | None,
     plat: str,
     srcroot: Path | str,
 ) -> None:
     """Scaffold the global machine-wide config (~/.agent-worktrees/config.yaml).
 
-    Carries machine-wide base settings (srcroot/machine/platform) plus
+    Carries machine-wide base settings (srcroot/platform and an explicit
+    machine binding, when supplied) plus
     user-authored copilot_profiles -- the lowest config tier. This file is
     **user-owned**: the installer scaffolds it once when missing, then **never**
     overwrites it -- not even with ``--force`` (which targets installer-owned
@@ -5015,6 +5016,7 @@ def _write_global_config(
         output.skipped(f"Global config exists at {path} (user-owned, left as-is)")
         return
     _p = "~/.agent-worktrees/config.yaml"  # marketplace-isolation: allow legacy-compatibility
+    machine_line = f"machine: {machine}\n" if machine is not None else ""
     content = f"""# {_p}
 # GLOBAL machine-wide agent-worktrees config (lowest precedence tier).
 #
@@ -5023,8 +5025,7 @@ def _write_global_config(
 # config) then ~/.<project>/config.yaml (machine-local override).
 
 srcroot: {srcroot}
-machine: {machine}
-platform: {plat}
+{machine_line}platform: {plat}
 
 # Copilot backend profiles -- machine-wide (Tab to cycle in the picker).
 # User-authored; uncomment and edit. Example:

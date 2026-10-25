@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,14 @@ from agent_worktrees import config as cfg, installation_cli, installer, repos
 
 @pytest.fixture
 def registration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    originals = {
+        "project_dir": cfg.project_dir, "global_config_path": cfg.global_config_path,
+        "find_repo": repos.find_repo, "add_repo": repos.add_repo,
+        "subprocess_run": installation_cli.subprocess.run,
+    }
+    from agent_worktrees import registry_paths
+
+    originals["installation_context"] = registry_paths.installation_context
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     state = tmp_path / "state"
@@ -76,7 +85,9 @@ def registration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         project_name="registered", repo_dir=str(repo), machine=None,
         default_branch="main", force=False, agent=True,
     )
-    return SimpleNamespace(repo=repo, state=state, effects=effects, args=args)
+    return SimpleNamespace(
+        repo=repo, state=state, effects=effects, args=args, originals=originals, overrides=overrides,
+    )
 
 
 def _map(repo: Path, kind: str, platform: str) -> None:
@@ -121,13 +132,15 @@ def test_actual_register_without_machine_enrollment(
         include_knowledge_preferences=False,
     )
     expected = "local-space" if map_kind == "matching" else (
-        "friendly-host" if map_kind in ("unscoped", "sibling-only") else "raw-host"
+        "friendly-host" if platform == "wsl" and map_kind in ("unscoped", "sibling-only")
+        else "raw-host"
     ) + ("-wsl" if platform == "wsl" else "")
     assert config.machine == expected
+    assert config.configured_machine is None
     assert config.platform == platform
     assert Path(config.default_repo.anchor) == fixture.repo
     assert "machine" not in yaml.safe_load(config_path.read_text())
-    assert yaml.safe_load(cfg.global_config_path().read_text())["machine"] == expected
+    assert "machine" not in yaml.safe_load(cfg.global_config_path().read_text())
     assert {"prepare", "repository", "project", "publication", "commit", "binstubs"} <= set(
         fixture.effects,
     )
@@ -254,3 +267,196 @@ def test_registration_refuses_unknown_observed_environment(
     assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == 1
     assert fixture.effects == []
     assert not fixture.state.exists()
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("command", ["register", "install"])
+@pytest.mark.parametrize("tier", ["global", "project", "dropin"])
+@pytest.mark.parametrize("binding", ["foreign-space", ""])
+def test_registration_checks_retained_effective_binding_before_writes(
+    registration, monkeypatch: pytest.MonkeyPatch, platform: str, command: str,
+    tier: str, binding: str,
+) -> None:
+    fixture = registration
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    other = "windows" if platform == "wsl" else "wsl"
+    (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {"foreign-space": {
+        "hostname": "raw-host", "physical_host": "friendly-host", "execution_platform": other,
+    }}}))
+    path = {
+        "global": cfg.global_config_path(),
+        "project": cfg.project_dir("registered") / "config.yaml",
+        "dropin": cfg.project_dir("registered") / "config.d" / "local.yaml",
+    }[tier]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump({
+        "machine": binding, "repos": {"registered": {"anchor": str(fixture.repo)}},
+    }))
+    before = {str(p.relative_to(fixture.state)): p.read_bytes()
+              for p in fixture.state.rglob("*") if p.is_file()}
+    assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == 1
+    assert fixture.effects == []
+    assert {str(p.relative_to(fixture.state)): p.read_bytes()
+            for p in fixture.state.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("command", ["register", "install"])
+@pytest.mark.parametrize("physical", ["friendly-win", "friendly-wsl"])
+def test_detected_custom_physical_suffix_survives_scaffold_round_trip(
+    registration, monkeypatch: pytest.MonkeyPatch, platform: str, command: str, physical: str,
+) -> None:
+    fixture = registration
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    other = "windows" if platform == "wsl" else "wsl"
+    (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {"sibling-space": {
+        "hostname": "raw-host", "physical_host": physical, "execution_platform": other,
+    }}}))
+    assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == 0
+    config = cfg.load_config(
+        cfg.project_dir("registered") / "config.yaml", project="registered",
+        include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert config.configured_machine is None
+    assert config.machine == (physical + "-wsl" if platform == "wsl" else "raw-host")
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("command", ["register", "install"])
+@pytest.mark.parametrize(("case", "allowed"), [
+    ("global", True), ("project", True), ("dropin", True),
+    ("project-over-dropin", True), ("forced-project", True),
+    ("forced-dropin", False), ("explicit-vs-retained", False), ("forced-global", False),
+])
+def test_registration_matches_retained_binding_precedence(
+    registration, monkeypatch: pytest.MonkeyPatch, platform: str, command: str,
+    case: str, allowed: bool,
+) -> None:
+    fixture = registration
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    other = "windows" if platform == "wsl" else "wsl"
+    entries = {key: {
+        "hostname": "raw-host", "physical_host": "friendly-host", "execution_platform": platform,
+    } for key in ("first", "second")}
+    entries["foreign"] = {
+        "hostname": "other-host", "physical_host": "other-host", "execution_platform": other,
+    }
+    (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": entries}))
+    global_path = cfg.global_config_path()
+    global_path.parent.mkdir(parents=True)
+    global_path.write_text(yaml.safe_dump({
+        "machine": "first" if case in ("global", "forced-project") else "foreign",
+        "platform": platform,
+    }))
+    project_path = cfg.project_dir("registered") / "config.yaml"
+    if case in ("project", "project-over-dropin", "forced-project", "forced-dropin"):
+        project_path.parent.mkdir(parents=True)
+        project_path.write_text(yaml.safe_dump({
+            "machine": "foreign" if case == "forced-project" else "first",
+            "repos": {"registered": {"anchor": str(fixture.repo)}},
+        }))
+    if case in ("dropin", "project-over-dropin", "forced-dropin"):
+        path = project_path.parent / "config.d" / "local.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(yaml.safe_dump({
+            "machine": "first" if case == "dropin" else "foreign",
+        }))
+    fixture.args.force = case in ("forced-project", "forced-dropin", "forced-global")
+    if case in ("explicit-vs-retained", "forced-global"):
+        fixture.args.machine = "first"
+    before = {str(p.relative_to(fixture.state)): p.read_bytes()
+              for p in fixture.state.rglob("*") if p.is_file()}
+    assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == (0 if allowed else 1)
+    if allowed:
+        config = cfg.load_config(
+            project_path, project="registered",
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
+        assert config.configured_machine == "first"
+        assert config.machine == "first"
+        assert global_path.read_bytes() == before[str(global_path.relative_to(fixture.state))]
+    else:
+        assert fixture.effects == []
+        assert {str(p.relative_to(fixture.state)): p.read_bytes()
+                for p in fixture.state.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("command", ["register", "install"])
+@pytest.mark.parametrize("case", [
+    "fresh", "retained", "aliased-foreign", "missing-receipt", "foreign-receipt",
+])
+def test_namespaced_registration_checks_prospective_owned_state_before_writes(
+    registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, command: str, case: str,
+) -> None:
+    from agent_worktrees import project_adoption, project_state, registry_paths
+    from test_registry_paths import _payload, _register_repo, _select, _stamp
+
+    fixture = registration
+    payload = _payload(tmp_path, "payload")
+    with monkeypatch.context() as native:
+        native.setattr(installation_cli.subprocess, "run", fixture.originals["subprocess_run"])
+        receipt, _ = _stamp(
+            tmp_path / "durable", payload,
+            marketplace="registration-local", repository="Example/Registration-Local",
+        )
+    _select(monkeypatch, receipt, payload)
+    monkeypatch.setattr(registry_paths, "installation_context", fixture.originals["installation_context"])
+    monkeypatch.setattr(cfg, "project_dir", fixture.originals["project_dir"])
+    monkeypatch.setattr(cfg, "global_config_path", fixture.originals["global_config_path"])
+    monkeypatch.setattr(repos, "find_repo", fixture.originals["find_repo"])
+    monkeypatch.setattr(repos, "add_repo", fixture.originals["add_repo"])
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    remote = "https://github.com/example/project.git"
+    monkeypatch.setattr(
+        installation_cli.subprocess, "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=remote, stderr=""),
+    )
+
+    def prepare(*args):
+        fixture.effects.append("prepare")
+        return project_adoption.prepare_namespaced_project_state(*args)
+
+    fixture.overrides["_prepare_namespaced_project_state"] = prepare
+    if case != "fresh":
+        previous = "previous-label" if case == "aliased-foreign" else "registered"
+        _register_repo(previous, remote)
+        state = project_state.ensure_project_state(previous)
+        (state / "config.yaml").write_text(yaml.safe_dump({
+            "machine": "foreign-space" if case == "aliased-foreign" else "local-space",
+            "repos": {"registered": {"anchor": str(fixture.repo)}},
+        }))
+        identity_path = state.parent / "identity.json"
+        if case == "missing-receipt":
+            identity_path.unlink()
+        elif case == "foreign-receipt":
+            value = json.loads(identity_path.read_text())
+            value["repositoryId"] = "repo-foreign"
+            identity_path.write_text(json.dumps(value))
+    other = "windows" if platform == "wsl" else "wsl"
+    (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+        "local-space": {
+            "hostname": "raw-host", "physical_host": "friendly-host", "execution_platform": platform,
+        },
+        "foreign-space": {
+            "hostname": "other-host", "physical_host": "other-host", "execution_platform": other,
+        },
+    }}))
+    before = {str(p.relative_to(tmp_path)): p.read_bytes()
+              for p in tmp_path.rglob("*") if p.is_file()}
+    refused = case in ("aliased-foreign", "missing-receipt", "foreign-receipt")
+    assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == (1 if refused else 0)
+    if refused:
+        assert fixture.effects == []
+        assert {str(p.relative_to(tmp_path)): p.read_bytes()
+                for p in tmp_path.rglob("*") if p.is_file()} == before
+        if case == "aliased-foreign":
+            assert "registered" not in repos.read_registry(strict=True).repos
+    else:
+        config = cfg.load_config(
+            cfg.project_dir("registered") / "config.yaml", project="registered",
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
+        assert config.machine == "local-space"
+        assert "prepare" in fixture.effects

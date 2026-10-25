@@ -58,9 +58,15 @@ metadata does not become the current execution entry.
 
 The existing `--machine` option remains an explicit installation binding, with
 its original spelling retained in newly scaffolded global configuration.
-Detection retains legacy machine spellings; neither path changes existing
-user-owned global configuration or an existing project configuration without
-the latter's ordinary `--force` request. Conflicting platform/profile bindings,
+Detected naming is not scaffolded as an explicit global binding, so later
+loading retains its observation provenance, including customized physical names
+ending in platform-like text. Admission validates the binding that will actually
+survive project/global/drop-in precedence and the project-only `--force` scope.
+Neither path changes existing user-owned global configuration. In a scoped
+installation, retained project configuration is read only through the existing
+repository identity and receipt, including a different label for the same remote;
+fresh adoption needs no premature registry or receipt publication.
+Conflicting platform/profile bindings,
 ambiguous associations, execution-name collisions and invalid declarations
 produce a nonzero diagnostic before state preparation or launcher publication.
 This naming admission does not replace repository hosting policy, installation
