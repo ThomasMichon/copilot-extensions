@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Installation driver lifecycle contract: vault-stamp-v1
 # Installation driver lifecycle contract: logger-install-v1
+# Installation driver lifecycle contract: bridge-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
 # Installation driver lifecycle contract: logger-command-v1
 # Fixed first-adopter launch; ordinary acceptance appears only in the canonical queue.
@@ -70,8 +71,8 @@ esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
     printf 'Stamp-to-selected-snapshot provisioning requires SSH.\n' >&2; exit 1
 fi
-if [[ "$installer_action" == install && "$plugin" != agent-logger ]]; then
-    printf 'Fixed install action requires Logger.\n' >&2; exit 1
+if [[ "$installer_action" == install && "$plugin" != agent-logger && "$plugin" != agent-bridge ]]; then
+    printf 'Fixed install action requires Logger or Bridge.\n' >&2; exit 1
 fi
 if [[ "$plugin" == agent-logger ]]; then
     for helper in command_binding.py command_lifecycle.py installer_engine.py \

@@ -17,7 +17,7 @@ from fleet_manager.gateway_service_channel import TransportError
 
 from agent_pull_requests.watch_gateway import WatchGateway, WatchScopeBinding
 from agent_pull_requests.watch_replay import ConsumerScope
-from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore
 from agent_dispatch.delegated_replay_consumer import create_replay_consumer
 from agent_dispatch.coordinator import create_app
 from tests._delegation_helpers import identity, task
@@ -26,8 +26,19 @@ from tests._helpers import RepoDefaultingQueue as TaskQueue
 pytestmark = pytest.mark.contract("agent_dispatch.delegated_replay.transport")
 
 
-def service_owner(tmp_path):
-    store = ReplayStore((tmp_path / "replay").resolve(), "fleet/service/installation")
+def service_binding():
+    return {
+        "fleet": "fleet-a", "gateway": "gateway-a", "slot": "service-a",
+        "namespace": "fleet/service/installation", "principal": "caller-a", "target": "project",
+        "consumer": "caller-a", "account": "dispatch", "repo": "example/project",
+    }
+
+
+def service_owner(tmp_path, *, scoped=False):
+    store = ReplayStore(
+        (tmp_path / "replay").resolve(), "fleet/service/installation",
+        service_identity=ReplayServiceIdentity("fleet-a", "gateway-a", "service-a") if scoped else None,
+    )
     store.provision()
     return store, WatchGateway(
         store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
@@ -37,7 +48,7 @@ def service_owner(tmp_path):
     )
 
 
-def new_consumer(queue, rig, checkpoint=None):
+def new_consumer(queue, rig, checkpoint=None, *, scoped=False):
     async def access():
         return rig.access("caller-a", 3)
     caller = ServiceCaller(
@@ -48,6 +59,7 @@ def new_consumer(queue, rig, checkpoint=None):
         queue, caller, route_prefix="/api", target="project",
         repo="example/project", caller_scope="caller-a:dispatch",
         checkpoint=checkpoint,
+        service_binding=service_binding() if scoped else None,
     ), caller
 
 
@@ -62,12 +74,12 @@ class RefuseOptional(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RefuseOptional())
 import agent_dispatch
 import agent_dispatch.delegated_replay_consumer
-from agent_dispatch.coordinator import create_app
-from agent_dispatch.queue import TaskQueue
+from agent_dispatch.config import Config
+from agent_dispatch.server import build_app
 from pathlib import Path
 import tempfile
 with tempfile.TemporaryDirectory() as root:
-    create_app(TaskQueue(Path(root) / 'queue.db'), enable_mcp=False)
+    build_app(Config(db_path=str(Path(root) / 'server.db')))
 """
     result = subprocess.run(
         [sys.executable, "-I", "-c", code], capture_output=True, text=True,
@@ -91,19 +103,20 @@ async def prepare_intent(queue, owner, task_id, *, timeout=1.0):
 
 
 @pytest.mark.parametrize("lost_operation", ["register", "acknowledge", "cancel"])
-def test_actual_consumer_restarts_after_lost_committed_result(tmp_path, monkeypatch, lost_operation):
+@pytest.mark.parametrize("scoped", [False, True])
+def test_actual_consumer_restarts_after_lost_committed_result(tmp_path, monkeypatch, lost_operation, scoped):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
     from gateway_service_transport_fixtures import running
     from test_gateway_service_handler import connect_handler
 
     async def scenario():
-        store, owner = service_owner(tmp_path)
+        store, owner = service_owner(tmp_path, scoped=scoped)
         database = tmp_path / "tasks.db"
         queue = TaskQueue(database)
         task_id = task(queue)
         async with running(tmp_path) as rig:
             await connect_handler(rig, owner.handle)
-            consumer, caller = new_consumer(queue, rig)
+            consumer, caller = new_consumer(queue, rig, scoped=scoped)
             spec = await prepare_intent(
                 queue, consumer, task_id, timeout=300.0 if lost_operation == "cancel" else 1.0,
             )
@@ -137,12 +150,13 @@ def test_actual_consumer_restarts_after_lost_committed_result(tmp_path, monkeypa
             )
             await connect_handler(rig, owner.handle)
             restored = TaskQueue(database)
-            consumer, _ = new_consumer(restored, rig)
+            consumer, _ = new_consumer(restored, rig, scoped=scoped)
             result = await consumer.cycle()
             assert not result["blocked"]
             assert len(restored.list_run_waiter_wakes(task_id)) == 1
             assert not restored.list_replay_waiters(consumer.binding)
-            records = json.loads(store.path.read_bytes())["records"]
+            state = json.loads(store.path.read_bytes())
+            records = (state["replay"] if scoped else state)["records"]
             assert len(records) == 1
             assert (await consumer.client.pending()).events == ()
             assert (spec["replay"]["deadline_at"] < time.time()) == (lost_operation != "cancel")
@@ -291,7 +305,9 @@ def test_coordinator_scheduler_uses_real_transport_and_recovers_shutdown(
     asyncio.run(scenario())
 
 
-def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.timeout(120 if sys.platform == "win32" else 30)
+def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_path, monkeypatch, scoped):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
     from gateway_service_transport_fixtures import eventually, running
     from agent_pull_requests.watch_observer import NativeObservationBinding
@@ -299,7 +315,7 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
     from agent_pull_requests.watch_service import WatchService
 
     async def scenario():
-        store, _ = service_owner(tmp_path)
+        store, _ = service_owner(tmp_path, scoped=scoped)
         database = tmp_path / "tasks.db"
         queue = TaskQueue(database)
         tasks = [task(queue), task(queue)]
@@ -359,7 +375,7 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
             await owner.start()
             try:
                 await eventually(lambda: owner.status()["ready"], timeout=10)
-                consumer, caller = new_consumer(queue, rig)
+                consumer, caller = new_consumer(queue, rig, scoped=scoped)
                 request, last_response = caller.request, []
 
                 async def observed_request(method, target, **kwargs):
@@ -426,7 +442,7 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
             await successor.start()
             try:
                 await eventually(lambda: successor.status()["ready"], timeout=10)
-                consumer, caller = new_consumer(queue, rig)
+                consumer, caller = new_consumer(queue, rig, scoped=scoped)
                 await completed_cycle(consumer)
                 for task_id in tasks:
                     waiter = queue.get_active_run_waiter(task_id)
@@ -453,7 +469,7 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
                     await asyncio.sleep(0.05)
                 assert lost
                 restored = TaskQueue(database)
-                recovered, _ = new_consumer(restored, rig)
+                recovered, _ = new_consumer(restored, rig, scoped=scoped)
                 for _ in range(100):
                     await recovered.cycle()
                     if not restored.list_replay_waiters(recovered.binding):
@@ -470,4 +486,65 @@ def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_p
             finally:
                 await successor.close(timeout=5)
 
+    asyncio.run(scenario())
+
+
+def test_programmatic_server_frontdoor_uses_scoped_factory_and_existing_authority(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_RETIRE", "0")
+    monkeypatch.setenv("AGENT_DISPATCH_ABANDONED_PASSIVE_REAP", "0")
+    from gateway_service_transport_fixtures import eventually, running
+    from test_gateway_service_handler import connect_handler
+    from agent_dispatch import server
+    from agent_dispatch.config import Config
+
+    active = [False]
+    monkeypatch.setattr(server, "_owns_active_route", lambda: active[0])
+
+    async def scenario():
+        store, owner = service_owner(tmp_path, scoped=True)
+        database = tmp_path / "tasks.db"
+        queue = TaskQueue(database)
+        task_id = task(queue)
+        async with running(tmp_path) as rig:
+            await connect_handler(rig, owner.handle)
+            initial, _ = new_consumer(queue, rig, scoped=True)
+            original = await prepare_intent(queue, initial, task_id)
+            constructed = []
+
+            def factory(selected_queue, checkpoint):
+                selected = new_consumer(selected_queue, rig, checkpoint, scoped=True)[0]
+                constructed.append(selected)
+                return selected
+
+            app = server.build_app(Config(db_path=str(database)), replay_consumer_factory=factory)
+            try:
+                async with app.router.lifespan_context(app):
+                    maintenance = app.state.waiter_maintenance
+                    await eventually(lambda: maintenance.status["state"] == "unavailable")
+                    selected, = constructed
+                    assert maintenance.queue is selected.queue
+                    assert selected.binding == initial.binding
+                    assert not queue.list_run_waiter_wakes(task_id)
+                    assert json.loads(store.path.read_bytes())["replay"]["records"] == []
+                    with pytest.raises(ValueError, match="not active"):
+                        await selected.prepare(
+                            task_id, delegation=original, worker_id="worker",
+                            resume_worktree="host/wt", host="host", reason="waiting",
+                        )
+                    active[0] = True
+                    await maintenance.tick()
+                    await eventually(lambda: maintenance.status["cycles"] == 1)
+                    assert not maintenance.status["last_result"]["blocked"]
+                    assert not queue.list_replay_waiters(selected.binding)
+                    assert len(queue.list_run_waiter_wakes(task_id)) == 1
+                    active[0] = False
+                    with pytest.raises(ValueError, match="not active"):
+                        selected._check_binding()
+                assert maintenance.status["state"] == "closed"
+                assert app.state.drain_gate.claims == 0
+                assert all(unit.done() for unit in maintenance._tasks)
+                assert rig.backends[0].requests == []
+            finally:
+                await owner.drain(timeout=3)
     asyncio.run(scenario())

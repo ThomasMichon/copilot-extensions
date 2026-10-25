@@ -89,11 +89,24 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - name: Qualify actual installation, isolated service effects and caller loss
+      - name: Qualify Bridge admission and materialized stamp
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_bridge.py
-          --test-timeout 900 --timeout 1800
+          -k "not native_caller_loss"
+          --test-timeout 900 --timeout 900
+      - name: Qualify Bridge cold provision within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and provision"
+          --test-timeout 900 --timeout 1080
+      - name: Qualify Bridge cold install within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and install"
+          --test-timeout 900 --timeout 1080
       - name: Preserve native lifecycle and unattended repair boundaries
         run: >-
           python tools/run-plugin-tests.py agent-bridge
@@ -118,11 +131,24 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - name: Qualify actual installation, isolated service effects and caller loss
+      - name: Qualify Bridge admission and materialized stamp
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_bridge.py
-          --test-timeout 900 --timeout 1800
+          -k "not native_caller_loss"
+          --test-timeout 900 --timeout 900
+      - name: Qualify Bridge cold provision within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and provision"
+          --test-timeout 900 --timeout 1080
+      - name: Qualify Bridge cold install within its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "native_caller_loss and install"
+          --test-timeout 900 --timeout 1080
       - name: Preserve native lifecycle and unattended repair boundaries
         run: >-
           python tools/run-plugin-tests.py agent-bridge

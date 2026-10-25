@@ -685,7 +685,7 @@ disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
 
-Bridge's fixed `stamp`/`provision` prerequisite admits only its canonical
+Bridge's fixed `stamp`/`provision`/`install` recipes admit only its canonical
 installed payload and default legacy root, required direct command/module
 declaration and native runtime gates. Its canonical Python engine helpers
 provide the existing complete-input freezer. Both materialized native engine
@@ -699,11 +699,17 @@ reconciles the task (including its explicit never-ran S4U repair). POSIX
 provision preserves its install path and healthy immutable reuse. An unattended
 Windows repair that needs elevation refuses before UAC or task mutation;
 interactive explicit repair retains its existing elevation flow.
+The fixed `install` action preserves the owning installer's content-qualified
+construction/publication/start path, including its healthy no-rebuild/no-restart
+return and immutable same-version content-mismatch refusal. It is distinct from
+`provision` in request identity/coalescing, including on POSIX where both map
+to the same native action. Windows prepared provision remains task-only;
+bootstrap drift still requires separate publisher adoption of `install`.
 The manual `bridge-recipes` portfolio exercises actual materialized payloads,
 Python-free callers, caller Job/group loss, coalescing and installed safe CLI
 consumers. Registration/start effects use isolated adapters, whose synthetic
 health replies prove adapter control flow, not actual serving or deployment.
-Snapshots, cells, custom roots, compound actions and `install` refuse. Ordinary
+Snapshots, cells, custom roots and compound actions refuse. Ordinary
 Bridge command/bootstrap publishers and explicit installers remain unadopted;
 this prerequisite authorizes neither host service rollout nor remote sessions.
 
@@ -713,8 +719,9 @@ required context and native runtime gates without a top-level command/module
 or provision-mode declaration. The fixed adapter supplies no service flags:
 native `provision` constructs the package/runtime and deployment manifest,
 whereas Logger's additional fixed `install` action retains its native sync/prune
-task or timer reconciliation. That action is not admitted for other plugins
-and is distinct from `provision` in request identity/coalescing. No new service
+task or timer reconciliation. Only Logger and Bridge admit fixed `install`,
+each retaining its own native semantics; other plugins refuse it. The action
+is distinct from `provision` in request identity/coalescing. No new service
 option, queue or execution owner is introduced. Fatal native registration
 errors remain nonzero durable results; Windows' existing access-denied warning
 retains its successful process exit and unchanged task, not a claim of

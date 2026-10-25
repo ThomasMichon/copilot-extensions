@@ -80,8 +80,8 @@ def check_bind_safety(cfg: Config) -> None:
         )
 
 
-def build_app(cfg: Config | None = None):
-    """Construct the coordinator app, ensuring the queue DB directory exists."""
+def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
+    """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     # Install a telemetry sink if one is configured (generic open hook; a no-op
     # unless a consumer wired a sink). Prefer a convention-located config file
@@ -98,6 +98,7 @@ def build_app(cfg: Config | None = None):
         handoff_fallback_enabled=cfg.handoff_fallback_enabled,
         handoff_fallback_grace=cfg.handoff_fallback_grace,
         wake_is_active=_owns_active_route,
+        replay_consumer_factory=replay_consumer_factory,
     )
 
 

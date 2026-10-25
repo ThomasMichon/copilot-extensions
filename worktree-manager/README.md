@@ -1357,22 +1357,35 @@ owned checkout atomically. Failed initialization cleans only its private
 staging directory, leaving a later acquisition able to retry; an unowned
 incumbent is still refused rather than repaired automatically.
 
-**Source-backed suite execution is not connected yet.** With a non-marketplace
-policy, ordinary and bootstrap/repair `update` fail before Manager self-update,
-Manager bootstrap installation or engine repair rather than silently ignoring
-the selection. `reset` explicitly restores ordinary
-marketplace runtime delivery. Canonical source preparation, immutable runtime
-planning and the existing installation driver remain the next integration
-boundary; this command adds no alternate installer or recurring worker.
-The early preflight is read-only: invalid bootstrap arguments still retain
-their existing failure scope without opening aggregate update telemetry.
+Ordinary `update` qualifies the **exact executing engine** through its existing
+installation inventory before source acquisition or Manager self-update. A
+missing or unsupported prepared-source declaration refuses with an engine
+upgrade/repair diagnostic; it never tries an effectful new command and then
+replays marketplace delivery. For a capable engine, Manager acquires one exact
+service-source commit/tree and prepares every eligible runtime from it before
+either update stage. Existing `--skip-modules` semantics apply. Prepared
+generations persist below `<manager-root>/runtime-sources/prepared/`; the
+complete immutable packet crosses the existing engine process and durable
+request boundary. The capability read and execution use the same frozen engine
+argv, including call-scoped ownership rather than a stale inherited handle.
+The engine remains authoritative for complete portfolio admission, native
+installation, retries and outcomes; no alternate installer or recurring worker
+is introduced. Marketplace plugin-content refresh remains independent.
+
+Bootstrap/repair and targeted service-runtime updates still refuse a
+non-marketplace policy **before their installation/repair effects**. They are
+not source-aware recovery entry points yet. A targeted Manager self-update
+continues to follow its independent `[source]` policy. `reset` explicitly
+restores ordinary marketplace runtime delivery. Invalid bootstrap arguments
+retain their existing failure scope without opening aggregate update telemetry.
 
 Released Manager payloads also carry the trusted canonical
 [source-preparation toolkit](../tools/prepare_runtime_source.md) in
 `scripts/runtime-source-tools/`. It supports Manager's standalone project as
-well as runtime plugins without executing fetched tools. This packaged
-capability does not connect the acquisition diagnostic to installation or
-remove the update refusal above.
+well as runtime plugins without executing fetched tools. Ordinary source-backed
+updates invoke only this executing Manager's toolkit in an isolated Python
+process and verify its complete receipt and prepared bytes before forwarding.
+Fetched tools remain data; they cannot replace the trusted preparer.
 The existing update request's source identity includes this policy, so changing
 it after submission rejects the old request rather than running a different
 runtime selection under its name.

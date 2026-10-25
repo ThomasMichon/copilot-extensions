@@ -35,7 +35,19 @@ pytestmark = pytest.mark.skipif(
 REPOSITORY = Path(__file__).resolve().parents[3]
 
 
-@pytest.mark.parametrize("action", ["stamp", "provision"])
+def set_payload_version(payload, version):
+    project = payload / "pyproject.toml"
+    project.write_text(
+        re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{version}"', project.read_text()),
+        encoding="utf-8",
+    )
+    identity = payload / "plugin.json"
+    manifest = json.loads(identity.read_text())
+    manifest["version"] = version
+    identity.write_text(json.dumps(manifest), encoding="utf-8")
+
+
+@pytest.mark.parametrize("action", ["stamp", "provision", "install"])
 def test_bridge_fixed_action_retains_context_staging_and_native_result(
     owning_bridge, area, monkeypatch, action,
 ):
@@ -67,10 +79,10 @@ def test_bridge_fixed_action_retains_context_staging_and_native_result(
 
 
 @pytest.mark.parametrize("native", [False, True])
-@pytest.mark.parametrize("action", ["stamp", "provision"])
+@pytest.mark.parametrize("action", ["stamp", "provision", "install"])
 @pytest.mark.parametrize("reason", [
     "client-only", "no-self", "pinned", "managed", "malformed", "copy", "custom-root",
-    "snapshot", "dispatcher", "module", "provision-mode", "compound", "install",
+    "snapshot", "dispatcher", "module", "provision-mode", "compound",
     "nested", "cell", "missing-helper", "missing-native-ps1", "missing-native-sh",
 ])
 def test_bridge_refusal_precedes_acquisition_queue_and_plugin_writes(
@@ -116,8 +128,8 @@ def test_bridge_refusal_precedes_acquisition_queue_and_plugin_writes(
         else:
             manifest["provisionMode"] = "snapshot"
         path.write_text(json.dumps(manifest), encoding="utf-8")
-    if reason in {"compound", "install"}:
-        action = "stamp-provision" if reason == "compound" else "install"
+    if reason == "compound":
+        action = "stamp-provision"
     root = area / "cold"
     before = {path: path.read_bytes() for path in installation.rglob("*") if path.is_file()}
     source = {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()}
@@ -136,7 +148,7 @@ def test_bridge_refusal_precedes_acquisition_queue_and_plugin_writes(
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == source
 
 
-@pytest.mark.parametrize("action", ["stamp", "provision"])
+@pytest.mark.parametrize("action", ["stamp", "provision", "install"])
 def test_bridge_native_admits_exact_recipe_before_source_comparison(owning_bridge, area, action):
     payload, installation, project = owning_bridge
     root = area / "cold"
@@ -151,6 +163,23 @@ def test_bridge_native_admits_exact_recipe_before_source_comparison(owning_bridg
     assert result.returncode != 0
     assert "Owning source changed after native first-use admission" in result.stderr, result.stderr
     assert not root.exists() and not installation.exists()
+
+
+def test_bridge_install_action_is_distinct_and_native_support_is_declared(owning_bridge, area):
+    payload, installation, project = owning_bridge
+    root = area / "queue"
+    actions = ("stamp", "provision", "install")
+    requests = [
+        provision.enqueue(payload, installation, project, root=root, installer_action=action)
+        for action in actions
+    ]
+    assert len({request.id for request in requests}) == len(actions)
+    assert [json.loads(request.spec.source).get("installer_action", "provision")
+            for request in requests] == list(actions)
+    for suffix in ("ps1", "sh"):
+        native = REPOSITORY / f"libs/update-driver/scripts/first-use.{suffix}"
+        assert "# Installation driver lifecycle contract: bridge-install-v1" in native.read_text()
+    assert not installation.exists()
 
 
 @pytest.mark.parametrize("change", ["substituted", "unavailable"])
@@ -265,7 +294,12 @@ def bridge_service_adapter(env):
             'base="$(dirname -- "${BASH_SOURCE[0]}")"\n'
             'printf \'{"operation":"systemctl","arguments":"%s"}\\n\' "$*" >>"$base/effects.jsonl"\n'
             'case "$*" in\n'
-            '  "--user daemon-reload"|"--user enable agent-bridge.service") exit 0 ;;\n'
+            '  "--user daemon-reload"|"--user enable agent-bridge.service")\n'
+            '    if [[ -f "$base/mode" && "$(cat "$base/mode")" == registration-denied ]]; then\n'
+            '      printf \'{"operation":"registration-denied"}\\n\' >>"$base/effects.jsonl"\n'
+            '      exit 37\n'
+            '    fi\n'
+            '    exit 0 ;;\n'
             '  "--user start agent-bridge.service")\n'
             '    printf synthetic >"$base/started"; exit 0 ;;\n'
             '  "--user is-active agent-bridge.service") [[ -f "$base/started" ]]; exit $? ;;\n'
@@ -375,8 +409,9 @@ def native_recipe_runner(area):
 
 
 @native_genesis
-def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutable_reuse(
-    materialized_bridge, area, native_window_observation, native_recipe_runner,
+@pytest.mark.parametrize("cold_action", ["provision", "install"])
+def test_actual_bridge_native_caller_loss_concurrent_cold_actions_and_immutable_reuse(
+    materialized_bridge, area, native_window_observation, native_recipe_runner, cold_action,
 ):
     import agent_procutil
 
@@ -416,10 +451,14 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
                           **no_window_kwargs())
             if os.name == "nt":
                 caller, job = agent_procutil.spawn_sync_in_kill_on_close_job(
-                    command("stamp"), require_job=True, allow_breakaway=False, **kwargs,
+                    command("stamp" if cold_action == "provision" else "install"),
+                    require_job=True, allow_breakaway=False, **kwargs,
                 )
             else:
-                caller = subprocess.Popen(command("stamp"), start_new_session=True, **kwargs)
+                caller = subprocess.Popen(
+                    command("stamp" if cold_action == "provision" else "install"),
+                    start_new_session=True, **kwargs,
+                )
             observe(lambda: acknowledgement() is not None or caller.poll() is not None, 120, diagnostic)
             frame = acknowledgement()
             assert frame is not None, diagnostic()
@@ -433,7 +472,8 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
                 descriptor = open_pidfd(int(frame.split()[0].partition(":")[2]))
                 assert not _pidfd_exited(descriptor), diagnostic()
             follower, _follower_log = native_recipe_runner.start(
-                command("stamp"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+                command("stamp" if cold_action == "provision" else "install"),
+                env=env, cwd=project, root=root, diagnostic=diagnostic,
             )
             if job is not None:
                 job.close()
@@ -447,8 +487,11 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
             ), 900, diagnostic)
             assert all(item.state == "completed" and item.exit_code == 0 for item in status(root=root)), diagnostic()
             assert foundation_status(root=root).state == "completed"
-            assert not registration_effects(adapter)
-            assert not (installation / "current-version").exists()
+            if cold_action == "provision":
+                assert not registration_effects(adapter)
+                assert not (installation / "current-version").exists()
+            else:
+                assert_bridge_registration(installation, adapter)
             if owner is not None:
                 owner.wait(timeout=900)
             if descriptor is not None:
@@ -474,7 +517,7 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
                     os.close(descriptor)
 
     callers = [native_recipe_runner.start(
-        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        command(cold_action), env=env, cwd=project, root=root, diagnostic=diagnostic,
     )
                for _ in range(2)]
     for process, path in callers:
@@ -487,7 +530,7 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     effects = registration_effects(adapter)
     repeated = native_recipe_runner.run(
-        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        command(cold_action), env=env, cwd=project, root=root, diagnostic=diagnostic,
     )
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr + diagnostic()
     assert (installation / "current-version").read_text().strip() == selected
@@ -496,7 +539,7 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
     assert [item for item in registration_effects(adapter) if item["operation"] in writes] == [
         item for item in effects if item["operation"] in writes
     ]
-    if os.name == "nt":
+    if os.name == "nt" and cold_action == "provision":
         task_path = adapter / "task.json"
         stale = json.loads(task_path.read_text(encoding="utf-8-sig"))
         stale["Actions"][0]["Arguments"] = "fixture stale registration"
@@ -546,26 +589,87 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
             repair_path.write_bytes(canonical_repair)
             task_path.write_text(json.dumps(interactive), encoding="utf-8")
             (adapter / "mode").unlink(missing_ok=True)
+    if cold_action == "install":
+        old_selected, old_complete = selected, complete
+        old_stub = installation.parent / ".local/bin" / (
+            "agent-bridge.ps1" if os.name == "nt" else "agent-bridge"
+        )
+        original_stub = old_stub.read_bytes()
+        for version, failure in (("98.0.0", "registration-denied"), ("98.0.1", "effect-fatal")):
+            set_payload_version(payload, version)
+            unit = installation.parent / ".config/systemd/user/agent-bridge.service"
+            unit_content = None
+            if os.name == "nt":
+                task_path = adapter / "task.json"
+                task = json.loads(task_path.read_text(encoding="utf-8-sig"))
+                task["Actions"][0]["Arguments"] = "fixture stale registration"
+                task_path.write_text(json.dumps(task), encoding="utf-8")
+            elif failure == "effect-fatal":
+                # A real unit-publication failure stops before service fallback.
+                unit_content = unit.read_bytes()
+                unit.unlink()
+                unit.mkdir()
+            mode = "start-fatal" if failure == "effect-fatal" and os.name == "nt" else failure
+            (adapter / "mode").write_text(mode, encoding="utf-8")
+            effects_before = registration_effects(adapter)
+            try:
+                outcome = native_recipe_runner.run(
+                    command("install"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+                )
+                result = status(root=root)[-1]
+                assert result.state == "completed" and result.exit_code == outcome.returncode
+                assert (outcome.returncode == 0) is (failure == "registration-denied"), (
+                    outcome.stdout + outcome.stderr + diagnostic()
+                )
+                observed = registration_effects(adapter)[len(effects_before):]
+                if failure == "registration-denied":
+                    if os.name == "nt":
+                        assert json.loads(task_path.read_text(encoding="utf-8-sig")) == task
+                        assert "fixture registration denied" in result.log_path.read_text(encoding="utf-8")
+                    else:
+                        assert sum(item["operation"] == "registration-denied" for item in observed) == 2
+                    assert any(item["operation"] in {"start", "systemctl"} for item in observed)
+                elif os.name == "nt":
+                    assert "fixture start failure" in result.log_path.read_text(encoding="utf-8")
+                    assert observed[-1]["operation"] == "start"
+                else:
+                    assert not any(item["operation"] == "systemctl" for item in observed)
+                # Native activation precedes these later effects; do not invent rollback.
+                assert (installation / "current-version").read_text().strip() == version
+                assert (installation / "versions" / old_selected / ".install-complete.json").read_bytes() == old_complete
+                assert old_stub.read_bytes() == original_stub
+                assert not (installation / "active.json").exists()
+                assert not (installation / "agent-bridge.pid").exists()
+            finally:
+                (adapter / "mode").unlink(missing_ok=True)
+                if unit_content is not None:
+                    unit.rmdir()
+                    unit.write_bytes(unit_content)
+        selected = (installation / "current-version").read_text().strip()
+        slot = installation / "versions" / selected
+        completion = slot / ".install-complete.json"
+        complete = completion.read_bytes()
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     assert manifest["source"]["kind"] == "marketplace"
     (payload / "src/agent_bridge/__init__.py").write_text(
         'raise RuntimeError("fixture failed Bridge candidate")\n', encoding="utf-8",
     )
     changed = native_recipe_runner.run(
-        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        command(cold_action), env=env, cwd=project, root=root, diagnostic=diagnostic,
     )
-    # Windows' prepared target only reconciles its task; POSIX's install path
+    # Only Windows prepared provision is task-only; install on either platform
     # refuses different content for the already-completed immutable version.
-    assert (changed.returncode == 0) is (os.name == "nt"), changed.stdout + changed.stderr + diagnostic()
+    assert (changed.returncode == 0) is (os.name == "nt" and cold_action == "provision"), (
+        changed.stdout + changed.stderr + diagnostic()
+    )
     assert status(root=root)[-1].state == "completed"
     assert (installation / "current-version").read_text().strip() == selected
     assert completion.read_bytes() == complete
-    project_file = payload / "pyproject.toml"
-    project_file.write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', 'version = "99.0.0"',
-                                   project_file.read_text()), encoding="utf-8")
+    set_payload_version(payload, "99.0.0")
     # A new version has no prepared target slot on either native installer.
     failed = native_recipe_runner.run(
-        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        command(cold_action), env=env, cwd=project, root=root, diagnostic=diagnostic,
     )
     assert failed.returncode != 0, failed.stdout + failed.stderr + diagnostic()
     failed_request = status(root=root)[-1]

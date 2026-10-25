@@ -204,6 +204,7 @@ def _run(
     cwd: str | None = None,
     stream_progress: bool = False,
     environment: dict[str, str] | None = None,
+    engine_command: list[str] | None = None,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -211,7 +212,10 @@ def _run(
     the process fails, or times out. A non-zero exit whose stdout is a JSON
     error envelope surfaces the engine's own ``error`` message. ``cwd``, when
     given, runs the engine from that directory (cwd-scoped verbs)."""
-    base = picker_review.engine_command(args, engine_base_command)
+    resolve = engine_base_command if environment is None else lambda: installed_engine_command(environment)
+    base = picker_review.engine_command(
+        args, lambda: list(engine_command) if engine_command is not None else resolve(),
+    )
     if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
@@ -225,7 +229,7 @@ def _run(
         else:
             kwargs = {
                 "capture_output": True, "text": True, "timeout": timeout,
-                "check": False, "env": {**_engine_environment(), **(environment or {})},
+                "check": False, "env": _engine_environment(environment),
                 "stdin": subprocess.DEVNULL,
                 **({"cwd": cwd} if cwd else {}),
             }
@@ -281,7 +285,8 @@ def run_json(project: str | None, args: list[str], *,
              allow_nonzero: bool = False,
              runner=None,
              stream_progress: bool = False,
-             environment: dict[str, str] | None = None) -> dict:
+             environment: dict[str, str] | None = None,
+             engine_command: list[str] | None = None) -> dict:
     """Run a ``--json`` verb and parse its stdout envelope into a dict."""
     raw = _run(
         project,
@@ -291,6 +296,7 @@ def run_json(project: str | None, args: list[str], *,
         runner=runner,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
+        **({"engine_command": engine_command} if engine_command is not None else {}),
     )
     try:
         obj = json.loads(raw)
@@ -306,7 +312,8 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
                            timeout: int | None = None,
                            environment: dict[str, str] | None = None,
                            terminal_aware: bool = False,
-                           headless: bool = False) -> int:
+                           headless: bool = False,
+                           engine_command: list[str] | None = None) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -319,7 +326,9 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     environment; it bypasses stale inherited command handles.
     """
     picker_review.require_writable()
-    base = engine_base_command() if environment is None else installed_engine_command(environment)
+    base = engine_command if engine_command is not None else (
+        engine_base_command() if environment is None else installed_engine_command(environment)
+    )
     if base is None:
         raise EngineError(
             f"the {ENGINE_BIN} engine is not installed", install_hint=True)
