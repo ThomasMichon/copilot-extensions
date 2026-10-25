@@ -128,8 +128,8 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP 'pane-argv-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.5/psmux-v3.3.5-windows-x64.zip' -OutFile $archive
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '7e3059f082df01eaa233bc50dbf62650d993150029b1d12327d3fcae2f6db808') {
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.6/psmux-v3.3.6-windows-x64.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947') {
             throw 'Pinned PSMux archive digest mismatch'
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $root

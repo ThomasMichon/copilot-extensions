@@ -353,3 +353,34 @@ Keeping a version directory alive is not an acceptable substitute.
   open.
 - Restored the temporary test edits exactly to the published candidate.
   No production deadline, process-containment policy or acceptance gate changed.
+
+### 2026-10-24 - Scoped native budgets and uninstall-contract preflight
+
+- Phase timing did not justify calling every failure a timeout: PSMux 3.3.5
+  also returned an immediate error followed by an absent server. An isolated,
+  digest-verified 3.3.6 comparison completed both cycles without changing the
+  host installation.
+- Observed native readiness reached 23.344 seconds. A later run separately
+  measured file creation at 13.810 seconds and its pane query at 0.172 seconds,
+  confirming that the former eight-second fixture limit was too short.
+  Pane teardown remained below 1.2 seconds and descendant cleanup below
+  0.05 seconds.
+- Replaced temporary unbounded instrumentation with scoped, finite integration
+  limits: 180 seconds per opt-in two-cycle case and 45 seconds for its
+  PowerShell preparation/readiness. Ordinary unit defaults and existing
+  client, query, teardown and containment limits remain unchanged.
+  The normal runner passed all eight selected controls in 86.70 seconds;
+  both workflow contract tests also passed.
+- The manual Windows lane now pins test-tool PSMux 3.3.6. This is neither an
+  operator-host upgrade nor a new production compatibility-floor policy.
+- A fresh Linux preflight at published source
+  `0e5d68c82bb8a7f810f5b60342c0e86a7a8995a5` borrowed credentials through
+  the normal provider, installed both real products and the missing tmux
+  prerequisite, and registered a synthetic local project through the actual
+  CLI. It did not establish interactive Copilot entitlement or launch a session.
+- The baseline stopped because no supported Manager uninstall entrypoint was
+  established from its installed help and pinned product entrypoints. No
+  manual file deletion was substituted for uninstall. The exact owned
+  container was removed and the shared Docker service left running.
+  Resolve that product contract before claiming a real two-product survival
+  baseline; the copied-wrapper/current-handler implementation is still open.

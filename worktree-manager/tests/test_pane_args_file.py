@@ -57,7 +57,9 @@ def test_native_pane_fixture_drops_parent_mux_session(tmp_path, monkeypatch, key
     assert os.environ[key] == "unrelated-parent-pane"
 
 
-def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list[str]:
+def _powershell_producer(
+    tmp_path: Path, wrapper: Path, argv: list[str], *, timeout: float = 15,
+) -> list[str]:
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
     start = source.index("                    $paneArgsRoot = Join-Path")
     end = source.index("\n                }\n                $savedAuth", start)
@@ -78,7 +80,7 @@ def _powershell_producer(tmp_path: Path, wrapper: Path, argv: list[str]) -> list
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(script), str(wrapper), str(payload),
          str(tmp_path / "runtime")],
-        capture_output=True, text=True, encoding="utf-8", timeout=15, env=_test_env(tmp_path),
+        capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=_test_env(tmp_path),
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
@@ -620,6 +622,7 @@ def test_real_psmux_direct_child_control(tmp_path):
     os.name != "nt" or os.environ.get("PSMUX_FILE_LAUNCH_E2E") != "1",
     reason="opt-in real Windows PSMux consumer check",
 )
+@pytest.mark.timeout(180)
 @pytest.mark.parametrize("producer", ["powershell", "python"])
 def test_real_psmux_file_launch_two_cycles(tmp_path, producer, monkeypatch):
     root = WRAPPER.parents[2]
@@ -709,7 +712,7 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
         output = tmp_path / f"capture-{cycle}.json"
         child_argv = [PWSH, "-NoProfile", "-File", str(child), str(output), *expected]
         if producer == "powershell":
-            command = _powershell_producer(tmp_path, wrapper, child_argv)
+            command = _powershell_producer(tmp_path, wrapper, child_argv, timeout=45)
         else:
             from agent_worktrees import sessions
 
@@ -762,8 +765,12 @@ def _exercise_psmux_cycles(tmp_path, producer, psmux, folder, wrapper, child, ex
             assert pane_birth is not None, "could not identify the owned pane process"
             pane_owner = pane_pid, pane_birth
             roots.add(pane_pid)
-            deadline = time.monotonic() + 8
-            while not output.exists() and time.monotonic() < deadline:
+            deadline = time.monotonic() + 45
+            while (
+                not output.exists()
+                and locks.process_start_time(pane_pid) == pane_birth
+                and time.monotonic() < deadline
+            ):
                 time.sleep(0.05)
             if not output.exists():
                 snapshot = observer["_process_snapshot"]()

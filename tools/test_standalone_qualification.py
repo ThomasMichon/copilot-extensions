@@ -28,7 +28,7 @@ def test_bridge_contracts_portfolio_keeps_existing_budgets_and_explicit_scope():
     assert "capture_reproducible_real_commit_preserves_history" in commands[1]
 
 
-def test_pane_argv_portfolio_is_manual_pinned_and_keeps_native_deadlines():
+def test_pane_argv_portfolio_is_manual_pinned_and_keeps_work_scoped():
     workflow = source_workflow(SCRIPT.parent.parent, "installation-context-full.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]
     inputs = triggers["workflow_dispatch"]["inputs"]
@@ -41,9 +41,9 @@ def test_pane_argv_portfolio_is_manual_pinned_and_keeps_native_deadlines():
     assert job["runs-on"] == "windows-latest"
     assert job["timeout-minutes"] == 10 and not job.get("strategy")
     prepare, qualify = [step for step in job["steps"] if "run" in step]
-    assert "/v3.3.5/psmux-v3.3.5-windows-x64.zip" in prepare["run"]
+    assert "/v3.3.6/psmux-v3.3.6-windows-x64.zip" in prepare["run"]
     assert "Get-FileHash" in prepare["run"] and "SHA256" in prepare["run"]
-    assert "7e3059f082df01eaa233bc50dbf62650d993150029b1d12327d3fcae2f6db808" in prepare["run"]
+    assert "a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947" in prepare["run"]
     assert qualify["env"]["PSMUX_FILE_LAUNCH_E2E"] == "1"
     assert qualify["env"]["EXPECTED_SOURCE"] == "${{ github.sha }}"
     assert "actual == os.environ['EXPECTED_SOURCE']" in qualify["run"]
