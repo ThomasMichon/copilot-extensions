@@ -1,11 +1,11 @@
 # Mux Companion — Vision
 
-- **Subject:** the in-session control surface for a muxed worktree — a
-  hotkey-summoned companion dialog, and the Mux-bind layer that delivers it and
-  any future custom Mux-side command.
+- **Subject:** the purpose-first Textual control surface for a muxed worktree:
+  a hotkey-summoned dialog, an alternate summary pane, and the Mux-bind layer
+  that delivers them.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-05
+- **Last revised:** 2026-10-24
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -16,13 +16,18 @@ came before the session currently attached, and it offers no way to act on any
 of that without leaving the pane for the full Worktree Picker. The operator is
 left context-switching out of the exact terminal they are trying to stay in.
 
-The Mux Companion closes that loop **from inside the session**: one hotkey
-summons a small, disposable dialog that explains the current status in plain
-language, shows the worktree's session lineage, offers to resume a prior
-session, and — deliberately, as a distinct and blunter action — can force a
-different session to become this worktree's head immediately, reclaiming the
-pane. It is a narrow, single-worktree, single-purpose companion, not a
-replacement for the Picker.
+The Mux Companion closes that loop **from inside the session**. Its primary
+job is to make a worktree's purpose, current work and resource commitments
+legible at a glance. One hotkey summons a compact Textual dialog; a switchable
+summary pane offers a calmer alternative to the CLI's scrolling output.
+Both consume the same authoritative sources as graphical companion clients,
+not a second interpretation of sessions, claims or progress.
+
+Summary and Claims take priority over session selection for handoff. Session
+lineage, prior-session recovery and the deliberate break-glass head override
+remain available as secondary capabilities, not removed or made automatic.
+The Companion stays rooted in one worktree and its related work, rather than
+becoming a replacement for the fleet-wide Picker.
 
 Delivering it durably requires separating two things the status-updater loop
 currently does in one place: **computing** a worktree's status (which stays the
@@ -53,12 +58,18 @@ the Worktree Manager, not to `agent-worktrees` directly.
   `apply-mux-keybinds.sh`/`.ps1` precedent (and `psmux-passthrough.conf`'s own
   "psmux-only" note) already draws this boundary; Mux-bind's tmux delivery
   must honor it (e.g. a session-name-conditioned bind), not bypass it.
-- **The Companion** — a small, separate program (a Worktree Manager
-  subcommand), launched on demand inside a Mux popup pane by a Mux-bind
-  hotkey. It reads the status core's data for the current worktree, renders
-  the explainer/lineage view, and carries out the one action a companion
-  offers: forcing a specific session to become head. It holds no persistent
-  state and exists only for the lifetime of the popup.
+- **The Companion** — a Textual Worktree Manager surface with a disposable
+  popup and an alternate summary-pane presentation. It shows purpose,
+  Summary, Claims and work topology from their owning sources. Presentation
+  state is not a rival worktree, claims, disposition or accounting ledger.
+- **Work topology** — a compact graph of the current worktree's agents,
+  bridges, downstream worktrees and pull requests, annotated with reported
+  phases and high-level states. It distinguishes a dependency or allocation
+  from evidence of progress or completion.
+- **Mux views and attention** — the CLI and summary are views of the same
+  worktree, not separate agent sessions. Clickable view tabs and keyboard
+  switching preserve the CLI; question and idle indicators keep requests for
+  operator attention visible even while the CLI is hidden.
 - **Session lineage** — the worktree's durable head/succession chain
   (`agent-worktrees`' authoritative head-and-lineage). The Companion presents
   it read-only, plus — for situational awareness only — the headline of any
@@ -72,6 +83,35 @@ the Worktree Manager, not to `agent-worktrees` directly.
   handoff.
 
 ## Features
+
+### purpose-and-claims-at-a-glance
+The default dialog and summary view lead with the worktree's purpose,
+reported Summary and Claims. Held resources are identifiable, not merely a
+count, and an absent or unavailable source is distinct from an empty ledger.
+
+### worktree-summary-topology
+A succinct graph-style view shows reported work phases, allocated sub-agents
+and bridges, downstream worktrees and open pull requests, with accumulated
+tool-call statistics. Users can understand overall work without reading a
+raw conversation feed. Graphical and terminal companions share source
+meaning, identity and freshness rather than growing competing backends.
+
+### switchable-cli-and-summary-views
+The operator can flip between the running Copilot CLI and an overall summary
+pane in the same mux worktree, through keyboard controls and clickable view
+tabs. Switching does not restart, replace, type into or take custody of the
+CLI session. Returning to the CLI restores its existing interaction.
+
+### permanent-claims-status-line
+The mux status bar reserves a second permanent line for explicit Claims
+information. View tabs and question/idle attention indicators remain
+discoverable alongside that information, including while Summary is shown.
+
+### cli-attention-while-summarizing
+When the CLI asks a question or goes idle, the summary view or mux toolbar
+shows that fact and offers an explicit return to CLI. Only the CLI's owning
+interaction surface accepts answers; an indicator is not permission to
+auto-answer or infer completion from idleness.
 
 ### hotkey-summoned-status-explainer
 From inside any muxed worktree session, one hotkey summons a compact view
@@ -198,6 +238,15 @@ The Companion runs as an on-demand process in its own Mux popup, holding no
 persistent state of its own; it costs nothing when it is not summoned and
 leaves nothing behind when it closes.
 
+### summary-is-an-observer
+Summary rendering does not change claims, start or retire agents, advance
+disposition, infer phases from prose, or replace accounting totals with
+locally guessed counts. Optional unavailable sources remain visibly
+unavailable without hiding independently usable Summary or Claims.
+Refreshing a visible view is bounded and does not create a second fleet
+poller when an owning producer already supplies the data. An alternate pane
+has an explicit mux-owned lifetime, separate from the disposable popup.
+
 ### one-seam-many-commands
 A new Mux-bound custom command is a Mux-bind registration, not a bespoke
 wiring job repeated per command. The Companion is the seam's first consumer,
@@ -212,15 +261,11 @@ not its only possible one.
   on an explicit human button press (manual-cutover-trigger). It is not a
   second way to author or arm a handoff; it is a second way to TRIGGER one
   someone (or something) else already prepared.
-- **Not a general status-bar click framework.** The Companion is
-  hotkey-summoned, and now ALSO click-summoned from one specific, named
-  status-right region (mux-bind-clickable-status-region) — but Mux-bind's
-  command seam extending to a GENERAL, arbitrary status-bar click framework
-  (every segment independently clickable, a menu of click targets, etc.)
-  remains out of scope and unrequired by this vision.
-- **Not a replacement for the Worktree Picker.** The Companion is a narrow,
-  single-worktree, single-purpose view — explain, show lineage, recover, or
-  break-glass override — not a multi-worktree management surface.
+- **Not an arbitrary status-bar click framework.** Named Companion launch
+  and view-tab regions are in scope; arbitrary third-party click targets or
+  unrelated worktree bindings are not.
+- **Not a replacement for the Worktree Picker.** The Companion explains one
+  worktree and its related topology, not a second fleet-management surface.
 - **Not a new session-hosting execution path.** The Companion acts on the same
   local session/process primitives the Picker's existing Stop/Reclaim actions
   already use; it introduces no new venue, provider, or execution mechanism.
@@ -233,6 +278,10 @@ not its only possible one.
 
 ## Provenance
 
+- **2026-10-24** — Expanded from recovery-first popup to purpose-first
+  Summary and Claims, a compact work-topology view, switchable CLI/summary
+  panes, explicit attention, two-line status and view tabs. Session-selection
+  and handoff recovery remain secondary rather than being removed.
 - **2026-10-05** — Added *mux-bind-keybind-relay* and
   *mux-bind-clickable-status-region* Features (effort `mux-bind-relay`): the
   actual Ctrl+K root-key-table binding and the status-right clickable region,

@@ -88,6 +88,14 @@ view highlighting whether resolved head matches the just-resumed session).
 
 ## Request
 
+**2026-10-24 continuation:** prioritize purpose-first Summary and Claims over
+handoff session selection; add a switchable work-topology summary pane,
+attention indicators, a permanent claims status line and clickable view tabs.
+The public-safe request capture, sequencing and acceptance details are in
+[purpose-first.md](purpose-first.md). This expands the same Companion effort;
+it does not retire the retained manual-cutover, expected-head or app-input
+acceptance below.
+
 > My intent with the Handoff helper in the Companion is that when the agent in
 > a worktree says it's made the handoff or called trigger_handoff, I should be
 > able to open Ctrl-K, see an entry for "Pending handoff" as a button, and then
@@ -376,7 +384,34 @@ https://github.com/ThomasMichon/copilot-extensions/pull/4371 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/5409 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
+### Step 6 - Purpose-first Summary and Claims continuation (#8811)
+
+- [ ] Land reviewed [purpose-first intent and sequence](purpose-first.md)
+      and the revised `visions/mux-companion` before implementation.
+- [ ] Reuse existing authoritative purpose, summary and claims sources in
+      the default Textual dialog; retain recovery as a secondary view.
+- [ ] Implement a compact topology presentation for phases, sub-agents,
+      bridges, downstream worktrees, open PRs and accumulated tool-call stats,
+      using the same sources as other companion clients.
+- [ ] Implement explicit CLI/summary pane switching with attention indicators
+      that preserve the live CLI and its answer boundary.
+- [ ] Deliver a permanent second claims status line and clickable view tabs
+      through the Mux-bind owner, with tmux/psmux qualification.
+
 ## Validation Plan
+
+- [ ] Purpose-first: confirm the captured continuation preserves the request
+      and distinguishes requested intent from agent-recommended sequencing.
+- [ ] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
+      long values, missing/stale/error sources and secondary recovery actions.
+- [ ] Purpose-first: contract tests for graph identities, reported phases,
+      agent/bridge/worktree/PR relationships and authoritative tool totals.
+- [ ] Purpose-first: prove actual CLI/summary switches preserve the original
+      session/process/pane and surface question/idle attention without answers.
+- [ ] Purpose-first: qualify two-line status and real click/key dispatch on
+      tmux and psmux, including narrow terminals and unrelated sessions.
+- [ ] Purpose-first: record source, clean-room, installed/native and rollout
+      evidence separately; no passed source test substitutes for a live lane.
 
 - [ ] Complete EVERY directly retained #4369 P1-P8, V1-V8 and C1-C4 clause above at the
   original finite source/manual/native bounds, preserving the entire incumbent Plan, own
@@ -431,6 +466,16 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-24 - Purpose-first continuation proposed
+
+- Resumed the existing Companion effort and preserved the separate Mux-bind
+  relay's ownership. Coordination token: #8811.
+- Proposed expanded standing intent and the linked purpose-first sequence.
+  Summary and Claims now lead; handoff/session recovery is lower priority,
+  not removed. Implementation waits for the normal reviewed intent gate.
+- No live bindings, mux servers, runtime installations, claims or sessions
+  were changed by this proposal.
 
 - [2026-10-24 - Direct retained acceptance from #4369](<journal/2026/10.24 backlog-intake-90.md>)
 
