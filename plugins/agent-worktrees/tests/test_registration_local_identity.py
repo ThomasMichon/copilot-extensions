@@ -460,3 +460,115 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
         )
         assert config.machine == "local-space"
         assert "prepare" in fixture.effects
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("command", ["register", "install"])
+@pytest.mark.parametrize("tier", ["global", "project", "dropin"])
+@pytest.mark.parametrize("foreign", [False, True])
+@pytest.mark.parametrize("force", [False, True])
+def test_registration_uses_target_bound_knowledge_map(
+    registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, command: str, tier: str, foreign: bool, force: bool,
+) -> None:
+    from agent_worktrees import state_root
+
+    fixture = registration
+    fixture.args.force = force
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "unrelated")
+    monkeypatch.setattr(cfg, "project_name", lambda: "unrelated")
+    # install already has an explicit active project; register does not.
+    if command == "install":
+        monkeypatch.setattr(cfg, "project_name", lambda: "registered")
+    monkeypatch.setattr(
+        cfg, "project_dir", lambda name=None: fixture.state / (name or cfg.project_name()),
+    )
+    inrepo = fixture.repo / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    inrepo.parent.mkdir(parents=True)
+    inrepo.write_text("stateless: true\n")
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    other = "windows" if platform == "wsl" else "wsl"
+    (knowledge / "machines.yaml").write_text(yaml.safe_dump({"machines": {"opaque-space": {
+        "hostname": "raw-host", "physical_host": "friendly-host",
+        "execution_platform": other if foreign else platform,
+    }}}))
+    monkeypatch.setattr(state_root, "_checkout_path", lambda name: str(knowledge))
+    project_path = cfg.project_dir("registered") / "config.yaml"
+    project_path.parent.mkdir(parents=True)
+    target = {"repos": {"registered": {"anchor": str(fixture.repo)}}}
+    if tier == "project":
+        target.update(machine="opaque-space", knowledge_repo="knowledge")
+    elif tier == "global":
+        cfg.global_config_path().write_text(
+            "machine: opaque-space\nknowledge_repo: knowledge\n",
+        )
+    else:
+        dropin = project_path.parent / "config.d" / "local.yaml"
+        dropin.parent.mkdir()
+        dropin.write_text("machine: opaque-space\nknowledge_repo: knowledge\n")
+    project_path.write_text(yaml.safe_dump(target))
+    before = {str(p.relative_to(tmp_path)): p.read_bytes()
+              for p in tmp_path.rglob("*") if p.is_file()}
+    dropped = force and tier == "project"
+    refused = foreign and not dropped
+    assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == (1 if refused else 0)
+    if refused:
+        assert fixture.effects == []
+        assert {str(p.relative_to(tmp_path)): p.read_bytes()
+                for p in tmp_path.rglob("*") if p.is_file()} == before
+    else:
+        config = cfg.load_config(
+            project_path, project="registered",
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
+        expected = ("raw-host-wsl" if platform == "wsl" else "raw-host") if dropped else "opaque-space"
+        assert config.machine == expected
+        assert config.configured_machine == (None if dropped else "opaque-space")
+        assert ("instructions" in fixture.effects) is not dropped
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("command", ["register", "install"])
+@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "ambiguous", "malformed"])
+def test_bound_knowledge_map_is_optional_but_invalid_declarations_refuse(
+    registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, command: str, map_kind: str,
+) -> None:
+    from agent_worktrees import state_root
+
+    fixture = registration
+    monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
+    inrepo = fixture.repo / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    inrepo.parent.mkdir(parents=True)
+    inrepo.write_text("stateless: true\n")
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    if map_kind in ("empty", "unrelated"):
+        _map(knowledge, map_kind, platform)
+    elif map_kind == "ambiguous":
+        (knowledge / "machines.yaml").write_text(yaml.safe_dump({"machines": {key: {
+            "hostname": "raw-host", "physical_host": "friendly-host",
+            "execution_platform": platform,
+        } for key in ("first", "second")}}))
+    elif map_kind == "malformed":
+        (knowledge / "machines.yaml").write_text("machines: [\n")
+    monkeypatch.setattr(state_root, "_checkout_path", lambda name: str(knowledge))
+    fixture.state.mkdir()
+    cfg.global_config_path().write_text("knowledge_repo: knowledge\n")
+    before = {str(p.relative_to(tmp_path)): p.read_bytes()
+              for p in tmp_path.rglob("*") if p.is_file()}
+    refused = map_kind in ("ambiguous", "malformed")
+    assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == (1 if refused else 0)
+    if refused:
+        assert fixture.effects == []
+        assert {str(p.relative_to(tmp_path)): p.read_bytes()
+                for p in tmp_path.rglob("*") if p.is_file()} == before
+    else:
+        config = cfg.load_config(
+            cfg.project_dir("registered") / "config.yaml", project="registered",
+            include_control_plane_related_pr=False, include_knowledge_preferences=False,
+        )
+        assert config.configured_machine is None
+        assert config.machine == ("raw-host-wsl" if platform == "wsl" else "raw-host")

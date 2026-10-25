@@ -66,6 +66,10 @@ Neither path changes existing user-owned global configuration. In a scoped
 installation, retained project configuration is read only through the existing
 repository identity and receipt, including a different label for the same remote;
 fresh adoption needs no premature registry or receipt publication.
+Machine-map fallback uses the prospective target configuration and its retained
+knowledge binding, not the ambient project's map. Force drops only settings
+that the project scaffold will actually replace; retained global and drop-in
+knowledge bindings still participate.
 Conflicting platform/profile bindings,
 ambiguous associations, execution-name collisions and invalid declarations
 produce a nonzero diagnostic before state preparation or launcher publication.
