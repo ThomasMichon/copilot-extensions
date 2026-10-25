@@ -165,7 +165,8 @@ def runtime_policy_physical_machine(
         local_names.add(config.machine.casefold())
     if machine.casefold() in local_names:
         return context.machine
-    return resolve_machine_selection(entries, machine, cfg.detect_platform()).target.machine
+    target = resolve_machine_selection(entries, machine, cfg.detect_platform())
+    return target.target.machine if target.entry is not None else machine
 
 
 def repository_config(repo_dir: Path) -> cfg.Config | None:

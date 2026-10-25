@@ -167,6 +167,28 @@ def test_runtime_policy_keeps_nonlocal_target_and_platform_refusals(tmp_path, mo
         )
 
 
+@pytest.mark.parametrize("registry", ["empty", "unrelated"])
+@pytest.mark.parametrize("target", ["peer-wsl", "PEER-wsl"])
+def test_unknown_nonlocal_runtime_target_retains_exact_name(tmp_path, monkeypatch, registry, target):
+    anchor = _configure(tmp_path, monkeypatch, "wsl", configured=False)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "local-host")
+    machines = {} if registry == "empty" else {
+        "other-space": {"execution_platform": "linux", "physical_host": "other-host"},
+    }
+    (anchor / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": machines}), encoding="utf-8",
+    )
+    config = cfg.load_config()
+    assert not reconcile.runtime_allowed(
+        "machine-gated", "agent-example", target,
+        {"agent-example": {"peer", "PEER"}}, repo_dir=anchor, config=config,
+    )
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", target,
+        {"agent-example": {target}}, repo_dir=anchor, config=config,
+    )
+
+
 @pytest.mark.parametrize("override_source", ["project", "dropin"])
 def test_update_gate_honors_project_machine_precedence(tmp_path, monkeypatch, override_source):
     anchor = _configure(tmp_path, monkeypatch, "windows")

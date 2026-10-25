@@ -76,9 +76,7 @@ def _check_machine_gate(source: Path) -> None:
         for extension in ("sh", "ps1"):
             (scripts / f"install.{extension}").write_text("exit 0\n", encoding="utf-8")
         anchor, context = root / "anchor", root / "enabling-repo"
-        identity.resolve_execution_context = lambda *args, **kwargs: SimpleNamespace(
-            target=SimpleNamespace(machine="physical-host"),
-        )
+        identity.runtime_policy_physical_machine = lambda *args, **kwargs: "physical-host"
         identity.repository_config = lambda repo_dir: None
         policy = _function(source / "update_gate.py", "runtime_allowed", {
             "__name__": reconcile.__name__, "__package__": package_name, "cfg": config,
