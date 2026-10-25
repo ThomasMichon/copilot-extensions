@@ -77,6 +77,22 @@ def test_history_failure_is_unknown_not_idle_or_success(inventory, monkeypatch):
     assert "unreadable journal" in rows[0]["card"]["body"]
 
 
+@pytest.mark.parametrize("origin", ["packaged", "checkout"])
+@pytest.mark.parametrize("error", [OSError("read denied"), ValueError("malformed catalog")])
+def test_independent_catalog_read_failure_keeps_manager_and_owner_rows(
+    inventory, monkeypatch, origin, error,
+):
+    def fail(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(catalog if origin == "packaged" else discovery,
+                        "load_catalog" if origin == "packaged" else "discover", fail)
+    result = ui.inventory()
+    rows = {row["id"]: row for row in result["entries"]}
+    assert rows["worktree-manager"]["updatable"] and rows["guide"]["payload"] == "2"
+    assert "catalog unavailable" in result["summary"]["banner_text"].lower()
+
+
 def test_submit_revalidates_and_forwards_only_selected_target(inventory, monkeypatch):
     calls = []
     monkeypatch.setattr(update_driver_cli, "cmd_update_request", lambda args: calls.append(args) or 0)
@@ -138,6 +154,7 @@ def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatc
 
 @pytest.mark.parametrize("flags", [
     ["--force"], ["--force-runtime", "guide"], ["--skip-modules"], ["--repair-engine", "source"],
+    ["--engine-acquisition-timeout", "120"],
 ])
 def test_target_rejects_widening_or_repair_flags(flags):
     with pytest.raises(SystemExit):

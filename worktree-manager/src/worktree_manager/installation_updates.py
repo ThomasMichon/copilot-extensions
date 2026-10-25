@@ -131,7 +131,7 @@ def _operations(*, engine_source=None):
 
 def inventory():
     from .catalog import load_catalog
-    from .discovery import discover
+    from .discovery import DiscoverySource, discover
     from .self_install import current_version, default_root, manager_ref, manager_repo
 
     root = default_root()
@@ -143,11 +143,19 @@ def inventory():
         "source": f"{manager_repo(root)} @ {manager_ref(root)}", "updatable": True,
         "limitation": "",
     }]
-    authored = {item.name: item for item in load_catalog().plugins}
-    known = {name: item.summary for name, item in authored.items()}
-    discovery = discover(allow_remote=False)
-    known.update({item.name: item.description for item in discovery.plugins})
     findings = []
+    authored = {}
+    try:
+        authored = {item.name: item for item in load_catalog().plugins}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        findings.append(f"Manager catalog unavailable: {error}; repair the Manager payload")
+    known = {name: item.summary for name, item in authored.items()}
+    discovery = DiscoverySource("none", "", ())
+    try:
+        discovery = discover(allow_remote=False)
+        known.update({item.name: item.description for item in discovery.plugins})
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        findings.append(f"Local catalog unavailable: {error}; refresh or repair its metadata")
     engine_error = None
     engine_source = None
     try:

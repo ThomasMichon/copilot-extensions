@@ -46,6 +46,8 @@ The public update seam is `worktree-manager update --target <plugin>` or
 acceptance receipt and use `update --request-status <id> --json` for owner state.
 Normal untargeted `update` retains its complete suite behavior. Component scope
 cannot be combined with force/reinstallation, repair or module-selection flags.
+The suite-only engine bootstrap acquisition budget is likewise inapplicable:
+component targeting never bootstraps or repairs a missing engine.
 Plugin scope does not bootstrap/repair the engine, update Manager, sync anchors,
 prune unrelated contributions or run the suite's finishing integration.
 

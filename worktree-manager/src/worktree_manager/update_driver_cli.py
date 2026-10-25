@@ -89,6 +89,8 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     options.target = parsed.target
     if parsed.target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parsed.target):
         parser.error("--target requires a nonempty component identifier")
+    if parsed.target is not None and options.engine_acquisition_timeout is not None:
+        parser.error("--target does not bootstrap an engine; --engine-acquisition-timeout is not applicable")
     if parsed.target is not None and any((
         parsed.force, parsed.force_runtime, parsed.skip_modules is not None,
         parsed.recreate_venv, parsed.repair_engine, parsed.auth_report,
