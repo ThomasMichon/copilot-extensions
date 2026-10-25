@@ -4,12 +4,20 @@
   "requests": {
     "body": "synthetic original retained input",
     "poll_limit": 1,
-    "page_limit": 1
+    "page_limit": 1,
+    "idle_reap_ttl": 60,
+    "idle_now": 120
   },
   "expected": {
     "advertised": {"protocol_version": 50, "min_protocol_version": 1},
-    "schema": {"version": 36, "pending_index": true},
+    "schema": {"version": 37, "pending_index": true},
     "empty_without_initialization": true,
+    "idle_custody": {
+      "retained_reaped": 0,
+      "retained_automatic_stop_refused": true,
+      "retained_idle_unchanged": true,
+      "legacy_stopped": true
+    },
     "bounded_poll": {"status": 200, "count": 1, "unoffered_untouched": true, "retry_same": true},
     "begin": [{"begin": true}, {"begin": false}],
     "recovery": {

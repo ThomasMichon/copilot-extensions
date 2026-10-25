@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "567e15aa6402be2f97f4b1c15597f0fafaa0c0ee",
+    "commit": "d33335b83a2fc0c83db7b21c94d9dc9730c898e8",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "plugins/agent-bridge/src/agent_bridge/preference_exec.py",
@@ -18,6 +18,6 @@
   "consent_base64": "AQ==",
   "refused_exit_code": 78,
   "exec_preserves_pid": true,
-  "component_digest": "4313556ccb9c5f86686da109b01391aeba8a4ddd29b6f5d8c083a7d764143dee",
+  "component_digest": "80edba74f62f342e3aadab4959b35905fe0ad0ba77e8676bb885386772f3f8b1",
   "capability_scope": "Linux target-local final context; actual ACP readback remains mandatory"
 }

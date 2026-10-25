@@ -73,7 +73,7 @@ from .runtime_custody import RuntimeCustodyError
 
 if TYPE_CHECKING:
     from .events import EventLog
-    from .acquisition_launch_owner import AcquisitionLaunchOwner
+    from .local_launch_owner import LocalLaunchOwner
     from .acquisition_host_transport import AcquisitionHostTransport
     from .native_turn_transport import NativeTurnTransport
 
@@ -327,7 +327,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._connection: ClientSideConnection | None = None
         self._acp_session_id: str | None = None
         self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
-        self._acquisition_launch: AcquisitionLaunchOwner | None = None
+        self._acquisition_launch: LocalLaunchOwner | None = None
 
         # Auto-approve all permission requests (agent-bridge default).
         # Ignored when on_permission is set.
@@ -551,7 +551,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
         timing_callback: Callable[[str, float], None] | None = None,
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> str:
         """Create a new ACP session. Returns the ACP session ID.
 
@@ -618,7 +618,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         suppress_replay: bool = True,
         mcp_servers: list[dict[str, Any]] | None = None,
         timing_callback: Callable[[str, float], None] | None = None,
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> None:
         """Reload a previously persisted ACP session (for resume).
 
