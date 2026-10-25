@@ -563,6 +563,10 @@ adopter/platform combination.
   use the selected installed Manager after updates, and preserve the declared
   native headless lifetime and current-user Windows Autorun boundary.
 
+The bounded Manager-first repository command entry merged in #10270, composing
+the existing setup caller and engine. Its [source qualification](<journal/2026/11.03 manager-register.md>)
+does not close the enrollment, native worker, actual adopter or release gates above.
+
 ### Phase 4a.1 - Manager automatic-update controls
 
 - [x] Review the automatic-control intent and validation plan before implementation (#10056).

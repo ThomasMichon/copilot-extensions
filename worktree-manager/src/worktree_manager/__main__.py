@@ -1498,9 +1498,15 @@ def _extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
 
 def _cmd_update(rest: list[str]) -> int:
     """Delegate update admission while retaining the existing CLI callback seam."""
+    from .automatic_updates_cli import guarded_update
+
+    return guarded_update(rest, _cmd_update_recorded)
+
+
+def _cmd_update_recorded(rest: list[str], trigger: str = "manual") -> int:
     from .update_orchestration import execute_update
 
-    return execute_update(rest, _cmd_update_steps)
+    return execute_update(rest, _cmd_update_steps, trigger=trigger)
 
 
 def _cmd_update_steps(
@@ -1586,6 +1592,9 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "update":
         from .update_driver_cli import cmd_update_request
         return cmd_update_request(args[1:])
+    if args and args[0] == "automatic-updates":
+        from .automatic_updates_cli import main as automatic_updates_main
+        return automatic_updates_main(args[1:])
     if args and args[0] == "--project":
         if len(args) != 2 or not args[1]:
             print("error: --project needs exactly one project name")

@@ -96,6 +96,7 @@ item in this umbrella.
 | Profile preparation implementer | Owns only the reviewed pre-adoption dependency-preparation follow-up under #11989; preserves #356/#8545 setup and #11976 acquisition ownership. | Managed source worktree; public source handle `sluggish-gasket`; coordination through #11989 and the linked subplan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
 | Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer/local-consumer source increment accepted, including complete CLI comparison; other verbs/runtime/platform lanes stay separate, with no PK/WI ownership or rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
+| Maintenance setup consumer | Owns automatic-maintenance enrollment and adopter integration through the shared setup seam; #8545 owns acquisition/registration/setup/trust/readiness, preserving #356's broader scope. | Managed source worktree; public source handle `battered-clasp`; maintenance coordination through #7028. |
 
 ## Context
 
@@ -159,6 +160,13 @@ the Manager; a bare invocation hands off to it when present and offers a
 trustworthy install/onboarding trigger when absent. Retire the bundled,
 in-plugin Picker once the extracted one reaches parity — this is the
 operator-visible end-state, not an indefinite dual-implementation state.
+
+**2026-10-20 operator clarification (summary):** install Manager first, then
+register an addressed repository URL through Manager and let the repository's
+config drive its complete supported setup. An adopter README should point at
+that flow, not another setup executable. The exact request, with private
+identifiers redacted, is in
+[Manager-first repository setup](phase-5-repository-setup.md#request).
 
 ## Plan
 
@@ -945,6 +953,13 @@ bundled retirement, shift source/resource custody or make the Picker mandatory.
   by this acceptance transfer.
 
 ### Phase 5 — Configurator: adoption, discovery, per-plugin config (Planned — #356 / #357)
+The [Manager-first request and maintenance integration acceptance](phase-5-repository-setup.md)
+consume the reviewed optional-bootstrap contract. The shared setup seam is
+owned by #8545; this is not a second first-repository implementation.
+
+- [ ] Integrate maintenance enrollment with the #8545-owned first-repository
+      setup path, then complete its native and real-adopter acceptance.
+
 The [Configuration workbench plan](phase-5-configuration-workbench.md) applies
 the revised [canonical vision](../../../visions/installer/configurator/README.md).
 Its [Wave 0 inventory/design](phase-5-effective-configuration-contract.md)
@@ -2624,6 +2639,8 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 - [ ] Complete every Phase 7b ownership/migration/compatibility row after
       explicit reviewed reconciliation with standing intent. Tracker
       consolidation is neither an architectural decision nor implementation.
+- [ ] Complete the [repository setup validation matrix](phase-5-repository-setup.md#validation-plan).
+      A registered checkout or a startup entry alone is not complete setup.
 
 - [ ] Complete the [platform-local runtime validation matrix](phase-7-platform-local-runtime.md#validation-plan),
       including an actual generated launcher from a standalone installed slot,
@@ -3382,6 +3399,12 @@ complete current receiving readback and separate source judgments remain.
   acceptance. The source worktree is being closed at the operator's request;
   its Phase 5 binding is released back to this canonical effort for a separately
   claimed continuation. No rollout, service or pool activation is claimed.
+- **2026-10-20** - Captured the operator's Manager-installer-first,
+  repository-URL registration/setup entry point in the
+  [focused Phase 5 proposal](phase-5-repository-setup.md). Claimed only that
+  first-repository orchestration slice on #356; existing workbench, platform,
+  restart and source-management scopes remain unchanged. Plan review precedes
+  implementation; no repository-setup command or adopter enrollment is claimed.
 
 - **2026-10-20** - Explicit exact-original survivor inspection merged in
   [#7358](https://github.com/ThomasMichon/copilot-extensions/pull/7358) after
