@@ -61,6 +61,11 @@ Errors do not become empty successful inventories; cached failed rows cannot
 run executable actions before a fresh read (read-only card inspection remains
 available). Refresh targets the current provider/scope cache. Worker/parser
 failures settle terminally, without a render-driven retry loop.
+Periodic repolling preserves healthy held subscriptions. Explicit reload fences
+the old generation immediately, then retires captured children off the input
+thread through a scope-owned worker. Repeated reloads coalesce; replacement
+waits for that scope's retirement and prior request to finish. Shutdown drains
+retirement workers without admitting replacements.
 
 One-shot reads have a 20-second execution budget, separate stdout/stderr limits
 (8 MiB / 256 KiB), and caller-owned descendant cleanup. Streams use the existing

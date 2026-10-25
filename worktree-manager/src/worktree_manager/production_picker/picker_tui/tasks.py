@@ -385,6 +385,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             self._procs.clear()
         for proc in procs:
             _kill_proc_tree(proc)
+        self._join_scope_retirements()
 
     def _spawn_stream(self, argv: Sequence[str]) -> subprocess.Popen:
         """Spawn a tracked, killable streaming child (line-buffered stdout so
@@ -416,7 +417,11 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             self._procs.append(proc)
         # Close the spawn/close race: if close() fired between the guard and the
         # Popen, it never saw this child -- kill it now.
-        if self._closed.is_set():
+        with self._lock:
+            current = self._generation_matches(
+                proc._picker_scope, getattr(self._request_context, "generation", None),
+            )
+        if self._closed.is_set() or not current:
             _kill_proc_tree(proc)
         return proc
 

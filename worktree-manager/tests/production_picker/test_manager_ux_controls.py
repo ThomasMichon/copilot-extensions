@@ -96,12 +96,14 @@ def test_configuration_highlight_activates_view_and_escape_returns_without_apply
             screen = app.query_one(PickerScreen)
             applied = []
             screen._apply_profiles = lambda *args: applied.append(args)
+            screen.pivots.insert(0, {"kind": "worktrees", "label": "Other"})
             start = screen._left_pivots()[-1]
             screen.htab, screen.sel = start, ("V", 0)
             screen._nav_view_row(1)
             assert screen._in_configuration() and screen.sel == ("CFG", 0)
             screen._dispatch_key("escape")
             assert screen.htab == start and not screen._in_configuration()
+            assert screen.sel == ("V", 0)
             assert not applied
     asyncio.run(run())
 

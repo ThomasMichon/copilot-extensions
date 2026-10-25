@@ -279,8 +279,10 @@ class PickerScreenRuntimeMixin:
             return
         self._last_pivot_poll = now
         try:
-            from .registered_scopes import refresh
-            refresh(self, reg)
+            from .registered_scopes import request_scopes
+            runtime = self._pivot_runtime(reg)
+            for scope in request_scopes(self, reg):
+                runtime.repoll(scope)
         except Exception:
             pass
     def _maybe_refresh_worker_pivots(self):

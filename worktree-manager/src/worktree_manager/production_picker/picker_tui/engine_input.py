@@ -276,7 +276,6 @@ class PickerScreenInputMixin:
             cur = 0
         target = row[(cur + d) % len(row)]
         if target == "cfg":
-            self.sel = ("CFG", 0)
             self._open_cfgmenu()
             self.sel = ("CFG", 0)
         else:

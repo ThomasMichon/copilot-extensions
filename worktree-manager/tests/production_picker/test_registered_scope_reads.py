@@ -163,6 +163,110 @@ def test_r_refreshes_only_active_registered_machine_not_worktree_loader():
     assert refreshed == ["host-a", "host-b"]
 
 
+def test_automatic_polling_preserves_healthy_held_channels(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import engine as engine_module
+
+    reg = pivot(stream=True, subscribe=True)
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    runtime._subscribe_live = {"host-a": True, "host-b": True}
+    runtime._schedule_list = lambda *args, **kwargs: pytest.fail("healthy subscription restarted")
+    runtime.refresh_read = lambda *args: pytest.fail("automatic poll forced an explicit reload")
+    screen = engine(runtime, reg)
+    screen._last_pivot_poll = 0
+    monkeypatch.setattr(engine_module, "POLL_SECS", .001)
+    for _ in range(3):
+        screen._last_pivot_poll = 0
+        screen._maybe_repoll_pivot()
+    assert runtime._subscribe_live == {"host-a": True, "host-b": True}
+
+
+def test_all_reload_returns_before_child_retirement_and_coalesces_replacements(monkeypatch):
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=True))
+    screen = engine(runtime, runtime.pivot)
+    release = threading.Event()
+    entered, completed = set(), []
+    input_thread = threading.get_ident()
+    runtime._procs = [SimpleNamespace(_picker_scope=scope) for scope in ("host-a", "host-b")]
+    originals = tuple(runtime._procs)
+    runtime._cache = {
+        scope: ("ready", [{"id": "old"}], "") for scope in ("host-a", "host-b")
+    }
+
+    def retire(proc):
+        assert threading.get_ident() != input_thread or runtime._closed.is_set()
+        entered.add(proc._picker_scope)
+        assert release.wait(3)
+        with runtime._procs_lock:
+            if proc in runtime._procs:
+                runtime._procs.remove(proc)
+
+    def replacement(machine, generation):
+        completed.append(machine)
+        assert release.is_set()
+        assert not any(proc._picker_scope == machine for proc in runtime._procs)
+        runtime._finish(machine, ("ready", [{"id": "fresh"}], ""), {})
+
+    monkeypatch.setattr(tasks, "_kill_proc_tree", retire)
+    runtime._run_list = replacement
+    try:
+        started = time.monotonic()
+        screen._dispatch_key("r")
+        assert time.monotonic() - started < 1
+        wait(lambda: len(entered) == 2)
+        assert len(runtime._scope_retirements) == 2
+        for _ in range(5):
+            screen._dispatch_key("r")
+        assert not completed and tuple(runtime._procs) == originals
+        assert all(runtime.get(scope)[1] == [{"id": "old"}] for scope in entered)
+        release.set()
+        wait(lambda: len(completed) == 2)
+        wait(lambda: not runtime._scope_retirements and not runtime._inflight)
+        assert sorted(completed) == ["host-a", "host-b"]
+    finally:
+        release.set()
+        runtime.close()
+
+
+def test_reload_worker_start_failure_remains_explicit(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import pivot_requests
+
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=True))
+    runtime._procs = [SimpleNamespace(_picker_scope="a")]
+
+    def failed():
+        raise RuntimeError("fixture retirement worker unavailable")
+
+    monkeypatch.setattr(pivot_requests, "threading", SimpleNamespace(
+        Thread=lambda **kwargs: SimpleNamespace(start=failed),
+    ))
+    runtime.refresh_read("a")
+    assert runtime.get("a")[0] == "error"
+    assert "retirement worker unavailable" in runtime.get("a")[2]
+    assert not runtime._scope_retirements and not runtime._refresh_pending
+
+
+def test_spawn_that_finishes_after_scope_reload_retires_only_its_captured_child(monkeypatch):
+    runtime = tasks.RegisteredPivotRuntime(pivot(stream=True, subscribe=True))
+    generation = (runtime._gen, 0, object())
+    runtime._active_requests["a"] = generation
+    runtime._request_context.machine = "a"
+    runtime._request_context.generation = generation
+    captured = SimpleNamespace()
+    other = SimpleNamespace(_picker_scope="b")
+    runtime._procs.append(other)
+    killed = []
+
+    def spawn(*args, **kwargs):
+        runtime._scope_generations["a"] = 1
+        return captured, None
+
+    monkeypatch.setattr(tasks, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(tasks, "_kill_proc_tree", killed.append)
+    assert runtime._spawn_stream(["fixture"]) is captured
+    assert killed == [captured]
+    assert other in runtime._procs
+
+
 def test_legacy_configuration_read_owns_its_children_without_changing_mutation_transport(monkeypatch):
     calls = []
     result = SimpleNamespace(returncode=0, stdout="fixture status", stderr="")
@@ -419,7 +523,8 @@ def test_held_stream_deadline_requires_initial_commit_not_just_begin(frame, tmp_
     runtime = tasks.RegisteredPivotRuntime(reg)
     try:
         runtime.ensure("a")
-        wait(received.is_set)
+        wait(lambda: received.is_set() or runtime.get("a")[0] == "error", timeout=20)
+        assert received.is_set(), runtime.get("a")
         assert len(timers) == 1 and timers[0].interval == .5
         if frame == "begin":
             timers[0].callback()

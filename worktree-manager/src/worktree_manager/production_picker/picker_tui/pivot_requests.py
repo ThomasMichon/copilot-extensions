@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import deque
 import threading
+import time
 
 
 class PivotRequestsMixin:
@@ -14,6 +15,7 @@ class PivotRequestsMixin:
         self._active_requests = {}
         self._reconnecting_scopes = set()
         self._refresh_pending = set()
+        self._scope_retirements = {}
 
     def ensure_many(self, machines):
         for machine in dict.fromkeys(machines):
@@ -54,9 +56,9 @@ class PivotRequestsMixin:
         self._stop_scope_read(machine, refetch=True)
 
     def _stop_scope_read(self, machine, *, refetch):
-        from .tasks import _kill_proc_tree
-
         with self._lock:
+            if not refetch:
+                self._refresh_pending.discard(machine)
             if machine in self._reconnecting_scopes:
                 self._reconnecting_scopes.discard(machine)
                 self._inflight.discard(machine)
@@ -64,12 +66,61 @@ class PivotRequestsMixin:
             running = machine in self._inflight
             if refetch and running:
                 self._refresh_pending.add(machine)
-        with self._procs_lock:
-            procs = [proc for proc in self._procs if getattr(proc, "_picker_scope", None) == machine]
-        for proc in procs:
-            _kill_proc_tree(proc)
+            if machine in self._scope_retirements:
+                if refetch:
+                    self._refresh_pending.add(machine)
+                return
+            with self._procs_lock:
+                procs = [proc for proc in self._procs if getattr(proc, "_picker_scope", None) == machine]
+            if procs:
+                if refetch:
+                    self._refresh_pending.add(machine)
+                worker = threading.Thread(
+                    target=self._retire_scope_read, args=(machine, procs),
+                    name="pivot-retire", daemon=True,
+                )
+                self._scope_retirements[machine] = worker
+                try:
+                    worker.start()
+                except RuntimeError as error:
+                    self._scope_retirements.pop(machine, None)
+                    self._retirement_failed(machine, error)
+                return
         if refetch and not running:
             self._schedule_list(machine, force=True)
+
+    def _retirement_failed(self, machine, error):
+        self._refresh_pending.discard(machine)
+        rows = self._cache.get(machine, ("idle", [], ""))[1]
+        self._cache[machine] = ("error", rows, f"Provider reload retirement failed: {error}")
+
+    def _retire_scope_read(self, machine, procs):
+        from .tasks import _kill_proc_tree
+
+        refetch = False
+        try:
+            for proc in procs:
+                _kill_proc_tree(proc)
+        except Exception as error:
+            with self._lock:
+                self._retirement_failed(machine, error)
+        finally:
+            with self._lock:
+                self._scope_retirements.pop(machine, None)
+                if machine not in self._inflight:
+                    refetch = machine in self._refresh_pending and not self._closed.is_set()
+                    self._refresh_pending.discard(machine)
+            if refetch:
+                self._schedule_list(machine, force=True)
+
+    def _join_scope_retirements(self):
+        with self._lock:
+            workers = tuple(self._scope_retirements.values())
+        deadline = time.monotonic() + 5
+        for worker in workers:
+            worker.join(timeout=max(0, deadline - time.monotonic()))
+        if any(worker.is_alive() for worker in workers):
+            raise RuntimeError("Provider reload retirement did not drain")
 
     def _generation_matches(self, machine, generation):
         if generation is None:
@@ -83,7 +134,7 @@ class PivotRequestsMixin:
 
     def _schedule_list(self, machine, *, force=False):
         with self._lock:
-            if self._closed.is_set() or machine in self._inflight:
+            if self._closed.is_set() or machine in self._inflight or machine in self._scope_retirements:
                 return
             if not force and machine in self._cache:
                 return
@@ -154,8 +205,9 @@ class PivotRequestsMixin:
                 ):
                     self._inflight.discard(machine)
                     self._active_requests.pop(machine, None)
-                    refetch = machine in self._refresh_pending and not self._closed.is_set()
-                    self._refresh_pending.discard(machine)
+                    if machine not in self._scope_retirements:
+                        refetch = machine in self._refresh_pending and not self._closed.is_set()
+                        self._refresh_pending.discard(machine)
             self._release_startup(machine)
             if refetch:
                 self._schedule_list(machine, force=True)

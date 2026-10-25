@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from .. import context
+from ...launch_confirmation import confirm_before_effect
 from ...seed_history import HistoryCursor, SeedHistory
 from .seed_prompt_field import compose_seed_prompt
 
@@ -19,6 +20,7 @@ class ActionsPromptMixin:
     def _load_prompt_history(self):
         if (
             self._loading or not self._can_prompt()
+            or not (self._rec.get("raw") or {}).get("id")
             or self._history_requested or self._engine is None
         ):
             return
@@ -62,6 +64,10 @@ class ActionsPromptMixin:
         self._prompt_refusal = None
         field = self._prompt_rec["primary"]
         seed = field.text.strip()
+        if seed and action == "Resume" and not (self._rec.get("raw") or {}).get("id"):
+            self.notify("Resume prompt requires a worktree id; nothing launched.", severity="error")
+            field.focus()
+            return None
         if seed and action in {"Open", "Resume", "Launch in new window"} and (
             action != "Resume" or not self._can_prompt()
         ):
@@ -76,10 +82,10 @@ class ActionsPromptMixin:
             return ""
         leg = self._rec.get("execution_leg") or (self._rec.get("raw") or {}).get("execution_leg")
         refusal = None
-        if seed and (self._ahp or (
-            isinstance(leg, dict) and leg.get("state", "unknown") in {"active", "unknown"}
-        )):
-            refusal = "Prompt requires a native cold resume, not AHP or an active/unknown execution leg."
+        if seed and self._ahp:
+            refusal = "Prompt is unsupported with AHP; choose a native cold resume."
+        elif seed and isinstance(leg, dict) and leg.get("state", "unknown") in {"active", "unknown"}:
+            refusal = f"Prompt requires a cold resume; execution leg is {leg.get('state', 'unknown')}."
         refusal = field.refusal(refusal_reason=refusal)
         if refusal:
             if self._engine is not None and getattr(self._engine, "real_ops", False):
@@ -94,8 +100,6 @@ class ActionsPromptMixin:
         engine = self._engine
         if engine is None or not getattr(engine, "real_ops", False):
             return False
-        from ...launch_confirmation import confirm_before_effect
-
         field = self._prompt_rec["primary"]
         decision = engine._resume_decision(
             self._rec, no_mux=self._no_mux, ahp=self._ahp, seed_prompt=seed,

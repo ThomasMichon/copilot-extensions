@@ -55,7 +55,7 @@ def resume_dialog(*, enabled=True):
         _run_bg=lambda *_args, **_kwargs: None,
     )
     dialog = SubMenuScreen(
-        {"is_local": True, "machine": "target", "env": "Win"},
+        {"is_local": True, "machine": "target", "env": "Win", "raw": {"id": "wt-original"}},
         ["Resume"], engine=engine,
     )
     dialog._no_mux = True
