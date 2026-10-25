@@ -308,6 +308,33 @@ yet wired to `sync.retention_days`.
 
 ## Compaction (cold-session archival)
 
+Scheduled runs preserve source-qualified usage evidence before transfer or
+compaction. Transcript accounting reads at most 64 MiB / 200,000 events per
+session per pass, and at most 256 MiB across the pass. Large finite histories
+converge over subsequent runs instead of failing solely because of total size.
+The existing 4 MiB individual-line and bounded accounting-artifact limits remain.
+The collector durably rotates its starting session after actual work, including
+failed reads, so repeatedly failing or changing early histories cannot starve
+later stable ones. It reserves a next position before work to survive interruption.
+Keyed observation aggregation keeps replay processing linear rather than merging
+an entire full checkpoint for every repeated event.
+
+`<home>/transcript-progress/` is a disposable, content-free checkpoint cache:
+only validated accounting scalars, source revision, byte offsets and counts.
+Unchanged completed sources need no transcript reads. A changed revision,
+including append, restarts validation from zero rather than assuming the old
+prefix was not rewritten. An actively changing large source can remain deferred
+until a stable generation is available; no partial result is called complete.
+Corrupt checkpoints are visibly rebuilt, and deleting this cache loses only
+collection progress, never the published evidence ledger.
+
+`accounting deferred` is distinct from a failed capture: raw transfer continues,
+the last good ledger remains intact, and cold compaction stays blocked until
+coverage is complete. Malformed records, conflicting observations and unsafe or
+oversized individual evidence still fail explicitly. One-shot transcript
+analysis readers retain their original whole-read bounds; resumable collection
+does not silently widen those APIs.
+
 Very old, inactive sessions are compressed into per-session `<id>.tar.gz`
 bundles to reclaim space (`events.jsonl` is ~95% of the bytes and compresses
 ~5x). Opt in under `sync.compact` (see [`references/config.yaml`](references/config.yaml)):

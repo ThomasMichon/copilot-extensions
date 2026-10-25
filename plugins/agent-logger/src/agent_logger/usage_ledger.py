@@ -90,40 +90,61 @@ def normalize_record(record: object, session_id: str) -> dict:
     return {"key": key, "source": source, "values": values, "multiplicity": multiplicity}
 
 
+class UsageObservations:
+    """Keyed aggregation of one source snapshot, with linear per-row work."""
+
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self._records: dict[str, dict] = {}
+
+    def add(self, record: dict) -> None:
+        self._add_normalized(normalize_record(record, self.session_id), replay=False)
+
+    def _add_normalized(self, record: dict, *, replay: bool) -> None:
+        key = record["key"]
+        previous = self._records.get(key)
+        if previous is None:
+            self._records[key] = dict(record, values=dict(record["values"]))
+            if len(self._records) > MAX_RECORDS:
+                raise UsageEvidenceError("accounting record limit exceeded")
+            return
+        for field, value in record["values"].items():
+            old = previous["values"].get(field)
+            if old is not None and value is not None and old != value:
+                raise UsageEvidenceError("conflicting source-qualified accounting observation")
+            if old is None:
+                previous["values"][field] = value
+        native = any(record["values"].get(field) for field in ("usage_id", "event_id", "api_call_id"))
+        count = (
+            max(previous["multiplicity"], record["multiplicity"]) if replay or native
+            else previous["multiplicity"] + record["multiplicity"]
+        )
+        if count > MAX_RECORDS:
+            raise UsageEvidenceError("too many identical accounting observations")
+        previous["multiplicity"] = count
+
+    def merge_snapshot(self, incoming: UsageObservations) -> None:
+        if incoming.session_id != self.session_id:
+            raise UsageEvidenceError("accounting session identity mismatch")
+        for record in incoming._records.values():
+            self._add_normalized(record, replay=True)
+
+    def records(self) -> list[dict]:
+        return [self._records[key] for key in sorted(self._records)]
+
+
 def _merge(records: list, incoming: list, session_id: str) -> list[dict]:
-    merged: dict[str, dict] = {}
-    for batch, replay in ((records, False), (incoming, True)):
-        counts: dict[str, int] = {}
+    saved = UsageObservations(session_id)
+    replay = UsageObservations(session_id)
+    for batch, accumulator, is_replay in ((records, saved, False), (incoming, replay, True)):
         for original in batch:
             if not isinstance(original, dict):
                 raise UsageEvidenceError("accounting observation is not an object")
-            if replay and original.get("session_id") != session_id:
+            if is_replay and original.get("session_id") != session_id:
                 raise UsageEvidenceError("accounting session identity mismatch")
-            record = dict(original, session_id=session_id)
-            normalized = normalize_record(record, session_id)
-            key = normalized["key"]
-            native = any(normalized["values"].get(field) for field in ("usage_id", "event_id", "api_call_id"))
-            counts[key] = (
-                max(counts.get(key, 0), normalized["multiplicity"]) if native
-                else counts.get(key, 0) + normalized["multiplicity"]
-            )
-            if counts[key] > MAX_RECORDS:
-                raise UsageEvidenceError("too many identical accounting observations")
-            if key not in merged:
-                merged[key] = normalized
-            else:
-                previous = merged[key]["values"]
-                for field, value in normalized["values"].items():
-                    old = previous.get(field)
-                    if old is not None and value is not None and old != value:
-                        raise UsageEvidenceError("conflicting source-qualified accounting observation")
-                    if old is None:
-                        previous[field] = value
-            if len(merged) > MAX_RECORDS:
-                raise UsageEvidenceError("accounting record limit exceeded")
-        for key, count in counts.items():
-            merged[key]["multiplicity"] = max(merged[key]["multiplicity"], count) if replay else count
-    return [merged[key] for key in sorted(merged)]
+            accumulator.add(dict(original, session_id=session_id))
+    saved.merge_snapshot(replay)
+    return saved.records()
 
 
 def merge_session_evidence(
