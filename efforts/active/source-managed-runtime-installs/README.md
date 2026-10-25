@@ -453,7 +453,7 @@ transaction execution from the existing recurring-maintenance assignment.
   sync/prune. Remove its age/PID installer guard and foreground fallback;
   selected snapshots, command/explicit-installer publishers, cells/custom
   roots, live periodic workers and rollout remain separate.
-- [ ] **Agent-recommended bounded source handoff:** qualify Logger's exact
+- [x] **Agent-recommended bounded source handoff:** qualify Logger's exact
   selected legacy snapshot for the existing service-less `provision` recipe
   through the same native foundation, canonical staged-origin reader, queue
   and frozen-input owner before adopting ordinary command publishers.
@@ -466,6 +466,19 @@ transaction execution from the existing recurring-maintenance assignment.
   reconciling `install` and the already-qualified bootstrap limited to their
   canonical installed source; do not infer adoption of command/explicit
   installer publishers, live sync/prune, custom roots/cells or rollout.
+- [ ] **Agent-recommended bounded publisher adoption:** route Logger's actual
+  legacy primary, six payload targets and five auxiliary compatibility
+  commands through its qualified single `provision` recipe and the same
+  caller-independent queue. Preserve healthy read-only dispatch, exact
+  selected-source/lifecycle ownership, publication controls and original
+  arguments/exit outcomes; remove cold outer execution locks and arbitrary
+  installed-payload fallback. The [bounded plan](logger-commands.md) requires
+  materialized command qualification, Python-free caller loss/concurrency,
+  source independence, failed-candidate preservation and no-write refusals
+  on native Windows/Linux. Keep bootstrap `install` distinct, retain healthy
+  cell dispatch and refuse unsupported cold cells/custom roots. Explicit
+  installers, compound actions, live sync/prune, macOS and rollout remain
+  separate; review this proposal before implementation.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
