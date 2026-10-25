@@ -45,6 +45,17 @@ unchanged. Standalone
 provisioning retains the exact selected root, context, installer exit code and
 stderr; `AGENT_CONTAINERS_NO_SELFPROVISION` remains an opt-out.
 
+On Windows, initial installation `status` and selected-context `validate`
+reads use the payload's canonical SDK in a fresh isolated, no-site Python
+process only after the [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+admits a registered signed CPython base. PATH and the addressed runtime do not
+establish admission. Unavailable optional support selects native PowerShell
+before evaluation; selected interpreter/SDK failures are terminal. The file
+guard is released before ordinary package-site/runtime resolution. Publication
+and under-lock admission retain their ordering. Legacy PowerShell argument
+passing uses the same encoded-argv module entry as Codespaces, preserving empty,
+numeric and quoted arguments without disabling ordinary package-site loading.
+
 Global stubs retain the exact publisher, canonical install root and selected
 context rather than searching other marketplaces or ambient commands. Equivalent
 root spellings bind to the same installation. Fresh direct provisioning publishes

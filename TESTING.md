@@ -144,6 +144,18 @@ CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollo
 
 ## Optional CodeSpaces bootstrap adoption
 
+Independent Windows evaluator admission is a separate native packet:
+`plugins/agent-codespaces/tests/test_bootstrap_python.py` covers the selector,
+while `libs/payload-invocation/tests/test_evaluator_bootstrap_consumers.py`
+covers both adopters' dispatcher routing, cleanup, complete SDK parity and
+terminal refusals.
+Use the existing bounded process-containment harness. Set
+`EVALUATOR_BOOTSTRAP_TEST_PYTHON` to an explicit existing signed console CPython
+base for actual native admission; a supplied but unfit fixture fails rather
+than skipping. The consumer's real-admission case skips without this explicit
+fixture. ABI stubs and platform/fixture skips are not native trust qualification.
+These subprocess/registry/signature cases are not required pure-unit CI.
+
 The manual `installation-context-full.yml` portfolio `codespaces-bootstrap`
 qualifies the actual materialized legacy hook on fresh Windows and Linux
 runners. It enforces the existing 15-second deadline and `{}` response,

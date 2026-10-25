@@ -110,8 +110,12 @@ timestamp. Existing OS trust caches are not a new suite authority cache.
 - #6812 retains native startup/no-site and shared installer ownership.
   Coordination comments `6380217728` and `6380366583` ask for an existing
   selector or a concrete overlap. A missing response is not an assignment.
-  Before any shared helper implementation, agree its canonical owner and
-  bounded file scope with the existing owner; record that assignment.
+  Before any shared helper implementation, record its canonical owner and
+  bounded assignment. The operator subsequently assigned the new native
+  selector, focused tests/sync and Containers/Codespaces delivery explicitly
+  (`assign-new-selector-scope`); this is not inferred acknowledgement.
+  Existing installer-selection behavior, SDK algorithms, Manager/lifetime
+  work and installed rollout stay with their existing owners.
 - Prefer the existing installer-engine ownership for a standalone native
   selector. Its implementation must be payload-local and independently
   vendored for each adopter, with the ordinary synchronization, parity and
@@ -135,30 +139,30 @@ timestamp. Existing OS trust caches are not a new suite authority cache.
 
 ## Plan and validation
 
-- [ ] Review and merge this contract before implementation.
-- [ ] Confirm the canonical selector owner and bounded assignment; refresh
+- [x] Review and merge this contract before implementation.
+- [x] Confirm the canonical selector owner and bounded assignment; refresh
   open PR files and preserve existing overlapping ownership.
-- [ ] Prove registry discovery invokes no candidate, launcher, package manager,
+- [x] Prove registry discovery invokes no candidate, launcher, package manager,
   network or runtime-selection/provisioning path.
-- [ ] Cover user/machine shadowing, registry views, opaque tags, missing optional
+- [x] Cover user/machine shadowing, registry views, opaque tags, missing optional
   metadata, deterministic order and supported native architecture selection.
-- [ ] Cover relative/remote/linked paths, venvs and addressed runtimes, embedded
+- [x] Cover relative/remote/linked paths, venvs and addressed runtimes, embedded
   overrides, missing/replaced files, unsigned/wrong-publisher executables,
   offline trust misses and explicit selector errors. Refused candidates must
   remain unexecuted.
-- [ ] Implement the assigned payload-local selector with no state writes or
+- [x] Implement the assigned payload-local selector with no state writes or
   persistent authority cache; enforce byte-identical adopter delivery.
 - [ ] Qualify actual signed CPython and native trust verification on supported
   Windows PowerShell 5.1 and pwsh processes, including disconnected controls,
   non-ASCII/spaced paths, both streams and no visible windows/focus changes.
   Mocked signature success is not this proof.
-- [ ] Integrate only the assigned consumers. Prove the fresh canonical SDK's
+- [x] Integrate only the assigned consumers. Prove the fresh canonical SDK's
   complete typed output and refusal parity, absent-bootstrap native fallback,
   terminal post-selection failures and unchanged ordinary package-site loading.
 - [ ] Keep effect-free units separately admitted with full source hashes,
   contextual coverage, effect observation and the existing 300-second budget.
   Native/registry/signature/process cases remain outside required pure units.
-- [ ] Measure selection and evaluator together, including native helper
+- [x] Measure selection and evaluator together, including native helper
   compilation. Reject the optimization if its real cold cost removes the
   expected benefit; an isolated Python status microbenchmark is not acceptance.
 - [ ] Rebuild final-source fixtures and repeat the parent's complete cold,
