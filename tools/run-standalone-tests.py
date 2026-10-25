@@ -183,7 +183,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         ]
     elif component == "services/ssh":
         sources = [
-            str(REPO / "fleet-manager") + "[service-gateway]",
+            str(REPO / "fleet-manager") + "[service-gateway,ssh-client]",
             str(REPO / "libs" / "single-instance-lease"),
             str(REPO / "libs" / "agent-procutil"),
         ]
@@ -235,7 +235,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             lease = (REPO / "libs" / "single-instance-lease").resolve().as_uri()
             procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
             override.write_text(
-                f"fleet-manager[service-gateway] @ {fleet}\n"
+                f"fleet-manager[service-gateway,ssh-client] @ {fleet}\n"
                 f"agent-single-instance-lease @ {lease}\n"
                 f"agent-procutil @ {procutil}\n", encoding="utf-8",
             )

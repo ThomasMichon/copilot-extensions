@@ -6,6 +6,9 @@ resource diagnostics, explicitly authenticated artifact staging and an explicit
 admitted-client construction/health and owned runtime-selector transitions, a local current-observation
 storage API, and an opt-in authenticated NEW
 Gateway/SDK/subscribed-controller boundary.**
+The explicitly configured [foreground SSH consumer](docs/ssh-machine.md)
+composes the existing registered directory and agent-ssh writers under its
+normal lifetime owner; thin installation remains inert.
 The [resident boundary](docs/gateway-runtime.md) is a first bounded slice:
 no production Gateway/index offload or managed install/update/uninstall,
 telemetry sink or fleet resource mutation is claimed.

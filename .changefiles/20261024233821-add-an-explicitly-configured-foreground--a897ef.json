@@ -1,0 +1,13 @@
+{
+  "comment": "Add an explicitly configured foreground Fleet SSH-directory consumer and qualify installed join/restart convergence through the registered service.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh-service",
+      "type": "patch"
+    }
+  ]
+}

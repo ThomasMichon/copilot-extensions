@@ -40,8 +40,8 @@ def main(argv=None):
     inspection.add_argument("--installation", required=True)
     diagnostic = commands.add_parser("doctor", help="Check this installed thin client; never install or probe a controller")
     diagnostic.add_argument("--role", choices=("client",), default="client")
-    hosting = commands.add_parser("serve", help="Host the explicitly configured NEW Gateway over TLS")
-    hosting.add_argument("--role", choices=("gateway",), required=True)
+    hosting = commands.add_parser("serve", help="Run an explicitly configured foreground Fleet role")
+    hosting.add_argument("--role", choices=("gateway", "ssh-client"), required=True)
     profile = hosting.add_mutually_exclusive_group(required=True)
     profile.add_argument("--config", type=Path)
     profile.add_argument("--service-policy", type=Path)
@@ -117,6 +117,13 @@ def main(argv=None):
             return 1
         return 0
     if args.command == "serve":
+        if args.role == "ssh-client":
+            if args.config is None or args.tls_config is not None:
+                print("fleet-manager: ssh-client requires only --config", file=sys.stderr)
+                return 1
+            from .ssh_machine import serve as serve_ssh
+
+            return serve_ssh(args.config)
         if args.service_policy is not None:
             if args.tls_config is None:
                 print("fleet-manager: --service-policy requires --tls-config", file=sys.stderr)

@@ -34,6 +34,7 @@ resource acquisition and identity bindings remain external adapters.
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
 | `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
+| `squeaky-buckle` | Bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | #6681 source reservation6394061625 |
 
 ## Coordination
 
@@ -50,6 +51,12 @@ resource acquisition and identity bindings remain external adapters.
   Gateway/SSH onboarding integration and validation matrix.
 - No edits to reserved installer, authentication, ledger, controller or shared
   CLI files before their retained owners agree the integration seam.
+- The bounded normal SSH consumer continuation is now selected under #6681:
+  `squeaky-buckle` drives new `ssh_machine.py`/`ssh_machine_config.py`, focused
+  tests/docs and narrow `serve --role ssh-client`/optional-closure wiring.
+  This is an explicit source slice, not takeover of retained worktrees,
+  construction/admission or operational authority. Existing shared lifecycle,
+  provider, credential and deployment gates remain with their owners.
 - The construction owner accepted two exclusive new source leaves:
   `fleet-manager/src/fleet_manager/gateway_ssh_policy.py` and its matching
   `test_gateway_ssh_policy.py` belong to `ticking-wrench`; the separate
@@ -351,6 +358,10 @@ onboarded merely because its source is published.
 
 ### Phase 3 - Actual setup and durable convergence
 
+- [x] Implement the bounded explicit foreground Fleet SSH-directory consumer,
+  composing the existing authenticated client and local profile/login-key
+  writers with native lease and shutdown custody. This is source capability,
+  not managed setup, enrollment or an adopted installation.
 - [ ] Wire the accepted role setup entry point to admitted target-local
   lifecycle/enrollment/authorization/profile effects.
 - [ ] Persist stage outcomes, desired/applied digests, owner generation and
@@ -428,6 +439,26 @@ retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
 takeover or implementation completion is asserted.
 
 ## Journal
+
+### 2026-10-24 - Foreground Fleet SSH consumer source
+
+- Added the explicitly selected `serve --role ssh-client` path and strict local
+  configuration, with packaged runtime contract metadata and an optional
+  dependency closure. Default installation/planning stays thin and inert.
+- The fixed adapter composes the existing authenticated directory client,
+  credential references, profile writer and target-login authorization owner.
+  Repeated cancellation retains the watch and native lease through settlement;
+  restart revalidates the current snapshot and existing writer floors.
+- Focused local qualification covers schema/refusal behavior, real local writes,
+  restart/no-op, lease/signal custody, missing dependencies and existing Gateway
+  runtime compatibility. Installed CLI fixtures exercise the real disposable
+  TLS/JWT/DPoP Gateway and registered service, including a connected later join
+  and offline catch-up with a second consumer. The Windows process fixture
+  qualifies abrupt kernel-lease recovery, not graceful Windows signal delivery.
+- This source does not install or update a managed role, enroll a machine,
+  acquire/rotate keys, renew a provider, change sshd, deploy or retire a
+  predecessor. General node hosting and the broader Plan/Validation items stay
+  open; release/artifact selection and actual adoption require their owners.
 
 ### 2026-10-16 - Intake and current boundary
 
