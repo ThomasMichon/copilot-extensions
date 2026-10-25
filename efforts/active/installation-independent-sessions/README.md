@@ -328,3 +328,28 @@ Keeping a version directory alive is not an acceptable substitute.
 - The Linux worker returned a minimal uninstall fix and a proposed real-branch
   regression/rerun plan. Neither has been applied or qualified yet. The
   production copied-wrapper/current-handler migration remains outstanding.
+
+### 2026-10-24 - Longer-running native diagnostic
+
+- Operator direction:
+
+  > Perhaps just run the tests unbounded and see what happens right now
+
+- Temporarily removed the native fixture's short subprocess, output and
+  teardown waits, while retaining real PSMux, both production producers,
+  exact process identities, observation and kernel containment.
+- The first diagnostic still hit the runner's separate 30-second item
+  watchdog. Its stack was waiting for the PowerShell producer's stdout to
+  close, before that cycle's PSMux launch.
+- The contained runner requires positive budgets. With diagnostic-only
+  `--test-timeout 1200 --timeout 1500 --plugin-timeout 1800`, all three native
+  cases passed: both producers completed two cycles and the direct control
+  passed. Pytest reported three passes, no skips and 53 deselections in
+  80.63 seconds; the complete command took 97.83 seconds.
+- This establishes eventual delivery for that diagnostic, not a pass under
+  the ordinary budgets or proof that every earlier failure has one cause.
+  Separate setup, delivery and teardown timings before changing a permanent
+  test budget. Interactive Copilot and actual installation survival remain
+  open.
+- Restored the temporary test edits exactly to the published candidate.
+  No production deadline, process-containment policy or acceptance gate changed.
