@@ -43,6 +43,7 @@ TEMPLATE_METADATA = {
     "reviewer": ("Pull request reviewer", "Discover, review and evaluate repository pull requests."),
     "conflict-resolution": ("Pull request conflict resolver", "Reconcile conflicted pull requests under the repository's landing policy."),
 }
+TEMPLATE_DESCRIPTIONS = {name: description for name, (_, description) in TEMPLATE_METADATA.items()}
 
 
 def _fields(name: str, document: dict, repo_root: str = "") -> list[dict]:

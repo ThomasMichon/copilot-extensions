@@ -19,7 +19,9 @@ from agent_dispatch.worker_instances import (
     ACTIVATION_CONSENT, OWNER, POINTER, active_dir, digest, instance_dir,
     read_records, save_instance, templates,
 )
-from agent_dispatch.workers_catalog import TEMPLATE_METADATA, catalog, _observation as real_observation
+from agent_dispatch.workers_catalog import (
+    TEMPLATE_DESCRIPTIONS, TEMPLATE_METADATA, catalog, _observation as real_observation,
+)
 from tests.test_worker_templates import repository_map
 
 @pytest.fixture(autouse=True)
@@ -67,6 +69,9 @@ def test_empty_catalog_is_read_only_and_lists_fragments():
     data = catalog()
     assert data["summary"]["configured"] == 0
     assert {r["name"] for r in data["entries"]} == set(templates()) == set(TEMPLATE_METADATA)
+    assert TEMPLATE_DESCRIPTIONS == {
+        row["name"]: row["description"] for row in data["entries"]
+    }
     assert all(row["title"] != row["name"] for row in data["entries"])
     assert all(row["description"].endswith(".") for row in data["entries"])
     assert all(row["card"]["title"] == row["title"] for row in data["entries"])

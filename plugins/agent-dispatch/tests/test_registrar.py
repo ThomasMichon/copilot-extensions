@@ -121,6 +121,11 @@ def test_document_display_title_reaches_loop_components_without_entering_runtime
         declaration_to_registration(d, machine="fixture") for d in original
     ]
     assert json.dumps(titled_document, sort_keys=True) == before
+    with pytest.raises(RegistrarError, match="pool.*title.*derived"):
+        expand_declaration_document(
+            {**document, "pool": {**document["pool"], "title": "Nested workers"}},
+            directory=tmp_path, repo_root=tmp_path,
+        )
 
 
 def test_reactive_compatibility_value_is_normalized_off():

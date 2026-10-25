@@ -228,6 +228,7 @@ def validate_config(
         "kind",
         "spec",
         "owner",
+        "title",
         "description",
     }
     if present := sorted(reserved_pool & set(pool)):

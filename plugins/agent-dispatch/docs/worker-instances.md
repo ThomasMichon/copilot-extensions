@@ -136,7 +136,9 @@ Clients must not infer capabilities, routing or guidance from these labels.
 
 The shared document expander applies a title to each component of a loop
 after recipe inheritance, without inserting it into the embedded producer
-configuration or changing runtime registrations. For a published instance,
+configuration or changing runtime registrations. Nested `pool.title` is
+rejected as derived metadata, like `pool.description`; put the title at the
+document root. For a published instance,
 the row's title and description describe the published snapshot; a newer
 Save-only draft remains separate and does not relabel it. An unpublished
 instance displays its draft metadata. Details retain the technical name.

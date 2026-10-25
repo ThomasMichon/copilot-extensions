@@ -542,7 +542,7 @@ def expand_reviewer_loop(data: Mapping) -> tuple[ProfileDeclaration, ...]:
     _reject_reserved(
         "pool",
         pool,
-        {"labels", "repos", "kind", "spec", "owner", "description"},
+        {"labels", "repos", "kind", "spec", "owner", "title", "description"},
     )
 
     pool_name = _string(pool, "name") if "name" in pool else f"{name}-workers"
