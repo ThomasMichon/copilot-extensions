@@ -313,6 +313,11 @@ compaction. Transcript accounting reads at most 64 MiB / 200,000 events per
 session per pass, and at most 256 MiB across the pass. Large finite histories
 converge over subsequent runs instead of failing solely because of total size.
 The existing 4 MiB individual-line and bounded accounting-artifact limits remain.
+The collector durably rotates its starting session after actual work, including
+failed reads, so repeatedly failing or changing early histories cannot starve
+later stable ones. It reserves a next position before work to survive interruption.
+Keyed observation aggregation keeps replay processing linear rather than merging
+an entire full checkpoint for every repeated event.
 
 `<home>/transcript-progress/` is a disposable, content-free checkpoint cache:
 only validated accounting scalars, source revision, byte offsets and counts.

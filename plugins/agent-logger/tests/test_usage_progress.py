@@ -310,3 +310,79 @@ def test_hard_interruption_temporary_is_reclaimed_under_writer_lock(tmp_path):
     result = read_transcript_progress(session, session.name, cache)
     assert result.complete and result.consumed == 0
     assert not temporary.exists()
+
+
+def test_saturated_native_replays_have_linear_normalization_work(tmp_path, monkeypatch):
+    from agent_logger import usage_ledger
+
+    limit = 32
+    replays = 300
+    monkeypatch.setattr(usage_ledger, "MAX_RECORDS", limit)
+    monkeypatch.setattr(usage_progress, "MAX_RECORDS", limit)
+    session = _session(
+        tmp_path, b"".join(_usage(index) for index in range(limit)) + _usage(0) * replays,
+    )
+    cache = tmp_path / "cache"
+    assert not read_transcript_progress(session, session.name, cache, event_budget=limit).complete
+    original = usage_ledger.normalize_record
+    normalized = 0
+
+    def counted(record, sid):
+        nonlocal normalized
+        normalized += 1
+        return original(record, sid)
+
+    monkeypatch.setattr(usage_ledger, "normalize_record", counted)
+    result = read_transcript_progress(session, session.name, cache)
+    assert result.complete and len(result.records) == limit
+    assert all(row["multiplicity"] == 1 for row in result.records)
+    assert normalized <= 2 * (limit + replays)
+
+
+def test_shared_budget_rotates_past_persistently_failing_predecessors(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    for index in range(4):
+        session = source / "session-state" / f"0{index}-bad"
+        session.mkdir(parents=True)
+        (session / "events.jsonl").write_bytes(b"x" * 512 + b"\n")
+    healthy = source / "session-state" / "last-healthy"
+    healthy.mkdir()
+    (healthy / "events.jsonl").write_bytes(_usage(1))
+    monkeypatch.setattr(usage_capture, "MAX_CAPTURE_BYTES", 512)
+    monkeypatch.setattr(usage_transcript, "MAX_LINE_BYTES", 256)
+    for _ in range(3):
+        usage_capture.capture_usage(source, None, cache_root=tmp_path / "cache")
+        if (healthy / ARTIFACT).exists():
+            break
+    assert (healthy / ARTIFACT).is_file(), "healthy later session was starved by failing predecessors"
+
+
+def test_capture_order_reserves_fair_progress_before_reader_interruption(tmp_path):
+    source = tmp_path / "source"
+    cache = tmp_path / "cache"
+    sessions = ["one", "two", "three"]
+    sessions.sort()
+    with pytest.raises(RuntimeError, match="reader stopped"):
+        with usage_progress.capture_order(
+            cache, source, sessions, usage_progress.TranscriptBudget(512),
+        ) as (ordered, rebuilt):
+            assert ordered[0] == sessions[0] and not rebuilt
+            raise RuntimeError("reader stopped")
+    with usage_progress.capture_order(
+        cache, source, sessions, usage_progress.TranscriptBudget(512),
+    ) as (ordered, rebuilt):
+        assert ordered[0] == sessions[1] and not rebuilt
+
+
+def test_corrupt_capture_order_rebuilds_without_changing_session_scope(tmp_path):
+    source = tmp_path / "source"
+    cache = tmp_path / "cache"
+    with usage_progress.capture_order(
+        cache, source, ["allowed"], usage_progress.TranscriptBudget(512),
+    ):
+        pass
+    next(cache.glob("capture-*.json")).write_bytes(b"corrupt")
+    with usage_progress.capture_order(
+        cache, source, ["allowed"], usage_progress.TranscriptBudget(512),
+    ) as (ordered, rebuilt):
+        assert rebuilt and ordered == ["allowed"]

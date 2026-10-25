@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from agent_logger.sync.publication_directory import publication_directory
 from agent_logger.usage_ledger import UsageEvidenceError, merge_session_evidence
-from agent_logger.usage_progress import TranscriptBudget, read_transcript_progress
+from agent_logger.usage_progress import TranscriptBudget, capture_order, read_transcript_progress
 from agent_logger.usage_sqlite import (
     UsageReadError, UsageRowLimitError, UsageStoreMissingError, read_sqlite_usage,
 )
@@ -97,10 +97,17 @@ def capture_usage(
         return CaptureResult()
     admitted = sorted(sessions)
     budget = TranscriptBudget(MAX_CAPTURE_BYTES)
-    return _combine_results([
-        _capture_batch(source, admitted[offset : offset + CAPTURE_BATCH_SIZE], cache_root, budget)
-        for offset in range(0, len(admitted), CAPTURE_BATCH_SIZE)
-    ])
+    try:
+        with capture_order(cache_root, source, admitted, budget) as (ordered, rebuilt):
+            result = _combine_results([
+                _capture_batch(source, ordered[offset : offset + CAPTURE_BATCH_SIZE], cache_root, budget)
+                for offset in range(0, len(ordered), CAPTURE_BATCH_SIZE)
+            ])
+            if rebuilt:
+                result = _combine_results([result, CaptureResult(rebuilt=("collection order",))])
+            return result
+    except (OSError, ValueError) as exc:
+        return CaptureResult(failures=(f"accounting collection progress: {exc}",))
 
 
 def _combine_results(results: list[CaptureResult]) -> CaptureResult:
@@ -141,7 +148,7 @@ def _capture_batch(
     deferred: list[str] = []
     rebuilt: list[str] = []
     updated = 0
-    for session_id in sorted(sessions):
+    for session_id in sessions:
         session = source / "session-state" / session_id
         try:
             try:

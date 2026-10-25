@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from bisect import bisect_right
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from agent_logger import usage_transcript
 from agent_logger.session_codecs import _file_identity, _file_revision
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.publication_directory import publication_directory
-from agent_logger.usage_ledger import MAX_BYTES, MAX_RECORDS, UsageEvidenceError, _merge
+from agent_logger.usage_ledger import MAX_BYTES, MAX_RECORDS, UsageEvidenceError, UsageObservations
 
 SCHEMA = "agent-logger.transcript-progress"
 
@@ -20,6 +22,7 @@ SCHEMA = "agent-logger.transcript-progress"
 @dataclass
 class TranscriptBudget:
     remaining: int
+    last_session: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,22 +46,33 @@ def _encode(value: dict) -> bytes:
     return bytes(output)
 
 
-def _load(directory, name: str, source: str, session_id: str) -> tuple[dict | None, bool]:
+def _read_state(directory, name: str, limit: int) -> tuple[dict | None, bool]:
     try:
         with directory.open(name, protected=True) as stream:
-            if os.fstat(stream.fileno()).st_size > MAX_BYTES:
+            if os.fstat(stream.fileno()).st_size > limit:
                 return None, True
-            raw = stream.read(MAX_BYTES + 1)
+            raw = stream.read(limit + 1)
     except FileNotFoundError:
         return None, False
     try:
         state = json.loads(raw)
         digest = state.pop("digest")
+        if len(raw) > limit or digest != hashlib.sha256(_encode(state)).hexdigest():
+            return None, True
+        return state, False
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        return None, True
+
+
+def _load(directory, name: str, source: str, session_id: str) -> tuple[dict | None, bool]:
+    state, rebuilt = _read_state(directory, name, MAX_BYTES)
+    if state is None:
+        return None, rebuilt
+    try:
         if (
             set(state) != {"schema", "version", "source", "session_id", "revision", "offset", "events", "records"}
             or state["schema"] != SCHEMA or type(state["version"]) is not int or state["version"] != 1
             or state["source"] != source or state["session_id"] != session_id
-            or digest != hashlib.sha256(_encode(state)).hexdigest()
             or not isinstance(state["revision"], list) or len(state["revision"]) != 5
             or any(type(value) is not int or value < 0 for value in state["revision"])
             or type(state["offset"]) is not int
@@ -68,13 +82,51 @@ def _load(directory, name: str, source: str, session_id: str) -> tuple[dict | No
             or any(not isinstance(row, dict) or row.get("source") != "transcript" for row in state["records"])
         ):
             return None, True
-        records = [dict(row, session_id=session_id) for row in state["records"]]
-        normalized = _merge([], records, session_id)
+        records = UsageObservations(session_id)
+        for row in state["records"]:
+            records.add(dict(row, session_id=session_id))
+        normalized = records.records()
         if normalized != state["records"] or sum(row["multiplicity"] for row in normalized) > state["events"]:
             return None, True
         return state, False
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         return None, True
+
+
+@contextmanager
+def capture_order(cache_root: Path | None, source: Path, sessions: list[str], budget: TranscriptBudget):
+    if cache_root is None or not sessions:
+        yield sessions, False
+        return
+    identity = os.path.normcase(str(source.absolute()))
+    name = "capture-" + hashlib.sha256(identity.encode("utf-8")).hexdigest() + ".json"
+    with publication_directory(cache_root, create=not cache_root.exists()) as directory:
+        with sync_lock(directory.path / f".{name}.lock", timeout=0, wait=False) as acquired:
+            if not acquired:
+                raise UsageEvidenceError("accounting collection order writer is busy")
+            directory.unlink(f"{name}.tmp")
+            saved, rebuilt = _read_state(directory, name, 4096)
+            if saved is not None and (
+                set(saved) != {"schema", "source", "last_session"}
+                or saved.get("schema") != "agent-logger.capture-order"
+                or saved.get("source") != identity
+                or not isinstance(saved.get("last_session"), str)
+                or not 1 <= len(saved["last_session"]) <= 128
+            ):
+                saved, rebuilt = None, True
+            index = bisect_right(sessions, saved["last_session"]) if saved else 0
+            ordered = sessions[index:] + sessions[:index]
+            state = {
+                "schema": "agent-logger.capture-order", "source": identity,
+                "last_session": ordered[0],
+            }
+            # Reserve progress before work so even a killed first reader rotates.
+            _save(directory, name, state)
+            try:
+                yield ordered, rebuilt
+            finally:
+                if budget.last_session is not None and budget.last_session != ordered[0]:
+                    _save(directory, name, dict(state, last_session=budget.last_session))
 
 
 def _save(directory, name: str, state: dict) -> None:
@@ -114,7 +166,7 @@ def read_transcript_progress(
         byte_budget = min(byte_budget, total_budget.remaining)
     source = os.path.normcase(str(session.absolute()))
     name = hashlib.sha256(source.encode("utf-8")).hexdigest() + ".json"
-    with publication_directory(cache_root) as cache:
+    with publication_directory(cache_root, create=not cache_root.exists()) as cache:
         with sync_lock(cache.path / f".{name}.lock", timeout=0, wait=False) as acquired:
             if not acquired:
                 raise UsageEvidenceError("transcript progress writer is busy")
@@ -133,7 +185,9 @@ def read_transcript_progress(
                     }
                     offset = state["offset"]
                     stream.seek(offset)
-                    records = [dict(row, session_id=session_id) for row in state["records"]]
+                    records = UsageObservations(session_id)
+                    for row in state["records"]:
+                        records.add(dict(row, session_id=session_id))
                     consumed = events = 0
                     reason = "work budget"
                     while offset < before.st_size and consumed < byte_budget and events < event_budget:
@@ -142,6 +196,8 @@ def read_transcript_progress(
                         consumed += len(line)
                         if total_budget is not None:
                             total_budget.remaining -= len(line)
+                            if line:
+                                total_budget.last_session = session_id
                         if not line:
                             raise UsageEvidenceError("transcript ended before its snapshot size")
                         if len(line) > usage_transcript.MAX_LINE_BYTES:
@@ -152,12 +208,7 @@ def read_transcript_progress(
                             break
                         record = usage_transcript.project_usage_line(line, session_id)
                         if record is not None:
-                            records.append(record)
-                            if len(records) > MAX_RECORDS:
-                                records = [
-                                    dict(row, session_id=session_id)
-                                    for row in _merge([], records, session_id)
-                                ]
+                            records.add(record)
                         offset = stream.tell()
                         events += 1
                     if (
@@ -167,7 +218,7 @@ def read_transcript_progress(
                         raise UsageEvidenceError("transcript changed during accounting capture")
                     state = dict(
                         state, offset=offset, events=state["events"] + events,
-                        records=_merge([], records, session_id),
+                        records=records.records(),
                     )
             if state != saved:
                 _save(cache, name, state)
