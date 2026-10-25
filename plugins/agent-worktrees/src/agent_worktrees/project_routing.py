@@ -55,6 +55,7 @@ _NO_PROJECT_COMMANDS = {
     "link-succession",
     "config-migrate",
     "session-tail",
+    "session-observations",
     "session-lock",
     "machine-context",
     "reconcile-binstubs",
