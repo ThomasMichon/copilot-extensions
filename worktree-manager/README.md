@@ -1074,6 +1074,10 @@ code is never executed during acquisition. Repository-routing overrides are
 removed from Git's environment, while configured credential helpers and scoped
 authentication configuration remain available; acquisition does not replace
 the user's authentication mechanism.
+First-use cloning pins the `origin` remote name and publishes a validated,
+owned checkout atomically. Failed initialization cleans only its private
+staging directory, leaving a later acquisition able to retry; an unowned
+incumbent is still refused rather than repaired automatically.
 
 **Source-backed suite execution is not connected yet.** With a non-marketplace
 policy, ordinary and bootstrap/repair `update` fail before Manager self-update,
@@ -1082,6 +1086,9 @@ the selection. `reset` explicitly restores ordinary
 marketplace runtime delivery. Canonical source preparation, immutable runtime
 planning and the existing installation driver remain the next integration
 boundary; this command adds no alternate installer or recurring worker.
+The existing update request's source identity includes this policy, so changing
+it after submission rejects the old request rather than running a different
+runtime selection under its name.
 
 ## Restart evidence and notification transport
 

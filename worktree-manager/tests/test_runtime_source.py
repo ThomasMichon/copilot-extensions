@@ -339,3 +339,69 @@ def test_git_keeps_approved_global_and_scoped_auth_without_repository_override(
         "approved-global-helper\napproved-scoped-helper"
     )
     assert source._git(repo, "rev-parse", "HEAD") == release
+
+
+def test_clone_pins_origin_despite_user_default_remote(repository, tmp_path, monkeypatch):
+    repo, release, _development = repository
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text('[clone]\ndefaultRemoteName = upstream\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    with source.acquire(config.RuntimeSource("main", str(repo)), root=tmp_path / "manager") as selected:
+        assert selected.commit == release
+        assert source._git(selected.checkout, "remote") == "origin"
+
+
+def test_failed_initial_checkout_does_not_poison_retry(repository, tmp_path, monkeypatch):
+    repo, release, _development = repository
+    selection = config.RuntimeSource("main", str(repo))
+    original = source._git
+
+    def failed_checkout(path, *arguments):
+        if arguments[:1] == ("checkout",):
+            raise source.SourceAcquisitionError("synthetic checkout interruption")
+        return original(path, *arguments)
+
+    monkeypatch.setattr(source, "_git", failed_checkout)
+    with pytest.raises(source.SourceAcquisitionError, match="synthetic checkout interruption"):
+        with source.acquire(selection, root=tmp_path / "manager"):
+            pytest.fail("interrupted initialization cannot be admitted")
+    monkeypatch.setattr(source, "_git", original)
+    with source.acquire(selection, root=tmp_path / "manager") as selected:
+        assert selected.commit == release
+        assert not list(selected.checkout.parent.glob(".acquire-*"))
+
+
+def test_queued_source_choice_cannot_change_before_participant_execution(tmp_path, monkeypatch, capsys):
+    from types import SimpleNamespace
+    import update_driver
+
+    from worktree_manager import update_driver_cli
+
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    original = update_driver_cli._source_key()
+    config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
+    request = SimpleNamespace(
+        state="running", spec=SimpleNamespace(
+            backend="manager", source=original,
+            context=(("WORKTREE_MANAGER_ROOT", str(root)),),
+        ),
+    )
+
+    class Custody:
+        request_id = "synthetic-request"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pytest.fail("changed source must be rejected before executing the participant")
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *args, **kwargs: request)
+    assert update_driver_cli.cmd_update_request([]) == 1
+    assert "source changed after submission" in capsys.readouterr().err

@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -126,12 +127,21 @@ def acquire(selection: RuntimeSource, *, root: Path | None = None) -> Iterator[R
         _ordinary(checkout)
         if not checkout.exists():
             checkout.parent.mkdir(parents=True, exist_ok=True)
-            _git(checkout.parent, "clone", "--no-hardlinks", "--no-checkout", "--", repo, "checkout")
-            _ordinary(checkout / ".git")
-            _git(checkout, "checkout", "--detach", "refs/remotes/origin/main", "--")
-            (checkout / ".git" / "runtime-source-owner.json").write_text(
-                json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8",
-            )
+            with tempfile.TemporaryDirectory(prefix=".acquire-", dir=checkout.parent) as temporary:
+                staging = Path(temporary) / "checkout"
+                _git(
+                    Path(temporary), "clone", "--no-hardlinks", "--no-checkout",
+                    "--origin", "origin", "--", repo, "checkout",
+                )
+                _ordinary(staging / ".git")
+                _git(staging, "checkout", "--detach", "refs/remotes/origin/main", "--")
+                marker = staging / ".git" / "runtime-source-owner.json"
+                _ordinary(marker)
+                marker.write_text(json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8")
+                _validate(staging, owner)
+                if checkout.exists() or checkout.is_symlink():
+                    raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
+                staging.rename(checkout)
         head = _validate(checkout, owner)
         branch = selection.branch
         remote_ref = f"refs/remotes/origin/{branch}"
