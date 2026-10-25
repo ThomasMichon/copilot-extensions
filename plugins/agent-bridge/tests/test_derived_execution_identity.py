@@ -252,6 +252,60 @@ def test_combined_observation_drives_real_split_profile_derivation_once(source, 
     assert resolver.resolve("library@guest").type == "local"
 
 
+@pytest.mark.parametrize("alias,duplicate", [
+    ("legacy", False), ("LEGACY", False), ("legacy", True), ("local-ssh", False),
+])
+def test_split_profile_remote_alias_cannot_become_local(source, tmp_path, monkeypatch, alias, duplicate):
+    import yaml
+
+    from agent_bridge.resolver_runtime import capture_resolver, restore_resolver
+    from agent_bridge.routes.worktrees import _is_local_target
+
+    topologies = {}
+    entries = [
+        ("legacy", "local-host", "windows", "local-ssh"),
+        ("remote", "remote-host", "linux", alias),
+    ]
+    if duplicate:
+        entries.append(("other-remote", "other-host", "linux", alias))
+    for key, hostname, platform, ssh_alias in entries:
+        machines_path = tmp_path / f"{key}.yaml"
+        machines_path.write_text(yaml.safe_dump({"machines": {key: {
+            "hostname": hostname,
+            "ssh": {"ready": True, "environments": [{
+                "name": platform, "alias": ssh_alias,
+                "shell": "pwsh" if platform == "windows" else "bash",
+            }]},
+        }}}), encoding="utf-8")
+        agents_path = tmp_path / f"{key}.json"
+        agents_path.write_text(json.dumps({key: {
+            "host": key, "project": "control", "ssh_environment": platform,
+        }}), encoding="utf-8")
+        topologies[key] = TopologyProfile(
+            machines_yaml=str(machines_path), agents_config=str(agents_path),
+        )
+    monkeypatch.setattr(agent_registry, "load_local_repos", lambda: [])
+    monkeypatch.setattr(agent_registry, "load_elevated_projects", lambda: set())
+    monkeypatch.setattr(agent_registry, "discover_local_agents", lambda: {})
+    monkeypatch.setattr(agent_registry, "_register_namespace_resolvers", lambda resolver: None)
+    original = agent_registry.build_resolver(ServiceConfig(topologies=topologies))
+    for resolver in (original, restore_resolver(capture_resolver(original))):
+        assert resolver._local_machine.key == "legacy"
+        assert all(not machine.execution_platform for machine in resolver.machines.values())
+        resolver._own_plugin_args = lambda *args: []
+        resolver._related_plugin_args = lambda *args: []
+        local = resolver.resolve("legacy")
+        assert local.type == "local"
+        assert _is_local_target(local.host, resolver, local.execution_space_key)
+        assert not resolver.is_local_transport(alias)
+        for key, _, _, _ in entries[1:]:
+            remote = resolver.resolve(key)
+            assert remote.type == "ssh"
+            assert remote.host == alias
+            assert remote.execution_space_key is None
+            assert not _is_local_target(remote.host, resolver, remote.execution_space_key)
+
+
 @pytest.mark.parametrize("file", [False, True])
 def test_invalid_source_under_existing_repository_is_not_promoted(source, monkeypatch, file):
     from agent_bridge import service_start_cli

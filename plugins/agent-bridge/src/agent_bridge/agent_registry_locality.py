@@ -36,7 +36,7 @@ class _LocalTransportMixin:
             if named is not None:
                 if named.key != machine.key:
                     return False
-            elif host_lower in self._ambiguous_ssh_aliases:
+            if host_lower in self._ambiguous_ssh_aliases:
                 return False
             elif host_lower in self._alias_index and self._alias_index[host_lower][0].key != machine.key:
                 return False
