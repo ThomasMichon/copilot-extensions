@@ -45,6 +45,18 @@ discovery; it fails closed with an actionable bootstrap path.
 Do not add a daemon merely to expose a command. Do not make a provider importable
 inside its consumer's venv. Do not make a service depend on a sibling launcher.
 
+## Design the contract before adding syntax
+
+A command's verbs, options, defaults, exit codes and JSON exchanges are a
+service contract even without a daemon. Follow
+[service-contract-evolution](service-contract-evolution.md): preserve strict
+unknown-argument rejection, declare support separately from package versions
+with the actual runtime, and introduce syntax through provider-first
+expand/migrate/contract phases. Include supported upgrade and rollback paths
+and focused mixed-version parser/process tests in the PR's **Contract impact**
+assessment. First consider implementing behavior inside the existing owning
+operation with backward-compatible config instead of a new prerequisite command.
+
 ## Required payload shape
 
 ```text

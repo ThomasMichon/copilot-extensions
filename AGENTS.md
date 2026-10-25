@@ -34,6 +34,7 @@ state-preserving reconciliation.
 | Maintain **adopter documentation and its reading flow** | `docs/documentation-architecture.md` + `visions/documentation/README.md`; documentation-impact review in `CONTRIBUTING.md` |
 | See **how we build plugins here** (reusable design) | `docs/patterns/README.md` |
 | Add an **`agent-*` runtime plugin** with commands/services | `docs/patterns/runtime-agent-plugin.md` |
+| Change a **CLI or service contract** across independently updated runtimes | `docs/patterns/service-contract-evolution.md` + `CONTRIBUTING.md` (*Contract impact*) |
 | See **what a subject should ultimately be** (intent) | `visions/README.md` |
 | Plan or resume a **stretch of work** | `efforts/README.md` + the **`efforts:planning-efforts`** skill |
 | **Make a change and land it correctly** | the **`copilot-extensions-harness:contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
@@ -220,6 +221,17 @@ grow it into the exhaustive portfolio. New subprocess-heavy matrices need a
 focused smoke lane, path gating, and an explicit scheduled/manual full lane.
 Preserve real process boundaries for concurrency tests. `TESTING.md` owns the
 detailed portfolio invariants and execution mechanics.
+
+### CLI and Service Contract Evolution
+
+CLI syntax is a service contract: keep unknown-argument rejection strict, but
+never assume independently deployed callers and providers upgrade together.
+Apply `docs/patterns/service-contract-evolution.md` when changing a boundary:
+declare support separately from package versions against the actual runtime,
+expand providers before migrating callers, and retire old forms only after
+the upgrade/rollback window. Prefer existing-operation config enforcement over
+unnecessary prerequisite commands. `CONTRIBUTING.md` owns the required
+**Contract impact** assessment; `REVIEW.md` applies the same rule.
 
 ### Windows Background Process Launches
 
