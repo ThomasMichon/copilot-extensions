@@ -320,8 +320,13 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
 - The semantic lifecycle owner remains semantic. Its fresh current-generation
   capture explicitly executes retained automatic-stop refusal and ordinary
   unassociated stop, in addition to the original recovery observations. Fresh
-  committed-source capture, canonical-reader validation and independent review
-  remain required; no earlier capture is relabeled as that correction.
+  committed-source HTTP-50 write/no-write capture from
+  `0459ebed61ce3f0c52677c0e2a390290fdc377d1` executes both installation modes
+  and reproduces 69 outputs, retaining every historical packet and provenance
+  record. The final canonical-reader/publication cohort passes 185 controls,
+  with two collection skips and verified cleanup. Both contracts and all 814
+  fixtures pass; independent current-head review/CI remain required.
+  No earlier capture is relabeled as that correction.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.
