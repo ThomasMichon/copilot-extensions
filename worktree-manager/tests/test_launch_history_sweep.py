@@ -209,6 +209,44 @@ def test_output_cap_applies_before_parsing():
         sweep.validate_page(b"x" * (sweep.MAX_RESPONSE_BYTES + 1), arguments())
 
 
+@pytest.mark.parametrize("sequence", [None, 0, -1, True, 1.0, "1", 1])
+def test_malformed_event_cannot_carry_private_details(page, sequence):
+    page["attempts"][0].update(
+        manager_outcome="unknown", last_manager_event={
+            "sequence": sequence, "observed_at": 1, "phase": "confirmed",
+            "details": {"input": "PRIVATE-FIXTURE"},
+        },
+    )
+    with pytest.raises(sweep.SweepError, match="incompatible-response"):
+        sweep.validate_page(json.dumps(page).encode(), arguments())
+
+
+@pytest.mark.parametrize("observed_at", [None, True, float("nan"), float("inf"), -1])
+def test_nonnull_event_requires_a_real_finite_observation_time(page, observed_at):
+    page["attempts"][0]["last_manager_event"] = {
+        "sequence": 1, "observed_at": observed_at, "phase": "confirmed", "details": {},
+    }
+    with pytest.raises(sweep.SweepError, match="incompatible-response"):
+        sweep.validate_page(json.dumps(page).encode(), arguments())
+
+
+def test_invalid_event_never_leaks_input_from_cli(page, monkeypatch, capsys):
+    page["attempts"][0]["last_manager_event"] = {
+        "sequence": None, "observed_at": 1, "phase": "confirmed",
+        "details": {"input": "PRIVATE-FIXTURE"},
+    }
+    monkeypatch.setattr(machine_roster, "selected_entries", lambda _: {"host-linux": entry()})
+    async def read(*a, **kw):
+        return json.dumps(page).encode()
+    monkeypatch.setattr(sweep, "query_source", read)
+    assert launch_history_cli.main([
+        "--sweep-project", "source-project", "--source-machine", "host-linux", "--json",
+    ]) == 1
+    output = capsys.readouterr().out
+    assert "PRIVATE-FIXTURE" not in output and '"input"' not in output
+    assert json.loads(output)["sources"][0]["code"] == "incompatible-response"
+
+
 @pytest.mark.parametrize("shell", ["bash", "zsh"])
 def test_posix_remote_uses_configured_shell_and_absolute_manager(shell):
     command = sweep.remote_command(shell, ["launch-attempts", "--project", "a'; echo unsafe"])
@@ -357,6 +395,19 @@ def test_selected_roster_supplier_preserves_canonical_first_fallback(configured)
     write(overlay / ".agent-worktrees" / "machines.yaml", {"machines": {"current": machine("current")}})
     result = machine_roster.selected_entries("example", home_dir=home)
     assert [item.ssh_environments[0].alias for item in result.values()] == ["current"]
+
+
+@pytest.mark.parametrize("supplier", [False, True])
+def test_explicit_registered_anchors_work_without_optional_repos_registry(configured, supplier):
+    root, overlay, home = configured
+    (home / ".agent-worktrees" / "repos.yaml").unlink()
+    write(home / ".agent-worktrees" / "projects.yaml", {"projects": {
+        "example": {"anchor": str(root)}, "knowledge": {"anchor": str(overlay)},
+    }})
+    selected = overlay if supplier else root
+    write(selected / "machines.yaml", {"machines": {"host": machine("configured")}})
+    result = machine_roster.selected_entries("example", home_dir=home)
+    assert [item.ssh_environments[0].alias for item in result.values()] == ["configured"]
 
 
 @pytest.mark.parametrize("content", ["[bad", "[]", "{}", "machines: []", "machines: {}\nmachines: {}"])

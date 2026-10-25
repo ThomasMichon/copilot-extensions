@@ -196,6 +196,8 @@ def validate_page(output: bytes, args) -> dict:
             if event is not None and (
                 not isinstance(event, dict)
                 or set(event) != {"sequence", "observed_at", "phase", "details"}
+                or type(event["sequence"]) is not int or event["sequence"] <= 0
+                or type(event["observed_at"]) not in (int, float)
             ):
                 raise ValueError("Invalid Manager observation")
             observation = (None, None, None, None) if event is None else (

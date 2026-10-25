@@ -55,7 +55,10 @@ def selected_entries(project: str, *, home_dir: Path | None = None) -> dict[str,
                 documents[path] = harness_state._read_yaml(path, strict=True)
         return documents[path]
 
-    selection = harness_state.project_anchor_selection(project, home, reader=read)
+    def read_registry(path: Path) -> dict:
+        return read(path) or {}
+
+    selection = harness_state.project_anchor_selection(project, home, reader=read_registry)
     if not selection.anchor or not Path(selection.anchor).is_absolute() or not Path(selection.anchor).is_dir():
         raise ValueError("Selected source project has no existing absolute local anchor")
     def supplier() -> Path:
@@ -63,7 +66,7 @@ def selected_entries(project: str, *, home_dir: Path | None = None) -> dict[str,
         knowledge = config.get("knowledge_repo")
         if not isinstance(knowledge, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", knowledge):
             raise ValueError("Source project has no configured machine registry")
-        overlay = harness_state.project_anchor_selection(knowledge, home, reader=read)
+        overlay = harness_state.project_anchor_selection(knowledge, home, reader=read_registry)
         if not overlay.anchor or not Path(overlay.anchor).is_absolute() or not Path(overlay.anchor).is_dir():
             raise ValueError("Configured machine supplier is unavailable")
         root = Path(overlay.anchor)
