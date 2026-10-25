@@ -1,0 +1,133 @@
+"""Actual local Host, child and ACP SDK; synthetic peers, not native qualification."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import os
+from pathlib import Path
+import sys
+import time
+from unittest.mock import AsyncMock
+
+import pytest
+from zdd.diagnostics import process_start_time
+
+from agent_bridge import session_manager as core
+from agent_bridge.acp_client import AcpClient
+from agent_bridge.acquisition_launch_owner import AcquisitionFrontend
+from agent_bridge.models import SessionStatus
+from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeProducer
+from agent_bridge.session_host.host_index import HostIndex
+from agent_bridge.session_host_connection import _SessionHostConnectionMixin
+from agent_bridge.session_manager import Session, SessionManager
+from agent_bridge.session_prompts import _SessionPromptMixin
+from agent_bridge.transport import SpawnTarget
+from test_acquisition_runtime import req, rig as rig
+from test_runtime_custody import installation
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,mode", [
+    ("new", "reply"), ("load", "reply"), ("new", "drop-reply"), ("load", "drop-reply"),
+])
+async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
+    rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, mode: str,
+) -> None:
+    identity = installation(rig.db)
+    epoch = rig.db.initialize_runtime_epoch(identity)
+    producer = RuntimeProducer("synthetic-frontend", os.getpid(), process_start_time(os.getpid()))
+    admission = rig.db.enroll_runtime_producer(identity, epoch.epoch, producer)
+    frontend = AcquisitionFrontend.capture(rig.runtime, identity, admission)
+    audit = tmp_path / "received.jsonl"
+    peer = Path(__file__).parent / "fixtures" / "acquisition_launch_peer.py"
+    handles = []
+    from agent_bridge.session_host import spawner
+
+    original_launch = spawner.launch_session_host
+
+    def record_launch(*args, **kwargs):
+        handle = original_launch(*args, **kwargs, state_dir=tmp_path / "host-state")
+        handles.append(handle)
+        return handle
+
+    async def resolve(target, **_kwargs):
+        return (
+            [sys.executable, "-u", str(peer), str(rig.db.db_path), str(audit), "delivery-a", mode],
+            target.cwd, dict(target.env),
+        )
+
+    monkeypatch.setattr(spawner, "launch_session_host", record_launch)
+    monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
+    monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock())
+    monkeypatch.setattr(SessionManager, "_connect_via_session_host", _SessionHostConnectionMixin._connect_via_session_host)
+    monkeypatch.setattr(core, "AcpClient", AcpClient)
+    monkeypatch.setattr(rig.manager, "_run_prompt", _SessionPromptMixin._run_prompt.__get__(rig.manager))
+    monkeypatch.setattr(rig.manager, "_notify_host_reapable", AsyncMock())
+    rig.manager._host_index = HostIndex(tmp_path / "hosts.json")
+    # An explicit empty test baseline, not inferred absence in an installation.
+    rig.manager._host_index._flush()
+    original = req()
+    if kind == "load":
+        target = SpawnTarget(
+            type="local", cwd=str(tmp_path), worktree_id="worktree-a",
+            project="test-project", explicit_cwd=True,
+        )
+        session = Session("retained-bridge", "retained", target, "task-worker")
+        session.acp_session_id, session.status = "synthetic-existing", SessionStatus.STOPPED
+        rig.db.create_session(
+            session.session_id, session.name, session.agent_name, target.cwd, "local", "stopped",
+            time.time(), acp_session_id=session.acp_session_id, target_json=target.to_json(),
+            runtime_admission=admission,
+        )
+        rig.manager._sessions[session.session_id] = session
+        rig.head["id"] = session.acp_session_id
+        rig.source["task"]["owner_session_id"] = session.session_id
+        rig.source["acquisition_reservation"].update(
+            worktree_ownership="reused", session_handle=f"local-body:{session.session_id}",
+        )
+        original = req(
+            allocation="reused", intent="continue",
+            prior_session_id=session.session_id, prior_native_session_id=session.acp_session_id,
+        )
+    try:
+        if mode == "drop-reply":
+            with pytest.raises((RuntimeError, ConnectionError, asyncio.TimeoutError)):
+                await asyncio.wait_for(rig.runtime.acquire(original, custody=frontend), 15)
+            with pytest.raises(RuntimeCustodyError, match="held"):
+                await rig.runtime.acquire(original, custody=frontend)
+        else:
+            result = await asyncio.wait_for(rig.runtime.acquire(original, custody=frontend), 15)
+            session = rig.manager.get_session(result.session_id)
+            assert session is not None and session._native_turn_transport is not None
+            await asyncio.wait_for(session._prompt_task, 5)
+            assert result.native_session_id == ("synthetic-created" if kind == "new" else "synthetic-existing")
+            assert await rig.runtime.acquire(original) == result
+            turn = rig.db.get_turn(result.session_id, 0)
+            assert turn["native_accepted_at"] is not None and turn["native_consumed_at"] is None
+        received = [json.loads(line) for line in audit.read_text().splitlines()]
+        assert [item["method"] for item in received] == (
+            [f"session/{kind}"] if mode == "drop-reply" else [f"session/{kind}", "session/prompt"]
+        )
+        assert len(handles) == 1
+        assert {item["pid"] for item in received} == {handles[0].child_pid}
+        row = rig.db.execute_read("SELECT * FROM acquisition_attempts")[0]
+        assert {item["handoff"] for item in received} == {json.loads(row["launch_handoff_json"])["id"]}
+        assert row["runtime_custody_json"] == admission.document()
+        assert (row["launch_result_json"] is not None) == (mode == "reply")
+        assert rig.db.runtime_custody_inventory(identity)["restore_qualified"] is False
+    finally:
+        for session in rig.manager.list_sessions():
+            if session.client is not None:
+                with contextlib.suppress(Exception):
+                    await session.client.session_host_client.terminate()
+                await session.client.shutdown()
+            if session._prompt_task is not None and not session._prompt_task.done():
+                session._prompt_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await session._prompt_task
+        for handle in handles:
+            if handle.proc.poll() is None:
+                handle.proc.terminate()
+            await asyncio.to_thread(handle.proc.wait, timeout=5)
