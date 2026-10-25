@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from . import claims_find_cli, claims_rank, claims_transitive_cli
-from . import config as cfg, installer, machine_identity, pr_config, providers, repos, tracking
+from . import config as cfg, installer, machine_identity, pr_config, providers, repo_accounts, tracking
 from . import legacy_wsl_record_locality
 from .providers.base import ProviderError
 
@@ -61,6 +61,7 @@ def collect_local(repo: str, config: cfg.Config) -> dict:
     roots: list[dict] = []
     errors: list[dict] = []
     records: dict[tuple[str, str, str], tracking.WorktreeRecord] = {}
+    record_paths = {}
     local: list[tuple[str, tracking.WorktreeRecord]] = []
     local_machines: dict[tuple[str, str], bool] = {}
     project_configs = {config.repo_name: config}
@@ -107,7 +108,22 @@ def collect_local(repo: str, config: cfg.Config) -> dict:
                 })
                 continue
             records[(record.execution_machine, project, record.worktree_id)] = record
+            record_paths[(project, record.worktree_id)] = path
             local.append((project, record))
+
+    admitted_records = {(project, record.worktree_id): record for project, record in local}
+
+    def resolve_record(machine: str, project: str, identity: str) -> tracking.WorktreeRecord | None:
+        record = admitted_records.get((project, identity))
+        if record is None:
+            return None
+        if machine == record.execution_machine:
+            return record
+        ref = tracking.parse_claim_ref(tracking.format_claim_ref(machine, project, identity))
+        proved_path = legacy_wsl_record_locality.resolve_legacy_wsl_owner_ref(
+            ref, project_configs[project],
+        )
+        return record if proved_path == record_paths[(project, identity)] else None
 
     for project, record in local:
         root = {
@@ -120,6 +136,7 @@ def collect_local(repo: str, config: cfg.Config) -> dict:
         obligations, unresolved = claims_transitive_cli.transitive_obligations(
             record.worktree_id, project, machine=record.execution_machine,
             _record=record, _records=records, _platform=config.platform, _snapshot_only=True,
+            _record_resolver=resolve_record,
         )
         roots.append({**root, "checked_utc": checked, "unresolved": unresolved})
         errors.extend({**root, **issue} for issue in unresolved)
@@ -181,13 +198,17 @@ def provider_inventory(repo: str, config: cfg.Config) -> dict:
     if not callable(read):
         raise ProviderError(f"Provider {owner.name!r} does not support repository PR inventories")
     explicit = bool(binding.token_command or binding.token_env)
-    expected = repos.account_for_github_slug(repo) if owner.name == "github" else None
+    authority = owner.authority_endpoint(binding.api_base or "")
+    expected = repo_accounts.account_for_remote(
+        f"https://{authority}/{repo}",
+    ) if owner.name == "github" else None
     if owner.name == "github" and not expected:
         raise ProviderError("The target repository has no scoped GitHub account")
-    token = providers.resolve_token(binding) if explicit else providers.account_token_for_slug(repo, binding)
+    public_github = owner.name == "github" and authority == "github.com"
+    token = providers.resolve_token(binding) if explicit or not public_github else providers.account_token_for_slug(repo, binding)
     if explicit and not token:
         raise ProviderError("The configured repository credential is unavailable")
-    if owner.name == "github" and not token:
+    if public_github and not token:
         from . import git_ops
 
         active = git_ops.active_gh_account()

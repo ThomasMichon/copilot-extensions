@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import subprocess
 from types import SimpleNamespace as NS
 
 import pytest
@@ -185,7 +186,15 @@ def local_records(tmp_path, monkeypatch):
     return save, config(tmp_path)
 
 
-def test_historical_wsl_record_uses_receiving_project_locality(tmp_path, monkeypatch):
+@pytest.mark.parametrize("root_machine", ["example-host", "example-host-wsl"])
+@pytest.mark.parametrize("child_machine,reference_machine", [
+    ("example-host-wsl", "example-host-wsl"),
+    ("example-host", "example-host-wsl"),
+    ("example-host-wsl", "native-profile"),
+])
+def test_historical_wsl_record_uses_receiving_project_locality(
+    tmp_path, monkeypatch, root_machine, child_machine, reference_machine,
+):
     anchor = tmp_path / "source"
     anchor.mkdir()
     (anchor / "machines.yaml").write_text(
@@ -201,19 +210,38 @@ def test_historical_wsl_record_uses_receiving_project_locality(tmp_path, monkeyp
     directory.mkdir(parents=True)
     record = tracking.create_new_record(
         "legacy", "worktree/legacy", str(tmp_path / "trees" / "legacy"),
-        "host", "example-host", "wsl", directory,
+        "host", root_machine, "wsl", directory,
     )
-    record.resources = [tracking.ResourceClaim(kind="pr", ref=f"{REPO}#1", state=obligations.ACTIVE)]
+    record.resources = [
+        tracking.ResourceClaim(kind="pr", ref=f"{REPO}#1", state=obligations.ACTIVE),
+        tracking.ResourceClaim(
+            kind="worktree", ref=tracking.format_claim_ref(reference_machine, "host", "child"),
+            state=obligations.ACTIVE,
+        ),
+    ]
     tracking.save_record(record, directory / "legacy.yaml")
+    child = tracking.create_new_record(
+        "child", "worktree/child", str(tmp_path / "trees" / "child"),
+        "host", child_machine, "wsl", directory,
+    )
+    child.resources = [tracking.ResourceClaim(kind="pr", ref=f"{REPO}#2", state=obligations.ACTIVE)]
+    tracking.save_record(child, directory / "child.yaml")
     monkeypatch.setattr(cfg, "project_dir", lambda *_a: directory.parent)
     monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: conf)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
     monkeypatch.setattr(pr_sweep.installer, "read_projects_registry", lambda **_k: {"projects": {"host": {}}})
-    before = (directory / "legacy.yaml").read_bytes()
+    before = {path: path.read_bytes() for path in directory.glob("*.yaml")}
     result = pr_sweep.collect_local(REPO, conf)
-    assert len(result["claims"]) == 1 and result["claims"][0]["machine"] == "example-host"
-    assert not result["errors"]
-    assert (directory / "legacy.yaml").read_bytes() == before
+    root_claims = [claim for claim in result["claims"] if claim["worktree_id"] == "legacy"]
+    assert all(claim["machine"] == root_machine for claim in root_claims)
+    if reference_machine == "native-profile":
+        assert [claim["number"] for claim in root_claims] == [1]
+        assert result["errors"]
+    else:
+        assert [claim["number"] for claim in root_claims] == [1, 2]
+        assert root_claims[1]["path"] == ["legacy", "child"]
+        assert not result["errors"]
+    assert before == {path: path.read_bytes() for path in directory.glob("*.yaml")}
 
 
 def test_local_walk_keeps_original_project_root_and_full_transitive_path(local_records, tmp_path):
@@ -348,7 +376,7 @@ def test_explicit_provider_token_still_passes_expected_account(monkeypatch, tmp_
     binding = NS(provider="github", api_base="", token_command="explicit", token_env="")
     monkeypatch.setattr(pr_sweep.pr_config, "resolve_repo_config_for_slug",
                         lambda *_a: NS(resolved=True, repo_config=NS(pr=binding)))
-    monkeypatch.setattr(pr_sweep.repos, "account_for_github_slug", lambda *_a: "expected-account")
+    monkeypatch.setattr(pr_sweep.repo_accounts, "account_for_remote", lambda *_a: "expected-account")
     monkeypatch.setattr(pr_sweep.providers, "resolve_token", lambda *_a: "configured-token")
     calls = []
     monkeypatch.setattr(pr_sweep.providers, "get_provider", lambda *_a: NS(
@@ -358,6 +386,50 @@ def test_explicit_provider_token_still_passes_expected_account(monkeypatch, tmp_
     assert pr_sweep.provider_inventory(REPO, config(tmp_path))["complete"]
     assert calls[0]["expected_login"] == "expected-account"
     assert calls[0]["token"] == "configured-token"
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("actual", ["enterprise-reader", "another-account"])
+def test_enterprise_inventory_uses_registered_host_account(monkeypatch, tmp_path, explicit, actual):
+    from agent_worktrees import repos
+    from agent_worktrees.providers import repository_inventory
+
+    registry = repos.ReposRegistry(repos={
+        "public": repos.RepoEntry("public", remote=f"https://github.com/{REPO}", account="public-reader"),
+        "enterprise": repos.RepoEntry(
+            "enterprise", remote=f"https://forge.example/{REPO}.git", account="enterprise-reader",
+        ),
+    })
+    monkeypatch.setattr(repos, "read_registry", lambda **_k: registry)
+    binding = NS(
+        provider="github", api_base="https://forge.example/api/v3", token_command="",
+        token_env="SWEEP_TEST_TOKEN" if explicit else "",
+    )
+    monkeypatch.setenv("SWEEP_TEST_TOKEN", "selected-repository-token")
+    monkeypatch.setattr(pr_sweep.pr_config, "resolve_repo_config_for_slug",
+                        lambda *_a: NS(resolved=True, repo_config=NS(pr=binding)))
+    monkeypatch.setattr(pr_sweep.providers, "account_token_for_slug",
+                        lambda *_a: pytest.fail("public-host token resolution"))
+    calls = []
+
+    def run(argv, *, env):
+        calls.append(argv)
+        assert argv[3] == "forge.example"
+        assert argv[4].startswith("https://forge.example/api/v3/")
+        if explicit:
+            assert all(env[key] == "selected-repository-token" for key in (
+                "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            ))
+        return subprocess.CompletedProcess(argv, 0, actual if argv[-1] == ".login" else "[]", "")
+
+    monkeypatch.setattr(repository_inventory, "run_cli", run)
+    if actual == "enterprise-reader":
+        assert pr_sweep.provider_inventory(REPO, config(tmp_path))["complete"]
+        assert len(calls) == 2
+    else:
+        with pytest.raises(pr_sweep.ProviderError, match="identity"):
+            pr_sweep.provider_inventory(REPO, config(tmp_path))
+        assert len(calls) == 1
 
 
 def test_invalid_selector_executes_no_provider_or_cell(monkeypatch, tmp_path, capsys):
@@ -391,9 +463,10 @@ def test_provider_identity_failure_cannot_fall_back_to_ambient(monkeypatch, tmp_
     monkeypatch.setattr(pr_sweep.pr_config, "resolve_repo_config_for_slug",
                         lambda *_a: NS(resolved=True, repo_config=NS(pr=binding)))
     monkeypatch.setattr(pr_sweep.providers, "get_provider",
-                        lambda *_a: NS(name="github", list_open_pull_records=lambda *_a, **_k: pytest.fail("read")))
+                        lambda *_a: NS(name="github", authority_endpoint=lambda *_a: "github.com",
+                                       list_open_pull_records=lambda *_a, **_k: pytest.fail("read")))
     monkeypatch.setattr(pr_sweep.providers, "account_token_for_slug", lambda *_a: None)
-    monkeypatch.setattr(pr_sweep.repos, "account_for_github_slug", lambda *_a: "expected-account")
+    monkeypatch.setattr(pr_sweep.repo_accounts, "account_for_remote", lambda *_a: "expected-account")
     from agent_worktrees import git_ops
     monkeypatch.setattr(git_ops, "active_gh_account", lambda: "another-account")
     with pytest.raises(pr_sweep.ProviderError, match="credential is unavailable"):

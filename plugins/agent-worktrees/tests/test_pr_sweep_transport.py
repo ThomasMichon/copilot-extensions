@@ -213,3 +213,29 @@ def test_topology_alias_keeps_wrong_machine_and_environment_checks(monkeypatch, 
         selected, "/catalog/agent-worktrees", project="remote-project", repo="example/widgets", timeout=12,
     )
     assert (result["status"] == "ok") is accepted
+
+
+@pytest.mark.parametrize("ambiguous", [False, True])
+def test_legacy_response_hostname_requires_unambiguous_topology(monkeypatch, ambiguous):
+    conf = NS(machine="worker-a", platform="windows", default_repo=NS(anchor="/example/host"))
+    entries = {
+        "worker-b": transport.cfg.MachineEntry(
+            key="worker-b", display_name="B", hostname="os-host-b", copilot=True, ssh_ready=True,
+            ssh_environments=[transport.cfg.SSHEnvironment(name="linux", alias="worker-b-ssh", shell="bash")],
+        ),
+    }
+    if ambiguous:
+        entries["worker-c"] = transport.cfg.MachineEntry(
+            key="worker-c", display_name="C", hostname="os-host-b", copilot=True, ssh_ready=True,
+            ssh_environments=[transport.cfg.SSHEnvironment(name="linux", alias="worker-c-ssh", shell="bash")],
+        )
+    monkeypatch.setattr(transport.cfg, "load_machines_yaml", lambda *_a, **_k: entries)
+    monkeypatch.setattr(transport.machine_identity, "is_local_machine", lambda *_a: False)
+    selected = next(row for row in transport.targets(conf, True) if row["cell"] == "worker-b/linux")
+    monkeypatch.setattr(transport, "run_owned", lambda argv, **_k: subprocess.CompletedProcess(
+        argv, 0, json.dumps(observation(cell="os-host-b/linux")), "",
+    ))
+    result = transport.observe_remote(
+        selected, "/catalog/agent-worktrees", project="remote-project", repo="example/widgets", timeout=12,
+    )
+    assert (result["status"] == "ok") is not ambiguous

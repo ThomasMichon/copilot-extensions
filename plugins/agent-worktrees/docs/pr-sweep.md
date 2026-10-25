@@ -14,6 +14,9 @@ mode needs no SSH or fleet service:
 The GitHub inventory uses its native paginated provider transport and the
 repository's own credential binding. An unavailable scoped credential or a
 failed/malformed later page makes the provider inventory unknown, never zero.
+Account lookup is host-qualified, including registered Enterprise repositories.
+An explicit repository token or that host's existing CLI credential must pass
+the selected account's identity check before the repository census is read.
 Other providers currently report unsupported inventory capability explicitly.
 The existing GitHub bulk-completion operation remains unsupported; this read
 capability does not enable `pr-merge --all`.
@@ -61,6 +64,8 @@ platform; an unknown environment remains unavailable rather than guessed.
 Declared profiles without an SSH alias remain visible as unavailable cells.
 Selected-machine aliases resolve through the existing topology authority;
 another machine or environment is still rejected.
+Legacy response hostnames are accepted only when the topology unambiguously
+resolves them to that selected machine/environment.
 
 ```powershell
 & '<catalog argv[0]>' pr-sweep example/widgets --fleet `
@@ -113,6 +118,8 @@ across a forge and machines. No timestamp or disappeared row clears a claim.
 Historical record aliases use the receiving project's existing record-scoped
 locality proof, without rewriting stored machine labels. Descendant traversal
 stays within that invocation's admitted machine/environment snapshot.
+Mixed historical/current labels resolve only against those admitted records.
+Malformed tracked candidates add root-scoped errors without hiding valid peers.
 Historical associations and monthly retention belong to the caller's own report,
 not this stateless one-shot operation.
 

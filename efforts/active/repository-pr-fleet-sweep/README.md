@@ -324,3 +324,24 @@ the rebased Windows packet passes212 cases/four platform skips.
 The optional workflow also preserves newly merged Logger/pane portfolios;
 the sweep job is placed away from their shared insertion boundary.
 Current-head review, required CI and Linux remain necessary after this fix.
+
+The next review caught annotated-tag publication and mixed historical/current
+machine-label traversal. Batched publication now checks pinned raw object
+identity separately from commit peeling; actual annotated-tag candidates with
+an existing tagged remote baseline pass or refuse oversized new blobs correctly.
+The complete guard packet passes67 cases. Snapshot traversal reuses admitted
+records and the existing record-scoped alias proof, preserves stored labels
+and rejects foreign execution profiles; its expanded seven-file packet passes
+217 cases/four platform skips.
+
+A subsequent full review identified host-qualified account selection and
+unambiguous legacy response hostnames. Inventory now reuses the existing
+host/repository account resolver, without selecting a public-host account or
+token for Enterprise. The selected host's credential must pass its account
+identity check before census reads. Response hostnames use the canonical
+strict topology resolver; ambiguous/foreign names remain rejected. The first
+targeted packet exposed a wrong keyword on the compatibility wrapper; selecting
+the actual canonical resolver fixed all seven failures. The final seven-file
+isolated Windows packet passes223 cases/four platform skips, source lint and
+all13 install contracts pass. Documentation was reassessed and updated for
+these account/identity/error guarantees. No deadline, review or CI gate changed.

@@ -187,28 +187,44 @@ def _publication_commits(refs: list[str]) -> dict[str, str | None]:
     requested = list(dict.fromkeys(refs))
     if any(not ref or any(character.isspace() or character == "\0" for character in ref) for ref in requested):
         raise GitEnumerationError("publication references contain invalid batch input")
+    pinned = [ref for ref in requested if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", ref)]
+    expressions = [(ref, ref) for ref in pinned] + [(ref + "^{commit}", ref) for ref in requested]
     response = _git_bytes(
         "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize) %(rest)",
-        input="".join(ref + "^{commit} " + ref + "\n" for ref in requested).encode("utf-8"),
+        input="".join(expression + " " + ref + "\n" for expression, ref in expressions).encode("utf-8"),
     )
     if response.returncode:
         raise GitEnumerationError("Git could not resolve publication commit references")
     lines = _decode(response.stdout).splitlines()
-    if len(lines) != len(requested):
+    if len(lines) != len(expressions):
         raise GitEnumerationError("publication commit batch response is incomplete")
-    resolved = {}
-    for ref, line in zip(requested, lines):
-        if line == ref + "^{commit} missing":
-            resolved[ref] = None
+    metadata: dict[str, tuple[str, str] | None] = {}
+    for (expression, ref), line in zip(expressions, lines):
+        if line == expression + " missing":
+            metadata[expression] = None
             continue
         fields = line.split(maxsplit=3)
         if (
             len(fields) != 4 or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", fields[0]) is None
-            or fields[1] != "commit" or not fields[2].isdigit() or fields[3] != ref
-            or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", ref) and fields[0] != ref
+            or fields[1] not in ("commit", "tag", "tree", "blob")
+            or not fields[2].isdigit() or fields[3] != ref
+            or expression == ref and fields[0] != ref
+            or expression != ref and fields[1] != "commit"
         ):
             raise GitEnumerationError("publication commit batch response is malformed")
-        resolved[ref] = fields[0]
+        metadata[expression] = (fields[0], fields[1])
+    resolved = {}
+    for ref in requested:
+        peeled = metadata[ref + "^{commit}"]
+        if ref in pinned and peeled is not None:
+            original = metadata[ref]
+            # A tag's object identity differs legitimately from its commit.
+            if (
+                original is None or original[1] not in ("commit", "tag")
+                or original[1] == "commit" and original[0] != peeled[0]
+            ):
+                raise GitEnumerationError("publication object identity disagrees with commit peeling")
+        resolved[ref] = peeled[0] if peeled is not None else None
     return resolved
 
 

@@ -12,7 +12,7 @@ import subprocess
 from datetime import datetime
 
 from agent_procutil.owned_process import run_owned
-from machine_transport.registry import machine_identity_names
+from machine_transport.registry import find_machine_entry, machine_identity_names
 
 from . import config as cfg, machine_identity
 from .pr_sweep import SCHEMA, VERSION, utc_now
@@ -42,16 +42,24 @@ def targets(config: cfg.Config, fleet: bool) -> list[dict]:
                     profile.alias.casefold() for profile in machine.ssh_environments
                     if profile.name and profile.name != label
                 }
+                machine_names = set()
+                for identity in machine_identity_names(machine, entries=entries):
+                    if identity.casefold() in foreign_profiles:
+                        continue
+                    try:
+                        resolved = find_machine_entry(
+                            entries, identity, execution_platform=label or None, reject_ambiguous=True,
+                        )
+                    except ValueError:
+                        continue
+                    if resolved == machine:
+                        machine_names.add(identity)
                 selected[cell] = {
                     "cell": cell, "local": False,
                     "available": bool(label and machine.copilot and machine.ssh_ready and environment.alias),
                     "shell": environment.shell or ("pwsh" if label == "windows" else "bash"),
                     "alias": environment.alias or "",
-                    "machine_names": sorted({
-                        name for name in machine_identity_names(machine, include_metadata=False)
-                        if name.casefold() not in foreign_profiles
-                        and cfg.find_machine_entry(entries, name, execution_platform=label or None) == machine
-                    }),
+                    "machine_names": sorted(machine_names),
                 }
     return list(selected.values())
 
