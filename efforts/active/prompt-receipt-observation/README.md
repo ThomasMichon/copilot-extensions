@@ -635,3 +635,23 @@ new authority or ownership behavior requires a separate proposal.
 - Publication/review of preparation source must use its current head, not the
   older b129 review. The PR remains draft/no-merge while the distinct actual
   SDK-host and remaining composition/installed/platform gates stay open.
+
+### Incremental source-only acceptance
+
+- The integration owner released the source-only merge hold for this defensive
+  zero-helper slice. Accepted evidence is the full33-case factor2 real
+  ControlServer/backend/Node fixture,49 metadata adapter/registration/scheduler
+  units, current required CI and an actual current-head clean review.
+  This permits incremental source publication, not bypassing a concrete
+  correctness/safety defect, unresolved finding or failing required check.
+- The earlier draft/no-merge instructions document prior qualification phases;
+  they no longer require this source PR to wait for every campaign objective.
+  Normal ready/review/CI/role-scoped managed merge gates still apply.
+- Remaining objectives stay explicitly open under issues #7942 and #3303 and
+  the coordinating campaign: actual SDK-host/refork storage and creation-time
+  isolation, whole hook-dispatcher composition, nominal2,000ms behavior, other
+  platforms and installed deployment. Those are named follow-ups, not claimed
+  passes or automatic blockers to this scoped source slice.
+- No ready-capability marker, production deadline change, new host/session/RPC,
+  extension reload, global service/update or rollout is authorized by this
+  source-only acceptance. The broader effort remains active and is not Done.
