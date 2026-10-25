@@ -21,6 +21,9 @@ and healthy payload invocation. Ordinary-shell calls through existing globals
 must still reach the healthy legacy root or the active cell selected by the
 attributable publisher, never acquire an unselected custom root. Whole-home
 snapshots constrain healthy retained-command writes to their existing boot trace.
+Equivalent trailing-separator and dot-segment legacy roots must still publish
+the global commands. Distinct case-sensitive POSIX roots must preserve them;
+both Bash and PowerShell exercise that distinction.
 These controls do not qualify native scoped staging, service registration,
 runtime construction, host rollout or performance; cold scoped provisioning
 retains its explicit unsupported-readiness outcome.

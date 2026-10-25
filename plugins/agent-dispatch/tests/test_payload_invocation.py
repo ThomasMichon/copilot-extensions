@@ -94,14 +94,15 @@ def test_scoped_installer_preserves_legacy_launchers_after_deploying_helpers() -
     publisher = powershell.split("function Deploy-SelfProvisioningBinstub {", 1)[1].split(
         "function Test-DispatchVenv {", 1,
     )[0]
-    guard = publisher.index("if (-not $publishLegacyNames)")
+    guard = publisher.index("if (-not (Test-Path -LiteralPath $legacyInstallDir")
+    assert "(Get-InstallDirectoryIdentity -Path $InstallDir) -cne" in publisher
     assert publisher.index("$contextDir = Join-Path $binDir 'installation-context'") < guard
     assert guard < publisher.index("$ps1Path = Join-Path $LocalBin 'agent-dispatch.ps1'")
     assert "return" in publisher[guard:publisher.index("$ps1Path =")]
 
     posix = (PLUGIN / "scripts/install.sh").read_text(encoding="utf-8")
     publisher = posix.split("deploy_binstub() {", 1)[1].split("_ensure_runtime() {", 1)[0]
-    guard = publisher.index('if [[ -n "$SERVICE_SUFFIX" ]]')
+    guard = publisher.index('if [[ ! "$INSTALL_DIR" -ef "$LEGACY_INSTALL_DIR" ]]')
     assert publisher.index('mkdir -p "$INSTALL_DIR/bin/installation-context"') < guard
     assert guard < publisher.index('_runtime_publication_stage "$STUB"')
     assert "return 0" in publisher[guard:publisher.index("local STUB_STAGE")]

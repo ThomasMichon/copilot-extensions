@@ -1572,7 +1572,9 @@ function Deploy-SelfProvisioningBinstub {
             -Destination (Join-Path $contextDir $r) -Force
     }
 
-    if (-not $publishLegacyNames) {
+    if (-not (Test-Path -LiteralPath $legacyInstallDir -PathType Container) -or
+        (Get-InstallDirectoryIdentity -Path $InstallDir) -cne
+            (Get-InstallDirectoryIdentity -Path $legacyInstallDir)) {
         Write-Ok 'Scoped install keeps the global compatibility binstubs unchanged'
         return
     }

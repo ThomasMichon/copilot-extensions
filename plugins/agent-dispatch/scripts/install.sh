@@ -995,7 +995,7 @@ deploy_binstub() {
         _runtime_publication_copy "$SCRIPT_DIR/installation-context/$r" \
             "$INSTALL_DIR/bin/installation-context/$r" || return 1
     done
-    if [[ -n "$SERVICE_SUFFIX" ]]; then
+    if [[ ! "$INSTALL_DIR" -ef "$LEGACY_INSTALL_DIR" ]]; then
         _ok 'Scoped install keeps the global compatibility binstubs unchanged'
         return 0
     fi

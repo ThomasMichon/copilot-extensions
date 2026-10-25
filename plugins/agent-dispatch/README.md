@@ -195,6 +195,9 @@ An explicit scoped stamp copies its selected-root metadata and runtime helpers,
 but preserves existing global primary/board compatibility launchers byte-for-byte
 or leaves them absent. Only a default legacy-root install publishes those global
 names. Scoped stamping is not proof of isolated staging or service readiness.
+Launcher ownership compares actual directory identity, not the case-folded
+service-name suffix: equivalent legacy path spellings retain publication, while
+distinct case-sensitive directories do not acquire global commands.
 
 The actual process-boundary portfolio is the explicit T3 suite
 `libs/payload-invocation/tests/test_dispatch_first_use_publication.py`. Run it

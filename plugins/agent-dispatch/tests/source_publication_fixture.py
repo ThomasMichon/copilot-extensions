@@ -83,6 +83,7 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = $PSScriptRoot
 $PluginDir = Split-Path -Parent $ScriptDir
 $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
+$legacyInstallDir = $InstallDir
 $publishLegacyNames = $true
 $LocalBin = Join-Path $env:USERPROFILE '.local/bin'
 $PkgSrcDir = Join-Path $PluginDir 'src'
@@ -132,6 +133,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_DIR="$HOME/.agent-dispatch"
+LEGACY_INSTALL_DIR="$INSTALL_DIR"
 SERVICE_SUFFIX=""
 LOCAL_BIN="$HOME/.local/bin"
 PKG_SRC_DIR="$PLUGIN_DIR/src"

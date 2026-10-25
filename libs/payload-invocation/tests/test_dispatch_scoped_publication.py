@@ -26,6 +26,43 @@ pytestmark = [
     pytest.mark.timeout(60),
 ]
 
+SHELLS = [
+    pytest.param("bash", marks=pytest.mark.skipif(os.name == "nt", reason="Native POSIX installer")),
+    pytest.param("powershell", marks=pytest.mark.skipif(
+        POWERSHELL is None, reason="PowerShell is unavailable",
+    )),
+]
+
+
+def _environment(fixture: dict, dispatch_release: Path) -> dict[str, str]:
+    environment = _adopter(fixture, "agent-dispatch", dispatch_release)
+    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
+    environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
+    if os.name == "nt":
+        environment.pop("PSModulePath", None)
+        environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
+        environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
+    return environment
+
+
+def _stamp(
+    fixture: dict, environment: dict[str, str], shell: str, root: Path | str,
+) -> subprocess.CompletedProcess:
+    command = [*_command(fixture, shell, "install"), "stamp"]
+    command += ["-InstallDir" if shell == "powershell" else "--install-dir", str(root)]
+    result = _run(fixture, environment, command)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return result
+
+
+def _global_paths(fixture: dict, shell: str) -> list[Path]:
+    names = (
+        ("agent-dispatch.ps1", "agent-dispatch.cmd",
+         "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
+        if shell == "powershell" else ("agent-dispatch", "agent-dispatch-board")
+    )
+    return [fixture["home"] / ".local/bin" / name for name in names]
+
 
 @pytest.mark.parametrize("scope", ["custom", "cell"])
 @pytest.mark.parametrize("existing_global", [False, True])
@@ -35,31 +72,12 @@ def test_dispatch_scoped_stamp_preserves_global_ownership(
     fixture = binding_fixture
     if os.name == "nt" and POWERSHELL is None:
         pytest.skip("Native PowerShell is required")
-    environment = _adopter(fixture, "agent-dispatch", dispatch_release)
-    environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
-    environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
-    if os.name == "nt":
-        environment.pop("PSModulePath", None)
-        environment["LOCALAPPDATA"] = str(fixture["home"] / "AppData/Local")
-        environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
+    environment = _environment(fixture, dispatch_release)
     shell_profiles = _initialize_shell_profiles(fixture, environment)
     shell = "powershell" if os.name == "nt" else "bash"
-
-    def stamp(root: Path) -> subprocess.CompletedProcess:
-        command = [*_command(fixture, shell, "install"), "stamp"]
-        command += ["-InstallDir" if os.name == "nt" else "--install-dir", str(root)]
-        result = _run(fixture, environment, command)
-        assert result.returncode == 0, result.stdout + result.stderr
-        return result
-
-    names = (
-        ("agent-dispatch.ps1", "agent-dispatch.cmd",
-         "agent-dispatch-board.ps1", "agent-dispatch-board.cmd")
-        if os.name == "nt" else ("agent-dispatch", "agent-dispatch-board")
-    )
-    global_paths = [fixture["home"] / ".local/bin" / name for name in names]
+    global_paths = _global_paths(fixture, shell)
     if existing_global:
-        stamp(fixture["legacy"])
+        _stamp(fixture, environment, shell, fixture["legacy"])
     before = {path: path.read_bytes() if path.exists() else None for path in global_paths}
     assert all(value is not None for value in before.values()) is existing_global
 
@@ -71,7 +89,7 @@ def test_dispatch_scoped_stamp_preserves_global_ownership(
         arguments = {**fixture["arguments"], "legacy_root": root}
         environment["AGENT_DISPATCH_INSTALL_DIR"] = str(root)
     _policy(fixture, root, arguments, "standalone")
-    stamped = stamp(root)
+    stamped = _stamp(fixture, environment, shell, root)
     assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == before
     assert "Scoped install keeps the global compatibility binstubs unchanged" in stamped.stdout
     assert (root / "payload-dir").is_file()
@@ -138,3 +156,34 @@ def test_dispatch_scoped_stamp_preserves_global_ownership(
     prefix = invoked_root.relative_to(fixture["home"]).as_posix()
     assert changed <= {prefix, f"{prefix}/logs", f"{prefix}/logs/boot-trace.jsonl"}
     assert {path: path.read_bytes() if path.exists() else None for path in global_paths} == before
+
+
+@pytest.mark.parametrize("shell", SHELLS)
+@pytest.mark.parametrize("spelling", ["trailing", "dot"])
+def test_dispatch_legacy_root_spellings_publish_globals(
+    binding_fixture: dict, dispatch_release: Path, shell: str, spelling: str,
+) -> None:
+    fixture = binding_fixture
+    environment = _environment(fixture, dispatch_release)
+    root = str(fixture["legacy"]) + os.sep + ("." if spelling == "dot" else "")
+    stamped = _stamp(fixture, environment, shell, root)
+    assert "Scoped install keeps the global compatibility binstubs unchanged" not in stamped.stdout
+    assert all(path.is_file() for path in _global_paths(fixture, shell)), stamped.stdout
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Distinct case-sensitive POSIX directories")
+@pytest.mark.parametrize("shell", SHELLS)
+def test_dispatch_case_distinct_root_preserves_globals(
+    binding_fixture: dict, dispatch_release: Path, shell: str,
+) -> None:
+    fixture = binding_fixture
+    environment = _environment(fixture, dispatch_release)
+    _stamp(fixture, environment, shell, fixture["legacy"])
+    globals_before = {path: path.read_bytes() for path in _global_paths(fixture, shell)}
+    root = fixture["home"] / ".AGENT-DISPATCH"
+    root.mkdir()
+    assert not root.samefile(fixture["legacy"])
+    stamped = _stamp(fixture, environment, shell, root)
+    assert {path: path.read_bytes() for path in globals_before} == globals_before
+    assert "Scoped install keeps the global compatibility binstubs unchanged" in stamped.stdout
+    assert (root / "payload-dir").is_file()
