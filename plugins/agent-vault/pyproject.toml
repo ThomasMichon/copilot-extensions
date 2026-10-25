@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-vault"
-version = "0.1.105-dev1"
+version = "0.1.106-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -55,6 +55,8 @@ agent-single-instance-lease = { path = "libs/single-instance-lease" }
 # and seal/unseal raise a clear error.
 cache = ["cryptography>=50.0.0"]
 kek = ["cryptography>=50.0.0"]
+ssh = ["cryptography>=50.0.0"]
+dev = ["pytest", "cryptography>=50.0.0"]
 
 [project.scripts]
 agent-vault = "agent_vault.__main__:main"

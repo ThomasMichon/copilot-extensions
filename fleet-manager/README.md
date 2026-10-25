@@ -219,6 +219,22 @@ original correlation. It does not supply a production SSH/policy/discovery
 adapter, choose candidates, change forwarding grants or select a reconnect
 loop. Default commands do not activate it.
 
+The stdlib-only [Gateway SSH provider](docs/gateway-ssh-provider.md) joins the
+existing directional policy with an owner-selected admitted public directory.
+Its optional `agent-ssh[fleet]` CLI consumer uses the existing normalized profile
+writer, with explicit local application and monotonic directory revisions.
+It does not authenticate enrollment data, allocate listeners or claim live SSH.
+
+The standalone [SSH service](../services/ssh/README.md) adds Gateway-registered
+declared-principal onboarding, durable public bindings and bounded directory
+notifications. The explicit `ssh_directory.SSHDirectoryClient` uses the existing
+authenticated service caller and can be hosted in a machine's existing Fleet
+lifetime. It catches up after reconnect and invokes an explicitly authorized
+local consumer; it does not install another daemon or distribute private keys.
+The existing agent-ssh consumer rebuilds profiles and native login keys under
+locally selected policy. Native relay/container integration and normal managed
+setup remain separate from that control-plane channel.
+
 ## Thin client artifacts and local diagnostics
 
 `fleet-manager` builds as a dependency-free runtime wheel. Its wheel carries the

@@ -145,13 +145,15 @@ def test_total_deadline_no_retry_and_no_retained_slot(tmp_path, method, code):
     async def scenario():
         async with running(tmp_path) as rig:
             await rig.connect()
-            client = caller(rig, timeout=0.5)
+            client = caller(rig, timeout=3)
             with pytest.raises(TransportError, match=code):
                 await client.request(method, "/api/hold")
             assert rig.backends[0].started.is_set()
             assert len(rig.backends[0].requests) == 1
             assert client._active == 0
             rig.backends[0].release.set()
+            # Recovery gets the normal budget; only the stalled exchange tests expiry.
+            client._timeout = 60
             assert (await client.request("GET", "/api")).status == 200
     asyncio.run(scenario())
 
@@ -289,6 +291,34 @@ def test_challenge_refusal_never_emits_token_or_attempts_application(tmp_path, f
             with pytest.raises(TransportError) as caught:
                 await client.request("POST", "/api")
             assert caught.value.code != "outcome-unknown"
+            assert paths == ["/_fleet/challenge"]
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("status", [401, 403, 429, 502, 503, 504])
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_challenge_status_survives_real_tls_without_credentials_dispatch_or_replay(
+    tmp_path, status, method,
+):
+    async def scenario():
+        paths = []
+
+        async def handle(request):
+            paths.append(request.path)
+            return web.Response(status=status)
+
+        async def access():
+            pytest.fail("refused challenge acquired credentials")
+
+        async with endpoint(tmp_path, handle) as selected:
+            client = ServiceCaller(
+                gateway_origin=selected, gateway_ca=str(tmp_path / "tls.pem"),
+                access_token_callback=access,
+                proof_key=ECKey.generate_key("P-256").get_op_key("sign"))
+            with pytest.raises(TransportError) as caught:
+                await client.request(method, "/api/enroll", body=b"original-request")
+            assert caught.value.code == "gateway-challenge-refused"
+            assert caught.value.status == status and client._active == 0
             assert paths == ["/_fleet/challenge"]
     asyncio.run(scenario())
 

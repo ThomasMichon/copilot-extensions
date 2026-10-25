@@ -46,6 +46,9 @@ registry plus a transport `module.yaml` it writes one managed SSH fragment:
 
 ```powershell
 agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
+agent-ssh gateway-profile selected-gateway.json --json
+agent-ssh gateway-provider --policy policy.json --directory admitted.json --machine worker-a --environment linux --gateway chosen-gateway --identity-file <absolute-key> --public-key-file <absolute-public-key> --json
+agent-ssh gateway-authorization --policy policy.json --directory admitted.json --machine worker-a --environment linux --public-key-file <absolute-public-key> --state-dir <dedicated-absolute-directory> --json
 agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
@@ -59,7 +62,7 @@ agent-ssh copilot my-machine --detach --seed-file task.md
 agent-ssh copilot my-machine --stop
 ```
 
-The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
+The profile core manages SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
 
@@ -97,6 +100,48 @@ If the combined 4 KiB budget is exceeded, a fitting command
 catalog is preserved and snapshot omission is explicit. Run the catalog's
 `session-snapshot --json` command for the full current report; use the
 `agent-ssh` skill for diagnosis and route repair, not automatic launch-time repair.
+
+### Gateway transport
+
+The supported [Gateway transport](docs/gateway-transport.md) projects explicitly
+approved peer names, finite reverse-listener ports and public host pins through
+an existing Gateway SSH alias. It retains source-independent local inputs and
+uses the same profile writer; it does not enroll peers, fetch keys, open a
+connection or start another controller.
+
+The optional `fleet` extra adds the
+[Fleet policy/public-directory provider](../../fleet-manager/docs/gateway-ssh-provider.md).
+`gateway-provider` previews independent-direction filtering; `--apply` uses
+the same writer and refuses superseded or equal-revision/changed directories.
+Missing SDK support is actionable, not a fallback to unfiltered peer routes.
+Ordinary standalone profile commands remain SDK-free.
+
+The same optional extra supplies `gateway-authorization`: a read-only preview,
+or explicit `--apply` of a dedicated target-local `AuthorizedKeysFile` for a
+separately owned sshd. It grants only source-outbound/target-inbound logins
+selected by the same public directory and policy; forwarding remains disabled.
+It does not edit the user's ordinary key file, enroll a Gateway, fetch a secret,
+start a listener, or create a reconciliation loop. See the
+[native authorization contract](docs/gateway-transport.md#target-local-login-authorization).
+
+The installed `agent_ssh.gateway_sshd` module is the native foreground listener
+entrypoint for an existing target-local lifecycle owner. It verifies the real
+login principal and admitted host pin, consumes that dedicated authorization
+file, and keeps its native child within the owner's process lifetime. It is
+not a new supervisor or complete Gateway setup installer. See
+[native listener integration](docs/gateway-transport.md#native-listener-integration).
+
+For an already authenticated
+[Fleet SSH service directory notification](../../services/ssh/README.md),
+`agent_ssh.gateway_directory.apply_update` is the fixed local consumer selected
+by the machine's existing Fleet setup/lifetime owner. It verifies the local
+policy/controller and local public key, then uses the same profile builder and
+target-local authorization writer. A later admitted peer therefore gains both
+its strict-pinned route and the appropriate login-key grant without a service
+restart. Each writer retains its existing monotonic revision and conflict
+checks; a partial write fails visibly and does not acknowledge convergence.
+No new operator command, listener, private-key transfer or background owner is
+introduced. Profile-only emission is not a complete native authorization update.
 
 `fleet-targets` is the read-only static-machine fleet driver. It uses the SAME
 normalized registry and matching transport recipe as `emit-profile`, validates

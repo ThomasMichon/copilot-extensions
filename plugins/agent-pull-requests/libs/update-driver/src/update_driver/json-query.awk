@@ -1,6 +1,6 @@
 # Minimal JSON scalar/query reader for the installation-context bootstrap.
 #
-# Query paths are separated by ASCII FS (034). Modes: get, hex, type, len, keys.
+# Query paths are separated by ASCII FS (034). Modes: get, hex, type, len, keys, directory.
 
 function fail(message) {
     parse_failed = 1
@@ -337,6 +337,60 @@ function parse_value(path, character) {
     }
 }
 
+function directory_string(path, fallback, text, index_value, components, count_value) {
+    if (!(path in value_type)) {
+        if (has_case_variant(path)) {
+            fail("JSON property must use exact case")
+        }
+        return fallback
+    }
+    if (value_type[path] == "null") {
+        return fallback
+    }
+    if (value_type[path] != "string") {
+        count_value = split(path, components, separator)
+        fail("Source field '" components[count_value] "' must be a string.")
+    }
+    text = value_scalar[path]
+    for (index_value = 1; index_value <= length(text); index_value++) {
+        if (byte_value(substr(text, index_value, 1)) == 0) {
+            fail("JSON strings containing NUL are unsupported.")
+        }
+    }
+    return text
+}
+
+function hex_text(text, index_value, result) {
+    result = ""
+    for (index_value = 1; index_value <= length(text); index_value++) {
+        result = result sprintf("%02x", byte_value(substr(text, index_value, 1)))
+    }
+    return result
+}
+
+function directory_entries(root, name, source, index_value, entry, requested) {
+    root = directory_string(child_path("metadata", "pluginRoot"), "")
+    print "root:" hex_text(root)
+    if (has_case_variant("plugins")) {
+        fail("JSON property must use exact case")
+    }
+    if (value_type["plugins"] != "array" && value_type["plugins"] != "object") {
+        fail("Marketplace manifest has no plugins array.")
+    }
+    requested = ENVIRON["INSTALLATION_CONTEXT_QUERY_PLUGIN"]
+    for (index_value = 0; index_value < value_length["plugins"]; index_value++) {
+        entry = child_path("plugins", index_value)
+        name = directory_string(child_path(entry, "name"), "")
+        if (requested != "" && name != requested) {
+            continue
+        }
+        source = directory_string(child_path(entry, "source"), "")
+        print "plugin:" hex_text(name) ":" hex_text(source)
+    }
+    name = directory_string("name", "marketplace")
+    print "marketplace:" hex_text(name)
+}
+
 BEGIN {
     separator = sprintf("%c", 28)
     position = 1
@@ -355,6 +409,10 @@ END {
     skip_ws()
     if (position <= length(document)) {
         fail("trailing data at byte " position)
+    }
+    if (mode == "directory") {
+        directory_entries()
+        exit
     }
     if (!(query_path in value_type)) {
         if (has_case_variant(query_path)) {
