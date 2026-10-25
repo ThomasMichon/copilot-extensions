@@ -51,7 +51,29 @@ class _ObservationReader:
         self.stream, self.chunks, self.error = stream, [], None
         self.done = threading.Event()
         self.attempted = False
+        self.launch_failure = None
+        self.never_started = False
         self.thread = threading.Thread(target=self._read, name="git-observation-pipe", daemon=True)
+
+    def confirm_never_started(self):
+        if self.never_started:
+            return True
+        if self.launch_failure is None:
+            return False
+        lock = getattr(threading, "_active_limbo_lock", None)
+        pending = getattr(threading, "_limbo", None)
+        started = getattr(self.thread, "_started", None)
+        if lock is None or pending is None or started is None or not lock.acquire(False):
+            return False
+        try:
+            # Thread.start registers pending creation before the native launch;
+            # bootstrap records identity/start before removing that registration.
+            self.never_started = (
+                self.thread not in pending and self.thread.ident is None and not started.is_set()
+            )
+            return self.never_started
+        finally:
+            lock.release()
 
     def _read(self):
         try:
@@ -92,17 +114,20 @@ class _ObservationProcess:
             return 0 if timeout == 0 else min(timeout, max(0, self.deadline - time.monotonic()))
 
         for reader in self.readers:
-            if not reader.attempted:
-                if self.cleaning:
-                    reader.stream.close()
-                    reader.done.set()
-                else:
-                    reader.attempted = True
+            if self.cleaning and (not reader.attempted or reader.confirm_never_started()):
+                reader.stream.close()
+                reader.done.set()
+            elif not reader.attempted:
+                reader.attempted = True
+                try:
                     reader.thread.start()
+                except RuntimeError as error:
+                    reader.launch_failure = error
+                    raise
         for reader in self.readers:
             if not reader.done.wait(remaining()):
                 raise subprocess.TimeoutExpired(self.args, timeout)
-            if reader.attempted:
+            if reader.attempted and not reader.never_started:
                 reader.thread.join(remaining())
                 if reader.thread.is_alive():
                     raise subprocess.TimeoutExpired(self.args, timeout)
@@ -118,7 +143,9 @@ class _ObservationProcess:
 
     def close(self):
         if not self.cleaning or self.returncode is None or any(
-            not reader.done.is_set() or (reader.attempted and reader.thread.is_alive())
+            not reader.done.is_set() or (
+                reader.attempted and not reader.never_started and reader.thread.is_alive()
+            )
             for reader in self.readers
         ):
             raise RuntimeError("native observation root/readers remain unconfirmed")
