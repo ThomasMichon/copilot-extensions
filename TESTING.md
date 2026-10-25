@@ -3298,6 +3298,28 @@ are preserved. This is synthetic compatible-state continuity, not qualification
 of production data migrations, the shell bootstrap's download/prerequisite
 transport, service-source engine repair or host rollout.
 
+Independent service-source engine repair has a separate native contract:
+
+```text
+python tools/run-manager-runtime-acceptance.py --root .validation --contract engine-source
+```
+
+It uses the same 300-second group and 30-second assertion budgets, with one
+real engine construction in an automatically cleaned OS-temporary sandbox.
+The existing account-isolated repair fixture supplies the registered incumbent;
+only native Copilot payload acquisition is substituted with its local published
+fixture. Manager acquires merged Dev, prepares it through trusted tools, runs
+the actual native runtime-only repair and queries the constructed engine's real
+inventory. Upstream Dev advances between repair and inventory: the complete
+subsequent suite packet must still name the original commit/tree and artifact.
+The final suite process is intercepted to check that packet and exact selected
+argv; this does not exercise marketplace refresh or the full update portfolio.
+The installed interpreter and generated global command execute, the installed
+module belongs to the selected non-editable slot, and the original default-root
+SQLite witness/schema, config/database bytes and file identity are retained.
+Command ownership remains the incumbent's. This is not production-data migration,
+consumer cutover, namespaced repair or host rollout evidence.
+
 The archived normal-updater consumer has its own explicit Windows contract:
 
 ```text

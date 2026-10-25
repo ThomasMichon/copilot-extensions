@@ -319,7 +319,7 @@ def test_cli_is_default_off_and_dev_requires_consent(tmp_path, monkeypatch, caps
     assert config.configured_source(root).channel == "marketplace"
 
 
-def test_update_policy_precedes_engine_repair_without_aggregate_telemetry(
+def test_invalid_update_policy_precedes_engine_repair_without_aggregate_telemetry(
     tmp_path, monkeypatch, capsys,
 ):
     from worktree_manager import __main__ as manager
@@ -327,7 +327,8 @@ def test_update_policy_precedes_engine_repair_without_aggregate_telemetry(
 
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
-    config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
+    root.mkdir()
+    (root / "config.toml").write_text('[runtime_source]\nchannel = "unsupported"\n')
     monkeypatch.setattr(
         update_events, "UpdateRun",
         lambda: pytest.fail("pre-bootstrap policy refusal must not open aggregate telemetry"),
@@ -338,11 +339,13 @@ def test_update_policy_precedes_engine_repair_without_aggregate_telemetry(
     )
     rest = ["--repair-engine", str(tmp_path / "fresh")]
     assert manager._cmd_update(rest) == 1
-    assert "No update was run" in capsys.readouterr().err
+    assert "runtime source channel must be" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("repair", [False, True])
-def test_bootstrap_update_policy_precedes_manager_self_install(tmp_path, monkeypatch, capsys, repair):
+@pytest.mark.parametrize("target", [[], ["--target", "agent-worktrees"]])
+def test_nonrepair_bootstrap_update_policy_precedes_manager_self_install(
+    tmp_path, monkeypatch, capsys, target,
+):
     import sys
     from types import SimpleNamespace
 
@@ -362,9 +365,7 @@ def test_bootstrap_update_policy_precedes_manager_self_install(tmp_path, monkeyp
         ),
     ))
     arguments = ["--root", str(root), "--payload", str(self_install.running_payload_dir())]
-    if repair:
-        arguments.append("--repair-update")
-    assert installer.main([*arguments, "--", "update"]) == 1
+    assert installer.main([*arguments, "--", "update", *target]) == 1
     assert "No update was run" in capsys.readouterr().err
 
 

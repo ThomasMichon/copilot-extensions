@@ -2709,8 +2709,15 @@ not exceptions that abort the remaining update portfolio. Native candidate const
 health remain the installer's responsibility. Ordinary runtime updates clear
 inherited transaction pins. This is provider-side, unprofiled legacy-runtime
 execution support: Manager's non-marketplace suite-update preflight remains
-closed until acquisition, whole-portfolio execution and outcome handling are
-connected. Namespaced source execution and profile-specific target selection
+capability-aware and owns acquisition and whole-portfolio preparation. Fresh
+legacy engine repair may prepare its source before inventory is available, using
+the same trusted Manager toolkit and incumbent publication custody. The original
+service-source lease and exact commit/tree survive repair through suite
+preparation/execution; the Manager checkout is only the policy SDK, never an
+implicit service-source choice. Its native repair is runtime-only and verifies
+the actual selected completed source slot before ordinary suite orchestration.
+See [Manager's source contract](../worktree-manager/README.md#independent-runtime-source-acquisition).
+Namespaced source execution and profile-specific target selection
 are not inferred from this internal API.
 
 > **Self-stage caveat (#935).** When the `install-contract:v4 self-stage` prologue

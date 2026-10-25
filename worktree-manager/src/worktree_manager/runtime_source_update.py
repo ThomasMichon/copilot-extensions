@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+from collections.abc import Iterator
 
 from . import engine_client as ec
-from .runtime_source import acquire
+from .runtime_source import ResolvedSource, acquire
 from .runtime_source_config import configured_source
 from .runtime_source_prepare import prepare as _prepare, preparer as _preparer
 from .self_install import default_root
@@ -22,6 +24,34 @@ class PreparedSuite:
     engine_command: list[str] | None = None
 
 
+@contextmanager
+def repair_selection(arguments: list[str]) -> Iterator[ResolvedSource | None]:
+    """Hold one service-source choice through engine repair and suite execution."""
+    selection = configured_source()
+    if (
+        arguments[:1] != ["--repair-engine"] or len(arguments) < 2
+        or selection.channel == "marketplace"
+    ):
+        yield None
+        return
+    _source_options(arguments[2:])
+    with acquire(selection) as resolved:
+        yield resolved
+
+
+def _source_options(arguments: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
+    parser.add_argument("--skip-modules", nargs="*")
+    parser.add_argument("--runtime-sources")
+    try:
+        options, _unknown = parser.parse_known_args(arguments)
+    except argparse.ArgumentError as error:
+        raise ValueError(f"Invalid source-backed update arguments: {error}") from error
+    if options.runtime_sources is not None:
+        raise ValueError("Manager owns --runtime-sources; do not supply a second source packet")
+    return options
+
+
 def _targets(inventory: dict, arguments: list[str]) -> list[str]:
     from .installation_updates import _engine_rows
 
@@ -34,15 +64,7 @@ def _targets(inventory: dict, arguments: list[str]) -> list[str]:
             "Selected engine lacks prepared runtime source support. No update was run; "
             "update that engine through its existing marketplace/setup flow first."
         )
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False, exit_on_error=False)
-    parser.add_argument("--skip-modules", nargs="*")
-    parser.add_argument("--runtime-sources")
-    try:
-        options, _unknown = parser.parse_known_args(arguments)
-    except argparse.ArgumentError as error:
-        raise ValueError(f"Invalid source-backed update arguments: {error}") from error
-    if options.runtime_sources is not None:
-        raise ValueError("Manager owns --runtime-sources; do not supply a second source packet")
+    options = _source_options(arguments)
     names = []
     for row in _engine_rows(inventory):
         name = row["id"]
@@ -64,9 +86,12 @@ def _targets(inventory: dict, arguments: list[str]) -> list[str]:
 
 def prepare_suite(
     project: str | None, arguments: list[str], *, environment: dict[str, str] | None = None,
+    runtime_source: ResolvedSource | None = None,
 ) -> PreparedSuite:
     """Default to marketplace; otherwise qualify and pin before either update stage."""
     selection = configured_source()
+    if runtime_source is not None and runtime_source.selection != selection:
+        raise ValueError("Runtime source policy changed after engine repair selection")
     if selection.channel == "marketplace":
         return PreparedSuite(arguments)
     command = ec.engine_base_command() if environment is None else ec.installed_engine_command(environment)
@@ -88,7 +113,7 @@ def prepare_suite(
     names = _targets(inventory, arguments)
     tool = _preparer()
     output = default_root().absolute() / "runtime-sources/prepared"
-    with acquire(selection) as resolved:
+    with (nullcontext(runtime_source) if runtime_source is not None else acquire(selection)) as resolved:
         records = {name: _prepare(tool, resolved, name, output) for name in names}
     packet = json.dumps({"schema": SCHEMA, "version": CONTRACT, "sources": records}, sort_keys=True)
     return PreparedSuite([*arguments, "--runtime-sources", packet], command)

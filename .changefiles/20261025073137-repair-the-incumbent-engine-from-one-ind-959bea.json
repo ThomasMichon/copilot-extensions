@@ -1,0 +1,9 @@
+{
+  "comment": "Repair the incumbent engine from one independent service source and retain the exact selection through suite preparation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

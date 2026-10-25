@@ -156,3 +156,37 @@ def test_bootstrap_acquisition_failure_never_constructs_or_dispatches(
     ]) == 1
     assert not state.dispatch
     assert "Manager source acquisition refused: controlled source refusal" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("targeted", [False, True])
+def test_only_suite_repair_admits_independent_service_policy(
+    bootstrap_case: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, targeted: bool,
+) -> None:
+    from worktree_manager.runtime_source_config import RuntimeSource, set_source
+
+    state = bootstrap_case
+    set_source(RuntimeSource("dev", allow_dev=True), root=state.root)
+    calls = []
+    monkeypatch.setattr(
+        importlib.import_module("update_entry"), "validate_manager_ownership",
+        lambda *a, **kw: calls.append("ownership") or {},
+    )
+    monkeypatch.setattr(_helper(), "manager_payload", lambda payload, root: payload)
+    monkeypatch.setattr(
+        self_install, "self_install",
+        lambda *a, **kw: calls.append("install") or SimpleNamespace(
+            action="installed", slot=str(state.slot),
+        ),
+    )
+    arguments = [
+        "--root", str(state.root), "--payload", str(state.payload),
+        "--repair-update", "--", "update",
+    ]
+    if targeted:
+        assert state.installer.main([*arguments, "--target", "agent-worktrees"]) == 1
+        assert calls == [] and not state.dispatch
+    else:
+        with pytest.raises(CommandDispatched):
+            state.installer.main(arguments)
+        assert calls == ["ownership", "install"]
+        assert state.dispatch[0][1][9:] == ["update", "--repair-engine", str(state.payload.parent)]

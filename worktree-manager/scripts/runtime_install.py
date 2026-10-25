@@ -301,10 +301,14 @@ def main(argv: list[str] | None = None) -> int:
     # Bootstrap update must honor the same policy before installing Manager.
     sys.path.insert(0, str(args.payload / "src"))
     if command[:1] == ["update"]:
-        from worktree_manager.runtime_source_config import require_marketplace
+        from worktree_manager.runtime_source_config import configured_source, require_marketplace
 
         try:
-            require_marketplace(args.root)
+            targeted = any(arg == "--target" or arg.startswith("--target=") for arg in command)
+            if args.repair_update and not targeted:
+                configured_source(args.root)
+            else:
+                require_marketplace(args.root)
         except (OSError, ValueError) as error:
             print(f"Runtime source: {error}", file=sys.stderr)
             return 1
