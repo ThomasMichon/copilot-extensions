@@ -1179,6 +1179,8 @@ declarations and removes matching obsolete Dev copies before staging. This
 survives later promotions; explicit Main reintroduction clears the tombstone.
 Unsafe deletion destinations and malformed or unavailable provenance refuse the
 composition before controls are written.
+Once Main records control provenance, removing its ownership manifest also
+refuses composition rather than silently restoring legacy behavior.
 
 `tools/promotion_control_transition.py` classifies two pinned ancestor-related
 Main snapshots against their actual exact declarations. Only declared control

@@ -152,6 +152,42 @@ def test_dev_pipeline_state_is_not_deletion_authority(objects):
     assert (root / OLD).read_bytes() == b"obsolete dev\n"
 
 
+@pytest.mark.parametrize("history", ["declared", "retired", "malformed"])
+def test_manifest_removal_cannot_downgrade_recorded_control_history(objects, history):
+    root, trees, _state, receipt, blob, save, *_rest = objects
+    del trees[MAIN][control.MANIFEST_PATH]
+    if history == "retired":
+        trees[OLDER] = {
+            control.MANIFEST_PATH: blob({"schema": control.SCHEMA, "version": 1, "files": [CURRENT]}),
+            CURRENT: trees[MAIN][CURRENT],
+        }
+        receipt.update({
+            "main_head": OLDER, "manifest_blob": trees[OLDER][control.MANIFEST_PATH][2],
+            "files": {name: entry[2] for name, entry in trees[OLDER].items()},
+            "retired": {OLD: PRIOR},
+        })
+    elif history == "malformed":
+        receipt["files"] = []
+    save()
+    with pytest.raises(control.ControlPreservationError):
+        preserve(objects)
+    assert (root / OLD).read_bytes() == b"obsolete dev\n"
+    assert (root / CURRENT).read_bytes() == b"dev version\n"
+
+
+@pytest.mark.parametrize("legacy", ["no-state", "no-promotion", "no-controls"])
+def test_manifest_absence_without_control_history_retains_legacy_behavior(objects, legacy):
+    root, trees, state, _receipt, _blob, save, *_rest = objects
+    del trees[MAIN][control.MANIFEST_PATH]
+    if legacy == "no-state":
+        del trees[MAIN][STATE]
+    else:
+        state["last_promotion"] = None if legacy == "no-promotion" else {}
+        save()
+    assert preserve(objects) is None
+    assert (root / OLD).read_bytes() == b"obsolete dev\n"
+
+
 @pytest.mark.parametrize("raw", [
     b"{", b"\xff", b'{"schema":"a","schema":"b"}',
 ])

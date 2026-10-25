@@ -215,6 +215,8 @@ def _preserve_control(scratch: Path, *, main_head: str, repo: Path) -> dict | No
     if manifest_aliases and manifest_aliases != [MANIFEST_PATH]:
         raise ControlPreservationError("case-equivalent main control manifest")
     if manifest_entry is None:
+        if _previous_paths(repo, main_head, entries):
+            raise ControlPreservationError("control ownership removal requires a new plan")
         candidate_manifest = scratch / MANIFEST_PATH
         if (
             any(path.casefold() == MANIFEST_PATH.casefold() for path in candidate_entries)

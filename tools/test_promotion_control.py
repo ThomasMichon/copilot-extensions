@@ -248,6 +248,24 @@ def test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci():
     assert "test_promotion_control.py" not in str(ci["jobs"])
 
 
+def test_manifest_removal_cannot_reactivate_deleted_dev_workflow(repo: Path):
+    _enable(repo)
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / WORKFLOW).parent.mkdir(parents=True, exist_ok=True)
+    (repo / WORKFLOW).write_bytes(b"name: obsolete-dev\n")
+    (repo / "README.md").write_text("first retirement input\n", encoding="utf-8")
+    _commit(repo, "dev: control removal input")
+    first = promotion.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert first["promoted"]
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    _git(["checkout", "-q", "main"], repo)
+    (repo / control.MANIFEST_PATH).unlink()
+    (repo / WORKFLOW).unlink()
+    _commit(repo, "main: remove ownership and old workflow")
+    with pytest.raises(promotion.PromotionError, match="ownership removal"):
+        promotion.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+
 def test_git_environment_cannot_redirect_control_read(repo: Path, monkeypatch):
     pinned = _enable(repo)
     monkeypatch.setenv("GIT_DIR", str(repo / "not-the-repository"))

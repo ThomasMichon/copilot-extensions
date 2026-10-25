@@ -1277,6 +1277,14 @@ nested values and non-finite numbers. Canonical type-preserving comparison now
 rejects them; all 66 focused controls passed in 16.51 seconds. Fresh hosted
 qualification and re-review remain required for the corrected head.
 
+Re-review identified a second real boundary defect: a missing Main manifest
+could return early before checking recorded control provenance. Three downgrade
+controls reproduced it while three genuine legacy controls passed. The composer
+now refuses ownership removal when Main records prior controls/tombstones;
+malformed provenance cannot downgrade that refusal. All 72 focused cases passed
+in 12.82 seconds. The optional actual-Git portfolio adds this negative composition
+case under the same 100-second bound. No live ownership deactivation is enabled.
+
 ### 2026-10-25 - Complete-source implementation merged; late controls remain
 
 #8790 merged as `28a0ff3911f02d457160dd856b448a8965204931` at
