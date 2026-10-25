@@ -4,6 +4,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 import yaml
@@ -689,6 +690,44 @@ def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
     saved = tracking.load_record(parent.yaml_path)
     assert saved.resources[0].state == obligations.AT_REST
     assert saved.resources[0].ref == f"{identity.execution_machine}/project/child"
+
+
+@pytest.mark.parametrize(("actual", "override"), [
+    ("windows", "wsl"), ("windows", "linux"),
+    ("wsl", "windows"), ("wsl", "linux"),
+    ("linux", "windows"), ("linux", "wsl"),
+])
+def test_legacy_platform_override_requires_actual_record_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, actual: str, override: str,
+) -> None:
+    (tmp_path / "machines.yaml").write_text(
+        "machines:\n  peer-space:\n    physical_host: peer\n    execution_platform: windows\n",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="raw-host", platform=override, repo_name="project",
+        repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+        )},
+    )
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: actual)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state" / "project")
+    records = cfg.project_dir("project") / "worktrees"
+    paths = []
+    for name, platform in (("foreign", override), ("local", actual)):
+        checkout = Path(config.default_repo.worktree_root) / name
+        checkout.mkdir(parents=True)
+        record = tracking.create_new_record(
+            name, f"worktree/{name}", str(checkout), "project",
+            config.machine, platform, records,
+        )
+        paths.append(record.yaml_path)
+    before = {path: path.read_bytes() for path in paths}
+    with pytest.raises(execution_spaces.ExecutionSpaceError, match="execution platform"):
+        execution_spaces.require_record_mutation(tracking.load_record(paths[0]), config)
+    execution_spaces.require_record_mutation(tracking.load_record(paths[1]), config)
+    assert all(path.read_bytes() == contents for path, contents in before.items())
 
 
 @pytest.mark.parametrize(("body", "error"), [

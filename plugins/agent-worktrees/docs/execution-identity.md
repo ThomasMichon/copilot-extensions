@@ -124,6 +124,10 @@ journaling or carving; an unsupported mixed parent spelling leaves no new
 obligation. Historical legacy platform/path overrides retain their existing
 actual-record compatibility. Tuple admission and explicit non-legacy execution
 keys still require the configured platform to match actual execution.
+A legacy fallback also compares the record's platform to actual execution;
+matching a configured path override alone cannot admit a foreign-platform
+record. Only the earlier actual-record compatibility proof preserves a valid
+legacy override.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names

@@ -368,7 +368,12 @@ def require_record_mutation(record: Any, config: Any) -> None:
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} belongs to a different execution space"
         )
-    if getattr(record, "platform", None) != config.platform:
+    from .config import detect_platform
+
+    if (
+        getattr(record, "platform", None) != config.platform
+        or record.platform != detect_platform()
+    ):
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} has a different or unproven execution platform"
         )
