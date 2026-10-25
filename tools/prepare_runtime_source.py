@@ -217,7 +217,10 @@ def prepare(
     with tempfile.TemporaryDirectory(prefix=prefix, dir=output) as temporary:
         work = Path(temporary)
         archive = work / "source.tar"
-        git_command(source, "archive", "--format=tar", "--output", str(archive), commit)
+        git_command(
+            source, "-c", "tar.umask=0022", "archive", "--format=tar",
+            "--output", str(archive), commit,
+        )
         snapshot = work / "source"
         snapshot.mkdir()
         _extract_archive(archive, snapshot, deadline=deadline)

@@ -140,6 +140,35 @@ def test_prepare_is_noneditable_relocatable_and_reuses_exact_bytes(
     ).read_bytes()
 
 
+@pytest.mark.parametrize("archive_mask", ["0000", "0002", "0077"])
+def test_prepare_retains_safe_executable_modes_independent_of_git_config(
+    repository, tmp_path, monkeypatch, archive_mask,
+):
+    root, _commit = repository
+    script = root / "plugins" / PLUGIN / "scripts" / "install.sh"
+    script.chmod(0o755)
+    _git(root, "update-index", "--chmod=+x", "--", str(script.relative_to(root)))
+    commit = _merged_commit(root)
+    _git(root, "config", "tar.umask", archive_mask)
+    extract = source_runtime._extract_archive
+    archived_modes = {}
+
+    def observe_archive(archive, destination, **options):
+        with tarfile.open(archive, "r:") as incoming:
+            archived_modes.update(
+                (member.name, member.mode) for member in incoming if member.isfile()
+            )
+        return extract(archive, destination, **options)
+
+    monkeypatch.setattr(source_runtime, "_extract_archive", observe_archive)
+    prepared = source_runtime.prepare(root, commit, PLUGIN, tmp_path / "prepared")
+    assert archived_modes[f"plugins/{PLUGIN}/scripts/install.sh"] == 0o755
+    assert archived_modes[f"plugins/{PLUGIN}/pyproject.toml"] == 0o644
+    assert (prepared.payload / "scripts/install.sh").read_bytes() == script.read_bytes()
+    if os.name != "nt":
+        assert (prepared.payload / "scripts/install.sh").stat().st_mode & 0o777 == 0o755
+
+
 @pytest.mark.parametrize("deadline", [True, 0, float("nan"), float("inf")])
 def test_preparation_deadline_refuses_before_git_or_output(
     repository, tmp_path, monkeypatch, deadline,
