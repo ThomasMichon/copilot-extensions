@@ -27,6 +27,7 @@ import pyarrow as pa
 from agent_procutil import no_window_kwargs as no_window_kwargs
 
 from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
+from agent_index.store.lance_connection import connect_content_store
 from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
 from agent_index.store.source_layout import (
     SourceLayoutError,
@@ -120,10 +121,8 @@ class ContentStore(_ContentFtsWorkerMixin):
         *,
         table_name: str = "chunks",
     ) -> None:
-        import lancedb
-
         self._source_domain = domain_for(db_path)
-        self._db = lancedb.connect(str(db_path))
+        self._db = connect_content_store(db_path, source_aware=self._source_domain is not None)
         self._db_path = str(db_path)
         self._table_name = table_name
         self._table = None

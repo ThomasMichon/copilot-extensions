@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import subprocess
 import sys
 
@@ -70,6 +71,7 @@ class GhAuthSource:
             argv += ["--hostname", host]
         if self._account:
             argv += ["--user", self._account]
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
@@ -77,20 +79,35 @@ class GhAuthSource:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 creationflags=_SUBPROCESS_FLAGS,
+                env=(
+                    {key: value for key, value in os.environ.items()
+                     if key.upper() not in {
+                         "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+                         "GITHUB_ENTERPRISE_TOKEN", "GH_HOST",
+                     }}
+                    if self._account else None
+                ),
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout,
             )
         except (TimeoutError, asyncio.TimeoutError):
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.communicate()
             log.error("gh auth token timed out (%.0fs)", timeout)
             return None
         except FileNotFoundError:
             log.error("gh CLI not found on PATH")
             return None
+        except asyncio.CancelledError:
+            if proc is not None and proc.returncode is None:
+                proc.kill()
+                await proc.communicate()
+            raise
 
         if proc.returncode != 0:
-            err = stderr.decode(errors="replace").strip()
-            log.error("gh auth token failed (exit %d): %s", proc.returncode, err)
+            log.error("gh auth token failed (exit %d)", proc.returncode)
             return None
 
         token = stdout.decode(errors="replace").strip()

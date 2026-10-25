@@ -19,15 +19,76 @@ class SourceCredentialError(RuntimeError):
     """Static errors safe to expose through indexing task diagnostics."""
 
 
+def validate_auth_selection(auth: dict) -> None:
+    selected = [key for key in ("gateway", "relay") if key in auth]
+    if len(selected) > 1 or any(
+        not isinstance(auth[key], str) or not auth[key].strip()
+        or not Path(auth[key]).is_absolute()
+        for key in selected
+    ):
+        raise SourceCredentialError("source-provider-policy-invalid")
+
+
+def _relay_destination(spec: SourceSpec) -> str:
+    if spec.type == "github":
+        return "github.com"
+    if spec.type != "git" or not spec.remote_url:
+        raise SourceCredentialError("source-materialization-policy-required")
+    https_origin(spec.remote_url)
+    target = urlsplit(spec.remote_url)
+    if target.port not in (None, 443):
+        raise SourceCredentialError("source-provider-destination-invalid")
+    return target.hostname
+
+
+def http_source_credentials(value: dict) -> dict:
+    """Fixed source-HTTP seam; caller capabilities never come from local files."""
+    keys = {"source", "account", "recipient", "host", "action", "capability"}
+    if not isinstance(value, dict) or set(value) != keys:
+        raise SourceCredentialError("source-provider-policy-invalid")
+    capability = value["capability"]
+    if not isinstance(capability, str) or not 32 <= len(capability) <= 2048:
+        raise SourceCredentialError("source-capability-required")
+    from agent_index.indexing.engine import configured_source_specs
+    from agent_index.source_account_relay import exchange_for
+
+    matches = [
+        spec for spec in configured_source_specs()
+        if spec.name == value["source"] and spec.auth_account == value["account"]
+        and spec.auth_relay is not None and spec.auth_gateway is None
+    ]
+    if len(matches) != 1:
+        raise SourceCredentialError("source-provider-policy-invalid")
+    fields = {key: item for key, item in value.items() if key != "capability"}
+    try:
+        token = exchange_for(
+            Path(matches[0].auth_relay), fields, capability, host=_relay_destination(matches[0]),
+        )
+    except (OSError, ValueError, TypeError, RuntimeError):
+        raise SourceCredentialError("source-credential-unavailable") from None
+    return {"token": token, "account": value["account"], "host": value["host"]}
+
+
 def gateway_connector_kwargs(spec: SourceSpec) -> dict[str, object]:
-    if spec.auth_gateway is None or not spec.auth_account or spec.type not in ("git", "github"):
+    if (
+        (spec.auth_gateway is None) == (spec.auth_relay is None)
+        or not spec.auth_account or spec.type not in ("git", "github")
+    ):
         raise SourceCredentialError("source-provider-policy-invalid")
     try:
-        from fleet_manager.gateway_worker import token_provider
+        if spec.auth_relay is not None:
+            from agent_index.source_account_relay import token_provider
+        else:
+            from fleet_manager.gateway_worker import token_provider
     except ImportError:
         raise SourceCredentialError("source-provider-dependency-unavailable") from None
+    kwargs = {}
+    if spec.auth_relay is not None:
+        kwargs["host"] = _relay_destination(spec)
     provider = token_provider(
-        Path(spec.auth_gateway), source=spec.name, account=spec.auth_account,
+        Path(spec.auth_relay if spec.auth_relay is not None else spec.auth_gateway),
+        source=spec.name, account=spec.auth_account,
+        **kwargs,
     )
     if spec.type == "github":
         return {"token_provider": provider}

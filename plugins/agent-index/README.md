@@ -1,5 +1,10 @@
 # agent-index
 
+For explicitly capability-bound resident source refresh, `auth.relay` selects
+the [account-relay worker contract](docs/account-relay.md).
+It is opt-in and mutually exclusive with the scoped broker's `auth.gateway`;
+neither path falls back to ambient or anonymous source access.
+
 `agent-index` is a runtime plugin that builds and serves a local semantic +
 lexical index for a repo and its configured corpus. The shipped plugin is no
 longer just a service shell: it includes the service, CLI, indexing pipeline,

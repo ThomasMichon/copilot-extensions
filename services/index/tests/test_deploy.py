@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 
 import httpx
@@ -53,6 +54,12 @@ def _assert_successor(config, route, worker_id, chunk_id, calls):
 
     client = AgentIndexClient(route.base_url)
     health = client.health()
+    assert health["installationId"] == (config.installation_id or "")
+    if config.installation_id:
+        client = AgentIndexClient(
+            route.base_url, installation_id=config.installation_id,
+            instance_token=health["instanceToken"],
+        )
     assert health["pid"] == route.pid
     assert health["version"] == route.version == __version__
     assert health["promoted"] is True
@@ -72,8 +79,10 @@ def _assert_successor(config, route, worker_id, chunk_id, calls):
     return client
 
 
+@pytest.mark.parametrize("installation_id", [None, "native-deployment-instance"])
 def test_real_deploy_survives_updater_and_preserves_config_queue(
     config_file, config_data, tmp_path, warm_engine,  # noqa: F811 - imported pytest fixture
+    installation_id,
 ):
     from agent_index.config import machine_id
     from agent_index.indexing.task_store import TaskStore
@@ -85,6 +94,8 @@ def test_real_deploy_survives_updater_and_preserves_config_queue(
         "engine": {"port": port, "mode": "external"},
     })
     config_data["sources"].append({"name": "git:queued", "path": str(tmp_path / "queued")})
+    if installation_id is not None:
+        config_data["installation_id"] = installation_id
     config_file.write_text(yaml.safe_dump(config_data), encoding="utf-8")
     config = load_config(config_file)
     chunk_id = _seed(config)
@@ -113,7 +124,11 @@ while True:
             store.set_worker(active.id, worker.pid, machine_id(), __version__)
             pending = store.enqueue(source="git:queued", trigger_source="isolated-test")
             arguments = [
-                "-m", "agent_index_service", "deploy", "--config", str(config_file),
+                "-c", "import faulthandler,sys; "
+                "faulthandler.dump_traceback_later(20,repeat=True); "
+                "from agent_index_service.__main__ import main; "
+                "raise SystemExit(main(sys.argv[1:]))",
+                "deploy", "--config", str(config_file),
                 "--health-timeout", "45", "--drain-timeout", "10",
             ]
             contaminated = dict(os.environ)
@@ -135,7 +150,14 @@ while True:
                     arguments, cwd=tmp_path, stdout=first_log,
                     stderr=first_error, env=contaminated,
                 ) as first_updater:
-                    first_updater.wait(timeout=90)
+                    try:
+                        first_updater.wait(timeout=90)
+                    except subprocess.TimeoutExpired:
+                        first_log.flush()
+                        first_error.flush()
+                        pytest.fail(
+                            (tmp_path / "deploy-first.err").read_text(encoding="utf-8")[-12000:]
+                        )
                     first_log.flush()
                     first_text = (tmp_path / "deploy-first.log").read_text(encoding="utf-8")
                     assert first_updater.returncode == 0, (

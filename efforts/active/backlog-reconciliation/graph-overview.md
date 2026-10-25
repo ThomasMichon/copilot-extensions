@@ -337,6 +337,53 @@ metadata-only pending their own admission. Eleven numeric and three existing
 ROOT intakes have been received; original research layers and provenance
 remain unchanged.
 
+## Eighth delivered consolidation
+
+Batch 98 considered fourteen process-authority and settlement issues.
+Three redundant trackers were administratively superseded into **OPEN #4136**
+only after complete direct receiving delivery and full actual-body/discussion
+readback:
+
+| Direct unfinished safety/adoption case | Superseded tracker |
+|---------------------------------------|--------------------|
+| All three POSIX own-unit stop guards and independently contained manager/helper tests | #2554 |
+| Supported update-while-active preservation, action-time identity/activity authority, defer OR exact consent and original installed/native qualification | #4135 |
+| All four configured-command cleanup consumers, exited-root pipes, incarnation safety and caller-group isolation | #5510 |
+
+The actual receiver contains 18,123 UTF-8 bytes, codepoints and UTF-16 units,
+with 46 unchecked rows. All incumbent original bytes remain contiguous after
+the single top disclosure; all seven refined acceptance rows, check states and
+existing discussion survive. New direct Plan rows have paired Validation and
+continuing Coordination. Failed or unconfirmed cleanup retains exact custody
+and literal errors, but is not successful settlement or an alternative that
+satisfies the original full-tree requirement. No implementation, resource
+ownership or native qualification is completed by tracking consolidation.
+
+**#1742, #3942, #4195, #5006, #5716, #5954, #7643, #7650 and #8403
+remain independently OPEN**, as do #3963 and #4136. The process-slot keeper
+#3963 receives none of the proposed CWD, Proactor, multi-forward cleanup or
+external-mapping cases: those complete outcomes exceed its established scope.
+Contributor claims, actual lifecycle owners, original alternatives and finite
+qualification tiers remain. See the [dated checkpoint](<journal/2026/10.24 deliberate-reap-family-98.md>).
+
+All fourteen public dispositions, original bodies, 31 original comments and
+current custody were audited before the census: **909 whole-queue open
+at 2026-10-24 20:12:45 PDT**, comprising 740 original-cohort and 169 inflow
+issues. There are 662 eligible open issues and 247 untouched excluded-author
+issues, still 180 above the fixed checkpoint. The intervening external closure
+of #8656 was observed metadata-only and receives no campaign or technical
+completion credit; its earlier OPEN description remains historical.
+
+The graph retains **717 historical eligible identities**: 662 open and
+55 closed, comprising 47 audited graph supersessions and eight external
+changes with no credit. The four previously pending arrivals, #8796, #8797,
+#8802 and #8811, now have 21 finite clauses and eleven typed discovery links.
+All four remain independently claimed; timeline references to closed PRs
+establish neither verified merges nor completion or claim release. No
+metadata-only arrivals remain at this snapshot. Twelve numeric and three
+existing ROOT intakes have been received; initial research layers and
+provenance remain unchanged.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider

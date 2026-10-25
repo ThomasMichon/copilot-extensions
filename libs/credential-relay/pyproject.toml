@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-credential-relay"
-version = "0.1.0-dev9"
+version = "0.1.1-dev1"
 description = "Shared credential relay framework + host-credential sources for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.157-dev1",
+      "version": "0.9.158-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -38,19 +38,19 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.5.131-dev1",
+      "version": "0.5.132-dev1",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.2.105-dev1",
+      "version": "0.2.106-dev1",
       "source": "plugins/agent-containers"
     },
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.89-dev1",
+      "version": "0.2.90-dev1",
       "source": "plugins/agent-mcp"
     },
     {
@@ -116,7 +116,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.10.86-dev1",
+      "version": "0.10.87-dev1",
       "source": "plugins/agent-index"
     },
     {

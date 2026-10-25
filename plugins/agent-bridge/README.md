@@ -1,5 +1,11 @@
 # Agent Bridge
 
+The optional local `account-relay.json` policy enables a separate **account-only**
+listener under this daemon's existing lifecycle. See the
+[source/worker contract](../agent-index/docs/account-relay.md). Do not
+forward the legacy relay as an account-scoped endpoint or infer credential
+permission from ordinary Bridge/Gateway membership.
+
 Persistent inter-agent communication service for Copilot CLI. One instance per
 machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
