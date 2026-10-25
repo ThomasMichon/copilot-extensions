@@ -12,6 +12,7 @@ import pytest
 
 from agent_pull_requests.watch_provider import fetch_snapshot
 from agent_pull_requests import watch_provider
+from watch_credential_transport_fixtures import native_reader
 
 
 @pytest.mark.parametrize("lose_provider", [False, True])
@@ -32,46 +33,8 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
     source = ScopedProvider(
         lambda material: None if lose_provider and material.token.endswith("-2") else material,
     )
-    requests = tmp_path / "forge-requests"
-    forge_command = tmp_path / "forge.py"
-    forge_command.write_text(
-        "import json,os,pathlib,sys\n"
-        f"path=pathlib.Path({str(requests)!r})\n"
-        "count=len(path.read_text().splitlines())+1 if path.exists() else 1\n"
-        "expected='synthetic-forge-secret-'+str(count)\n"
-        "assert os.environ['GH_TOKEN']==os.environ['GITHUB_TOKEN']==expected\n"
-        "assert not any('synthetic-forge-secret-' in part for part in sys.argv)\n"
-        "with path.open('a') as stream: stream.write('request\\n')\n"
-        "url=sys.argv[-1]\n"
-        "assert url.startswith('https://api.github.com/repos/project/repository/')\n"
-        "if url.endswith('/pulls/7'):\n"
-        f"    value={{'state':{'closed' if replay else 'open'!r},'merged':{replay!r},"
-        "'head':{'sha':'head'},'title':'Fixture'}\n"
-        "elif url.endswith('/status'):\n"
-        "    value={'total_count':0,'statuses':[]}\n"
-        "elif '/check-runs?' in url:\n"
-        "    value={'total_count':0,'check_runs':[]}\n"
-        "else: value=[]\n"
-        "print(json.dumps(value))\n",
-        encoding="utf-8",
-    )
-    native = tmp_path / "native.py"
-    native.write_text(
-        "import json,sys\n"
-        f"sys.path.insert(0,{str(repository / 'plugins' / 'agent-worktrees' / 'src')!r})\n"
-        "from agent_worktrees.pr_credential_command import command_source\n"
-        "from agent_worktrees.providers import github\n"
-        "from agent_worktrees.providers.base import run_cli\n"
-        "from agent_worktrees.pr_snapshot_payload import snapshot_payload\n"
-        "assert sys.argv[1:7]==['pr-watch','snapshot','project/repository','7','--json',"
-        "'--credential-command']\n"
-        f"github.run_cli=lambda argv,**options: run_cli([sys.executable,{str(forge_command)!r},"
-        "*argv[1:]],**options)\n"
-        "source=command_source(sys.argv[7])\n"
-        "snapshot=github.GitHubProvider().get_snapshot('project/repository',7,credential_source=source)\n"
-        "print(json.dumps(snapshot_payload(snapshot,'project/repository',7,'github',"
-        "'https://api.github.com')))\n",
-        encoding="utf-8",
+    prefix, requests, _ = native_reader(
+        tmp_path, repository, scope, merged=replay,
     )
     monkeypatch.setenv("GH_TOKEN", "ambient-credential-must-not-win")
     monkeypatch.setenv("GITHUB_TOKEN", "ambient-credential-must-not-win")
@@ -91,7 +54,7 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
 
             def fetch():
                 return fetch_snapshot(
-                    "project/repository", 7, sys.executable, prefix=[sys.executable, str(native)],
+                    "project/repository", 7, sys.executable, prefix=prefix,
                     credential_command=credential_command, runner=run,
                 )
 
@@ -113,7 +76,7 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
                 receipt = store.execute(consumer, "register", original, expires_at=expires)
                 owner = ReplayObserver(store, bindings=(NativeObservationBinding(
                     consumer.account, consumer.repo, sys.executable,
-                    prefix=(sys.executable, str(native)),
+                    prefix=prefix,
                     credential_command=tuple(credential_command),
                 ),))
                 result = owner.cycle(expires_at=expires)
@@ -125,7 +88,7 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
                 events = store.execute(consumer, "pending", {}, expires_at=expires)["events"]
                 if lose_provider:
                     assert events == []
-                    assert len(source.calls) == 2 and requests.read_text().splitlines() == ["request"]
+                    assert len(source.calls) == 2 and len(requests.read_text().splitlines()) == 1
                 else:
                     assert len(events) == 1 and events[0]["transitions"] == ["merged"]
                     assert events[0]["registration_id"] == receipt["registration_id"]
@@ -138,7 +101,7 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
             elif lose_provider:
                 with pytest.raises(ValueError, match="native snapshot command failed"):
                     fetch()
-                assert len(source.calls) == 2 and requests.read_text().splitlines() == ["request"]
+                assert len(source.calls) == 2 and len(requests.read_text().splitlines()) == 1
             else:
                 snapshot = fetch()
                 assert snapshot.head_sha == "head" and snapshot.native_snapshot["checks_complete"]
@@ -146,3 +109,5 @@ def test_native_bridge_consumes_real_typed_exchange_without_ambient_fallback(
                 assert "synthetic-forge-secret" not in repr(snapshot)
                 assert all(item.state == "ACKED" and item.delivery is None
                            for item in gateway.gateway.broker._items.values())
+        observed = [json.loads(line)["credential"] for line in requests.read_text().splitlines()]
+        assert observed == ([1] if lose_provider else [1, 2, 3, 4])
