@@ -5,6 +5,7 @@
   "module": "agent_ssh",
   "legacyRuntimeRoot": ".agent-ssh",
   "installationContext": "required",
+  "installerLifecycle": true,
   "noSelfProvisionEnv": "AGENT_SSH_NO_SELFPROVISION",
   "purpose": "Emit inspect and verify SSH fabric profiles",
   "payloadRootEnv": "AGENT_SSH_PAYLOAD_ROOT",

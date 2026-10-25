@@ -187,6 +187,24 @@ def test_installer_lifecycle_requires_boolean(tmp_path: Path, value: object) -> 
         generator.load_manifest(manifest)
 
 
+@pytest.mark.parametrize("required_context", [False, True])
+def test_installer_lifecycle_requires_context_and_vendored_primitive(
+    tmp_path: Path, required_context: bool,
+) -> None:
+    manifest = (
+        _required_context_manifest(tmp_path) if required_context else _manifest(tmp_path)
+    )
+    if not required_context:
+        primitive = manifest.parent / "scripts/installation-context/installation_context.py"
+        primitive.parent.mkdir()
+        primitive.write_text("# fixture\n", encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["installerLifecycle"] = True
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="installerLifecycle requires a vendored installation primitive"):
+        generator.load_manifest(manifest)
+
+
 def _write_runtime_completion(slot: Path, version: str) -> None:
     (slot / ".install-complete.json").write_text(
         json.dumps(

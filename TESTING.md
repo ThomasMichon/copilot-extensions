@@ -46,6 +46,24 @@ errors or extending the original deadline.
 Expired source-lock consumption retains an active typed subprocess timeout
 and its diagnostics; successful consumption still checks the outer deadline.
 
+## Materialized source-owner SDK readiness
+
+`plugins/agent-worktrees/tests/test_source_portfolio_owners.py` materializes the
+current required-context Python runtime roster and invokes each installed owner's
+actual source validator against a separate prepared artifact. It checks canonical
+lifecycle SDK bytes and unchanged fixture selector, config and SQLite file
+identity. The fixture snapshot uses the canonical materializer's ignore policy
+and omits bytecode-only directories, retaining working-tree additions without
+requiring a platform-native Git worktree. Run this integration lane through the
+bounded test runner with short Windows and Linux-native temporary paths.
+
+This is SDK-readiness evidence with synthetic source receipts, not Git admission,
+native construction, full collected-portfolio execution, production data-format
+compatibility or serving qualification. The legacy version-1 command manifest is
+not converted. Generator controls retain its required-context/vendored-primitive
+guard and unchanged command/catalog rendering. No required unit-only CI packet
+is expanded.
+
 ## Optional native source-profile updater witness
 
 Set `COPILOT_TEST_NATIVE_SOURCE_PROFILE=1` and select
