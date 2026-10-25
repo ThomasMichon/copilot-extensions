@@ -180,7 +180,9 @@ def local_host():
     entries = _entries()
     current = local_context(config, entries, host_key, plat) if config is not None else None
     if current is not None:
-        return current.execution_machine, _ENV_LABEL[plat]
+        entry = entries.get(current.customization_key)
+        key = entry.key if entry is not None and entry.copilot else current.execution_machine
+        return key, _ENV_LABEL[plat]
     m = local_entry(entries, config_machine, host_key, plat)
     if m is not None and m.copilot:
         for env in m.ssh_environments:

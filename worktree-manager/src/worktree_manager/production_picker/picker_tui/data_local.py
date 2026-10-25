@@ -122,12 +122,16 @@ def is_local(machine: str, env: str) -> bool:
             current = roster.local_context(config, entries, LOCAL[0], actual)
             if machine.casefold() == current.execution_machine.casefold():
                 return True
-            target = resolve_machine_selection(entries, machine, actual).entry
+            selection = resolve_machine_selection(entries, machine, actual)
         except ValueError:
             return False
+        target = selection.entry
         if target is not None:
             return target.key == current.customization_key
-        return machine.casefold() == LOCAL[0].casefold()
+        return (
+            selection.target.logical_machine.casefold() == current.execution_machine.casefold()
+            or machine.casefold() == LOCAL[0].casefold()
+        )
     if entries:
         actual = local_execution_platform()
         try:
@@ -195,9 +199,18 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+def _source_key() -> tuple[str, str]:
+    try:
+        cfg.project_name()
+    except RuntimeError:
+        return LOCAL
+    config = cfg.load_config()
+    return roster.local_host() if getattr(config, "machine_binding_known", False) else LOCAL
+
+
 def machines():
     """Machine-tab descriptors. Slice 1: the local machine only."""
-    m, e = LOCAL
+    m, e = _source_key()
     return [(f"{m} {e}", m, e, True)]
 
 
@@ -337,7 +350,7 @@ def load(
 ):
     """Normalized records for this machine's worktrees (tracking + classify).
 
-    *machine*/*env* default to this host's identity (``LOCAL``). The SSH source
+    *machine*/*env* default to this host's selected source identity. The SSH source
     overrides them so the local machine's rows carry its ``machines.yaml``
     display name and env label, matching the multi-machine tab descriptors.
 
@@ -346,8 +359,9 @@ def load(
     competing caller-side answer.
     """
     derive.NOW = _dt.datetime.now()
-    machine = machine if machine is not None else LOCAL[0]
-    env = env if env is not None else LOCAL[1]
+    local = _source_key() if machine is None or env is None else (machine, env)
+    machine = machine if machine is not None else local[0]
+    env = env if env is not None else local[1]
     norm_source = {
         "source_kind": source_kind,
         "source_id": source_id,
@@ -381,8 +395,9 @@ def refresh_one(worktree_id: str, machine: str | None = None,
                 env: str | None = None, *, runner=None):
     """Read ONE current slot -- the picker's per-row Refresh."""
     derive.NOW = _dt.datetime.now()
-    machine = machine if machine is not None else LOCAL[0]
-    env = env if env is not None else LOCAL[1]
+    local = _source_key() if machine is None or env is None else (machine, env)
+    machine = machine if machine is not None else local[0]
+    env = env if env is not None else local[1]
     rows = list(
         engine_client.list_worktree_rows(
             context.project(),

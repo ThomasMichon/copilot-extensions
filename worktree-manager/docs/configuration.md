@@ -164,6 +164,11 @@ retains its canonical source key. The source, Profiles local host and per-row
 local routing use the same context; named foreign-platform/profile targets,
 ambiguity and malformed declarations still refuse. This does not rewrite
 historical record owners or bypass the engine's project/record checks.
+Local-only mode uses the same source key for its tab, list and per-row refresh,
+rather than stamping raw hostname metadata onto differently named local rows.
+Supported legacy registry keys remain the Profiles/source keys even when the
+compact execution name differs; validated legacy target spellings normalize
+to that same local execution space when no customization entry exists.
 Older bootstrap responses without provenance retain their historical strict
 roster behavior; their detected `machine` scalar is not promoted to a new
 configured binding.
