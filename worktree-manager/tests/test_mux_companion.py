@@ -504,6 +504,52 @@ def test_long_purpose_and_claim_values_remain_literal_and_complete():
     assert companion._claims_view(data)[1][0]["note"] == note
 
 
+def test_targeted_worktree_handoff_does_not_use_process_cwd(
+    tmp_path, monkeypatch, _fake_status_bundle,
+):
+    from textual.widgets import Button
+
+    process_dir = tmp_path / "other worktree"
+    target = tmp_path / "selected worktree"
+    for path, title in ((process_dir, "Wrong worktree"), (target, "Selected handoff")):
+        handoffs = path / ".state" / "handoff"
+        handoffs.mkdir(parents=True)
+        (handoffs / "handoff-example.json").write_text(json.dumps({
+            "kind": "context-handoff", "title": title, "createdAt": "2026-01-01",
+        }), encoding="utf-8")
+    payloads = {
+        "status-segment": {"id": "wt-ab12", "state": "wip", "path": str(target)},
+        "list-sessions": {"sessions": []},
+        "worktree-status-bundle": _bundle(),
+    }
+    script = tmp_path / "example engine.py"
+    script.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        f"payloads = json.loads({json.dumps(payloads)!r})\n"
+        "if sys.argv[1] == 'get':\n"
+        "    print(Path.cwd() / '.state')\n"
+        "else:\n"
+        "    print(json.dumps(payloads[sys.argv[1]]))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(process_dir)
+    monkeypatch.setattr(cc, "worktree_status_bundle", _fake_status_bundle)
+    ec.set_engine_command([sys.executable, str(script)])
+
+    async def run():
+        app = companion.MuxCompanionApp(cwd=str(target))
+        async with app.run_test():
+            await app.workers.wait_for_complete()
+            assert app._data.pending_handoff["title"] == "Selected handoff"
+            assert not app.query_one("#cutover-btn", Button).disabled
+
+    try:
+        asyncio.run(run())
+    finally:
+        ec.set_engine_command(None)
+
+
 def test_slow_refresh_keeps_textual_responsive_and_retries_initial_error(monkeypatch):
     import threading
     from textual.widgets import Static

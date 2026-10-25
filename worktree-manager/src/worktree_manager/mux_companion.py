@@ -425,7 +425,9 @@ class MuxCompanionApp(App):
         try:
             self._data = await asyncio.to_thread(
                 _load_current_worktree, self._cwd,
-                runner=cc.cancellable_read_runner(cancelled),
+                runner=cc.cancellable_read_runner(
+                    cancelled, cwd=self._cwd or os.getcwd(),
+                ),
             )
         finally:
             cancelled.set()

@@ -493,6 +493,13 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - Native relay constraint from existing source: the current psmux click bind
   is deliberately withheld because it corrupts the supported root table.
   Do not silently enable it to satisfy view-tab presentation.
+- The operator selected `same-window` for the CLI/Summary layout; captured
+  verbatim in the linked continuation and reflected in standing intent.
+  Native windows are not a substitute. A further review found target-cwd
+  loss in the new runner; it now binds every observation read to the selected
+  worktree without changing legacy two-argument runner callbacks. A real
+  different-process-cwd versus selected-worktree handoff test passes;
+  the final focused packet is 156 passed.
 
 ### 2026-10-24 - Purpose-first continuation proposed
 
