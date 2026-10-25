@@ -114,10 +114,11 @@ def build(
     unusable = False
     if expected_head != pr.head_sha:
         evidence, unusable = _evidence_snapshot(pr, cwd)
-        try:
-            point = pr_recovery.synced(record, pr, pr.head_sha, source_head, cwd=cwd)
-        except (ValueError, OSError, git_ops.GitError):
-            unusable = True
+        if not unusable:
+            try:
+                point = pr_recovery.synced(record, pr, pr.head_sha, source_head, cwd=cwd)
+            except (ValueError, OSError, git_ops.GitError):
+                unusable = True
         if point is not None and not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", point.target_head):
             unusable = True
         if unusable:

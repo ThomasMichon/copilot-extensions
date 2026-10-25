@@ -28,11 +28,11 @@ def test_source_lineage_settlement_requires_normal_mode_and_intact_evidence(
     config = SimpleNamespace(default_repo=SimpleNamespace(
         remote="origin", default_branch="main", pr=SimpleNamespace(api_base=""),
     ))
-    monkeypatch.setattr(pr_recovery_plan, "_evidence_snapshot", lambda *a: ("", False))
+    monkeypatch.setattr(pr_recovery_plan, "_evidence_snapshot", lambda *a: ("", unusable))
 
     def synced(*args, **kwargs):
         if unusable:
-            raise ValueError("invalid historical checkpoint")
+            pytest.fail("Known unusable evidence must not be probed again.")
         return None
 
     monkeypatch.setattr(pr_recovery, "synced", synced)
