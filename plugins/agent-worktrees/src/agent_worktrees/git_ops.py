@@ -24,6 +24,10 @@ from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
 from .git_errors import GitError, _redact_args as _redact_args
+from .github_credentials import (
+    AccountCredentialError as AccountCredentialError,
+    gh_token_for_target as gh_token_for_target,
+)
 
 log = logging.getLogger("agent-worktrees")
 
@@ -1075,27 +1079,6 @@ def gh_token_for_account(account: str) -> str | None:
     use :func:`gh_token_for_target` to enforce configured identity choices.
     """
     return _gh_token_for_owner(account)
-
-
-class AccountCredentialError(RuntimeError):
-    """A configured repository identity has no usable account credential."""
-
-    def __init__(self, account: str) -> None:
-        super().__init__(
-            f"GitHub credential unavailable for selected account '{account}'; "
-            "refusing ambient authentication. Check that account's gh login "
-            "and credential store, then retry."
-        )
-
-
-def gh_token_for_target(account: str, target: str | None) -> str | None:
-    """Resolve a credential without substituting an explicitly selected identity."""
-    token = gh_token_for_account(account)
-    if not token:
-        from . import repos
-        if repos.account_for_github_slug(target, configured_only=True):
-            raise AccountCredentialError(account)
-    return token
 
 
 @contextmanager

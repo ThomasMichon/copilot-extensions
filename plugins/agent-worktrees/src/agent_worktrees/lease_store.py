@@ -101,12 +101,11 @@ class GitLeaseStore:
         self._auth_args: list[str] = []
         if settings.auth_remote and settings.auth_cwd:
             try:
-                from . import git_ops
                 self._auth_args = git_ops._auth_config_args(
                     settings.auth_remote, cwd=settings.auth_cwd
                 )
-            except Exception:
-                self._auth_args = []
+            except git_ops.GitError as exc:
+                raise GitError(str(exc)) from exc
 
     def acquire(
         self,

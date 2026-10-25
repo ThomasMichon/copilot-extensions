@@ -553,13 +553,7 @@ def account_for_github_owner(
             or (None if configured_only else owner)
         )
     if registry is None:
-        if configured_only:
-            registry = read_registry(strict=True)
-        else:
-            try:
-                registry = read_registry()
-            except Exception:
-                registry = ReposRegistry()
+        registry = read_registry(strict=True) if configured_only else read_registry()
     for entry in registry.repos.values():
         if not entry.account:
             continue
@@ -922,8 +916,9 @@ def clone_repo(
     if is_https_remote(remote):
         try:
             extra_args = git_ops._auth_config_args_for_url(remote)
-        except Exception:
-            extra_args = []
+        except (git_ops.GitError, RepositoryResolutionError) as exc:
+            output.err(str(exc))
+            return None
     argv = ["git", *extra_args, "clone", remote, str(target_path)]
 
     def _redact(text: str) -> str:

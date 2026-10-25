@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -132,6 +133,63 @@ def test_git_exact_repo_does_not_borrow_sibling_identity(registry, monkeypatch):
     )
     git_ops._auth_config_args_for_url("https://github.com/example-org/sibling.git")
     assert seen == ["sibling-writer"]
+
+
+def test_clone_entrypoint_refuses_instead_of_starting_plain_git(
+    registry, monkeypatch, tmp_path, capfd,
+):
+    pin(registry, "repo")
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: pytest.fail("must not clone"),
+    )
+    assert repos.clone_repo(
+        "https://github.com/example-org/sample.git",
+        name="sample", target=str(tmp_path / "new-clone"),
+    ) is None
+    assert "selected-writer" in capfd.readouterr().out
+    assert not (tmp_path / "new-clone").exists()
+
+
+@pytest.mark.parametrize("store_kind", ["lease", "history"])
+def test_coordination_store_refuses_before_any_network(
+    registry, monkeypatch, tmp_path, store_kind,
+):
+    from agent_worktrees import claim_history_mirror, lease_store
+    from agent_worktrees.lease_config import LeaseSettings
+
+    pin(registry, "repo")
+    monkeypatch.setattr(
+        git_ops, "_remote_url",
+        lambda *args, **kwargs: "https://github.com/example-org/sample.git",
+    )
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: pytest.fail("must not contact store"),
+    )
+    settings = LeaseSettings(
+        origin="https://github.com/example-org/sample.git",
+        auth_remote="origin", auth_cwd=str(tmp_path),
+    )
+    constructor, error = (
+        (lease_store.GitLeaseStore, lease_store.GitError)
+        if store_kind == "lease"
+        else (claim_history_mirror.ClaimHistoryMirror,
+              claim_history_mirror.ClaimHistoryMirrorError)
+    )
+    with pytest.raises(error, match="selected-writer"):
+        constructor(settings)
+
+
+def test_prune_lookup_refuses_before_provider_request(registry, monkeypatch, capfd):
+    pin(registry, "repo")
+    monkeypatch.setattr(
+        base, "get_provider", lambda name: pytest.fail("must not select a provider"),
+    )
+    config_value = SimpleNamespace(
+        default_repo=SimpleNamespace(pr=config.PRConfig(provider="github")),
+    )
+    lookup = cli._make_pr_lookup(config_value)
+    assert lookup("example-org/sample", 42) is None
+    assert "selected-writer" in capfd.readouterr().out
 
 
 def test_same_active_git_and_provider_paths_are_preserved(registry, monkeypatch):

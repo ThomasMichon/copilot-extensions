@@ -231,13 +231,13 @@ class ClaimHistoryMirror:
         # uses for this same store repo -- see its own __init__ for why.
         self._auth_args: list[str] = []
         if settings.auth_remote and settings.auth_cwd:
+            from . import git_ops
             try:
-                from . import git_ops
                 self._auth_args = git_ops._auth_config_args(
                     settings.auth_remote, cwd=settings.auth_cwd
                 )
-            except Exception:
-                self._auth_args = []
+            except git_ops.GitError as exc:
+                raise ClaimHistoryMirrorError(str(exc)) from exc
 
     def push(self, entry: dict) -> bool:
         """Append one history ``entry`` -- a thin single-event wrapper over
