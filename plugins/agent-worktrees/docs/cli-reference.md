@@ -1327,6 +1327,43 @@ files untouched and carry no `files=` token:
 Any status other than `refreshed`, `current`, or `none` is printed as a
 warning.
 
+### Component-scoped updates and installation inventory
+
+`update --inventory --json` is the read-only generation-1 installation-updates
+contract of the **executing engine**, independent of its package version. It
+returns `{contract: 1, entries: [...]}` with installed/enabled distinctions,
+payload, selected-runtime and observed-running versions, installation provenance,
+update readiness and actionable limitations. `execution_source` identifies the
+executing engine installation for attribution of its durable requests.
+It does not enqueue work, acquire
+payloads, start services or request credentials. Missing running evidence is
+unknown, not the on-disk package version.
+
+`update --target <plugin> [--detach --json]` submits a durable operation for one
+already installed, eligible component. It refreshes the selected marketplace
+catalog, acquires only that plugin payload, and invokes only its owning runtime
+installer where applicable. Module owners retain their ordinary cutover flags;
+an update failure is not retried as a fresh installation. Target scope omits
+Manager self-update/recovery, unrelated payloads/runtimes, anchor sync, pivot
+pruning and suite-wide finishing. Engine targeting requires the scoped installer
+contract on both platform scripts. An older installer reports the suite-upgrade
+prerequisite instead of widening the request.
+
+Force, forced runtimes, venv recreation and module selection cannot combine
+with `--target`. Missing/disabled or policy-gated targets report setup/enablement
+or policy readiness rather than implicitly provisioning dependencies. The
+targeted engine command retains its own durable custody instead of delegating
+through a potentially older Manager; Manager is not a targeting prerequisite.
+The existing source, activation-preservation, credential, publication, runtime
+retention and durable execution/recovery owners remain authoritative.
+Untargeted updates retain their existing full-suite semantics.
+
+Manager's Configuration client uses the generation-1 read response before
+offering a plugin action; older providers that reject the inventory option
+leave that optional action unavailable with an explicit suite-upgrade path.
+Upgraded engines continue accepting old update syntax. No prior syntax is
+retired, and rollback never authorizes replay as a broader suite update.
+
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 
 `--apply` submits its canonical work to that same durable execution owner,

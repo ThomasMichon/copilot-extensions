@@ -1462,6 +1462,10 @@ def _cmd_update(rest: list[str]) -> int:
     The run is recorded through ``update_events``; the exit code follows the
     shared update table (0 success, non-zero failure classes).
     """
+    if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
+        from .installation_updates import run_targeted_update
+
+        return run_targeted_update(rest)
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source

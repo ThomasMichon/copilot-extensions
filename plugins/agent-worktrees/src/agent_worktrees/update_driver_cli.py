@@ -84,6 +84,15 @@ def cmd_update_request(args: argparse.Namespace) -> int:
     import update_driver as driver
 
     update_cli.update_options.validate_auth_flags(args)
+    if getattr(args, "inventory", False):
+        from .installation_updates import print_inventory
+
+        if _flags(args) or any(getattr(args, key, False) for key in (
+            "detach", "wait", "supervised_debug", "request_status", "recovery_status",
+            "recover_after_restart", "recover_for_repair", "auth_report",
+        )):
+            raise ValueError("--inventory is read-only and cannot select an update operation")
+        return print_inventory()
     if getattr(args, "auth_report", False):
         return update_cli.cmd_update(args)
     request = None

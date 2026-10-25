@@ -95,6 +95,8 @@ class PickerScreenPivotsMixin:
         if self._kind() == "config_section" and getattr(self, "_nf_mounted", False):
             self.call_after_refresh(self._load_current_config_section)
     def _install_config_descriptors(self):
+        from worktree_manager.installation_updates import PIVOT_NAME, configuration_pivot
+
         self._config_section_states = {}
         for descriptor in self.pivots:
             reg = descriptor.get("pivot")
@@ -106,6 +108,11 @@ class PickerScreenPivotsMixin:
             self.pivots.append({
                 "label": section.label, "kind": "config_section", "pivot": None,
                 "placement": "config", "section": section,
+            })
+        if not any(getattr(item.get("pivot"), "name", None) == PIVOT_NAME for item in self.pivots):
+            reg = configuration_pivot()
+            self.pivots.append({
+                "label": reg.label, "kind": "registered", "pivot": reg, "placement": "config",
             })
     def _pivot_descriptor_key(self, index=None):
         descriptors = getattr(self, "pivots", ())
