@@ -39,7 +39,8 @@ def test_real_producer_packet_returns_locked_metadata_with_unchanged_directory_c
         return result.returncode, result.stdout, result.stderr
     context = {}
     directories = prepare_plugins(
-        SimpleNamespace(stage_plugins=["helper@local"], plugin_roots=[str(controller)]),
+        SimpleNamespace(stage_plugins=["helper@local"], plugin_roots=[str(controller)],
+                        hosting_live_attachment=True),
         SimpleNamespace(actual_profile="trusted", workspace_folder=str(target)),
         run_input=run, prepared_context=context,
     )
@@ -86,7 +87,8 @@ def test_registered_target_source_rebinds_through_container_script(monkeypatch, 
         lambda repository: observed.append(repository) or [anchor],
     )
     script, _run = _script(
-        SimpleNamespace(stage_plugins=["sample@synthetic"], plugin_roots=[str(controller)]),
+        SimpleNamespace(stage_plugins=["sample@synthetic"], plugin_roots=[str(controller)],
+                        hosting_live_attachment=True),
         SimpleNamespace(actual_profile="trusted", workspace_folder=str(target),
                         info=SimpleNamespace(repo="registered-alias"),
                         fleet=SimpleNamespace(repo="wrong-fallback", devcontainer_path=str(controller))),
@@ -166,7 +168,8 @@ def test_preparation_uses_selected_checkout_and_worktree(monkeypatch):
         "agent_containers.plugin_preparation.build_prepare_script",
         lambda plan, workspace, **kw: observed.append((plan, workspace, kw)) or "PREPARE",
     )
-    args = SimpleNamespace(stage_plugins=[], plugin_roots=[], worktree_id="selected")
+    args = SimpleNamespace(stage_plugins=[], plugin_roots=[], worktree_id="selected",
+                           hosting_live_attachment=True)
     target = SimpleNamespace(actual_profile="trusted", workspace_folder="/workspaces/project")
 
     def run(command, stdin, *, timeout):

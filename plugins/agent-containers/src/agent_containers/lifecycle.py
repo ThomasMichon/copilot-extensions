@@ -48,12 +48,22 @@ _EXEC_OPTIONS_WITH_VALUE = {
 }
 
 
+class ContainerNotFoundError(RuntimeError):
+    """Docker explicitly confirmed absence of the requested inspect target."""
+
+
 def _creation_flags() -> int:
     return no_window_flags()
 
 
 def _docker(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
     """Run a docker CLI command, returning the CompletedProcess."""
+    operation = _docker_operation_label(args)
+    if args and args[0] in {"start", "stop", "unpause", "rm"}:
+        from .config import load_config
+        from .lifecycle_ownership import pin_lifecycle_command
+
+        args = pin_lifecycle_command(args, load_config(strict=True), inspect_container)
     try:
         return subprocess.run(
             ["docker", *args],
@@ -65,9 +75,8 @@ def _docker(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProce
     except FileNotFoundError:
         raise RuntimeError("docker CLI not found on PATH") from None
     except subprocess.TimeoutExpired as exc:
-        command = _docker_operation_label(args)
         raise RuntimeError(
-            f"{command} timed out after {timeout:.0f}s"
+            f"{operation} timed out after {timeout:.0f}s"
         ) from exc
 
 
@@ -345,6 +354,15 @@ def inspect_container(name: str) -> dict:
     """Return one container's Docker inspect document."""
     res = _docker(["inspect", name], timeout=30)
     if res.returncode != 0:
+        detail = (res.stderr.strip() or res.stdout.strip())
+        prefixes = (
+            "error: no such object: ",
+            "error: no such container: ",
+            "error response from daemon: no such container: ",
+        )
+        if any(detail.lower().startswith(prefix) and detail[len(prefix):] == name
+               for prefix in prefixes):
+            raise ContainerNotFoundError(f"docker inspect {name} failed: {detail}")
         raise RuntimeError(
             f"docker inspect {name} failed: {res.stderr.strip() or res.stdout.strip()}"
         )
@@ -701,6 +719,12 @@ def cmd_stop(config: ContainersConfig, name: str) -> int:
 
     info = _resolve_member_info(config, name)
     if info is not None:
+        from .lifecycle_ownership import lifecycle_blocker
+
+        reason = lifecycle_blocker(config, info.name, info.labels)
+        if reason:
+            print(f"Deferred: {name} ({reason})", file=sys.stderr)
+            return _BUSY_EXIT
         fleet = _resolve_member_fleet(config, info)
         restricted = bool(fleet and fleet.restricted) or info.security_profile == RESTRICTED_PROFILE
         if restricted and (fleet is None or not fleet.restricted):
@@ -813,6 +837,12 @@ def cmd_remove(config: ContainersConfig, name: str, *, force: bool = False) -> i
 
     info = _resolve_member_info(config, name)
     if info is not None:
+        from .lifecycle_ownership import lifecycle_blocker
+
+        reason = lifecycle_blocker(config, info.name, info.labels)
+        if reason:
+            print(f"Deferred: {name} ({reason})", file=sys.stderr)
+            return _BUSY_EXIT
         fleet = _resolve_member_fleet(config, info)
         # Mirrors remove_fleet's exact admission logic -- see its own
         # docstring/comments for the full case table:
