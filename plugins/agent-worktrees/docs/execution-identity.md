@@ -48,6 +48,42 @@ An unknown command/schema/version is not authority. The older `get machine`
 scalar remains unchanged and is not a substitute for this stronger contract.
 No sibling is required to install or operate Worktrees.
 
+## Local project registration and installation
+
+`register` and `install` validate local naming from the actual OS hostname and
+execution environment before writing project or runtime state. A missing,
+empty or unrelated machine map does not require enrollment. A matching
+customization supplies its own instruction metadata; a native/guest sibling's
+metadata does not become the current execution entry.
+
+The existing `--machine` option remains an explicit installation binding, with
+its original spelling retained in newly scaffolded global configuration.
+Detected naming is not scaffolded as an explicit global binding, so later
+loading retains its observation provenance, including customized physical names
+ending in platform-like text. Admission validates the binding that will actually
+survive project/global/drop-in precedence and the project-only `--force` scope.
+Neither path changes existing user-owned global configuration. In a scoped
+installation, retained project configuration is read only through the existing
+repository identity and receipt, including a different label for the same remote;
+fresh adoption needs no premature registry or receipt publication.
+Retained machine-local maps use that same proven prospective root, even before
+the new project label is registered. Checkout-local maps keep their precedence.
+Machine-map fallback uses the prospective target configuration and its retained
+knowledge binding, not the ambient project's map. Force drops only settings
+that the project scaffold will actually replace; retained global and drop-in
+knowledge bindings still participate. The selected source uses the ordinary
+canonical-plus-legacy map merge, including for a knowledge checkout.
+Admission checks both explicit-project loading and ordinary loading when a
+retained `repo_name` selects a different repository or drop-in scope.
+Configured platform precedence selects repository paths; actual observed
+execution still supplies local naming admission.
+Absent prospective maps do not fall back to an older remote's registered scope.
+Conflicting platform/profile bindings,
+ambiguous associations, execution-name collisions and invalid declarations
+produce a nonzero diagnostic before state preparation or launcher publication.
+This naming admission does not replace repository hosting policy, installation
+ownership, receiving-project or actual-record mutation checks.
+
 ## Versioned tracking identity
 
 Tracking readers also recognize an explicitly versioned physical/environment

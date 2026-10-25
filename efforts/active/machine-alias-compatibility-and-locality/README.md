@@ -51,8 +51,10 @@ and passing required CI. Completed creation-key replay under later optional
 customization merged in #8852, preserving supported legacy platform overrides.
 Completed launch-admission replay merged in #8857 after current-head approval
 and required CI. Interrupted creation-tail compatibility merged in #8865
-after current-head approval and required CI. Complete
-registration/lookup/resume and Manager entry-point proof, qualified release
+after current-head approval and required CI. Actual configuration-loader JSON
+New/short-ID lookup/Resume source proof merged in #8886, including optional-map
+and managed/external namespace boundaries. Complete harness/project
+registration and Manager entry-point proof, qualified release
 and installed acceptance remain open. The parent effort remains Active.
 These source merges do not establish release, installation or default activation.
 

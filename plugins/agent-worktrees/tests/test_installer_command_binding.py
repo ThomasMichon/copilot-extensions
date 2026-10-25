@@ -114,7 +114,7 @@ def test_command_binding_python_install_admission_precedes_runtime_mutation(
     monkeypatch.setattr(installer, "check_prereqs", lambda: [])
     monkeypatch.setattr(installation_cli.worktree_identity, "_find_repo_dir", lambda: home)
     monkeypatch.setattr(installation_cli.cfg, "project_name", lambda: "example")
-    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root: home / "missing-machines.yaml")
+    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root, **k: home / "missing-machines.yaml")
     mutations = []
 
     def deploy(*args: Any) -> int:
@@ -149,7 +149,7 @@ def test_command_binding_python_install_rejects_invalid_context_at_error_boundar
     monkeypatch.setattr(installer, "check_prereqs", lambda: [])
     monkeypatch.setattr(installation_cli.worktree_identity, "_find_repo_dir", lambda: home)
     monkeypatch.setattr(installation_cli.cfg, "project_name", lambda: "example")
-    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root: home / "missing-machines.yaml")
+    monkeypatch.setattr(installation_cli.cfg, "machines_yaml_path", lambda root, **k: home / "missing-machines.yaml")
 
     def invalid_context():
         raise _installation_context.InstallationContextError("invalid fixture context")
@@ -159,6 +159,6 @@ def test_command_binding_python_install_rejects_invalid_context_at_error_boundar
     before = list(runtime.iterdir())
     assert installation_cli.cmd_install(argparse.Namespace(machine="example-host")) == 1
     captured = capsys.readouterr()
-    assert "Runtime installation refused" in captured.out + captured.err
+    assert "Cannot resolve selected marketplace policy" in captured.out + captured.err
     assert "Traceback" not in captured.out + captured.err
     assert list(runtime.iterdir()) == before

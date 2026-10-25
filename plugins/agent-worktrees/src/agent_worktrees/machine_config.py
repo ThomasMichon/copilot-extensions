@@ -24,6 +24,11 @@ def machine_config_root(base: str | None, *, project: str | None = None) -> str 
         root = str(cfg.project_dir(project))
     except Exception:  # noqa: BLE001 -- an unresolvable project has no overlay
         return None
+    return config_overlay_root(root, base)
+
+
+def config_overlay_root(root: str, base: str | None = None) -> str | None:
+    """Classify an already-resolved project root using the normal overlay markers."""
     if base and os.path.abspath(root) == os.path.abspath(base):
         return None
     return root if any(os.path.isdir(os.path.join(root, m)) for m in _MARKERS) else None
