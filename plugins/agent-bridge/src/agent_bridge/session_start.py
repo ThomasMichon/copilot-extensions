@@ -797,7 +797,7 @@ class _SessionStartMixin:
             # session binding* names "a spawned successor, a headless launch").
             # LOCAL worktrees only -- a remote worktree's ground layer lives on
             # its own machine. Best-effort / fail-open: never breaks a launch.
-            if target.type == "local" and target.worktree_id and acp_sid:
+            if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
                 with contextlib.suppress(Exception):
                     worktree_lineage.register_session(

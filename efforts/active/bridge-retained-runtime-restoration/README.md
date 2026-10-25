@@ -297,6 +297,15 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   controls, with two collection skips; both contracts and all 814 fixtures pass.
   Scoped module, installation and documentation checks pass. Normal independent
   source review/CI/merge remain owed.
+- Independent source review reproduced premature ordinary lineage registration:
+  `start_session` wrote the native session before original creation's binding
+  fence, causing its own subsequent sessionless check to reject that session.
+  The actual Host wire fixture now makes ordinary registration visible to
+  workspace reads; it fails before the correction. Selected original launches
+  defer that ground write to their binding owner, while a separate ordinary
+  start control preserves unselected registration. The coupled
+  creation/acquisition/start/lineage lane passes 146 controls, with two
+  collection skips and verified cleanup. Current-head review remains required.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.

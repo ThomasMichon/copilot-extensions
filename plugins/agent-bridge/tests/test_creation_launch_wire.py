@@ -52,7 +52,7 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
         "id": "creation-worktree", "repo": "fixture", "path": str(path), "creation_nonce": "original-nonce",
     }
     head = None
-    calls, handles = [], []
+    calls, handles, ordinary_registrations = [], [], []
     digest = hashlib.sha256(json.dumps(["fixture", "original"]).encode()).hexdigest()
     delivery = f"creation:{digest}"
     audit = tmp_path / "received.jsonl"
@@ -82,6 +82,13 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             "sessions_indexed": True,
         }, head
 
+    def register_lineage(worktree_id, native, **_kwargs):
+        nonlocal head
+        assert worktree_id == saved["id"]
+        ordinary_registrations.append(native)
+        head = native
+        return True
+
     from agent_bridge.session_host import spawner
 
     original_launch = spawner.launch_session_host
@@ -99,6 +106,7 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
 
     monkeypatch.setattr(workspace, "worktree_command", command)
     monkeypatch.setattr(workspace, "_workspace", current)
+    monkeypatch.setattr("agent_bridge.worktree_lineage.register_session", register_lineage)
     monkeypatch.setattr(spawner, "launch_session_host", record_launch)
     monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
     monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock())
@@ -184,6 +192,7 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             else ["create", "bind-session"]
         )
         assert len(handles) == 1
+        assert not ordinary_registrations
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         expected = ["session/new"]
         if mode == "config":

@@ -144,7 +144,11 @@ through its environment.
 
 After exact native acceptance and configuration, binding uses the existing
 `bind-session` owner with a one-shot FULL fence at its actual subprocess
-boundary. An independent exact-workspace head read proves the binding result
+boundary. Selected original launches skip the ordinary best-effort lineage
+registration in `start_session`; their actual binding owner must perform that
+ground write, not mutate the workspace before its own final admission.
+Unselected local starts retain ordinary lineage registration.
+An independent exact-workspace head read proves the binding result
 before acceptance is retained, even when the epoch closed while the reply
 returned. An unknown native or binding reply remains held without retry.
 The accepted original Host transport is captured only after proven binding.
