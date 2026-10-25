@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-dispatch"
-version = "0.18.106-dev1"
+version = "0.18.107-dev1"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"

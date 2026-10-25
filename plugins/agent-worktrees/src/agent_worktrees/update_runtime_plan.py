@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import shutil
+import subprocess
 from collections.abc import Collection, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -18,6 +19,7 @@ from . import reconcile
 
 if TYPE_CHECKING:
     from .update_runtime import _RegisteredPluginTarget
+    from .update_runtime_source import PreparedRuntimeSource
 
 
 @dataclasses.dataclass(frozen=True)
@@ -34,6 +36,8 @@ class RuntimeUpdateStep:
     argv: tuple[str, ...] = ()
     fallback_argv: tuple[str, ...] = ()
     deadline_s: int = 0
+    source: PreparedRuntimeSource | None = None
+    project_root: Path | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "environment", MappingProxyType(dict(self.environment)))
@@ -44,9 +48,60 @@ class RuntimeUpdateStep:
             self.status.startswith("SKIPPED") or self.status == "payload-only"
         )
 
+    @property
+    def artifact(self) -> Path:
+        return self.source.payload if self.source is not None else self.payload
+
+
+def _select_inputs(
+    step: RuntimeUpdateStep, source: PreparedRuntimeSource | None,
+    project: Path | None = None,
+) -> RuntimeUpdateStep:
+    try:
+        environment, root = reconcile.runtime_installer_environment(step.name, step.payload)
+        environment = dict(environment)
+        if source is not None:
+            from . import update_runtime as runtime
+            from .update_runtime_source import PIN_ENV
+
+            environment.pop(PIN_ENV, None)
+            scope = reconcile.manifest_runtime_scope(source.payload)
+            if scope not in {"universal", "machine-gated"}:
+                raise ValueError("Prepared payload does not declare an installable runtime scope")
+            try:
+                if runtime._machine_gate_blocks(step.name, scope, project):
+                    return dataclasses.replace(
+                        step, status=runtime.MACHINE_GATED_SKIP, eligible=False,
+                    )
+            except runtime.MachineDetectionError as error:
+                return dataclasses.replace(step, status=f"machine detection failed: {error}")
+            source.validate(step.name, step.payload, environment)
+            project = (project or Path.cwd()).resolve()
+            environment.update({
+                PIN_ENV: source.identity,
+                "COPILOT_PLUGIN_STAGED_FROM": str(step.payload.resolve()),
+                "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(project),
+            })
+        return dataclasses.replace(
+            step, source=source, environment=environment, runtime_root=root,
+            target_version=source.version if source else reconcile.payload_version(step.payload),
+            project_root=project,
+        )
+    except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
+        label = "installation inputs invalid" if source else "installation context invalid"
+        return dataclasses.replace(step, status=f"{label}: {error}")
+
+
+def _deployed_version(step: RuntimeUpdateStep) -> str | None:
+    if step.source is not None:
+        assert step.runtime_root is not None
+        return step.source.deployed_version(step.runtime_root, step.payload)
+    return reconcile.runtime_deployed_version(step.name, root=step.runtime_root)
+
 
 def plan_registered(
     name: str, platform_name: str, *, force: bool, gate_context: Path | None = None,
+    source: PreparedRuntimeSource | None = None,
 ) -> RuntimeUpdateStep:
     from . import update_runtime as runtime
 
@@ -63,15 +118,14 @@ def plan_registered(
             return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
     except runtime.MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
+    step = _select_inputs(step, source, gate_context)
+    if step.status:
+        return step
+    pdir, environment, pver = step.artifact, step.environment, step.target_version
     try:
-        environment, root = reconcile.runtime_installer_environment(name, pdir)
-    except ValueError as error:
-        return dataclasses.replace(step, status=f"installation context invalid: {error}")
-    pver = reconcile.payload_version(pdir)
-    step = dataclasses.replace(
-        step, environment=environment, runtime_root=root, target_version=pver,
-    )
-    dver = reconcile.runtime_deployed_version(name, root=root)
+        dver = _deployed_version(step)
+    except (OSError, ValueError) as error:
+        return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
     if not force and pver and dver and reconcile._versions_equal(dver, pver):
         return dataclasses.replace(step, status="SKIPPED (current)")
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT")
@@ -126,6 +180,7 @@ def _shell_prefix(
 def plan_module(
     name: str, pdir: Path, platform_name: str, *, force: bool,
     gate_context: Path | None = None,
+    source: PreparedRuntimeSource | None = None,
 ) -> RuntimeUpdateStep:
     from . import update_runtime as runtime
 
@@ -143,15 +198,14 @@ def plan_module(
             return dataclasses.replace(step, status=runtime.MACHINE_GATED_SKIP, eligible=False)
     except runtime.MachineDetectionError as error:
         return dataclasses.replace(step, status=f"machine detection failed: {error}")
+    step = _select_inputs(step, source, gate_context)
+    if step.status:
+        return step
+    pdir, environment, pver = step.artifact, step.environment, step.target_version
     try:
-        environment, root = reconcile.runtime_installer_environment(name, pdir)
-    except ValueError as error:
-        return dataclasses.replace(step, status=f"installation context invalid: {error}")
-    pver = reconcile.payload_version(pdir)
-    step = dataclasses.replace(
-        step, environment=environment, runtime_root=root, target_version=pver,
-    )
-    dver = reconcile.runtime_deployed_version(name, root=root)
+        dver = _deployed_version(step)
+    except (OSError, ValueError) as error:
+        return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
     if not force and pver and dver and pver == dver:
         return dataclasses.replace(step, status="SKIPPED (current)")
     # Modules historically use install/update even in a selected cell. Never
@@ -219,20 +273,25 @@ def plan_modules(
     return tuple(steps)
 
 
-def plan_engine(plugin_dir: Path, platform_name: str, *, force: bool) -> RuntimeUpdateStep:
+def plan_engine(
+    plugin_dir: Path, platform_name: str, *, force: bool,
+    source: PreparedRuntimeSource | None = None, project_root: Path | None = None,
+) -> RuntimeUpdateStep:
     from . import update_cli
 
     step = RuntimeUpdateStep("agent-worktrees", "engine_runtime", plugin_dir, eligible=True)
-    try:
-        environment, root = reconcile.runtime_installer_environment("agent-worktrees", plugin_dir)
-    except ValueError as error:
-        return dataclasses.replace(step, status=f"installation context invalid: {error}")
+    step = _select_inputs(step, source, project_root)
+    if step.status:
+        return step
+    plugin_dir, root = step.artifact, step.runtime_root
+    environment = dict(step.environment)
     environment["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] = "1"
-    pver = reconcile.payload_version(plugin_dir)
-    step = dataclasses.replace(
-        step, environment=environment, runtime_root=root, target_version=pver,
-    )
-    dver = reconcile.runtime_deployed_version("agent-worktrees", root=root)
+    step = dataclasses.replace(step, environment=environment)
+    pver = step.target_version
+    try:
+        dver = _deployed_version(step)
+    except (OSError, ValueError) as error:
+        return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
     if not force and pver and pver == dver:
         if "COPILOT_EXTENSIONS_CONTEXT" in environment or not reconcile.hook_shims_drifted(plugin_dir):
             return dataclasses.replace(step, status="SKIPPED (current)")

@@ -1,9 +1,7 @@
-"""GitHub PR provider -- the ``gh`` CLI.
+"""GitHub PR provider through gh and repository-bound credential support.
 
-Uses ``gh pr create`` (and ``gh pr view``) so it inherits ``gh``'s ambient
-auth.  An explicit token (``pr.token_command`` / ``pr.token_env``) is passed
-via ``GH_TOKEN`` when configured; otherwise ``gh``'s logged-in account is
-used (the resolve_token None case).
+Explicit configuration supplies tokens; inventory reads verify the selected
+account before enumerating a repository.
 """
 
 from __future__ import annotations
@@ -461,12 +459,14 @@ class GitHubProvider:
     def list_open_pulls(
         self, repo: str, *, api_base: str = "", token: str | None = None
     ) -> tuple[int, ...]:
-        """Not implemented: pr-watch/pr-merge snapshot flow is gitea-only today."""
-        _ = (repo, api_base, token)
-        raise ProviderError(
-            f"Provider '{self.name}' does not support listing open PRs "
-            "(pr-merge --all is gitea-only today)."
-        )
+        raise ProviderError("Provider 'github' does not support listing open PRs (pr-merge --all is gitea-only today).")
+
+    def list_open_pull_records(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+        expected_login: str | None = None,
+    ) -> tuple[dict, ...]:
+        from .repository_inventory import github_open_pulls
+        return github_open_pulls(self, repo, api_base=api_base, token=token, expected_login=expected_login)
 
     def find_pull_by_head(
         self, repo: str, head: str, *, api_base: str = "", token: str | None = None

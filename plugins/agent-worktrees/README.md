@@ -31,6 +31,11 @@ The same surface provides [built-in publication checks](docs/pr-publication-chec
 and [bounded ADO remediation](docs/pr-remediation.md), without casting human
 approvals or creating pipeline runs.
 
+For a complete repository-open census and original claim paths across selected
+configured cells, use the [one-shot PR sweep](docs/pr-sweep.md). Configuration
+inspection is separate from execution, and unavailable cells never become
+empty successful inventories. This adds no watcher or deployment.
+
 Resolved machine topology treats native Windows and WSL as independent logical
 machines, conventionally `host` and `host-wsl`. The shared machine owner
 projects legacy combined entries without editing topology or historical

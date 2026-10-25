@@ -259,6 +259,33 @@ def test_scoped_binding_remains_an_explicit_bounded_native_portfolio(
         assert name not in required["jobs"]
 
 
+def test_pr_sweep_is_a_focused_manual_portfolio_not_required_ci() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "pr-sweep" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    assert trigger["workflow_dispatch"]["inputs"]["portfolio"]["default"] == "context"
+    job = workflow["jobs"]["pr-sweep-linux"]
+    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pr-sweep'"
+    assert job["runs-on"] == "ubuntu-latest" and job["timeout-minutes"] == 10
+    assert "strategy" not in job and job["env"]["UV_PYTHON"] == "3.12"
+    execution = next(step for step in job["steps"] if "run" in step)
+    assert execution["run"].count("--test-file") == 6
+    assert "--test-file tests/test_pr_sweep_process.py" in execution["run"]
+    assert "--test-timeout 60 --timeout 540" in execution["run"]
+    assert not execution.get("continue-on-error", False)
+    guard = next(step for step in job["steps"] if step.get("name", "").startswith("Qualify publication"))
+    assert guard["run"].split() == [
+        "timeout", "--signal=TERM", "--kill-after=10s", "120s",
+        "python", "-m", "pytest", "-q", "tools/test_check_large_files.py",
+        "tools/test_check_no_internal_identifiers.py",
+    ]
+    assert not guard.get("continue-on-error", False)
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    assert "pr-sweep-linux" not in required["jobs"]
+
+
 def test_codespaces_bootstrap_remains_an_explicit_bounded_native_portfolio() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
@@ -320,7 +347,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     assert set(trigger) == {"workflow_dispatch"}
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert set(inputs) == {
-        "watch_owner", "dispatch_delegation", "pr_service", "pr_artifacts", "dependency_compile",
+        "watch_owner", "dispatch_delegation", "pr_service", "ssh_service", "pr_artifacts", "dependency_compile",
         "candidate_profiles", "ssh_snapshot", "wheel_inputs",
         "guardian_followthrough", "guardian_ref",
         "runtime_profiles", "chat_construction",

@@ -173,6 +173,29 @@ def test_native_prepared_source_preserves_managed_global_owner(
         path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
         for path in (config, database, policy_path)
     }
+    owner_python = Path(before["venv"]) / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    update_probe = (
+        "import json,os,sys;from pathlib import Path;"
+        "from agent_worktrees import update_runtime,update_runtime_plan;"
+        "from agent_worktrees.update_runtime_source import PreparedRuntimeSource;"
+        "owner,artifact,project=map(Path,sys.argv[1:4]);"
+        "source=PreparedRuntimeSource(artifact,sys.argv[4]);"
+        "step=update_runtime_plan.plan_engine(owner,"
+        "'windows' if os.name=='nt' else 'linux',force=True,source=source,project_root=project);"
+        "assert not step.status,step.status;"
+        "assert step.payload==owner and step.artifact==artifact;"
+        "status=update_runtime._execute_runtime_step(step);assert status=='OK',status;"
+        "assert source.deployed_version(step.runtime_root,owner)==source.version;"
+        "print('PINNED_UPDATE_PRESERVED_GLOBAL_OWNER')"
+    )
+    assert "PINNED_UPDATE_PRESERVED_GLOBAL_OWNER" in run([
+        str(owner_python), "-I", "-B", "-X", "utf8", "-c", update_probe, str(owner), str(artifact),
+        str(project), json.dumps({
+            "runtime_source": identity, "runtime_version": identity["runtime_version"],
+        }),
+    ], "update prepared source through collected runtime plan", 300)
     environment["COPILOT_PLUGIN_STAGED_FROM"] = str(owner)
     for shell, executable in hosts:
         run(provision(artifact, shell, executable), f"deploy prepared source via {shell}", 180)

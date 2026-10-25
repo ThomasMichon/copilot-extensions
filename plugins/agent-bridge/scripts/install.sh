@@ -609,7 +609,7 @@ _bootstrap_python() {
 }
 
 _initialize_source_runtime() {
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     local py
     py="$(_bootstrap_python)" || {
         _fail "Source runtime selection requires a bootstrap Python interpreter"

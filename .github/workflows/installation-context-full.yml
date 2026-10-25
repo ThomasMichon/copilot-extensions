@@ -17,6 +17,7 @@ on:
           - ssh-recipes
           - ssh-bootstrap
           - ssh-commands
+          - pr-sweep
           - codespaces-recipes
           - codespaces-bootstrap
           - logger-recipes
@@ -1020,6 +1021,43 @@ jobs:
           --test-file tests/test_bridge_first_use_publication.py
           -k "agent-vault or test_snapshot_retains_every_byte or test_snapshot_surfaces_file_read_failure or (test_bridge_actual_first_use_publication and legacy-managed-payload)"
           --allow-explicit-tiers --test-timeout 120 --timeout 540
+
+  pr-sweep-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pr-sweep'
+    name: Repository PR sweep contracts (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify isolated provider, selection, claim and native POSIX boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_repository_inventory.py
+          --test-file tests/test_pr_sweep.py
+          --test-file tests/test_pr_sweep_transport.py
+          --test-file tests/test_pr_sweep_process.py
+          --test-file tests/test_claims_transitive.py
+          --test-file tests/test_claims_find.py
+          --allow-explicit-tiers --test-timeout 60 --timeout 540
+      - name: Install seasoned guard tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml
+      - name: Qualify publication guards and native finite-reader boundary
+        env:
+          PYTHONPATH: tools
+        run: >-
+          timeout --signal=TERM --kill-after=10s 120s
+          python -m pytest -q tools/test_check_large_files.py
+          tools/test_check_no_internal_identifiers.py
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)

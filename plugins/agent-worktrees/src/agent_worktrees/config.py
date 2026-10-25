@@ -685,7 +685,7 @@ def _parse_machines_yaml_file(
 
 
 def load_machines_yaml(
-    repo_dir: str | Path, *, config: Config | None = None,
+    repo_dir: str | Path, *, config: Config | None = None, require_alias: bool = True,
 ) -> dict[str, MachineEntry]:
     """Additively merge the canonical in-repo + legacy root ``machines.yaml``
     (returning only whichever was found first -- the prior bug, #7914 --
@@ -707,7 +707,7 @@ def load_machines_yaml(
             _parse_machines_yaml_file(canonical, require_alias=False) if have_canonical else None,
         )
     return {
-        key: replace(entry, ssh_environments=[env for env in entry.ssh_environments if env.alias])
+        key: replace(entry, ssh_environments=[env for env in entry.ssh_environments if env.alias or not require_alias])
         for key, entry in _mt_normalize_machine_entries(
             entries, observed_hostname=socket.gethostname(),
         ).items()

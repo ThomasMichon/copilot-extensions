@@ -4,6 +4,14 @@
 agent-worktrees <subcommand> [options]
 ```
 
+## Repository PR census
+
+`pr-sweep <owner/repository> [--fleet] [--include MACHINE/ENV]
+[--exclude MACHINE/ENV] [--commands FILE] [--author LOGIN] [--json]`
+reports provider-open PRs and original worktree claim paths. Start with
+`--fleet --list-cells --json` to inspect configuration without probing.
+See [one-shot scope, exact command inputs and partial-result semantics](pr-sweep.md).
+
 ## Native machine-record repair
 
 `doctor --repair-machine-record <exact-id> --from-machine <old>
