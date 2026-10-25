@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_executor import executor
+from .creation_custody import legacy_creation
 from .models import SessionStatus
 from .transport import SpawnTarget
 from .workspace_creation import creation_fact_options
@@ -86,14 +86,7 @@ async def start(
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     db = manager.db
     with executor(db, f"provider-creation:{digest}"):
-        db.execute_write(
-            "INSERT OR IGNORE INTO provider_embodiments "
-            "(key_digest,facts_digest,state,session_id) VALUES (?,?,'prepared',?)",
-            (digest, facts_digest, str(uuid.uuid4())[:12]),
-        )
-        operation = dict(db.execute_read(
-            "SELECT * FROM provider_embodiments WHERE key_digest=?", (digest,),
-        )[0])
+        operation = legacy_creation(db, "provider", digest, facts_digest)
         if operation["facts_digest"] != facts_digest:
             raise AcquisitionRefused("creation_conflict", "creation key is bound to different provider facts")
         if operation["state"] == "terminal":

@@ -25,6 +25,7 @@ from agent_bridge.connect import ConnectTracker
 from agent_bridge.drain_contract import DrainRequest
 from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
+from agent_bridge.protocol import HTTP_PROTOCOL_VERSION
 from agent_bridge.routes.admin import router
 from agent_bridge.routes.health import router as health_router
 from agent_bridge.session_cold_drain import cold_drain, owned_execution
@@ -115,6 +116,7 @@ def test_cold_drain_missing_compatible_and_refused_mismatch(session_manager) -> 
 def test_cold_drain_independent_full_control_vector(session_manager) -> None:
     path = Path(__file__).resolve().parents[1] / "contract/inputs/http47/negotiated-drain.json"
     expected = json.loads(path.read_text())
+    expected["advertised"]["protocol_version"] = HTTP_PROTOCOL_VERSION
     with api(session_manager) as client:
         actual = client.get("/health").json()
         assert {key: actual[key] for key in expected["advertised"]} == expected["advertised"]

@@ -32,6 +32,8 @@ class _SchemaMixin:
         from .turn_custody_schema import validate_schema as validate_turn_schema
         from .acquisition_custody_schema import ensure_schema as ensure_acquisition_schema
         from .acquisition_custody_schema import validate_schema as validate_acquisition_schema
+        from .creation_custody_schema import ensure_schema as ensure_creation_schema
+        from .creation_custody_schema import validate_schema as validate_creation_schema
 
         conn = self._get_conn()
         with self._write_lock:
@@ -52,6 +54,8 @@ class _SchemaMixin:
                     validate_turn_schema(conn)
                 if recorded is not None and recorded["version"] >= 35:
                     validate_acquisition_schema(conn)
+                if recorded is not None and recorded["version"] >= 36:
+                    validate_creation_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -62,11 +66,13 @@ class _SchemaMixin:
                 ensure_consumer_schema(conn)
                 ensure_turn_schema(conn)
                 ensure_acquisition_schema(conn)
+                ensure_creation_schema(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
                 validate_turn_schema(conn)
                 validate_acquisition_schema(conn)
+                validate_creation_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -82,6 +88,7 @@ class _SchemaMixin:
             validate_consumer_schema(conn)
             validate_turn_schema(conn)
             validate_acquisition_schema(conn)
+            validate_creation_schema(conn)
             conn.commit()
 
     def _ensure_current_columns(self, conn: sqlite3.Connection) -> None:
@@ -792,3 +799,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (35,))
             conn.commit()
             log.info("Schema migrated to version 35: retained original acquisition launch custody")
+
+        if from_version < 36:
+            from .creation_custody_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (36,))
+            conn.commit()
+            log.info("Schema migrated to version 36: retained original keyed creation custody")

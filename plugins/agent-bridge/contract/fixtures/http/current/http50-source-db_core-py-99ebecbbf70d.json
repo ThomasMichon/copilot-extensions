@@ -2,15 +2,15 @@
   "evidence_family": "http50-shared-asgi-v1",
   "shared_operation_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-retained-recovery.json",
-    "sha256": "5e8e4e8f824360513fb99340c82ce140d2b075b366f397c3bd569b9f379a7ab6"
+    "sha256": "f37fdd658942a5f4f2bce5380ee26f240e9d20aa1c0fbf7d62ec4cf818a5956d"
   },
   "scope": "shared named ASGI portfolio, not an independent capture",
   "captured_from": {
-    "commit": "d5219b038a431a9579fed66a1c1ea71fdfad7a77",
+    "commit": "f3f5257ed41ecf10abcb2d52bc3c80d0190d672c",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 50,
     "source_path": "plugins/agent-bridge/src/agent_bridge/db_core.py",
-    "source_git_blob": "d4774cd62305fbe9a5531ad3697f3d94d472ee93",
-    "source_sha256": "1e982b6e89337d05fcbd81df0b4889236e5ab75dde9a164d74c2209ad604b930"
+    "source_git_blob": "3b81e39357b5f750c08605313685ae9cdad1f370",
+    "source_sha256": "f0a60ba3beaf3d33f1a63fd8b0ca495067b2a9070c1d24f6deed4a5ae6516d69"
   }
 }

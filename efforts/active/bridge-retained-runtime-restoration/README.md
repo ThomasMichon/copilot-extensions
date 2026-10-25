@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK, original-turn/acquisition DB and explicit local native transport source merged; full custody/qualification/restoration open
+- **Status:** Active; opt-in SDK, original-turn/acquisition DB and explicit local native/acquisition source merged; full custody/qualification/restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -141,9 +141,13 @@ require their own review and qualification.
       qualification remain open. The
       [original-acquisition DB foundation](../../../plugins/agent-bridge/docs/acquisition-custody.md)
       merged in #8750 with internal epoch association and one-shot launch observations.
-      The explicit local acquisition adapter is implemented in the current
-      source slice; normal review/merge and the other lifecycle/host cohorts
-      remain open.
+      Explicit internal local acquisition, Host/child/new/load and prompt
+      custody merged in #8783, including no-downgrade lifecycle and recovery
+      exclusions. Other creation/background/host/remote cohorts and full
+      installed qualification remain open. The internal
+      [keyed-creation DB foundation](../../../plugins/agent-bridge/docs/creation-custody.md)
+      is under source validation; actual allocation/native effect-owner
+      integration remains open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -258,6 +262,41 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original keyed-creation DB foundation under validation
+
+- Extend the existing workspace/provider embodiment rows with their original
+  full creation facts and epoch/producer association, retained atomically before
+  any future selected effect. Exact replay observes the same original ID;
+  legacy history cannot be retrospectively enrolled or erase retained inputs.
+- Current-schema validation, passive existing-only adoption and strict inventory
+  include both creation owners. Ordinary effect paths refuse associated rows
+  instead of downgrading; no public selection or default enrollment is added.
+- Focused source/storage validation passed 204 controls, followed by 239
+  migration, durability and neighboring-admission controls. Fresh HTTP-50
+  write/no-write capture passed against committed schema-36 source
+  `f3f5257ed41ecf10abcb2d52bc3c80d0190d672c`; both semantic DB owners remain
+  bound. Older-generation fixtures are unchanged. Normal review remains pending.
+- Source/storage controls do not close Phase 1. Actual allocation, native launch,
+  provider execution and delivery fences remain the next source integration;
+  compatibility, installer and native/platform qualification stay open.
+
+### 2026-10-24 - Local acquisition source merged; keyed creation custody next
+
+- Normal review and required CI passed on exact source
+  `8fe7532bb39233a837b084025bb3eaefa594bb06`; independent review
+  `5641086211` approved with no open findings. #8783 merged as
+  `f2aa840b3265f52563b256c5c01d48916b186045`. The parent #8063 remains open.
+- The bounded local adapter now preserves original acquisition and turn
+  custody through launch, failed capture, lifecycle refusal and shutdown.
+  The eight real-Host synthetic controls are not actual model conversation,
+  native/platform qualification, attributed consumption or restoration.
+- Re-read the full Plan and Validation Plan after merge. No full cohort item
+  closes from this local slice. The next bounded source stretch extends
+  existing keyed workspace/provider creation attempt custody before allocation
+  effects, starting with those owners and their original journals. Background,
+  host/remote transfer, compatibility, guarded installer convergence and
+  separately authorized qualification/adoption remain open.
 
 ### 2026-10-24 - Original local acquisition effect owners under validation
 
