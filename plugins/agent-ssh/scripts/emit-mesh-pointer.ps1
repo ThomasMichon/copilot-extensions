@@ -5,7 +5,16 @@ $command = Join-Path $root 'bin\agent-ssh.ps1'
 $hostExe = (Get-Process -Id $PID).Path
 $env:AGENT_SSH_NO_SELFPROVISION = '1'
 try {
-    $result = @(& $hostExe -NoProfile -File $command session-snapshot --guidance 2>$null)
+    $native = Join-Path $PSScriptRoot 'snapshot_runtime.py'
+    $python = @('python3', 'python', 'py') | ForEach-Object {
+        Get-Command $_ -CommandType Application -All -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch '\\WindowsApps\\' }
+    } | Select-Object -First 1
+    if ((Test-Path -LiteralPath $native -PathType Leaf) -and $python) {
+        $result = @(& $python.Source -I -X utf8 $native snapshot 2>$null)
+    } else {
+        $result = @(& $hostExe -NoProfile -File $command session-snapshot --guidance 2>$null)
+    }
     if ($LASTEXITCODE -eq 0 -and $result) {
         $result -join "`n"
         exit 0

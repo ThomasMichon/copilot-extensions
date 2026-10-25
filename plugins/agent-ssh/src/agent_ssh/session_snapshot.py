@@ -119,3 +119,7 @@ def guidance(snapshot: dict, *, max_bytes: int = 2048) -> str:
             break
         content = candidate
     return content
+
+
+if __name__ == "__main__":
+    print(json.dumps({"additionalContext": guidance(capture())}))

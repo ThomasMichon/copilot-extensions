@@ -38,3 +38,36 @@ def parse_projects_registry(path: Path) -> dict:
     elif not isinstance(data["projects"], dict):
         raise ValueError(f"{path}: 'projects' is not a mapping")
     return data
+
+
+def read_projects_registry(path: Path, *, strict: bool = False) -> dict:
+    """Read an already owner-resolved registry path with the normal fallback."""
+    try:
+        return parse_projects_registry(path)
+    except Exception:
+        if strict:
+            raise
+        return {"projects": {}}
+
+
+def project_for_anchor(anchor: Path, *, read_projects, read_repos, platform, normalize):
+    """Resolve registered membership without importing a command dispatcher."""
+    target = normalize(str(anchor))
+    try:
+        projects = read_projects().get("projects", {})
+    except Exception:
+        projects = {}
+    for name, entry in projects.items():
+        path = entry.get("anchor") if isinstance(entry, dict) else None
+        if path and normalize(str(Path(path))) == target:
+            return name
+    try:
+        registry = read_repos()
+        selected_platform = platform()
+        for name in registry.repos:
+            path = registry.repos[name].local_path(selected_platform)
+            if path and normalize(str(Path(path))) == target:
+                return name
+    except Exception:
+        pass
+    return None

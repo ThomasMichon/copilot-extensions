@@ -1439,15 +1439,10 @@ def read_projects_registry(*, strict: bool = False) -> dict:
     Returns ``{"projects": {}}`` if the file is missing, and if it can't be read
     or parsed unless ``strict`` (see :func:`projects_registry.parse_projects_registry`).
     """
-    from .projects_registry import parse_projects_registry
+    from .projects_registry import read_projects_registry as read
 
     path = projects_yaml_path()  # an invalid installation context raises, never reads as empty
-    try:
-        return parse_projects_registry(path)
-    except Exception:
-        if strict:
-            raise
-        return {"projects": {}}
+    return read(path, strict=strict)
 
 
 def _format_yaml_value(v: object) -> str:
