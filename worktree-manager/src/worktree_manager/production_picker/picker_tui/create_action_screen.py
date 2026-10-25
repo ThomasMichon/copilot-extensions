@@ -22,6 +22,7 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.content import Content
 from textual.screen import ModalScreen
 from textual.widgets import Static, TabbedContent, TabPane
 
@@ -89,7 +90,7 @@ class CreateActionFormMixin(FieldQuestionsMixin):
             return
         with TabbedContent(id="create-tabs"):
             for i, f in enumerate(self._fields):
-                with TabPane(field_label(f), id=f"tab-{i}"):
+                with TabPane(Content(field_label(f)), id=f"tab-{i}"):
                     yield from self._compose_one(f, i)
 
     def _compose_one(self, f: dict, i: int):

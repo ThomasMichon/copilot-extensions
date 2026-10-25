@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from textual.app import App
-from textual.widgets import Input, Static
+from textual.widgets import Input, Static, Tab
 
 from worktree_manager.production_picker.picker_tui import pivots
 from worktree_manager.production_picker.picker_tui.configuration_form import ConfigurationFormScreen
@@ -47,11 +47,15 @@ def test_configuration_captions_are_validated(change):
         _parse_create_fields([{"name": "param_label", "type": "text", **change}], where="fixture")
 
 
-def test_native_configuration_preserves_owner_captions_and_collects_only_parameter_fields():
+@pytest.mark.parametrize("tab_label", ["[bold]Queue[/bold]", "[unclosed"])
+def test_native_configuration_preserves_owner_captions_and_collects_only_parameter_fields(tab_label):
     fields = list(_parse_create_fields([{
         "name": "param_label", "type": "text", "label": "Watched task label",
         "description": "Only matching queued tasks are eligible. [Source-owned]",
         "default": "fixture",
+    }, {
+        "name": "param_queue", "type": "text", "label": tab_label,
+        "description": "Source-owned queue selector.", "default": "queue",
     }], where="fixture", dynamic_other=False))
     assert field_label(fields[0]) == "Watched task label"
     assert field_label({"name": "old_field"}) == "Old field"
@@ -68,9 +72,10 @@ def test_native_configuration_preserves_owner_captions_and_collects_only_paramet
             assert isinstance(screen, ConfigurationFormScreen)
             captions = [str(widget.content) for widget in screen.query(Static)]
             assert any("Watched task label" in caption and "[Source-owned]" in caption for caption in captions)
-            assert screen.query_one(Input).value == "fixture"
-            screen.query_one(Input).value = "changed"
-            assert screen._collect() == {"param_label": "changed"}
+            assert [tab.label.plain for tab in screen.query(Tab)] == ["Watched task label", tab_label]
+            assert screen.query_one("#q-0", Input).value == "fixture"
+            screen.query_one("#q-0", Input).value = "changed"
+            assert screen._collect() == {"param_label": "changed", "param_queue": "queue"}
             screen._show_confirm_prompt()
             await pilot.pause()
             assert "Watched task label: changed" in str(screen.query_one("#create-confirm-prompt", Static).content)

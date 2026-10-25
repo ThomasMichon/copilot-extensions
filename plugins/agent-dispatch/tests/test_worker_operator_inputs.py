@@ -213,6 +213,40 @@ def test_partial_safe_edit_retains_existing_values_and_repository_context(tmp_pa
     }
 
 
+@pytest.mark.parametrize("identical", [False, True])
+def test_locked_binding_drift_refuses_partial_edit_but_preserves_exact_concurrent_retry(monkeypatch, identical):
+    _, _, row = controlled(extra=[{
+        "name": "unused", "type": "text", "label": "Optional marker",
+        "description": "A fixture parameter whose changes leave execution unchanged.", "default": "original",
+    }])
+    result = save(row, param_label="fixture")
+    intended = {"name": "local", "param_label": "other"}
+    acquire = wi.SingleInstance.acquire
+    changed = False
+
+    def concurrent(lock):
+        nonlocal changed
+        if not changed:
+            changed = True
+            fields = intended if identical else {"name": "local", "param_unused": "concurrent"}
+            wi.save_instance(result["id"], result["revision"], fields, operator_inputs=True)
+        return acquire(lock)
+
+    monkeypatch.setattr(wi.SingleInstance, "acquire", concurrent)
+    if identical:
+        assert wi.save_instance(
+            result["id"], result["revision"], intended, operator_inputs=True,
+        )["retry"]
+    else:
+        with pytest.raises(RegistrarError, match="operator inputs changed"):
+            wi.save_instance(result["id"], result["revision"], intended, operator_inputs=True)
+    record, = wi.read_records()
+    assert record["operator_inputs"]["values"] == {
+        "label": "other" if identical else "fixture",
+        "unused": "original" if identical else "concurrent",
+    }
+
+
 @pytest.mark.parametrize("stage", ["catalog", "save", "retry", "edit", "refuse"])
 def test_actual_cli_first_touch_safe_save_edit_retry_and_capability(capsys, stage):
     from agent_dispatch.__main__ import build_parser

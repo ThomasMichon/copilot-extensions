@@ -227,7 +227,8 @@ refresh shares one source discovery across these checks; edits therefore
 depend on source availability. Source changes, including cosmetic index
 changes, missing providers and mismatched saved values make human editing
 unavailable rather than silently selecting a newer template. Save checks again
-under the existing write lock. Previously published execution is unaffected.
+under the existing write lock, rejecting binding-only drift even when execution
+bytes have not changed. Previously published execution is unaffected.
 An advanced declaration save always clears the operator binding, including
 when its execution bytes are unchanged. Legacy instances remain advanced-only;
 there is no inferred provenance or automatic migration.

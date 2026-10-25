@@ -370,6 +370,7 @@ def save_instance(
     source = source_id.removeprefix("template:")
     provider = None
     safe_values = None
+    operator_baseline = None
     if operator_inputs:
         from .worker_operator_inputs import materialize, selected_source, source_fields, values_for, verify_record
 
@@ -379,6 +380,7 @@ def save_instance(
             _regular(instance_dir(), directory=True)
             record = _read(instance_dir() / f"{name}.json")
             selected, current_values = verify_record(record)
+            operator_baseline = digest(record["operator_inputs"])
             parameters = {**{f"param_{key}": value for key, value in current_values.items()}, **parameters}
             if "repo_root" not in fields:
                 repo_root = record["configuration"]["repo_root"]
@@ -434,6 +436,8 @@ def save_instance(
         if operator_inputs and source_id.startswith("instance:"):
             # Binding invalidation can leave execution bytes unchanged.
             verify_record(existing)
+            if not retry and digest(existing["operator_inputs"]) != operator_baseline:
+                raise RegistrarError("operator inputs changed; refresh before editing")
         _check_collisions(name, declarations, existing)
         if provider is not None:
             # Recheck source closure/activation after validation and collision reads.
