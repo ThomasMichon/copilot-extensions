@@ -86,6 +86,10 @@ One-shot reads have a 20-second execution budget, separate stdout/stderr limits
 30-second initial-read budget, including held subscriptions until their first
 commit; protocol `begin` is not a commit. A timeout identifies the operation,
 budget and retry path rather than truncating a long argv ahead of the reason.
+One-shot success requires actual JSON output, including an explicit empty array
+or supported empty envelope for an empty scope. Missing or malformed output is
+a read error even when a wrapper reports exit zero; a bounded final stderr line
+is retained to expose provider incompatibility instead of claiming zero rows.
 
 Version-1 compatibility also covers the existing declarative fields:
 

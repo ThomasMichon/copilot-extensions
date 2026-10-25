@@ -43,8 +43,12 @@ def exec_list(runtime, context):
         detail = (result.stderr or "").strip().splitlines()
         return "error", [], (detail[-1] if detail else f"exit {result.returncode}")[:200], {}
     try:
-        payload = json.loads(result.stdout or "[]")
+        payload = json.loads(result.stdout or "")
     except ValueError:
-        return "error", [], "list command did not print JSON", {}
+        detail = (result.stderr or "").strip().splitlines()
+        reason = "list command did not print JSON"
+        if detail:
+            reason += ": " + detail[-1][:200]
+        return "error", [], reason, {}
     rows, summary = tasks.parse_list_payload(payload)
     return "ready", rows, "", summary
