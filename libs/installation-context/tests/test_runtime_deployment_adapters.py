@@ -94,7 +94,10 @@ def _run_adapter(
         stderr = exc.stderr or b""
         if isinstance(stderr, bytes):
             stderr = stderr.decode("utf-8", errors="replace")
-        exc.add_note(f"Native policy child started at {started}; phase evidence:\n{stderr}")
+        exc.__notes__ = [
+            *getattr(exc, "__notes__", []),
+            f"Native policy child started at {started}; phase evidence:\n{stderr}",
+        ]
         raise
     if runner == "powershell" and environment.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1":
         print(f"Native policy child started at {started}; phase evidence:\n{result.stderr}")
@@ -106,6 +109,8 @@ def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest
     failure = subprocess.TimeoutExpired(
         ["native-reader"], 30, stderr=b"native-policy-phase=Add-Type;elapsed_ms=50\n",
     )
+    monkeypatch.setattr(failure, "add_note", None, raising=False)
+    failure.__notes__ = ["existing diagnostic"]
 
     def timeout(command: list[str], **kwargs: Any) -> None:
         calls.append((command, kwargs))
@@ -118,7 +123,8 @@ def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest
     assert len(calls) == 1
     assert calls[0][1]["timeout"] == 30
     assert "native-policy-phase=Add-Type" in "\n".join(failure.__notes__)
-    assert "Native policy child started at " in failure.__notes__[0]
+    assert failure.__notes__[0] == "existing diagnostic"
+    assert "Native policy child started at " in failure.__notes__[-1]
 
 
 @pytest.mark.skipif(

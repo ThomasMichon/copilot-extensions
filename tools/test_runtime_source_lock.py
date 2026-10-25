@@ -372,6 +372,27 @@ def test_native_exact_witness_carries_actual_filename_without_admitting_url(targ
     }]
 
 
+def test_native_witness_canonicalizes_duplicate_tag_alternatives_before_parsing(target, monkeypatch):
+    import runtime_profile
+
+    filename = "fixture-1.0-" + "-".join(
+        ".".join([part] * 128) for part in ("py3", "none", "any")
+    ) + ".whl"
+    package = _native_wheel_lock()
+    package["wheels"][0]["url"] = "https://example.invalid/" + filename
+    actual = runtime_profile.parse_wheel_filename
+    parsed = []
+
+    def bounded_parse(name):
+        assert name == "fixture-1.0-py3-none-any.whl"
+        parsed.append(name)
+        return actual(name)
+
+    monkeypatch.setattr(runtime_profile, "parse_wheel_filename", bounded_parse)
+    assert _wheel_pins([package], target)[0]["filename"] == filename
+    assert parsed == ["fixture-1.0-py3-none-any.whl"]
+
+
 @pytest.mark.parametrize("kind", [
     "ambiguous", "source-only", "foreign-name", "foreign-version", "foreign-tag",
     "invalid-hash", "duplicate", "path", "encoded-path", "non-wheel", "marker", "unlocked",

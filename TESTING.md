@@ -527,7 +527,9 @@ configuration. A native export can contain multiple compatible files; this
 initial path refuses that ambiguity rather than implementing another wheel
 ranking algorithm. Ordinary requirements exports remain unchanged. Real
 multi-wheel and source-only feed controls refuse before acquisition or a
-third-party backend request.
+third-party backend request. Compressed wheel-tag alternatives pass through the
+existing bounded canonicalizer before filename parsing; a regression repeats
+each alternative 128 times and asserts the parser receives only one combination.
 
 `tools/test_runtime_source_authentication.py` composes actual installation-owned
 fallback intent with the existing configured-runtime-source acquisition and
@@ -561,6 +563,11 @@ The composition exercises the existing `retain_source_profile` owner with
 owned offline build custody and its exact local-package selection. Foreign
 build roles, changed tool versions/files and an online build request refuse
 before the backend runs; ordinary promotion-toolchain controls remain intact.
+Fresh and reused tools slots validate their installed interpreter against the
+selected marker environment before any backend runs. Native regressions query
+real tools interpreters, inject a mismatched target result and require refusal;
+the success control still proves unchanged immutable reuse. Short synthetic
+directory labels keep these nested native executables within Windows path limits.
 Source-mode configuration refusals additionally forbid effectful compiler
 execution and require zero package requests for implicit public indexes and
 unsupported index, credential, TLS and proxy settings.

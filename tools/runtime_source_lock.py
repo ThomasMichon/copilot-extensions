@@ -20,11 +20,11 @@ from urllib.parse import unquote, urlsplit
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import SpecifierSet
-from packaging.utils import canonicalize_name, parse_wheel_filename
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from build_toolchain_lock import _MARKER_ENV_QUERY_SCRIPT, sanitize_subprocess_env
-from runtime_profile import ProfileError, _tag, _target
+from runtime_profile import ProfileError, _tag, _target, _wheel_filename
 from runtime_profile_policy import InstallationProfilePlan
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -145,9 +145,7 @@ def _wheel_pins(content: bytes, target: dict, deadline: float) -> list[dict]:
                 or not filename.endswith(".whl") or "/" in filename or "\\" in filename
             ):
                 raise ProfileError("native source wheel witness has no exact wheel filename")
-            prefix, python, abi, platform = filename[:-4].rsplit("-", 3)
-            tags = _tag("-".join((python, abi, platform)), 10_000, deadline)
-            wheel_name, wheel_version, _, _ = parse_wheel_filename(filename)
+            wheel_name, wheel_version, _, tags = _wheel_filename(filename, 10_000, deadline)
             if wheel_name != name or wheel_version != version or not tags & compatible:
                 raise ProfileError("native source wheel witness differs from the selected target")
             names.add(name)

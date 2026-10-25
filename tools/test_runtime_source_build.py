@@ -31,6 +31,11 @@ from test_runtime_source_lock import target as target  # noqa: PLC0414
 from wheel_input_fixture import wheel_bytes
 
 
+@pytest.fixture
+def tmp_path(tmp_path_factory):
+    return tmp_path_factory.mktemp("src")
+
+
 def source_with_process_owner(configured_source, *, build_only=False):
     repository = configured_source[1]
     project = repository / "plugins" / "agent-example"
@@ -246,6 +251,37 @@ def test_authenticated_source_builds_and_reuses_independent_closed_environments(
             assert (reused.slot / ".runtime-input-origins.json").read_bytes() == receipt
     assert len(completed) == 2
     assert all(call["offline"] and call["build_profile"] is not None for call in completed)
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+def test_tools_interpreter_target_drift_refuses_before_backend(
+    adopter, configured_source, target, feeds, tmp_path, monkeypatch, reuse,
+):
+    source_with_process_owner(configured_source)
+    state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
+    packaging_feed(state)
+    env = environment(adopter, state, tmp_path)
+    monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
+    arguments = options(adopter, target, env)
+    selected = plan(adopter)
+    if reuse:
+        with builds.retain_source_runtime_inputs(selected, **arguments):
+            pass
+    actual = builds._query_marker_environment
+    observed = []
+
+    def different_target(python, **kwargs):
+        assert ".source-build-tools" in python.parts
+        observed.append(python)
+        return {**actual(python, **kwargs), "platform_machine": "different-target"}
+
+    monkeypatch.setattr(builds, "_query_marker_environment", different_target)
+    monkeypatch.setattr(completion, "build_wheel", lambda *args, **kwargs: pytest.fail("target drift reached backend"))
+    with pytest.raises(ValueError, match="installed build-tools interpreter differs"), builds.retain_source_runtime_inputs(
+        selected, **arguments,
+    ):
+        pytest.fail("target drift reached runtime construction")
+    assert len(observed) == 1
 
 
 @pytest.mark.parametrize("fault", ["foreign", "packages", "file", "online"])

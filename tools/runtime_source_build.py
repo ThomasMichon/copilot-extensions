@@ -23,6 +23,7 @@ for _library in ("installer-engine", "versioned-runtime"):
 
 import installer_engine as engine
 from build_python_artifacts import ToolchainLock
+from build_toolchain_lock import _query_marker_environment
 from installer_wheel_acquisition import AcquisitionLimits, acquire_wheel_inputs
 from installer_wheel_inputs import WheelLimits, _check_deadline
 from installer_wheel_snapshot import WheelInstallInputs
@@ -207,11 +208,19 @@ def retain_source_runtime_inputs(
             )
             build_root = Path(record["policy"]["owner"]["runtimeRoot"]) / ".source-build-tools"
             build_version = authenticated.identity.runtime_version + ".build." + build_inputs.receipt()["lock_id"][7:23]
+
+            def validate_tools(slot):
+                authenticated.verify()
+                installed_python = engine.runtime.slot_python(build_root, slot.name)
+                if _query_marker_environment(installed_python, deadline=deadline) != record["target"]["environment"]:
+                    raise ProfileError("installed build-tools interpreter differs from the selected target")
+
             with engine.numbered_candidate(
                 build_root, build_version, plugin=locked.payload, uv=Path(uv), base_python=python,
                 health_module="packaging", local_packages=(), wheel_inputs=build_inputs,
                 wait_timeout=deadline - time.monotonic(),
                 expected_source_identity=engine.runtime_source.manifest_fields(authenticated.identity),
+                validate_candidate=validate_tools,
             ) as tools:
                 tool_python = tools.slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                 toolchain = ToolchainLock(tool_python, {
