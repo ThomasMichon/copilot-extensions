@@ -15,7 +15,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
-
+from typing import Any, cast
 import agent_procutil as pu
 import pytest
 
@@ -103,6 +103,7 @@ try:
                     procutil=pu, construction_fd=descriptor,
                     runtime_root=runtime_root, runtime_version="probe",
                     runtime_path=Path(spec["runtime"]),
+                    diagnostics_path=Path(spec["diagnostics"]),
                 )
             except guardian.ChildTimeoutExpired as exc:
                 assert cycle == 2 and spec["failure"] == "timeout"
@@ -132,7 +133,7 @@ if "error" in report:
 """
 
 
-def _load(name: str, path: Path):
+def _load(name: str, path: Path) -> Any:
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -141,7 +142,7 @@ def _load(name: str, path: Path):
     return module
 
 
-def _parent_source():
+def _parent_source() -> str:
     return (
         "from __future__ import annotations\n"
         + inspect.getsource(_load) + textwrap.dedent(_PARENT)
@@ -149,7 +150,7 @@ def _parent_source():
 
 
 @pytest.mark.parametrize("failure", ["timeout", "cancel"])
-def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp_path, failure):
+def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp_path: Path, failure: str) -> None:
     repo = Path(__file__).resolve().parents[3]
     observer_module = _load(
         "installer_guardian_window_observer",
@@ -167,6 +168,13 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
     )
     runtime_path = repo / "libs" / "versioned-runtime" / "versioned_runtime.py"
     runtime = _load("windowless_guardian_runtime", runtime_path)
+    helper_path = repo / "plugins" / "agent-worktrees" / "scripts" / "installer_diagnostics.py"
+    diagnostics = guardian._load_resource("windowless_capture_diagnostics", helper_path)
+    environment = diagnostics.reserve_launch({
+        **os.environ, **pu.windowless_python_env(sys.executable),
+        "USERPROFILE": str(tmp_path), "HOME": str(tmp_path),
+    })
+    directory = Path(environment["COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY"])
     child = tmp_path / "console-child.py"
     child.write_text(textwrap.dedent(_CHILD), encoding="utf-8")
     parent = tmp_path / "windowless-parent.py"
@@ -181,8 +189,9 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
         "console": observer_module._console_python(),
         "child": str(child),
         "failure": failure,
+        "diagnostics": str(helper_path),
     }
-    handles = []
+    handles: list[Any] = []
     log_path = tmp_path / "parent.log"
     with observer_module._WindowObserver(user32, kernel32, callback_type) as observer:
         with log_path.open("wb") as log:
@@ -190,7 +199,7 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
                 [pythonw, "-I", "-B", str(parent), json.dumps(spec)],
                 require_job=True, allow_breakaway=False,
                 cwd=tmp_path,
-                env={**os.environ, **pu.windowless_python_env(sys.executable)},
+                env=environment,
                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                 **pu.no_window_kwargs(),
             )
@@ -198,7 +207,7 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
                 assert job is not None, "windowless parent needs strict outer containment"
                 for cycle in range(3):
                     state = tmp_path / str(cycle)
-                    def started(state=state):
+                    def started(state: Path = state) -> Any:
                         identities = observer_module._read_json(state / "pids.json")
                         if identities:
                             return identities
@@ -233,6 +242,16 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
                     elif failure == "cancel":
                         progress = observer_module._read_json(tmp_path / "progress.json")
                         assert progress == {"cycles": 2}
+                        observer_module._wait_for(
+                            lambda: sum(
+                                b"owned stdout" in path.read_bytes()
+                                for path in directory.glob("*.stdout.raw")
+                            ) == 3 and sum(
+                                b"owned stderr" in path.read_bytes()
+                                for path in directory.glob("*.stderr.raw")
+                            ) == 3,
+                            5, "private child output before caller cancellation", log_path,
+                        )
                         # Cancel only this pinned owner, leaving its guardian alive
                         # to observe EOF and settle its strict child Job itself.
                         process.terminate()
@@ -250,8 +269,14 @@ def test_retained_guardian_from_pythonw_settles_without_desktop_side_effects(tmp
                     assert returncode != 0
                 with runtime._cleanup_lease(tmp_path / "runtime", "probe") as admitted:
                     assert admitted, "live construction/retention remained after failure"
+                archives = list(directory.glob("*.log"))
+                assert len(archives) == 3
+                for archive in archives:
+                    text = archive.read_text(encoding="utf-8")
+                    assert "owned stdout" in text and "owned stderr" in text
+                    assert '"returncode"' not in text and '"timed_out"' not in text
             finally:
-                job.terminate_and_wait(10)
+                cast(pu.JobHandle, job).terminate_and_wait(10)
                 process.wait(timeout=10)
                 for handle in handles:
                     assert kernel32.CloseHandle(handle)

@@ -1,0 +1,9 @@
+{
+  "comment": "Provide private native and Python installer diagnostics, standalone producer evidence and retained child capture",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

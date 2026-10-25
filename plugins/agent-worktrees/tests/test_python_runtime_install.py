@@ -18,14 +18,14 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any, NoReturn, Protocol, TypeVar, TypedDict, cast
 from unittest.mock import Mock
 
 import pytest
 from agent_procutil import no_window_kwargs
 from update_driver import core
-
+DiagnosticPublication = tuple[SimpleNamespace, Path, dict[str, Any], bytes, Path, list[str]]
 
 @overload
 def _status(request_id: str, *, root: Path) -> core.Request: ...
@@ -310,6 +310,83 @@ def test_direct_installation_refuses_before_governance_or_construction(
     with pytest.raises(RuntimeError, match="live driver custody"):
         getattr(driver, entry)(*arguments[0], **arguments[1])
     assert not root.exists()
+
+
+@pytest.fixture
+def diagnostic_publication(driver: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[DiagnosticPublication]:
+    from types import SimpleNamespace
+    from agent_worktrees import runtime_deployment as deployment
+
+    home, root = tmp_path / "home", tmp_path / "runtime"
+    home.mkdir()
+    slot = _slot(driver, root, "1.0.0")
+    for key in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(home))
+    for key in ("ATTEMPT", "WRITER", "DIRECTORY", "MISSING"):
+        monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_" + key, raising=False)
+    identity = driver._installed_identity(slot)
+    manifest = deployment.manifest_bytes(identity, slot, "previous")
+    (root / "current-version").write_text(slot.name + "\n")
+    deployment.publish(root, manifest)
+    checked: list[str] = []
+    governance = SimpleNamespace(root=root, recheck=lambda: checked.append("governance"))
+    with driver.diagnostics.writer():
+        directory = driver.diagnostics.context()
+        yield governance, slot, identity, manifest, directory, checked
+
+
+def test_diagnostics_associate_only_installed_publication(driver: ModuleType, diagnostic_publication: DiagnosticPublication) -> None:
+    governance, slot, identity, manifest, directory, checked = diagnostic_publication
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    record = json.loads((directory / "installation.json").read_text())
+    assert checked == ["governance"]
+    assert record["runtime_root"] == str(governance.root)
+    assert record["runtime_slot"] == slot.name
+    assert record["runtime_generation"] == identity["build_info"]["runtime_generation"]
+    assert record["deployment_manifest_sha256"] == hashlib.sha256(manifest).hexdigest()
+    assert record["log_directory"] == str(directory)
+    assert "source" not in record and "receipt" not in record and "serving" not in record
+    # Idempotent evidence never replaces an earlier publication association.
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    assert json.loads((directory / "installation.json").read_text()) == record
+    reference = driver.diagnostics.launch_reference(dict(os.environ))
+    assert reference["attribution"] == "VALIDATED_INSTALLATION_RECORDED"
+    assert reference["installation"] == record
+    assert json.loads((directory / "attempt.json").read_text())["attribution"] == "UNATTRIBUTED"
+
+
+@pytest.mark.parametrize("damage", ["governance", "selected", "manifest", "identity", "log", "marker"])
+def test_unverified_installation_remains_unattributed(
+    driver: ModuleType, diagnostic_publication: DiagnosticPublication, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
+    governance, slot, identity, manifest, directory, _checked = diagnostic_publication
+    if damage == "governance":
+        def changed() -> NoReturn:
+            raise driver.InstallationRefused("changed owner")
+        governance.recheck = changed
+    elif damage == "selected":
+        _slot(driver, governance.root, "2.0.0")
+        (governance.root / "current-version").write_text("2.0.0\n")
+    elif damage == "manifest":
+        (governance.root / "deploy-manifest.json").write_text("{}")
+    elif damage == "identity":
+        identity = {**identity, "package_version": "2.0.0"}
+    elif damage == "marker":
+        marker = driver.runtime.marker_path(governance.root, slot.name)
+        marker.unlink()
+    elif damage == "log":
+        original = driver.diagnostics.files().open_file
+
+        def refused(path: Path, *args: Any, **kwargs: Any) -> Any:
+            if path.suffix == ".log":
+                raise PermissionError("log path ownership changed")
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(driver.diagnostics.files(), "open_file", refused)
+    # Diagnostic refusal is deliberately not an installer failure/rollback.
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    assert not (directory / "installation.json").exists()
+    assert (directory / "missing-diagnostics.json").exists()
+    assert json.loads((directory / "attempt.json").read_text())["attribution"] == "UNATTRIBUTED"
 
 
 @pytest.mark.parametrize(("section", "field"), [
@@ -625,6 +702,7 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
         assert source.read_source_identity(snapshot, "1.0.0") == identity
         assert kwargs["reuse_generations"] is False
         assert kwargs["construction_data"] is provenance
+        assert kwargs["progress"] is driver.diagnostics.phase
         raise ConstructionReached
 
     monkeypatch.setattr(driver, "_source_provenance", attribute)
@@ -1375,6 +1453,17 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         '[project]\nname="agent-worktrees"\nversion="2.0.0"\n', encoding="utf-8",
     )
     authority: list[str] = []
+    associations = []
+
+    def associate(record: dict[str, Any]) -> None:
+        assert authority == ["enter", "leave", "enter"]
+        for retained in ("1.0.0", "2.0.0"):
+            with pytest.raises(driver.runtime.RetentionTimeout):
+                with driver.runtime._kernel_lease(
+                    root, retained, kind="retention", shared=False, timeout=0,
+                ):
+                    pytest.fail("diagnostic association outlived retained-slot custody")
+        associations.append(record)
 
     class Governance:
         def __init__(self, requested: Path, payload: Path) -> None:
@@ -1455,6 +1544,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             return "", ""
 
     monkeypatch.setattr(driver, "Governance", Governance)
+    monkeypatch.setattr(driver.diagnostics, "associate_installed", associate)
     monkeypatch.setattr(driver, "_source_provenance", lambda *_args: {})
     monkeypatch.setattr(driver.engine, "_construct", construct)
     monkeypatch.setattr(
@@ -1575,6 +1665,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     if special == "prepublication-interrupted":
         assert settlement_actions == ["preparing"]
     assert authority == ["enter", "leave", "enter", "cutover-released", "leave"]
+    assert len(associations) == (0 if rollback else 1)
     for version in ("1.0.0", "2.0.0"):
         with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):
             pass
@@ -2340,7 +2431,12 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                     assert monitor.returncode is not None, "baseline child was not reaped"
 
 
-def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("missing_diagnostic", [
+    None, "installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py",
+])
+def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_diagnostic: str | None,
+) -> None:
     import ast
     import agent_worktrees
     from agent_worktrees import runtime_candidate as installer
@@ -2370,11 +2466,15 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert {
         "command_binding.py", "command_lifecycle.py", "runtime_install_governance.py",
     } <= set(installer._LIFECYCLE_FILES)
-    for name in installer._LIFECYCLE_FILES:
-        (frozen_scripts / name).write_text("frozen lifecycle", encoding="utf-8")
+    optional_diagnostics = (
+        "installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py",
+    )
+    for name in (*installer._LIFECYCLE_FILES, *optional_diagnostics):
+        if name != missing_diagnostic:
+            (frozen_scripts / name).write_text("frozen lifecycle", encoding="utf-8")
     (frozen_scripts / "installation-context").mkdir()
     (frozen_scripts / "installation-context" / "installation_context.py").write_text(
-        "frozen validator", encoding="utf-8",
+        "VALIDATED = True\n", encoding="utf-8",
     )
     from agent_worktrees import update_stage
 
@@ -2395,9 +2495,11 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     assert "frozen_plugin" not in info
     for name in installer._LIFECYCLE_FILES:
         assert (tmp_path / ".runtime-bootstrap" / name).read_text() == "frozen lifecycle"
+    for name in optional_diagnostics:
+        assert (tmp_path / ".runtime-bootstrap" / name).is_file() == (name != missing_diagnostic)
     assert (
         tmp_path / ".runtime-bootstrap" / "installation-context" / "installation_context.py"
-    ).read_text() == "frozen validator"
+    ).read_text() == "VALIDATED = True\n"
     assert len(info["runtime_generation"]) == 32
     assert info["build_timestamp"].endswith("Z")
     assert native_script.is_file() and python.is_file()
@@ -2405,6 +2507,24 @@ def test_preparation_stamps_installed_metadata_and_preserves_native_scripts(tmp_
     with pytest.raises(RuntimeError, match="Frozen package version"):
         installer.prepare_runtime_candidate({**provenance, "version": "1.0.0"})
     assert (package / "_build_info.py").read_text(encoding="utf-8") == content
+
+    from agent_worktrees import __main__ as command
+
+    monkeypatch.setattr(command, "_load_full_command_surface", lambda: None)
+    build = ModuleType("agent_worktrees._build_info")
+    monkeypatch.setattr(build, "BUILD_INFO", info, raising=False)
+    monkeypatch.setitem(sys.modules, build.__name__, build)
+    monkeypatch.setitem(sys.modules, "_installed_lifecycle_validator", ModuleType("validator"))
+    for name in (
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    ):
+        (tmp_path / ".runtime-bootstrap" / name).write_text("frozen bootstrap\n", encoding="utf-8")
+    installer.verify_runtime_candidate()
+    (tmp_path / ".runtime-bootstrap" / "runtime_install_diagnostics.py").unlink()
+    with pytest.raises(RuntimeError, match="immutable process-retention bootstrap"):
+        installer.verify_runtime_candidate()
 
 
 @pytest.mark.parametrize("missing", [

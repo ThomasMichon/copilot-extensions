@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+
+if __name__ == "__main__":
+    # Enter diagnostics before implementation imports and argparse can fail.
+    # Re-enter this same trusted source in-process, not through another child.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from runtime_install_diagnostics import run_entry
+
+    run_entry(Path(__file__))
+
 import argparse
 import hashlib
 import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,6 +44,7 @@ import versioned_runtime_source as _runtime_source
 runtime_source = _runtime_source
 import runtime_install_publication as helper_publication
 import runtime_install_driver as install_driver
+import runtime_install_diagnostics as diagnostic_entry
 import runtime_input_verifier as verification
 from runtime_install_profiles import runtime_profile_policy
 from runtime_install_governance import Governance, InstallationRefused
@@ -41,6 +53,9 @@ __all__ = [
     "engine", "runtime", "runtime_source", "helper_publication", "install_driver",
     "Governance", "InstallationRefused", "install", "settle_candidate", "main",
 ]
+
+
+diagnostics = globals().get("_entry_diagnostics") or diagnostic_entry.load_diagnostics()
 
 
 def helper_publication_plan(path: Path, digest: str, *, prepare_only: bool = False) -> dict[str, Any]:
@@ -356,51 +371,20 @@ def _settle_monitor(
 def _source_provenance(
     payload: Path, version: str, source_identity: runtime_source.SourceIdentity | None = None,
 ) -> dict[str, str]:
-    provenance = {"version": version, "source": payload.as_posix()}
-    for field, arguments in (
-        ("commit", ["rev-parse", "HEAD"]),
-        ("branch", ["rev-parse", "--abbrev-ref", "HEAD"]),
-    ):
-        if source_identity is not None:
-            provenance[field] = source_identity.source_commit if field == "commit" else "unknown"
-            continue
-        if shutil.which("git") is None:
-            provenance[field] = "unknown"
-            continue
-        result = subprocess.run(
-            ["git", "-C", str(payload), *arguments],
-            capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
-        )
-        if result.returncode != 0:
-            if "not a git repository" not in result.stderr:
-                raise InstallationRefused(f"Source provenance lookup failed: {result.stderr}")
-            provenance[field] = "unknown"
-        else:
-            provenance[field] = result.stdout.strip()
-    kind = "marketplace" if "/.copilot/installed-plugins/" in payload.as_posix() else "local"
-    dirty = None
-    if source_identity is None and kind == "local" and provenance["commit"] != "unknown":
-        status = subprocess.run(
-            ["git", "-C", str(payload), "status", "--porcelain", "--", str(payload)],
-            capture_output=True, text=True, timeout=30, check=True,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
-        )
-        dirty = bool(status.stdout.strip())
-    if source_identity is not None:
-        provenance["commit"] = source_identity.source_commit
-    provenance["deployment_source"] = json.dumps({
-        "kind": kind, "path": payload.as_posix(), "repo": "copilot-extensions",
-        "plugin": "agent-worktrees", "version": version,
-        "commit": provenance["commit"] if kind == "local" else None,
-        "branch": provenance["branch"] if kind == "local" else None, "dirty": dirty,
-        **runtime_source.manifest_fields(source_identity),
-    })
-    return provenance
+    return install_driver.source_provenance(
+        payload, version, source_identity, runtime_source=runtime_source, refusal=InstallationRefused,
+    )
 
 
 def _installed_identity(slot: Path) -> dict[str, Any]:
     return install_driver.installed_identity(slot, runtime, InstallationRefused)
+
+
+def _associate_diagnostics(governance: Governance, slot: Path, identity: dict[str, Any], manifest: bytes) -> None:
+    diagnostic_entry.associate(
+        governance, slot, identity, manifest,
+        runtime=runtime, diagnostics=diagnostics, refusal=InstallationRefused,
+    )
 
 
 @install_driver.owned
@@ -483,9 +467,13 @@ def install(
         if previous is not None:
             custody.enter_context(runtime.retention_lease(root, previous, timeout=wait_timeout))
         try:
+            diagnostics.phase("governance-wait")
             with governance.held(timeout=wait_timeout):
+                diagnostics.phase("governance-acquired")
                 if source_identity is not None:
+                    diagnostics.phase("publish-source-snapshot")
                     plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
+                    diagnostics.phase("source-snapshot-ready")
                 if source_identity is not None or native_wheel_inputs is not None:
                     version = install_driver.selected_repair(root, version, previous, source_identity, governance)
                 candidate = custody.enter_context(engine.numbered_candidate(
@@ -497,6 +485,8 @@ def install(
                     reuse_generations=source_identity is None and not wheel_options,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
+                    progress=diagnostics.phase,
+                    diagnostics=True,
                     **cast(install_driver.ValidationOptions, {"validate_candidate": lambda _slot: governance.recheck()}
                            if policy is not None else {}),
                     **wheel_options,
@@ -551,7 +541,9 @@ def install(
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            completed = verification.wait_for_settlement(argv, environment, verifier=input_verifier)
+            completed = diagnostic_entry.settle_publication(
+                argv, environment, diagnostics=diagnostics, verifier=input_verifier,
+            )
             stdout, stderr = completed.stdout, completed.stderr
             if stdout:
                 print(stdout, end="", flush=True)
@@ -790,12 +782,15 @@ def settle_candidate(
                         helpers.keep()
                     else:
                         helpers.rollback()
+                if committed:
+                    _associate_diagnostics(governance, candidate_slot, identity, manifest)
                 if isinstance(failure, InstallationRefused):
                     return install_driver.refusal_result(version, failure, committed=committed)
                 raise
             else:
                 if helpers is not None:
                     helpers.keep()
+                _associate_diagnostics(governance, candidate_slot, identity, manifest)
         return {
             "runtime_version": version,
             "package_version": identity["build_info"]["version"],
