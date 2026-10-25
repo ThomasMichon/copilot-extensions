@@ -204,6 +204,9 @@ not replace the held #6859 / #7833 lifetime repair.
 - [ ] Complete the [bounded POSIX marker-only bootstrap readiness](posix-bootstrap-marker-readiness.md)
   repair, retaining first-touch, changed, fallback, refusal and guidance behavior
   without requiring legacy links or relaxing startup deadlines.
+  The staged implementation and host-only validation are recorded in that plan;
+  native POSIX/clean-room proof, a dependency-vendoring guard defect, integration
+  and publication remain open under their respective owners.
 
 - [x] Verify existing final-integration deferral with native invocation counts
   and current/changed/first-touch aggregate ordering (#6933).
@@ -394,6 +397,24 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-24 - Directory repair merged; integrated bootstrap proof continues
+
+- #8828 actually merged as `2a7414cfea162a3d55293922de8765dbb984fd0d`
+  after exact-head Copilot approval, all required CI green and the
+  documentation-impact finding addressed and resolved. Re-read the Plan and
+  Validation Plan: only the bounded source implementation and recovered
+  source-consumer proof are accepted. Its containing promotion, authorized
+  installed rollout and broader effort acceptance remain open.
+- The independently owned #7743 ordinary POSIX readiness slice now preserves
+  #8716's complete Logger Driver implementation rather than overwriting it.
+  The remaining three ordinary adopters passed native integration controls;
+  the [bounded record](posix-bootstrap-marker-readiness.md) retains exact
+  results, earlier failures and open real-consumer/deployment gates.
+- A corrected fresh full-plugin trial is running against the integrated
+  source. This is not a replay of a completed worker or a repair of an earlier
+  failed report. No production updater or fleet activation followed this
+  source merge, and this effort is still Active.
 
 ### 2026-10-24 - Review the launch-version compatibility correction
 

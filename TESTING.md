@@ -62,6 +62,23 @@ resolver-only fallback. Synthetic distinct cell and legacy modules identify
 the runtime actually executed; no native runtime construction, service
 installation, live host adoption or performance-budget claim follows.
 
+## Optional POSIX selected-runtime bootstrap controls
+
+Run `python tools/run-plugin-tests.py runtime-source --test-file
+tests/test_bootstrap_selected_readiness.py` with the normal containment and
+deadlines. The actual three adopting hooks and vendored shell resolver execute
+against fixture-owned runtimes and harmless installer witnesses. Controls cover
+completed marker-only/source/repair selections, legacy links, invalid selections
+and completion, fallback, changed identities/bytes, first-touch and publication
+refusal, exact structured output and read-only trace behavior. A before/after
+control records actual installer child counts and hook elapsed time; it does not
+assert an invented speed threshold or substitute for installed startup evidence.
+Windows skips native POSIX controls explicitly without invoking WSL. Deterministic
+host controls still execute the hook's real identity probe and the family sync
+contract; they are not shell qualification. Use the isolated Linux integration
+fixture for native evidence and full-plugin first-turn validation separately.
+No required unit-only CI packet is expanded by this on-demand integration file.
+
 ## Optional historical Bridge source proof
 
 The manual `installation-context-full.yml` portfolio `bridge-contracts`
