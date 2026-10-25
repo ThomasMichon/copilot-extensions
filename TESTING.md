@@ -45,6 +45,27 @@ These controls do not qualify native scoped staging, service registration,
 runtime construction, host rollout or performance; cold scoped provisioning
 retains its explicit unsupported-readiness outcome.
 
+## Optional native pane argument delivery
+
+The manual `installation-context-full.yml` portfolio `pane-argv` runs the real
+PSMux direct-child control and both file-based pane producers twice on a fresh
+`windows-latest` runner. It downloads PSMux 3.3.6 into disposable job storage
+with a pinned archive digest, records the actual checked-out source and Python,
+and retains kernel containment and the existing client/query/teardown bounds.
+The opt-in two-cycle cases have a 180-second item budget and 45-second
+PowerShell setup/payload-readiness limits. Measured native readiness exceeded
+the earlier eight-second fixture wait; these functional-integration limits do
+not change ordinary unit budgets, production deadlines or performance gates.
+
+Dispatch against the published candidate branch with `-f portfolio=pane-argv`.
+This lane qualifies only native argument delivery and owned teardown. It does
+not prove interactive Copilot, selected-host desktop visibility, real
+uninstall/reinstall survival, handler adoption or rollout. It does not expand
+required PR CI or the default scheduled portfolio.
+The pinned test tool does not adopt a new production compatibility floor or
+upgrade the operator's installed PSMux. The older 3.3.5 baseline also exhibited
+intermittent immediate exits and is not qualified by this lane.
+
 ## Optional Bridge scoped-stamp binding
 
 The manual `installation-context-full.yml` portfolio `bridge-binding` runs

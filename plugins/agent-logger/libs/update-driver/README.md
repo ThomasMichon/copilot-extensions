@@ -730,6 +730,28 @@ failed-candidate preservation, Python-free concurrency/caller loss and early
 refusals. Snapshot `stamp`, `install` and bootstrap remain unsupported; their
 canonical-installed-source boundary is unchanged.
 
+Logger's legacy primary and five auxiliary compatibility commands now
+delegate cold invocation to their exact selected snapshot's qualified payload
+dispatcher. Its six payload command targets submit the existing single
+service-less `provision` request through the packaged native client and wait
+as observers; command arguments are never installer argv. The
+`logger-first-use-v1` dispatcher and `logger-command-v1` client markers expose
+actual support independently of package versions. Missing/older support refuses
+explicitly, with no foreground installer, arbitrary installed-payload fallback,
+outer provisioning lock or status writer. An older selected dispatcher can
+still serve a verified healthy auxiliary invocation without gaining cold
+publication authority.
+
+Healthy runtime dispatch remains before publication and retains selected
+installation context and module argument/exit forwarding. Cold custom roots/
+cells, pinned/no-self/nested requests and managed publication retain explicit
+refusal before acquisition/queue/plugin writes. The manual `logger-commands`
+portfolio exercises actual primary, Windows `.cmd`, payload and auxiliary
+commands, caller loss/concurrency, selected-source independence, safe installed
+consumers and isolated service effects. This command adoption neither widens
+bootstrap `install` nor adopts explicit installer entry points, compound
+actions, live periodic workers, cold custom roots/cells, macOS or rollout.
+
 Logger's legacy session bootstrap now submits `stamp` for a missing deployment
 manifest and `install` for runtime drift through its canonically packaged
 foundation. Both paths admit without Python on the caller PATH. The native

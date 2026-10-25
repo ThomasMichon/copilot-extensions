@@ -325,7 +325,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "guardian_followthrough", "guardian_ref",
         "runtime_profiles", "chat_construction",
         "immutable_runtime", "immutable_runtime_ref",
-        "interactive_completion",
+        "interactive_completion", "ssh_service",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -339,6 +339,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch-owner-boundaries-linux", "watch-owner-boundaries-windows",
         "dispatch-delegation-linux", "dispatch-delegation-windows",
         "pr-service-linux", "pr-service-windows",
+        "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
@@ -358,7 +359,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert job["if"] == (
             "${{ !inputs.interactive_completion && !inputs.immutable_runtime "
             "&& !inputs.guardian_followthrough && !inputs.watch_owner "
-            "&& !inputs.dispatch_delegation && !inputs.pr_service "
+            "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs "
             "&& !inputs.runtime_profiles }}"
@@ -437,6 +438,40 @@ def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None
             "--test-timeout", "60", "--timeout", "180",
         ]
         assert not job.get("continue-on-error")
+
+
+def test_logger_command_adoption_uses_explicit_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "logger-commands" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    for platform, runner, opt_in in (
+        ("linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        name = f"logger-commands-{platform}"
+        job = workflow["jobs"][name]
+        assert name not in required["jobs"] and not job.get("strategy")
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        execution = next(step for step in job["steps"] if step.get("name") == (
+            "Qualify real command admission, caller loss and installed consumers"
+        ))
+        assert execution["env"]["PYTEST_ADDOPTS"] == "--capture=tee-sys"
+        assert [shlex.split(step["run"]) for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_logger_command.py",
+             "--test-timeout", "900", "--timeout", "1800"],
+            ["python", "tools/run-plugin-tests.py", "agent-logger",
+             "--test-file", "tests/test_runtime_gate.py",
+             "--test-file", "tests/test_install_binstub.py",
+             "--max-files-per-sub-suite", "1", "--test-timeout", "120", "--timeout", "600"],
+        ]
 
 
 def test_codespaces_recipes_remain_manual_and_bounded() -> None:

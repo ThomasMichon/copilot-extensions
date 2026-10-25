@@ -1,3 +1,4 @@
+# Installation driver contract: logger-first-use-v1
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
@@ -287,6 +288,9 @@ function Resolve-RuntimePython {
     param([string]$TraceMode = 'ready')
     $script:AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
+    if (-not (Select-String -LiteralPath $runtimeResolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet)) {
+        throw 'Read-only runtime resolver is unavailable; update or repair the owning payload.'
+    }
     . $runtimeResolver -TraceMode $TraceMode
     return $AgentRtPy
 }
@@ -338,112 +342,43 @@ if ($env:AGENT_LOGGER_NO_SELFPROVISION) {
     exit 1
 }
 
-$publicationArgs = @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-    'probe-plugin-publication', '-PayloadRoot', $payloadRoot,
-    '-PluginId', 'agent-logger', '-LegacyRoot', $runtimeRoot
-)
-if ($context) {
-    $publicationArgs += @('-Context', $context, '-DurableHome', $validationDurableHome)
+if (Test-Path Env:AGENT_LOGGER_PINNED_CONTEXT) {
+    [Console]::Error.WriteLine('[agent-logger] pinned invocation requires a prepared owning runtime; provision independently.')
+    exit 126
 }
-$publicationJson = @(& $hostExe @publicationArgs)
-$publicationCode = $LASTEXITCODE
+$defaultRoot = Join-Path $env:USERPROFILE '.agent-logger'
+if ($context -or $runtimeRoot -ine $defaultRoot -or
+    (Test-Path Env:AGENT_LOGGER_INSTALLATION_ID)) {
+    [Console]::Error.WriteLine('[agent-logger] cold namespaced/custom-root provisioning requires explicit installation management.')
+    exit 126
+}
+if (Test-Path Env:UPDATE_DRIVER_WITNESS) {
+    [Console]::Error.WriteLine('[agent-logger] nested first-use submission is unsupported; retain the current installation owner.')
+    exit 126
+}
+$location = Get-Location
+if ($location.Provider.Name -cne 'FileSystem') {
+    throw 'Invocation requires a filesystem project location.'
+}
+$firstUse = Join-Path $payloadRoot 'libs\update-driver\scripts\first-use.ps1'
+if (-not (Test-Path -LiteralPath $firstUse -PathType Leaf) -or -not (
+    Select-String -LiteralPath $firstUse -SimpleMatch `
+        '# Installation driver lifecycle contract: logger-command-v1' -Quiet
+)) {
+    throw 'The packaged installation driver lacks the Logger command contract.'
+}
+$executionRoot = Join-Path $env:USERPROFILE '.copilot-extensions\update-driver'
+$previousEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
-    $publication = ($publicationJson -join "`n") | ConvertFrom-Json -ErrorAction Stop
-    $publicationRoot = if ($context) {
-        [string]$publication.runtimeRoot
-    } else { [string]$publication.legacy.root }
-    if ($publicationCode -ne 0 -or
-        $publication.deployment.allowPluginPublication -isnot [bool] -or
-        -not $publication.deployment.allowPluginPublication -or
-        $publicationRoot -cne $runtimeRoot -or
-        [string]$publication.deployment.path -cne
-            (Join-Path $runtimeRoot 'runtime-deployment.json')) {
-        throw ($publicationJson -join ' ')
-    }
-} catch {
-    [Console]::Error.WriteLine(
-        "[agent-logger] Runtime publication refused: $($_.Exception.Message) " +
-        'Use explicit installation management to install or repair this runtime.'
-    )
-    exit 3
-}
-
-$runtimePython = Resolve-RuntimePython -TraceMode normal
-if ($runtimePython) {
-    Invoke-Runtime -Python $runtimePython
-}
-New-Item -ItemType Directory -Force -Path $runtimeRoot | Out-Null
-$statusPath = Join-Path $runtimeRoot '.provision-status'
-$_lockPath = Join-Path $runtimeRoot '.provision.lock'
-$_lock = $null
-while (-not $_lock) {
-    try {
-        $_lock = [IO.File]::Open(
-            $_lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
-        )
-    } catch {
-        Start-Sleep -Milliseconds 200
-    }
-}
-
-$_provisionedPy = $null
-$_provisionRc = 0
-try {
-    $_provisionedPy = Resolve-RuntimePython
-    if (-not $_provisionedPy) {
-        [Console]::Error.WriteLine(
-            "[$commandName] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout."
-        )
-        [Console]::Error.WriteLine(
-            "::agent-provisioning:: plugin=$commandName eta_seconds=120 reason=first-use status=$statusPath"
-        )
-        try {
-            "provisioning $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-                Set-Content -LiteralPath $statusPath -Encoding utf8
-        } catch {}
-
-        Set-RuntimeEnvironment
-        $previousEap = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer provision -InstallDir $runtimeRoot 2>&1 |
-                ForEach-Object { [Console]::Error.WriteLine($_) }
-            $_provisionRc = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $previousEap
-        }
-        if ($_provisionRc -eq 0) {
-            $_provisionedPy = Resolve-RuntimePython
-        }
-    }
-} finally {
-    if ($_lock) { $_lock.Dispose() }
-}
-
-if ($_provisionRc -ne 0) {
-    try {
-        "failed rc=$_provisionRc $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-    } catch {}
-    [Console]::Error.WriteLine(
-        "[$commandName] provisioning FAILED. See the log above; retry, or run: $installer provision -InstallDir $runtimeRoot"
-    )
-    exit $_provisionRc
-}
-
-if ($_provisionedPy) {
-    try {
-        "ready $((Get-Date).ToUniversalTime().ToString('s'))Z" |
-            Set-Content -LiteralPath $statusPath -Encoding utf8
-    } catch {}
-    Invoke-Runtime -Python $_provisionedPy
-}
-
-[Console]::Error.WriteLine(
-    "[$commandName] provisioning completed without a resolvable runtime."
-)
+    $nativeShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    & $nativeShell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $firstUse `
+        -Root $executionRoot -Payload $payloadRoot -RuntimeRoot $runtimeRoot `
+        -Project $location.ProviderPath -InstallerAction provision -Wait
+    $code = $LASTEXITCODE
+} finally { $ErrorActionPreference = $previousEap }
+if ($code -ne 0) { exit $code }
+$runtimePython = Resolve-RuntimePython
+if ($runtimePython) { Invoke-Runtime -Python $runtimePython }
+[Console]::Error.WriteLine("[$commandName] driver completed without a resolvable runtime.")
 exit 1

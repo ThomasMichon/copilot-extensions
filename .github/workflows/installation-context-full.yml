@@ -20,10 +20,12 @@ on:
           - codespaces-bootstrap
           - logger-recipes
           - logger-bootstrap
+          - logger-commands
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
           - promotion-controls
+          - pane-argv
         default: context
 
 permissions:
@@ -62,6 +64,68 @@ jobs:
           tools/test_promotion_control.py::test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci
           tools/test_promotion_control.py::test_manifest_removal_cannot_reactivate_deleted_dev_workflow
 
+  logger-commands-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'
+    name: Logger command publishers (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real command admission, caller loss and installed consumers
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_command.py
+          --test-timeout 900 --timeout 1800
+      - name: Preserve healthy dispatch and native wrapper publication
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_runtime_gate.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 120 --timeout 600
+  logger-commands-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-commands'
+    name: Logger command publishers (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify real command admission, caller loss and installed consumers
+        env:
+          PYTEST_ADDOPTS: "--capture=tee-sys"
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_command.py
+          --test-timeout 900 --timeout 1800
+      - name: Preserve healthy dispatch and native wrapper publication
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --test-file tests/test_runtime_gate.py
+          --test-file tests/test_install_binstub.py
+          --max-files-per-sub-suite 1 --test-timeout 120 --timeout 600
   dispatch-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-binding'
     name: Dispatch scoped-stamp binding (Ubuntu)
@@ -103,6 +167,46 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_dispatch_scoped_publication.py
           --allow-explicit-tiers --test-timeout 60 --timeout 540
+
+  pane-argv-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'pane-argv'
+    name: File-based pane argv (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare pinned disposable PSMux
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $null = Get-Command pwsh -CommandType Application -ErrorAction Stop
+          $root = Join-Path $env:RUNNER_TEMP 'pane-argv-psmux'
+          $null = New-Item -ItemType Directory -Path $root
+          $archive = Join-Path $root 'psmux.zip'
+          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.6/psmux-v3.3.6-windows-x64.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'a56a890ea0829567818b9a368f16dcbd39c087f27328573df17c10dd39618947') {
+            throw 'Pinned PSMux archive digest mismatch'
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $root
+          $binaries = @(Get-ChildItem -LiteralPath $root -Filter psmux.exe -Recurse -File)
+          if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned PSMux binary' }
+          "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+      - name: Qualify actual pane producers and owned teardown
+        env:
+          PSMUX_FILE_LAUNCH_E2E: "1"
+          UV_PYTHON: "3.12"
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE'], (actual,os.environ['EXPECTED_SOURCE']); print('Source:',actual); print('Python:',sys.version)"
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/test_pane_args_file.py -k real_psmux --allow-explicit-tiers
 
   bridge-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
