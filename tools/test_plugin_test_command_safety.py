@@ -157,6 +157,11 @@ def test_child_arguments_cannot_qualify_the_parent_mux_namespace(monkeypatch, tm
 @pytest.mark.parametrize("command", [
     ["pwsh", "-NoProfile", "-Command", "Stop-Process -Name python -Force"],
     ["bash", "-c", "pkill -f copilot"],
+    ["bash", "-lc", "pkill -f fixture"],
+    ["bash", "-xc", "pkill -f fixture"],
+    ["sh", "-ec", "pkill -f fixture"],
+    ["bash", "-o", "pipefail", "-lc", "pkill -f fixture"],
+    ["pwsh", "-ExecutionPolicy", "Bypass", "-co", "Stop-Process -Name fixture"],
     ["cmd.exe", "/c", "taskkill /IM python.exe /F"],
     ["pwsh", "-Command", "psmux kill-session -t wt-live"],
     ["sh", "-c", "docker system prune -af"],
@@ -167,6 +172,76 @@ def test_child_arguments_cannot_qualify_the_parent_mux_namespace(monkeypatch, tm
 ])
 def test_shell_wrappers_do_not_hide_global_commands(command, tmp_path):
     assert safety.command_problem(command, sandbox=tmp_path)
+
+
+@pytest.mark.parametrize("prefix", [
+    ["env"], ["env", "-i"], ["env", "-u", "TMUX"], ["env", "HOME=private"],
+    ["timeout", "--signal", "TERM", "5"], ["nohup"], ["sudo", "-n"], ["doas", "-n"],
+    ["env", "timeout", "5", "nohup"],
+    ["command", "-p"], ["exec"], ["exec", "-a", "fixture"],
+])
+def test_local_launchers_preserve_mux_scope_checks_and_private_admission(monkeypatch, tmp_path, prefix):
+    monkeypatch.setenv(safety.SANDBOX_ENV, str(tmp_path))
+    private = safety.private_mux_args(tmp_path)
+    assert safety.command_problem(
+        [*prefix, "psmux", "kill-session", "-t", "fixture"],
+        sandbox=tmp_path, environment={},
+    )
+    assert safety.command_problem(
+        [*prefix, "psmux", *private, "kill-session", "-t", "fixture"],
+        sandbox=tmp_path, environment={},
+    ) is None
+
+
+@pytest.mark.parametrize("options", [
+    ["-u", "TMUX"], ["--unset=TMUX"], ["-uTMUX"], ["-i"],
+    ["TMUX=/foreign/mux.sock,0,0"],
+])
+def test_env_launcher_changes_the_effective_mux_environment(monkeypatch, tmp_path, options):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    assert safety.command_problem(
+        ["env", *options, "tmux", "kill-session", "-t", "fixture"],
+        sandbox=tmp_path, environment={"TMUX": str(tmp_path / "mux.sock") + ",0,0"},
+    )
+
+
+def test_env_launcher_split_string_and_cwd_are_inspected(monkeypatch, tmp_path):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    for options in (["-C", str(tmp_path)], ["--chdir=" + str(tmp_path)]):
+        assert safety.command_problem(
+            ["env", *options, "tmux", "-S", "mux.sock", "has-session"],
+            sandbox=tmp_path, environment={}, cwd=tmp_path.parent,
+        ) is None
+        assert safety.command_problem(
+            ["env", *options, "tmux", "-S", "../foreign.sock", "has-session"],
+            sandbox=tmp_path, environment={}, cwd=tmp_path.parent,
+        )
+    assert safety.command_problem(
+        ["env", "-S", "bash -lc 'pkill -f fixture'"], sandbox=tmp_path, environment={},
+    )
+    assert safety.command_problem(
+        ["env", "--split-string=TMUX='" + str(tmp_path / "mux.sock") + "',0,0 tmux has-session"],
+        sandbox=tmp_path, environment={},
+    ) is None
+
+
+@pytest.mark.parametrize("command", [
+    ["env", "tmux", "kill-session", "-t", "fixture"],
+    ["env", "-S", "bash -lc 'pkill -f fixture'"],
+    ["bash", "-lc", "pkill -f fixture"],
+    ["bash", "-xc", "pkill -f fixture"],
+    ["timeout", "5", "bash", "-c", "pkill -f fixture"],
+    ["bash", "-lc", "HOME=private tmux kill-session -t fixture"],
+    ["bash", "-lc", "command tmux kill-session -t fixture"],
+    ["bash", "-lc", "exec tmux kill-session -t fixture"],
+])
+def test_wrapped_cleanup_is_refused_at_a_synthetic_audit_boundary(command):
+    with pytest.raises(safety.UnsafeTestCommand):
+        sys.audit("subprocess.Popen", command[0], command, None, {})
 
 
 @pytest.mark.parametrize("flag", ["-EncodedCommand", "-enc", "-ec", "-e"])
@@ -190,6 +265,10 @@ def test_encoded_powershell_cleanup_is_inspected(tmp_path, flag):
     "subprocess.run([tmux, b'kill-server'])",
     r"command('ki\x6cl-server')",
     "subprocess.run(['w' 'sl', '--shut' 'down'])",
+    "subprocess.run(['bash', '-c', 'pkill -f fixture'])",
+    "subprocess.run(['bash', '-lc', 'pkill -f fixture'])",
+    "subprocess.run(['timeout', '5', 'bash', '-xc', 'pkill -f fixture'])",
+    "subprocess.run(['env', '-S', \"bash -lc 'pkill -f fixture'\"])",
 ])
 def test_source_preflight_rejects_child_cleanup_without_importing_it(tmp_path, body):
     source = tmp_path / "child.py"
@@ -221,6 +300,16 @@ def test_comments_mock_expectations_and_owned_process_handles_are_not_calls(tmp_
         "    assert expected[1] == 'kill-server'\n"
         "    process.terminate()\n"
     )
+    assert safety.source_problems(source) == []
+
+
+def test_source_preflight_inspects_encoded_shell_bodies_without_runtime_scope(tmp_path):
+    source = tmp_path / "child.py"
+    for flag in ("-EncodedCommand", "-enc", "-ec", "-e"):
+        encoded = base64.b64encode("Stop-Process -Name fixture".encode("utf-16-le")).decode("ascii")
+        source.write_text(f"subprocess.run(['pwsh', {flag!r}, {encoded!r}])")
+        assert safety.source_problems(source)
+    source.write_text("subprocess.run(['env', 'bash', '-lc', 'tmux kill-session -t fixture'])")
     assert safety.source_problems(source) == []
 
 

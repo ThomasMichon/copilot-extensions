@@ -24,7 +24,7 @@ _SINKS = {
 }
 _SOURCE_MARKERS = re.compile(
     r"kill|stop|restart|shutdown|terminate|\bwsl\b|\bdocker\b|\bpodman\b|"
-    r"\bsystemctl\b|\bsc\b|\bnet\b|\bservice\b|\\(?:[xuUN]|[0-7])",
+    r"\bsystemctl\b|\bsc\b|\bnet\b|\bservice\b|\b(?:pwsh|powershell)\b|\\(?:[xuUN]|[0-7])",
     re.IGNORECASE,
 )
 _ADJACENT_LITERALS = re.compile(r"""['"][^'"\r\n]+['"]\s*[bruBRU]?['"][^'"\r\n]+['"]""")
@@ -139,9 +139,103 @@ def _global_problem(parts: list[str]) -> str | None:
     if name in {"docker", "podman"} and any(word in {"stop", "kill", "rm"} for word in words):
         if any(word in {"--all", "-a"} or "$(" in word or "*" in word for word in words):
             return "bulk container cleanup is forbidden; target an owned fixture"
-    if name in {"ssh", "sudo", "doas", "env", "timeout", "nohup"}:
-        return _shell_problem(" ".join(parts[1:]), check_mux_scope=False)
     return None
+
+
+def _launcher_problem(
+    parts: list[str], *, cwd: str | Path | None,
+    environment: Mapping[str, str] | None, sandbox: Path | None,
+    check_mux_scope: bool,
+) -> str | None:
+    name = _name(parts[0])
+    effective = dict(os.environ if environment is None else environment)
+    nested = parts[1:]
+    if name == "ssh":
+        text = " ".join(nested)
+        if check_mux_scope and re.search(r"\b(?:psmux|tmux)(?:\.exe)?\b", text, re.IGNORECASE):
+            return "remote mux commands require independently verified remote fixture scope"
+        return _shell_problem(text, check_mux_scope=False)
+    if name in {"sudo", "doas"}:
+        # Privilege launchers may replace the environment. An inherited TMUX
+        # socket is not scope evidence after crossing that boundary.
+        effective = {}
+    index = 0
+    while index < len(nested):
+        argument = nested[index]
+        if argument == "--":
+            index += 1
+            break
+        if name == "env" and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", argument):
+            break
+        if argument in {"--help", "--version"}:
+            return None
+        if not argument.startswith("-") or argument == "-":
+            if name == "env" and argument == "-":
+                effective.clear()
+                index += 1
+                continue
+            break
+        if name == "env" and argument in {"-i", "--ignore-environment"}:
+            effective.clear()
+            index += 1
+            continue
+        option, separator, attached = argument.partition("=")
+        takes_value = {
+            "env": {"-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+            "timeout": {"-k", "--kill-after", "-s", "--signal"},
+            "sudo": {"-u", "--user", "-g", "--group", "-p", "--prompt", "-D", "--chdir"},
+            "doas": {"-u", "-C"},
+            "exec": {"-a"},
+        }.get(name, set())
+        if name == "env" and argument[:2] in {"-u", "-C", "-S"} and len(argument) > 2:
+            option, separator, attached = argument[:2], "=", argument[2:]
+        if option in takes_value:
+            if not separator and index + 1 >= len(nested):
+                return "cannot inspect a launcher option without its value"
+            value = attached if separator else nested[index + 1]
+            index += 1 if separator else 2
+            if name == "env" and option in {"-u", "--unset"}:
+                for key in list(effective):
+                    if key == value or os.name == "nt" and key.upper() == value.upper():
+                        effective.pop(key)
+            elif option in {"-D", "--chdir"} or name == "env" and option in {"-C", "--chdir"}:
+                path = Path(value)
+                cwd = path if path.is_absolute() else Path(cwd or Path.cwd()) / path
+            elif name == "env" and option in {"-S", "--split-string"}:
+                try:
+                    nested[index:index] = shlex.split(value)
+                except ValueError:
+                    return "cannot inspect a malformed env split-string"
+            continue
+        flags = {
+            "env": {"-v", "--debug", "--null", "-0"},
+            "timeout": {"--foreground", "--preserve-status", "-v", "--verbose"},
+            "sudo": {"-n", "--non-interactive", "-E", "--preserve-env", "-H", "-S"},
+            "doas": {"-n"},
+            "nohup": set(),
+            "command": {"-p"},
+            "exec": {"-l", "-c"},
+        }.get(name, set())
+        if argument not in flags:
+            return "cannot inspect an unsupported " + name + " launcher option"
+        if name == "exec" and argument == "-c":
+            effective.clear()
+        index += 1
+    if name == "env":
+        while index < len(nested) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", nested[index]):
+            key, value = nested[index].split("=", 1)
+            if os.name == "nt":
+                for previous in list(effective):
+                    if previous.upper() == key.upper():
+                        effective.pop(previous)
+            effective[key] = value
+            index += 1
+    elif name == "timeout" and index < len(nested):
+        index += 1  # The duration precedes the executable.
+    return _command_problem(
+        nested[index:], cwd=cwd, environment=effective, sandbox=sandbox,
+        check_mux_scope=check_mux_scope,
+    )
 
 
 def _shell_problem(
@@ -173,7 +267,7 @@ def _shell_problem(
         ):
             if not re.search(r"-(?:id|inputobject)\b", match[1], re.IGNORECASE):
                 return "PowerShell termination requires explicit owned -Id/-InputObject targets"
-    if not check_mux_scope:
+    if not check_mux_scope and not re.search(r"\b(?:pwsh|powershell)(?:\.exe)?\b", text, re.IGNORECASE):
         return None
     for segment in re.split(r"[\r\n;|&]+", text):
         try:
@@ -186,14 +280,15 @@ def _shell_problem(
         except ValueError:
             pass
         for candidate in candidates:
-            if candidate and _name(candidate[0]) not in _SHELLS:
-                problem = _global_problem(candidate)
+            if candidate:
+                if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", candidate[0]):
+                    candidate = ["env", *candidate]
+                problem = _command_problem(
+                    candidate, cwd=cwd, environment=environment, sandbox=sandbox,
+                    check_mux_scope=check_mux_scope,
+                )
                 if problem:
                     return problem
-                if _name(candidate[0]) in _MUX:
-                    problem = command_problem(candidate, cwd=cwd, environment=environment, sandbox=sandbox)
-                    if problem:
-                        return problem
     return None
 
 
@@ -202,16 +297,34 @@ def command_problem(
     environment: Mapping[str, str] | None = None, sandbox: Path | None = None,
 ) -> str | None:
     """Inspect an actual external command, not a mocked command construction."""
+    return _command_problem(command, cwd=cwd, environment=environment, sandbox=sandbox)
+
+
+def _command_problem(
+    command: object, *, cwd: str | Path | None = None,
+    environment: Mapping[str, str] | None = None, sandbox: Path | None = None,
+    check_mux_scope: bool = True,
+) -> str | None:
     parts = _tokens(command)
     problem = _global_problem(parts)
     if problem or not parts:
         return problem
     name = _name(parts[0])
+    if name in {"ssh", "sudo", "doas", "env", "timeout", "nohup", "command", "exec"}:
+        return _launcher_problem(
+            parts, cwd=cwd, environment=environment, sandbox=sandbox,
+            check_mux_scope=check_mux_scope,
+        )
     if name in _SHELLS:
-        lowered = [part.lower() for part in parts]
         is_powershell = name in {"pwsh", "powershell"}
-        for index, flag in enumerate(lowered[1:], start=1):
-            if flag in {"-file", "-f", "-command", "-c", "/c", "/k"}:
+        index = 1
+        while index < len(parts):
+            flag = parts[index].lower()
+            if is_powershell:
+                flag = "-" + flag[1:] if flag.startswith("/") else flag
+            if is_powershell and flag.startswith("-f") and "-file".startswith(flag):
+                break
+            if flag == "--" or not flag.startswith(("-", "/")):
                 break
             if is_powershell and (
                 flag in {"-e", "-ec"} or flag.startswith("-en") and "-encodedcommand".startswith(flag)
@@ -222,14 +335,30 @@ def command_problem(
                     return "cannot inspect an encoded PowerShell test command"
                 return _shell_problem(
                     script, cwd=cwd, environment=environment, sandbox=sandbox, powershell=True,
+                    check_mux_scope=check_mux_scope,
                 )
-        for flag in ("-command", "-c", "/c", "/k"):
-            if flag in lowered:
+            command_flag = (
+                is_powershell and flag.startswith("-c") and "-command".startswith(flag)
+                or name == "cmd" and flag in {"/c", "/k"}
+                or not is_powershell and name != "cmd"
+                and re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", flag) is not None
+            )
+            if command_flag:
                 return _shell_problem(
-                    " ".join(parts[lowered.index(flag) + 1:]),
+                    " ".join(parts[index + 1:]),
                     cwd=cwd, environment=environment, sandbox=sandbox, powershell=is_powershell,
+                    check_mux_scope=check_mux_scope,
                 )
-    if name not in _MUX or parts[1:] in (["-V"], ["--version"], ["--help"], ["-h"]):
+            value_flags = (
+                {"-executionpolicy", "-ep", "-inputformat", "-outputformat", "-windowstyle",
+                 "-version", "-workingdirectory", "-wd", "-settingsfile"}
+                if is_powershell else {"-o", "--rcfile", "--init-file"}
+            )
+            index += 2 if flag in value_flags or parts[index] == "-O" else 1
+    if (
+        not check_mux_scope or name not in _MUX
+        or parts[1:] in (["-V"], ["--version"], ["--help"], ["-h"])
+    ):
         return None
     if sandbox is None:
         return "real mux commands require the runner's verified private namespace"
@@ -335,7 +464,9 @@ def source_problems(path: Path) -> list[str]:
         elif isinstance(value, (str, bytes)):
             reason = _shell_problem(os.fsdecode(value), check_mux_scope=False)
         elif isinstance(value, (list, tuple)) and all(isinstance(part, (str, bytes)) for part in value):
-            reason = _global_problem([os.fsdecode(part) for part in value])
+            reason = _command_problem(
+                [os.fsdecode(part) for part in value], check_mux_scope=False,
+            )
         else:
             reason = None
             if isinstance(argument, (ast.List, ast.Tuple)):
