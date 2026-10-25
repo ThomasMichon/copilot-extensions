@@ -254,8 +254,14 @@ mechanism or permission to select another release.
    returns installed provenance without this Git proof; that record must not
    be promoted into authenticated source evidence. Expose the same proof for
    the actual registered selection while preserving ordinary inventory behavior.
+   The cache proof locates consistent bytes; a local remote URL and commit
+   are not, by themselves, origin authentication.
 3. Bind preparation to the proof's real Git commit and tree, exact selected
-   plugin/version and complete source inventory. Verify prepared source against
+   plugin/version and complete source inventory. Compose with the existing
+   source-acquisition owner's authenticated repository/ref checks, selecting
+   that exact commit rather than trusting a cache's self-described origin.
+   Unsupported registered refs stay unsupported; do not reinterpret them as
+   the repository's latest default branch. Verify prepared source against
    the actual acquired payload; do not substitute a newer branch tip, manufacture
    Git fields from a payload digest or treat optional artifact publication as
    an authentication prerequisite. Unsupported source layouts remain explicit
