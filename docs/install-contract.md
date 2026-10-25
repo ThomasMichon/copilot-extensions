@@ -2963,6 +2963,12 @@ timeout or interrupted outcome without completing inherited writers. Parser,
 signature or policy refusal before native entry therefore never masquerades as
 successful installer logging. Diagnostic presentation uses stderr and does not
 replace protocol stdout or native process ownership.
+Caller announcements and missing-diagnostics warnings are bounded best-effort
+notifications, not synchronous writes on the installer path. At most one raw
+descriptor writer is outstanding per caller module, with a 50 ms presentation
+wait and no queued replay or buffered-stdio lock. A stalled reader may lose the
+notice but cannot withhold launch or interpreter exit; the exact private
+reference and missing/unknown state remain in the result and event stream.
 
 The retained Worktrees publication receiver can record `installation.json`
 only inside its existing governance and candidate/rollback retention custody,
@@ -3028,6 +3034,12 @@ outside this boundary remains incomplete evidence, not successful installation.
 The same packaged private-filesystem/redaction closure accompanies source,
 staged and retained/frozen Python entrypaths; no additional Python is introduced
 into the native pre-bootstrap flow.
+If the optional Python helper itself is missing or fails to import, entry and
+implementation reuse one warning-only fallback: capture uses inherited streams,
+diagnostic callbacks do nothing, and missing diagnostics remains explicit.
+The fallback warning has the same bounded raw-write presentation rule.
+Implementation imports, parser results, construction ownership and native
+failures remain outside the optional-helper exception boundary.
 
 An explicit text/binary flush also persists bounded incomplete logical and
 decoder state to a private, non-inheritable `<writer>.producer.pending`

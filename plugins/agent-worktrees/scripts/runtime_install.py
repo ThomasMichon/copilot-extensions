@@ -2,6 +2,65 @@
 
 from __future__ import annotations
 
+
+def _load_diagnostics():
+    from contextlib import nullcontext
+    import os
+    import sys
+    import threading
+
+    try:
+        import installer_diagnostics
+
+        return installer_diagnostics
+    except Exception:
+        # Only the optional import is isolated; implementation failures still escape.
+        os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
+        sink = sys.stderr
+
+        def notify():
+            descriptor = None
+            try:
+                descriptor = os.dup(sink.fileno())
+                os.write(descriptor, b"WARNING: installer diagnostics unavailable; "
+                         b"continuing with missing diagnostics.\n")
+            except (OSError, ValueError, AttributeError):
+                pass
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+
+        try:
+            thread = threading.Thread(target=notify, name="installer-missing-diagnostics", daemon=True)
+            thread.start()
+            thread.join(.05)
+        except RuntimeError:
+            pass
+
+        class MissingDiagnostics:
+            @staticmethod
+            def writer(**kwargs):
+                return nullcontext()
+
+            @staticmethod
+            def capture():
+                return nullcontext({})
+
+            @staticmethod
+            def phase(name):
+                pass
+
+            @staticmethod
+            def associate_installed(installation):
+                pass
+
+            @staticmethod
+            def warn():
+                pass
+
+        return MissingDiagnostics()
+
+
 if __name__ == "__main__":
     # Enter diagnostics before implementation imports and argparse can fail.
     # Re-enter this same trusted source in-process, not through another child.
@@ -9,13 +68,17 @@ if __name__ == "__main__":
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    import installer_diagnostics as _entry_diagnostics
+    _entry_diagnostics = _load_diagnostics()
 
     with _entry_diagnostics.writer(announce=True):
         import runpy
 
-        _entry_diagnostics.ordinary(Path(__file__))
-        _implementation = runpy.run_path(__file__, run_name="__installer_source__")
+        if hasattr(_entry_diagnostics, "ordinary"):
+            _entry_diagnostics.ordinary(Path(__file__))
+        _implementation = runpy.run_path(
+            __file__, run_name="__installer_source__",
+            init_globals={"_entry_diagnostics": _entry_diagnostics},
+        )
         raise SystemExit(_implementation["main"]())
 
 import argparse
@@ -37,11 +100,13 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 
 import installer_engine as engine
-import installer_diagnostics as diagnostics
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 import runtime_install_publication as helper_publication
 from runtime_install_governance import Governance, InstallationRefused
+
+
+diagnostics = globals().get("_entry_diagnostics") or _load_diagnostics()
 
 
 def helper_publication_plan(path: Path, digest: str) -> dict:

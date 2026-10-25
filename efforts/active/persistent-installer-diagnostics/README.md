@@ -1149,3 +1149,42 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   All nine Python consumers synchronize and all admitted unit hashes verify.
   The already-tested canonical engine and Worktrees source-step code did not
   change in this pull-forward; no native success is inferred from regeneration.
+- Exact-head CI `40185321559` passed guards, eligible units and the required PR
+  gate at `287108d9f386de69abe05c772e6aa168f2052802`; attribution and lockdown
+  also passed. Copilot review `5642782386` found two additional High issues:
+  unconditional optional-helper imports could abort the Python entrypoint, and
+  caller announcements/warnings could block on a full stderr pipe before the
+  installer's existing deadline began. The earlier native qualification
+  findings remain open; this review is not qualification or merge permission.
+- Both Python import surfaces now reuse one warning-only fallback when the
+  diagnostic module is absent or fails during import. Diagnostic capture and
+  callbacks become explicitly missing rather than replacing the parser,
+  implementation import or native result. The original implementation errors
+  still escape. The fallback's own warning uses a bounded raw writer.
+- Caller notices no longer swap global stdout or write synchronously through
+  buffered stderr. A module permits at most one outstanding raw descriptor
+  writer and waits at most **50 ms**; it never queues another message behind a
+  stalled reader or holds a buffered-stdio lock during interpreter shutdown.
+  Exact private references and missing/unknown state are retained independently
+  of optional presentation. There is no new process owner or installer timeout.
+- The new native backpressure fixture initially held the CRT lock on stderr
+  itself, and then incorrectly inherited that deliberately full pipe into the
+  child. Those versions did not prove healthy child-output acceptance. The
+  corrected fixture fills a separate duplicate and supplies an independent
+  explicit child-output file while leaving caller stderr unread. Both cases
+  preserve native exit **23** and caller process exit **0**, with the original
+  **2-second** child and **10-second** observation limits unchanged.
+- The complete caller-reference file plus missing/import/syntax/runtime-error
+  helper controls, blocked early-warning presentation and ordinary entry
+  controls pass: **45 passed, 47 deselected, 72.03 seconds; 175.30 seconds
+  including preparation and cleanup**. The earlier complete caller file also
+  passed **21 tests** before the additional import/completion refusal controls.
+  Targeted Ruff, the **1000-line** touched-module cap and the complete admitted
+  unit-source hash inventory pass. These are local synthetic native/unit
+  controls, not a real-UV installation, Linux acceptance or installed rollout.
+- Documentation-impact review updates this install-contract boundary rather
+  than creating another manual. Existing Worktrees changefile coverage remains
+  applicable. The repaired candidate still owes current-head required CI,
+  current review and the previously admitted hosted native packet. It remains
+  draft-only; no merge, rollout, larger deadline or broader native enrollment
+  is authorized.
