@@ -39,6 +39,10 @@ def lifecycle_blocker(
 
 
 def pin_lifecycle_command(args: list[str], config: ContainersConfig, inspect) -> list[str]:
+    if (len(args) < 2 or args[0] not in {"start", "stop", "unpause", "rm"}
+            or (args[1:-1] not in ([], ["-f"]) if args[0] == "rm" else len(args) != 2)
+            or args[-1].startswith("-")):
+        raise RuntimeError("unsupported container lifecycle command")
     target = args[-1]
     record = inspect(target)
     identity = record.get("Id")

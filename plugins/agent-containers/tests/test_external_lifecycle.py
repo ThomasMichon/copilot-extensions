@@ -130,6 +130,17 @@ def test_uncertain_instance_never_reaches_mutation(identity):
         pin_lifecycle_command(["stop", "pilot-1"], ContainersConfig(), lambda _: observed)
 
 
+@pytest.mark.parametrize("args", [
+    [], ["stop"], ["stop", "other-1", "pilot-1"], ["rm", "-f", "other-1", "pilot-1"],
+    ["start", "--all"], ["rm", "--force", "pilot-1"],
+])
+def test_unverified_extra_targets_or_options_refused(args):
+    with pytest.raises(RuntimeError, match="unsupported container lifecycle command"):
+        pin_lifecycle_command(
+            args, ContainersConfig(), lambda _: pytest.fail("unexpected inspection"),
+        )
+
+
 def test_external_prefix_cannot_borrow_different_label(external):
     assert lifecycle_blocker(external, "pilot-1", {FLEET_LABEL: "other"})
 
