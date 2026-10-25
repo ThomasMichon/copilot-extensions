@@ -1,0 +1,9 @@
+{
+  "comment": "Retain original creation observations on explicitly selected fresh provider bindings, refusing ordinary-path downgrade without enabling native custody.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
