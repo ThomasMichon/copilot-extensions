@@ -3650,6 +3650,12 @@ venv/package writers, even when construction tools are absent. Unfinished
 builders recheck under the canonical OS lease; completed content drift or
 invalid evidence refuses instead of rewriting a published slot.
 
+An optional owner-supplied `validate_candidate(slot)` runs after installed
+health but before a new completion marker, and before exposing any reused
+candidate. Source-profile callers use it to recheck retained source and the
+installed interpreter target under the same custody. A rejected new candidate
+remains incomplete; the hook does not activate or rewrite a published slot.
+
 An explicitly selected `extras` tuple on `numbered_candidate()` installs only
 declared optional groups on the primary package, inside that same retained UV
 transaction. Names are normalized and ordered; unknown, duplicate and mutable

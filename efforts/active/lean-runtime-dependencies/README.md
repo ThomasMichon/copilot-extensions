@@ -221,6 +221,11 @@ a profile, authorizes acquisition or supplies an admitted reuse receipt.
 The existing-owner configuration-intent reader merged in #8494, including
 management publication holds and policy invalidation. It does not close the
 authenticated adopting-policy/source adapter or its actual governed closure.
+The release-authentication adapter (#8568) and policy/release planner (#8586)
+also merged under the artifact owner's continuation. They remain repository-only
+preparation: no independently locked source closure, governed acquisition or
+production consumer is enabled. Coordinate actual source-lock/acquisition
+composition with that owner under #4876 rather than duplicating it.
 #6941 retains the separate contributor-owned
 candidate-input generator. Native/standalone queue, schema, canary, warm-engine and
 Darwin acceptance remain with #5768. Apply the reviewed profile contract under
@@ -238,6 +243,12 @@ the trusted setup by a user or authorized agent is the dependency-operation
 authority for the selected configuration. Carry it through the existing
 installation/custody owner rather than introducing a separate package approver;
 configuration reads and candidate discovery alone do not establish invocation.
+Continue the source/helper consumer through direct reviewed contributions;
+unreliable peer acknowledgement is not a prerequisite for implementation.
+Reconcile overlapping source changes through the PR flow rather than leaving
+the campaign blocked. Preserve the accepted immutable-helper-artifact boundary
+from #6767: no rejected routing broker or shared mutable venv, and no claimed
+transfer without acceptance by a named tracked objective.
 
 ## Journal
 
@@ -922,3 +933,85 @@ configuration reads and candidate discovery alone do not establish invocation.
   permitted CPU-closure result. Parent Plan and Validation Plan remain open.
   Next bind the invoked setup and selected configuration at the existing owner,
   then prove real source resolution and exact retained-byte admission.
+- The clarification merged in #8658 as
+  `6f6e3343796d6ed92bb35d31743b6ae41e0cc9eb` after genuine current-head
+  approval, no open review threads and green required CI `40128173965`.
+  Re-read this Plan and Validation Plan after merge; no aggregate
+  implementation or acceptance item closes from a documentation clarification.
+- Consume the independently merged closed-wheel constructor composition
+  (#8534, `bd4c5539a`) alongside the inspector and snapshots. It binds
+  inspected wheel facts to existing immutable construction and offline install,
+  but deliberately leaves semantic profile, source/feed and target admission
+  with the actual setup/installation owner. Do not add another constructor.
+- The adopting harness's matching authority intent also cleared its own
+  required CI and review and merged. No runtime mechanics changed. The parent
+  Plan and Validation Plan were re-read again; the real closure, native consumer,
+  helper reuse and service-acceptance gates remain open.
+- Refreshed #4876 coordination after discovering the owner's subsequently merged
+  release adapter (#8568) and policy/release planner (#8586). Consume those
+  components, and requested confirmation of the existing source-lock/acquisition
+  continuation and its engine-consumer handoff. No response or accepted transfer
+  is assumed; #6941 retains its original candidate-input contributor.
+
+### 2026-10-24 - Reconcile the accepted helper-consumer residual
+- Re-read the reviewed #6767 decision, full compatibility/lifecycle boundary
+  and both parent acceptance plans. The accepted immutable-helper consumer
+  lane already composes with #4876's admission/consumer/retention work; it is
+  not a separate shared venv or broker implementation.
+- The artifact owner reported source-graph export merged in #8600 and
+  explicitly retained source identity/trigger/target lock binding, acquisition
+  and consumer realization. Do not duplicate that continuation or substitute
+  a build-cache preparation change for the accepted consumer/lifecycle result.
+- Requested explicit acceptance of the deferred helper-consumer requirements
+  into #4876, or one agreed non-overlapping implementation slice, in
+  [the coordination request](https://github.com/ThomasMichon/copilot-extensions/issues/4876#issuecomment-6390022767).
+  The request includes whole-closure/extras parity, standalone installation,
+  reference survival, matched allocation savings, installation-cell/trust
+  isolation, concurrency, failure recovery and rollback. #6697 is a completed
+  publication PR, not a named active delivery objective.
+- The request is not acceptance. Phase 5 implementation and its validation
+  items remain unchecked; source/default-profile and native/service gates
+  also remain open. No runtime, acquisition, activation or rollout changed.
+
+### 2026-10-24 - Direct source-profile construction continuation
+- The operator directed direct PR delivery instead of waiting for unreliable
+  agent acknowledgement. Resumed implementation in this campaign's existing
+  workspace; ordinary review, source integrity and acquisition policy remain
+  binding. The earlier request is not a completion or accepted transfer.
+- Consumed the merged source-lock binding and implemented complete source
+  profiles from its retained inputs: build required first-party/helper wheels,
+  require exact pinned third-party bytes, inspect the whole metadata/extras
+  closure, then use the existing offline immutable constructor. The owning
+  context supplies the root, interpreter and source generation; no alternate
+  slot allocator, activation or service owner is introduced.
+- Bound the retained source fingerprint across compilation, build and health,
+  with a final check before exposing a candidate. Construction receipts retain
+  the source trigger, exact profile, selected policy and locked build tools.
+  Existing build helpers now carry the caller's deadline to each child.
+- Final focused source validation passed all 57 cases, including real helper
+  builds and the actual constructor/isolated CLI. Earlier combined validation
+  passed 329 cases but exposed two twenty-second collection startup timeouts.
+  A bounded import profile showed pytest import dominating startup. The
+  collection control now runs all four real selectors in one child, sharing
+  imports only; all 69 CI-scope cases pass with every original inventory
+  assertion and the same twenty-second cap. No timeout increase or test
+  omission is accepted.
+- The source consumer remains repository-only. Permitted third-party
+  acquisition, production CPU/accelerator profiles, admitted persistent reuse,
+  native engine/application and remaining service/platform gates stay open.
+  Separate Linux/Windows/macOS source-profile qualification uses the existing
+  wheel-input opt-in; hosted proof, unit-packet admission and PR review/merge
+  remain publication gates. No production rollout is authorized or claimed.
+- Opened direct draft #8791 after preserving all upstream unit additions
+  during publication rebase (1587 existing plus eight new units). The eight
+  focused units pass the unchanged no-actor observer, and actual constructor
+  requalification passes with interpreter checks before construction and
+  after installed health. The full local packet exceeded its fixed budget;
+  no full local pass is claimed and required hosted qualification remains open.
+- Initial Linux required CI exposed eager `ctypes` loading through the
+  build-toolchain trust module. Deferred it to the actual native operations,
+  not a framework preload or an allowed-effect exception. A clean `-I -S -B`
+  caller now refuses native loading while importing the profile consumer;
+  native import/provenance controls pass along with the updated CI-scope
+  contracts. Hosted native lanes also include macOS without claiming
+  standalone-service supervision or engine rollout parity.

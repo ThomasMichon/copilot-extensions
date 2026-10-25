@@ -129,6 +129,16 @@ def _target(value: Any, max_tags: int, deadline: float) -> None:
     _reference(value["device"], "target device")
 
 
+def _wheel_filename(filename: str, max_tags: int, deadline: float):
+    if not filename.endswith(".whl") or "/" in filename or "\\" in filename:
+        raise ProfileError("wheel filename must be a .whl basename")
+    prefix, python, abi, platform = filename[:-4].rsplit("-", 3)
+    canonical, _ = bounded_tag(
+        "-".join((python, abi, platform)), limit=max_tags, deadline=deadline,
+    )
+    return parse_wheel_filename(prefix + "-" + canonical + ".whl")
+
+
 def _closure(record: dict, max_tags: int, deadline: float) -> None:
     entries = record["wheels"]
     if not isinstance(entries, list) or not entries:
@@ -147,16 +157,8 @@ def _closure(record: dict, max_tags: int, deadline: float) -> None:
             raise ProfileError(f"duplicate normalized distribution: {name}")
         version = Version(_text(entry["version"], "version"))
         filename = _text(entry["filename"], "filename")
-        if "/" in filename or "\\" in filename:
-            raise ProfileError("wheel filename must be a basename")
-        prefix, python, abi, platform = filename.removesuffix(".whl").rsplit("-", 3)
-        canonical, _ = bounded_tag(
-            "-".join((python, abi, platform)), limit=max_tags, deadline=deadline,
-        )
-        wheel_name, wheel_version, _, tags = parse_wheel_filename(prefix + "-" + canonical + ".whl")
+        wheel_name, wheel_version, _, tags = _wheel_filename(filename, max_tags, deadline)
         _check_deadline(deadline)
-        if not filename.endswith(".whl"):
-            raise ProfileError("wheel filename must end with .whl")
         if wheel_name != name or wheel_version != version or not tags & compatible:
             raise ProfileError(f"{name}: wheel identity or target tags disagree")
         _digest(entry["sha256"], "wheel digest")

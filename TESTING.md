@@ -462,6 +462,45 @@ windows or foreground transitions. Storage thresholds measure file-content
 bytes, including control/helper copies; filesystem allocation overhead and
 enabled budgets still require the parent effort's separate measurements.
 
+`tools/test_runtime_source_wheels.py` continues the retained selection through
+real first-party/helper wheel builds, complete metadata/extras validation and the
+existing offline immutable constructor. The source profile is frozen before the
+constructor creates its first slot. Its receipt binds the selected source,
+fallback trigger, policy, target, exact complete profile and locked build tools.
+The constructor uses the selected owner's runtime root and source generation,
+not an alternate caller-supplied destination. Changed source, altered/missing
+third-party lock inputs and dropped helper extras refuse. Unit-only graph and
+build-deadline controls live in
+`tools/promotion_unit_tests/test_source_profile_derivation.py`.
+Built wheels must preserve the retained source's dependencies, extras and
+Python requirement. Native regressions alter actual wheel metadata, refuse
+nonordinary inputs before opening, bound compressed filename tags before
+expansion and reject oversized WHEEL metadata before an unbounded read.
+Deadline-bound builds use the existing installer process-tree supervisor;
+a real backend's delayed writer must exit before staging custody is released.
+Both absolute and PATH-only UV selection reach real construction using the
+same selected absolute executable throughout building and assembly.
+An installed-target mismatch must refuse before the constructor writes its
+completion marker. Third-party RECORD entries accept the runtime verifier's
+SHA-256/384/512 policy; built first-party wheels retain SHA-256-only records.
+Marker probes bypass site initialization: a real venv control proves that
+an installed `.pth` hook executes normally, but not during target inspection.
+The existing `wheel_inputs=true` opt-in also runs a separate six-minute native
+source-profile packet on Linux, Windows and macOS. This does not extend the existing
+wheel-inspection job's deadline. These are synthetic source/byte and fresh-root
+construction controls, not private-feed acquisition, production CPU/accelerator
+profiles, persistent reuse admission or deployment. Callers still own permitted
+third-party acquisition and retain the source-lock and wheel contexts through
+health; no new package approver or feed exception is introduced.
+CI-scope inventory checks execute all four actual pytest selectors in one
+bounded child, sharing interpreter imports but not collection results. Every
+partition still has its original exact-inventory assertions; the aggregate
+child retains the original twenty-second cap. The macOS source-consumer lane
+does not qualify standalone-service supervision or new engine deployment parity.
+A clean `-I -S -B` caller also denies native-loader operations during consumer
+import. Feed-governance native adapters load only when their operations run;
+the no-actor packet neither preloads them nor permits their effects.
+
 `python -m pytest -q tools/test_installer_wheel_inputs.py` exercises real
 synthetic wheel archives, streamed digest/RECORD checks, independent selected
 metadata mutations, ambiguous/linked/encrypted members, compressed metadata
