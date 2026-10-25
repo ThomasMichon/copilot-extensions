@@ -1,0 +1,17 @@
+{
+  "comment": "Preserve transient health-probe failure semantics and explicit maintenance startup admission.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}

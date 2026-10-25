@@ -11,8 +11,9 @@ import threading
 import traceback
 import uuid
 from dataclasses import asdict
+from io import BufferedReader
 from pathlib import Path
-from typing import TYPE_CHECKING, ContextManager, Protocol
+from typing import TYPE_CHECKING, Any, BinaryIO, Callable, ContextManager, Protocol, cast
 
 from . import _daemon_instance_store as store
 from ._daemon_instance_clock import WallLeaseObservation
@@ -29,6 +30,7 @@ _ENVIRONMENT = {INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV, "COPILOT_EXTENSION
 
 if TYPE_CHECKING:
     from .daemon_broker import WindowsDaemonProcess
+    from .daemon_instances import Purpose
 
 
 class ShellOwner(Protocol):
@@ -43,18 +45,20 @@ class ShellOwner(Protocol):
     def retire(self) -> None: ...
 
 
-def _receipt(value: dict) -> DaemonInstanceReceipt:
+def _receipt(value: dict[str, Any]) -> DaemonInstanceReceipt:
     return DaemonInstanceReceipt(value["instance_id"], Path(value["registry_root"]))
 
 
-def _metadata(receipt: DaemonInstanceReceipt, **extra: object) -> dict:
+def _metadata(receipt: DaemonInstanceReceipt, **extra: object) -> dict[str, object]:
     return {
         "instance_id": receipt.instance_id, "registry_root": str(receipt.registry_root),
         "record_path": str(receipt.record_path), **extra,
     }
 
 
-def _spec(parameters: dict, environment: dict, *, admission: bool) -> DaemonInstanceSpec:
+def _spec(
+    parameters: dict[str, Any], environment: dict[str, str], *, admission: bool,
+) -> DaemonInstanceSpec:
     purpose = parameters.get("purpose")
     if not purpose:
         if admission and not environment.get(TEST_CONTEXT_ENV):
@@ -76,7 +80,8 @@ def _spec(parameters: dict, environment: dict, *, admission: bool) -> DaemonInst
     lease = DaemonLeasePolicy(ttl, maximum) if ttl or maximum else None
     return DaemonInstanceSpec(
         parameters["service"], Path(parameters["runtime_root"]), Path(parameters["source"]),
-        purpose=purpose, owner=owner, registry_root=Path(root) if root else None, lease=lease,
+        purpose=cast("Purpose", purpose), owner=owner,
+        registry_root=Path(root) if root else None, lease=lease,
     )
 
 
@@ -91,7 +96,7 @@ class ShellInstanceSession:
         self._failed = False
         self._owned_cleanup: BaseException | None = None
 
-    def dispatch(self, request: dict) -> dict | list | str | None:
+    def dispatch(self, request: dict[str, Any]) -> object:
         if self._failed:
             if self._owned_cleanup is not None:
                 raise OSError("finite process cleanup is unsettled; replay is refused")
@@ -132,7 +137,8 @@ class ShellInstanceSession:
                 return self._enter(parameters, environment)
         if command == "exit":
             with self._guard_lock:
-                return self._exit(request)
+                self._exit(request)
+            return None
         if command == "bind":
             return self._bind(request)
         if command == "finish-child":
@@ -143,6 +149,29 @@ class ShellInstanceSession:
                     raise ValueError("child daemon completion requires observed exit")
                 finish_for_process(receipt, identity, launcher=self.owner.identity)
             return None
+        if command == "failed-launch-contract":
+            return {"version": 1, "owner_bound": True, "pinned_exit": True}
+        if command == "failed-launch":
+            from ._daemon_instance_records import cancel_for_process, finish_failed_for_process
+
+            receipt = _receipt(request["receipt"])
+            refused = request.get("creation_refused")
+            admission = request.get("admission_possible")
+            if type(refused) is not bool or type(admission) is not bool:
+                raise ValueError("failed-launch evidence must be boolean")
+            if refused:
+                if request.get("process") is not None or admission:
+                    raise ValueError("refused creation cannot carry child admission")
+                cancel_for_process(receipt, self.owner.identity, creation_refused=True)
+                return {"settled": True}
+            identity, handle = self._child_request(request)
+            with self.owner.child(identity, handle) as process:
+                if process.poll() is None:
+                    raise ValueError("failed launch requires observed child exit")
+                settled = finish_failed_for_process(
+                    receipt, identity, self.owner.identity, admission_possible=admission,
+                )
+            return {"settled": settled}
         if command == "read":
             path = Path(parameters["path"])
             receipt = DaemonInstanceReceipt(path.stem, path.parent)
@@ -168,11 +197,11 @@ class ShellInstanceSession:
         raise ValueError("unknown instance shell operation")
 
     @staticmethod
-    def _child_request(request: dict) -> tuple[ProcessIdentity, int]:
+    def _child_request(request: dict[str, Any]) -> tuple[ProcessIdentity, int]:
         value = request["process"]
         return ProcessIdentity(value["pid"], value["birth"]), value["handle"]
 
-    def _bind(self, request: dict) -> dict[str, str]:
+    def _bind(self, request: dict[str, Any]) -> dict[str, str]:
         receipt = _receipt(request["receipt"])
         identity, handle = self._child_request(request)
         with self.owner.child(identity, handle):
@@ -187,7 +216,9 @@ class ShellInstanceSession:
             with store._locked(receipt, wait_seconds=1) as path:
                 return store._read(path)
 
-    def _enter(self, parameters: dict, environment: dict[str, str]) -> dict:
+    def _enter(
+        self, parameters: dict[str, Any], environment: dict[str, str],
+    ) -> dict[str, object]:
         if len(self._tokens) >= 4096:
             raise ValueError("daemon guard reference bound exceeded")
         scopes = self.owner.scopes
@@ -226,7 +257,7 @@ class ShellInstanceSession:
         self._tokens.add(token)
         return _metadata(receipt, guard_token=token, job_scopes=scopes)
 
-    def _exit(self, request: dict) -> None:
+    def _exit(self, request: dict[str, Any]) -> None:
         token = request["guard_token"]
         if self._active is None or token not in self._tokens:
             raise ValueError("daemon admission guard custody changed")
@@ -241,9 +272,11 @@ class ShellInstanceSession:
 
     def observe(self) -> None:
         active = self._active
-        if active is None or active[1] is None:
+        if active is None:
             return
         receipt, observation = active
+        if observation is None:
+            return
         if not self._guard_lock.acquire(blocking=False):
             if self._active == active and observation.past_hard(store._monotonic_clock()):
                 self.owner.retire()
@@ -272,7 +305,7 @@ class ShellInstanceSession:
             self._guard_lock.release()
 
 
-def _write_response(response: dict) -> None:
+def _write_response(response: dict[str, Any]) -> None:
     encoded = json.dumps(response, ensure_ascii=True)
     if len(encoded) + 1 <= _MAX_FRAME:
         sys.stdout.write(encoded + "\n")
@@ -297,7 +330,7 @@ def _write_response(response: dict) -> None:
 def _serve_requests(session: ShellInstanceSession, nonce: str) -> int:
     sequence = 0
     while True:
-        raw = sys.stdin.buffer.raw.readline(_MAX_FRAME + 1)
+        raw = cast(BinaryIO, cast(BufferedReader, sys.stdin.buffer).raw).readline(_MAX_FRAME + 1)
         if not raw:
             return 0
         if len(raw) > _MAX_FRAME or not raw.endswith(b"\n"):
@@ -322,16 +355,17 @@ def _serve_requests(session: ShellInstanceSession, nonce: str) -> int:
         _write_response(response)
 
 
-def main(request: dict) -> int:
+def main(request: dict[str, Any]) -> int:
     import msvcrt
 
     from ._daemon_instance_shell_windows import ShellProcessOwner
     from ._shell_caller_owned import serve
 
     lifetime = request["lifetime"]
+    get_osfhandle: Callable[[int], int] = getattr(msvcrt, "get_osfhandle")
     owner = ShellProcessOwner(
         ProcessIdentity(lifetime["owner_pid"], lifetime["owner_birth"]),
-        msvcrt.get_osfhandle(sys.stdin.fileno()),
+        get_osfhandle(sys.stdin.fileno()),
     )
     for name in (INSTANCE_ENV, REGISTRY_ENV, TEST_CONTEXT_ENV):
         os.environ.pop(name, None)

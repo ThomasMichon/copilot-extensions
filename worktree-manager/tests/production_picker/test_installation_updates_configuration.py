@@ -1,17 +1,28 @@
 """Real Configuration navigation, contextual consent, durable receipt and refresh."""
 
+from __future__ import annotations
+
 import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 import dataclasses
 import json
 import sys
 import threading
+import subprocess
 from pathlib import Path
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from types import SimpleNamespace
+from typing import Any, NoReturn, Protocol, cast
 
 import pytest
-from test_config_actions import _wait
-from test_picker_tui import _fixture_source, _wait_for_initial_setup
+from rich.text import Text
+from agent_procutil.owned_process import run_caller_owned
+from test_config_actions import _wait as shared_wait
+from test_picker_tui import (
+    _fixture_source as shared_source, _wait_for_initial_setup as shared_initial_setup,
+)
+from textual.pilot import Pilot
 from textual.widgets import Static
 
 from worktree_manager import installation_updates as ui
@@ -21,6 +32,52 @@ from worktree_manager.production_picker.picker_tui.engine_action_confirm import 
 from worktree_manager.production_picker.picker_tui.engine_dialogs import TaskMenuScreen
 from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
 from worktree_manager.production_picker.picker_tui.configuration_form import ConfigurationResultScreen
+from worktree_manager.production_picker.picker_tui.command_transport import child_process_env
+from worktree_manager.production_picker.picker_tui.engine_helpers import VRow
+from worktree_manager.production_picker.picker_tui.pivots import RegisteredPivot
+
+
+class ConfigurationScreen(Protocol):
+    """The exercised interface of the still-untyped production picker mixins."""
+
+    pivots: list[dict[str, Any]]
+    htab: int
+    sel: tuple[str, int]
+
+    def refresh(self) -> object: ...
+    def _open_cfgmenu(self) -> None: ...
+    def _rotate_config_section(self, delta: int) -> None: ...
+    def _reg_pivot(self) -> RegisteredPivot | None: ...
+    def _pivot_runtime(self, reg: RegisteredPivot) -> tasks.RegisteredPivotRuntime: ...
+    def _task_rows(self) -> Sequence[object]: ...
+    def _selected_task(self) -> object | None: ...
+    def _pivot_scope_key(self) -> str: ...
+    def _open_task_menu(self) -> None: ...
+    def _in_configuration(self) -> bool: ...
+    def build_body(self, width: int) -> list[VRow]: ...
+    def tab_bar(self, width: int, focused: bool) -> Text: ...
+
+
+class PickerFactory(Protocol):
+    def __call__(self, source: SimpleNamespace, *, live: bool) -> PickerApp: ...
+
+
+_wait = cast(Callable[[Pilot[Any], Callable[[], bool]], Awaitable[None]], shared_wait)
+_fixture_source = cast(Callable[[], SimpleNamespace], shared_source)
+_wait_for_initial_setup = cast(
+    Callable[[Pilot[Any], ConfigurationScreen], Awaitable[None]], shared_initial_setup,
+)
+picker_app = cast(PickerFactory, PickerApp)
+
+
+def close_result(app: PickerApp) -> None:
+    assert isinstance(app.screen, ConfigurationResultScreen)
+    cast(Callable[[], None], app.screen.action_close)()
+
+
+def dismiss_menu(app: PickerApp, choice: int) -> None:
+    assert isinstance(app.screen, TaskMenuScreen)
+    app.screen.dismiss(choice)
 
 pytestmark = pytest.mark.contract("worktree_manager.configuration_backstage")
 
@@ -63,15 +120,20 @@ def test_production_automatic_control_cancel_save_and_refresh(
     calls = []
     controller = maintenance_policy if kind == "maintenance" else bootstrap_policy
 
-    def read(runtime, ctx):
+    def read(
+        runtime: tasks.RegisteredPivotRuntime, ctx: dict[str, str],
+    ) -> tuple[str, list[dict[str, Any]], str, dict[str, Any]]:
         assert threading.current_thread() is not threading.main_thread()
         return "ready", [controller.configuration_row()], "", {}
 
-    def execute(runtime, argv, **kwargs):
+    def execute(
+        runtime: tasks.RegisteredPivotRuntime, argv: list[str], **kwargs: Any,
+    ) -> tuple[bool, str]:
         calls.append(list(argv))
         captured = StringIO()
         start = argv.index("worktree_manager.installation_updates") + 1
         with redirect_stdout(captured), redirect_stderr(captured):
+            code: int | str | None
             try:
                 code = ui.main(list(argv[start:]))
             except SystemExit as error:
@@ -81,10 +143,10 @@ def test_production_automatic_control_cancel_save_and_refresh(
     monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_exec_list", read)
     monkeypatch.setattr(tasks.RegisteredPivotRuntime, "run_resolved", execute)
 
-    async def run():
-        app = PickerApp(_fixture_source(), live=False)
+    async def run() -> None:
+        app = picker_app(_fixture_source(), live=False)
         async with app.run_test(size=(118, 40)) as pilot:
-            scr = app.query_one(PickerScreen)
+            scr = cast(ConfigurationScreen, app.query_one(PickerScreen))
             await _wait_for_initial_setup(pilot, scr)
             scr._open_cfgmenu()
             await pilot.pause()
@@ -99,6 +161,7 @@ def test_production_automatic_control_cancel_save_and_refresh(
                 await pilot.pause()
             assert scr.htab == index, "Installation & Updates section was not reachable"
             reg = scr._reg_pivot()
+            assert reg is not None
             runtime = scr._pivot_runtime(reg)
             runtime.ensure("")
             await _wait(pilot, lambda: runtime.get("")[0] == "ready")
@@ -112,8 +175,9 @@ def test_production_automatic_control_cancel_save_and_refresh(
             )
             scr._open_task_menu()
             await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
-            app.screen.dismiss(1)
+            dismiss_menu(app, 1)
             await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
+            assert isinstance(app.screen, ActionConfirmScreen)
             assert ("Enable launch-time" if kind == "maintenance" else "Allow automatic") in app.screen._label
             if kind == "bootstrap":
                 assert str(switch) in app.screen._label
@@ -126,7 +190,7 @@ def test_production_automatic_control_cancel_save_and_refresh(
             await pilot.pause()
             scr._open_task_menu()
             await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
-            app.screen.dismiss(1)
+            dismiss_menu(app, 1)
             await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
             await _wait(pilot, lambda: app.screen.query_one("#action-confirm-buttons", FocusGroup).has_focus)
             await pilot.press("left", "enter")
@@ -135,7 +199,7 @@ def test_production_automatic_control_cancel_save_and_refresh(
             )
             rendered = str(app.screen.query_one("#config-result", Static).render())
             assert "No update or recurring worker was started" in rendered
-            app.screen.action_close()
+            close_result(app)
             await _wait(pilot, lambda: runtime.get("")[1][0]["enabled"] == "ON")
             assert len(calls) == 1
             assert controller.inspect_policy().enabled is True
@@ -146,7 +210,9 @@ def test_production_automatic_control_cancel_save_and_refresh(
     asyncio.run(run())
 
 
-def test_production_configuration_navigation_target_consent_and_refresh(tmp_path, monkeypatch):
+def test_production_configuration_navigation_target_consent_and_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root = tmp_path / "pivots"
     root.mkdir()
     monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(root))
@@ -160,7 +226,9 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
         "card": {"title": "Fixture guide", "body": "Synthetic source and limitations"},
     }
 
-    def read(runtime, ctx):
+    def read(
+        runtime: tasks.RegisteredPivotRuntime, ctx: dict[str, str],
+    ) -> tuple[str, list[dict[str, Any]], str, dict[str, Any]]:
         assert threading.current_thread() is not threading.main_thread()
         assert runtime.pivot.name == ui.PIVOT_NAME
         return "ready", [dict(row)], "", {}
@@ -169,7 +237,9 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
     # replace only its external owner process with an isolated synthetic peer.
     monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_exec_list", read)
 
-    def execute(runtime, argv, **kwargs):
+    def execute(
+        runtime: tasks.RegisteredPivotRuntime, argv: list[str], **kwargs: Any,
+    ) -> tuple[bool, str]:
         calls.append(list(argv))
         assert argv[-2:] == ["update", "guide"]
         row.update(payload="2", activity="queued")
@@ -177,10 +247,10 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
 
     monkeypatch.setattr(tasks.RegisteredPivotRuntime, "run_resolved", execute)
 
-    async def run():
-        app = PickerApp(_fixture_source(), live=False)
+    async def run() -> None:
+        app = picker_app(_fixture_source(), live=False)
         async with app.run_test(size=(118, 40)) as pilot:
-            scr = app.query_one(PickerScreen)
+            scr = cast(ConfigurationScreen, app.query_one(PickerScreen))
             await _wait_for_initial_setup(pilot, scr)
             scr._open_cfgmenu()
             await pilot.pause()
@@ -189,6 +259,7 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
                 scr._rotate_config_section(1)
                 await pilot.pause()
             reg = scr._reg_pivot()
+            assert reg is not None
             runtime = scr._pivot_runtime(reg)
             runtime.ensure("")
             await _wait(pilot, lambda: runtime.get("")[0] == "ready")
@@ -200,8 +271,9 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
             assert "Fixture guide" in body and "Installation & Updates" in scr.tab_bar(118, True).plain
             scr._open_task_menu()
             await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
-            app.screen.dismiss(1)
+            dismiss_menu(app, 1)
             await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
+            assert isinstance(app.screen, ActionConfirmScreen)
             assert "Fixture guide" in app.screen._label
             assert "this machine only" in app.screen._label
             app.screen.action_cancel()
@@ -209,7 +281,7 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
             assert calls == []
             scr._open_task_menu()
             await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
-            app.screen.dismiss(1)
+            dismiss_menu(app, 1)
             await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
             group = app.screen.query_one("#action-confirm-buttons", FocusGroup)
             await _wait(pilot, lambda: group.has_focus)
@@ -217,7 +289,7 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
             await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
             text = str(app.screen.query_one("#config-result", Static).render())
             assert "Request accepted" in text and "not yet complete" in text
-            app.screen.action_close()
+            close_result(app)
             await _wait(pilot, lambda: runtime.get("")[1][0]["payload"] == "2")
             assert len(calls) == 1
             assert row["activity"] == "queued"  # Dismissing observation is not cancellation.
@@ -226,7 +298,7 @@ def test_production_configuration_navigation_target_consent_and_refresh(tmp_path
     asyncio.run(run())
 
 
-def test_native_pivot_uses_existing_contract_and_exact_row_target():
+def test_native_pivot_uses_existing_contract_and_exact_row_target() -> None:
     reg = ui.configuration_pivot()
     assert reg.placement == "config" and reg.account_scoped
     update = next(action for action in reg.actions if action.key == "update")
@@ -236,7 +308,9 @@ def test_native_pivot_uses_existing_contract_and_exact_row_target():
 
 
 @pytest.mark.parametrize("ok", [True, False])
-def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_path, monkeypatch, ok):
+def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ok: bool,
+) -> None:
     from worktree_manager import doctor_cli
 
     monkeypatch.setattr(tasks, "ACTION_TIMEOUT", 2)
@@ -252,15 +326,19 @@ def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_p
         "card": {"title": "Manager", "body": "Installed versions are not live-health proof."},
     }
 
-    def read(runtime, ctx):
+    def read(
+        runtime: tasks.RegisteredPivotRuntime, ctx: dict[str, str],
+    ) -> tuple[str, list[dict[str, Any]], str, dict[str, Any]]:
         return "ready", [dict(row)], "", {}
 
-    def doctor(rest):
+    def doctor(rest: list[str]) -> int:
         assert rest == [] and threading.current_thread() is not threading.main_thread()
         print("Native diagnostic report: " + ("checks passed" if ok else "required prerequisite MISSING"))
         return 0 if ok else 1
 
-    def execute(runtime, argv, **kwargs):
+    def execute(
+        runtime: tasks.RegisteredPivotRuntime, argv: list[str], **kwargs: Any,
+    ) -> tuple[bool, str]:
         calls.append(list(argv))
         started.set()
         assert release.wait(5), "Diagnostic result was never released"
@@ -276,11 +354,11 @@ def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_p
     monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_exec_list", read)
     monkeypatch.setattr(tasks.RegisteredPivotRuntime, "run_resolved", execute)
 
-    async def run():
-        app = PickerApp(_fixture_source(), live=False)
+    async def run() -> None:
+        app = picker_app(_fixture_source(), live=False)
         try:
             async with app.run_test(size=(118, 40)) as pilot:
-                scr = app.query_one(PickerScreen)
+                scr = cast(ConfigurationScreen, app.query_one(PickerScreen))
                 await _wait_for_initial_setup(pilot, scr)
                 scr._open_cfgmenu()
                 await pilot.pause()
@@ -295,6 +373,7 @@ def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_p
                     await pilot.pause()
                 assert scr.htab == index
                 reg = scr._reg_pivot()
+                assert reg is not None
                 runtime = scr._pivot_runtime(reg)
                 runtime.ensure("")
                 await _wait(pilot, lambda: runtime.get("")[0] == "ready" and bool(scr._task_rows()))
@@ -307,21 +386,24 @@ def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_p
                 scr._open_task_menu()
                 await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
                 assert not calls
-                app.screen.dismiss(chosen)
+                dismiss_menu(app, chosen)
                 await _wait(
                     pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and started.is_set(),
                 )
+                assert isinstance(app.screen, ConfigurationResultScreen)
                 pending = str(app.screen.query_one("#config-result", Static).render())
                 assert "read-only" in pending.lower() and "Applying configuration" not in pending
                 assert app.screen.pending
                 release.set()
-                await _wait(pilot, lambda: not app.screen.pending)
+                await _wait(
+                    pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending,
+                )
                 rendered = str(app.screen.query_one("#config-result", Static).render())
                 assert "Native diagnostic report" in rendered
                 assert ("Diagnostics completed" if ok else "Diagnostics failed or are incomplete") in rendered
                 assert "configuration saved" not in rendered.lower()
                 assert original.read_bytes() == before and len(calls) == 1
-                app.screen.action_close()
+                close_result(app)
                 await _wait(pilot, lambda: not isinstance(app.screen, ConfigurationResultScreen))
                 assert app.query_one(PickerScreen) is scr and scr.htab == index
         finally:
@@ -331,7 +413,9 @@ def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_p
 
 
 @pytest.mark.parametrize("ready", [True, False])
-def test_diagnostic_runs_native_report_through_actual_child_transport(tmp_path, monkeypatch, ready):
+def test_diagnostic_runs_native_report_through_actual_child_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ready: bool,
+) -> None:
     home = tmp_path / "home"
     home.mkdir()
     sentinel = home / "config.toml"
@@ -373,7 +457,9 @@ def test_diagnostic_runs_native_report_through_actual_child_transport(tmp_path, 
     assert before == {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
 
 
-def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_path, monkeypatch):
+def test_unresponsive_engine_preserves_manager_rows_through_production_list(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import time
 
     engine = tmp_path / "slow_engine.py"
@@ -403,7 +489,10 @@ def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_
 
 
 @pytest.mark.parametrize("operation", ["update", "doctor"])
-def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch, operation):
+def test_selected_cell_context_survives_actual_configuration_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    import update_driver
     from _installation_context_fixtures import namespaced_fixture, write_json
     from worktree_manager import engine_client
     from worktree_manager.production_picker.picker_tui import pivot_list_command
@@ -420,6 +509,7 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     write_json(legacy, {"version": "legacy", "enabled": "inactive"})
     write_json(cell, {"version": "cell", "enabled": "active"})
     engine = tmp_path / "engine.py"
+    observation = tmp_path / "engine-observation.json"
     engine.write_text(
         "import json,os,pathlib,sys\n"
         "pointer=os.environ.get('COPILOT_EXTENSIONS_CONTEXT')\n"
@@ -432,11 +522,11 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
         "'source':str(root),'updatable':True,'limitation':''}]}))\n"
         "else:\n"
         " assert '--target' in sys.argv and pointer\n"
-        " print(json.dumps({'request_id':'cell-request','state':'pending','exit_code':None,'context':pointer}))\n"
+        f" pathlib.Path({str(observation)!r}).write_text(json.dumps({{'context':pointer,'arguments':sys.argv[1:],'has_custody':bool(os.environ.get('UPDATE_DRIVER_WITNESS'))}}))\n"
     )
     wrapper = tmp_path / "inventory.py"
     wrapper.write_text(
-        "import json,os\n"
+        "import json,os,sys,update_driver\n"
         "from pathlib import Path\n"
         "from worktree_manager import agent_plugin_runtime as apr,doctor_cli,installation_updates as ui\n"
         f"apr._canonical_os_profile=lambda environment:Path({str(home)!r})\n"
@@ -450,6 +540,14 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
         " print(json.dumps({'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT')}))\n"
         " return 0\n"
         "doctor_cli.cmd_doctor=diagnostic\n"
+        "original=update_driver.runtime_command\n"
+        "def command(module,args=()):\n"
+        " if module=='worktree_manager': return (sys.executable,str(Path(__file__).resolve()),'execute',*args),{}\n"
+        " return original(module,args)\n"
+        "update_driver.runtime_command=command\n"
+        "if sys.argv[1:2]==['execute']:\n"
+        " from worktree_manager import __main__ as manager\n"
+        " raise SystemExit(manager.main(sys.argv[2:]))\n"
         "raise SystemExit(ui.main())\n"
     )
     monkeypatch.setenv("HOME", str(home))
@@ -458,13 +556,13 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     monkeypatch.setattr(engine_client, "_INHERITED_ENGINE_COMMAND", [sys.executable, str(engine)])
     reg = ui.configuration_pivot()
     assert "--engine-context" in reg.list_cmd
-    assert "COPILOT_EXTENSIONS_CONTEXT" not in tasks._child_process_env()
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in child_process_env()
     reg = dataclasses.replace(reg, list_cmd=(sys.executable, "-B", str(wrapper), *reg.list_cmd[4:]))
     runtime = tasks.RegisteredPivotRuntime(reg)
     observed = {}
-    original_run = pivot_list_command.run_caller_owned
+    original_run = run_caller_owned
 
-    def observe(*args, **kwargs):
+    def observe(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         result = original_run(*args, **kwargs)
         observed["stderr"] = result.stderr
         return result
@@ -483,29 +581,39 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     argv = [sys.executable, "-B", str(wrapper), *argv[4:]]
     ok, message = runtime.run_resolved(argv, preserve_output=True)
     assert ok, message
-    expected = {"context": str(install)}
-    if operation == "update":
-        expected.update(request_id="cell-request", state="pending", exit_code=None)
-    assert json.loads(message) == expected
-    assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    if operation == "doctor":
+        assert json.loads(message) == {"context": str(install)}
+        assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+        return
+    # Manual component updates delegate observation to the selected engine;
+    # this synthetic peer records transport, not an engine-owned queue receipt.
+    assert message == ""
+    assert not update_driver.status(root=home / ".copilot-extensions/update-driver")
+    seen = json.loads(observation.read_text())
+    assert seen["context"] == str(install) and seen["has_custody"] is False
+    assert seen["arguments"] == ["update", "--no-manager", "--target", "guide", "--detach", "--json"]
+    assert all(path.read_bytes() == body for path, body in before.items())
 
 
-def test_catalog_failure_uses_production_warning_banner(monkeypatch):
+def test_catalog_failure_uses_production_warning_banner(monkeypatch: pytest.MonkeyPatch) -> None:
     from plugin_resolve import inventory as plugin_inventory
     from worktree_manager.production_picker.picker_tui.engine_views import TasksView
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> NoReturn:
         raise ValueError("catalog metadata is unavailable")
 
     monkeypatch.setattr(plugin_inventory, "installed_item", fail)
     monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {"contract": 1, "entries": []})
     monkeypatch.setattr(ui, "_operations", lambda **kwargs: {})
     summary = ui.inventory()["summary"]
-    banner = TasksView(None)._banner_line(summary, 118)
+    banner_line = cast(Callable[[dict[str, Any], int], Text | None], TasksView(None)._banner_line)
+    banner = banner_line(summary, 118)
     assert banner is not None and "Known catalog unavailable" in banner.plain
 
 
-def test_read_only_candidate_never_launches_native_inventory_or_update(tmp_path, monkeypatch):
+def test_read_only_candidate_never_launches_native_inventory_or_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import update_driver
     from worktree_manager import picker_review
 

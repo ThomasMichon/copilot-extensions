@@ -9,10 +9,13 @@ update`` instead of self-update's dtssh/repo-sweep steps).
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Callable, NoReturn
 
 import pytest
 
@@ -23,21 +26,38 @@ from agent_machines import (
     fleet_update_lock,
     fleet_update_state,
     fleet_update_tasks,
+    reconcile,
+    resources,
+    validator,
 )
-from agent_machines.manifest import ManifestError, load_package
+from agent_machines.manifest import ManifestError, RequirementPackage, load_package
 from agent_machines.reconcile import plan
-from agent_machines.resources import ResourceContext, apply_resources, resolve_resources
+from agent_machines.resources import ResourceContext, Runner, apply_resources, resolve_resources
+from agent_machines.scheduler_retirement import SchedulerRunner
 
 from ._helpers import base_package, write_package
+from ._manager_compatibility_helpers import unit_guarded_manager_update
+from ._scheduler_safety_helpers import fixture_unit_properties
+
+UTC = timezone.utc
+
+
+@pytest.fixture(autouse=True)
+def _real_transaction_lock_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zdd import cutover_lock
+
+    monkeypatch.setattr(cutover_lock, "sys", SimpleNamespace(platform=sys.platform))
+    monkeypatch.setattr(fleet_update, "run_compatible_manager_update", unit_guarded_manager_update)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 def _pkg(
     tmp_path: Path,
     name: str,
-    resources: list[dict],
+    resources: list[dict[str, Any]],
     *,
     authority: int | None = None,
-) -> object:
+) -> RequirementPackage:
     data = base_package(
         name=name,
         schema_version=4,
@@ -51,14 +71,14 @@ def _pkg(
     return load_package(path, source_repo=name.split("/")[0])
 
 
-def _ctx(tmp_path, runner, plat="windows"):
+def _ctx(tmp_path: Path, runner: Runner, plat: str="windows") -> ResourceContext:
     return ResourceContext(
         home=tmp_path, repo_paths={"acme": tmp_path}, platform=plat, runner=runner
     )
 
 
 class _FakeMutex:
-    def __init__(self, outcome: str):
+    def __init__(self, outcome: str) -> None:
         self.outcome = outcome
         self.released = False
         self.closed = False
@@ -79,24 +99,29 @@ def _task_snapshot(
     present: bool,
     matching: bool = True,
     enabled: bool | None = True,
-):
-    return fleet_update.ScheduledTaskSnapshot(
+    home: Path | None = None,
+) -> fleet_update_tasks.ScheduledTaskSnapshot:
+    return fleet_update_tasks.ScheduledTaskSnapshot(
         task_name=fleet_update_state.TIER_SPECS[tier].task_name,
         present=present,
         enabled=enabled,
         logon_type="Interactive" if present else None,
         description=fleet_update.task_description(tier) if present else None,
         execute="conhost.exe" if present else None,
-        arguments=fleet_update_tasks.task_action_arguments(tier),
-        working_directory=fleet_update_tasks.task_working_directory(),
+        arguments=fleet_update_tasks.task_action_arguments(tier, home=home),
+        working_directory=fleet_update_tasks.task_working_directory(home),
         matching=matching,
+        state="Ready" if present else None,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
+        trigger_kind=fleet_update_state.TIER_SPECS[tier].schedule_kind,
+        trigger_value=fleet_update_state.TIER_SPECS[tier].schedule_value,
     )
 
 
 # --------------------------------------------------------------------------- #
 # Manifest validation + resource selection
 # --------------------------------------------------------------------------- #
-def test_manifest_accepts_fleet_update_resource_and_rejects_bad_tier(tmp_path):
+def test_manifest_accepts_fleet_update_resource_and_rejects_bad_tier(tmp_path: Path) -> None:
     package = _pkg(
         tmp_path,
         "acme/fleet",
@@ -112,8 +137,8 @@ def test_manifest_accepts_fleet_update_resource_and_rejects_bad_tier(tmp_path):
 
 
 def test_fleet_update_resource_selects_highest_authority_and_equal_highest_conflicts(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     disabled = _pkg(
         tmp_path,
         "acme/disabled",
@@ -140,10 +165,10 @@ def test_fleet_update_resource_selects_highest_authority_and_equal_highest_confl
     assert any(finding.code == "resource-conflict" for finding in equal_findings)
 
 
-def test_plan_includes_fleet_update_observed_status(tmp_path, monkeypatch):
+def test_plan_includes_fleet_update_observed_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
-    fleet_update.write_status(
+    fleet_update_state.write_status(
         tmp_path,
         "sweep",
         attempt="2026-09-14T09:00:00+00:00",
@@ -166,36 +191,38 @@ def test_plan_includes_fleet_update_observed_status(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 # run_tier
 # --------------------------------------------------------------------------- #
-def test_run_noops_when_tier_not_opted_in():
+def test_run_noops_when_tier_not_opted_in() -> None:
     result = fleet_update.run_tier("sweep", opted_in=False)
     assert result.ok is True
     assert result.status == "noop"
     assert result.detail == "tier 'sweep' is not opted in"
 
 
-def test_run_tier_rejects_unknown_tier():
+def test_run_tier_rejects_unknown_tier() -> None:
     with pytest.raises(ValueError, match="unknown fleet-update tier"):
         fleet_update.run_tier("nightly", opted_in=True)
 
 
-def test_run_tier_invokes_worktree_manager_update_and_records_success(tmp_path):
+def test_run_tier_invokes_worktree_manager_update_and_records_success(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
-    def runner(argv, timeout=3600):
+    def runner(argv: list[str], timeout: float=3600) -> fleet_update.CommandResult:
         calls.append(argv)
         return fleet_update.CommandResult(argv, 0, "updated 12 plugins", "")
 
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
     assert result.ok is True
     assert result.status == "ok"
-    assert calls == [["worktree-manager", "update", "--auto"]]
+    assert calls == [[
+        "worktree-manager", "update", "--auto", "--automatic-trigger", "legacy-agent-machines",
+    ]]
     assert result.success_at is not None
     status = fleet_update_state.tier_status(tmp_path, "sweep")
     assert status.last_success == result.success_at
 
 
-def test_run_tier_reports_error_when_worktree_manager_update_fails(tmp_path):
-    def runner(argv, timeout=3600):
+def test_run_tier_reports_error_when_worktree_manager_update_fails(tmp_path: Path) -> None:
+    def runner(argv: list[str], timeout: float=3600) -> fleet_update.CommandResult:
         return fleet_update.CommandResult(argv, 1, "", "network unreachable")
 
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
@@ -212,18 +239,20 @@ def test_run_tier_reports_error_when_worktree_manager_update_fails(tmp_path):
     (1, "automatic-update KillSwitch active; nothing ran", "error"),
 ])
 def test_held_fleet_update_preserves_no_work_without_recording_success(
-    tmp_path, returncode, detail, expected,
-):
+    tmp_path: Path, returncode: int, detail: str, expected: str,
+) -> None:
     previous = "2026-09-14T09:05:00+00:00"
-    fleet_update.write_status(tmp_path, "sweep", success=previous)
+    fleet_update_state.write_status(tmp_path, "sweep", success=previous)
     calls = []
 
-    def runner(argv, timeout=3600):
+    def runner(argv: list[str], timeout: float=3600) -> fleet_update.CommandResult:
         calls.append(argv)
         return fleet_update.CommandResult(argv, returncode, "", detail)
 
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
-    assert calls == [["worktree-manager", "update", "--auto"]]
+    assert calls == [[
+        "worktree-manager", "update", "--auto", "--automatic-trigger", "legacy-agent-machines",
+    ]]
     assert result.status == result.steps[0].status == expected
     assert result.ok is (expected == "noop")
     assert detail in result.detail
@@ -234,17 +263,17 @@ def test_held_fleet_update_preserves_no_work_without_recording_success(
 
 
 def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_lock(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Mirrors self_update.run_tier's own safety-net test: an unexpected
     exception from the runner must come back as a normal error `RunResult`
     (lock released, `last_attempt` recorded) instead of propagating past
     `run_tier` and crashing the whole `fleet-update run` CLI invocation."""
-    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     created_mutexes: list[_FakeMutex] = []
 
-    def _make_mutex(_name):
+    def _make_mutex(_name: str) -> _FakeMutex:
         mutex = _FakeMutex("acquired")
         created_mutexes.append(mutex)
         return mutex
@@ -252,7 +281,7 @@ def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_l
     monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", _make_mutex)
     monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
 
-    def boom(argv, timeout=3600):
+    def boom(argv: list[str], timeout: float=3600) -> NoReturn:
         raise RuntimeError("boom")
 
     result = fleet_update.run_tier("sweep", opted_in=True, runner=boom, home=tmp_path)
@@ -263,10 +292,10 @@ def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_l
     assert len(created_mutexes) == 1
     assert created_mutexes[0].released is True
     assert created_mutexes[0].closed is True
-    assert not fleet_update_lock.lock_path("sweep", tmp_path).exists()
+    assert not fleet_update_state.lock_path("sweep", tmp_path).exists()
 
 
-def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
+def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Same bug class as self_update_types.default_command_runner: a hung
     child (and any grandchildren it spawned) must be torn down as a whole
     Job, not just the immediate process, or a surviving grandchild can keep
@@ -274,27 +303,28 @@ def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
     closed = {"job": False}
 
     class _FakeJob:
-        def close(self):
+        def close(self) -> None:
             closed["job"] = True
 
     class _Proc:
         returncode = None
         killed = False
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
+            assert timeout is not None
             if not closed["job"]:
                 raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
             return "partial", ""
 
-        def kill(self):
+        def kill(self) -> None:
             self.killed = True
 
     proc = _Proc()
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, _FakeJob]:
         return proc, _FakeJob()
 
-    monkeypatch.setattr(fleet_update.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(fleet_update, "spawn_sync_in_kill_on_close_job", fake_spawn)
     result = fleet_update.default_command_runner(["slow-command"], timeout=5)
 
@@ -305,25 +335,26 @@ def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
     assert result.stdout == "partial"
 
 
-def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
+def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Proc:
         returncode = None
         killed = False
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
+            assert timeout is not None
             if not self.killed:
                 raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
             return "", ""
 
-        def kill(self):
+        def kill(self) -> None:
             self.killed = True
 
     proc = _Proc()
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, None]:
         return proc, None
 
-    monkeypatch.setattr(fleet_update.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(fleet_update, "spawn_sync_in_kill_on_close_job", fake_spawn)
     result = fleet_update.default_command_runner(["slow-command"], timeout=5)
 
@@ -332,31 +363,32 @@ def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
 
 
 def test_default_command_runner_preserves_partial_output_when_drain_also_times_out(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     closed = {"job": False}
 
     class _FakeJob:
-        def close(self):
+        def close(self) -> None:
             closed["job"] = True
 
     class _Proc:
         returncode = None
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
+            assert timeout is not None
             if not closed["job"]:
                 raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
             raise subprocess.TimeoutExpired(
                 cmd="slow", timeout=timeout, output="collected-stdout", stderr="collected-stderr"
             )
 
-        def kill(self):
+        def kill(self) -> None:
             pass
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, _FakeJob]:
         return _Proc(), _FakeJob()
 
-    monkeypatch.setattr(fleet_update.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(fleet_update, "spawn_sync_in_kill_on_close_job", fake_spawn)
     result = fleet_update.default_command_runner(["slow-command"], timeout=5)
 
@@ -369,10 +401,10 @@ def test_default_command_runner_preserves_partial_output_when_drain_also_times_o
 # --------------------------------------------------------------------------- #
 # Locking (mirrors self-update's TierLock coverage exactly)
 # --------------------------------------------------------------------------- #
-def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
+def test_lock_refuses_live_owner_without_double_drive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started = datetime(2026, 1, 1, tzinfo=UTC)
-    fleet_update.lock_path("sweep", tmp_path).parent.mkdir(parents=True, exist_ok=True)
-    fleet_update.lock_path("sweep", tmp_path).write_text(
+    fleet_update_state.lock_path("sweep", tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    fleet_update_state.lock_path("sweep", tmp_path).write_text(
         json.dumps(
             {
                 "schema_version": 1,
@@ -385,9 +417,9 @@ def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
     monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
-    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
-    lock = fleet_update.TierLock(tier="sweep", home=tmp_path)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    lock = fleet_update_lock.TierLock(tier="sweep", home=tmp_path)
     acquired, detail = lock.acquire()
     assert acquired is False
     assert "already active" in detail
@@ -395,9 +427,9 @@ def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
     assert lock.snapshot.pid == 4321
 
 
-def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch):
+def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started = datetime(2026, 1, 1, tzinfo=UTC)
-    path = fleet_update.lock_path("sweep", tmp_path)
+    path = fleet_update_state.lock_path("sweep", tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -412,9 +444,9 @@ def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
-    lock = fleet_update.TierLock(
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    lock = fleet_update_lock.TierLock(
         tier="sweep",
         home=tmp_path,
         pid=9999,
@@ -430,26 +462,26 @@ def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch)
     lock.release()
 
 
-def test_tier_lock_acquires_and_releases_on_posix(tmp_path):
+def test_tier_lock_acquires_and_releases_on_posix(tmp_path: Path) -> None:
     if sys.platform == "win32":
         pytest.skip("POSIX-only lock path")
-    lock = fleet_update.TierLock(tier="sweep", home=tmp_path)
+    lock = fleet_update_lock.TierLock(tier="sweep", home=tmp_path)
     acquired, detail = lock.acquire()
     assert acquired is True
     assert detail == "acquired"
-    assert fleet_update.lock_path("sweep", tmp_path).exists()
+    assert fleet_update_state.lock_path("sweep", tmp_path).exists()
     lock.release()
-    assert not fleet_update.lock_path("sweep", tmp_path).exists()
+    assert not fleet_update_state.lock_path("sweep", tmp_path).exists()
 
 
-def test_tier_lock_refuses_concurrent_holder_on_posix(tmp_path):
+def test_tier_lock_refuses_concurrent_holder_on_posix(tmp_path: Path) -> None:
     if sys.platform == "win32":
         pytest.skip("POSIX-only lock path")
-    first = fleet_update.TierLock(tier="sweep", home=tmp_path, pid=111)
+    first = fleet_update_lock.TierLock(tier="sweep", home=tmp_path, pid=111)
     acquired_first, _ = first.acquire()
     assert acquired_first is True
 
-    second = fleet_update.TierLock(
+    second = fleet_update_lock.TierLock(
         tier="sweep", home=tmp_path, pid=222, pid_alive=lambda _p: True
     )
     acquired_second, detail = second.acquire()
@@ -461,17 +493,17 @@ def test_tier_lock_refuses_concurrent_holder_on_posix(tmp_path):
 # --------------------------------------------------------------------------- #
 # Windows Scheduled Task register/reconcile/status
 # --------------------------------------------------------------------------- #
-def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
-    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
+def test_reconcile_task_registers_new_opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     state = {"present": False}
 
-    def query(tier, *, runner=None, resolve_binary=None, home=None):
+    def query(tier: str, *, runner: SchedulerRunner | None=None, resolve_binary: Callable[[str], str | None] | None=None, home: Path | None=None) -> fleet_update_tasks.ScheduledTaskSnapshot:
         return _task_snapshot(tier, present=state["present"])
 
-    def register(tier, *, runner=None, resolve_binary=None, home=None):
+    def register(tier: str, *, runner: SchedulerRunner | None=None, resolve_binary: Callable[[str], str | None] | None=None, home: Path | None=None) -> fleet_update.CommandResult:
         state["present"] = True
         return fleet_update.CommandResult(["pwsh"], 0, "", "")
 
@@ -483,12 +515,14 @@ def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
     assert result.snapshot is not None and result.snapshot.present is True
 
 
-def test_register_scheduled_task_daily_has_no_repetition_parameters():
+def test_register_scheduled_task_daily_has_no_repetition_parameters() -> None:
     captured: dict[str, list[str]] = {}
 
-    def fake_runner(argv, *, timeout=300):
+    def fake_runner(argv: list[str], *, timeout: float=300) -> fleet_update.CommandResult:
         captured["argv"] = argv
-        return fleet_update.CommandResult(argv, 0, "", "")
+        return fleet_update.CommandResult(
+            argv, 0, json.dumps({"present": False}) if "ConvertTo-Json" in argv[-1] else "",
+        )
 
     fleet_update_tasks.register_scheduled_task(
         "sweep",
@@ -502,24 +536,27 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])
-def test_task_action_arguments_uses_worktree_manager_binstub(monkeypatch, platform):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", platform)
+def test_task_action_arguments_uses_guarded_agent_machines_binstub(monkeypatch: pytest.MonkeyPatch, platform: str) -> None:
+    monkeypatch.setattr(sys, "platform", platform)
     home = Path(r"C:\Users\operator" if platform == "win32" else "/home/operator")
     args = fleet_update_tasks.task_action_arguments("sweep", home=home)
     if platform == "win32":
         assert args.startswith("--headless cmd.exe /c ")
-        assert r"C:\Users\operator\.local\bin\worktree-manager.cmd" in args
+        assert r"C:\Users\operator\.local\bin\agent-machines.cmd" in args
     else:
         assert args.startswith("--headless ")
-        assert fleet_update_tasks._linux_exec_start("sweep", home=home).endswith(" update --auto")
-    assert args.endswith(" update --auto")
+        assert fleet_update_tasks._linux_exec_start("sweep", home=home).endswith(
+            " fleet-update run --tier sweep"
+        )
+    assert args.endswith(" fleet-update run --tier sweep")
     assert "self-update" not in args
-    assert "agent-machines" not in args
+    assert "worktree-manager.cmd" not in args
+    assert "--automatic-trigger" not in args
 
 
 @pytest.mark.parametrize("home", [r"C:\Users\operator", r"C:\Users\operator name"])
-def test_task_definition_matches_its_own_generated_arguments(monkeypatch, home):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
+def test_task_definition_matches_its_own_generated_arguments(monkeypatch: pytest.MonkeyPatch, home: str | Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
     home = Path(home)
     snapshot = fleet_update_tasks.ScheduledTaskSnapshot(
         task_name=fleet_update_state.TIER_SPECS["sweep"].task_name,
@@ -533,31 +570,31 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch, home):
         working_directory=fleet_update_tasks.task_working_directory(home),
         trigger_kind="daily",
         trigger_value=1,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
     )
     assert fleet_update_tasks.task_definition_matches(snapshot, "sweep", home=home)
     from dataclasses import replace
 
-    for marker in (
-        "", " --automatic", " --auto-suffix", ' "--auto suffix"', " --auto --auto", " --AUTO",
-    ):
-        invalid = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", marker))
+    assert snapshot.arguments is not None
+    for marker in ("", " --tier other", " --tier sweep --tier sweep", " --TIER sweep"):
+        invalid = replace(snapshot, arguments=snapshot.arguments.replace(" --tier sweep", marker))
         assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
-    for old, new in ((" update", " UPDATE"), ("--headless", "--HEADLESS")):
+    for old, new in ((" fleet-update", " FLEET-UPDATE"), ("--headless", "--HEADLESS")):
         invalid = replace(snapshot, arguments=snapshot.arguments.replace(old, new))
         assert not fleet_update_tasks.task_definition_matches(invalid, "sweep", home=home)
-    quoted = replace(snapshot, arguments=snapshot.arguments.replace(" --auto", ' "--auto"'))
-    assert fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
+    quoted = replace(snapshot, arguments=snapshot.arguments.replace(" --tier", ' "--tier"'))
+    assert not fleet_update_tasks.task_definition_matches(quoted, "sweep", home=home)
     path_case = replace(snapshot, arguments=snapshot.arguments.replace(
-        "worktree-manager.cmd", "WORKTREE-MANAGER.CMD",
+        "agent-machines.cmd", "AGENT-MACHINES.CMD",
     ))
     assert fleet_update_tasks.task_definition_matches(path_case, "sweep", home=home)
 
 
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
@@ -577,19 +614,21 @@ def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
     assert "run once from an elevated PowerShell" in result.detail
 
 
-def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch, tmp_path):
-    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
+def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
         fleet_update_tasks,
         "query_scheduled_task",
-        lambda tier, **kwargs: _task_snapshot(tier, present=True, matching=True, enabled=True),
+        lambda tier, **kwargs: _task_snapshot(
+            tier, present=True, matching=True, enabled=True, home=kwargs.get("home"),
+        ),
     )
     calls: list[str] = []
 
-    def unregister(tier, *, runner=None, resolve_binary=None):
+    def unregister(tier: str, *, runner: SchedulerRunner | None=None, resolve_binary: Callable[[str], str | None] | None=None, home: Path | None=None) -> fleet_update.CommandResult:
         calls.append(tier)
         return fleet_update.CommandResult(["pwsh"], 0, "", "")
 
@@ -604,7 +643,7 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
-def test_cli_fleet_update_run_emits_json(monkeypatch, capsys):
+def test_cli_fleet_update_run_emits_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(
         cli_fleet_update,
         "_resolve_machine_identity",
@@ -619,18 +658,18 @@ def test_cli_fleet_update_run_emits_json(monkeypatch, capsys):
         cli_fleet_update, "_collect_all_packages", lambda machine, accepted_machines=None: []
     )
     monkeypatch.setattr(
-        cli_fleet_update._reconcile,
+        reconcile,
         "resolve_union",
         lambda packages, machine, accepted_machines=None: [],
     )
     monkeypatch.setattr(
-        cli_fleet_update._validator, "validate", lambda resolved, machine, plat=None: []
+        validator, "validate", lambda resolved, machine, plat=None: []
     )
     monkeypatch.setattr(
-        cli_fleet_update._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
     )
     monkeypatch.setattr(
-        cli_fleet_update._fleet_update,
+        fleet_update,
         "run_tier",
         lambda tier, **kwargs: fleet_update.RunResult(
             tier=tier,
@@ -647,8 +686,8 @@ def test_cli_fleet_update_run_emits_json(monkeypatch, capsys):
 
 
 def test_cli_fleet_update_install_skips_non_opted_in_tier_without_registration(
-    monkeypatch, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(
         cli_fleet_update,
         "_resolve_machine_identity",
@@ -663,19 +702,19 @@ def test_cli_fleet_update_install_skips_non_opted_in_tier_without_registration(
         cli_fleet_update, "_collect_all_packages", lambda machine, accepted_machines=None: []
     )
     monkeypatch.setattr(
-        cli_fleet_update._reconcile,
+        reconcile,
         "resolve_union",
         lambda packages, machine, accepted_machines=None: [],
     )
     monkeypatch.setattr(
-        cli_fleet_update._validator, "validate", lambda resolved, machine, plat=None: []
+        validator, "validate", lambda resolved, machine, plat=None: []
     )
     monkeypatch.setattr(
-        cli_fleet_update._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
     )
     registered = []
     monkeypatch.setattr(
-        cli_fleet_update._fleet_update,
+        fleet_update,
         "reconcile_scheduled_task",
         lambda tier, **kwargs: registered.append(tier),
     )
@@ -686,7 +725,7 @@ def test_cli_fleet_update_install_skips_non_opted_in_tier_without_registration(
     assert payload["tiers"][0]["status"] == "skipped"
 
 
-def test_cli_fleet_update_status_emits_json(monkeypatch, capsys):
+def test_cli_fleet_update_status_emits_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(
         cli_fleet_update,
         "_resolve_machine_identity",
@@ -701,20 +740,20 @@ def test_cli_fleet_update_status_emits_json(monkeypatch, capsys):
         cli_fleet_update, "_collect_all_packages", lambda machine, accepted_machines=None: []
     )
     monkeypatch.setattr(
-        cli_fleet_update._reconcile,
+        reconcile,
         "resolve_union",
         lambda packages, machine, accepted_machines=None: [],
     )
     monkeypatch.setattr(
-        cli_fleet_update._validator, "validate", lambda resolved, machine, plat=None: []
+        validator, "validate", lambda resolved, machine, plat=None: []
     )
     monkeypatch.setattr(
-        cli_fleet_update._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
     )
     monkeypatch.setattr(
-        cli_fleet_update._fleet_update,
+        fleet_update,
         "scheduled_task_status",
-        lambda tier, **kwargs: fleet_update.ScheduledTaskStatus(
+        lambda tier, **kwargs: fleet_update_tasks.ScheduledTaskStatus(
             tier=tier,
             opted_in=False,
             task_name=fleet_update_state.TIER_SPECS[tier].task_name,
@@ -731,20 +770,21 @@ def test_cli_fleet_update_status_emits_json(monkeypatch, capsys):
 # --------------------------------------------------------------------------- #
 # Linux/WSL: systemd --user timers
 # --------------------------------------------------------------------------- #
-def test_render_linux_timer_unit_daily():
+def test_render_linux_timer_unit_daily() -> None:
     unit = fleet_update_tasks.render_linux_timer_unit("sweep")
     assert "OnCalendar=*-*-* 04:00:00" in unit
     assert "Persistent=true" in unit
 
 
-def test_render_linux_service_unit_includes_workdir(tmp_path):
+def test_render_linux_service_unit_includes_workdir(tmp_path: Path) -> None:
     unit = fleet_update_tasks.render_linux_service_unit("sweep", home=tmp_path)
     assert "Type=oneshot" in unit
     assert str(tmp_path / ".agent-machines") in unit
-    assert "worktree-manager" in unit
+    assert "agent-machines" in unit
+    assert "fleet-update run --tier sweep" in unit
 
 
-def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path):
+def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path: Path) -> None:
     """Regression: see the identical test/comment in test_self_update.py --
     the same systemd --user minimal-PATH gap affects this sibling sweep too
     (its `worktree-manager` binstub, and anything it shells out to, also
@@ -755,7 +795,7 @@ def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path)
     assert f"Environment=PATH={tmp_path}/.local/bin:" in unit
 
 
-def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path):
+def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path: Path) -> None:
     """See the identical test in test_self_update.py -- same quoting fix,
     same _systemd_quote helper (duplicated per-module by design)."""
     if sys.platform == "win32":
@@ -765,23 +805,29 @@ def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path
     assert f'Environment="PATH={spacey_home}/.local/bin:' in unit
 
 
-def test_linux_systemd_user_available_false_without_binary():
+def test_linux_systemd_user_available_false_without_binary() -> None:
     assert (
         fleet_update_tasks.linux_systemd_user_available(
-            resolve_binary=lambda _b: None, runner=lambda *a, **k: None
+            resolve_binary=lambda _b: None,
+            runner=lambda *a, **k: pytest.fail("missing systemctl must not reach runner"),
         )
         is False
     )
 
 
-def _fake_command_result(argv, returncode, stdout=""):
+def _fake_command_result(argv: list[str], returncode: int, stdout: str="") -> fleet_update.CommandResult:
     return fleet_update.CommandResult(argv, returncode, stdout, "")
 
 
-def test_query_systemd_timer_matches_after_register(tmp_path, monkeypatch):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
+def test_query_systemd_timer_matches_after_register(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> fleet_update.CommandResult:
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], fleet_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-system-running" in argv:
             return _fake_command_result(argv, 0, "running\n")
         if "is-enabled" in argv:
@@ -803,15 +849,21 @@ def test_query_systemd_timer_matches_after_register(tmp_path, monkeypatch):
     assert snapshot.enabled is True
     assert snapshot.state == "active"
     assert snapshot.matching is True
-    assert snapshot.execute == str(tmp_path / ".local" / "bin" / "worktree-manager")
+    assert snapshot.execute == str(tmp_path / ".local" / "bin" / "agent-machines")
 
 
-def test_unregister_systemd_timer_removes_units_and_disables(tmp_path, monkeypatch):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
+def test_unregister_systemd_timer_removes_units_and_disables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
     calls = []
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> fleet_update.CommandResult:
         calls.append(argv)
+        if argv[2] == "show":
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], fleet_update_tasks._linux_unit_dir(tmp_path)),
+            )
         return _fake_command_result(argv, 0)
 
     fleet_update_tasks.register_systemd_timer(
@@ -825,12 +877,17 @@ def test_unregister_systemd_timer_removes_units_and_disables(tmp_path, monkeypat
 
 
 def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(fleet_update, "shutil_which", lambda _b: "/usr/bin/systemctl")
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> fleet_update.CommandResult:
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], fleet_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-system-running" in argv:
             return _fake_command_result(argv, 0, "running\n")
         if "is-enabled" in argv:
@@ -849,8 +906,8 @@ def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(
     assert result.changed is True
 
 
-def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch, tmp_path):
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
+def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     result = fleet_update.reconcile_scheduled_task(
         "sweep",
         desired_present=True,
@@ -865,17 +922,17 @@ def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch
 # Declarative resource handler (apply/dry-run), mirroring self-update's
 # resource tests in test_resources.py.
 # --------------------------------------------------------------------------- #
-def test_fleet_update_resource_registers_opted_in_task(tmp_path, monkeypatch):
+def test_fleet_update_resource_registers_opted_in_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.resources import RunOutcome
 
     class FakeRunner:
-        def __call__(self, argv):
+        def __call__(self, argv: list[str]) -> RunOutcome:
             return RunOutcome(0, "", "")
 
     pkg = _pkg(tmp_path, "acme/fleet", [{"type": "fleet-update", "tier": "sweep"}])
     monkeypatch.setattr(
         "agent_machines.resource_fleet_update._fleet_update.reconcile_scheduled_task",
-        lambda tier, **kwargs: fleet_update.ScheduledTaskReconcileResult(
+        lambda tier, **kwargs: fleet_update_tasks.ScheduledTaskReconcileResult(
             tier=tier,
             desired_state="present",
             status="changed",
@@ -897,17 +954,17 @@ def test_fleet_update_resource_registers_opted_in_task(tmp_path, monkeypatch):
     assert res.detail == "registered the Scheduled Task"
 
 
-def test_fleet_update_resource_defers_registration_with_install_retry(tmp_path, monkeypatch):
+def test_fleet_update_resource_defers_registration_with_install_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from agent_machines.resources import RunOutcome
 
     class FakeRunner:
-        def __call__(self, argv):
+        def __call__(self, argv: list[str]) -> RunOutcome:
             return RunOutcome(0, "", "")
 
     pkg = _pkg(tmp_path, "acme/fleet", [{"type": "fleet-update", "tier": "sweep"}])
     monkeypatch.setattr(
         "agent_machines.resource_fleet_update._fleet_update.reconcile_scheduled_task",
-        lambda tier, **kwargs: fleet_update.ScheduledTaskReconcileResult(
+        lambda tier, **kwargs: fleet_update_tasks.ScheduledTaskReconcileResult(
             tier=tier,
             desired_state="present",
             status="deferred",
@@ -934,7 +991,7 @@ def test_fleet_update_resource_defers_registration_with_install_retry(tmp_path, 
     assert res.commands == [["agent-machines", "fleet-update", "install", "--tier", "sweep"]]
 
 
-def test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, monkeypatch):
+def test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Regression: apply()'s dry-run path called query_scheduled_task() (always
     # the Windows PowerShell/Scheduled Task probe) directly, unconditionally,
     # instead of dispatching by platform the way reconcile_scheduled_task()
@@ -942,11 +999,11 @@ def test_fleet_update_resource_dry_run_queries_systemd_timer_on_linux(tmp_path, 
     # errored) instead of reporting the systemd --user timer's real state.
     from agent_machines.resources import RunOutcome
 
-    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(fleet_update, "shutil_which", lambda _b: "/usr/bin/systemctl")
 
     class FakeRunner:
-        def __call__(self, argv):
+        def __call__(self, argv: list[str]) -> RunOutcome:
             if "is-system-running" in argv:
                 return RunOutcome(0, "running\n", "")
             return RunOutcome(0, "", "")

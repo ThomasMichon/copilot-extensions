@@ -1,13 +1,12 @@
-"""End-to-end delivery test: real git-fetch → versioned slot publish (self_update).
+"""Local-source delivery: real git fetch and publication with a synthetic constructor.
 
 Unlike ``test_self_install`` / ``test_update`` (which mock git + self_install to
 stay fully offline), this exercises the **real** ``self_update`` delivery path —
 an actual ``git clone``/``fetch`` followed by the real versioned-install — against
-a **local git remote**, so it needs only ``git`` on PATH (no network, no PyPI, no
-uv venv build; the delivery mechanics copy files + write the marker, and the uv
-venv only materializes when the *binstub* later runs). It closes the Phase-6 "6b:
-self-updating delivery validated end-to-end (bootstrap fetch → versioned slot)"
-item as always-on CI coverage.
+a **local git remote** with no network or PyPI access. The constructor and
+activation owner are isolated fixtures: these tests qualify source selection,
+payload assembly and versioned publication, not real runtime construction,
+native lifecycle or daemon handover.
 
 The remote is selected via the **user-level source config** (`[source]` in
 ``config.toml``), the same override that lets the updater track a fork / canary
@@ -19,13 +18,15 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 from _manager_constructor_fixture import apply_constructor_fixture
+from _manager_engine_fixtures import runtime_installer
 
 
 @pytest.fixture(autouse=True)
-def _unit_constructor(monkeypatch):
+def _unit_constructor(monkeypatch: pytest.MonkeyPatch) -> None:
     apply_constructor_fixture(monkeypatch)
 
 import worktree_manager.self_install as si
@@ -103,7 +104,7 @@ def _seed_older_install(tmp: Path, root: Path, version: str) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_provider_registry(monkeypatch, tmp_path):
+def _isolate_provider_registry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Every real ``self_install()``/``self_update(dry_run=False)`` call in
     this file reaches ``_write_control_plane_provider_manifest``, which
     writes to ``control_plane_providers_dir()`` -- **not** gated by ``root``
@@ -129,34 +130,28 @@ def _isolate_provider_registry(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def mock_cutover(monkeypatch):
-    """This file is about the real git-fetch -> versioned-slot-publish delivery
-    path, not daemon cutover -- but every ``self_update(dry_run=False)`` call
-    below still reaches its own real (unmocked) cutover step,
-    ``mux_daemon_cutover.activate_after_update`` -> ``spawn_passive``, which
-    launches a REAL, detached/breakaway background OS process (see
-    ``spawn_passive``'s ``windowless_daemon_kwargs(breakaway=True)``) rooted at
-    this test's own ``tmp_path``. That process outlives both the test and the
-    whole pytest run -- pytest's teardown has no handle on a detached child --
-    and this exact pattern was confirmed to leak a real, persistent Windows
-    user-PATH mutation pointing at a since-deleted tmp_path on a machine that
-    ran the suite natively (see ``test_update.py``'s
-    ``test_self_update_without_git_falls_back_to_tarball``). Mock it here too,
-    for every test in this file that drives a real ``self_update``.
+def mock_cutover(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Isolate installed activation, not source acquisition or publication.
+
+    Intercept the current owner before it launches its bootstrap child; patching
+    a historical downstream cutover function cannot contain that process.
     """
     seen: dict[str, object] = {}
 
-    def _fake_cutover(**kw):
+    def _fake_cutover(**kw: Any) -> dict[str, Any]:
         seen["cutover_kwargs"] = kw
         return {"action": "cutover", "result": {"ok": True}}
 
     monkeypatch.setattr(
-        "worktree_manager.mux_daemon_cutover.activate_after_update", _fake_cutover
+        runtime_installer(), "_activate_after_bootstrap_update",
+        lambda root, slot: _fake_cutover(root=root, slot=slot, version=slot.name),
     )
     return seen
 
 
-def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monkeypatch, mock_cutover):
+def test_self_update_fetches_local_remote_and_publishes_new_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_cutover: dict[str, object],
+) -> None:
     root = tmp_path / "root"
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
     _seed_older_install(tmp_path, root, "1.0.0")
@@ -166,7 +161,7 @@ def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monke
 
     # First self_update: clones the remote (no staging yet) and publishes the new slot.
     res = self_update(root=root, ref="main", dry_run=False)
-    assert res.action == "updated"
+    assert res.action == "updated", res.reason
     assert res.previous == "1.0.0"
     assert res.version == "9.9.9"
     assert current_version(root) == "9.9.9"
@@ -177,7 +172,9 @@ def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monke
     assert (version_slot("9.9.9", root) / "payload" / "src" / "worktree_manager" / "__init__.py").exists()
 
 
-def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_path, monkeypatch, mock_cutover):
+def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_cutover: dict[str, object],
+) -> None:
     """Round-8 review finding: self_update() must translate a materialization
     failure into a clean SelfUpdateResult(action="error") -- not let the
     RuntimeError escape past self_update's own documented best-effort/
@@ -205,7 +202,9 @@ def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_p
     assert not version_slot("9.9.9", root).exists()
 
 
-def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch, mock_cutover):
+def test_self_update_second_run_is_version_gated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_cutover: dict[str, object],
+) -> None:
     root = tmp_path / "root"
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
     _seed_older_install(tmp_path, root, "1.0.0")
@@ -213,7 +212,8 @@ def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch, mock_cut
     remote = _make_remote(tmp_path, "9.9.9")
     sc.set_source(repo=str(remote), root=root)
 
-    assert self_update(root=root, ref="main", dry_run=False).action == "updated"
+    first = self_update(root=root, ref="main", dry_run=False)
+    assert first.action == "updated", first.reason
     # Second run re-fetches into the existing staging (fetch path) and is a
     # version-gated no-op — the remote payload is unchanged.
     again = self_update(root=root, ref="main", dry_run=False)
@@ -222,7 +222,9 @@ def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch, mock_cut
     assert current_version(root) == "9.9.9"
 
 
-def test_self_update_fetch_path_honors_switched_source(tmp_path, monkeypatch, mock_cutover):
+def test_self_update_fetch_path_honors_switched_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_cutover: dict[str, object],
+) -> None:
     """After the first update, re-pointing the source config at a different remote
     must take effect on the *fetch* path (staging already exists) — i.e. the
     override is authoritative every run, not just on the initial clone."""
@@ -239,13 +241,15 @@ def test_self_update_fetch_path_honors_switched_source(tmp_path, monkeypatch, mo
     remote_b = _make_remote(tmp_path / "b", "9.9.10")
     sc.set_source(repo=str(remote_b), root=root)
     res = self_update(root=root, ref="main", dry_run=False)
-    assert res.action == "updated"
+    assert res.action == "updated", res.reason
     assert res.version == "9.9.10"
     assert current_version(root) == "9.9.10"
     assert version_slot("9.9.10", root).is_dir()
 
 
-def test_self_update_uses_configured_ref(tmp_path, monkeypatch, mock_cutover):
+def test_self_update_uses_configured_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_cutover: dict[str, object],
+) -> None:
     """With no explicit ref, self_update fetches the branch from the source config."""
     root = tmp_path / "root"
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
@@ -256,6 +260,6 @@ def test_self_update_uses_configured_ref(tmp_path, monkeypatch, mock_cutover):
     sc.set_source(repo=str(remote), ref="canary", root=root)
 
     res = self_update(root=root, dry_run=False)  # ref resolved from config
-    assert res.action == "updated"
+    assert res.action == "updated", res.reason
     assert res.version == "9.9.11"
     assert current_version(root) == "9.9.11"

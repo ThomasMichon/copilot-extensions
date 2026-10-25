@@ -1,0 +1,13 @@
+{
+  "comment": "Reconcile current checker program isolation and source-bound installer metadata.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}

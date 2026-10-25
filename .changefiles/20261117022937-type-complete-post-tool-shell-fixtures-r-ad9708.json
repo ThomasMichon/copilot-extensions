@@ -1,0 +1,9 @@
+{
+  "comment": "Type complete post-tool shell fixtures, retain explicit malformed JSON controls and route fallback counters to their isolated fixture home.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

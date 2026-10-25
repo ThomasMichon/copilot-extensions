@@ -466,6 +466,10 @@ try {
             if (cache.parent == custody.root / "cache" / "python" and ".." not in cache.parts
                     and re.fullmatch(r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", cache.name)):
                 arguments = [*arguments[:2], *arguments[4:]]
+        if len(arguments) == 9 and arguments[1:4] == ["-I", "-S", "-B"]:
+            arguments = [*arguments[:2], *arguments[4:]]
+        elif len(arguments) == 8 and arguments[1:3] == ["-I", "-B"]:
+            arguments = [*arguments[:2], *arguments[3:]]
         if (len(arguments) != 7 or arguments[1] != "-I" or Path(arguments[2]) != runner
                 or Path(arguments[3]) != custody.root or arguments[4] != request.id
                 or arguments[5] != witness or Path(arguments[6]) != procutil):
@@ -642,6 +646,8 @@ try {
             if (cache.parent == custody.root / "cache/python" and ".." not in cache.parts
                     and re.fullmatch(r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", cache.name)):
                 arguments = [*arguments[:3], *arguments[5:]]
+        if len(arguments) == 9 and arguments[1:4] == ["-I", "-S", "-B"]:
+            arguments = [*arguments[:3], *arguments[4:]]
         if (len(arguments) != 8 or arguments[1:3] != ["-I", "-S"] or Path(arguments[3]) != runner
                 or Path(arguments[4]) != custody.root or arguments[5] != request.id
                 or arguments[6] != witness or Path(arguments[7]) != procutil):

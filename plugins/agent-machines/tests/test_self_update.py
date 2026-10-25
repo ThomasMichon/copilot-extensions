@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Callable, NoReturn
 
 import pytest
 
@@ -18,21 +20,32 @@ from agent_machines import (
     self_update_state,
     self_update_tasks,
     self_update_types,
+    _peer_launch,
+    resources,
 )
-from agent_machines.manifest import ManifestError, load_package
+from agent_machines.manifest import ManifestError, RequirementPackage, load_package
 from agent_machines.reconcile import plan
 from agent_machines.resources import resolve_resources
+from agent_machines.scheduler_retirement import SchedulerRunner
 
 from ._helpers import base_package, write_package
+from ._scheduler_safety_helpers import fixture_unit_properties
+
+UTC = timezone.utc
+
+
+@pytest.fixture(autouse=True)
+def _default_legacy_unit_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 def _pkg(
     tmp_path: Path,
     name: str,
-    resources: list[dict],
+    resources: list[dict[str, Any]],
     *,
     authority: int | None = None,
-) -> object:
+) -> RequirementPackage:
     data = base_package(
         name=name,
         schema_version=4,
@@ -47,7 +60,7 @@ def _pkg(
 
 
 class _FakeMutex:
-    def __init__(self, outcome: str):
+    def __init__(self, outcome: str) -> None:
         self.outcome = outcome
         self.released = False
         self.closed = False
@@ -68,21 +81,26 @@ def _task_snapshot(
     present: bool,
     matching: bool = True,
     enabled: bool | None = True,
-):
-    return self_update.ScheduledTaskSnapshot(
-        task_name=self_update.TIER_SPECS[tier].task_name,
+    home: Path | None = None,
+) -> self_update_tasks.ScheduledTaskSnapshot:
+    return self_update_tasks.ScheduledTaskSnapshot(
+        task_name=self_update_state.TIER_SPECS[tier].task_name,
         present=present,
         enabled=enabled,
         logon_type="Interactive" if present else None,
         description=self_update.task_description(tier) if present else None,
         execute="conhost.exe" if present else None,
-        arguments=self_update.task_action_arguments(tier),
-        working_directory=self_update.task_working_directory(),
+        arguments=self_update.task_action_arguments(tier, home=home),
+        working_directory=self_update.task_working_directory(home),
         matching=matching,
+        state="Ready" if present else None,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
+        trigger_kind=self_update_state.TIER_SPECS[tier].schedule_kind,
+        trigger_value=self_update_state.TIER_SPECS[tier].schedule_value,
     )
 
 
-def test_manifest_accepts_self_update_resource_and_rejects_bad_tier(tmp_path):
+def test_manifest_accepts_self_update_resource_and_rejects_bad_tier(tmp_path: Path) -> None:
     package = _pkg(
         tmp_path,
         "acme/watchdog",
@@ -98,8 +116,8 @@ def test_manifest_accepts_self_update_resource_and_rejects_bad_tier(tmp_path):
 
 
 def test_self_update_resource_selects_highest_authority_and_equal_highest_conflicts(
-    tmp_path,
-):
+    tmp_path: Path,
+) -> None:
     disabled = _pkg(
         tmp_path,
         "acme/disabled",
@@ -126,17 +144,17 @@ def test_self_update_resource_selects_highest_authority_and_equal_highest_confli
     assert any(finding.code == "resource-conflict" for finding in equal_findings)
 
 
-def test_run_noops_when_tier_not_opted_in():
+def test_run_noops_when_tier_not_opted_in() -> None:
     result = self_update.run_tier("watchdog", opted_in=False)
     assert result.ok is True
     assert result.status == "noop"
     assert result.detail == "tier 'watchdog' is not opted in"
 
 
-def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
+def test_lock_refuses_live_owner_without_double_drive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started = datetime(2026, 1, 1, tzinfo=UTC)
-    self_update.lock_path("watchdog", tmp_path).parent.mkdir(parents=True, exist_ok=True)
-    self_update.lock_path("watchdog", tmp_path).write_text(
+    self_update_state.lock_path("watchdog", tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    self_update_state.lock_path("watchdog", tmp_path).write_text(
         json.dumps(
             {
                 "schema_version": 1,
@@ -149,9 +167,9 @@ def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("timeout"))
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    lock = self_update.TierLock(tier="watchdog", home=tmp_path)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    lock = self_update_lock.TierLock(tier="watchdog", home=tmp_path)
     acquired, detail = lock.acquire()
     assert acquired is False
     assert "already active" in detail
@@ -159,9 +177,9 @@ def test_lock_refuses_live_owner_without_double_drive(tmp_path, monkeypatch):
     assert lock.snapshot.pid == 4321
 
 
-def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch):
+def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started = datetime(2026, 1, 1, tzinfo=UTC)
-    path = self_update.lock_path("watchdog", tmp_path)
+    path = self_update_state.lock_path("watchdog", tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -176,9 +194,9 @@ def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    lock = self_update.TierLock(
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    lock = self_update_lock.TierLock(
         tier="watchdog",
         home=tmp_path,
         pid=9999,
@@ -194,9 +212,9 @@ def test_lock_reclaims_dead_owner_only_after_stale_window(tmp_path, monkeypatch)
     lock.release()
 
 
-def test_lock_refuses_recent_dead_owner(tmp_path, monkeypatch):
+def test_lock_refuses_recent_dead_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started = datetime(2026, 1, 1, tzinfo=UTC)
-    path = self_update.lock_path("watchdog", tmp_path)
+    path = self_update_state.lock_path("watchdog", tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -211,9 +229,9 @@ def test_lock_refuses_recent_dead_owner(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
-    lock = self_update.TierLock(
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    lock = self_update_lock.TierLock(
         tier="watchdog",
         home=tmp_path,
         pid=9999,
@@ -227,7 +245,7 @@ def test_lock_refuses_recent_dead_owner(tmp_path, monkeypatch):
     assert json.loads(path.read_text(encoding="utf-8"))["pid"] == 4321
 
 
-def test_tier_lock_acquires_and_releases_on_posix(tmp_path):
+def test_tier_lock_acquires_and_releases_on_posix(tmp_path: Path) -> None:
     """Regression: TierLock.acquire() used to unconditionally refuse with
     'self-update locking is supported only on Windows' on any non-Windows
     platform, so `agent-machines self-update run` could never actually
@@ -237,36 +255,36 @@ def test_tier_lock_acquires_and_releases_on_posix(tmp_path):
     path -- this test only runs meaningfully on a POSIX host."""
     if sys.platform == "win32":
         pytest.skip("POSIX-only lock path")
-    lock = self_update.TierLock(tier="watchdog", home=tmp_path)
+    lock = self_update_lock.TierLock(tier="watchdog", home=tmp_path)
     acquired, detail = lock.acquire()
     assert acquired is True
     assert detail == "acquired"
-    assert self_update.lock_path("watchdog", tmp_path).exists()
+    assert self_update_state.lock_path("watchdog", tmp_path).exists()
     lock.release()
-    assert not self_update.lock_path("watchdog", tmp_path).exists()
+    assert not self_update_state.lock_path("watchdog", tmp_path).exists()
 
 
-def test_tier_lock_refuses_concurrent_holder_on_posix(tmp_path):
+def test_tier_lock_refuses_concurrent_holder_on_posix(tmp_path: Path) -> None:
     if sys.platform == "win32":
         pytest.skip("POSIX-only lock path")
-    first = self_update.TierLock(tier="sweep", home=tmp_path, pid=111)
+    first = self_update_lock.TierLock(tier="sweep", home=tmp_path, pid=111)
     acquired_first, _ = first.acquire()
     assert acquired_first is True
 
-    second = self_update.TierLock(tier="sweep", home=tmp_path, pid=222, pid_alive=lambda _p: True)
+    second = self_update_lock.TierLock(tier="sweep", home=tmp_path, pid=222, pid_alive=lambda _p: True)
     acquired_second, detail = second.acquire()
     assert acquired_second is False
     assert "already active" in detail
 
     first.release()
-    third = self_update.TierLock(tier="sweep", home=tmp_path, pid=333)
+    third = self_update_lock.TierLock(tier="sweep", home=tmp_path, pid=333)
     acquired_third, _ = third.acquire()
     assert acquired_third is True
     third.release()
 
 
-def test_watchdog_starts_launcher_when_missing(monkeypatch):
-    config = self_update.DtsshConfig(
+def test_watchdog_starts_launcher_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = self_update_dtssh.DtsshConfig(
         config_path=Path("config.json"),
         install_root=Path("install"),
         launcher_path=Path(r"C:\agent-ssh-dtssh\dtssh-host-launcher.ps1"),
@@ -275,19 +293,19 @@ def test_watchdog_starts_launcher_when_missing(monkeypatch):
     )
     state = {"running": False}
 
-    def process_lister():
+    def process_lister() -> list[dict[str, int | str]]:
         return (
             []
             if not state["running"]
             else [{"ProcessId": 321, "CommandLine": str(config.launcher_path)}]
         )
 
-    def starter(_config):
+    def starter(_config: self_update_dtssh.DtsshConfig) -> bool:
         state["running"] = True
         return True
 
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
-    steps = self_update.ensure_watchdog(
+    steps = self_update_dtssh.ensure_watchdog(
         process_lister=process_lister,
         launcher_starter=starter,
         sleeper=lambda _seconds: None,
@@ -297,25 +315,25 @@ def test_watchdog_starts_launcher_when_missing(monkeypatch):
     assert "started dtssh host launcher" in steps[0].detail
 
 
-def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeypatch, tmp_path):
+def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Regression: CREATE_NO_WINDOW applied to conhost.exe --headless itself
     # (rather than to the ordinary child it hosts) breaks its own console
     # allocation -- conhost then exits immediately without ever starting the
     # pwsh launcher, so the watchdog silently times out forever. conhost's
     # own `--headless` flag already keeps a window from appearing, so no
     # extra Popen creationflags belong on this specific spawn.
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_dtssh, "shutil_which", lambda _name: r"C:\pwsh\pwsh.exe")
     monkeypatch.setattr(Path, "is_file", lambda self: True)
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     class _FakePopen:
-        def __init__(self, argv, **kwargs):
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
             captured["argv"] = argv
             captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(self_update_dtssh.subprocess, "Popen", _FakePopen)
-    config = self_update.DtsshConfig(
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -328,33 +346,33 @@ def test_default_launcher_starter_does_not_pass_creationflags_to_conhost(monkeyp
     assert captured["argv"][1] == "--headless"
 
 
-def test_refresh_dtssh_mesh_skips_when_agent_ssh_missing(monkeypatch):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: None)
-    step = self_update.refresh_dtssh_mesh(runner=lambda *a, **k: (_ for _ in ()).throw(
+def test_refresh_dtssh_mesh_skips_when_agent_ssh_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    step = self_update_dtssh.refresh_dtssh_mesh(runner=lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("must not run without agent-ssh")
     ))
     assert step.status == "skipped"
     assert "agent-ssh is not installed" in step.detail
 
 
-def test_refresh_dtssh_mesh_skips_when_no_machines_yaml(monkeypatch):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+def test_refresh_dtssh_mesh_skips_when_no_machines_yaml(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         payload = json.dumps(
             {"ok": True, "machines_yaml": None, "detail": "no machines.yaml found", "aliases": []}
         )
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.refresh_dtssh_mesh(runner=runner)
+    step = self_update_dtssh.refresh_dtssh_mesh(runner=runner)
     assert step.status == "skipped"
     assert "no machines.yaml" in step.detail
 
 
-def test_refresh_dtssh_mesh_ok_when_mesh_reachable(monkeypatch):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+def test_refresh_dtssh_mesh_ok_when_mesh_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         payload = json.dumps(
             {
                 "ok": True,
@@ -368,15 +386,15 @@ def test_refresh_dtssh_mesh_ok_when_mesh_reachable(monkeypatch):
         )
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.refresh_dtssh_mesh(runner=runner)
+    step = self_update_dtssh.refresh_dtssh_mesh(runner=runner)
     assert step.status == "ok"
     assert "all 2 known alias(es) reachable" in step.detail
 
 
-def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         payload = json.dumps(
             {
                 "ok": False,
@@ -390,12 +408,12 @@ def test_refresh_dtssh_mesh_error_when_alias_unreachable(monkeypatch):
         )
         return self_update.CommandResult(list(argv), 1, payload, "")
 
-    step = self_update.refresh_dtssh_mesh(runner=runner)
+    step = self_update_dtssh.refresh_dtssh_mesh(runner=runner)
     assert step.status == "error"
     assert "host-b" in step.detail
 
 
-def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_path):
+def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cell = tmp_path / "marketplaces" / "test-cell"
     root = cell / "plugins" / "agent-machines"
     root.mkdir(parents=True)
@@ -403,42 +421,42 @@ def test_refresh_dtssh_mesh_uses_same_cell_agent_ssh_prefix(monkeypatch, tmp_pat
     own = {"cellRoot": str(cell), "pluginRoot": str(root)}
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
     monkeypatch.setenv("AGENT_RT_ROOT", str(root))
-    monkeypatch.setattr(self_update_dtssh._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(_peer_launch, "validate_owner", lambda *args: own)
     monkeypatch.setattr(
-        self_update_dtssh.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+        shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
     )
-    expected_prefix = self_update_dtssh._peer_launch.launch_prefix(
+    expected_prefix = _peer_launch.launch_prefix(
         "agent-machines", Path(own["pluginRoot"]),
         str(Path(own["pluginRoot"]) / "install.json"), "agent-ssh",
     )
     calls = []
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(list(argv))
         payload = json.dumps(
             {"ok": True, "machines_yaml": None, "detail": "no mesh", "aliases": []}
         )
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.refresh_dtssh_mesh(runner=runner)
+    step = self_update_dtssh.refresh_dtssh_mesh(runner=runner)
     assert step.status == "skipped"
     assert calls[0][:len(expected_prefix)] == expected_prefix
     assert calls[0][len(expected_prefix):] == ["refresh-mesh", "--json"]
 
 
-def test_refresh_dtssh_mesh_skips_without_same_cell_agent_ssh(monkeypatch, tmp_path):
+def test_refresh_dtssh_mesh_skips_without_same_cell_agent_ssh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     cell = tmp_path / "marketplaces" / "test-cell"
     root = cell / "plugins" / "agent-machines"
     root.mkdir(parents=True)
     own = {"cellRoot": str(cell), "pluginRoot": str(root)}
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
     monkeypatch.setenv("AGENT_RT_ROOT", str(root))
-    monkeypatch.setattr(self_update_dtssh._peer_launch, "validate_owner", lambda *args: own)
+    monkeypatch.setattr(_peer_launch, "validate_owner", lambda *args: own)
     monkeypatch.setattr(
-        self_update_dtssh.shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
+        shutil, "which", lambda _: pytest.fail("ambient PATH selected"),
     )
 
-    step = self_update.refresh_dtssh_mesh(
+    step = self_update_dtssh.refresh_dtssh_mesh(
         runner=lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("must not run without a same-cell agent-ssh")
         )
@@ -447,28 +465,28 @@ def test_refresh_dtssh_mesh_skips_without_same_cell_agent_ssh(monkeypatch, tmp_p
     assert "agent-ssh is not installed" in step.detail
 
 
-def test_refresh_dtssh_mesh_propagates_context_refusal(monkeypatch, tmp_path):
+def test_refresh_dtssh_mesh_propagates_context_refusal(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = tmp_path / "marketplaces" / "test-cell" / "plugins" / "agent-machines"
     root.mkdir(parents=True)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(root / "install.json"))
     monkeypatch.setenv("AGENT_RT_ROOT", str(root))
 
-    def refuse(*_args):
+    def refuse(*_args: Any) -> NoReturn:
         raise ValueError("malformed receipt")
 
-    monkeypatch.setattr(self_update_dtssh._peer_launch, "validate_owner", refuse)
+    monkeypatch.setattr(_peer_launch, "validate_owner", refuse)
 
-    with pytest.raises(self_update_dtssh._peer_launch.ContextRefused):
-        self_update.refresh_dtssh_mesh(
+    with pytest.raises(_peer_launch.ContextRefused):
+        self_update_dtssh.refresh_dtssh_mesh(
             runner=lambda *a, **k: (_ for _ in ()).throw(
                 AssertionError("must not run on a refused context")
             )
         )
 
 
-def test_ensure_dtssh_host_healthy_skips_when_agent_ssh_missing(monkeypatch):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: None)
-    step = self_update.ensure_dtssh_host_healthy(
+def test_ensure_dtssh_host_healthy_skips_when_agent_ssh_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+    step = self_update_dtssh.ensure_dtssh_host_healthy(
         runner=lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("must not run without agent-ssh")
         )
@@ -477,14 +495,14 @@ def test_ensure_dtssh_host_healthy_skips_when_agent_ssh_missing(monkeypatch):
     assert "agent-ssh is not installed" in step.detail
 
 
-def test_ensure_dtssh_host_healthy_skips_when_config_missing(monkeypatch):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
+def test_ensure_dtssh_host_healthy_skips_when_config_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
 
-    def raise_config(local_app_data=None):
+    def raise_config(local_app_data: Path | None=None) -> NoReturn:
         raise RuntimeError("dtssh companion config is unreadable: not found")
 
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", raise_config)
-    step = self_update.ensure_dtssh_host_healthy(
+    step = self_update_dtssh.ensure_dtssh_host_healthy(
         runner=lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("must not run without a resolvable dtssh config")
         )
@@ -493,9 +511,9 @@ def test_ensure_dtssh_host_healthy_skips_when_config_missing(monkeypatch):
     assert "unreadable" in step.detail
 
 
-def test_ensure_dtssh_host_healthy_ok_when_already_healthy(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
-    config = self_update.DtsshConfig(
+def test_ensure_dtssh_host_healthy_ok_when_already_healthy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -505,12 +523,12 @@ def test_ensure_dtssh_host_healthy_ok_when_already_healthy(monkeypatch, tmp_path
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
     calls = []
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(list(argv))
         payload = json.dumps({"ok": True, "healthy": True, "would_change": False})
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    step = self_update_dtssh.ensure_dtssh_host_healthy(runner=runner)
     assert step.status == "ok"
     assert "healthy" in step.detail
     # Only the status probe ran -- no apply for an already-healthy host.
@@ -521,9 +539,9 @@ def test_ensure_dtssh_host_healthy_ok_when_already_healthy(monkeypatch, tmp_path
     assert calls[0][-5:-3] == ["--alias", "box-1"]
 
 
-def test_ensure_dtssh_host_healthy_reports_error_without_apply_when_blocked(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
-    config = self_update.DtsshConfig(
+def test_ensure_dtssh_host_healthy_reports_error_without_apply_when_blocked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -533,7 +551,7 @@ def test_ensure_dtssh_host_healthy_reports_error_without_apply_when_blocked(monk
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
     calls = []
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(list(argv))
         payload = json.dumps(
             {
@@ -546,16 +564,16 @@ def test_ensure_dtssh_host_healthy_reports_error_without_apply_when_blocked(monk
         )
         return self_update.CommandResult(list(argv), 1, payload, "")
 
-    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    step = self_update_dtssh.ensure_dtssh_host_healthy(runner=runner)
     assert step.status == "error"
     assert "Dev Tunnel login" in step.detail
     # would_change was false -- must not attempt a no-op apply.
     assert len(calls) == 1
 
 
-def test_ensure_dtssh_host_healthy_applies_when_unhealthy_and_repairs(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
-    config = self_update.DtsshConfig(
+def test_ensure_dtssh_host_healthy_applies_when_unhealthy_and_repairs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -565,7 +583,7 @@ def test_ensure_dtssh_host_healthy_applies_when_unhealthy_and_repairs(monkeypatc
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
     calls = []
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(list(argv))
         if "--apply" in argv:
             payload = json.dumps(
@@ -588,7 +606,7 @@ def test_ensure_dtssh_host_healthy_applies_when_unhealthy_and_repairs(monkeypatc
         )
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    step = self_update_dtssh.ensure_dtssh_host_healthy(runner=runner)
     assert step.status == "changed"
     assert "banner OK" in step.detail
     assert len(calls) == 2
@@ -596,9 +614,9 @@ def test_ensure_dtssh_host_healthy_applies_when_unhealthy_and_repairs(monkeypatc
     assert calls[1][:-2] == calls[0][:-1]  # same base argv, minus each call's trailing flag(s)
 
 
-def test_ensure_dtssh_host_healthy_apply_still_unhealthy_is_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
-    config = self_update.DtsshConfig(
+def test_ensure_dtssh_host_healthy_apply_still_unhealthy_is_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -607,7 +625,7 @@ def test_ensure_dtssh_host_healthy_apply_still_unhealthy_is_error(monkeypatch, t
     )
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         if "--apply" in argv:
             payload = json.dumps(
                 {
@@ -621,16 +639,16 @@ def test_ensure_dtssh_host_healthy_apply_still_unhealthy_is_error(monkeypatch, t
         payload = json.dumps({"ok": True, "healthy": False, "would_change": True})
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    step = self_update_dtssh.ensure_dtssh_host_healthy(runner=runner)
     assert step.status == "error"
     assert "remains unhealthy" in step.detail
 
 
 def test_ensure_dtssh_host_healthy_verification_required_is_changed_not_error(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(self_update_dtssh.shutil, "which", lambda _name: "agent-ssh")
-    config = self_update.DtsshConfig(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-ssh")
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -639,7 +657,7 @@ def test_ensure_dtssh_host_healthy_verification_required_is_changed_not_error(
     )
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", lambda local_app_data=None: config)
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         if "--apply" in argv:
             payload = json.dumps(
                 {
@@ -654,7 +672,7 @@ def test_ensure_dtssh_host_healthy_verification_required_is_changed_not_error(
         payload = json.dumps({"ok": True, "healthy": False, "would_change": True})
         return self_update.CommandResult(list(argv), 0, payload, "")
 
-    step = self_update.ensure_dtssh_host_healthy(runner=runner)
+    step = self_update_dtssh.ensure_dtssh_host_healthy(runner=runner)
     assert step.status == "changed"
     assert "verification pending" in step.detail
 
@@ -662,18 +680,18 @@ def test_ensure_dtssh_host_healthy_verification_required_is_changed_not_error(
 @pytest.mark.parametrize("platform", ["linux", "darwin"])
 @pytest.mark.parametrize("mesh_status", ["ok", "error"])
 def test_watchdog_skips_windows_host_checks_but_retains_mesh_on_non_windows(
-    monkeypatch, tmp_path, platform, mesh_status
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, platform: str, mesh_status: str
+) -> None:
     monkeypatch.setattr(self_update, "sys", SimpleNamespace(platform=platform))
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
 
-    def windows_only(*_args, **_kwargs):
+    def windows_only(*_args: Any, **_kwargs: Any) -> NoReturn:
         pytest.fail("non-Windows watchdog entered a Windows-only host check")
 
     monkeypatch.setattr(self_update_dtssh, "load_dtssh_config", windows_only)
     calls = []
 
-    def runner(argv, **_kwargs):
+    def runner(argv: list[str], **_kwargs: Any) -> self_update_types.CommandResult:
         calls.append(list(argv))
         payload = json.dumps({
             "machines_yaml": "machines.yaml",
@@ -703,12 +721,12 @@ def test_watchdog_skips_windows_host_checks_but_retains_mesh_on_non_windows(
     status = self_update_state.tier_status(tmp_path, "watchdog")
     assert status.last_attempt == result.attempted_at
     assert bool(status.last_success) == (mesh_status == "ok")
-    assert not self_update.lock_path("watchdog", tmp_path).exists()
+    assert not self_update_state.lock_path("watchdog", tmp_path).exists()
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native Linux CLI consumer")
 @pytest.mark.parametrize("peer_exit", [0, 1])
-def test_native_linux_watchdog_cli_without_windows_environment(tmp_path, peer_exit):
+def test_native_linux_watchdog_cli_without_windows_environment(tmp_path: Path, peer_exit: int) -> None:
     home = tmp_path / "home"
     package_dir = home / ".agent-machines" / "config" / "all"
     package_dir.mkdir(parents=True)
@@ -756,15 +774,15 @@ def test_native_linux_watchdog_cli_without_windows_environment(tmp_path, peer_ex
         "skipped", "skipped", "ok" if peer_exit == 0 else "error"
     ]
     assert bool(result["success_at"]) == (peer_exit == 0)
-    assert not self_update.lock_path("watchdog", home).exists()
+    assert not self_update_state.lock_path("watchdog", home).exists()
 
 
-def test_run_tier_watchdog_appends_host_health_step_before_mesh_refresh(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+def test_run_tier_watchdog_appends_host_health_step_before_mesh_refresh(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    config = self_update.DtsshConfig(
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -779,13 +797,13 @@ def test_run_tier_watchdog_appends_host_health_step_before_mesh_refresh(monkeypa
     )
     order = []
 
-    def host_healer():
+    def host_healer() -> self_update_types.StepResult:
         order.append("host-health")
-        return self_update.StepResult("dtssh-host-health", "changed", "repaired the dtssh host")
+        return self_update_types.StepResult("dtssh-host-health", "changed", "repaired the dtssh host")
 
-    def mesh_refresher():
+    def mesh_refresher() -> self_update_types.StepResult:
         order.append("mesh-refresh")
-        return self_update.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
+        return self_update_types.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
 
     result = self_update.run_tier(
         "watchdog",
@@ -804,13 +822,13 @@ def test_run_tier_watchdog_appends_host_health_step_before_mesh_refresh(monkeypa
 
 
 def test_run_tier_watchdog_fails_when_host_health_errors_and_skips_mesh_refresh(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    config = self_update.DtsshConfig(
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -824,16 +842,16 @@ def test_run_tier_watchdog_fails_when_host_health_errors_and_skips_mesh_refresh(
         lambda _config, process_lister=None: True,
     )
 
-    def host_healer():
-        return self_update.StepResult(
+    def host_healer() -> self_update_types.StepResult:
+        return self_update_types.StepResult(
             "dtssh-host-health", "error", "dtssh host remains unhealthy after apply"
         )
 
     mesh_calls = []
 
-    def mesh_refresher():
+    def mesh_refresher() -> self_update_types.StepResult:
         mesh_calls.append(True)
-        return self_update.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
+        return self_update_types.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
 
     result = self_update.run_tier(
         "watchdog",
@@ -848,12 +866,12 @@ def test_run_tier_watchdog_fails_when_host_health_errors_and_skips_mesh_refresh(
     assert result.steps[-1].name == "dtssh-host-health"
 
 
-def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    config = self_update.DtsshConfig(
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -869,15 +887,15 @@ def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
 
     calls = []
 
-    def mesh_refresher():
+    def mesh_refresher() -> self_update_types.StepResult:
         calls.append(True)
-        return self_update.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
+        return self_update_types.StepResult("dtssh-mesh-refresh", "ok", "refreshed the dtssh mesh")
 
     result = self_update.run_tier(
         "watchdog",
         opted_in=True,
         mesh_refresher=mesh_refresher,
-        host_healer=lambda: self_update.StepResult("dtssh-host-health", "ok", "healthy"),
+        host_healer=lambda: self_update_types.StepResult("dtssh-host-health", "ok", "healthy"),
         home=tmp_path,
     )
     assert result.status == "ok"
@@ -886,12 +904,12 @@ def test_run_tier_watchdog_appends_mesh_refresh_step(monkeypatch, tmp_path):
     assert result.steps[-1].status == "ok"
 
 
-def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    config = self_update.DtsshConfig(
+    config = self_update_dtssh.DtsshConfig(
         config_path=tmp_path / "config.json",
         install_root=tmp_path,
         launcher_path=tmp_path / "dtssh-host-launcher.ps1",
@@ -905,8 +923,8 @@ def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path)
         lambda _config, process_lister=None: True,
     )
 
-    def mesh_refresher():
-        return self_update.StepResult(
+    def mesh_refresher() -> self_update_types.StepResult:
+        return self_update_types.StepResult(
             "dtssh-mesh-refresh", "error", "unreachable: host-b"
         )
 
@@ -914,7 +932,7 @@ def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path)
         "watchdog",
         opted_in=True,
         mesh_refresher=mesh_refresher,
-        host_healer=lambda: self_update.StepResult("dtssh-host-health", "ok", "healthy"),
+        host_healer=lambda: self_update_types.StepResult("dtssh-host-health", "ok", "healthy"),
         home=tmp_path,
     )
     assert result.status == "error"
@@ -923,8 +941,8 @@ def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path)
 
 
 def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_lock(
-    monkeypatch, tmp_path
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Safety net: every *anticipated* failure path already returns its own
     error `RunResult`. This covers everything else -- a bug in a step, an
     unexpected `OSError`, ... -- which previously propagated straight out of
@@ -933,11 +951,11 @@ def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_l
     was already durably recorded before this (written before any step runs);
     what's new is that the caller gets a normal `RunResult` back instead of
     an unhandled exception, and the lock is still released."""
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     created_mutexes: list[_FakeMutex] = []
 
-    def _make_mutex(_name):
+    def _make_mutex(_name: str) -> _FakeMutex:
         mutex = _FakeMutex("acquired")
         created_mutexes.append(mutex)
         return mutex
@@ -945,7 +963,7 @@ def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_l
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", _make_mutex)
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
 
-    def boom(*_args, **_kwargs):
+    def boom(*_args: Any, **_kwargs: Any) -> NoReturn:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(self_update, "ensure_watchdog", boom)
@@ -962,14 +980,14 @@ def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_l
     assert len(created_mutexes) == 1
     assert created_mutexes[0].released is True
     assert created_mutexes[0].closed is True
-    assert not self_update_lock.lock_path("watchdog", tmp_path).exists()
+    assert not self_update_state.lock_path("watchdog", tmp_path).exists()
 
 
-def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
+def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
 
-    def dirty_runner(argv, *, cwd=None, timeout=0):
+    def dirty_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         if argv[:3] == ["git", "rev-parse", "--is-bare-repository"]:
             return self_update.CommandResult(list(argv), 0, "false\n", "")
         if argv[:2] == ["git", "status"]:
@@ -980,7 +998,7 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
     assert dirty.status == "skipped"
     assert "dirty" in dirty.detail
 
-    def diverged_runner(argv, *, cwd=None, timeout=0):
+    def diverged_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
                 list(argv), 0, "false\n", ""
@@ -1003,12 +1021,12 @@ def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
 SCRATCH_REF = "refs/agent-machines/self-update-fetch/main"
 
 
-def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
+def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path: Path) -> None:
     repo = tmp_path / "bare-repo"
     repo.mkdir()
     calls: list[list[str]] = []
 
-    def bare_runner(argv, *, cwd=None, timeout=0):
+    def bare_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(list(argv))
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
@@ -1049,11 +1067,11 @@ def test_fast_forward_repo_bare_anchor_fast_forwards_branch_ref(tmp_path):
     assert ["git", "update-ref", "-d", SCRATCH_REF] in calls
 
 
-def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path):
+def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path: Path) -> None:
     repo = tmp_path / "bare-repo"
     repo.mkdir()
 
-    def bare_runner(argv, *, cwd=None, timeout=0):
+    def bare_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
                 list(argv), 0, "true\n", ""
@@ -1072,11 +1090,11 @@ def test_fast_forward_repo_bare_anchor_skips_detached_head(tmp_path):
     assert "detached" in result.detail
 
 
-def test_fast_forward_repo_bare_anchor_reports_error_when_ref_lock_fails(tmp_path):
+def test_fast_forward_repo_bare_anchor_reports_error_when_ref_lock_fails(tmp_path: Path) -> None:
     repo = tmp_path / "bare-repo"
     repo.mkdir()
 
-    def bare_runner(argv, *, cwd=None, timeout=0):
+    def bare_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
                 list(argv), 0, "true\n", ""
@@ -1113,11 +1131,11 @@ def test_fast_forward_repo_bare_anchor_reports_error_when_ref_lock_fails(tmp_pat
     assert "lock ref" in result.detail
 
 
-def test_fast_forward_repo_bare_anchor_skips_when_upstream_diverges_during_update(tmp_path):
+def test_fast_forward_repo_bare_anchor_skips_when_upstream_diverges_during_update(tmp_path: Path) -> None:
     repo = tmp_path / "bare-repo"
     repo.mkdir()
 
-    def bare_runner(argv, *, cwd=None, timeout=0):
+    def bare_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
                 list(argv), 0, "true\n", ""
@@ -1151,12 +1169,12 @@ def test_fast_forward_repo_bare_anchor_skips_when_upstream_diverges_during_updat
     assert "non-fast-forward" in result.detail
 
 
-def test_fast_forward_repo_bare_anchor_already_up_to_date(tmp_path):
+def test_fast_forward_repo_bare_anchor_already_up_to_date(tmp_path: Path) -> None:
     repo = tmp_path / "bare-repo"
     repo.mkdir()
     calls: list[list[str]] = []
 
-    def bare_runner(argv, *, cwd=None, timeout=0):
+    def bare_runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(list(argv))
         mapping = {
             ("git", "rev-parse", "--is-bare-repository"): self_update.CommandResult(
@@ -1188,7 +1206,7 @@ def test_fast_forward_repo_bare_anchor_already_up_to_date(tmp_path):
 
 
 
-def test_live_session_deferral_reason_reports_busy_worktree():
+def test_live_session_deferral_reason_reports_busy_worktree() -> None:
     reason = self_update.live_session_deferral_reason(
         worktree_lister=lambda: [
             {
@@ -1208,13 +1226,13 @@ def test_live_session_deferral_reason_reports_busy_worktree():
     (1, "automatic-update KillSwitch active; nothing ran", "error"),
 ])
 def test_held_self_update_skips_restore_without_recording_success(
-    tmp_path, returncode, detail, expected,
-):
+    tmp_path: Path, returncode: int, detail: str, expected: str,
+) -> None:
     previous = "2026-09-14T09:05:00+00:00"
-    self_update.write_status(tmp_path, "sweep", success=previous)
+    self_update_state.write_status(tmp_path, "sweep", success=previous)
     calls = []
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         calls.append(argv)
         assert argv[:3] == ["agent-worktrees", "-p", "copilot-extensions"]
         return self_update.CommandResult(argv, returncode, "", detail)
@@ -1236,16 +1254,14 @@ def test_held_self_update_skips_restore_without_recording_success(
 
 
 def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and_binstub_restore(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
-    repo = type("Repo", (), {"path": tmp_path / "repo"})
+    repo = SimpleNamespace(path=tmp_path / "repo")
     repo.path.mkdir()
 
-    def runner(argv, *, cwd=None, timeout=0):
+    def runner(argv: list[str], *, cwd: Path | None=None, timeout: float=0) -> self_update_types.CommandResult:
         if argv[:2] == ["git", "status"]:
             if cwd == repo.path:
                 return self_update.CommandResult(list(argv), 0, " M tracked.txt\n", "")
@@ -1277,7 +1293,7 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and
         ],
         home=tmp_path,
     )
-    assert result.status == "ok"
+    assert result.status == "ok", result.detail
     assert result.steps[0].name == "git-pull"
     assert result.steps[0].status == "skipped"
     assert "dirty" in result.steps[0].detail
@@ -1291,14 +1307,15 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and
         "--no-manager",
     ]
     restore_step = next(step for step in result.steps if step.name == "restore")
-    assert (restore_step.command or [None])[0] == "agent-machines"
+    assert restore_step.command is not None
+    assert restore_step.command[0] == "agent-machines"
     assert "--maintenance-safe" in (restore_step.command or [])
 
 
-def test_plan_includes_self_update_observed_status(tmp_path, monkeypatch):
+def test_plan_includes_self_update_observed_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
-    self_update.write_status(
+    self_update_state.write_status(
         tmp_path,
         "watchdog",
         attempt="2026-09-14T09:00:00+00:00",
@@ -1318,7 +1335,7 @@ def test_plan_includes_self_update_observed_status(tmp_path, monkeypatch):
     assert "last-attempt=2026-09-14T09:00:00+00:00" in resource["summary"]
 
 
-def test_cli_self_update_run_emits_json(monkeypatch, capsys):
+def test_cli_self_update_run_emits_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(
         cli,
         "_resolve_machine_identity",
@@ -1335,13 +1352,13 @@ def test_cli_self_update_run_emits_json(monkeypatch, capsys):
     )
     monkeypatch.setattr(cli._validator, "validate", lambda resolved, machine, plat=None: [])
     monkeypatch.setattr(
-        cli._resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
+        resources, "resolve_resources", lambda resolved, machine, plat: ([], [])
     )
     monkeypatch.setattr(cli._discover, "discover", lambda machine, accepted_machines=None: [])
     monkeypatch.setattr(
-        cli._self_update,
+        self_update,
         "run_tier",
-        lambda tier, **kwargs: self_update.RunResult(
+        lambda tier, **kwargs: self_update_types.RunResult(
             tier=tier,
             status="noop",
             opted_in=False,
@@ -1355,17 +1372,17 @@ def test_cli_self_update_run_emits_json(monkeypatch, capsys):
     assert payload["status"] == "noop"
 
 
-def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+def test_reconcile_task_registers_new_opt_in(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     state = {"present": False}
 
-    def query(tier, *, machine=None, runner=None, resolve_binary=None, home=None):
+    def query(tier: str, *, machine: str | None=None, runner: SchedulerRunner | None=None, resolve_binary: Callable[[str], str | None] | None=None, home: Path | None=None) -> self_update_tasks.ScheduledTaskSnapshot:
         return _task_snapshot(tier, present=state["present"])
 
-    def register(tier, *, machine=None, runner=None, resolve_binary=None, home=None):
+    def register(tier: str, *, machine: str | None=None, runner: SchedulerRunner | None=None, resolve_binary: Callable[[str], str | None] | None=None, home: Path | None=None) -> self_update_types.CommandResult:
         state["present"] = True
         return self_update.CommandResult(["pwsh"], 0, "", "")
 
@@ -1377,7 +1394,7 @@ def test_reconcile_task_registers_new_opt_in(monkeypatch, tmp_path):
     assert result.snapshot is not None and result.snapshot.present is True
 
 
-def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
+def test_register_scheduled_task_hourly_uses_native_repetition_parameters() -> None:
     """Regression: mutating $trigger.Repetition.Interval post-hoc does not
     persist through Register-ScheduledTask (Get-ScheduledTask reads back an
     empty Repetition on the live CIM object), so the hourly watchdog task
@@ -1386,9 +1403,11 @@ def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
     -RepetitionDuration parameters instead."""
     captured: dict[str, list[str]] = {}
 
-    def fake_runner(argv, *, timeout=300):
+    def fake_runner(argv: list[str], *, timeout: float=300) -> self_update_types.CommandResult:
         captured["argv"] = argv
-        return self_update.CommandResult(argv, 0, "", "")
+        return self_update.CommandResult(
+            argv, 0, json.dumps({"present": False}) if "ConvertTo-Json" in argv[-1] else "",
+        )
 
     self_update_tasks.register_scheduled_task(
         "watchdog",
@@ -1405,12 +1424,14 @@ def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
     assert "-m agent_machines" not in script
 
 
-def test_register_scheduled_task_daily_has_no_repetition_parameters():
+def test_register_scheduled_task_daily_has_no_repetition_parameters() -> None:
     captured: dict[str, list[str]] = {}
 
-    def fake_runner(argv, *, timeout=300):
+    def fake_runner(argv: list[str], *, timeout: float=300) -> self_update_types.CommandResult:
         captured["argv"] = argv
-        return self_update.CommandResult(argv, 0, "", "")
+        return self_update.CommandResult(
+            argv, 0, json.dumps({"present": False}) if "ConvertTo-Json" in argv[-1] else "",
+        )
 
     self_update_tasks.register_scheduled_task(
         "sweep",
@@ -1423,8 +1444,8 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
     assert "-RepetitionInterval" not in script
 
 
-def test_task_action_arguments_uses_stable_binstub_path(monkeypatch):
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+def test_task_action_arguments_uses_stable_binstub_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
     args = self_update_tasks.task_action_arguments(
         "watchdog", machine="box-1", home=Path(r"C:\Users\operator")
     )
@@ -1435,14 +1456,14 @@ def test_task_action_arguments_uses_stable_binstub_path(monkeypatch):
     assert "-m agent_machines" not in args
 
 
-def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
+def test_task_definition_matches_its_own_generated_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
     # Regression: the "/" -> "\\" path normalization applied to the whole
     # arguments string for the binstub-path check also corrupted cmd.exe's
     # own literal "/c" flag into "\c", making a freshly-registered task with
     # the current (post-versioned-path-fix) `cmd.exe /c <binstub>` command
     # shape never match its own expected definition -- perpetual, spurious
     # drift on every real machine (dotfiles maintenance-worker report).
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     home = Path(r"C:\Users\operator")
     snapshot = self_update_tasks.ScheduledTaskSnapshot(
         task_name=self_update_state.TIER_SPECS["sweep"].task_name,
@@ -1458,6 +1479,7 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
         working_directory=self_update_tasks.task_working_directory(home),
         trigger_kind="daily",
         trigger_value=1,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
     )
     assert self_update_tasks.task_definition_matches(
         snapshot, "sweep", machine="box-1", home=home
@@ -1465,10 +1487,10 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
 
 
 def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
@@ -1488,19 +1510,21 @@ def test_reconcile_task_defers_to_elevated_install_when_registration_is_denied(
     assert "run once from an elevated PowerShell" in result.detail
 
 
-def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(
         self_update_tasks,
         "query_scheduled_task",
-        lambda tier, **kwargs: _task_snapshot(tier, present=True, matching=True, enabled=True),
+        lambda tier, **kwargs: _task_snapshot(
+            tier, present=True, matching=True, enabled=True, home=kwargs.get("home"),
+        ),
     )
     calls: list[str] = []
 
-    def unregister(tier, *, runner=None, resolve_binary=None, machine=None):
+    def unregister(tier: str, *, runner: SchedulerRunner | None=None, resolve_binary: Callable[[str], str | None] | None=None, machine: str | None=None, home: Path | None=None) -> self_update_types.CommandResult:
         calls.append(tier)
         return self_update.CommandResult(["pwsh"], 0, "", "")
 
@@ -1512,7 +1536,7 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
     assert "elevated PowerShell" not in result.detail
 
 
-def test_default_command_runner_resolves_pathext_shim(monkeypatch):
+def test_default_command_runner_resolves_pathext_shim(monkeypatch: pytest.MonkeyPatch) -> None:
     """Regression: on Windows, a bare command name that resolves to a
     `.cmd`/`.bat` shim (e.g. the `agent-worktrees` binstub) raises
     FileNotFoundError under subprocess.run(shell=False), because CreateProcess
@@ -1522,7 +1546,7 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     `agent-worktrees` was genuinely on PATH."""
     captured: dict[str, list[str]] = {}
 
-    def fake_which(name):
+    def fake_which(name: str) -> str | None:
         return (
             f"C:\\Users\\operator\\.local\\bin\\{name}.cmd"
             if name == "agent-worktrees"
@@ -1532,24 +1556,24 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
     class _Proc:
         returncode = 0
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
             return "", ""
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, None]:
         captured["argv"] = argv
         return _Proc(), None
 
-    monkeypatch.setattr(self_update_types.shutil, "which", fake_which)
+    monkeypatch.setattr(shutil, "which", fake_which)
     monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
-    result = self_update.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
+    result = self_update_types.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
     assert captured["argv"][0] == "C:\\Users\\operator\\.local\\bin\\agent-worktrees.cmd"
     # The reported CommandResult.argv still shows the original logical argv
     # (not the resolved absolute path) so status/log output stays readable.
     assert result.argv[0] == "agent-worktrees"
 
 
-def test_default_command_runner_leaves_unresolvable_argv0_unchanged(monkeypatch):
-    def fake_which(name):
+def test_default_command_runner_leaves_unresolvable_argv0_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_which(name: str) -> str | None:
         return None
 
     captured: dict[str, list[str]] = {}
@@ -1557,20 +1581,20 @@ def test_default_command_runner_leaves_unresolvable_argv0_unchanged(monkeypatch)
     class _Proc:
         returncode = 1
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
             return "", "not found"
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, None]:
         captured["argv"] = argv
         return _Proc(), None
 
-    monkeypatch.setattr(self_update_types.shutil, "which", fake_which)
+    monkeypatch.setattr(shutil, "which", fake_which)
     monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
-    self_update.default_command_runner(["totally-unknown-binary"])
+    self_update_types.default_command_runner(["totally-unknown-binary"])
     assert captured["argv"] == ["totally-unknown-binary"]
 
 
-def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
+def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """A hung child (and any grandchildren it spawned) must be torn down as a
     whole Job, not just the immediate process -- a plain `kill()` on the
     immediate child alone can leave a surviving grandchild holding the stdout
@@ -1580,29 +1604,30 @@ def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
     closed = {"job": False}
 
     class _FakeJob:
-        def close(self):
+        def close(self) -> None:
             closed["job"] = True
 
     class _Proc:
         returncode = None
         killed = False
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
+            assert timeout is not None
             if not closed["job"]:
                 raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
             return "partial", ""
 
-        def kill(self):
+        def kill(self) -> None:
             self.killed = True
 
     proc = _Proc()
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, _FakeJob]:
         return proc, _FakeJob()
 
-    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
-    result = self_update.default_command_runner(["slow-command"], timeout=5)
+    result = self_update_types.default_command_runner(["slow-command"], timeout=5)
 
     assert closed["job"] is True
     assert not proc.killed  # the Job close subsumes a plain kill() when one was assigned
@@ -1611,7 +1636,7 @@ def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
     assert result.stdout == "partial"
 
 
-def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
+def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch: pytest.MonkeyPatch) -> None:
     """Off-Windows (or if Job assignment itself failed), there is no Job to
     close -- fall back to a plain `kill()` so the immediate child is still
     reaped rather than left running forever."""
@@ -1620,30 +1645,31 @@ def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
         returncode = None
         killed = False
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
+            assert timeout is not None
             if not self.killed:
                 raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
             return "", ""
 
-        def kill(self):
+        def kill(self) -> None:
             self.killed = True
 
     proc = _Proc()
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, None]:
         return proc, None
 
-    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
-    result = self_update.default_command_runner(["slow-command"], timeout=5)
+    result = self_update_types.default_command_runner(["slow-command"], timeout=5)
 
     assert proc.killed is True
     assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
 
 
 def test_default_command_runner_preserves_partial_output_when_drain_also_times_out(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A surviving descendant can keep holding the pipes open even after the
     tree-kill (or plain `kill()`) above, so the bounded second `communicate()`
     can itself raise `TimeoutExpired` -- this is the one case that actually
@@ -1653,13 +1679,14 @@ def test_default_command_runner_preserves_partial_output_when_drain_also_times_o
     closed = {"job": False}
 
     class _FakeJob:
-        def close(self):
+        def close(self) -> None:
             closed["job"] = True
 
     class _Proc:
         returncode = None
 
-        def communicate(self, timeout=None):
+        def communicate(self, timeout: float | None=None) -> tuple[str, str]:
+            assert timeout is not None
             if not closed["job"]:
                 raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
             # The bounded drain call itself times out too (a grandchild still
@@ -1669,15 +1696,15 @@ def test_default_command_runner_preserves_partial_output_when_drain_also_times_o
                 cmd="slow", timeout=timeout, output="collected-stdout", stderr="collected-stderr"
             )
 
-        def kill(self):
+        def kill(self) -> None:
             pass
 
-    def fake_spawn(argv, **kwargs):
+    def fake_spawn(argv: list[str], **kwargs: Any) -> tuple[_Proc, _FakeJob]:
         return _Proc(), _FakeJob()
 
-    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
     monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
-    result = self_update.default_command_runner(["slow-command"], timeout=5)
+    result = self_update_types.default_command_runner(["slow-command"], timeout=5)
 
     assert closed["job"] is True
     assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
@@ -1689,7 +1716,7 @@ def test_default_command_runner_preserves_partial_output_when_drain_also_times_o
 
 
 
-def test_cli_self_update_install_skips_non_opted_in_tier_without_registration(monkeypatch, capsys):
+def test_cli_self_update_install_skips_non_opted_in_tier_without_registration(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     resource = type("Resource", (), {"desired": {"state": "absent"}})()
     monkeypatch.setattr(
         cli,
@@ -1697,10 +1724,10 @@ def test_cli_self_update_install_skips_non_opted_in_tier_without_registration(mo
         lambda args: (None, "box-1", {"watchdog": resource}),
     )
 
-    def fail(*args, **kwargs):
+    def fail(*args: Any, **kwargs: Any) -> NoReturn:
         raise AssertionError("install should not be attempted for opted-out tiers")
 
-    monkeypatch.setattr(cli._self_update, "reconcile_scheduled_task", fail)
+    monkeypatch.setattr(self_update, "reconcile_scheduled_task", fail)
     rc = cli.main(["self-update", "install", "--tier", "watchdog", "--json"])
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -1708,7 +1735,7 @@ def test_cli_self_update_install_skips_non_opted_in_tier_without_registration(mo
     assert "not opted in" in payload["tiers"][0]["detail"]
 
 
-def test_cli_self_update_status_emits_json(monkeypatch, capsys):
+def test_cli_self_update_status_emits_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     resource = type("Resource", (), {"desired": {"state": "present"}})()
     monkeypatch.setattr(
         cli,
@@ -1716,12 +1743,12 @@ def test_cli_self_update_status_emits_json(monkeypatch, capsys):
         lambda args: (None, "box-1", {"watchdog": resource}),
     )
     monkeypatch.setattr(
-        cli._self_update,
+        self_update,
         "scheduled_task_status",
-        lambda tier, opted_in, machine=None: self_update.ScheduledTaskStatus(
+        lambda tier, opted_in, machine=None: self_update_tasks.ScheduledTaskStatus(
             tier=tier,
             opted_in=opted_in,
-            task_name=self_update.TIER_SPECS[tier].task_name,
+            task_name=self_update_state.TIER_SPECS[tier].task_name,
             registered=True,
             enabled=True,
             matching=True,
@@ -1749,11 +1776,11 @@ def test_cli_self_update_status_emits_json(monkeypatch, capsys):
 # closes that gap.
 
 
-def _fake_command_result(argv, returncode=0, stdout="", stderr=""):
+def _fake_command_result(argv: list[str], returncode: int=0, stdout: str="", stderr: str="") -> self_update_types.CommandResult:
     return self_update.CommandResult(list(argv), returncode, stdout, stderr)
 
 
-def test_render_linux_timer_unit_hourly_vs_daily():
+def test_render_linux_timer_unit_hourly_vs_daily() -> None:
     hourly = self_update_tasks.render_linux_timer_unit("watchdog")
     assert "OnBootSec=5min" in hourly
     assert "OnUnitActiveSec=1h" in hourly
@@ -1768,7 +1795,7 @@ def test_render_linux_timer_unit_hourly_vs_daily():
         assert "Persistent=true" in unit
 
 
-def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path):
+def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path: Path) -> None:
     # `task_binstub_path()` (which this renderer calls) intentionally keys
     # its `.cmd`-suffix/Windows-path-style behavior off `sys.platform`, not
     # an explicit rendering target -- it's shared with the real Windows
@@ -1795,7 +1822,7 @@ def test_render_linux_service_unit_includes_machine_and_workdir(tmp_path):
     assert f"WorkingDirectory={self_update_tasks.task_working_directory(tmp_path)}" in unit
 
 
-def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path):
+def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path: Path) -> None:
     """Regression: systemd --user's own manager environment carries a
     minimal PATH with no `~/.local/bin`, so a bare-name subprocess call to
     a facility binstub (agent-worktrees, agent-ssh, ...) inside the sweep
@@ -1811,7 +1838,7 @@ def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path)
     assert f"Environment=PATH={tmp_path}/.local/bin:" in unit
 
 
-def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path):
+def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path: Path) -> None:
     """A home directory containing whitespace (e.g. '/home/Build User') must
     not split the Environment=PATH= assignment into invalid tokens -- caught
     in PR review; systemd's Environment= parser is shell-like, same as
@@ -1825,7 +1852,7 @@ def test_render_linux_service_unit_quotes_path_for_home_with_whitespace(tmp_path
     assert f'Environment="PATH={spacey_home}/.local/bin:' in unit
 
 
-def test_linux_systemd_user_available_false_without_binary():
+def test_linux_systemd_user_available_false_without_binary() -> None:
     available = self_update_tasks.linux_systemd_user_available(
         resolve_binary=lambda _name: None,
         runner=lambda *a, **k: _fake_command_result(["systemctl"]),
@@ -1833,7 +1860,7 @@ def test_linux_systemd_user_available_false_without_binary():
     assert available is False
 
 
-def test_linux_systemd_user_available_true_when_running():
+def test_linux_systemd_user_available_true_when_running() -> None:
     available = self_update_tasks.linux_systemd_user_available(
         resolve_binary=lambda _name: "/usr/bin/systemctl",
         runner=lambda argv, **k: _fake_command_result(argv, 0, "running\n"),
@@ -1841,7 +1868,7 @@ def test_linux_systemd_user_available_true_when_running():
     assert available is True
 
 
-def test_linux_systemd_user_available_false_when_offline():
+def test_linux_systemd_user_available_false_when_offline() -> None:
     """Regression: `systemctl --user is-system-running` can exit non-zero
     with a non-empty state like 'offline' -- the manager process exists but
     isn't usable yet, so treating any non-empty stdout as "available" let
@@ -1854,7 +1881,7 @@ def test_linux_systemd_user_available_false_when_offline():
     assert available is False
 
 
-def test_linux_exec_start_quotes_executable_with_spaces():
+def test_linux_exec_start_quotes_executable_with_spaces() -> None:
     """Regression: systemd's `ExecStart=` splits the command line similarly
     to a shell, so an unquoted executable path containing whitespace (a real
     possibility for `sys.executable`) silently becomes multiple arguments and
@@ -1865,12 +1892,12 @@ def test_linux_exec_start_quotes_executable_with_spaces():
     assert plain == "/usr/bin/python3"
 
 
-def test_reconcile_scheduled_task_skips_non_linux_posix_platform(monkeypatch, tmp_path):
+def test_reconcile_scheduled_task_skips_non_linux_posix_platform(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Regression: dispatching every non-Windows platform (including macOS)
     into the Linux systemd path attempted to write/query systemd units
     wherever a `systemctl` binary happened to be present, instead of leaving
     genuinely unsupported platforms at the existing skipped result."""
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "darwin")
+    monkeypatch.setattr(sys, "platform", "darwin")
     calls: list[str] = []
     monkeypatch.setattr(
         self_update_tasks,
@@ -1888,7 +1915,7 @@ def test_reconcile_scheduled_task_skips_non_linux_posix_platform(monkeypatch, tm
     assert "darwin" in result.detail
 
 
-def test_query_systemd_timer_absent_when_units_missing(tmp_path):
+def test_query_systemd_timer_absent_when_units_missing(tmp_path: Path) -> None:
     snapshot = self_update_tasks.query_systemd_timer(
         "watchdog",
         runner=lambda *a, **k: _fake_command_result(["systemctl"]),
@@ -1898,7 +1925,7 @@ def test_query_systemd_timer_absent_when_units_missing(tmp_path):
     assert snapshot.present is False
 
 
-def test_query_systemd_timer_matches_after_register(tmp_path):
+def test_query_systemd_timer_matches_after_register(tmp_path: Path) -> None:
     # Same POSIX-host assumption as test_render_linux_service_unit_...
     # above -- `task_binstub_path()`'s Windows-flavored rendering makes the
     # embedded exec path and this test's expected string diverge on a
@@ -1906,7 +1933,12 @@ def test_query_systemd_timer_matches_after_register(tmp_path):
     if sys.platform == "win32":
         pytest.skip("Linux systemd unit rendering assumes a POSIX host")
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> self_update_types.CommandResult:
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
         if "is-active" in argv:
@@ -1939,8 +1971,13 @@ def test_query_systemd_timer_matches_after_register(tmp_path):
     assert snapshot.arguments == "self-update run --tier watchdog --machine box-1"
 
 
-def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path):
-    def runner(argv, **kwargs):
+def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path: Path) -> None:
+    def runner(argv: list[str], **kwargs: Any) -> self_update_types.CommandResult:
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
         if "is-active" in argv:
@@ -1967,11 +2004,17 @@ def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path):
     assert snapshot.matching is False
 
 
-def test_unregister_systemd_timer_removes_units_and_disables(tmp_path):
+def test_unregister_systemd_timer_removes_units_and_disables(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     calls: list[list[str]] = []
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> self_update_types.CommandResult:
         calls.append(list(argv))
+        if argv[2] == "show":
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         return _fake_command_result(argv, 0)
 
     self_update_tasks.register_systemd_timer(
@@ -1986,15 +2029,20 @@ def test_unregister_systemd_timer_removes_units_and_disables(tmp_path):
     assert any("disable" in call for call in calls)
 
 
-def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(
         self_update_tasks,
         "linux_systemd_user_available",
         lambda **kwargs: True,
     )
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> self_update_types.CommandResult:
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
         if "is-active" in argv:
@@ -2009,8 +2057,8 @@ def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(monk
     assert result.snapshot is not None and result.snapshot.matching is True
 
 
-def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch, tmp_path):
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(
         self_update_tasks,
         "linux_systemd_user_available",
@@ -2027,7 +2075,7 @@ def test_reconcile_scheduled_task_skips_when_no_systemd_user_manager(monkeypatch
     assert "systemd --user" in result.detail
 
 
-def test_scheduled_task_status_reports_linux_timer(monkeypatch, tmp_path):
+def test_scheduled_task_status_reports_linux_timer(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # `scheduled_task_status()`'s public wrapper hardcodes
     # `resolve_binary=shutil_which` (not test-injectable), so this test can
     # only pass where a REAL `systemctl` binary is resolvable on PATH --
@@ -2035,9 +2083,14 @@ def test_scheduled_task_status_reports_linux_timer(monkeypatch, tmp_path):
     # `sys.platform` alone cannot substitute for that real dependency.
     if sys.platform == "win32":
         pytest.skip("requires a real systemctl binary on PATH (Linux/WSL only)")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
+    monkeypatch.setattr(sys, "platform", "linux")
 
-    def runner(argv, **kwargs):
+    def runner(argv: list[str], **kwargs: Any) -> self_update_types.CommandResult:
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-system-running" in argv:
             return _fake_command_result(argv, 0, "running\n")
         if "is-enabled" in argv:

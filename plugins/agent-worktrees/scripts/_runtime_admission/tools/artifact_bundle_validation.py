@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import configparser
+from fnmatch import fnmatchcase
 import hashlib
 import json
 import re
@@ -266,7 +267,18 @@ def validate_wheel_sources(
         if not isinstance(packages, dict) or set(packages) - {"find"}:
             raise PromotionArtifactError("unsupported wheel source package layout")
         find = packages.get("find", {})
-        if not isinstance(find, dict) or set(find) - {"where"} or find.get("where", ["src"]) != ["src"]:
+        if not isinstance(find, dict) or set(find) - {"where", "include"}:
+            raise PromotionArtifactError("unsupported wheel source discovery configuration")
+        # Keep implicit src discovery compatible; explicit include selectors can
+        # also describe setuptools' ordinary flat package layout.
+        where = find.get("where", ["."] if "include" in find else ["src"])
+        includes = find.get("include")
+        if where not in (["src"], ["."]) or includes is not None and (
+            not isinstance(includes, list) or not includes
+            or any(not isinstance(value, str) or not value or any(
+                character in value for character in ("/", "\\", "\0", "\r", "\n")
+            ) for value in includes)
+        ) or where == ["."] and includes is None:
             raise PromotionArtifactError("unsupported wheel source discovery configuration")
         if modules is not None:
             if not isinstance(modules, list) or any(
@@ -277,7 +289,7 @@ def validate_wheel_sources(
             base = source_dir
             required_python = {name + ".py" for name in modules}
         else:
-            base = source_dir / "src"
+            base = source_dir / where[0]
             if not base.resolve().is_relative_to(source_dir.resolve()) or base.is_symlink():
                 raise PromotionArtifactError("wheel source root escapes candidate")
             required_python = {
@@ -286,6 +298,12 @@ def validate_wheel_sources(
                     part in ("__pycache__", "build", "dist") or part.endswith(".egg-info")
                     for part in path.relative_to(base).parts
                 )
+                and (includes is None or (
+                    path.relative_to(base).parent.parts
+                    and any(fnmatchcase(
+                        ".".join(path.relative_to(base).parent.parts), pattern,
+                    ) for pattern in includes)
+                ))
             }
             required_python.update(name for name in injected if name.endswith(".py"))
         if settings.get("package-dir", {"": str(base.relative_to(source_dir))}) != {
@@ -433,7 +451,7 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
                 and all(
                     isinstance(path, str)
                     and re.fullmatch(r"(?:worktree-manager/)?libs/[a-z0-9]+(?:-[a-z0-9]+)*", path)
-                    for path in resources
+                    for path in resources[len(expected_resources):]
                 )
                 and len(resources) == len(set(resources))
             )

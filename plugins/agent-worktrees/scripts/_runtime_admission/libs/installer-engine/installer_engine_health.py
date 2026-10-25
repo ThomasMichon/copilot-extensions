@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 
+import versioned_runtime as runtime
 from installer_dependency_policy import DependencyPolicyError, _native_retained_path
 from installer_source_build import SourceWheelInputs
 from installer_wheel_inputs import WheelDeadlineError, WheelError, _ordinary
@@ -50,6 +53,62 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
 
 class HealthRepairRequired(RuntimeError):
     """Published health needs a distinct generation, never an in-place rebuild."""
+
+
+def application_uv_selection(application: Path) -> bool:
+    """Inspect explicit executable support in the selected POSIX application."""
+    entry = application / "install.sh"
+    _ordinary(entry)
+    prefix = b"#!/bin/sh\n# installer-uv-selection: absolute/v1\n"
+    with _open(entry) as stream:
+        return stream.read(len(prefix)) == prefix
+
+
+def application_staging_environment(
+    application: Path, uv: Path, base_python: Path,
+) -> dict[str, str]:
+    """Keep marked UV selection separate from ordinary legacy PATH lookup."""
+    exact_uv = os.name != "nt" and application_uv_selection(application)
+    return {
+        **os.environ,
+        **(
+            {"COPILOT_INSTALLER_UV": str(uv)} if exact_uv else
+            {"PATH": str(uv.parent) + os.pathsep + os.environ.get("PATH", "")}
+        ),
+        "UV_PYTHON": str(base_python), "UV_PYTHON_DOWNLOADS": "never", "UV_OFFLINE": "1",
+    }
+
+
+class ContentRepairRequired(RuntimeError):
+    """Published bytes differ; a caller must select a distinct generation."""
+
+
+@dataclass(frozen=True)
+class ReadyCandidate:
+    slot: Path
+    payload_hash: str
+    reused: bool
+    descriptor: int | None
+    frozen_plugin: Path
+    extras: tuple[str, ...] = ()
+    local_packages: tuple[str, ...] | None = None
+
+
+def refuse_admission(decision: str, version: str) -> None:
+    """Classify immutable-content and health admission without replacing a slot."""
+    if decision == runtime.ADMIT_CONTENT_CONFLICT:
+        raise ContentRepairRequired(
+            f"Published runtime {version} has different content; publish a new version "
+            "or use an explicitly owned dev slot. Force cannot rewrite a numbered runtime."
+        )
+    if decision == runtime.ADMIT_HEALTH_REPAIR_REQUIRED:
+        raise HealthRepairRequired(
+            f"Runtime {version} requires distinct-generation health repair; "
+            "ordinary construction cannot replace its published or selected identity."
+        )
+    if decision not in (runtime.ADMIT_CONSTRUCT, runtime.ADMIT_REUSE):
+        raise RuntimeError(f"Unrecognized runtime admission for {version}: {decision}")
+
 
 def verify_installed_inputs(
     slot: Path, python: Path | None, module: str, *,

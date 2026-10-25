@@ -1,0 +1,9 @@
+{
+  "comment": "Type public update request fixtures while retaining queue and controller coverage",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

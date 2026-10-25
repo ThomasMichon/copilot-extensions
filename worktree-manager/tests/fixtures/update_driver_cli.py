@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 
@@ -16,31 +17,33 @@ from worktree_manager import update_driver_cli as boundary
 
 def main() -> int:
     boundary.source_identity = lambda: {"repo": "fixture-source", "ref": "fixed"}
-    engine_client.installed_engine_command = lambda: ["synthetic-marker-provider"]
+    engine_client.installed_engine_command = lambda environment=None: ["synthetic-marker-provider"]
     engine_client.accept_inherited_engine_command()
     get_value = engine_client.get_value
 
-    def selected_value(project, key):
+    def selected_value(project: str | None, key: str, *, timeout: int = 120) -> str:
         if key == "update-controller":
             return ""
-        return get_value(project, key)
+        return get_value(project, key, timeout=timeout)
 
     engine_client.get_value = selected_value
     if sys.argv[1] in {"submit", "submit-only"}:
         original = update_driver.runtime_command
 
-        def command(module, args=()):
+        def command(
+            module: str, args: Sequence[str] = (),
+        ) -> tuple[tuple[str, ...], dict[str, str]]:
             if module == "worktree_manager":
                 return (sys.executable, str(Path(__file__).resolve()), "execute", *args), {}
             return original(module, args)
 
         update_driver.runtime_command = command
         if sys.argv[1] == "submit-only":
-            update_driver.ensure_worker = lambda *args, **kwargs: None
+            setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
             return boundary.cmd_update_request(["--detach", *sys.argv[2:]])
         return boundary.cmd_update_request(sys.argv[2:])
 
-    def execute(rest):
+    def execute(rest: Sequence[str]) -> int:
         events = Path(os.environ["UPDATE_DRIVER_TEST_EVENTS"])
         with events.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({
@@ -50,6 +53,15 @@ def main() -> int:
                 "acquisition_budget": os.environ.get(
                     "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC",
                 ),
+                "session_credentials_present": any(os.environ.get(key) for key in (
+                    "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+                )),
+                "git_override_present": any(key in os.environ for key in (
+                    "GIT_SSH_COMMAND", "GIT_DIR", "GIT_CONFIG_COUNT",
+                )),
+                "askpass_present": "SSH_ASKPASS" in os.environ,
+                "askpass_requirement": os.environ.get("SSH_ASKPASS_REQUIRE"),
+                "unattended": os.environ.get("CE_UPDATE_UNATTENDED"),
             }) + "\n")
             stream.flush()
         print("synthetic canonical updater started", file=sys.stderr, flush=True)
@@ -72,7 +84,7 @@ def main() -> int:
 
     # Only the product body is synthetic; queue, worker and custody remain real.
     manager = ModuleType("worktree_manager.__main__")
-    manager._cmd_update = execute
+    manager.__dict__["_cmd_update"] = execute
     sys.modules[manager.__name__] = manager
     assert sys.argv[2] == "update"
     return boundary.cmd_update_request(sys.argv[3:])

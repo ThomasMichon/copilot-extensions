@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh typed admission toolkit and qualify standalone engine copies independently",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

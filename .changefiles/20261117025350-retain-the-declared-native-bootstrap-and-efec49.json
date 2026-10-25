@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the declared native bootstrap and complete canonical materialization fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

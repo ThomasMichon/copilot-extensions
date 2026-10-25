@@ -37,6 +37,11 @@ no environment variable silently replaces that authority. A product worker may
 call `drain(root=...)`, or use the finite `python -m update_driver worker`
 entrypoint. No command/runner submission CLI exists.
 
+Queue access and the private executor shim accept extended Windows filesystem
+spelling without putting its namespace prefix into a SQLite URI authority.
+They retain the same database identity and explicit read/write mode; an absent
+read-only queue is not created.
+
 The canonical executor uses procutil's explicit installation-owned process
 boundary. Bounded installer descendants remain caller-owned; on Windows only
 explicitly durable product daemons can leave its cleanup Job through native

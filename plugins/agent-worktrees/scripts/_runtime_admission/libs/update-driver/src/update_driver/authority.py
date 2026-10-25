@@ -10,6 +10,7 @@ import stat
 import time
 import uuid
 from contextlib import contextmanager
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -19,7 +20,7 @@ from ._directory import create_queue_directory
 from .foundation_state import _publish
 
 if TYPE_CHECKING:
-    from .core import RequestSpec
+    from .core import Request, RequestSpec
 
 LEGACY_SCHEMA_VERSION = 5
 SCHEMA_VERSION = 6
@@ -147,7 +148,7 @@ def ensure_guard(root: Path) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def validate(db) -> None:
+def validate(db: sqlite3.Connection) -> None:
     table = db.execute(
         "SELECT type FROM sqlite_master WHERE name='suite_authority'",
     ).fetchone()
@@ -167,7 +168,7 @@ def validate(db) -> None:
         selection(mode, project)
 
 
-def initialize(db) -> None:
+def initialize(db: sqlite3.Connection) -> None:
     db.execute(
         "CREATE TABLE suite_authority ("
         "scope TEXT PRIMARY KEY NOT NULL, mode TEXT NOT NULL, project TEXT NOT NULL)"
@@ -175,14 +176,14 @@ def initialize(db) -> None:
     db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
 
-def read(db, context: str) -> UpdateAuthority:
+def read(db: sqlite3.Connection, context: str) -> UpdateAuthority:
     row = db.execute(
         "SELECT mode, project FROM suite_authority WHERE scope=?", (context,),
     ).fetchone()
     return selection(row[0], row[1]) if row is not None else UpdateAuthority()
 
 
-def write(db, context: str, selected: UpdateAuthority) -> None:
+def write(db: sqlite3.Connection, context: str, selected: UpdateAuthority) -> None:
     db.execute(
         "INSERT INTO suite_authority(scope,mode,project) VALUES(?,?,?) "
         "ON CONFLICT(scope) DO UPDATE SET mode=excluded.mode,project=excluded.project",
@@ -244,7 +245,7 @@ def current(*, root: Path | None = None, context: str = "", cwd: str = "") -> Up
             if marker:
                 raise core.StateError("update authority database is missing")
             return UpdateAuthority()
-        with core._database(root) as db:
+        with core._database(root, allow_pristine=True) as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
             selected_scope = (
                 _scope(context, root=root, cwd=cwd)
@@ -317,7 +318,7 @@ def _choose_selection(selections: list[UpdateAuthority]) -> UpdateAuthority:
 def _selected_for_request(
     root: Path, spec: RequestSpec, db: sqlite3.Connection | None = None,
     *, allow_legacy_project: bool = False,
-):
+) -> UpdateAuthority | None:
     from . import core
 
     if db is None:
@@ -380,7 +381,9 @@ def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = No
     )
 
 
-def _legacy_project_reader(root: Path, selected_scope: str, selected: UpdateAuthority, db) -> bool:
+def _legacy_project_reader(
+    root: Path, selected_scope: str, selected: UpdateAuthority, db: sqlite3.Connection,
+) -> bool:
     from . import core
     from .participant import (
         ENVIRONMENT_KEY, ParticipantError, borrowed_custody, participant, participant_environment,
@@ -417,7 +420,7 @@ def _legacy_project_reader(root: Path, selected_scope: str, selected: UpdateAuth
 
 
 @contextmanager
-def submission(root: Path, spec: RequestSpec):
+def submission(root: Path, spec: RequestSpec) -> Iterator[RequestSpec]:
     from . import core
 
     if not suite_request(spec):
@@ -467,7 +470,7 @@ def change(
         raise core.StateError("update authority state is unavailable or invalid") from error
     deadline = time.monotonic() + timeout
 
-    def verify():
+    def verify() -> None:
         try:
             capable = verify_capabilities(deadline)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
@@ -515,7 +518,7 @@ def change(
                         if incomplete and request.state == "pending" and suite_request(request.spec)
                     ]
                     if version == LEGACY_SCHEMA_VERSION:
-                        def obsolete(request):
+                        def obsolete(request: Request) -> bool:
                             selections = [
                                 read(db, value) for value in _request_scopes(request.spec, root)
                             ]

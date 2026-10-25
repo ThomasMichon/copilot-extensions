@@ -1,0 +1,9 @@
+{
+  "comment": "Type unattended scheduler fixtures with canonical providers and preserve bounded process cleanup, path-only repository fallback and ownership assertions.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    }
+  ]
+}

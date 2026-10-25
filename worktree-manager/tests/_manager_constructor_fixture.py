@@ -4,28 +4,40 @@ Real governed construction, origin health and native execution are exercised by
 the separate cold acceptance lane; these existing units never install packages.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import shutil
 
+import pytest
 
-def apply_constructor_fixture(monkeypatch):
+from _manager_engine_fixtures import runtime_installer
+
+
+def apply_constructor_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
     from worktree_manager import self_install as si
 
-    adapter = si._runtime_installer()
+    adapter = runtime_installer()
     runtime = adapter.runtime
     monkeypatch.setattr(si, "_runtime_installer", lambda: adapter)
     monkeypatch.setattr(adapter, "_installation_custody", lambda: nullcontext(object()))
 
-    def healthy(slot):
-        return runtime.is_complete(slot.parent.parent, slot.name) and all(
+    def healthy(slot: Path) -> bool:
+        complete: bool = runtime.is_complete(slot.parent.parent, slot.name)
+        return complete and all(
             (slot / "payload" / rel).is_file() for rel in si._SLOT_KEY_FILES
         )
 
     @contextmanager
-    def candidate(payload, root, *, assemble):
+    def candidate(
+        payload: Path, root: Path, *, assemble: Callable[[Path, Path], None],
+    ) -> Iterator[SimpleNamespace]:
         version = si.payload_version(payload)
+        assert version is not None
         selected = si.current_version(root)
         slot = si.version_slot(selected or version, root)
         reused = healthy(slot) and si.payload_version(slot / "payload") == version
@@ -39,7 +51,7 @@ def apply_constructor_fixture(monkeypatch):
             except BaseException:
                 shutil.rmtree(slot, ignore_errors=True)
                 raise
-            python = slot / ("Scripts/python.exe" if si.os.name == "nt" else "bin/python")
+            python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             python.parent.mkdir(exist_ok=True)
             python.write_text("unit constructor", encoding="utf-8")
             runtime.mark_complete(root, slot.name, payload_hash="a" * 64)

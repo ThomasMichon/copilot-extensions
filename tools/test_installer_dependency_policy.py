@@ -11,10 +11,12 @@ import sys
 import threading
 import zipfile
 from datetime import datetime, timedelta, timezone
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from subprocess import CompletedProcess
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import Any, IO, NoReturn, TypedDict
 
 import pytest
 
@@ -25,8 +27,13 @@ from promotion_unit_tests.test_installer_retention import (
     test_retained_remapping_preserves_nested_native_uri_and_escaped_forms as test_retained_remapping_preserves_nested_native_uri_and_escaped_forms,
 )
 
+PublishedFile = TypedDict("PublishedFile", {
+    "filename": str, "url": str, "hashes": dict[str, str], "upload-time": str,
+}, total=False)
+
 PATH = Path(__file__).resolve().parents[1] / "libs" / "installer-engine" / "installer_dependency_policy.py"
 SPEC = importlib.util.spec_from_file_location("installer_dependency_policy", PATH)
+assert SPEC is not None and SPEC.loader is not None
 policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
 NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
@@ -34,8 +41,8 @@ NOW = datetime(2026, 10, 13, tzinfo=timezone.utc)
 
 @pytest.mark.parametrize("preparation_seconds,cap", [(3, None), (3, 2), (11, None)])
 def test_install_execution_uses_budget_remaining_after_retention(
-    monkeypatch, tmp_path, preparation_seconds, cap,
-):
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, preparation_seconds: int, cap: int | None,
+) -> None:
     from contextlib import contextmanager
     from types import SimpleNamespace
 
@@ -43,7 +50,7 @@ def test_install_execution_uses_budget_remaining_after_retention(
     monkeypatch.setattr(policy._configuration.clock, "monotonic", lambda: now[0])
 
     @contextmanager
-    def retain(uv, arguments, **options):
+    def retain(uv: str, arguments: list[str], **options: Any) -> Iterator[SimpleNamespace]:
         assert uv == "selected-uv" and arguments == ["example"]
         assert options["deadline"] == 110.0
         now[0] += preparation_seconds
@@ -53,7 +60,7 @@ def test_install_execution_uses_budget_remaining_after_retention(
         finally:
             settled.append(True)
 
-    def run(arguments, **options):
+    def run(arguments: list[str], **options: Any) -> CompletedProcess[str]:
         calls.append(options)
         return CompletedProcess(arguments, 0)
 
@@ -75,8 +82,8 @@ def test_install_execution_uses_budget_remaining_after_retention(
 
 @pytest.mark.parametrize("missing", [False, True])
 def test_copied_configuration_loads_only_its_sibling_argument_grammar(
-    tmp_path, monkeypatch, missing,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: bool,
+) -> None:
     for name in (
         "installer_dependency_config.py", "installer_dependency_arguments.py",
         "installer_retained_content.py",
@@ -85,7 +92,7 @@ def test_copied_configuration_loads_only_its_sibling_argument_grammar(
             shutil.copyfile(PATH.with_name(name), tmp_path / name)
     foreign = ModuleType("installer_dependency_arguments")
 
-    def refused(*args, **kwargs):
+    def refused(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("copied configuration used an ambient argument grammar")
 
     for name in ("argument_pairs", "balanced", "uv_command"):
@@ -94,6 +101,7 @@ def test_copied_configuration_loads_only_its_sibling_argument_grammar(
     spec = importlib.util.spec_from_file_location(
         "copied_dependency_configuration", tmp_path / "installer_dependency_config.py",
     )
+    assert spec is not None and spec.loader is not None
     copied = importlib.util.module_from_spec(spec)
     if missing:
         with pytest.raises(FileNotFoundError):
@@ -108,13 +116,13 @@ def test_copied_configuration_loads_only_its_sibling_argument_grammar(
 @pytest.mark.parametrize("names", [
     [], "example", ("../example",), ("example", "EXAMPLE"), (False,),
 ])
-def test_generated_local_exclusions_refuse_invalid_names_before_uv(names):
+def test_generated_local_exclusions_refuse_invalid_names_before_uv(names: object) -> None:
     with pytest.raises(policy.DependencyPolicyError, match="excluded local packages"):
         with policy.retain_uv_install("unused-uv", [], excluded_local_packages=names):
             pytest.fail("invalid exclusions cannot reach UV or admit retained inputs")
 
 
-def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch):
+def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     from contextlib import contextmanager
 
     temporary = policy._configuration.temporary_inputs
@@ -122,13 +130,13 @@ def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch)
     expected = object()
 
     @contextmanager
-    def aliased(parent):
+    def aliased(parent: Path | None) -> Iterator[str]:
         with temporary(parent) as directory:
             path = Path(directory)
             yield str(path / ".." / path.name)
 
     @contextmanager
-    def retain(_uv, arguments, **options):
+    def retain(_uv: str, arguments: list[str], **options: Any) -> Iterator[object]:
         constraint, = options["_generated_constraints"]
         assert constraint == constraint.resolve()
         assert constraint.read_text(encoding="utf-8") == "example-local<0,>=0\n"
@@ -146,12 +154,12 @@ def test_generated_local_exclusions_canonicalize_owned_temp_aliases(monkeypatch)
 
 
 @pytest.mark.parametrize("fraction", ["1", "12", "123", "1234", "12345", "123456", "123456789"])
-def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction):
+def test_absolute_cutoff_fraction_is_python310_compatible_and_conservative(fraction: str) -> None:
     value = policy._cutoff_value(f"Absolute(2026-10-06T00:00:00.{fraction}Z)", NOW)
     assert value == datetime(2026, 10, 6, microsecond=int(fraction[:6].ljust(6, "0")), tzinfo=timezone.utc)
 
 
-def settings(global_value="None", packages="", index="None"):
+def settings(global_value: str="None", packages: str="", index: str="None") -> str:
     return f"""PipInstallSettings {{
     settings: PipSettings {{
         index_locations: IndexLocations {{ indexes: [Index {{ exclude_newer: {index}, }}], flat_index: [], }},
@@ -167,8 +175,8 @@ def settings(global_value="None", packages="", index="None"):
 @pytest.mark.parametrize("declare_source", [False, True])
 @pytest.mark.parametrize("editable_source", [False, True])
 def test_native_local_dependency_requires_declared_source_attribution(
-    tmp_path, declare_source, editable_source,
-):
+    tmp_path: Path, declare_source: bool, editable_source: bool,
+) -> None:
     import os
     from pathlib import Path
     import shutil
@@ -214,12 +222,13 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     original_manifests = {source: (source / "pyproject.toml").read_bytes() for source in sources}
     target = tmp_path / "venv"
     created = subprocess.run(
-        [uv, "venv", "--python", sys._base_executable, str(target)],
+        [uv, "venv", "--python", getattr(sys, "_base_executable"), str(target)],
         env=environment, capture_output=True, text=True, creationflags=policy._HEADLESS,
         timeout=30,
     )
     assert created.returncode == 0, created.stderr
     python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    assert policy.__file__ is not None
     for source in sources:
         installed = subprocess.run(
             [sys.executable, "-I", str(Path(policy.__file__)), "--uv", uv,
@@ -236,37 +245,37 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
     assert {source: (source / "pyproject.toml").read_bytes() for source in sources} == original_manifests
 
 
-def absolute(date):
+def absolute(date: datetime) -> str:
     return "Absolute(" + date.isoformat().replace("+00:00", "Z") + ",)"
 
 
-def package(name, value):
+def package(name: str, value: str) -> str:
     return f'PackageName("{name}",): Enabled({value},),'
 
 
-def test_exact_floor_and_reinstall():
+def test_exact_floor_and_reinstall() -> None:
     args = policy.cutoff_arguments(settings(), now=NOW)
     assert args == ["--exclude-newer", "2026-10-06T00:00:00Z", "--reinstall"]
 
 
 @pytest.mark.parametrize("seconds", [604800, 604801, 1000000])
-def test_stricter_global_is_honored(seconds):
+def test_stricter_global_is_honored(seconds: int) -> None:
     date = NOW - timedelta(seconds=seconds)
     args = policy.cutoff_arguments(settings("Some(" + absolute(date) + ",)"), now=NOW)
     assert datetime.fromisoformat(args[1].replace("Z", "+00:00")) == date
 
 
-def test_weaker_global_is_strengthened():
+def test_weaker_global_is_strengthened() -> None:
     assert policy.cutoff_arguments(settings("Some(" + absolute(NOW) + ",)"), now=NOW)[1] == "2026-10-06T00:00:00Z"
 
 
-def test_stricter_relative_is_honored():
+def test_stricter_relative_is_honored() -> None:
     assert policy.cutoff_arguments(
         settings("Some(Relative(ExcludeNewerSpan(10d,),),)"), now=NOW,
     )[1] == "2026-10-03T00:00:00Z"
 
 
-def projected_cutoff(timestamp, span="None"):
+def projected_cutoff(timestamp: str, span: str="None") -> str:
     return f"ExcludeNewerValue {{ timestamp: {timestamp}, span: {span}, }}"
 
 
@@ -278,7 +287,7 @@ def projected_cutoff(timestamp, span="None"):
     ("2026-10-02T23:59:59Z", "Some(ExcludeNewerSpan(10d,),)", "2026-10-02T23:59:59Z"),
     ("2026-10-12T00:00:00Z", "Some(ExcludeNewerSpan(1d,),)", "2026-10-06T00:00:00Z"),
 ])
-def test_structured_uv_cutoff_preserves_the_strongest_boundary(timestamp, span, expected):
+def test_structured_uv_cutoff_preserves_the_strongest_boundary(timestamp: str, span: str, expected: str) -> None:
     value = projected_cutoff(timestamp, span)
     assert policy.cutoff_arguments(settings(f"Some({value},)"), now=NOW)[1] == expected
 
@@ -291,7 +300,7 @@ def test_structured_uv_cutoff_preserves_the_strongest_boundary(timestamp, span, 
     ("2026-10-03T00:00:01Z", "Some(ExcludeNewerSpan(10d,),)", True),
     ("2026-10-12T00:00:00Z", "Some(ExcludeNewerSpan(10d,),)", True),
 ])
-def test_structured_uv_package_cutoff_cannot_weaken_seasoning(timestamp, span, accepted):
+def test_structured_uv_package_cutoff_cannot_weaken_seasoning(timestamp: str, span: str, accepted: bool) -> None:
     projection = settings(packages=package("demo", projected_cutoff(timestamp, span)))
     if accepted:
         assert policy.cutoff_arguments(projection, now=NOW)[1] == "2026-10-06T00:00:00Z"
@@ -308,7 +317,7 @@ def test_structured_uv_package_cutoff_cannot_weaken_seasoning(timestamp, span, a
     projected_cutoff("2026-10-03T00:00:00Z", "Some(Unknown(10d))"),
     projected_cutoff("2026-10-03T00:00:00Z", "Some(ExcludeNewerSpan(1month))"),
 ])
-def test_structured_uv_cutoff_unknown_or_malformed_fields_refuse(value):
+def test_structured_uv_cutoff_unknown_or_malformed_fields_refuse(value: str) -> None:
     with pytest.raises(policy.DependencyPolicyError):
         policy.cutoff_arguments(settings(f"Some({value},)"), now=NOW)
 
@@ -320,7 +329,7 @@ def test_structured_uv_cutoff_unknown_or_malformed_fields_refuse(value):
     ("2026-10-01T23:59:59Z", "Some(ExcludeNewerSpan(11d))", False),
     ("2026-10-02T00:00:01Z", "None", False),
 ])
-def test_structured_package_comparison_preserves_stricter_timestamps(timestamp, span, equivalent):
+def test_structured_package_comparison_preserves_stricter_timestamps(timestamp: str, span: str, equivalent: bool) -> None:
     original = settings(packages=package("demo", projected_cutoff(
         "2026-10-02T00:00:00Z", "Some(ExcludeNewerSpan(11d))",
     )))
@@ -331,12 +340,12 @@ def test_structured_package_comparison_preserves_stricter_timestamps(timestamp, 
     ) is equivalent
 
 
-def test_stricter_package_is_preserved():
+def test_stricter_package_is_preserved() -> None:
     date = NOW - timedelta(days=10)
     assert policy.cutoff_arguments(settings(packages=package("demo", absolute(date))), now=NOW)[1] == "2026-10-06T00:00:00Z"
 
 
-def test_every_effective_package_override_is_frozen_to_its_admitted_absolute_cutoff():
+def test_every_effective_package_override_is_frozen_to_its_admitted_absolute_cutoff() -> None:
     packages = (
         package("first", absolute(NOW - timedelta(days=10)))
         + package("second", "Relative(ExcludeNewerSpan(11d))")
@@ -354,13 +363,13 @@ def test_every_effective_package_override_is_frozen_to_its_admitted_absolute_cut
     package("demo", absolute(NOW - timedelta(seconds=604799))),
     'PackageName("demo",): Unknown,',
 ])
-def test_package_bypass_refused(packages):
+def test_package_bypass_refused(packages: str) -> None:
     with pytest.raises(policy.DependencyPolicyError):
         policy.cutoff_arguments(settings(packages=packages), now=NOW)
 
 
 @pytest.mark.parametrize("index", ["Some(Disabled)", "Some(Enabled(Absolute(2020-01-01T00:00:00Z,)))"])
-def test_index_override_cannot_assign_unknown_upload_age(index):
+def test_index_override_cannot_assign_unknown_upload_age(index: str) -> None:
     with pytest.raises(policy.DependencyPolicyError, match="index-specific"):
         policy.cutoff_arguments(settings(index=index), now=NOW)
 
@@ -370,15 +379,15 @@ def test_index_override_cannot_assign_unknown_upload_age(index):
     settings().replace("ExcludeNewerPackage", "DifferentType"), settings() + settings(),
     settings()[:-10],
 ])
-def test_missing_unknown_or_truncated_configuration_refuses(projection):
+def test_missing_unknown_or_truncated_configuration_refuses(projection: str) -> None:
     with pytest.raises(policy.DependencyPolicyError):
         policy.cutoff_arguments(projection, now=NOW)
 
 
-def test_probe_preserves_arguments_environment_and_cwd(monkeypatch, tmp_path):
+def test_probe_preserves_arguments_environment_and_cwd(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append((command, kwargs))
         return CompletedProcess(command, 0, settings(), "")
 
@@ -396,7 +405,7 @@ def test_probe_preserves_arguments_environment_and_cwd(monkeypatch, tmp_path):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows subprocess cwd limit")
 @pytest.mark.parametrize("selection", ["cwd", "relative", "inline", "environment", "repeated"])
-def test_native_probe_preserves_configuration_beyond_windows_cwd_limit(tmp_path, monkeypatch, selection):
+def test_native_probe_preserves_configuration_beyond_windows_cwd_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV is required"
     deep = tmp_path / ("a" * 100) / ("b" * 100) / ("c" * 50)
@@ -417,10 +426,10 @@ def test_native_probe_preserves_configuration_beyond_windows_cwd_limit(tmp_path,
         arguments.append("--directory=selected")
     elif selection == "environment":
         environment["UV_WORKING_DIR"] = "selected"
-    actual = policy.subprocess.run
+    actual = subprocess.run
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append((command, kwargs))
         return actual(command, **kwargs)
 
@@ -442,7 +451,7 @@ def test_native_probe_preserves_configuration_beyond_windows_cwd_limit(tmp_path,
     assert options["env"] == environment
 
 
-def test_probe_error_never_prints_credential_projection(monkeypatch):
+def test_probe_error_never_prints_credential_projection(monkeypatch: pytest.MonkeyPatch) -> None:
     secret = "private-config-value"
     monkeypatch.setattr(policy.subprocess, "run",
                         lambda *args, **kw: CompletedProcess(args, 1, secret, secret))
@@ -452,7 +461,7 @@ def test_probe_error_never_prints_credential_projection(monkeypatch):
 
 
 @pytest.mark.parametrize("alias", ["--reinstall", "--force-reinstall"])
-def test_reinstall_alias_is_normalized_before_mandatory_resolution(monkeypatch, alias):
+def test_reinstall_alias_is_normalized_before_mandatory_resolution(monkeypatch: pytest.MonkeyPatch, alias: str) -> None:
     monkeypatch.setattr(policy.subprocess, "run",
                         lambda command, **kwargs: CompletedProcess(command, 0, settings(), ""))
     admitted = policy.prepare_uv_install("uv", [alias, "demo>=1"], now=NOW)
@@ -461,10 +470,10 @@ def test_reinstall_alias_is_normalized_before_mandatory_resolution(monkeypatch, 
 
 
 @pytest.mark.parametrize("quiet", ["--quiet", "-q", "-qq"])
-def test_probe_cannot_suppress_required_settings_but_install_remains_quiet(monkeypatch, quiet):
+def test_probe_cannot_suppress_required_settings_but_install_remains_quiet(monkeypatch: pytest.MonkeyPatch, quiet: str) -> None:
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         assert quiet not in command
         return CompletedProcess(command, 0, settings(), "")
@@ -476,7 +485,7 @@ def test_probe_cannot_suppress_required_settings_but_install_remains_quiet(monke
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows application discovery")
-def test_engine_uv_discovery_selects_one_application_without_acquisition(tmp_path):
+def test_engine_uv_discovery_selects_one_application_without_acquisition(tmp_path: Path) -> None:
     import os
     import subprocess
 
@@ -507,13 +516,13 @@ if (Test-Path '{tmp_path / "uncreated"}') {{ throw 'Discovery unnecessarily acqu
 
 
 @pytest.mark.parametrize("argument", ["--show-settings", "--dry-run", "--dry-run=true"])
-def test_success_shaped_no_install_argument_refused(argument):
+def test_success_shaped_no_install_argument_refused(argument: str) -> None:
     with pytest.raises(policy.DependencyPolicyError):
         policy.prepare_uv_install("uv", [argument])
 
 
 @pytest.mark.parametrize("argument", ["--no-deps", "--no-build-isolation", "--no-build-isolation-package=demo"])
-def test_dependency_closure_bypass_refused(argument):
+def test_dependency_closure_bypass_refused(argument: str) -> None:
     with pytest.raises(policy.DependencyPolicyError, match="cannot bypass"):
         policy.prepare_uv_install("uv", [argument])
 
@@ -523,19 +532,19 @@ def test_dependency_closure_bypass_refused(argument):
     "https://unapproved.example/demo.whl",
     "git://unapproved.example/repo", "demo @ HTTPS://unapproved.example/demo.whl",
 ])
-def test_direct_remote_inputs_cannot_bypass_artifact_timestamps(requirement):
+def test_direct_remote_inputs_cannot_bypass_artifact_timestamps(requirement: str) -> None:
     with pytest.raises(policy.DependencyPolicyError, match="remote"):
         policy.prepare_uv_install("uv", [requirement])
 
 
 @pytest.mark.parametrize("option", ["--index", "--index-url", "--default-index", "--extra-index-url"])
 @pytest.mark.parametrize("inline", [False, True])
-def test_index_option_exempts_only_its_own_value(monkeypatch, option, inline):
+def test_index_option_exempts_only_its_own_value(monkeypatch: pytest.MonkeyPatch, option: str, inline: bool) -> None:
     index = ["https://configured.example/simple"]
     arguments = [option + "=" + index[0]] if inline else [option, *index]
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         return CompletedProcess(command, 0, settings(), "")
 
@@ -550,7 +559,7 @@ def test_index_option_exempts_only_its_own_value(monkeypatch, option, inline):
     assert len(calls) == 1
 
 
-def test_remote_requirement_hidden_in_an_include_refuses_before_probe(tmp_path):
+def test_remote_requirement_hidden_in_an_include_refuses_before_probe(tmp_path: Path) -> None:
     nested = tmp_path / "nested.txt"
     nested.write_text("demo @ https://unapproved.example/demo.whl\n", encoding="utf-8")
     root = tmp_path / "requirements.txt"
@@ -559,19 +568,19 @@ def test_remote_requirement_hidden_in_an_include_refuses_before_probe(tmp_path):
         policy.prepare_uv_install("uv", ["-r", str(root)])
 
 
-def test_effective_remote_override_is_not_an_index_exemption():
+def test_effective_remote_override_is_not_an_index_exemption() -> None:
     projection = settings().replace("settings: PipSettings", 'overrides: ["demo @ https://unapproved.example/demo.whl"],\nsettings: PipSettings')
     with pytest.raises(policy.DependencyPolicyError, match="remote"):
         policy.cutoff_arguments(projection, now=NOW)
 
 
-def test_flat_index_is_not_a_registry_timestamp_proof():
+def test_flat_index_is_not_a_registry_timestamp_proof() -> None:
     projection = settings().replace("flat_index: []", 'flat_index: ["https://unapproved.example/wheels"]')
     with pytest.raises(policy.DependencyPolicyError, match="flat-index"):
         policy.cutoff_arguments(projection, now=NOW)
 
 
-def test_real_uv_settings_consumer_preserves_stricter_cutoff(tmp_path):
+def test_real_uv_settings_consumer_preserves_stricter_cutoff(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("native UV unavailable")
@@ -588,7 +597,7 @@ def test_real_uv_settings_consumer_preserves_stricter_cutoff(tmp_path):
     assert result[-1] == "--reinstall"
 
 
-def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path):
+def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV is required for relative cutoff coverage"
     now = datetime.now(timezone.utc)
@@ -604,7 +613,7 @@ def test_real_uv_settings_consumer_preserves_relative_cutoffs(tmp_path):
     assert result[-1] == "--reinstall"
 
 
-def test_real_uv_package_span_is_enforced_on_the_executed_override(tmp_path):
+def test_real_uv_package_span_is_enforced_on_the_executed_override(tmp_path: Path) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV is required for structured package cutoff coverage"
     (tmp_path / "uv.toml").write_text(
@@ -624,9 +633,9 @@ def test_real_uv_package_span_is_enforced_on_the_executed_override(tmp_path):
 ])
 @pytest.mark.parametrize("first_party_source", [False, True])
 def test_real_uv_registry_transitive_and_isolated_build_age(
-    tmp_path, missing_timestamp, url_dependency, exact_boundary, first_party_source,
-    mutation=None, monkeypatch=None, clock_source=None,
-):
+    tmp_path: Path, missing_timestamp: bool, url_dependency: bool, exact_boundary: bool, first_party_source: bool,
+    mutation: str | None=None, monkeypatch: pytest.MonkeyPatch | None=None, clock_source: str | None=None,
+) -> None:
     import hashlib
     import io
     import json
@@ -640,10 +649,12 @@ def test_real_uv_registry_transitive_and_isolated_build_age(
     uv = shutil.which("uv")
     if uv is None:
         pytest.skip("native UV unavailable")
-    artifacts, backends, downloads = {}, {}, []
-    projects = {}
+    artifacts: dict[str, bytes] = {}
+    backends: dict[str, str] = {}
+    downloads: list[str] = []
+    projects: dict[str, list[PublishedFile]] = {}
 
-    def add_wheel(name, version, module="", contents="", dependencies=""):
+    def add_wheel(name: str, version: str, module: str="", contents: str="", dependencies: str="") -> str:
         filename = f"{name}-{version}-py3-none-any.whl"
         content = io.BytesIO()
         with zipfile.ZipFile(content, "w") as archive:
@@ -658,8 +669,8 @@ def test_real_uv_registry_transitive_and_isolated_build_age(
         artifacts[filename] = content.getvalue()
         return filename
 
-    def published(name, filename, old):
-        record = {
+    def published(name: str, filename: str, old: bool) -> None:
+        record: PublishedFile = {
             "filename": filename, "url": "/files/" + filename,
             "hashes": {"sha256": hashlib.sha256(artifacts[filename]).hexdigest()},
         }
@@ -690,25 +701,25 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
         published("fixture-backend", add_wheel("fixture_backend", version, "fixture_backend", backend), old)
         backends[version] = backend
     archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w:gz") as source:
+    with tarfile.open(fileobj=archive, mode="w:gz") as source_archive:
         content = b'[build-system]\nrequires=["fixture-backend>=1"]\nbuild-backend="fixture_backend"\n'
         member = tarfile.TarInfo("fixture_root-1.0/pyproject.toml")
         member.size = len(content)
-        source.addfile(member, io.BytesIO(content))
+        source_archive.addfile(member, io.BytesIO(content))
     artifacts["fixture_root-1.0.tar.gz"] = archive.getvalue()
     published("fixture-root", "fixture_root-1.0.tar.gz", True)
 
     class Index(BaseHTTPRequestHandler):
-        def log_message(self, *args):
+        def log_message(self, *args: object) -> None:
             pass
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             self.respond(head=False)
 
-        def do_HEAD(self):
+        def do_HEAD(self) -> None:
             self.respond(head=True)
 
-        def respond(self, *, head):
+        def respond(self, *, head: bool) -> None:
             name = self.path.rstrip("/").rsplit("/", 1)[-1]
             if self.path.startswith("/simple/") and name in projects:
                 body = json.dumps({"meta": {"api-version": "1.2"}, "name": name,
@@ -762,7 +773,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
                        env=environment, check=True, capture_output=True, timeout=30, **flags)
         python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         requirement = "fixture-root"
-        roots = ()
+        roots: tuple[Path, ...] = ()
         if first_party_source:
             source = tmp_path / "first-party"
             source.mkdir()
@@ -796,9 +807,9 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             arguments = ["--python", str(python), "-r", str(requirements)]
         actual_run = subprocess.run
         mutations = []
-        clock_steps = []
+        clock_steps: list[datetime] = []
 
-        def run(command, **kwargs):
+        def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
             if clock_source and command[1:3] == ["pip", "install"]:
                 clock = NOW + (timedelta(seconds=2) if clock_steps else timedelta())
                 kwargs["env"] = dict(
@@ -826,6 +837,7 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
             return actual_run(command, **kwargs)
 
         if mutation or clock_source:
+            assert monkeypatch is not None
             monkeypatch.setattr(policy.subprocess, "run", run)
         installed = policy.run_uv_install(
             uv, arguments, env=environment, cwd=tmp_path, now=NOW, trusted_source_roots=roots,
@@ -859,14 +871,14 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 
 
 @pytest.mark.parametrize("mutation", ["requirements", "project", "config"])
-def test_native_install_never_reopens_admitted_mutable_inputs(tmp_path, monkeypatch, mutation):
+def test_native_install_never_reopens_admitted_mutable_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutation: str) -> None:
     test_real_uv_registry_transitive_and_isolated_build_age(
         tmp_path, False, False, False, True, mutation=mutation, monkeypatch=monkeypatch,
     )
 
 
 @pytest.mark.parametrize("source", ["cli", "cli-inline", "environment", "config"])
-def test_native_package_cutoffs_stay_frozen_across_probe_and_execution_clocks(tmp_path, monkeypatch, source):
+def test_native_package_cutoffs_stay_frozen_across_probe_and_execution_clocks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
     test_real_uv_registry_transitive_and_isolated_build_age(
         tmp_path, False, False, False, False, monkeypatch=monkeypatch, clock_source=source,
     )
@@ -875,7 +887,7 @@ def test_native_package_cutoffs_stay_frozen_across_probe_and_execution_clocks(tm
 @pytest.mark.parametrize("selection", [
     "explicit", "implicit", "env-relative", "project-env", "directory", "resource-parent",
 ])
-def test_native_editable_retains_metadata_but_imports_live_source_after_cleanup(tmp_path, monkeypatch, selection):
+def test_native_editable_retains_metadata_but_imports_live_source_after_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str) -> None:
     import os
     import subprocess
 
@@ -914,6 +926,7 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
     module.write_text("value = 'original'\n", encoding="utf-8")
     environment = offline_environment(tmp_path)
     uv = shutil.which("uv")
+    assert uv is not None
     target = tmp_path / (".venv" if selection in ("implicit", "env-relative") else "venv")
     actual = subprocess.run
     created = actual(
@@ -935,7 +948,7 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
         cwd = source
     retained = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" not in command:
             retained.append(Path(kwargs["cwd"]))
             manifest.write_text(
@@ -945,9 +958,9 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
         return actual(command, **kwargs)
 
     monkeypatch.setattr(policy.subprocess, "run", run)
-    copytree = policy.shutil.copytree
+    copytree = shutil.copytree
 
-    def copy_outside(source, destination, *args, **kwargs):
+    def copy_outside(source: Path, destination: Path, *args: Any, **kwargs: Any) -> Path:
         assert not Path(destination).resolve().is_relative_to(Path(source).resolve())
         return copytree(source, destination, *args, **kwargs)
 
@@ -972,14 +985,14 @@ def build_editable(wheel_directory, config_settings=None, metadata_directory=Non
 
 
 @pytest.mark.parametrize("packages", [["pyyaml"], ["pyyaml", "packaging"]])
-def test_native_retained_configuration_preserves_package_specific_reinstall(tmp_path, monkeypatch, packages):
+def test_native_retained_configuration_preserves_package_specific_reinstall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packages: list[str]) -> None:
     import subprocess
 
     environment = offline_environment(tmp_path)
     actual = subprocess.run
     installs = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" in command:
             return actual(command, **kwargs)
         installs.append(command)
@@ -998,7 +1011,7 @@ def test_native_retained_configuration_preserves_package_specific_reinstall(tmp_
     assert all(package in installs[0] for package in packages)
 
 
-def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_path, monkeypatch):
+def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import os
     import subprocess
 
@@ -1025,7 +1038,7 @@ def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_
     actual = subprocess.run
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" in command:
             return actual(command, **kwargs)
         config = Path(kwargs["env"]["UV_CONFIG_FILE"])
@@ -1051,7 +1064,7 @@ def test_native_retained_configuration_preserves_all_three_precedence_tiers(tmp_
     assert len(calls) == 1 and not calls[0].exists()
 
 
-def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypatch):
+def test_native_retained_editable_build_uses_real_setuptools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import configparser
     import subprocess
     import zipfile
@@ -1079,7 +1092,7 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     actual = subprocess.run
     retained = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" in command:
             return actual(command, **kwargs)
         retained.append(Path(command[command.index("-e") + 1]))
@@ -1126,7 +1139,7 @@ def test_native_retained_editable_build_uses_real_setuptools(tmp_path, monkeypat
     "[egg_info]\ntag_build = .fixture\negg_base = src\n"
     "[options.data_files]\nshare/WidgetPkg = first.txt\nshare/widgetpkg = second.txt\n",
 ])
-def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkeypatch, configuration):
+def test_retained_editable_metadata_configuration_stays_private(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configuration: str | None) -> None:
     import configparser
 
     source = source_project(tmp_path / "source")
@@ -1142,12 +1155,12 @@ def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkey
         original.write_text(configuration, encoding="utf-8")
     retained = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" in command:
             return CompletedProcess(command, 0, settings(), "")
         retained.append(Path(command[command.index("-e") + 1]))
         config = configparser.ConfigParser(interpolation=None)
-        config.optionxform = str
+        setattr(config, "optionxform", str)
         config.read(retained[-1] / "setup.cfg", encoding="utf-8")
         assert config["egg_info"]["egg_base"] == "."
         if configuration is not None:
@@ -1172,7 +1185,7 @@ def test_retained_editable_metadata_configuration_stays_private(tmp_path, monkey
 
 
 @pytest.mark.parametrize("failure", ["malformed", "read", "write"])
-def test_retained_editable_metadata_configuration_failure_refuses(tmp_path, monkeypatch, failure):
+def test_retained_editable_metadata_configuration_failure_refuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str) -> None:
     source = source_project(tmp_path / "source")
     manifest = source / "pyproject.toml"
     manifest.write_text(
@@ -1189,14 +1202,14 @@ def test_retained_editable_metadata_configuration_failure_refuses(tmp_path, monk
     retained = []
     calls = []
 
-    def open_config(path, mode="r", *args, **kwargs):
+    def open_config(path: Path, mode: str="r", *args: Any, **kwargs: Any) -> IO[Any]:
         if path.name == "setup.cfg" and path not in (original, original_native):
             retained.append(path.parent)
             if (failure == "read" and mode == "r") or (failure == "write" and mode == "w"):
                 raise OSError("fixture configuration failure")
         return opened(path, mode, *args, **kwargs)
 
-    def probe(command, **kwargs):
+    def probe(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         assert "--show-settings" in command
         return CompletedProcess(command, 0, settings(), "")
@@ -1213,7 +1226,7 @@ def test_retained_editable_metadata_configuration_failure_refuses(tmp_path, monk
     assert original.read_text(encoding="utf-8") == configuration
 
 
-def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypatch):
+def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = source_project(tmp_path / "source")
     temporary_directory = policy.tempfile.TemporaryDirectory
     monkeypatch.setattr(
@@ -1231,7 +1244,7 @@ def test_retained_snapshot_inside_source_refuses_before_copy(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("excluded", [(), ("unused-local",)])
-def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path, monkeypatch, excluded):
+def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, excluded: tuple[str, ...]) -> None:
     source = source_project(
         tmp_path / "runtime" / ".install-stage" / ("stage-" + "x" * 40)
         / "plugin" / "libs" / "fixture-source",
@@ -1250,10 +1263,10 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
     cwd = tmp_path / "unrelated-caller"
     cwd.mkdir()
     (cwd / "uv.toml").write_text('exclude-newer="2026-09-01T00:00:00Z"\n', encoding="utf-8")
-    actual = policy.subprocess.run
+    actual = subprocess.run
     retained = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" not in command:
             copied = next(Path(value) for value in command if Path(value).is_dir()
                           and (Path(value) / "fixture_backend.py").is_file())
@@ -1284,7 +1297,7 @@ def test_native_absolute_source_build_drops_unrelated_staging_ancestry(tmp_path,
 
 
 @pytest.mark.parametrize("resource_parent", [False, True])
-def test_absolute_sources_preserve_dependency_and_resource_layout(tmp_path, monkeypatch, resource_parent):
+def test_absolute_sources_preserve_dependency_and_resource_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource_parent: bool) -> None:
     stage = tmp_path / "deep" / "staging" / "plugin"
     source = source_project(stage / "libs" / "root", sources='fixture-child={path="../child"}')
     child = source_project(stage / "libs" / "child", "fixture-child")
@@ -1292,7 +1305,7 @@ def test_absolute_sources_preserve_dependency_and_resource_layout(tmp_path, monk
     (stage / "resources" / "data.txt").write_text("resource", encoding="utf-8")
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         if "--show-settings" not in command:
             retained_source = Path(kwargs["cwd"])
@@ -1314,7 +1327,7 @@ def test_absolute_sources_preserve_dependency_and_resource_layout(tmp_path, monk
 
 
 @pytest.mark.parametrize("reference", ["configured-override", "source-excursion"])
-def test_absolute_operands_preserve_relative_metadata_sources(tmp_path, monkeypatch, reference):
+def test_absolute_operands_preserve_relative_metadata_sources(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str) -> None:
     if reference == "configured-override":
         source = source_project(tmp_path / "nested" / "source")
         (tmp_path / "uv.toml").write_text(
@@ -1329,7 +1342,7 @@ def test_absolute_operands_preserve_relative_metadata_sources(tmp_path, monkeypa
     if reference == "configured-override":
         calls = []
 
-        def run(command, **kwargs):
+        def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
             calls.append(command)
             if "--show-settings" not in command:
                 retained_base = Path(kwargs["cwd"])
@@ -1357,7 +1370,7 @@ def test_absolute_operands_preserve_relative_metadata_sources(tmp_path, monkeypa
 @pytest.mark.parametrize("selection", [
     "relative", "requirements", "toml", "group", "project", "environment", "editable",
 ])
-def test_context_sensitive_sources_keep_relative_retention_layout(tmp_path, monkeypatch, selection):
+def test_context_sensitive_sources_keep_relative_retention_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str) -> None:
     cwd = tmp_path / "caller"
     cwd.mkdir()
     source = source_project(cwd / "nested" / "source")
@@ -1388,7 +1401,7 @@ def test_context_sensitive_sources_keep_relative_retention_layout(tmp_path, monk
         arguments.insert(-1, "-e")
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         if "--show-settings" not in command:
             retained_base = Path(kwargs["cwd"])
@@ -1403,14 +1416,14 @@ def test_context_sensitive_sources_keep_relative_retention_layout(tmp_path, monk
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows editable snapshot placement")
-def test_windows_volume_root_input_has_no_outside_retention_location(tmp_path, monkeypatch):
+def test_windows_volume_root_input_has_no_outside_retention_location(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     anchor = Path(tmp_path.anchor)
     source = anchor / "fixture"
     monkeypatch.setattr(
         policy, "_source_inputs", lambda *args: (tmp_path, {anchor, source}, set(), {source}),
     )
 
-    def prepare(*args, _projection, **kwargs):
+    def prepare(*args: Any, _projection: list[str], **kwargs: Any) -> list[str]:
         _projection.append(settings())
         return []
 
@@ -1422,14 +1435,14 @@ def test_windows_volume_root_input_has_no_outside_retention_location(tmp_path, m
 @pytest.mark.parametrize("field,value", [
     ("dependency_mode", "Direct"), ("build_isolation", "Shared"),
 ])
-def test_environment_resolver_closure_bypass_refused(field, value):
+def test_environment_resolver_closure_bypass_refused(field: str, value: str) -> None:
     projection = settings().replace("settings: PipSettings {", f"settings: PipSettings {{\n{field}: {value},")
     with pytest.raises(policy.DependencyPolicyError, match="cannot bypass"):
         policy.cutoff_arguments(projection, now=NOW)
 
 
 @pytest.mark.parametrize("unsupported", ["backend", "dynamic", "layout", "package-dir", "mode"])
-def test_unsupported_editable_retention_refuses_before_install(tmp_path, monkeypatch, unsupported):
+def test_unsupported_editable_retention_refuses_before_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsupported: str) -> None:
     source = source_project(tmp_path / "source")
     manifest = source / "pyproject.toml"
     data = manifest.read_text(encoding="utf-8").replace("fixture_backend", "setuptools.build_meta")
@@ -1446,7 +1459,7 @@ def test_unsupported_editable_retention_refuses_before_install(tmp_path, monkeyp
     manifest.write_text(data, encoding="utf-8")
     calls = []
 
-    def probe(command, **kwargs):
+    def probe(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         assert "--show-settings" in command
         projection = settings()
@@ -1463,7 +1476,7 @@ def test_unsupported_editable_retention_refuses_before_install(tmp_path, monkeyp
     assert len(calls) == 1
 
 
-def test_retained_install_never_resolves_venv_python_to_its_base_interpreter(tmp_path, monkeypatch):
+def test_retained_install_never_resolves_venv_python_to_its_base_interpreter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     target = tmp_path / "venv" / "bin" / "python"
     target.parent.mkdir(parents=True)
     target.touch()
@@ -1471,13 +1484,13 @@ def test_retained_install_never_resolves_venv_python_to_its_base_interpreter(tmp
     base_python.touch()
     resolve = Path.resolve
 
-    def symlink_resolution(path, *args, **kwargs):
+    def symlink_resolution(path: Path, *args: Any, **kwargs: Any) -> Path:
         return base_python if path == target else resolve(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "resolve", symlink_resolution)
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
 
@@ -1490,10 +1503,10 @@ def test_retained_install_never_resolves_venv_python_to_its_base_interpreter(tmp
     assert calls[-1][calls[-1].index("--python") + 1] == str(target)
 
 
-def test_retention_never_reinterprets_inline_unknown_flags_as_requirements(tmp_path, monkeypatch):
+def test_retention_never_reinterprets_inline_unknown_flags_as_requirements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
 
@@ -1507,12 +1520,12 @@ def test_retention_never_reinterprets_inline_unknown_flags_as_requirements(tmp_p
     assert all("false" not in command for command in calls)
 
 
-def test_uv_inner_end_marker_cannot_hide_the_mandatory_cutoff():
+def test_uv_inner_end_marker_cannot_hide_the_mandatory_cutoff() -> None:
     with pytest.raises(policy.DependencyPolicyError, match="end-of-options"):
         policy.prepare_uv_install("uv", ["--", "demo"])
 
 
-def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monkeypatch):
+def test_relative_certificate_directory_list_retains_original_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import os
 
     environment = offline_environment(tmp_path)
@@ -1520,7 +1533,7 @@ def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monk
     expected = os.pathsep.join(str(tmp_path / directory) for directory in ("first", "second"))
     calls = []
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         assert kwargs["env"]["SSL_CERT_DIR"] == expected
         return CompletedProcess(command, 0, settings() if "--show-settings" in command else "", "")
@@ -1532,7 +1545,7 @@ def test_relative_certificate_directory_list_retains_original_cwd(tmp_path, monk
     assert len(calls) == 3
 
 
-def source_project(path, name="fixture-source", sources="", dependencies="", module_code=None):
+def source_project(path: Path, name: str="fixture-source", sources: str="", dependencies: str="", module_code: str | None=None) -> Path:
     import ast
 
     path.mkdir(parents=True, exist_ok=True)
@@ -1569,15 +1582,16 @@ def source_project(path, name="fixture-source", sources="", dependencies="", mod
     PATH,
     PATH.parents[2] / "worktree-manager" / "scripts" / "installer_dependency_policy.py",
 ], ids=["canonical", "manager"])
-def bundled_policy(request):
+def bundled_policy(request: pytest.FixtureRequest) -> ModuleType:
     spec = importlib.util.spec_from_file_location("bundled_installer_dependency_policy", request.param)
+    assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 @pytest.mark.parametrize("change", ["none", "bytes", "package", "project", "filename"])
-def test_bundled_dbus_next_exception_is_exact(tmp_path, change, bundled_policy):
+def test_bundled_dbus_next_exception_is_exact(tmp_path: Path, change: str, bundled_policy: ModuleType) -> None:
     name = "other" if change == "package" else "dbus-next"
     filename = "other.whl" if change == "filename" else "dbus_next-0.2.3-py3-none-any.whl"
     source = source_project(
@@ -1596,7 +1610,7 @@ def test_bundled_dbus_next_exception_is_exact(tmp_path, change, bundled_policy):
             bundled_policy._check_project(source, (tmp_path,), set())
 
 
-def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_path, bundled_policy):
+def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_path: Path, bundled_policy: ModuleType) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV is required for the bundled wheel contract"
     source = source_project(
@@ -1610,7 +1624,7 @@ def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_p
     environment = offline_environment(tmp_path)
     target = tmp_path / "venv"
     created = subprocess.run(
-        [uv, "venv", "--python", sys._base_executable, str(target)],
+        [uv, "venv", "--python", getattr(sys, "_base_executable"), str(target)],
         env=environment, capture_output=True, text=True, timeout=30,
         creationflags=policy._HEADLESS,
     )
@@ -1632,12 +1646,12 @@ def test_native_bundled_dbus_next_installs_through_retained_policy_offline(tmp_p
     assert imported.returncode == 0, imported.stderr
 
 
-def test_retained_transaction_exposes_only_admitted_inputs_until_context_exit(tmp_path, monkeypatch):
+def test_retained_transaction_exposes_only_admitted_inputs_until_context_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = source_project(tmp_path / "source")
     original = (source / "pyproject.toml").read_bytes()
     calls = []
 
-    def probe(command, **_kwargs):
+    def probe(command: list[str], **_kwargs: Any) -> CompletedProcess[str]:
         calls.append(command)
         assert "--show-settings" in command
         return CompletedProcess(command, 0, settings(), "")
@@ -1659,12 +1673,13 @@ def test_retained_transaction_exposes_only_admitted_inputs_until_context_exit(tm
     assert (source / "pyproject.toml").read_bytes() == original
 
 
-def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, monkeypatch):
+def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = source_project(tmp_path / "source")
     copy = policy._copy_retained_file
 
-    def mutate(original, destination):
+    def mutate(original: Path, destination: Path) -> str | Path:
         result = copy(original, destination)
+        assert isinstance(result, (str, Path))
         if Path(original).name == "pyproject.toml":
             Path(original).write_text('[project]\nname="changed"\nversion="1"\n', encoding="utf-8")
         return result
@@ -1683,7 +1698,7 @@ def test_retained_transaction_refuses_copy_mutation_before_execution(tmp_path, m
 
 
 @pytest.mark.parametrize("outcome", ["nonzero", "checked", "success", "admission"])
-def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monkeypatch, capsys, outcome):
+def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], outcome: str) -> None:
     source = source_project(tmp_path / "source")
     temporary_directory = policy.tempfile.TemporaryDirectory
     retained_paths = []
@@ -1691,17 +1706,17 @@ def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monk
     primary = subprocess.CalledProcessError(17, ["uv"], output="output", stderr="error")
 
     class CleanupFailure:
-        def __init__(self, **kwargs):
+        def __init__(self, **kwargs: Any) -> None:
             self.temporary = temporary_directory(**kwargs)
             self.name = self.temporary.name
             self._finalizer = self.temporary._finalizer
             allocations.append(Path(self.name))
 
-        def _rmtree(self, name, **kwargs):
+        def _rmtree(self, name: str, **kwargs: Any) -> None:
             self.temporary._rmtree(name, **kwargs)
             raise PermissionError("injected retained cleanup failure")
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" in command:
             if outcome == "admission" and allocations:
                 raise primary
@@ -1732,7 +1747,7 @@ def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monk
     assert diagnostic.count("retained-input-cleanup:") == (0 if outcome == "success" else 1)
 
 
-def offline_environment(tmp_path):
+def offline_environment(tmp_path: Path) -> dict[str, str]:
     import os
 
     environment = {
@@ -1743,7 +1758,7 @@ def offline_environment(tmp_path):
     return environment
 
 
-def native_policy(tmp_path, arguments, *, roots=(), interpreter=sys.executable):
+def native_policy(tmp_path: Path, arguments: list[str], *, roots: tuple[Path, ...]=(), interpreter: str | Path=sys.executable) -> CompletedProcess[str]:
     import subprocess
 
     uv = shutil.which("uv")
@@ -1758,7 +1773,7 @@ def native_policy(tmp_path, arguments, *, roots=(), interpreter=sys.executable):
 
 
 @pytest.mark.parametrize("editable", [None, "-e", "--editable"])
-def test_native_unowned_directory_is_not_a_first_party_exemption(tmp_path, editable):
+def test_native_unowned_directory_is_not_a_first_party_exemption(tmp_path: Path, editable: str | None) -> None:
     source = source_project(tmp_path / "unowned", "agent-lookalike")
     arguments = ([editable] if editable else []) + [str(source)]
     result = native_policy(tmp_path, arguments)
@@ -1769,7 +1784,7 @@ def test_native_unowned_directory_is_not_a_first_party_exemption(tmp_path, edita
 
 @pytest.mark.parametrize("reference", ["path", "url", "named"])
 @pytest.mark.parametrize("option", [None, "-e", "--editable", "-r", "-c"])
-def test_native_local_wheel_refused_even_inside_attested_root(tmp_path, reference, option):
+def test_native_local_wheel_refused_even_inside_attested_root(tmp_path: Path, reference: str, option: str | None) -> None:
     import zipfile
 
     wheel = tmp_path / "demo-1.0-py3-none-any.whl"
@@ -1798,7 +1813,7 @@ def test_native_local_wheel_refused_even_inside_attested_root(tmp_path, referenc
 
 
 @pytest.mark.parametrize("filename", ["demo.tar.gz", "demo.zip"])
-def test_local_source_archive_refused_before_uv_probe(tmp_path, monkeypatch, filename):
+def test_local_source_archive_refused_before_uv_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, filename: str) -> None:
     artifact = tmp_path / filename
     artifact.write_bytes(b"not attributable source")
     monkeypatch.setattr(policy.subprocess, "run", lambda *args, **kwargs: pytest.fail("probe ran"))
@@ -1806,7 +1821,7 @@ def test_local_source_archive_refused_before_uv_probe(tmp_path, monkeypatch, fil
         policy.prepare_uv_install("uv", [str(artifact)], trusted_source_roots=(tmp_path,))
 
 
-def test_python_api_does_not_infer_trust_from_helper_or_cwd(tmp_path, monkeypatch):
+def test_python_api_does_not_infer_trust_from_helper_or_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = source_project(tmp_path / "owned-looking")
     monkeypatch.setattr(policy.subprocess, "run", lambda *args, **kwargs: pytest.fail("probe ran"))
     with pytest.raises(policy.DependencyPolicyError, match="trusted source roots"):
@@ -1814,7 +1829,7 @@ def test_python_api_does_not_infer_trust_from_helper_or_cwd(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("edge", ["escape", "identity", "wheel", "symlink"])
-def test_native_nested_source_graph_refuses_unattributed_edges(tmp_path, edge):
+def test_native_nested_source_graph_refuses_unattributed_edges(tmp_path: Path, edge: str) -> None:
     import os
 
     owned = tmp_path / "owned"
@@ -1849,7 +1864,7 @@ def test_native_nested_source_graph_refuses_unattributed_edges(tmp_path, edge):
 
 
 @pytest.mark.parametrize("working_directory", ["flag", "env"])
-def test_relative_source_extras_follow_uv_working_directory(tmp_path, working_directory):
+def test_relative_source_extras_follow_uv_working_directory(tmp_path: Path, working_directory: str) -> None:
     source = source_project(tmp_path / "owned" / "source")
     with (source / "pyproject.toml").open("a", encoding="utf-8") as stream:
         stream.write('[project.optional-dependencies]\nextra=[]\n')
@@ -1872,13 +1887,13 @@ def test_relative_source_extras_follow_uv_working_directory(tmp_path, working_di
     ["--index", "demo @ https://unapproved.example/demo.whl"],
     ["--index=https://configured.example/simple", "demo @ https://unapproved.example/demo.whl"],
 ])
-def test_pending_index_option_cannot_exempt_a_direct_requirement(arguments, monkeypatch):
+def test_pending_index_option_cannot_exempt_a_direct_requirement(arguments: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(policy.subprocess, "run", lambda *args, **kwargs: pytest.fail("probe ran"))
     with pytest.raises(policy.DependencyPolicyError):
         policy.prepare_uv_install("uv", arguments)
 
 
-def test_native_fresh_python310_no_pip_uses_bundled_proper_parser(tmp_path):
+def test_native_fresh_python310_no_pip_uses_bundled_proper_parser(tmp_path: Path) -> None:
     import os
     import subprocess
 
@@ -1917,7 +1932,7 @@ def test_native_fresh_python310_no_pip_uses_bundled_proper_parser(tmp_path):
     assert "trusted source roots" in rejected.stderr
 
 
-def test_parserless_bootstrap_fails_explicitly_without_installing(monkeypatch):
+def test_parserless_bootstrap_fails_explicitly_without_installing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(policy, "_BUNDLED_TOML", None)
     monkeypatch.setattr(policy.importlib, "import_module", lambda name: (_ for _ in ()).throw(ModuleNotFoundError(name)))
     monkeypatch.setattr(policy.Path, "glob", lambda *args: [])
@@ -1927,7 +1942,7 @@ def test_parserless_bootstrap_fails_explicitly_without_installing(monkeypatch):
 
 
 @pytest.mark.parametrize("option", ["-e", "-r", "-c", "-b"])
-def test_attached_short_options_cannot_hide_a_local_artifact(tmp_path, monkeypatch, option):
+def test_attached_short_options_cannot_hide_a_local_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, option: str) -> None:
     artifact = tmp_path / "demo.whl"
     artifact.write_bytes(b"artifact")
     value = str(artifact)
@@ -1941,7 +1956,7 @@ def test_attached_short_options_cannot_hide_a_local_artifact(tmp_path, monkeypat
 
 
 @pytest.mark.parametrize("context", ["--project", "UV_PROJECT", "--group"])
-def test_explicit_project_context_does_not_trust_an_escaping_source_graph(tmp_path, context):
+def test_explicit_project_context_does_not_trust_an_escaping_source_graph(tmp_path: Path, context: str) -> None:
     project = source_project(tmp_path / "owned", sources='fixture-child={path="../outside"}')
     source_project(tmp_path / "outside", "fixture-child")
     environment = offline_environment(tmp_path)
@@ -1962,7 +1977,7 @@ def test_explicit_project_context_does_not_trust_an_escaping_source_graph(tmp_pa
 @pytest.mark.parametrize("anchor", [
     "canonical", "canonical-vendored", "canonical-editable", "canonical-materialized", "payload",
 ])
-def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anchor):
+def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path: Path, anchor: str) -> None:
     import json
 
     repository = tmp_path / "repository"
@@ -2028,6 +2043,7 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
     environment = offline_environment(tmp_path)
     runtime_source = PATH.parents[1] / "versioned-runtime" / "versioned_runtime.py"
     runtime_spec = importlib.util.spec_from_file_location("installed_graph_runtime", runtime_source)
+    assert runtime_spec is not None and runtime_spec.loader is not None
     runtime = importlib.util.module_from_spec(runtime_spec)
     runtime_spec.loader.exec_module(runtime)
     runtime_root = tmp_path / "runtime"
@@ -2087,8 +2103,8 @@ def test_native_cli_uses_its_own_roster_or_payload_anchor_not_cwd(tmp_path, anch
 @pytest.mark.parametrize("helper_owner", ["canonical", "payload"])
 @pytest.mark.parametrize("target", ["sibling", "unowned", "foreign-payload", "wrong-identity"])
 def test_canonical_materialized_graph_retains_only_its_owned_library_namespace(
-    tmp_path, monkeypatch, helper_owner, target,
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, helper_owner: str, target: str,
+) -> None:
     import json
 
     repository = tmp_path / "repository"
@@ -2131,7 +2147,7 @@ def test_canonical_materialized_graph_retains_only_its_owned_library_namespace(
             policy._anchor_roots()
 
 
-def test_payload_metadata_alone_without_owner_provenance_grants_no_roots(tmp_path, monkeypatch):
+def test_payload_metadata_alone_without_owner_provenance_grants_no_roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
     source = source_project(tmp_path / "payload", "agent-lookalike")
@@ -2142,7 +2158,7 @@ def test_payload_metadata_alone_without_owner_provenance_grants_no_roots(tmp_pat
     assert policy._anchor_roots() == ()
 
 
-def test_nested_toml_requirements_cannot_hide_local_file_artifacts(tmp_path, monkeypatch):
+def test_nested_toml_requirements_cannot_hide_local_file_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     wheel = tmp_path / "demo.whl"
     wheel.write_bytes(b"artifact")
     source = source_project(tmp_path / "source", dependencies=f'"demo @ {wheel.as_uri()}"')
@@ -2156,7 +2172,7 @@ def test_nested_toml_requirements_cannot_hide_local_file_artifacts(tmp_path, mon
 
 
 @pytest.mark.parametrize("name", ["fixture_source", "not-the-source"])
-def test_native_directory_file_url_requires_exact_attributed_project_identity(tmp_path, name):
+def test_native_directory_file_url_requires_exact_attributed_project_identity(tmp_path: Path, name: str) -> None:
     source = source_project(tmp_path / "source")
     arguments = ["--no-config", "--python", sys.executable, name + " @ " + source.as_uri()]
     if name == "not-the-source":
@@ -2175,7 +2191,7 @@ def test_native_directory_file_url_requires_exact_attributed_project_identity(tm
     "absolute", "relative", "absolute-extras", "relative-extras",
     "uri", "literal-uri", "named-uri", "named-literal-uri", "nested",
 ])
-def test_native_owned_source_paths_containing_at_are_not_named_requirements(tmp_path, reference):
+def test_native_owned_source_paths_containing_at_are_not_named_requirements(tmp_path: Path, reference: str) -> None:
     from urllib.parse import unquote
 
     source = source_project(tmp_path / "owned@source" / "demo", "demo")
@@ -2208,7 +2224,7 @@ def test_native_owned_source_paths_containing_at_are_not_named_requirements(tmp_
 
 
 @pytest.mark.parametrize("reference", ["unowned-path", "unowned-uri", "artifact", "wrong-name"])
-def test_at_in_paths_does_not_relax_source_attribution(tmp_path, monkeypatch, reference):
+def test_at_in_paths_does_not_relax_source_attribution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reference: str) -> None:
     from urllib.parse import unquote
 
     owned = source_project(tmp_path / "owned@source" / "demo", "demo")
@@ -2231,7 +2247,7 @@ def test_at_in_paths_does_not_relax_source_attribution(tmp_path, monkeypatch, re
 
 
 @pytest.mark.parametrize("resource", ["relative", "outside", "missing"])
-def test_retained_build_resources_require_existing_attributed_directories(tmp_path, monkeypatch, resource):
+def test_retained_build_resources_require_existing_attributed_directories(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource: str) -> None:
     source = source_project(tmp_path / "source")
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -2243,17 +2259,18 @@ def test_retained_build_resources_require_existing_attributed_directories(tmp_pa
         )
 
 
-def test_new_private_snapshot_paths_are_canonicalized_without_trusting_source_aliases(tmp_path, monkeypatch):
+def test_new_private_snapshot_paths_are_canonicalized_without_trusting_source_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     source = source_project(tmp_path / "source")
     create = policy._private_retained_root
     roots = []
 
-    def private(parent):
+    def private(parent: Path | None) -> Path:
         root = create(parent)
+        assert isinstance(root, Path)
         roots.append(root)
         return root / ".." / root.name
 
-    def run(command, **kwargs):
+    def run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
         if "--show-settings" in command:
             return CompletedProcess(command, 0, """PipInstallSettings { settings: PipSettings {
                 index_locations: IndexLocations { indexes: [], flat_index: [], },
@@ -2272,18 +2289,18 @@ def test_new_private_snapshot_paths_are_canonicalized_without_trusting_source_al
     assert result.returncode == 0 and roots and not roots[0].exists()
 
 
-def test_registry_only_cli_does_not_discover_product_roots(monkeypatch):
-    def forbidden():
+def test_registry_only_cli_does_not_discover_product_roots(monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden() -> NoReturn:
         pytest.fail("registry bootstrap attempted product-graph discovery")
 
     calls = []
+
+    def install(uv: str, arguments: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        calls.append((uv, arguments, kwargs))
+        return CompletedProcess([], 0)
+
     monkeypatch.setattr(policy, "_anchor_roots", forbidden)
-    monkeypatch.setattr(
-        policy, "run_uv_install",
-        lambda uv, arguments, **kwargs: (
-            calls.append((uv, arguments, kwargs)) or CompletedProcess([], 0)
-        ),
-    )
+    monkeypatch.setattr(policy, "run_uv_install", install)
     arguments = [
         "--no-config", "--require-hashes", "--index-url", "https://registry.example/simple",
         "packaging==25.0",
@@ -2295,17 +2312,19 @@ def test_registry_only_cli_does_not_discover_product_roots(monkeypatch):
     assert calls[0][2]["non_editable"] is True
 
 
-def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
+def test_default_cli_retains_product_attribution(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     discovered, calls = [], []
-    monkeypatch.setattr(
-        policy, "_anchor_roots", lambda: (discovered.append(True) or (tmp_path,)),
-    )
-    monkeypatch.setattr(
-        policy, "run_uv_install",
-        lambda uv, arguments, **kwargs: (
-            calls.append(kwargs["trusted_source_roots"]) or CompletedProcess([], 0)
-        ),
-    )
+
+    def roots() -> tuple[Path, ...]:
+        discovered.append(True)
+        return (tmp_path,)
+
+    def install(uv: str, arguments: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        calls.append(kwargs["trusted_source_roots"])
+        return CompletedProcess([], 0)
+
+    monkeypatch.setattr(policy, "_anchor_roots", roots)
+    monkeypatch.setattr(policy, "run_uv_install", install)
     assert policy.main(["--uv", "selected-uv", "--", "fixture-package"]) == 0
     assert discovered == [True] and calls == [(tmp_path,)]
 
@@ -2313,14 +2332,14 @@ def test_default_cli_retains_product_attribution(monkeypatch, tmp_path):
 @pytest.mark.parametrize("options", [
     [], ["--link-mode", "copy"], ["--link-mode=copy"],
 ])
-def test_deployment_cli_does_not_duplicate_caller_immutable_options(monkeypatch, options):
+def test_deployment_cli_does_not_duplicate_caller_immutable_options(monkeypatch: pytest.MonkeyPatch, options: list[str]) -> None:
     calls = []
-    monkeypatch.setattr(
-        policy, "run_uv_install",
-        lambda uv, arguments, **kwargs: (
-            calls.append(arguments) or CompletedProcess([], 0)
-        ),
-    )
+
+    def install(uv: str, arguments: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        calls.append(arguments)
+        return CompletedProcess([], 0)
+
+    monkeypatch.setattr(policy, "run_uv_install", install)
     arguments = [*options, "fixture-package"]
     assert policy.main(["--uv", "selected-uv", "--registry-only", "--", *arguments]) == 0
     pairs = list(policy._argument_pairs(calls[0]))
@@ -2333,8 +2352,8 @@ def test_deployment_cli_does_not_duplicate_caller_immutable_options(monkeypatch,
     ["--editable", "."], ["-e", "."], ["--editable=."],
     ["--link-mode", "symlink"], ["--link-mode=hardlink"],
 ])
-def test_deployment_cli_refuses_live_or_shared_code_before_resolver(monkeypatch, capsys, arguments):
-    def forbidden(*args, **kwargs):
+def test_deployment_cli_refuses_live_or_shared_code_before_resolver(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], arguments: list[str]) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("mutable deployment reached the resolver")
 
     monkeypatch.setattr(policy, "run_uv_install", forbidden)
@@ -2343,12 +2362,12 @@ def test_deployment_cli_refuses_live_or_shared_code_before_resolver(monkeypatch,
     assert "deployed runtimes require" in capsys.readouterr().err
 
 
-def test_deployment_cli_refuses_editable_requirement_before_uv(monkeypatch, tmp_path, capsys):
+def test_deployment_cli_refuses_editable_requirement_before_uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     source = source_project(tmp_path / "source")
     requirements = tmp_path / "requirements.txt"
     requirements.write_text(f"-e {source.as_posix()}\n", encoding="utf-8")
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("editable requirement reached UV")
 
     monkeypatch.setattr(policy, "_select_uv_executable", forbidden)
@@ -2359,7 +2378,7 @@ def test_deployment_cli_refuses_editable_requirement_before_uv(monkeypatch, tmp_
     assert "deployed runtimes require non-editable" in capsys.readouterr().err
 
 
-def test_registry_only_cannot_grant_explicit_source_roots(tmp_path, capsys):
+def test_registry_only_cannot_grant_explicit_source_roots(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as error:
         policy.main([
             "--uv", "selected-uv", "--registry-only", "--trusted-source-root", str(tmp_path),
@@ -2372,7 +2391,7 @@ def test_registry_only_cannot_grant_explicit_source_roots(tmp_path, capsys):
 @pytest.mark.parametrize(
     "reference", ["direct", "editable", "requirements", "nested-requirements", "project", "configured"],
 )
-def test_registry_only_refuses_local_sources_before_uv(monkeypatch, tmp_path, capsys, reference):
+def test_registry_only_refuses_local_sources_before_uv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], reference: str) -> None:
     source = source_project(tmp_path / "source")
     for name in tuple(os.environ):
         if name.startswith(("UV_", "PIP_")):
@@ -2401,7 +2420,7 @@ def test_registry_only_refuses_local_sources_before_uv(monkeypatch, tmp_path, ca
         monkeypatch.setenv("UV_CONFIG_FILE", str(config))
         arguments = ["fixture-package"]
 
-    def forbidden(*args, **kwargs):
+    def forbidden(*args: Any, **kwargs: Any) -> NoReturn:
         pytest.fail("refused local-source input reached UV or dependency writes")
 
     monkeypatch.setattr(policy, "_anchor_roots", forbidden)
@@ -2410,7 +2429,7 @@ def test_registry_only_refuses_local_sources_before_uv(monkeypatch, tmp_path, ca
     assert "dependency-seasoning:" in capsys.readouterr().err
 
 
-def materialized_broken_helper(root):
+def materialized_broken_helper(root: Path) -> Path:
     import materialize_main
 
     repository = root / "repository"
@@ -2474,7 +2493,7 @@ def materialized_broken_helper(root):
 
 
 @pytest.mark.parametrize("case", ["accepted", "stricter-cutoff", "wrong-hash", "unseasoned"])
-def test_native_registry_bootstrap_is_independent_of_materialized_product_graph(tmp_path, case):
+def test_native_registry_bootstrap_is_independent_of_materialized_product_graph(tmp_path: Path, case: str) -> None:
     uv = shutil.which("uv")
     assert uv, "native UV is required for validator-bootstrap coverage"
     helper = materialized_broken_helper(tmp_path)
@@ -2500,16 +2519,16 @@ def test_native_registry_bootstrap_is_independent_of_materialized_product_graph(
     downloads = []
 
     class Index(BaseHTTPRequestHandler):
-        def log_message(self, *args):
+        def log_message(self, *args: object) -> None:
             pass
 
-        def do_GET(self):
+        def do_GET(self) -> None:
             self.respond(head=False)
 
-        def do_HEAD(self):
+        def do_HEAD(self) -> None:
             self.respond(head=True)
 
-        def respond(self, *, head):
+        def respond(self, *, head: bool) -> None:
             if self.path == "/simple/fixture-validator/":
                 body = json.dumps({
                     "meta": {"api-version": "1.2"}, "name": "fixture-validator",
@@ -2547,7 +2566,7 @@ def test_native_registry_bootstrap_is_independent_of_materialized_product_graph(
     )
     try:
         created = subprocess.run(
-            [uv, "venv", "--offline", "--python", sys._base_executable, str(target)], **options,
+            [uv, "venv", "--offline", "--python", getattr(sys, "_base_executable"), str(target)], **options,
         )
         assert created.returncode == 0, created.stdout + created.stderr
         python = target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

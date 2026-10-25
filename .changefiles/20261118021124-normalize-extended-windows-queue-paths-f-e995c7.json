@@ -1,0 +1,9 @@
+{
+  "comment": "Normalize extended Windows queue paths for SQLite access in the retained installer and private executor",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "comment": "Recognize current retained Manager launchers and help while preserving older protocols; type isolated updater and telemetry fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

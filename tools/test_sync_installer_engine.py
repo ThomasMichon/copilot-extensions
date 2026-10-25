@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 import importlib.util
 import io
 import json
@@ -436,7 +437,10 @@ def _copy_real_installer_engine(root: Path) -> None:
     canonical = root / "libs" / "installer-engine"
     canonical.mkdir(parents=True)
     origin = REPO / "libs" / "installer-engine"
-    for asset in (*contract.FILES, *contract.support_files(origin)):
+    extras = {
+        asset for names in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for asset in names
+    }
+    for asset in dict.fromkeys((*contract.FILES, *contract.support_files(origin), *sorted(extras))):
         (canonical / asset).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(origin / asset, canonical / asset)
 
@@ -447,7 +451,10 @@ def test_real_engine_fixture_retains_nested_support_assets(
     contract = sync_installer_engine.ier
     origin = tmp_path / "input"
     canonical = origin / "libs" / "installer-engine"
-    assets = (*contract.FILES, "nested/support.py")
+    extras = {
+        asset for names in contract.STANDALONE_NATIVE_EXTRA_FILES.values() for asset in names
+    }
+    assets = (*contract.FILES, "nested/support.py", *sorted(extras))
     for asset in assets:
         path = canonical / asset
         path.parent.mkdir(parents=True, exist_ok=True)

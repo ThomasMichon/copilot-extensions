@@ -1,0 +1,13 @@
+{
+  "comment": "Retain automatic update ownership in Manager queue requests, preserve read-only inspection during initial queue publication, normalize retained local-package file URLs on Windows without relaxing exact origin verification, and keep request serialization in its invocation owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

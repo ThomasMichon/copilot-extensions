@@ -1,0 +1,9 @@
+{
+  "comment": "Allow headless Windows qualification while reporting unavailable desktop coverage separately from Job lifetime proof.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

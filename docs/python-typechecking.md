@@ -55,6 +55,15 @@ controls live in `tools/promotion_unit_tests/test_typecheck_new_code.py`; actual
 MyPy duplicate-module, strict-failure, import-precedence and source-replacement
 controls live in `tools/test_typecheck_programs.py`.
 
+Import resolution prefers the checked project's inventoried `src` roots over
+other projects' bundled package copies, including during test-only checks.
+This keeps a standalone source edit from being checked against an older
+consumer copy without suppressing diagnostics or admitting additional files.
+The Worktrees runtime-admission engine copy has its own pending physical
+scope, separate from the plugin's same-named standalone scripts. Both copies
+remain in the changed-code ratchet; the constructor retains its Python 3.11
+target while its surrounding helpers retain Python 3.10.
+
 Bridge remains pending as a project. Its whole-file changed-code checks use
 a hash-locked extension of the service-index checker environment, adding
 Cryptography for its HTTPS certificate fixtures alongside Pydantic's typed
@@ -82,6 +91,18 @@ libraries. Its build helper, package code and runtime resources remain in the
 physical inventory; other undeclared application trees still refuse. This is
 ownership accounting, not strict admission or an exclusion from `--new-code`:
 changed physical application files retain the whole-file strict ratchet.
+
+The Python-owned `installer_engine.py` constructor and each physical consumer
+have separate pending Python 3.11 analysis scopes, matching the installer
+bootstrap's existing minimum. Their surrounding runtime and dependency-policy
+code retains its Python 3.10 target. Manager uses its declared Python 3.11
+package minimum. These target corrections do not admit a pending scope or
+remove any file from the whole-file strict ratchet.
+
+Manager's pending scope uses a hash-locked extension of the runner checker
+profile (YAML and TOML) with its declared Textual dependency, so selected
+production-picker tests are checked against the real widget types rather than
+a missing import.
 
 ## Local commands
 

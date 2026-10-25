@@ -1,0 +1,9 @@
+{
+  "comment": "Observe completed materialized payload writes for incremental qualification verification",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

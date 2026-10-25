@@ -1,0 +1,9 @@
+{
+  "comment": "Type maintenance policy, enrollment, handover and startup fixtures while retaining every runtime assertion.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
