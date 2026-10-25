@@ -229,6 +229,13 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   covered; full machine provisioning and installed prompt acceptance are not
   claims of this read-only source lane. The POSIX venue lacked the optional
   devcontainer CLI, so it used the canonical contained runner.
+- Review follow-up rejects every non-null event without a positive integer
+  sequence before inspecting its outcome/details, and rejects nonnumeric or
+  boolean observation times. Regression cases include malformed private fields
+  and the actual CLI's refusal without echoing them. Missing optional registry
+  documents now remain empty mappings for selected/supplier anchor resolution,
+  while missing machine files still preserve supplier fallback. The expanded
+  Windows and frozen-source POSIX packets both pass 223 cases.
 - This slice closes neither whole-attempt terminal outcomes nor remote private
   detail, containing release, authorized rollout, original New/cold Resume
   conversation/acceptance proof or cleanup. Both parent efforts remain Active.
