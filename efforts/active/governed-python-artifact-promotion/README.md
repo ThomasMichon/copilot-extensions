@@ -757,6 +757,20 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-10-24 - Explicit source-fallback transaction design approved
+
+- #8829 merged as `d78a69266823b4fd6efdc1ccc9a3814cac778d1e`.
+  Review `5641295377` approved final head `3fe48e065a39ad7c32632afccc45a7889d6d3e7a`
+  without findings or threads; required CI `40157069100` passes.
+  The existing wheel-input sub-plan now specifies actual source authentication,
+  native exact-wheel selection, admitted source-build inputs, complete offline
+  construction/health and independent source-mode receipts/reuse.
+- Re-read this Plan and Validation Plan after merge. No source-admission or
+  consumer checkbox closes from this documentation-only approval. Start the
+  actual source-owner/native-selection integration; preserve existing candidate
+  and publisher ownership, artifact-independent fallback and the foreground
+  payload/runtime boundary. The parent remains **Active**.
+
 ### 2026-10-24 - Bounded exact-wheel preparation merged; source admission next
 
 - #8820 merged as `68223a35d34a77773d65a263e2bb8b140fe0c63b`.

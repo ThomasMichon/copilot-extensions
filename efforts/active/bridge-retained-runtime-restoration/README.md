@@ -270,6 +270,44 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
 
 ## Journal
 
+### 2026-10-25 - Immutable provider declaration prerequisite
+
+- Extend the existing Containers slot profile, not a new handshake, service or
+  per-effect preflight. New completed slots publish a strict versioned
+  `executionContract`; both dependency profiles declare retained creation
+  unsupported. The installer-owned read-only selector returns the canonical
+  exact interpreter and matching slot identity rather than qualifying a mutable
+  payload shim or ready venue.
+- Preserve ordinary completed-profile reuse and rollback. An older descriptor
+  is not rewritten to acquire capabilities; selected legacy, malformed or
+  unsupported declarations refuse before provider/guest effects. No ordinary
+  resolver, wrapper argument or effect path changes.
+- This is a prerequisite only. A declaration does not hold the slot, connect
+  Bridge to the exact selected execution, admit the original provider operation
+  or retain guest/native custody. Those owners and the complete mixed-version
+  execution matrix remain the next source stretch. No full Plan/Validation
+  item, platform qualification, release, rollout or adoption gate closes.
+
+### 2026-10-25 - Local/provider selection prerequisite merged
+
+- #8947 merged as `59564b362117a0b4e86559d36055a7543371ee21` after
+  independent approval `5642717855` of exact head
+  `aae87fb46ee19910d7bf85b841a7507c524ff1c1`, no open findings and successful
+  required checks. The managed completion path verified normal Maintainer
+  authority; no blocking review, check or hold was bypassed.
+- Re-read the complete Plan and Validation Plan after merge. The bounded
+  local-only rejection closes no full-cohort item. Provider-first negotiation,
+  actual provider/guest/native mediation, compatibility, platform qualification,
+  restoration and adoption remain open.
+- Reconciled only the clean, already-merged source worktree, retaining the
+  reviewed tip and immutable capture-time source tag. No live provider operation
+  or rollout occurred.
+- Continue at the selected-runtime composition: the existing provider gate
+  chooses a completed immutable slot, while the canonical versioned-runtime
+  library owns retention. Define the provider's declaration and final runtime
+  validation through those owners, without promoting a mutable returned shim,
+  payload version or readiness observation into retained support.
+
 ### 2026-10-25 - Refuse provider selection at the local creation owner
 
 - The provider-first trace reaches the payload-owned runtime gate and canonical

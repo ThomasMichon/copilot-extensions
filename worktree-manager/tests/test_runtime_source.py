@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import pytest
@@ -212,6 +213,32 @@ def test_marketplace_never_acquires_or_creates_source_state(tmp_path):
         with source.acquire(config.RuntimeSource(), root=tmp_path / "manager"):
             pytest.fail("marketplace has no source checkout")
     assert not (tmp_path / "manager").exists()
+
+
+@pytest.mark.parametrize("deadline", [True, 0, float("nan"), float("inf")])
+def test_source_deadline_refuses_before_git_or_state_writes(tmp_path, monkeypatch, deadline):
+    monkeypatch.setattr(source, "_git", lambda *args, **options: pytest.fail("invalid deadline ran Git"))
+    with pytest.raises(source.SourceAcquisitionError, match="deadline"):
+        with source.acquire(
+            config.RuntimeSource("main", str(tmp_path / "upstream")),
+            root=tmp_path / "manager", deadline=deadline,
+        ):
+            pytest.fail("invalid deadline reached consumption")
+    assert not (tmp_path / "manager").exists()
+
+
+def test_source_git_child_uses_original_shared_deadline(repository, monkeypatch):
+    actual = source.subprocess.run
+    deadline = time.monotonic() + 5
+    timeouts = []
+
+    def run(command, **options):
+        timeouts.append(options["timeout"])
+        return actual(command, **options)
+
+    monkeypatch.setattr(source.subprocess, "run", run)
+    assert source._git(repository[0], "rev-parse", "HEAD", deadline=deadline) == repository[1]
+    assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
 
 
 def test_unavailable_configured_source_does_not_fall_back_to_cwd(repository, tmp_path, monkeypatch):

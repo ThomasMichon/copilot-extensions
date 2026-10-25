@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from promotion_unit_contract import PROFILE, UnitEvidenceError
+from promotion_unit_effects import UnitRun
 from promotion_unit_packet import verify_packet
 
 SPEC = importlib.util.spec_from_file_location(
@@ -39,6 +40,33 @@ def test_framework_io_bootstrap_does_not_hide_a_missing_adapter(monkeypatch):
         RUNNER.prepare_framework_io()
 
 
+def test_collection_selects_exact_nodes_in_admitted_order(tmp_path):
+    nodes = ["test_units.py::test_second[value]", "test_units.py::test_first"]
+    run = UnitRun(None, tmp_path, {}, tmp_path, nodes=nodes)
+    items = [SimpleNamespace(nodeid=node) for node in [
+        nodes[1], "test_units.py::test_second[other]", nodes[0], "test_units.py::test_unadmitted",
+    ]]
+    excluded = [items[1], items[3]]
+    calls = []
+    config = SimpleNamespace(hook=SimpleNamespace(pytest_deselected=lambda **kw: calls.append(kw)))
+    session = SimpleNamespace(items=items)
+    run.pytest_collection_modifyitems(session, config, items)
+    run.pytest_collection_finish(session)
+    assert run.collected == nodes
+    assert calls == [{"items": excluded}]
+
+
+@pytest.mark.parametrize("observed", [[], ["admitted", "admitted"], ["unadmitted"]],
+                         ids=["missing", "duplicate", "unadmitted-only"])
+def test_collection_refuses_missing_or_duplicate_admitted_nodes(tmp_path, observed):
+    run = UnitRun(None, tmp_path, {}, tmp_path, nodes=["admitted"])
+    items = [SimpleNamespace(nodeid=node) for node in observed]
+    with pytest.raises(UnitEvidenceError, match="exact admitted inventory"):
+        run.pytest_collection_modifyitems(None, None, items)
+    assert [item.nodeid for item in items] == observed
+    assert run.collected == []
+
+
 def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp_path, monkeypatch):
     root = tmp_path / "source"
     tests = root / "tools/promotion_unit_tests"
@@ -56,7 +84,11 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
         "sys.modules[spec.name] = business\n"
         "spec.loader.exec_module(business)\n"
         "def test_no_production_call():\n"
-        "    assert True\n",
+        "    assert True\n"
+        "def test_second_no_production_call():\n"
+        "    assert True\n"
+        "def test_not_admitted():\n"
+        "    raise AssertionError('unadmitted test executed')\n",
         encoding="utf-8",
     )
     sources = {
@@ -65,7 +97,8 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
     }
     node = test.relative_to(root).as_posix() + "::test_no_production_call"
     manifest = {
-        "profile": PROFILE, "nodes": [node], "sources": sources,
+        "profile": PROFILE, "nodes": [node, test.relative_to(root).as_posix()
+                                    + "::test_second_no_production_call"], "sources": sources,
         "coverage_targets": [business.relative_to(root).as_posix()], "max_seconds": 300,
     }
     manifest_path = root / "tools/promotion-unit-manifest.json"
@@ -80,6 +113,8 @@ def test_no_production_call_is_rejected_by_the_collector_and_packet_verifier(tmp
 
     def scoped_collection(arguments, **kwargs):
         assert Path(arguments[arguments.index("--confcutdir") + 1]) == root
+        assert arguments.count(str(test)) == 1
+        assert not any("::" in argument for argument in arguments)
         return real_pytest_main(arguments, **kwargs)
 
     monkeypatch.setattr(pytest, "main", scoped_collection)

@@ -447,6 +447,11 @@ controls join required unit CI. These checks prove configuration-policy input,
 not a permitted CPU wheel closure, authenticated profile release or native
 engine construction. The manual `runtime_profiles=true` acceptance selector
 runs the actual readers on Linux and Windows.
+The Windows lane enables test-only PowerShell phase markers on stderr.
+On a subprocess timeout, the failure retains the parent start timestamp and
+child entry, native compilation, path, installation and deployment-reader
+markers to distinguish cold startup from reader work. The deadline remains
+30 seconds; tracing does not retry or admit a timed-out decision.
 
 `python tools/run-plugin-tests.py agent-worktrees --test-file
 tests/test_python_installer_engine.py` covers the canonical candidate engine,
@@ -515,6 +520,61 @@ The caller's deadline covers retention entry, both UV settings probes and
 per-chunk source copying as well as compilation and consumption. The same optional
 `dependency_compile=true` Linux/Windows lane runs these controls, not required
 unit CI. They do not qualify private-feed policy, wheel admission or deployment.
+
+The explicit `retain_source_wheel_lock` path additionally consumes native
+`pylock.toml` output, retaining actual filenames/hashes and the compiler's held
+configuration. A native export can contain multiple compatible files; this
+initial path refuses that ambiguity rather than implementing another wheel
+ranking algorithm. Ordinary requirements exports remain unchanged. Real
+multi-wheel and source-only feed controls refuse before acquisition or a
+third-party backend request. Compressed wheel-tag alternatives pass through the
+existing bounded canonicalizer before filename parsing; a regression repeats
+each alternative 128 times and asserts the parser receives only one combination.
+
+`tools/test_runtime_source_authentication.py` composes actual installation-owned
+fallback intent with the existing configured-runtime-source acquisition and
+canonical preparation paths. Real local Git repositories exercise exact
+origin/ownership, fetched merged commit/tree, source-policy changes, prepared
+byte changes and cleanup. Manager self-update preferences do not authorize
+runtime source; its default marketplace choice remains unsupported by this
+explicit provider. No artifact index, manifest or caller-provided source receipt
+authenticates these inputs.
+
+`tools/test_runtime_source_feed.py` continues that real source selection through
+native exact-file resolution, the same held native feed configuration and the
+existing bounded TLS acquisition worker. Feed capture must not run another
+resolver or fabricate a release selection. A public test-only server leaf,
+signed by the existing fixture CA, lets both UV and the worker verify the chain;
+the older CA-as-leaf fixture alone is not acceptable to UV.
+
+`tools/test_runtime_source_build.py` extends that path through a single native
+runtime/build union lock, byte-inspected build dependencies, an independent
+immutable build-tools environment and the existing offline first-party build
+frontend. A real PEP 517 backend builds authenticated sources, including the
+canonical process-ownership implementation, and imports a declared build-only
+registry requirement that must be locked, acquired and installed only in the
+tools environment. Actual wheel metadata must match
+static runtime declarations and selected index Python hints. The final runtime
+contains only its reachable runtime closure, not build tools; installed health
+and held-input offline reuse exercise the existing constructor. Negative
+controls refuse corrupt RECORDs, direct build URLs, metadata drift and source
+policy revocation; a native timeout must settle an actual backend descendant.
+The composition exercises the existing `retain_source_profile` owner with
+owned offline build custody and its exact local-package selection. Foreign
+build roles, changed tool versions/files and an online build request refuse
+before the backend runs; ordinary promotion-toolchain controls remain intact.
+Fresh and reused tools slots validate their installed interpreter against the
+selected marker environment before any backend runs. Native regressions query
+real tools interpreters, inject a mismatched target result and require refusal;
+the success control still proves unchanged immutable reuse. Short synthetic
+directory labels keep these nested native executables within Windows path limits.
+Source-mode configuration refusals additionally forbid effectful compiler
+execution and require zero package requests for implicit public indexes and
+unsupported index, credential, TLS and proxy settings.
+These tests do not qualify persistent offline discovery, activation, ordinary
+consumer enablement or live private-feed operations. The build checks have
+their own six-minute Linux/Windows jobs under `dependency_compile=true`, rather
+than extending the existing compile job's budget or required unit CI.
 
 `tools/test_installer_wheel_acquisition.py` uses a public test-only localhost TLS
 certificate/key and real owned workers to check exact file/redirect trust,
@@ -1164,7 +1224,10 @@ The packet lives in `tools/promotion_unit_tests/`, independent of mixed
 integration test modules and their conftests. The manifest binds source and
 test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
-or phase rejects the result. The runner rejects process, network, native-loader,
+or phase rejects the result. Each admitted file is collected once; an exact
+node whitelist deselects other cases before execution and restores manifest
+order. Missing or duplicate admitted nodes reject collection before execution.
+The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 

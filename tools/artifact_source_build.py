@@ -18,6 +18,24 @@ class PromotionArtifactError(RuntimeError):
     pass
 
 
+def read_build_system_requires(
+    source_dir: Path, *, error_type: type[Exception] = PromotionArtifactError,
+) -> list[str]:
+    """Read static build constraints without importing or executing a backend."""
+    pyproject = source_dir / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise error_type(f"{pyproject}: could not read/parse: {exc}") from exc
+    build_system = data.get("build-system", {})
+    if not isinstance(build_system, dict):
+        raise error_type(f"{pyproject}: [build-system] is not a table")
+    requires = build_system.get("requires", [])
+    if not isinstance(requires, list) or not all(isinstance(r, str) for r in requires):
+        raise error_type(f"{pyproject}: [build-system].requires is not a list of strings")
+    return requires
+
+
 def parse_wheel_identity(
     path: Path, *, error_type: type[Exception] = PromotionArtifactError,
     numeric_version: bool = False,

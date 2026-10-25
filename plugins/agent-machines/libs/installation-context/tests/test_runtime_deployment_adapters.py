@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +57,9 @@ DOWNLOAD_PROFILES = {
 }
 
 
-def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_adapter(
+    runner: str, arguments: list[str], *, trace_root: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
@@ -68,11 +71,60 @@ def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProce
         ]
         if runner == "posix32" else _runner_command(runner, arguments)
     )
-    return subprocess.run(
-        command, capture_output=True, text=True,
-        encoding="utf-8", env=environment, check=False, timeout=30,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    if (
+        runner == "powershell" and trace_root is not None
+        and environment.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1"
+    ):
+        script_index = command.index("-File") + 1
+        argument_file = trace_root / "native-policy-arguments.json"
+        argument_file.write_text(json.dumps(command[script_index + 1:]), encoding="utf-8")
+        command = [
+            *command[:script_index],
+            str(Path(__file__).with_name("native_policy_trace.ps1")),
+            "-Adapter", command[script_index], "-ArgumentsFile", str(argument_file),
+        ]
+    started = datetime.now(timezone.utc).isoformat()
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True,
+            encoding="utf-8", env=environment, check=False, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired as exc:
+        stderr = exc.stderr or b""
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", errors="replace")
+        exc.__notes__ = [
+            *getattr(exc, "__notes__", []),
+            f"Native policy child started at {started}; phase evidence:\n{stderr}",
+        ]
+        raise
+    if runner == "powershell" and environment.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1":
+        print(f"Native policy child started at {started}; phase evidence:\n{result.stderr}")
+    return result
+
+
+def test_native_timeout_retains_phase_evidence_without_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    failure = subprocess.TimeoutExpired(
+        ["native-reader"], 30, stderr=b"native-policy-phase=Add-Type;elapsed_ms=50\n",
     )
+    monkeypatch.setattr(failure, "add_note", None, raising=False)
+    failure.__notes__ = ["existing diagnostic"]
+
+    def timeout(command: list[str], **kwargs: Any) -> None:
+        calls.append((command, kwargs))
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        _run_adapter("python", ["probe-plugin-publication"])
+    assert captured.value is failure
+    assert len(calls) == 1
+    assert calls[0][1]["timeout"] == 30
+    assert "native-policy-phase=Add-Type" in "\n".join(failure.__notes__)
+    assert failure.__notes__[0] == "existing diagnostic"
+    assert "Native policy child started at " in failure.__notes__[-1]
 
 
 @pytest.mark.skipif(
@@ -195,9 +247,13 @@ def test_native_policy_decision_matches_reference(
         _cli_arguments(
             layout, legacy, action="probe-plugin-publication", policy_path=mode_policy,
         ),
+        trace_root=tmp_path,
     )
     expected_code = 0 if reference["allowPluginPublication"] else 3
     assert result.returncode == expected_code, result.stdout + result.stderr
+    if runner == "powershell" and os.environ.get("INSTALLATION_CONTEXT_POLICY_TRACE") == "1":
+        for stage in ("process-entry", "Add-Type", "Resolve-InstallationStatus"):
+            assert f"native-policy-phase={stage};" in result.stderr, result.stderr
     value = json.loads(result.stdout)
     actual = value["deployment"]
     for field in ("path", "state", "managed", "allowPluginPublication", "reason", "owner", "recovery"):

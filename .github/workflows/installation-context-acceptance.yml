@@ -222,7 +222,8 @@ jobs:
         if: runner.os == 'Windows'
         env:
           INSTALLATION_CONTEXT_POWERSHELL: powershell
-        run: python -m pytest -q libs/installation-context/tests/test_runtime_deployment_adapters.py -k "native_policy and profile and not posix"
+          INSTALLATION_CONTEXT_POLICY_TRACE: "1"
+        run: python -m pytest -q -rP --durations=10 libs/installation-context/tests/test_runtime_deployment_adapters.py -k "native_policy and profile and not posix"
 
   runtime-profile-policy-windows:
     if: ${{ inputs.runtime_profiles }}
@@ -737,7 +738,9 @@ jobs:
           tools/test_installer_dependency_compile.py
           tools/test_installer_dependency_policy.py
           tools/test_runtime_source_lock.py
-          -k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock"
+          tools/test_runtime_source_authentication.py
+          tools/test_runtime_source_feed.py
+          -k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock or runtime_source_authentication or runtime_source_feed"
 
   dependency-compile-windows:
     if: ${{ inputs.dependency_compile }}
@@ -745,6 +748,29 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 6
     steps: *dependency-compile-steps
+
+  source-build-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Admitted source build (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &source-build-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - name: Real authenticated source, admitted tools, offline build and health
+        run: python -m pytest -q tools/test_runtime_source_build.py
+
+  source-build-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Admitted source build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *source-build-steps
 
   wheel-inputs-linux:
     if: ${{ inputs.wheel_inputs }}

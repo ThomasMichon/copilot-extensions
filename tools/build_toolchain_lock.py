@@ -35,13 +35,8 @@ import time
 import tempfile
 from pathlib import Path
 
-try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
-    # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
-    import tomli as tomllib
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from artifact_source_build import read_build_system_requires  # noqa: E402
 from governed_feed_trust import (  # noqa: E402
     _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401 -- re-exported for test/caller use
     _PUBLIC_PYPI_HOSTS,  # noqa: F401 -- re-exported for test/caller use
@@ -835,6 +830,7 @@ def resolve_toolchain_lock(
 #: satisfied.
 _BUILD_REQUIRES_CHECK_SCRIPT = (
     "import json, sys\n"
+    "from pathlib import Path\n"
     "from packaging.requirements import InvalidRequirement, Requirement\n"
     "from packaging.utils import canonicalize_name\n"
     "from packaging.version import InvalidVersion, Version\n"
@@ -843,7 +839,8 @@ _BUILD_REQUIRES_CHECK_SCRIPT = (
     "    print(json.dumps({'ok': False, 'error': error}))\n"
     "    sys.exit(0)\n"
     "\n"
-    "payload = json.loads(sys.stdin.read())\n"
+    "payload = json.loads(Path(sys.argv[2]).read_text(encoding='utf-8') "
+    "if sys.argv[1:2] == ['--payload-file'] else sys.stdin.read())\n"
     "locked = {\n"
     "    canonicalize_name(name): version\n"
     "    for name, version in payload['locked_packages'].items()\n"
@@ -901,29 +898,11 @@ _BUILD_REQUIRES_CHECK_SCRIPT = (
 
 
 def _read_build_system_requires(source_dir: Path) -> list[str]:
-    """``source_dir``'s own declared `[build-system].requires` list --
-    the constraints `uv build --no-build-isolation` can never satisfy
-    itself (isolation is precisely what would otherwise let it install a
-    different version), so a locked toolchain that doesn't meet them must
-    be caught before the build runs, not discovered as a build failure."""
-    pyproject = source_dir / "pyproject.toml"
-    try:
-        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
-        raise ArtifactBuildError(f"{pyproject}: could not read/parse: {exc}") from exc
-    build_system = data.get("build-system", {})
-    if not isinstance(build_system, dict):
-        raise ArtifactBuildError(f"{pyproject}: [build-system] is not a table")
-    requires = build_system.get("requires", [])
-    if not isinstance(requires, list) or not all(isinstance(r, str) for r in requires):
-        raise ArtifactBuildError(
-            f"{pyproject}: [build-system].requires is not a list of strings"
-        )
-    return requires
+    return read_build_system_requires(source_dir, error_type=ArtifactBuildError)
 
 
 def _assert_toolchain_satisfies_build_requires(
-    source_dir: Path, toolchain: ToolchainLock, *, deadline: float | None = None,
+    source_dir: Path, toolchain: ToolchainLock, *, deadline: float | None = None, run=None,
 ) -> None:
     """Fails closed unless the locked toolchain's exact `setuptools`/
     `wheel` versions satisfy every applicable constraint ``source_dir``
@@ -955,24 +934,40 @@ def _assert_toolchain_satisfies_build_requires(
     toolchain locks (`_LOCKED_TOOLCHAIN_PACKAGES`), installed from the
     same validated governed feed as `setuptools`/`wheel`. This also means
     the comparison runs under the SAME interpreter whose
-    `marker_environment` it evaluates markers against."""
+    `marker_environment` it evaluates markers against. Owned builds pass
+    dependency JSON through an invocation-owned file retained until the child
+    settles, avoiding native command-line limits; ordinary callers use stdin."""
     requires = _read_build_system_requires(source_dir)
-    if deadline is not None and toolchain._marker_environment is None:
+    if run is None and deadline is not None and toolchain._marker_environment is None:
         toolchain._marker_environment = _query_marker_environment(toolchain.venv_python, deadline=deadline)
+    marker_environment = (
+        toolchain.marker_environment if run is None else json.loads(run([
+            str(toolchain.venv_python), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT,
+        ]).stdout)
+    )
     payload = json.dumps(
         {
             "requires": requires,
             "locked_packages": toolchain.packages,
-            "marker_environment": toolchain.marker_environment,
+            "marker_environment": marker_environment,
         }
     )
-    result = subprocess.run(
-        [str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
-        input=payload, capture_output=True, text=True,
-        env=sanitize_subprocess_env(),
-        **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    if run is not None:
+        with tempfile.TemporaryDirectory(prefix="build-requires-") as temporary:
+            payload_path = Path(temporary) / "requirements.json"
+            payload_path.write_text(payload, encoding="utf-8")
+            result = run([
+                str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT,
+                "--payload-file", str(payload_path),
+            ])
+    else:
+        result = subprocess.run(
+            [str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
+            input=payload, capture_output=True, text=True,
+            env=sanitize_subprocess_env(),
+            **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
     if result.returncode != 0:
         raise ArtifactBuildError(
             f"{source_dir}: could not verify [build-system].requires "
