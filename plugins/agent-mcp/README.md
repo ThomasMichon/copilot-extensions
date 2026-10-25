@@ -21,8 +21,9 @@ ownership, readiness sections, and anti-self-delegation; use
 
 The supported legacy layout uses `~/.agent-mcp` when `AGENT_MCP_HOME` is
 unset or empty. A nonempty override selects that directory; a relative value
-is made absolute against the launch directory, without expanding literal path
-text or dereferencing symlinks. Selection alone creates nothing.
+is made absolute against the launch directory, without collapsing `..`,
+expanding literal path text or dereferencing symlinks. Selection alone creates
+nothing; the filesystem retains its normal symlink-plus-parent semantics.
 
 Named bridge configs, overlays, default file storage, shared token caches,
 materialization and source-digest keys use this common home. The resident

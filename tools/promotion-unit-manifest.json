@@ -1592,7 +1592,9 @@
         "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[empty]",
         "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[relative]",
         "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[absolute]",
-        "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[whitespace]"
+        "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[whitespace]",
+        "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[relative-parent]",
+        "tools/promotion_unit_tests/test_mcp_home.py::test_legacy_home_selection_is_absolute_and_side_effect_free[absolute-parent]"
     ],
     "sources": {
         "libs/installer-engine/installer_dependency_policy.py": "a29a7ee450991c21b07acb0bc2406b29c69e51a1e753c777a6a5283f7ce374bb",
@@ -1763,8 +1765,8 @@
         "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
         "fleet-manager/tests/test_host_profile.py": "8ac1c27809fdf08916b04aa06d1c0d9a87e3918a7dd4d35579cd7e75fd4af3dc",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
-        "tools/promotion_unit_tests/test_mcp_home.py": "2fdb3fe3a7eb1ceeb73f9fae111e028d1142bb47a0f71d9005ed3aa6446b0fb4",
-        "plugins/agent-mcp/src/agent_mcp/home.py": "c529d0c87adac6ebc01de21efdbb9dbef62e0a27997133ab79c2a0df963dcedd"
+        "tools/promotion_unit_tests/test_mcp_home.py": "979e26f5099c3d582fe7567318887a37ecd0c36f45cb4cc8836ea84a7d6bc634",
+        "plugins/agent-mcp/src/agent_mcp/home.py": "c27b390c5771eb2b876596a973d1dbe387fa96ad7d5f75fcf51d7d0f726b7ade"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_dependency_policy.py",

@@ -43,3 +43,18 @@ def test_absolute_home_is_preserved(tmp_path, monkeypatch):
 
     assert default_home_dir() == home
     assert not home.exists()
+
+
+@pytest.mark.parametrize("absolute", [False, True], ids=["relative", "absolute"])
+def test_home_keeps_parent_components_for_filesystem_resolution(
+    tmp_path,
+    monkeypatch,
+    absolute,
+):
+    monkeypatch.chdir(tmp_path)
+    relative = Path("link") / ".." / "state"
+    home = tmp_path / relative
+    monkeypatch.setenv("AGENT_MCP_HOME", str(home if absolute else relative))
+
+    assert default_home_dir() == home
+    assert list(tmp_path.iterdir()) == []

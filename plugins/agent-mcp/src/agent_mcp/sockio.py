@@ -58,7 +58,7 @@ def absolute_handle(raw: str | Path) -> str:
     spawns) to one generation. Resolution is still attempted so a symlink
     loop raises here (``RuntimeError``/``OSError``) for the caller's fallback.
     """
-    path = os.path.abspath(os.fspath(raw))
+    path = str(Path(raw).absolute())
     Path(path).resolve()
     return path
 

@@ -140,7 +140,9 @@ def write(key: str, token: str, *, ttl: str = "auto") -> bool:
     root = _root()
     try:
         root.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(root), prefix=".tmp-", suffix=".json")
+        # tempfile collapses ".."; resolve the existing destination first so
+        # symlink-plus-parent homes keep their filesystem-selected target.
+        fd, tmp = tempfile.mkstemp(dir=str(root.resolve()), prefix=".tmp-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump({"token": token, "exp": exp, "acquired_at": time.time()}, f)

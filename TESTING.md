@@ -1301,7 +1301,9 @@ Run it through the bounded supervisor. Fresh child processes use only temporary
 profiles and real local daemon listeners, leases and routing publication.
 They verify missing, empty, relative and absolute homes across the daemon's
 cwd change, named configs/overlays, storage, digest keys and token caches,
-with no loose artifacts in the launch directory. Existing `test_serve_cwd.py`
+with no loose artifacts in the launch directory. POSIX cases additionally
+exercise symlink-plus-`..` home overrides and explicit socket paths through real
+daemon publication and artifact writes. Existing `test_serve_cwd.py`
 retains explicit relative-socket and passive-refusal controls. These native
 cases stay outside required unit CI; the packet admits only the dependency-free
 home selector's synthetic no-actor controls.
