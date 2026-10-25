@@ -8,7 +8,7 @@ import json
 import re
 import sys
 
-from . import config, output, reconcile, update_events, update_options, update_runtime, update_runtime_plan
+from . import config, output, reconcile, update_acquisition, update_events, update_options, update_runtime, update_runtime_plan
 
 TARGET_CONTRACT = 1
 
@@ -130,7 +130,14 @@ def update_target(name: str) -> int:
             raise ValueError(before.status)
         if not update_runtime._refresh_marketplace(reconcile.MARKETPLACE, cwd=target.context):
             raise ValueError("Selected marketplace refresh failed; resolve its reported source/authentication failure and retry")
-        status = update_runtime._update_one_plugin_payload(name, reconcile.MARKETPLACE, cwd=target.context)
+        status = (
+            update_acquisition.acquire(
+                name, reconcile.MARKETPLACE, reconcile.resolve_copilot() or "copilot",
+                cwd=target.context, engine=True,
+            )
+            if name == reconcile.SELF_PLUGIN else
+            update_runtime._update_one_plugin_payload(name, reconcile.MARKETPLACE, cwd=target.context)
+        )
         update_events.record("payload_refresh", f"{name}@{reconcile.MARKETPLACE}", status)
         if not status.startswith("OK"):
             return 1

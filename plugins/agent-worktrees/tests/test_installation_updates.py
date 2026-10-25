@@ -234,6 +234,35 @@ def test_target_authentication_prepares_only_its_owning_context(monkeypatch):
     assert prepared == ["selected-target"]
 
 
+def test_engine_target_preserves_no_install_fallback_acquisition_policy(installed, monkeypatch, tmp_path):
+    import subprocess
+    from agent_worktrees import update_acquisition, update_auth_context
+
+    payload = tmp_path / "agent-worktrees"
+    payload.mkdir()
+    (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"2","runtimeScope":"universal"}')
+    installed["agent-worktrees"] = payload
+    monkeypatch.setattr(update_runtime, "_invocation_update_context", lambda: tmp_path)
+    monkeypatch.setattr(owner, "target_plan", lambda name, target:
+        update_runtime_plan.RuntimeUpdateStep(name, "engine_runtime", payload, eligible=True))
+    monkeypatch.setattr(reconcile, "resolve_copilot", lambda: "synthetic-copilot")
+    monkeypatch.setattr(update_auth_context, "blocked", lambda *a: False)
+    monkeypatch.setattr(update_auth_context, "child_environment", lambda *a: {})
+    monkeypatch.setattr(update_auth_context, "run_acquisition", lambda run, argv, **kwargs:
+        run(argv, **{key: value for key, value in kwargs.items() if key != "context"}))
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    calls = []
+
+    def fail(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 1, "", "plugin agent-worktrees is not installed")
+
+    monkeypatch.setattr(update_acquisition, "_run_update", fail)
+    monkeypatch.setattr(update_acquisition, "_run_install", lambda *a, **k: pytest.fail("engine acquired via install fallback"))
+    assert owner.update_target("agent-worktrees") == 1
+    assert calls == [["synthetic-copilot", "plugin", "update", "agent-worktrees@copilot-extensions"]]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
 def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
     name = "agent-example"
