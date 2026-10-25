@@ -91,10 +91,10 @@ def _update_from_payload(payload, root, env, *, activation=None):
         return si.self_update(root=root, dry_run=False), cutovers
 
 
-def _prepare_constructed(directory):
+def _prepare_constructed(directory, *, default_data_root=False):
     directory.mkdir()
     env = _environment(directory)
-    root = directory / "root"
+    root = Path(env["USERPROFILE"]) / ".worktree-manager" if default_data_root else directory / "root"
     payload = directory / "input"
     si._copy_payload(SOURCE, payload)
     with (payload / "pyproject.toml").open("a", encoding="utf-8") as stream:

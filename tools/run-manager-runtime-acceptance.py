@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--contract", choices=("runtime", "callbacks", "updater"), default="runtime")
+    parser.add_argument("--contract", choices=("runtime", "callbacks", "updater", "source"), default="runtime")
     args = parser.parse_args()
     root = args.root.resolve()
     if root == REPO or not root.is_relative_to(REPO):
@@ -43,12 +43,16 @@ def main() -> int:
         "runtime": "test_manager_runtime_install.py",
         "callbacks": "test_manager_mux_callbacks.py",
         "updater": "test_manager_updater_recovery.py",
+        "source": "test_manager_source_install.py",
     }[args.contract]
     native = REPO / "worktree-manager" / "tests" / "native" / filename
     with ExitStack() as ownership:
         lease = acquire(0, python.parent.parent)
         ownership.callback(lease.release)
-        raw = ownership.enter_context(tempfile.TemporaryDirectory(prefix="manager-acceptance-", dir=root))
+        # Source + repair identities are longer than release-only slots. Keep
+        # their default-home fixture below OS temp, not a deep source checkout.
+        storage = {} if args.contract == "source" else {"dir": root}
+        raw = ownership.enter_context(tempfile.TemporaryDirectory(prefix="manager-acceptance-", **storage))
         sandbox = Path(raw)
         env = isolated_environment(os.environ, sandbox)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")

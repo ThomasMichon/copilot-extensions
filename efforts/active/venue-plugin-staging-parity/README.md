@@ -259,8 +259,11 @@ below used those effective runtime versions, not a source-only patch.
   is also published and verified in the active Bridge and Dispatch. The
   targeted-allocation recovery correction #8796 is published and verified
   live; the original recovery succeeded without replacing its allocation.
-  Native preparation now needs the separately tracked #8900 availability
-  correction, its release and authorized rollout before headed acceptance.
+  Native availability correction #8911 for #8900 is merged into Dev; its
+  natural Main publication and centrally owned adoption remain prerequisites
+  for headed acceptance. Fleet installation and deployment belong exclusively
+  to the central coordinator; this effort does not independently update or
+  restart those runtimes.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -311,9 +314,11 @@ below used those effective runtime versions, not a source-only patch.
   modes, with effective paths/settings and launch version recorded.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
-  Installed static-local ACP now passes; genuine headed acquisition is blocked
-  by the targeted-allocation recovery gap #8796 after #8715 activation.
-  SSH and privileged native acceptance remain open.
+  Installed static-local ACP now passes. Targeted-allocation recovery #8796
+  succeeded after #8715 activation; genuine headed acquisition now awaits
+  publication and centrally owned adoption of #8911, followed by coordinated
+  admission of the retained original task. SSH and privileged native
+  acceptance remain open.
 - [x] Source-preservation examples agree with executable cases: local
   same-world references retain the original path, remote local sources use
   reflected paths, Git declarations remain Git declarations after installation,
@@ -364,6 +369,30 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-25 - Land native-cache availability without claiming native acceptance
+
+- #8911 merged into Dev as
+  `a817c1610d155c1493f0d3c8a58477b85bb9b2e6` at
+  `2026-10-25T11:46:13Z`. Its exact reviewed head
+  `05872fd975951f1150a309af0bf67b70d6186d87` received an approving review
+  with no open findings, and required CI passed. The managed merge used the
+  provider-confirmed Maintainer review-rule exception, not a CI bypass.
+- The exact committed-head full contained library suite passed 374 tests with
+  four explicit skips in 609.14 seconds and clean exit zero. Two native POSIX
+  executable-mode controls and the actual cyclic-symbolic-source control
+  remain unexercised on Windows; controlled-platform and legacy-exception
+  controls run locally. The existing suite platform skip remains explicit.
+  Canonical source and its one real vendored copy agree.
+- This closes the reviewed source correction, not release or productive
+  acceptance. Observe natural Main publication without changing release
+  controls or retrying workflows, then send the exact source/release evidence
+  to the central coordinator that exclusively owns fleet installation and
+  deployment. No independent adoption or native retry is authorized here.
+- Preserve the original task, allocation and launch history. After central
+  adoption and coordinated admission, resume its headed proof. The combined
+  trusted-container lane, SSH/privileged evidence or named tracked transfers,
+  and #5286/#5072/#954 reconciliation still keep this effort Active.
 
 ### 2026-10-25 - Close native inventory provenance and fallback review gaps
 
