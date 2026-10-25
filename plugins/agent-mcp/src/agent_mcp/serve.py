@@ -296,7 +296,7 @@ class Server:
                  control_port: int | None = None,
                  control_token: str | None = None,
                  version: str | None = None) -> None:
-        self.socket_path = Path(socket_path)
+        self.socket_path = Path(os.path.abspath(socket_path))
         self.pool = pool or WarmPool(idle_timeout=idle_timeout)
         self._idle_timeout = idle_timeout
         self._stop = asyncio.Event()
@@ -612,7 +612,7 @@ class Server:
 
     @daemon_entrypoint(
         "agent-mcp", source=__file__, purpose="production",
-        runtime_root=lambda self: self.socket_path.absolute().parent,
+        runtime_root=lambda self: self.socket_path.parent,
     )
     async def serve_forever(self) -> None:
         # Take the single-instance lease before binding so a losing host never

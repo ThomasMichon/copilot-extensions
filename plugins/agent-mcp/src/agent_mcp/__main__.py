@@ -631,7 +631,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     # not to the daemon's own (about to change) cwd. Lexically, never
     # dereferenced: the fixed handle is a symlink that cutover repoints, and a
     # host bound to its current target would be pinned to that generation.
-    socket_path = str(Path(socket_path).absolute())
+    socket_path = os.path.abspath(socket_path)
     control_token = os.environ.get("AGENT_MCP_CONTROL_TOKEN") or None
 
     # Pin the resident daemon's CWD to the stable AGENT_MCP_HOME directory

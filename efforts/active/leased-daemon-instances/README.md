@@ -431,3 +431,31 @@ caller coverage, not one launcher or one platform passing.
   cases, including disabled and malformed-policy refusal before any spawn.
   Updated its test seam and the census for the upstream bounded policy read
   and replaced caller-contained streaming helper.
+- Confirmed the retained Windows packet includes real windowless-parent,
+  Job-boundary and visual-observer cases, not only launch-flag assertions.
+  Separately exercised the explicit Python-free PowerShell bootstrap lane:
+  both production and contained cases passed, two cycles each. The native
+  fixture observed authorized survival versus Job-bound termination, lock
+  custody and zero observed attributable windows or focus changes.
+
+### 2026-10-24 - Embedded Gateway and coherent relative-path admission
+
+- Embedded Gateway startup now admits before TLS, reload and listener work.
+  Its retained guard spans completed shielded cleanup, startup failure and
+  cross-task cancellation; app-runner startup is also an explicit census
+  owner. Nested CLI/app entry borrows one process record. The worker's
+  service/enrolled-identity packet passed 387 cases; independent embedded
+  TLS and census integration passed 43.
+- Gateway config and service-policy parents, MCP home, CLI socket and resident
+  socket selection now collapse parent components lexically without resolving
+  linked runtime parents. Coupled MCP consumers retain one launch-directory
+  selection across cwd changes. Updated the home contract and its eight pure
+  selector expectations rather than leaving consumers with divergent roots.
+- Independent contained MCP integration passed 56 with five platform skips.
+  Existing Windows closed-loop/proactor cleanup warnings remain disclosed;
+  they do not replace test assertions. Focused Gateway CLI controls and eight
+  Linux home selectors also passed. Refreshed only the two changed unit-source
+  bindings; native process-library bytes and the unit budget are unchanged.
+- Current source CI passed guards and actual units. The new review findings
+  still require publication, fresh review and current-head CI before merge;
+  neither that pass nor this journal closes the effort or authorizes rollout.

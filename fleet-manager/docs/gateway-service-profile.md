@@ -86,6 +86,12 @@ private-origin restrictions and the separate application-authentication boundary
 
 SDK tests may call `await start(Listener(...), policy_path)` with port zero;
 the returned handle supplies the actual origin, app and asynchronous `close()`.
+Embedded and app-runner startup acquire instance attribution before background
+reload or listener work. Production has no lease expiry; explicit test-owner
+contexts retain their test lease. Await `close()` to join complete cleanup:
+concurrent callers share one shielded cleanup task, and cancelling a waiter
+does not release admission while cleanup is still running. Nested CLI/app
+admission borrows the existing process record rather than creating a duplicate.
 Foreground CLI serving requires an explicitly selected nonzero port.
 Changing bootstrap/listener settings requires a controlled runtime change;
 ordinary service policy reload does not.

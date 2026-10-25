@@ -1997,8 +1997,8 @@
         "fleet-manager/src/fleet_manager/trusted_systemd_profile.py": "ff6090d2fb2eaba4c58ca3210a9653803290e92a14f904cb43fb0b0d7905e4ec",
         "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
-        "tools/promotion_unit_tests/test_mcp_home.py": "979e26f5099c3d582fe7567318887a37ecd0c36f45cb4cc8836ea84a7d6bc634",
-        "plugins/agent-mcp/src/agent_mcp/home.py": "c27b390c5771eb2b876596a973d1dbe387fa96ad7d5f75fcf51d7d0f726b7ade",
+        "tools/promotion_unit_tests/test_mcp_home.py": "d1740e27b644f828638e8afdf6ee0f7bcec78953ca91bf969f6e5bedde0836e2",
+        "plugins/agent-mcp/src/agent_mcp/home.py": "62c504a90b38853728e6cc5371ca28ffd77668c23abdae61e32b913e191ed108",
         "tools/promotion_unit_tests/test_container_inventory.py": "de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
         "plugins/agent-containers/src/agent_containers/lifecycle.py": "10e0108feed7e4f44c2ad27d1aec29863e1868aa26e614db8bcca552847f020c",
         "tools/native_daemon_artifacts.py": "206c03069e3ad9cf4836fb0687ecd9dc683825f7e9de579631db0b795b360b6c"

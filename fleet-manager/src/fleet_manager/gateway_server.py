@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_procutil.daemon_instances import daemon_entrypoint
 
+import os
 import secrets
 import socket
 import ssl
@@ -222,7 +223,7 @@ def build_server(config: GatewayConfig, signer: Signer) -> _Server:
 
 @daemon_entrypoint(
     "fleet-manager-gateway", source=__file__, purpose="production",
-    runtime_root=lambda config_path: config_path.absolute().parent,
+    runtime_root=lambda config_path: Path(os.path.abspath(config_path)).parent,
 )
 def serve(config_path: Path) -> int:
     """Foreground hosting only. No deployment, background spawn or discovered-state writes."""

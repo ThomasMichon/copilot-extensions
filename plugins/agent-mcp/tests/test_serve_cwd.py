@@ -19,6 +19,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from agent_mcp import ipc
 from agent_mcp.__main__ import _cmd_serve
 
@@ -138,3 +140,51 @@ def test_cmd_serve_passive_without_socket_still_fails_fast_before_chdir(
     assert "requires an explicit --socket" in capsys.readouterr().err
     assert not home_dir.exists(), "must not have chdir'd/created anything on the refused path"
     assert Path.cwd() == original_cwd
+
+
+@pytest.mark.parametrize("selection", ("socket", "home"))
+def test_actual_cli_parent_relative_paths_reach_admitted_server(tmp_path, monkeypatch, selection):
+    from agent_mcp import serve
+    from agent_mcp.__main__ import main
+
+    launch = tmp_path / "launch"
+    home = tmp_path / "state"
+    launch.mkdir()
+    home.mkdir()
+    monkeypatch.chdir(launch)
+    monkeypatch.setenv("AGENT_MCP_HOME", "../state" if selection == "home" else str(home))
+    observed = []
+
+    class ObservedServer(serve.Server):
+        async def _start_control_listener(self):
+            await super()._start_control_listener()
+            assert self.socket_path == home / "serve.sock"
+            assert Path.cwd() == home
+            assert os.environ["AGENT_MCP_HOME"] == str(home)
+            observed.append(True)
+            self.stop()
+
+    command = ["serve"]
+    if selection == "socket":
+        command += ["--socket", "../state/serve.sock"]
+    with patch.object(serve, "Server", ObservedServer):
+        assert main(command) == 0
+    assert observed == [True]
+
+
+def test_actual_server_linked_runtime_parent_refuses_before_lease(tmp_path, monkeypatch):
+    import asyncio
+    from agent_mcp import serve
+
+    target = tmp_path / "target"
+    target.mkdir()
+    alias = tmp_path / "linked"
+    try:
+        alias.symlink_to(target, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    server = serve.Server(alias / "serve.sock")
+    monkeypatch.setattr(server, "_acquire_lease", lambda: pytest.fail("linked root reached lease"))
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        asyncio.run(server.serve_forever())
+    assert list(target.iterdir()) == []

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import daemon_entrypoint
+from agent_procutil.daemon_instances import (
+    DaemonInstanceGuard, admit_daemon_instance, daemon_entrypoint,
+)
 
 import asyncio
 import base64
 import logging
+import os
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -526,20 +529,24 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
     app.router.add_route("*", "/{tail:.*}", state.public)
 
     async def lifetime(application: web.Application) -> AsyncIterator[None]:
-        task = asyncio.create_task(state.reload_loop())
+        with admit_daemon_instance(
+            "fleet-manager-service-gateway", source=__file__, purpose="production",
+            runtime_root=Path(os.path.abspath(policy_path)).parent,
+        ):
+            task = asyncio.create_task(state.reload_loop())
 
-        def failed(finished: asyncio.Task[None]) -> None:
-            if not finished.cancelled() and finished.exception() is not None:
-                state.stopping = True
-                state.last_error = "reload-owner-failed"
-                LOG.error("service-reload-stopped code=reload-owner-failed")
+            def failed(finished: asyncio.Task[None]) -> None:
+                if not finished.cancelled() and finished.exception() is not None:
+                    state.stopping = True
+                    state.last_error = "reload-owner-failed"
+                    LOG.error("service-reload-stopped code=reload-owner-failed")
 
-        task.add_done_callback(failed)
-        try:
-            yield
-        finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            task.add_done_callback(failed)
+            try:
+                yield
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def shutdown(application: web.Application) -> None:
         state.stopping = True
@@ -566,18 +573,35 @@ class Serving:
     runner: web.AppRunner
     app: web.Application
     origin: str
+    _instance_guard: DaemonInstanceGuard | None = field(default=None, repr=False, compare=False)
+    _close_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False, compare=False)
 
     async def close(self) -> None:
+        """Join cleanup once; cancellation of one waiter cannot release admission."""
+        if self._close_task is None:
+            self._close_task = asyncio.create_task(self._close())
+        await asyncio.shield(self._close_task)
+
+    async def _close(self) -> None:
         await self.runner.cleanup()
+        if self._instance_guard is not None:
+            self._instance_guard.close()
+            self._instance_guard = None
 
 
 async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving:
     """Start a real TLS listener; port zero resolves one immutable test origin."""
-    context = listener.tls()
-    app = await build_app(listener, policy_path, **kwargs)
-    runner = web.AppRunner(app, access_log=None, shutdown_timeout=5,
-                           handler_cancellation=True)
+    guard = admit_daemon_instance(
+        "fleet-manager-service-gateway", source=__file__, purpose="production",
+        runtime_root=Path(os.path.abspath(policy_path)).parent,
+    )
+    serving = None
     try:
+        context = listener.tls()
+        app = await build_app(listener, policy_path, **kwargs)
+        runner = web.AppRunner(app, access_log=None, shutdown_timeout=5,
+                               handler_cancellation=True)
+        serving = Serving(runner, app, listener.origin, guard)
         await runner.setup()
         site = web.TCPSite(runner, listener.host, listener.port, ssl_context=context)
         await site.start()
@@ -585,15 +609,19 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
         check(len(addresses) == 1 or listener.port != 0, "ambiguous-test-listener")
         actual = listener.bound_origin(addresses[0][1])
         app[STATE].origin = listener.external_origin or actual
-        return Serving(runner, app, actual)
+        serving.origin = actual
+        return serving
     except BaseException:
-        await runner.cleanup()
+        if serving is None:
+            guard.close()
+        else:
+            await serving.close()
         raise
 
 
 @daemon_entrypoint(
     "fleet-manager-service-gateway", source=__file__, purpose="production",
-    runtime_root=lambda policy_path, tls_path: policy_path.absolute().parent,
+    runtime_root=lambda policy_path, tls_path: Path(os.path.abspath(policy_path)).parent,
 )
 def serve(policy_path: Path, tls_path: Path) -> int:
     """Foreground runner; the external service manager owns process lifetime."""
