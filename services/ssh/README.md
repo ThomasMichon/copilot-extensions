@@ -152,6 +152,9 @@ retains the original process and lease in an explicit error, not a success.
 The CLI stays in the foreground and retries retirement through that original
 kernel custody. SIGINT/SIGTERM or repeated task cancellation cannot release
 the writer early; the process reports failure only after cleanup settles.
+The withdrawal handlers and original-handler state travel with unsettled
+custody across the CLI handoff. Original handlers are restored only after
+native settlement, never in the interval before the CLI catches that outcome.
 The outer lifecycle owner must also contain descendants on abrupt host death;
 for a container, that is the existing container process namespace/lifecycle.
 

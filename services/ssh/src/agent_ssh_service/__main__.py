@@ -3,7 +3,6 @@
 import argparse
 import asyncio
 from pathlib import Path
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -18,19 +17,9 @@ async def _foreground(config) -> int:
         await run(config)
         return 0
     except UnsettledRelay as unsettled:
-        def retain(_signal=None, _frame=None):
-            print("agent-ssh-service: native-relay-cleanup-unconfirmed; "
-                  "foreground custody and writer lease retained", file=sys.stderr)
-
-        previous = {}
-        try:
-            for selected_signal in (signal.SIGINT, signal.SIGTERM):
-                previous[selected_signal] = signal.signal(selected_signal, retain)
-            retain()
-            await unsettled.settle()
-        finally:
-            for selected_signal, handler in previous.items():
-                signal.signal(selected_signal, handler)
+        print("agent-ssh-service: native-relay-cleanup-unconfirmed; "
+              "foreground custody and writer lease retained", file=sys.stderr)
+        await unsettled.settle()
         return 1
 
 

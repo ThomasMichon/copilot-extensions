@@ -20,8 +20,9 @@ _LEASE = "agent-ssh-service.lock"
 
 
 class UnsettledRelay(RuntimeError):
-    def __init__(self, relay, lease):
+    def __init__(self, relay, lease, previous):
         self.relay, self.lease = relay, lease
+        self.previous = previous
         super().__init__("native-relay-cleanup-unconfirmed")
 
     async def settle(self) -> None:
@@ -35,6 +36,9 @@ class UnsettledRelay(RuntimeError):
                     pass
                 else:
                     self.lease.release()
+                    for selected_signal, handler in self.previous.items():
+                        signal.signal(selected_signal, handler)
+                    self.previous.clear()
                     return
             logging.getLogger(__name__).error(
                 "ssh-native-relay-cleanup-unconfirmed code=foreground-custody-retained")
@@ -146,10 +150,10 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
         result, interrupted = [], False
         if service is not None:
             result, interrupted = await _drain(asyncio.create_task(service.close()))
+        if relay is not None and relay.process is not None and relay.process.returncode is None:
+            raise UnsettledRelay(relay, lease, previous)
         for selected_signal, handler in previous.items():
             signal.signal(selected_signal, handler)
-        if relay is not None and relay.process is not None and relay.process.returncode is None:
-            raise UnsettledRelay(relay, lease)
         lease.release()
         for failure in result:
             if isinstance(failure, BaseException):
