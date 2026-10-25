@@ -69,6 +69,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py runtime-source
           --test-file tests/test_prepare_runtime_source.py
+          --test-file tests/test_source_snapshot_publication.py
           --test-timeout 120 --timeout 600
       - name: Preserve native waitable owner exit status
         run: >-

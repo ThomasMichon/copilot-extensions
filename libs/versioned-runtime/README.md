@@ -438,6 +438,10 @@ writers reuse the verified winner without rewriting it; conflicting receipts or
 copies refuse publication. The adapter's `--snapshot-root` mode returns that
 snapshot path, with `--expected-source-identity` retaining the caller's complete
 initial identity across the process boundary.
+Windows sharing/access-lock failures during the final rename use the runtime's
+existing finite retry/backoff policy. Both the candidate and original source
+are revalidated before each attempt; exhausted locks and other filesystem
+errors remain explicit publication failures, never a fallback winner.
 
 Source preparation and the metadata contract are documented at
 [`prepare_runtime_source`](../../tools/prepare_runtime_source.md). The

@@ -635,6 +635,7 @@ def test_bridge_snapshots_use_explicit_bounded_native_portfolio() -> None:
              "-k", '"actual', "and", "not", 'actual_stamp"', "--test-timeout", "900", "--timeout", "1080"],
             ["python", "tools/run-plugin-tests.py", "runtime-source",
              "--test-file", "tests/test_prepare_runtime_source.py",
+             "--test-file", "tests/test_source_snapshot_publication.py",
              "--test-timeout", "120", "--timeout", "600"],
             ["python", "tools/run-plugin-tests.py", "agent-procutil",
              "--test-file", "tests/test_native_daemon_shell.py",

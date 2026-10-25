@@ -13,6 +13,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 from types import ModuleType
 from typing import Any
 
@@ -539,7 +540,8 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
     snapshots = root / "snapshots"
     snapshot = snapshots / identity.runtime_version
     snapshots.mkdir(parents=True, exist_ok=True)
-    with _runtime().construction_lease(snapshots, identity.runtime_version):
+    runtime = _runtime()
+    with runtime.construction_lease(snapshots, identity.runtime_version):
         verify(payload)
         if snapshot.exists() or snapshot.is_symlink():
             verify(snapshot)
@@ -548,9 +550,20 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
         with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
             candidate = Path(temporary) / "payload"
             shutil.copytree(payload, candidate, symlinks=True)
-            verify(candidate)
-            verify(payload)
-            candidate.rename(snapshot)
+            for attempt in range(runtime._AV_RETRY_ATTEMPTS):
+                verify(candidate)
+                verify(payload)
+                try:
+                    candidate.rename(snapshot)
+                    break
+                except OSError as error:
+                    if (
+                        getattr(error, "winerror", None) not in (5, 32, 33)
+                        or not runtime._is_transient_lock(error)
+                        or attempt == runtime._AV_RETRY_ATTEMPTS - 1
+                    ):
+                        raise
+                    time.sleep(runtime._AV_RETRY_BACKOFF * (attempt + 1))
         return snapshot
 
 
