@@ -66,7 +66,7 @@ installer_diagnostics_write() {
 
 installer_diagnostics_init() {
     INSTALLER_DIAGNOSTICS_LOG=''
-    local plugin="$1" root directory attempt writer parent native line handoff
+    local plugin="$1" root directory attempt writer parent native line handoff metadata
     local fields=()
     [[ "$plugin" =~ ^[a-z][a-z0-9-]{0,63}$ ]] || { installer_diagnostics_warn; return 0; }
     case "${OSTYPE:-}" in
@@ -110,8 +110,11 @@ installer_diagnostics_init() {
     if [[ "$attempt" =~ ^[a-f0-9]{32}$ ]]; then
         directory="$root/$attempt"
         installer_diagnostics_private "$directory" &&
-            installer_diagnostics_path "$directory/attempt.json" &&
-            grep -Fq "\"plugin\":\"$plugin\"" "$directory/attempt.json" || {
+            installer_diagnostics_path "$directory/attempt.json" || {
+                installer_diagnostics_warn; return 0;
+            }
+        metadata="$(< "$directory/attempt.json")" &&
+            [[ "$metadata" =~ \"plugin\"[[:space:]]*:[[:space:]]*\"$plugin\" ]] || {
                 installer_diagnostics_warn; return 0;
             }
     else
