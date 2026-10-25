@@ -1732,9 +1732,6 @@ function Get-ScheduledTaskLastResult {
 }
 
 function Get-ScheduledTaskRepairScript {
-    if ($env:COPILOT_PLUGIN_STAGED_FROM) {
-        return (Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'scripts\repair-scheduled-task.ps1')
-    }
     return (Join-Path $PSScriptRoot 'repair-scheduled-task.ps1')
 }
 
@@ -2747,7 +2744,11 @@ function Invoke-Provision {
 
         Write-Step 'Repairing never-ran S4U scheduled task as the default interactive AtLogOn task...'
         $pwsh = Get-PwshPath
-        & $pwsh -NoProfile -ExecutionPolicy Bypass -File $repair
+        $repairHostArguments = @()
+        if ([Environment]::GetCommandLineArgs() -icontains '-NonInteractive') {
+            $repairHostArguments += '-NonInteractive'
+        }
+        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair
         $repairExit = $LASTEXITCODE
         if ($repairExit -ne 0) {
             Write-Fail "Scheduled-task repair failed (exit $repairExit)"
@@ -2825,7 +2826,9 @@ function Get-PwshPath {
     $pwshPath = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\pwsh.exe'
     if (-not (Test-Path $pwshPath)) {
         $pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
-        $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else { 'powershell.exe' }
+        $pwshPath = if ($pwshCmd) { $pwshCmd.Source } else {
+            Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        }
     }
     return $pwshPath
 }

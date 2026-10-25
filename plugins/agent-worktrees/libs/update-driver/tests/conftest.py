@@ -93,6 +93,7 @@ def owning_context(area, monkeypatch):
         *provision.SSH_CONTEXT_KEYS,
         *provision.CODESPACES_CONTEXT_KEYS,
         *provision.LOGGER_CONTEXT_KEYS,
+        *provision.BRIDGE_CONTEXT_KEYS,
         "AGENT_VAULT_VALIDATED_CONTEXT", "AGENT_PULL_REQUESTS_VALIDATED_CONTEXT",
         "AGENT_PULL_REQUESTS_ACTION", "AGENT_PULL_REQUESTS_FORCE",
         "AGENT_PULL_REQUESTS_INSTALL_DIR", "UPDATE_DRIVER_WITNESS",
@@ -102,6 +103,9 @@ def owning_context(area, monkeypatch):
         "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
         "AGENT_LOGGER_VALIDATED_CONTEXT", "AGENT_LOGGER_PAYLOAD_ROOT",
         "AGENT_LOGGER_ACTION", "AGENT_LOGGER_DRY_RUN",
+        "AGENT_BRIDGE_VALIDATED_CONTEXT", "AGENT_BRIDGE_PAYLOAD_ROOT",
+        "AGENT_BRIDGE_ACTION", "AGENT_BRIDGE_DRY_RUN", "AGENT_BRIDGE_FORCE",
+        "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
         "COPILOT_PROJECT_DIR", "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -253,6 +257,33 @@ def owning_codespaces(owning_ssh):
             encoding="utf-8",
         )
     return payload, installation.with_name(".agent-codespaces"), project
+
+
+@pytest.fixture
+def owning_bridge(owning_codespaces):
+    payload, installation, project = owning_codespaces
+    payload = Path(shutil.copytree(payload, payload.with_name("agent-bridge")))
+    for name in ("plugin.json", "pyproject.toml", "scripts/install.ps1", "scripts/install.sh"):
+        path = payload / name
+        path.write_text(path.read_text().replace(
+            "agent-codespaces", "agent-bridge",
+        ).replace("agent_codespaces", "agent_bridge").replace(
+            "AGENT_CODESPACES", "AGENT_BRIDGE",
+        ), encoding="utf-8")
+    repository = Path(__file__).resolve().parents[3]
+    shutil.copyfile(
+        repository / "plugins/agent-bridge/payload-invocation.json",
+        payload / "payload-invocation.json",
+    )
+    for name in provision.BRIDGE_HELPERS:
+        path = payload / "scripts" / name
+        if not path.exists():
+            source = repository / (
+                "libs/installer-engine" if name in ("installer-engine.ps1", "installer-engine.sh")
+                else "plugins/agent-bridge/scripts"
+            ) / name
+            shutil.copyfile(source, path)
+    return payload, installation.with_name(".agent-bridge"), project
 
 
 @pytest.fixture

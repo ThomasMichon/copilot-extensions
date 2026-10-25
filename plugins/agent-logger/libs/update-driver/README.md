@@ -659,8 +659,8 @@ canonical queued request receipts.
 ### Fixed first-use recipes and command adoption
 
 The additive `scripts/first-use.ps1` and `scripts/first-use.sh` front doors
-support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces
-and Agent Logger payloads' existing legacy
+support the owning Agent Vault, Agent Pull Requests, Agent SSH, Agent CodeSpaces,
+Agent Logger and Agent Bridge payloads' existing legacy
 **direct `provision`** and **`stamp`** actions. Namespaced installation recipes refuse before
 queue or plugin mutation until separately qualified. Vault's cold payload command
 and generated primary command use this recipe; the latter delegates to its
@@ -684,6 +684,28 @@ actual materialized installation and installed CLI origin with isolated
 disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
+
+Bridge's fixed `stamp`/`provision` prerequisite admits only its canonical
+installed payload and default legacy root, required direct command/module
+declaration and native runtime gates. Its canonical Python engine helpers
+provide the existing complete-input freezer. Both materialized native engine
+files are also required before acquisition or queue writes. Bridge's native
+installers still own construction, immutable completion/activation, publication and service
+lifecycle. Linux admission also requires the owning installer's `xargs` content
+fingerprinting and `seq` service-loop tools before acquisition or queue writes.
+The queue supplies no service override: Windows cold provision
+performs the full native install, whereas prepared-runtime provision only
+reconciles the task (including its explicit never-ran S4U repair). POSIX
+provision preserves its install path and healthy immutable reuse. An unattended
+Windows repair that needs elevation refuses before UAC or task mutation;
+interactive explicit repair retains its existing elevation flow.
+The manual `bridge-recipes` portfolio exercises actual materialized payloads,
+Python-free callers, caller Job/group loss, coalescing and installed safe CLI
+consumers. Registration/start effects use isolated adapters, whose synthetic
+health replies prove adapter control flow, not actual serving or deployment.
+Snapshots, cells, custom roots, compound actions and `install` refuse. Ordinary
+Bridge command/bootstrap publishers and explicit installers remain unadopted;
+this prerequisite authorizes neither host service rollout nor remote sessions.
 
 Logger's fixed prerequisite admits its canonical installed payload at the
 default legacy root. It preserves the six declared command/module pairs,
