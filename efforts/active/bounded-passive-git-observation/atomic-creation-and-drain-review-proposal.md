@@ -1,5 +1,11 @@
 # Atomic creation and handoff review proposal
 
+**Latest split:** the independent admitted atomic spawn/facade is implemented
+and pure-tested; the recovery hold never revoked that work. The proposed
+receiving operation is now specified separately in
+[the bounded wire decision packet](guarded-undrain-contract-decision.md).
+No client, receiver or ZDD recovery implementation is made by that packet.
+
 ## Counterexample at the admitted recovery boundary
 
 The caller-only owner fencing is now admitted, with existing-token-only
