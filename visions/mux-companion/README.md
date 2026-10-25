@@ -98,7 +98,7 @@ meaning, identity and freshness rather than growing competing backends.
 
 ### switchable-cli-and-summary-views
 The operator can flip between the running Copilot CLI and an overall summary
-pane in the same mux worktree, through keyboard controls and clickable view
+pane in the same mux window, through keyboard controls and clickable view
 tabs. Switching does not restart, replace, type into or take custody of the
 CLI session. Returning to the CLI restores its existing interaction.
 

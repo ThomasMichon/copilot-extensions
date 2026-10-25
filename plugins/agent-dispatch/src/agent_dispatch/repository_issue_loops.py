@@ -343,8 +343,7 @@ def validate_config(
         "repos",
         "kind",
         "spec",
-        "owner",
-        "description",
+        "owner", "title", "description",
     }
     if present := sorted(reserved_pool & set(pool)):
         raise RegistrarError(

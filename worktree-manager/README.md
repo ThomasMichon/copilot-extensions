@@ -19,6 +19,21 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## In-session Mux Companion
+
+`worktree-manager companion` opens the current worktree's Textual companion.
+Summary is the initial tab, showing its reported purpose and disposition.
+Claims shows the actual engine resource ledger, including the inbound owner,
+resource references, states and notes. Each observation retains its own
+confirmation marker and timestamp; unavailable data is not an empty ledger.
+Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
+
+Recovery retains session lineage and the explicit, human-gated Cut over action
+for an already-prepared handoff. Selecting a tab never triggers cutover.
+These are tabs inside the Companion, not mux CLI/Summary view switches.
+Alternate mux panes, topology/statistics and two-line clickable mux chrome
+remain separately tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
+
 ## Set up the harness
 
 For UI development without installing or promoting a candidate, use the

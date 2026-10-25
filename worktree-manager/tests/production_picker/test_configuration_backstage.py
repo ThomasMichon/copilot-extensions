@@ -34,6 +34,10 @@ def test_illustrated_configuration_scenarios_use_production_compositor(monkeypat
     from configuration import capture_configuration
     from render import _demo_source
 
+    def refuse_provider_spawn(*args, **kwargs):
+        raise AssertionError("Configuration snapshots must not launch a real provider")
+
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_spawn_stream", refuse_provider_spawn)
     svg = capture_configuration(_demo_source(), scenario)
     assert "<svg" in svg
     assert f"Configuration - {scenario}" in html.unescape(svg).replace("\xa0", " ")

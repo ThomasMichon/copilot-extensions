@@ -4,8 +4,11 @@ A hotkey-summoned in-session view for the **current worktree** -- resolved
 from the process's own cwd, the same way the status bar / status core
 resolve it (``agent-worktrees status-segment --json``, the same non-daemon
 classify pass the mux bar itself uses). It explains the worktree's status in
-plain language and lists its session lineage with the current head clearly
-marked.
+plain language. Summary and Claims lead; session lineage and the explicit
+cutover action remain in the secondary Recovery tab. Disposition and actual
+resource claims come from the engine's independently marked status bundle,
+not transcript inference or a second ledger. Reads run off Textual's event
+loop so the popup remains dismissible during a slow engine read.
 
 v1 was view-only. mux-companion-manual-cutover-diagnostics (#4369) adds
 exactly two explicit, human-gated actions, both bounded by the vision's own
@@ -28,14 +31,21 @@ module docstring.
 from __future__ import annotations
 
 import os
+import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from threading import Event
 
 from rich.text import Text
+from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Button, DataTable, Footer, Header, Static
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import (
+    Button, DataTable, Footer, Header, Static, TabbedContent, TabPane,
+)
 
 from . import engine_client as ec
+from . import companion_client as cc
 from . import handoff_client as hc
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
@@ -98,9 +108,12 @@ class _CompanionData:
     sessions: list[dict] = field(default_factory=list)
     pending_handoff: dict | None = None
     error: str | None = None
+    bundle: dict = field(default_factory=dict)
+    bundle_error: str | None = None
+    sessions_error: str | None = None
 
 
-def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
+def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _CompanionData:
     """Resolve the worktree containing ``cwd`` (default: the real cwd) and
     fetch its status + session lineage.
 
@@ -114,19 +127,28 @@ def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
     """
     target = cwd if cwd is not None else os.getcwd()
     try:
-        payload = ec.current_worktree_status(path=target)
+        payload = ec.current_worktree_status(path=target, runner=runner)
     except ec.EngineError as exc:
         return _CompanionData(error=str(exc))
+    if not isinstance(payload, dict):
+        return _CompanionData(error="No current worktree status is available.")
     if payload.get("error"):
         return _CompanionData(error=str(payload["error"]))
 
     worktree_id = payload.get("id")
     sessions: list[dict] = []
+    sessions_error = None
+    bundle: dict = {}
+    bundle_error = None
     if worktree_id:
         try:
-            sessions = ec.list_worktree_sessions(None, worktree_id)
-        except ec.EngineError:
-            pass  # lineage stays empty; the status section still renders
+            sessions = ec.list_worktree_sessions(None, worktree_id, runner=runner)
+        except ec.EngineError as exc:
+            sessions_error = str(exc)
+        try:
+            bundle = cc.worktree_status_bundle(None, worktree_id, runner=runner)
+        except ec.EngineError as exc:
+            bundle_error = str(exc)
 
     # Phase 8 (worktrees-pivot-ux-overhaul #3307): situational-awareness-only
     # pending context-handoff baton headline (visions/mux-companion
@@ -136,11 +158,81 @@ def _load_current_worktree(cwd: str | None = None) -> _CompanionData:
     worktree_path = payload.get("path")
     if worktree_path:
         try:
-            pending = hc.pending_handoff(None, worktree_path)
+            pending = hc.pending_handoff(None, worktree_path, runner=runner)
         except ec.EngineError:
             pending = None
 
-    return _CompanionData(worktree=payload, sessions=sessions, pending_handoff=pending)
+    return _CompanionData(
+        worktree=payload, sessions=sessions, pending_handoff=pending,
+        bundle=bundle, bundle_error=bundle_error, sessions_error=sessions_error,
+    )
+
+
+def _fact(data: _CompanionData, name: str) -> tuple[dict | None, str]:
+    """Keep each producer observation and its uncertainty together."""
+    if data.bundle_error:
+        return None, f"Unavailable: {data.bundle_error}"
+    fact = data.bundle.get("facts", {}).get(name)
+    if not isinstance(fact, dict) or not isinstance(fact.get("value"), dict):
+        return None, "Unavailable: the engine supplied no observation."
+    state = "Confirmed" if fact.get("confirmed") is True else "Last known; unconfirmed"
+    observed = fact.get("observed_at")
+    if isinstance(observed, (int, float)) and not isinstance(observed, bool):
+        try:
+            stamp = datetime.fromtimestamp(observed, timezone.utc).isoformat(timespec="seconds")
+            state += f" at {stamp}"
+        except (ValueError, OverflowError, OSError):
+            state += "; observation time unavailable"
+    else:
+        state += "; observation time unavailable"
+    return fact["value"], state
+
+
+def _summary_text(data: _CompanionData) -> Text:
+    text = Text()
+    disposition, evidence = _fact(data, "disposition")
+    text.append("Purpose\n", style="bold #d78700")
+    if disposition is None:
+        text.append(evidence + "\n")
+    else:
+        text.append(str(disposition.get("title") or "No purpose reported.") + "\n\n")
+        text.append("Summary\n", style="bold")
+        text.append(str(disposition.get("summary") or "No summary reported.") + "\n")
+        text.append(evidence + "\n", style="dim")
+        flags = []
+        if disposition.get("follow_up"):
+            flags.append("Follow-up required")
+        if disposition.get("paused"):
+            flags.append("Intentionally paused")
+        if flags:
+            text.append(" | ".join(flags) + "\n", style="bold #d7af00")
+    claims, claims_evidence = _fact(data, "claims")
+    text.append("\nClaims\n", style="bold")
+    resources = claims.get("resources") if claims is not None else None
+    if isinstance(resources, list) and all(isinstance(row, dict) for row in resources):
+        text.append(f"{len(resources)} recorded resource(s); see Claims for states and references.\n")
+    else:
+        text.append("Resource ledger unavailable.\n")
+    text.append(claims_evidence, style="dim")
+    return text
+
+
+def _claims_view(data: _CompanionData) -> tuple[Text, list[dict]]:
+    claims, evidence = _fact(data, "claims")
+    text = Text(evidence + "\n")
+    if claims is None:
+        return text, []
+    text.append("Owned by: ", style="bold")
+    text.append(str(claims.get("owner_ref") or "(no owner recorded)") + "\n")
+    resources = claims.get("resources")
+    if not isinstance(resources, list) or any(not isinstance(row, dict) for row in resources):
+        text.append("Resource ledger unavailable: invalid claims observation.", style="bold yellow")
+        return text, []
+    text.append(
+        f"{len(resources)} recorded resource(s). States are reported by the owning engine."
+        if resources else "No recorded resources in this observation."
+    )
+    return text, resources
 
 
 def _fallback_label(row: dict) -> str:
@@ -206,7 +298,7 @@ def _closure_explanation(row: dict) -> list[str]:
 
 
 class MuxCompanionApp(App):
-    """Status + session-lineage view for the CURRENT worktree, plus two
+    """Summary, Claims and secondary Recovery for the CURRENT worktree, plus
     explicit, human-gated actions ("Cut over", "Refresh") -- see the module
     docstring for the exact boundary. Styled to match the Worktree Manager's
     own Picker palette (grey/orange chrome, per-state colors) rather than
@@ -230,7 +322,7 @@ class MuxCompanionApp(App):
         padding: 1 2;
     }
 
-    #lineage-label {
+    #lineage-label, #claims-evidence {
         padding: 0 2;
         color: #b2b2b2;
         text-style: bold;
@@ -240,6 +332,24 @@ class MuxCompanionApp(App):
         height: 1fr;
         margin: 0 2;
         background: #1a1a1a;
+    }
+
+    #views {
+        height: 1fr;
+    }
+
+    TabPane {
+        padding: 0;
+    }
+
+    #summary {
+        height: auto;
+        padding: 1 2;
+    }
+
+    #claims {
+        height: 1fr;
+        margin: 0 2;
     }
 
     #footer-row {
@@ -267,30 +377,68 @@ class MuxCompanionApp(App):
     }
     """
 
+    BINDINGS = [("r", "refresh", "Refresh"), ("escape", "quit", "Exit")]
+
     def __init__(self, cwd: str | None = None) -> None:
         super().__init__()
         self._cwd = cwd
-        self._data = _load_current_worktree(cwd)
+        self._data = _CompanionData()
+        self._loading = True
+        self._read_cancel = Event()
         self._action_message: Text | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static(self._status_text(), id="status")
-        if not self._data.error:
-            yield Static(
-                "Session lineage (\u25cf marks the current head):",
-                id="lineage-label",
-            )
-            yield DataTable(id="lineage")
+        yield Static(Text("Loading current worktree..."), id="status")
+        with TabbedContent(initial="summary-tab", id="views"):
+            with TabPane("Summary", id="summary-tab"):
+                with VerticalScroll():
+                    yield Static(id="summary")
+            with TabPane("Claims", id="claims-tab"):
+                yield Static(id="claims-evidence")
+                yield DataTable(id="claims")
+            with TabPane("Recovery", id="recovery-tab"):
+                yield Static(
+                    "Session lineage (\u25cf marks the current head):",
+                    id="lineage-label",
+                )
+                yield DataTable(id="lineage")
+                yield Button("Cut over", id="cutover-btn", disabled=True)
         with Horizontal(id="footer-row"):
-            if not self._data.error:
-                yield Button("Cut over", id="cutover-btn")
-                yield Button("Refresh", id="refresh-btn")
+            yield Button("Refresh", id="refresh-btn")
             yield Button("Exit", id="exit-btn")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._reload()
+
+    def on_unmount(self) -> None:
+        self._read_cancel.set()
+
+    @work(exclusive=True)
+    async def _reload(self) -> None:
+        self._loading = True
+        self.query_one("#refresh-btn", Button).disabled = True
+        self.query_one("#cutover-btn", Button).disabled = True
+        cancelled = Event()
+        self._read_cancel = cancelled
+        try:
+            self._data = await asyncio.to_thread(
+                _load_current_worktree, self._cwd,
+                runner=cc.cancellable_read_runner(
+                    cancelled, cwd=self._cwd or os.getcwd(),
+                ),
+            )
+        finally:
+            cancelled.set()
+        self._loading = False
         self._refresh_view(reload=False)
+        self.query_one("#refresh-btn", Button).disabled = False
+
+    def action_refresh(self) -> None:
+        if not self._loading:
+            self._action_message = None
+            self._reload()
 
     def _refresh_view(self, *, reload: bool = True) -> None:
         """(Re)paint the whole view from ``self._data`` -- optionally
@@ -299,15 +447,30 @@ class MuxCompanionApp(App):
         reopening after a manual ``/clear`` + paste-seed resume, or pressing
         "Cut over" in THIS popup, shows current state without exiting Mux)."""
         if reload:
-            self._data = _load_current_worktree(self._cwd)
+            self._reload()
+            return
         row = self._data.worktree
         self.title = str(row.get("id") or "Mux Companion")
         repo = row.get("repo") or "?"
         branch = row.get("branch") or "?"
         self.sub_title = f"{repo} \u00b7 {branch}"
         self.query_one("#status", Static).update(self._status_text())
-        if self._data.error:
-            return
+        self.query_one("#summary", Static).update(_summary_text(self._data))
+        evidence, resources = _claims_view(self._data)
+        self.query_one("#claims-evidence", Static).update(evidence)
+        claims_table = self.query_one("#claims", DataTable)
+        claims_table.clear(columns=True)
+        claims_table.cursor_type = "row"
+        claims_table.add_columns("Kind", "Resource", "State", "Note")
+        for claim in resources:
+            claims_table.add_row(*[
+                Text(str(claim.get(key) or ""))
+                for key in ("kind", "ref", "state", "note")
+            ])
+        lineage_label = "Session lineage (\u25cf marks the current head):"
+        if self._data.sessions_error:
+            lineage_label += f"\nUnavailable: {self._data.sessions_error}"
+        self.query_one("#lineage-label", Static).update(Text(lineage_label))
         table = self.query_one("#lineage", DataTable)
         table.clear(columns=True)
         table.cursor_type = "row"
@@ -328,7 +491,7 @@ class MuxCompanionApp(App):
         except Exception:
             cutover_btn = None
         if cutover_btn is not None:
-            cutover_btn.disabled = not bool(self._data.pending_handoff)
+            cutover_btn.disabled = self._loading or not bool(self._data.pending_handoff)
 
     def _status_text(self) -> Text:
         text = Text()
@@ -389,8 +552,7 @@ class MuxCompanionApp(App):
         if event.button.id == "exit-btn":
             self.exit()
         elif event.button.id == "refresh-btn":
-            self._action_message = None
-            self._refresh_view()
+            self.action_refresh()
         elif event.button.id == "cutover-btn":
             self._cut_over()
 
