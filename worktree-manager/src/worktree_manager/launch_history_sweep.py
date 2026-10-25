@@ -100,6 +100,8 @@ async def _capture(stream, *, retain: bool) -> bytes:
 
 
 async def query_source(entry, query: list[str], *, timeout: float) -> bytes:
+    if len(entry.ssh_environments) > 1:
+        raise SweepError("ambiguous-ssh-profile")
     alias, shell = resolve_ssh_target(entry)
     if not entry.ssh_ready or not alias or not shell:
         raise SweepError("ssh-not-ready")
@@ -127,7 +129,7 @@ async def query_source(entry, query: list[str], *, timeout: float) -> bytes:
             if config.user:
                 connection += ["-l", config.user]
             process = await create_ssh_subprocess(
-                ssh, "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                ssh, "-T", "-a", "-x", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "ConnectionAttempts=1", "-o", "ControlMaster=no",
                 "-o", "ControlPath=none", "-o", "ClearAllForwardings=yes",
                 "-o", "PermitLocalCommand=no", "-o", "StrictHostKeyChecking=yes",

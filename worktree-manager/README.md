@@ -1094,10 +1094,14 @@ selection is currently unavailable and refuses rather than substituting the
 machine-global registry.
 
 Select 1-8 configured machine/environment identities explicitly. The sweep
-reads **one metadata page per source** through its configured SSH profile and
+refuses legacy multi-profile entries that cannot be normalized to independent
+execution spaces, rather than substituting their default SSH profile for a
+selected alias. Declare separate execution-space entries for those sources.
+It reads **one metadata page per source** through its configured SSH profile and
 the target's published absolute `~/.local/bin/worktree-manager` front door
 (`worktree-manager.ps1` on Windows), not a PATH-selected engine or a setup
-command. Only already-known host keys are accepted; forwarding, persistent
+command. Only already-known host keys are accepted; agent, X11 and port
+forwarding, persistent
 control sockets and SSH local commands are disabled. The shared SSH transport
 owns proxy children and cleanup. A source has a 20-second read deadline, the
 sweep shares a 120-second deadline, and each source stream is limited to 1 MiB.

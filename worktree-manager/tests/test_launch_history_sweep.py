@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 import yaml
-from machine_transport import MachineEntry, SSHEnvironment
+from machine_transport import MachineEntry, SSHEnvironment, normalize_machine_entries
 
 from worktree_manager import engine_client, launch_history_cli, launch_history_sweep as sweep, machine_roster
 from worktree_manager.launch_attempts import LaunchAttempts
@@ -146,6 +146,26 @@ def test_aliases_do_not_query_the_same_source_twice(page, monkeypatch):
     ))
     assert calls == ["host-linux"]
     assert report["sources"][1]["code"] == "duplicate-source"
+
+
+@pytest.mark.parametrize("selection", ["mixed-host", "non-default-linux"])
+def test_unsplit_legacy_profiles_never_dispatch_the_default_for_another_selection(monkeypatch, selection):
+    mixed = MachineEntry(
+        key="mixed-host", display_name="Mixed legacy host", environment="windows", ssh_ready=True,
+        ssh_environments=[
+            SSHEnvironment("windows", "default-windows", "pwsh"),
+            SSHEnvironment("linux", "non-default-linux", "bash"),
+        ],
+    )
+    machines = normalize_machine_entries({mixed.key: mixed})
+    monkeypatch.setattr(machine_roster, "selected_entries", lambda _: machines)
+    monkeypatch.setattr(
+        sweep, "SSHProfileSource", lambda *a, **kw: pytest.fail("ambiguous source must not connect"),
+    )
+    report = asyncio.run(sweep.read_sweep(arguments(source_machine=[selection])))
+    assert report["sources"][0]["status"] == "unavailable"
+    assert report["sources"][0]["code"] == "ambiguous-ssh-profile"
+    assert "page" not in report["sources"][0]
 
 
 def test_total_deadline_does_not_expand_per_source(page, monkeypatch):
@@ -299,6 +319,7 @@ def test_transport_uses_existing_proxy_owner_and_cleans_up(monkeypatch, page):
     assert argv[-3:-1] == ("--", "host-profile")
     assert "StrictHostKeyChecking=yes" in argv and "ClearAllForwardings=yes" in argv
     assert "ControlMaster=no" in argv and "UpdateHostKeys=no" in argv
+    assert "-a" in argv and "-x" in argv
     assert kwargs["config"] is config and kwargs["stdin"] == asyncio.subprocess.DEVNULL
     assert len(cleanups) == 1 and cleanups[0][1] == {"grace": 1}
 
