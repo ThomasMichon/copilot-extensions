@@ -14,9 +14,30 @@ import update_telemetry as ut
 
 from agent_worktrees import installer_diagnostics, installer_run, registry_paths, update_events
 from agent_worktrees import update_runtime as runtime
+from agent_worktrees import update_runtime_plan
 
 
 PAYLOAD = Path(__file__).resolve().parents[1]
+
+
+def test_other_runtime_steps_do_not_enable_representative_diagnostics(tmp_path, monkeypatch):
+    captured = []
+
+    def run(argv, **kwargs):
+        captured.append(kwargs)
+        return SimpleNamespace(status="OK")
+
+    monkeypatch.setattr(runtime, "_run_human_installer", run)
+    monkeypatch.setattr(
+        update_events, "installer_diagnostics",
+        lambda *args: pytest.fail("other consumers have not opted into capture"),
+    )
+    step = update_runtime_plan.RuntimeUpdateStep(
+        name="agent-example", phase="registered", payload=tmp_path,
+        argv=("owned-installer",), deadline_s=30,
+    )
+    assert runtime._execute_runtime_step(step) == "OK"
+    assert len(captured) == 1 and "diagnostics" not in captured[0]
 
 
 @pytest.fixture

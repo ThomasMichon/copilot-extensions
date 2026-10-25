@@ -1118,3 +1118,25 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   compiler cause. No local timing retry or budget increase is admitted.
   The fixture repair requires a new exact-head hosted run; all draft and
   rollout holds remain.
+- The UTF-8 fixture repair published as `068db2380f`. Its first managed
+  attempt failed in the unchanged 30-second fetch bound before pushing;
+  a bounded anonymous read of the public Git remote succeeded in **1.85
+  seconds**, and an ordinary managed retry published the commit. This
+  distinguishes a reachable public read from the unproven managed acquisition
+  failure; it does not establish an authentication root cause.
+- The advancing base introduced the prepared-runtime-source execution route.
+  A preserved original-commit replay onto `edde802ec4` retains its source
+  revalidation, lifecycle argv, artifact cwd, pinned receipt and update/install
+  fallback. Representative Worktrees attempts opt into diagnostics on that
+  actual route and emit each attempt's reference, including fallback attempts.
+  Other runtime consumers remain opted out. Complementary registered-origin
+  timeout capture and the upstream runner dependency-cache repair are retained.
+  No source authority, deployment receipt or cache protection is weakened.
+- Reconciled source-step, receipt, planner and non-native launch-reference
+  controls pass: **70 passed, 11 native cases deselected, 175.17 seconds;
+  864.76 seconds including required cache preparation and cleanup**. The
+  aggregate remains below its unchanged 900-second limit. The source retry
+  regression checks two distinct diagnostic references and unchanged pinned
+  execution/receipt inputs; another control proves other runtimes receive no
+  diagnostics opt-in. Targeted Ruff, the touched-module cap and the complete
+  admitted unit-source hash inventory pass.
