@@ -164,7 +164,7 @@ def test_legacy_acquisition_migration_preserves_original_unknown_history(tmp_pat
     assert path.read_bytes() == before
     db = Database(path)
     try:
-        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 37
+        assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION == 38
         row, = db.execute_read("SELECT * FROM acquisition_attempts")
         assert (row["delivery_id"], row["request_digest"], row["token"], row["state"]) == (
             "original-delivery", "original-digest", "original-token", "pending",

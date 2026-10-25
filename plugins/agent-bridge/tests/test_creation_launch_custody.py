@@ -10,7 +10,7 @@ import pytest
 
 from agent_bridge.creation_custody import CreationJournal
 from agent_bridge.creation_launch_schema import COLUMNS, schema_triggers
-from agent_bridge.db import Database
+from agent_bridge.db import Database, SCHEMA_VERSION
 from agent_bridge.db_adoption import open_existing_writable
 from agent_bridge.runtime_custody import RuntimeCustodyError
 from test_creation_custody import creation_request
@@ -233,7 +233,7 @@ def test_creation_launch_migration_from_36_preserves_original_allocation(tmp_db)
     migrated = Database(tmp_db.db_path)
     try:
         assert CreationJournal(migrated).read(request) == before
-        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == 37
+        assert migrated.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         assert all(before[name] is None for name in COLUMNS)
     finally:
         migrated.close()

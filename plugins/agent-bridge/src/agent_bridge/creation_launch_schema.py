@@ -52,24 +52,36 @@ def schema_triggers() -> dict[str, str]:
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(workspace_embodiments)")}
-    for name, kind in COLUMNS.items():
+    _ensure_table_schema(conn, "workspace_embodiments", COLUMNS, schema_triggers())
+
+
+def _ensure_table_schema(
+    conn: sqlite3.Connection, table: str, declarations: dict[str, str], triggers: dict[str, str],
+) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, kind in declarations.items():
         if name not in columns:
-            conn.execute(f"ALTER TABLE workspace_embodiments ADD COLUMN {name} {kind}")
-    for statement in schema_triggers().values():
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+    for statement in triggers.values():
         conn.execute(statement)
 
 
 def validate_schema(conn: sqlite3.Connection) -> None:
-    columns = {row[1]: row for row in conn.execute("PRAGMA table_info(workspace_embodiments)")}
-    for name, kind in COLUMNS.items():
+    _validate_table_schema(conn, "workspace_embodiments", COLUMNS, schema_triggers())
+
+
+def _validate_table_schema(
+    conn: sqlite3.Connection, table: str, declarations: dict[str, str], triggers: dict[str, str],
+) -> None:
+    columns = {row[1]: row for row in conn.execute(f"PRAGMA table_info({table})")}
+    for name, kind in declarations.items():
         row = columns.get(name)
         if row is None or row[2].upper() != kind or row[3] != 0 or row[5] != 0:
             raise RuntimeCustodyError(f"Creation launch requires writable preparation: {name}")
-    for name, statement in schema_triggers().items():
+    for name, statement in triggers.items():
         row = conn.execute("SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,)).fetchone()
         if (
-            row is None or row[0] != "trigger" or row[1] != "workspace_embodiments"
+            row is None or row[0] != "trigger" or row[1] != table
             or type(row[2]) is not str or _normalized_schema(row[2]) != _normalized_schema(statement)
         ):
             raise RuntimeCustodyError(f"Creation launch requires writable preparation: {name}")
