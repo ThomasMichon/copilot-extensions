@@ -56,6 +56,11 @@ class LocalLaunchOwner(ABC):
     _client: AcpClient | None = field(default=None, init=False)
     _connection: Any = field(default=None, init=False)
     _host: Any = field(default=None, init=False)
+    _host_record: Any = field(default=None, init=False)
+    _socket: Any = field(default=None, init=False)
+    _streams: Any = field(default=None, init=False)
+    _state_file: str | None = field(default=None, init=False)
+    _nonce: str | None = field(default=None, init=False)
     _host_process: Any = field(default=None, init=False)
     _host_pid: int | None = field(default=None, init=False)
     _child_pid: int | None = field(default=None, init=False)
@@ -92,6 +97,7 @@ class LocalLaunchOwner(ABC):
         if self._session is not None:
             if (
                 self.frontend.manager.get_session(self.session_id) is not self._session
+                or self._session._local_launch_owner is not self
                 or self._session.target is not self._target
                 or self._target.to_json() != self._target_json
                 or self._session.status != SessionStatus.STARTING
@@ -110,11 +116,41 @@ class LocalLaunchOwner(ABC):
             or session.session_id != self.session_id or session.target is not target
             or target.worktree_id != self.worktree_id or not target.explicit_cwd
             or session.acp_session_id != self.native_session_id or self._session is not None
+            or session._local_launch_owner is not None
             or target.native_resume_id not in (None, self.native_session_id)
         ):
             raise RuntimeCustodyError("Local launch requires its original keyed local session")
         self._session, self._target, self._target_json = session, target, target.to_json()
+        session._local_launch_owner = self
         self.require_current()
+
+    def retain_process(self, proc: Any, state_file: str, nonce: str) -> None:
+        """Observe the actual Popen before readiness; this never grants new effects."""
+        self._host_process, self._host_pid = proc, proc.pid
+        self._host_birth = process_start_time(proc.pid)
+        self._state_file, self._nonce = state_file, nonce
+
+    def retain_host(self, host: Any) -> None:
+        self._host, self._child_pid = host, host.child_pid
+        self._child_birth = process_start_time(host.child_pid)
+        self._host_record = self.frontend.manager._register_host_launch(host, self.session_id)
+
+    def retain_client(self, client: AcpClient) -> None:
+        self._client = client
+        self._session.client = client
+        client._acquisition_launch = self
+
+    def retain_failed_start(self) -> None:
+        """Keep unknown startup custody even if its admission epoch has closed."""
+        if self._client is not None:
+            self._connection = self._client._connection
+        from .session_manager import log
+
+        log.warning("Original local launch %s remains held after startup failure", self.session_id)
+        self._session.event_log.append("original_launch_held", {
+            "host_pid": self._host_pid, "child_pid": self._child_pid,
+            "reason": "startup_outcome_unknown", "retryable": False,
+        })
 
     def require_no_host(self) -> None:
         index = self.frontend.manager._host_index
@@ -142,16 +178,19 @@ class LocalLaunchOwner(ABC):
 
         self.require_current()
         if (
-            type(client) is not AcpClient or self._client is not None or host.boundary != "local"
+            type(client) is not AcpClient or self._client is not client or self._host is not host
+            or host.boundary != "local"
             or host.proc is None or host.proc.pid != host.host_pid
             or host.proc.poll() is not None
             or client._connection is None or not client._host_mode or not client.is_running
             or client._host_child_pid != host.child_pid or client.acp_session_id is not None
         ):
             raise RuntimeCustodyError("Local launch requires its actual local host transport")
-        self._host_birth = process_start_time(host.host_pid)
-        self._child_birth = process_start_time(host.child_pid)
-        if not self._host_birth or not self._child_birth:
+        if (
+            not self._host_birth or not self._child_birth
+            or process_start_time(host.host_pid) != self._host_birth
+            or process_start_time(host.child_pid) != self._child_birth
+        ):
             raise RuntimeCustodyError("Local launch host or child birth is unavailable")
         self._host, self._client, self._connection = host, client, client._connection
         self._host_process, self._host_pid, self._child_pid = host.proc, host.host_pid, host.child_pid

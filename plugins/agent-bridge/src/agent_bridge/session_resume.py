@@ -473,10 +473,11 @@ class _SessionResumeMixin:
                     # Stop the wedged child before the next round (the "stop" in
                     # stop->resume); re-rolls the launch against the SAME ACP
                     # session, preserving prior-turn context.
-                    if client:
-                        with contextlib.suppress(Exception):
-                            await client.shutdown()
-                    session.client = None
+                    if acquisition_launch is None:
+                        if client:
+                            with contextlib.suppress(Exception):
+                                await client.shutdown()
+                        session.client = None
                     if cold_outage is not None or acquisition_launch is not None:
                         session.status = SessionStatus.STOPPED
                         self._db.update_session_status(

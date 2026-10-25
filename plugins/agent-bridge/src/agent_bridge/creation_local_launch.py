@@ -73,6 +73,7 @@ async def start(
     facts = decode(request.facts_json)
     target = SpawnTarget.from_json(json.dumps(facts["target"]))
     options, prompt = facts["options"], facts["prompt"]
+    target.env = {**target.env, **(options.get("env_overrides") or {})}
     saved = decode(row["worktree_json"])
     worktree_id, delivery_id = saved["id"], f"creation:{request.key_digest}"
     with executor(db, f"creation:{request.key_digest}"):

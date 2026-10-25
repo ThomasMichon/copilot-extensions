@@ -295,6 +295,8 @@ def launch_session_host(
         cwd=cwd or None,
         **spawn_options,
     )
+    if acquisition_launch is not None:
+        acquisition_launch.retain_process(proc, str(state_file), nonce)
     crash_tail = _CrashTailCapture(proc.stdout)
     expected_identity: str | None = None
     if sys.platform != "win32" and not contained_test_mode():
@@ -347,6 +349,10 @@ def launch_session_host(
     # waiting on it rather than leaking a hung process (and anything it
     # already spawned), an unbounded-lifetime daemon thread, and its pipe
     # file descriptor.
+    if acquisition_launch is not None:
+        raise TimeoutError(
+            f"original session host readiness is unknown after {ready_timeout}s; retaining custody"
+        )
     _kill_host_process_tree(proc, expected_identity)
     try:
         proc.wait(timeout=5.0)

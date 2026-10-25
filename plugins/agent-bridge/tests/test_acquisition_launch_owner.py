@@ -25,6 +25,16 @@ from test_acquisition_foundation import request
 from test_runtime_custody import close, installation
 
 
+def retain_synthetic_transport(owner: LocalLaunchOwner, client: AcpClient, host: SimpleNamespace) -> None:
+    """Follow startup observation order; these are unit-only process references."""
+    host.local_port, host.protocol_version = 1, 1
+    host.state_file, host.nonce, host.endpoint = "synthetic-state", "synthetic-nonce", {}
+    owner.retain_process(host.proc, host.state_file, host.nonce)
+    owner.retain_host(host)
+    owner.retain_client(client)
+    owner.attach_transport(client, host)
+
+
 def test_acquisition_launch_unselected_host_keeps_requested_reap_timeouts(tmp_path, monkeypatch):
     from agent_bridge.session_host import launcher
 
@@ -115,7 +125,7 @@ async def test_acquisition_launch_native_checks_inside_scheduled_rpc(local_launc
         host_pid=os.getpid(), child_pid=os.getpid(),
         proc=SimpleNamespace(pid=os.getpid(), poll=lambda: None), boundary="local",
     )
-    rig.owner.attach_transport(client, host)
+    retain_synthetic_transport(rig.owner, client, host)
     invoke = rig.owner.native_method(client, "new", client._connection.new_session)
     pending = invoke(cwd=rig.target.cwd, mcp_servers=[])
     close(rig.db, rig.identity, rig.producer)
@@ -141,7 +151,7 @@ async def test_acquisition_launch_native_acceptance_survives_closed_reply(local_
         host_pid=os.getpid(), child_pid=os.getpid(),
         proc=SimpleNamespace(pid=os.getpid(), poll=lambda: None), boundary="local",
     )
-    rig.owner.attach_transport(client, host)
+    retain_synthetic_transport(rig.owner, client, host)
     invoke = rig.owner.native_method(client, "new", client._connection.new_session)
     assert (await invoke(cwd=rig.target.cwd, mcp_servers=[])).session_id == "native-new"
     report = AcquisitionJournal(rig.db).read_launch(rig.original)
@@ -236,7 +246,7 @@ async def test_acquisition_launch_native_retains_exact_live_references(local_lau
         host_pid=os.getpid(), child_pid=os.getpid(),
         proc=SimpleNamespace(pid=os.getpid(), poll=lambda: None), boundary="local",
     )
-    rig.owner.attach_transport(client, host)
+    retain_synthetic_transport(rig.owner, client, host)
     invoke = rig.owner.native_method(client, "new", original.new_session)
     if change == "session":
         rig.runtime.manager._sessions[rig.session.session_id] = Session("bridge-a", "other", rig.target)
@@ -282,7 +292,7 @@ async def test_acquisition_launch_invalid_params_cannot_repeat_actual_native_cal
         host_pid=os.getpid(), child_pid=os.getpid(),
         proc=SimpleNamespace(pid=os.getpid(), poll=lambda: None), boundary="local",
     )
-    rig.owner.attach_transport(client, host)
+    retain_synthetic_transport(rig.owner, client, host)
     with pytest.raises(RuntimeCustodyError, match="held"):
         await client.new_session(rig.target.cwd, acquisition_launch=rig.owner)
     client._connection.new_session.assert_awaited_once()
@@ -315,7 +325,7 @@ async def test_acquisition_launch_configuration_rechecks_each_actual_effect(loca
         host_pid=os.getpid(), child_pid=os.getpid(),
         proc=SimpleNamespace(pid=os.getpid(), poll=lambda: None), boundary="local",
     )
-    rig.owner.attach_transport(client, host)
+    retain_synthetic_transport(rig.owner, client, host)
     with pytest.raises(RuntimeCustodyError, match="open epoch"):
         await client.new_session(rig.target.cwd, acquisition_launch=rig.owner)
     client._connection.new_session.assert_awaited_once()

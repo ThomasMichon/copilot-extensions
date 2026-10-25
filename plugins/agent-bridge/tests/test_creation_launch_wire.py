@@ -33,7 +33,9 @@ from test_runtime_custody import close, installation
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", [
-    "reply", "no-prompt", "drop-reply", "lost-binding", "closed-binding", "closed-capture",
+    "reply", "no-prompt", "drop-reply", "live-drop-reply", "live-initialize",
+    "cancel-native", "ready-timeout", "environment",
+    "lost-binding", "closed-binding", "closed-capture",
     "config", "closed-config", "closed-first-prompt", "closed-binding-scheduled", "closed-binding-start",
 ])
 async def test_creation_launch_real_host_original_binding_and_first_prompt(
@@ -45,10 +47,18 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
     producer = RuntimeProducer("creation-frontend", os.getpid(), process_start_time(os.getpid()))
     admission = db.enroll_runtime_producer(identity, epoch.epoch, producer)
     frontend = CreationFrontend.capture(manager, identity, admission)
+    if mode == "live-drop-reply":
+        manager._timeouts = manager._timeouts.model_copy(update={"session_new": 0.25})
+    if mode == "live-initialize":
+        manager._timeouts = manager._timeouts.model_copy(update={"session_start": 0.25})
+    if mode == "ready-timeout":
+        manager._timeouts = manager._timeouts.model_copy(update={"session_host_ready": 0.0})
     manager._session_host_active_reap_seconds = 1800.0
     path = tmp_path / "workspace"
     path.mkdir()
     target = SpawnTarget(type="local", project="fixture", cwd=str(tmp_path))
+    if mode == "environment":
+        target.env = {"SYNTHETIC_BASE": "preserved", "SYNTHETIC_OVERRIDE": "old"}
     saved = {
         "id": "creation-worktree", "repo": "fixture", "path": str(path), "creation_nonce": "original-nonce",
     }
@@ -101,6 +111,10 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
 
     async def resolve(resolved, **_kwargs):
         assert resolved.cwd == str(path) and resolved.worktree_id == saved["id"]
+        if mode == "environment":
+            assert resolved.env == {
+                "SYNTHETIC_BASE": "preserved", "SYNTHETIC_OVERRIDE": "new", "SYNTHETIC_EXTRA": "added",
+            }
         return [
             sys.executable, "-u", str(peer), str(db.db_path), str(audit), delivery, mode,
         ], resolved.cwd, dict(resolved.env)
@@ -149,11 +163,23 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
         monkeypatch.setattr(CreationJournal, "begin_binding", closed_start)
     prompt = None if mode == "no-prompt" else "Original creation prompt."
     options = {"model": "fixture-model", "effort": "high"} if mode in ("config", "closed-config") else {}
+    if mode == "environment":
+        options = {"env_overrides": {"SYNTHETIC_OVERRIDE": "new", "SYNTHETIC_EXTRA": "added"}}
     request = CreationRequest.capture("workspace", digest, {
         "target": json.loads(target.to_json()), "options": options, "prompt": prompt,
     })
     try:
-        if mode == "drop-reply":
+        if mode == "cancel-native":
+            launch = asyncio.create_task(frontend.start(target, key="original", prompt=prompt, **options))
+            try:
+                async with asyncio.timeout(10):
+                    while not audit.exists():
+                        await asyncio.sleep(0.01)
+            finally:
+                launch.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await launch
+        elif mode in ("drop-reply", "live-drop-reply", "live-initialize", "ready-timeout"):
             with pytest.raises((RuntimeError, RuntimeCustodyError, ConnectionError, asyncio.TimeoutError)):
                 await asyncio.wait_for(frontend.start(target, key="original", prompt=prompt, **options), 15)
         elif mode == "lost-binding":
@@ -187,39 +213,80 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
         row = CreationJournal(db).read(request)
         assert row["state"] == {
             "reply": "complete", "no-prompt": "complete", "drop-reply": "launching",
+            "live-drop-reply": "launching", "environment": "complete",
+            "live-initialize": "launching", "cancel-native": "launching",
+            "ready-timeout": "launching",
             "lost-binding": "binding_started", "closed-binding": "bound", "closed-capture": "bound",
             "config": "complete", "closed-config": "native_accepted",
             "closed-first-prompt": "delivering", "closed-binding-scheduled": "native_accepted",
             "closed-binding-start": "binding_started",
         }[mode]
-        if mode not in ("reply", "no-prompt", "config"):
+        if mode not in ("reply", "no-prompt", "config", "environment"):
             with pytest.raises((AcquisitionRefused, RuntimeCustodyError)):
                 await frontend.start(target, key="original", prompt=prompt, **options)
+        if mode == "ready-timeout":
+            owner = manager.list_sessions()[0]._local_launch_owner
+            assert owner is not None and owner._host_process.poll() is None
+            async with asyncio.timeout(5):
+                while not Path(owner._state_file).exists():
+                    await asyncio.sleep(0.01)
+            actual = json.loads(Path(owner._state_file).read_text())
+            assert actual["pid"] == owner._host_pid
+            assert process_start_time(actual["child_pid"])
+            assert owner._host_process.poll() is None and owner._host is None
+            assert calls == ["create"] and not handles and not ordinary_registrations
+            assert not db.execute_read("SELECT * FROM acquisition_attempts")
+            assert len(db.execute_read("SELECT * FROM workspace_embodiments")) == 1
+            return
         assert calls == (
-            ["create"] if mode in ("drop-reply", "closed-config", "closed-binding-scheduled", "closed-binding-start")
+            ["create"] if mode in (
+                "drop-reply", "live-drop-reply", "live-initialize", "cancel-native", "closed-config",
+                "closed-binding-scheduled", "closed-binding-start",
+            )
             else ["create", "bind-session"]
         )
         assert len(handles) == 1
+        if mode in ("live-drop-reply", "live-initialize", "cancel-native", "closed-config"):
+            assert handles[0].proc.poll() is None
+            assert process_start_time(handles[0].child_pid)
+            session = manager.list_sessions()[0]
+            owner = session._local_launch_owner
+            assert owner is not None and owner._host_process is handles[0].proc
+            assert session.client is owner._client and owner._connection is session.client._connection
+            assert owner._host_pid == handles[0].host_pid and owner._child_pid == handles[0].child_pid
+            assert session._native_turn_transport is None
+            assert manager._host_index.get(session.session_id).host_pid == handles[0].host_pid
         argv = handles[0].proc.args
         assert float(argv[argv.index("--active-reap-seconds") + 1]) == 0
         assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 0
         assert not ordinary_registrations
-        received = [json.loads(line) for line in audit.read_text().splitlines()]
-        expected = ["session/new"]
+        received = [json.loads(line) for line in audit.read_text().splitlines()] if audit.exists() else []
+        expected = [] if mode == "live-initialize" else ["session/new"]
         if mode == "config":
             expected += ["session/set_config_option", "session/set_config_option"]
-        if mode in ("reply", "config"):
+        if mode in ("reply", "config", "environment"):
             expected += ["session/prompt"]
         assert [item["method"] for item in received] == expected
-        assert {item["pid"] for item in received} == {handles[0].child_pid}
-        assert {item["handoff"] for item in received} == {json.loads(row["launch_handoff_json"])["id"]}
+        if received:
+            assert {item["pid"] for item in received} == {handles[0].child_pid}
+            assert {item["handoff"] for item in received} == {json.loads(row["launch_handoff_json"])["id"]}
+        if mode == "environment":
+            assert all(item["environment"] == {
+                "SYNTHETIC_BASE": "preserved", "SYNTHETIC_OVERRIDE": "new", "SYNTHETIC_EXTRA": "added",
+            } for item in received)
+            assert target.env == {"SYNTHETIC_BASE": "preserved", "SYNTHETIC_OVERRIDE": "old"}
+            assert options == {"env_overrides": {"SYNTHETIC_OVERRIDE": "new", "SYNTHETIC_EXTRA": "added"}}
         assert not db.execute_read("SELECT * FROM acquisition_attempts")
         assert len(db.execute_read("SELECT * FROM workspace_embodiments")) == 1
         for session in manager.list_sessions():
             if session.client is not None:
                 await assert_direct_lifecycle_refused(session.client, session.target.cwd)
                 if session._native_turn_transport is None:
-                    with pytest.raises(RuntimeCustodyError, match="prompt"):
+                    error, message = (
+                        (ValueError, f"{session.status.value}, not idle") if session.status.value != "idle"
+                        else (RuntimeCustodyError, "prompt")
+                    )
+                    with pytest.raises(error, match=message):
                         await manager.submit_prompt(session.session_id, "must not downgrade")
                 with pytest.raises(RuntimeCustodyError, match="resync"):
                     await manager.resync_session(session.session_id)
@@ -239,3 +306,9 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             if handle.proc.poll() is None:
                 handle.proc.terminate()
             await asyncio.to_thread(handle.proc.wait, timeout=5)
+        for session in manager.list_sessions():
+            owner = session._local_launch_owner
+            if owner is not None and owner._host_process is not None:
+                if owner._host_process.poll() is None:
+                    owner._host_process.terminate()
+                await asyncio.to_thread(owner._host_process.wait, timeout=5)

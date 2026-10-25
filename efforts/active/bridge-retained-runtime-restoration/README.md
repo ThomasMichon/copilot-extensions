@@ -341,6 +341,24 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   controls with two collection skips and verified cleanup; both contracts and
   all 814 fixtures validate. Fresh independent review/CI remain owed; no existing
   Host or runtime is reconfigured.
+- A subsequent pass reproduced selected startup rollback physically retiring
+  a still-live child after an unknown native reply or closed-epoch preference
+  failure. The actual Session now retains its original launch owner before
+  effects, raw process/state observations before readiness, ready Host/index
+  inside the spawn worker, and socket/streams/client before initialization.
+  Selected unknown startup does not authorize ordinary TERMINATE or close.
+  Actual acquisition new/load controls also exposed and corrected the outer
+  resume handler clearing its retained client. Ordinary unselected cleanup
+  remains unchanged. Unit fixtures now follow the actual observation order.
+- The same pass found retained environment overrides forwarded as options but
+  absent from the target used by local preparation. Merge serialized overrides
+  into a copied target before preparation, leaving original facts unchanged.
+  Actual child readback verifies override precedence and unrelated base keys.
+  The expanded creation/acquisition/Host cohort passes 678 controls, with eight
+  capability skips and verified cleanup. It includes live silent peers,
+  initialize/native deadlines, cancellation, late Host readiness and the
+  closed-epoch configuration boundary. Fresh source-authority capture,
+  independent current-head review and required CI remain owed.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.

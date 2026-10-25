@@ -130,6 +130,9 @@ It retains the full request, including the prompt and unshortened owner referenc
 through the same allocation method. The existing keyed executor spans launch,
 binding and first-turn admission; the existing workspace lock and shared launch
 gate exclude competing starts without fabricating an acquisition request.
+Serialized environment overrides are merged into a fresh copy of the retained
+target before local preparation, preserving unrelated base environment keys
+and the unchanged original target/options facts.
 
 Before launch preparation, `CreationLaunchOwner` retains its original same-row
 handoff and session. It reuses `LocalLaunchOwner`'s actual Session/target/Host/
@@ -176,6 +179,11 @@ and active-reap timeout arguments to zero for the concrete original owner.
 A graceful `detach(False)` must not arm a quiet-active timeout that later
 retires the retained child. Ordinary unselected Hosts retain their configured
 timeouts; existing Hosts are not retrospectively adopted or reconfigured.
+The shared [local startup custody owner](acquisition-custody.md#explicit-local-effect-owners)
+also retains actual process/transport observations before awaited startup.
+Unknown readiness, initialize/new replies, cancellation and closed-epoch
+configuration failure leave that original Host/child held, not physically
+retired by ordinary rollback.
 Native acceptance, first-turn admission, attributed consumption and semantic
 completion remain separate.
 
@@ -218,6 +226,10 @@ local Host, separate synthetic ACP child and SDK, including original-row
 readback, preference application, unknown native/binding replies, closure
 during binding/capture/first-prompt admission, and no ordinary lifecycle downgrade.
 Selected Host arguments are checked with a nonzero configured active timeout;
+startup controls additionally keep live peers silent without exiting, exercise
+initialization and native timeouts, cancel a pending native call, and let the
+actual Host become ready after its readiness deadline. Child environment
+readback verifies retained overrides, not only forwarded manager arguments.
 actual graceful-detach controls cover both the production-default bound and a
 short nonzero bound, waiting beyond the latter while the same Host stays alive.
 They are not native performance budgets,

@@ -52,7 +52,9 @@ def attach(rig, method):
         host_pid=os.getpid(), child_pid=os.getpid(),
         proc=SimpleNamespace(pid=os.getpid(), poll=lambda: None), boundary="local",
     )
-    rig.owner.attach_transport(client, host)
+    from test_acquisition_launch_owner import retain_synthetic_transport
+
+    retain_synthetic_transport(rig.owner, client, host)
     return client
 
 

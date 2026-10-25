@@ -135,6 +135,18 @@ subsequent preference application; each configuration effect rechecks its owner
 outside the preference fallback handler. A missing reply or configuration
 failure does not authorize the resume ladder or a new conversation.
 
+The actual Session retains its original launch owner before spawning. That
+owner records the raw `Popen`, state-file path and nonce before readiness,
+then the actual Host/child and existing HostIndex record before returning from
+the spawn worker. It retains the socket, streams and client before ACP startup.
+Readiness, initialization, native-reply and configuration failures do not run
+ordinary launch rollback: no TERMINATE, stream close or Host retirement is
+authorized by an unknown result, cancellation or a closed epoch. Failed startup
+keeps the original objects and journal outstanding without claiming success or
+granting replay. Ordinary unselected failed launches retain their cleanup.
+An unknown readiness result may have only the original raw process/state-file
+observations; it does not fabricate a ready Host or enroll reattachment.
+
 After successful startup, only that original accepted local owner can select
 its Host transport into the [existing original-turn protocol](native-turn-custody.md).
 The acquisition's prompt and later selected turns use the same retained
@@ -170,6 +182,8 @@ The isolated wire flow runs the actual local Host, child and ACP SDK with a
 synthetic peer that independently reads original launch/turn rows before
 replying. Create/load and lost-reply cases must each produce one Host and one
 corresponding native request, with no replay and no consumption claim.
+Live peers that withhold new/load replies remain alive after the bounded RPC
+timeout, under the same owner/client/connection and indexed Host.
 
 This is not a native performance budget or platform qualification. The separately
 authorized qualification owner must measure ordinary versus selected cold/warm
