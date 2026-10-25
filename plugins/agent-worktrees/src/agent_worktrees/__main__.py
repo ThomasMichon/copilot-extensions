@@ -5427,6 +5427,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'session-role': ('session_metadata_cli', 'cmd_session_role'),
     'session-tail': ('session_tracking_cli', 'cmd_session_tail'),
     'session-observations': ('session_observations_cli', 'cmd_session_observations'),
+    'session-attention': ('session_observations_cli', 'cmd_session_attention'),
     'session-transcript': ('session_tracking_cli', 'cmd_session_transcript'),
     'set-pr': ('pr_state_cli', 'cmd_set_pr'),
     'status': ('status_cli', 'cmd_status'),
@@ -6023,7 +6024,7 @@ def _load_full_command_surface() -> None:
 
     from . import update_launch_cli
 
-    from .session_observations_cli import cmd_session_observations
+    from .session_observations_cli import cmd_session_attention, cmd_session_observations
     COMMAND_MAP = {
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
@@ -6139,6 +6140,7 @@ def _load_full_command_surface() -> None:
         "session-transcript": cmd_session_transcript,
         "session-tail": cmd_session_tail,
         "session-observations": cmd_session_observations,
+        "session-attention": cmd_session_attention,
         "recent-messages": cmd_recent_messages,
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,

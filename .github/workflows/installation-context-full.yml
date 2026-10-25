@@ -61,6 +61,11 @@ jobs:
           --test-file tests/test_companion_topology.py
           --test-file tests/test_companion_observations.py
           --test-file tests/test_companion_topology_ui.py --test-timeout 120
+      - name: Qualify bounded root attention process contract
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_session_attention.py
+          --test-file tests/test_session_attention_cli.py --test-timeout 120
 
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
