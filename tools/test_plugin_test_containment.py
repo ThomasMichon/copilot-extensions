@@ -56,8 +56,48 @@ def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path,
     assert [event for event, _ in events] == ["enter", "run", "exit"]
     assert events[0][1]["purpose"] == "interactive-test"
     assert events[0][1]["lease"] is policy
-    assert events[0][1]["registry_root"] == tmp_path / "daemon-instances"
+    assert events[0][1]["registry_root"] == tmp_path.resolve() / "daemon-instances"
     assert events[1][1] == {"KEEP": "yes", "DAEMON_TEST_CONTEXT": "owned"}
+
+
+@pytest.mark.parametrize("alias", [
+    "parent-reference",
+    pytest.param("short-name", marks=pytest.mark.skipif(os.name != "nt", reason="Windows short path")),
+])
+def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path, monkeypatch, alias):
+    from contextlib import contextmanager
+
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    sandbox = parent / ".." / "sandbox"
+    sandbox.mkdir()
+    if alias == "short-name":
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = ctypes.windll.kernel32.GetShortPathNameW(str(sandbox.resolve()), buffer, len(buffer))
+        assert 0 < length < len(buffer)
+        sandbox = Path(buffer.value)
+        if sandbox == sandbox.resolve():
+            pytest.skip("volume does not expose an alternate short path")
+    admitted = []
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        from agent_procutil._daemon_instance_store import _root
+
+        root = kwargs["registry_root"]
+        admitted.append(_root(root, create=True))
+        yield {}
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    assert plugin_test_containment.run_contained(
+        ["unused"], cwd=tmp_path, env={}, sandbox=sandbox, limits=Limits(),
+    ) == 0
+    assert admitted == [tmp_path.resolve() / "sandbox" / "daemon-instances"]
 
 
 def test_tree_size_counts_nested_files_without_repeated_path_stats(tmp_path, monkeypatch):
