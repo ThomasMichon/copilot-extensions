@@ -11,6 +11,8 @@ from . import output, update_events
 
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--target", metavar="PLUGIN", help="Update only this installed plugin; no Manager, anchors or unrelated components")
+    p.add_argument("--inventory", action="store_true", help="Read installation inventory and supported update contract without installing")
     p.add_argument(
         "--auth-report",
         action="store_true",
@@ -38,6 +40,8 @@ def forced_runtimes(args: argparse.Namespace) -> frozenset[str]:
 def forwarded_flags(args: argparse.Namespace) -> list[str]:
     """The options above, rebuilt for forwarding through the Manager seam."""
     flags: list[str] = []
+    if getattr(args, "target", None):
+        flags += ["--target", args.target]
     if getattr(args, "auth_report", False):
         flags.append("--auth-report")
     for name in getattr(args, "force_runtime", None) or ():
@@ -46,6 +50,20 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
 
 
 def validate_auth_flags(args: argparse.Namespace) -> None:
+    if getattr(args, "inventory", False) and (
+        getattr(args, "skip_modules", None) is not None
+        or any(getattr(args, name, False) for name in (
+            "target", "force", "force_runtime", "recreate_venv", "auth_report",
+            "detach", "wait", "supervised_debug", "request_status", "recovery_status",
+            "recover_after_restart", "recover_for_repair", "no_anchor_sync", "no_prune_pivots",
+        ))
+    ):
+        argparse.ArgumentParser(prog="update").error("--inventory is read-only and cannot select installation options")
+    if getattr(args, "target", None) and (
+        getattr(args, "skip_modules", None) is not None
+        or any(getattr(args, key, None) for key in ("force", "force_runtime", "recreate_venv", "auth_report"))
+    ):
+        argparse.ArgumentParser(prog="update").error("--target cannot be combined with force, repair or module selection")
     if getattr(args, "auth_report", False) and any(
         getattr(args, name, False) for name in (
             "detach", "supervised_debug", "request_status", "recovery_status", "recover_after_restart",
@@ -55,7 +73,7 @@ def validate_auth_flags(args: argparse.Namespace) -> None:
         argparse.ArgumentParser(prog="update").error(
             "--auth-report cannot select an installation execution mode or request status"
         )
-    driver_json = any(getattr(args, name, False) for name in (
+    driver_json = getattr(args, "inventory", False) or any(getattr(args, name, False) for name in (
         "detach", "request_status", "recovery_status", "recover_after_restart", "recover_for_repair",
     ))
     report_only = [

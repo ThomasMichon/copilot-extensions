@@ -1,0 +1,185 @@
+"""One-plugin update admission, exact effects and read-only observed inventory."""
+
+import argparse
+import json
+import os
+import shlex
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from agent_worktrees import installation_updates as owner
+from agent_worktrees import reconcile, update_cli, update_options, update_runtime, update_runtime_plan
+
+PLAN_REGISTERED = update_runtime_plan.plan_registered
+DEPLOYED_VERSION = reconcile.runtime_deployed_version
+
+
+@pytest.fixture
+def installed(tmp_path, monkeypatch):
+    payloads = {}
+    for name, scope in (("agent-example", "universal"), ("guide", "none"), ("agent-other", "universal")):
+        path = tmp_path / name
+        path.mkdir()
+        (path / "plugin.json").write_text(json.dumps({"name": name, "version": "2", "runtimeScope": scope}))
+        payloads[name] = path
+    target = update_runtime._RegisteredPluginTarget(tmp_path, update_runtime._PluginActivation.ACTIVE)
+    monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {name: target for name in payloads})
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", payloads.get)
+    monkeypatch.setattr(reconcile, "discover_core_payload_dirs", lambda: list(payloads.items()))
+    monkeypatch.setattr(reconcile, "resolve_runtime_installation", lambda name, path: SimpleNamespace(
+        runtime_root=tmp_path / "selected" / name, actual_mode="legacy", reason="fixture",
+    ))
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", lambda *a, **k: "1")
+    monkeypatch.setattr(reconcile, "runtime_running_version", lambda *a, **k: "0")
+    monkeypatch.setattr(owner.config, "detect_platform", lambda: "linux")
+    monkeypatch.setattr(update_runtime, "_refresh_marketplace", lambda *a, **k: True)
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", lambda name, *a, **k:
+        update_runtime_plan.RuntimeUpdateStep(name, "runtime_reconcile", payloads[name], eligible=True))
+    return payloads
+
+
+def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeypatch):
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("browse acquired a payload"))
+    before = {p: p.read_bytes() for root in installed.values() for p in root.rglob("*") if p.is_file()}
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert rows["agent-example"]["payload"] == "2"
+    assert rows["agent-example"]["selected"] == "1"
+    assert rows["agent-example"]["running"] == "0"
+    assert rows["guide"]["selected"] == "not applicable"
+    assert rows["guide"]["updatable"]
+    assert not rows["agent-worktrees"]["installed"]
+    assert before == {p: p.read_bytes() for p in before}
+
+
+@pytest.mark.parametrize("name", ["guide", "agent-example"])
+def test_target_acquires_and_executes_only_selected_owner(installed, monkeypatch, name):
+    calls = []
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda target, market, **k: calls.append(("payload", target)) or "OK")
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda step: calls.append(("runtime", step.name)) or "OK")
+    monkeypatch.setattr(update_runtime, "_fast_forward_project_anchors", lambda: pytest.fail("target updated anchors"))
+    monkeypatch.setattr(update_cli, "_prune_stale_pivots_after_update", lambda: pytest.fail("target pruned unrelated pivots"))
+    before = (installed["agent-other"] / "plugin.json").read_bytes()
+    assert update_cli._update_in_plugin_steps(argparse.Namespace(target=name)) == 0
+    assert calls == [("payload", name), ("runtime", name)]
+    assert (installed["agent-other"] / "plugin.json").read_bytes() == before
+
+
+def test_failed_acquisition_stops_runtime_and_retry_reuses_target(installed, monkeypatch):
+    calls = []
+    results = iter(["authentication denied", "OK"])
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda target, market, **k: next(results))
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda step: calls.append(step.name) or "OK")
+    assert owner.update_target("agent-example") == 1
+    assert calls == []
+    assert owner.update_target("agent-example") == 0
+    assert calls == ["agent-example"]
+
+
+def test_policy_block_is_visible_and_refuses_before_acquisition(installed, monkeypatch):
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", lambda name, *a, **k:
+        update_runtime_plan.RuntimeUpdateStep(name, "runtime_reconcile", installed[name], status="SKIPPED (machine policy)"))
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("blocked policy acquired"))
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert not rows["agent-example"]["updatable"]
+    assert "machine policy" in rows["agent-example"]["limitation"]
+    assert owner.update_target("agent-example") == 1
+
+
+@pytest.mark.parametrize("name", ["unknown", "../other", "agent-example/other"])
+def test_unknown_or_unsafe_target_never_becomes_suite_update(installed, monkeypatch, name):
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("invalid target acquired"))
+    assert owner.update_target(name) == 1
+
+
+def test_old_engine_installer_cannot_recover_manager_as_target_effect(tmp_path, monkeypatch):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "plugin.json").write_text('{"runtimeScope":"universal"}')
+    for ext in ("sh", "ps1"):
+        (tmp_path / "scripts" / f"install.{ext}").write_text("old installer")
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: tmp_path)
+    monkeypatch.setattr(update_runtime_plan, "plan_engine", lambda *a, **k:
+        update_runtime_plan.RuntimeUpdateStep("agent-worktrees", "engine_runtime", tmp_path))
+    with pytest.raises(ValueError, match="lacks targeted"):
+        owner.target_plan("agent-worktrees", None)
+    for ext in ("sh", "ps1"):
+        (tmp_path / "scripts" / f"install.{ext}").write_text("AGENT_WORKTREES_TARGETED_UPDATE")
+    assert owner.target_plan("agent-worktrees", None).environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"
+
+
+def test_installer_branches_preserve_unrelated_finishing_effects():
+    root = Path(__file__).resolve().parents[1] / "scripts"
+    for ext, start, finish in (
+        ("sh", 'if [[ "${AGENT_WORKTREES_TARGETED_UPDATE', "\n        fi"),
+        ("ps1", "if ($env:AGENT_WORKTREES_TARGETED_UPDATE", "\n        }"),
+    ):
+        text = (root / f"install.{ext}").read_text()
+        assert "TARGETED_UPDATE" in text
+        assert "--recover-adopted-manager" in text
+        branch = text[text.index(start):]
+        branch = branch[:branch.index(finish)]
+        assert "exit 0" in branch
+        assert "reconcile_binstubs" not in branch and "Reconcile-Binstubs" not in branch
+
+
+def test_target_flags_survive_driver_forwarding_and_reject_force():
+    args = argparse.Namespace(target="guide")
+    assert update_options.forwarded_flags(args) == ["--target", "guide"]
+    with pytest.raises(SystemExit):
+        update_options.validate_auth_flags(argparse.Namespace(target="guide", force=True))
+    with pytest.raises(SystemExit):
+        update_options.validate_auth_flags(argparse.Namespace(target="guide", skip_modules=[]))
+
+
+def test_disabled_payload_only_plugin_update_does_not_require_enabling(installed, monkeypatch):
+    inactive = update_runtime._RegisteredPluginTarget(None, update_runtime._PluginActivation.INACTIVE)
+    monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {"guide": inactive})
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", lambda name, *a, **k:
+        update_runtime_plan.RuntimeUpdateStep(name, "runtime_reconcile", installed[name], status="payload-only"))
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: "OK")
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert rows["guide"]["enabled"] == "inactive" and rows["guide"]["updatable"]
+    assert owner.update_target("guide") == 0
+
+
+def test_real_update_parser_routes_inventory_without_execution(monkeypatch):
+    from agent_worktrees import update_driver_cli
+
+    parser = argparse.ArgumentParser()
+    update_cli.add_parsers(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["update", "--inventory", "--json"])
+    calls = []
+    monkeypatch.setattr(owner, "print_inventory", lambda: calls.append("read") or 0)
+    assert update_driver_cli.cmd_update_request(args) == 0
+    assert calls == ["read"]
+    with pytest.raises(SystemExit):
+        update_options.validate_auth_flags(parser.parse_args(["update", "--inventory", "--target", "guide"]))
+    with pytest.raises(SystemExit):
+        parser.parse_args(["update", "--target-plugin-typo", "guide"])
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
+def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
+    name = "agent-example"
+    selected = tmp_path / "selected-runtime"
+    selected.mkdir()
+    manifest = selected / "deploy-manifest.json"
+    manifest.write_text('{"source":{"version":"1"}}')
+    script = installed[name] / "scripts" / "install.sh"
+    script.parent.mkdir()
+    code = "import pathlib; pathlib.Path(" + repr(str(manifest)) + ").write_text('{\"source\":{\"version\":\"2\"}}')"
+    script.write_text("set -e\n[ \"$1\" = update ]\n" + shlex.quote(sys.executable) + " -c " + shlex.quote(code) + "\n")
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", PLAN_REGISTERED)
+    monkeypatch.setattr(reconcile, "runtime_deployed_version", DEPLOYED_VERSION)
+    monkeypatch.setattr(reconcile, "runtime_installer_environment", lambda *a: (dict(os.environ), selected))
+    monkeypatch.setattr(update_runtime, "_machine_gate_blocks", lambda *a: False)
+    monkeypatch.setattr(update_runtime, "_installer_timeout", lambda *a: 30)
+    acquisition = []
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda target, *a, **k: acquisition.append(target) or "OK")
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert owner.update_target(name) == 0
+    assert acquisition == [name]
+    assert DEPLOYED_VERSION(name, root=selected) == "2"
+    assert {p: p.read_bytes() for p in before if p != manifest} == {p: b for p, b in before.items() if p != manifest}

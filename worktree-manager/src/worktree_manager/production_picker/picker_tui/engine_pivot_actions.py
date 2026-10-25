@@ -182,6 +182,11 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             if choice is None:
                 return
             action = actions[choice]
+            from worktree_manager.installation_updates import PIVOT_NAME
+            if reg.name == PIVOT_NAME and action.key == "update":
+                from dataclasses import replace
+
+                action = replace(action, label=f"Update {rec['title']} on this machine only")
             if reg.placement == "config" and action.form is not None:
                 self._run_task_action(reg, action, rec)
                 return

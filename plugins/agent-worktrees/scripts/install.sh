@@ -1183,7 +1183,7 @@ _deploy_python_runtime() {
             ;;
     esac
     [[ -z "$OWNER_ARG" ]] || mode_args+=(--owner "$OWNER_ARG")
-    [[ "$ACTION" != update ]] || mode_args+=(--recover-adopted-manager)
+    [[ "$ACTION" != update || "${AGENT_WORKTREES_TARGETED_UPDATE:-}" == "1" ]] || mode_args+=(--recover-adopted-manager)
     base="$(_bootstrap_python exclude-venv-dir)" || {
         err "The Python-owned installer requires a base Python 3.11+ outside the target slot"
         return 1
@@ -3709,6 +3709,12 @@ case "$ACTION" in
 
         # -- Shared runtime (venv first: package install targets the venv) --
         _deploy_python_runtime || exit 1
+        if [[ "${AGENT_WORKTREES_TARGETED_UPDATE:-}" == "1" ]]; then
+            deploy_tool_binstub
+            write_deploy_manifest
+            ok "Targeted engine runtime update complete"
+            exit 0
+        fi
         remove_legacy_scripts
         remove_legacy_binstubs
         # Deploy the tool binstub unconditionally (see the install action) so a

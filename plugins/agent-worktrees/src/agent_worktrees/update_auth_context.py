@@ -271,7 +271,9 @@ def run_update(args: argparse.Namespace, steps) -> int:
     with session() as value:
         if value is not None:
             value.prepare(
-                _marketplace_context(), include_anchors=not getattr(args, "no_anchor_sync", False)
+                _marketplace_context(), include_anchors=not (
+                    getattr(args, "target", None) or getattr(args, "no_anchor_sync", False)
+                )
             )
         rc = steps(args)
         if value is not None and rc == 0:

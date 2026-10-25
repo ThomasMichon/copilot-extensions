@@ -75,6 +75,7 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     for name in ("force", "no-anchor-sync", "no-prune-pivots", "recreate-venv", "no-manager"):
         canonical.add_argument("--" + name, action="store_true")
     canonical.add_argument("--project")
+    canonical.add_argument("--target")
     canonical.add_argument("--repair-engine", help=argparse.SUPPRESS)
     canonical.add_argument("--force-runtime", action="append")
     canonical.add_argument("--skip-modules", nargs="*")
@@ -84,6 +85,11 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-non-repository", action="store_true")
     canonical.add_argument("--auth-environment", action="store_true")
     parsed = canonical.parse_args(forwarded)
+    if parsed.target is not None and any((
+        parsed.force, parsed.force_runtime, parsed.skip_modules is not None,
+        parsed.recreate_venv, parsed.repair_engine, parsed.auth_report,
+    )):
+        parser.error("--target cannot be combined with force, repair, auth or module selection")
     if parsed.repair_engine is not None and forwarded[:1] != ["--repair-engine"]:
         parser.error("bootstrap repair must precede ordinary update arguments")
     if not parsed.auth_report and (
