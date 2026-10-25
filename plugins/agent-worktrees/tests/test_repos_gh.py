@@ -26,7 +26,7 @@ def home(tmp_path: Path, monkeypatch) -> Path:
 
 
 def test_injects_token_when_account_and_token_resolve(monkeypatch):
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "acct-x")
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: "acct-x")
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda a: "tok-123")
 
     env, login, injected = m._gh_env_for_repo("owner/name")
@@ -37,7 +37,7 @@ def test_injects_token_when_account_and_token_resolve(monkeypatch):
 
 def test_ambient_when_no_account(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: None)
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: None)
 
     minted = {"n": 0}
 
@@ -56,7 +56,10 @@ def test_ambient_when_no_account(monkeypatch):
 
 def test_no_inject_when_token_missing(monkeypatch):
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "acct-x")
+    monkeypatch.setattr(
+        repos, "account_for_github_slug",
+        lambda t, **kwargs: None if kwargs.get("configured_only") else "acct-x",
+    )
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda a: None)
 
     env, login, injected = m._gh_env_for_repo("owner/name")
@@ -67,7 +70,7 @@ def test_no_inject_when_token_missing(monkeypatch):
 
 def test_never_switches_active_account(monkeypatch):
     """The builder must be side-effect-free: it never calls `gh auth switch`."""
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "acct-x")
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: "acct-x")
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda a: "tok")
 
     calls: list[list[str]] = []
@@ -114,7 +117,7 @@ def test_repos_gh_allows_unregistered_bare_owner(monkeypatch):
 
     monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/gh")
     monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda t: False)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: None)
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: None)
     calls: list[list[str]] = []
     monkeypatch.setattr(
         subprocess, "run",
@@ -218,7 +221,7 @@ def test_repos_gh_omitted_target_infers_github_remote(monkeypatch):
         m, "_infer_active_github_slug", lambda cfg: "ThomasMichon/copilot-extensions",
     )
     monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda t: False)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "ThomasMichon")
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: "ThomasMichon")
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda a: "tok")
     calls: list[list[str]] = []
     monkeypatch.setattr(
@@ -266,7 +269,7 @@ def test_repos_account_for_omitted_target_infers_github_remote(
     monkeypatch.setattr(
         m, "_infer_active_github_slug", lambda cfg: "ThomasMichon/copilot-extensions",
     )
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda t: "ThomasMichon")
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: "ThomasMichon")
 
     rc = m.cmd_repos_dispatch(["account-for"])
 

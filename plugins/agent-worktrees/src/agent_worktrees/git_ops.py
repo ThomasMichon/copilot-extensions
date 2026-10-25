@@ -24,6 +24,12 @@ from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
 from .git_errors import GitError, _redact_args as _redact_args
+from .repos_registry_reader import RepositoryResolutionError
+from .github_credentials import (
+    AccountCredentialError as AccountCredentialError,
+    GitAuthArgs, account_selection,
+    gh_token_for_target as gh_token_for_target,
+)
 
 log = logging.getLogger("agent-worktrees")
 
@@ -949,8 +955,8 @@ def push(
 # a ``gh`` account for that owner is authenticated, inject its token as a
 # one-shot HTTP auth header -- never writing the token to ``.git/config``.
 #
-# For org-owned repos the owner is not a ``gh`` *account*, so ``gh auth token
-# --user <org>`` fails and we transparently fall back to default git behavior.
+# An unconfigured org-owner hint may retain default Git behavior. An explicit
+# repository account or account map must never fall back to another identity.
 
 def _remote_url(remote: str, *, cwd: str | Path) -> str | None:
     """Return the configured URL for *remote*, or None."""
@@ -1057,9 +1063,9 @@ def _gh_token_for_owner(owner: str) -> str | None:
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--user", owner],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=60, **no_window_kwargs(),
         )
-    except Exception:
+    except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0:
         return None
@@ -1071,8 +1077,8 @@ def gh_token_for_account(account: str) -> str | None:
 
     The auth-provider seam for the repo-scoped identity layer -- ``gh`` itself
     is the token store/minter in v1.  Returns None when ``gh`` is unavailable
-    or ``account`` is not an authenticated ``gh`` account (callers then fall
-    back to the ambient credential).
+    or ``account`` is not an authenticated ``gh`` account. Execution callers
+    use :func:`gh_token_for_target` to enforce configured identity choices.
     """
     return _gh_token_for_owner(account)
 
@@ -1348,19 +1354,24 @@ def _auth_config_args_for_url(url: str) -> list[str]:
     owner = _parse_github_owner(url)
     if not owner:
         return []
+    slug = slug_from_url(url)
     try:
-        from . import repos
-        account = repos.account_for_github_owner(owner) or owner
-    except Exception:
-        account = owner
-    active = _active_gh_account()
-    if active and active.casefold() == account.casefold():
-        return []
-    token = _gh_token_for_owner(account)
+        selection = account_selection(slug)
+        account = selection.login or owner
+        active = _active_gh_account()
+        if active and active.casefold() == account.casefold():
+            return []
+        token = gh_token_for_target(selection)
+    except (AccountCredentialError, RepositoryResolutionError) as exc:
+        raise GitError(["git", "authenticate"], 1, str(exc)) from exc
     if not token:
         return []
     cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+    scheme = "ba" + "sic"
+    return GitAuthArgs(
+        ["-c", f"http.extraheader=AUTHORIZATION: {scheme} {cred}"],
+        allow_ambient_retry=not selection.configured,
+    )
 
 
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:

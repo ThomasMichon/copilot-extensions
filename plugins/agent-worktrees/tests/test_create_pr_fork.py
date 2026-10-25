@@ -688,7 +688,7 @@ class TestCreatePRForkFlow:
         # Pin the ambient collaborators (not _resolve_fork_credential
         # itself) so the test is deterministic across machines/CI.
         monkeypatch.setattr(
-            "agent_worktrees.repos.account_for_github_slug", lambda slug: None,
+            "agent_worktrees.repos.account_for_github_slug", lambda slug, **kwargs: None,
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: "ambient-user",

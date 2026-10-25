@@ -157,7 +157,7 @@ def _clarify_registration_account(
 
 def cmd_repos_dispatch(argv: list[str]) -> int:
     """Route repos subcommands."""
-    from . import repos
+    from . import git_ops, repos
 
     if not argv or argv[0] in ("--help", "-h"):
         _repos_usage()
@@ -675,7 +675,11 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 "or set an account: override for this repo."
             )
             return 1
-        env, login, injected = _core()._gh_env_for_repo(target)
+        try:
+            env, login, injected = _core()._gh_env_for_repo(target)
+        except (git_ops.AccountCredentialError, repos.RepositoryResolutionError) as exc:
+            output.err(str(exc))
+            return 1
         if login and not injected:
             output.warn(f"could not mint a gh token for '{login}'; using ambient auth")
         return subprocess.run(["gh", *gh_args], env=env).returncode

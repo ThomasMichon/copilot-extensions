@@ -988,8 +988,9 @@ def _make_pr_lookup(config):
     def lookup(repo, number):
         try:
             token = providers.account_token_for_slug(repo, prcfg)
-        except Exception:
-            token = None
+        except providers.ProviderError as exc:
+            output.warn(str(exc))
+            return None
         try:
             provider = providers.get_provider(prcfg.provider)
             return provider.get_pull(repo, number, api_base=api_base, token=token)

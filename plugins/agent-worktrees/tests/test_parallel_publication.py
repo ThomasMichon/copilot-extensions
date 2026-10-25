@@ -381,7 +381,9 @@ def test_remote_uploadpack_is_preserved_for_published_ref(tmp_path, uploadpack):
 def test_probe_authentication_override_uses_same_plain_fallback(tmp_path, monkeypatch):
     root, remote = repository(tmp_path)
     monkeypatch.setattr(git_ops, "_auth_config_args_for_url",
-                        lambda _url: ["-c", "protocol.file.allow=never"])
+                        lambda _url: git_ops.GitAuthArgs(
+                            ["-c", "protocol.file.allow=never"], allow_ambient_retry=True,
+                        ))
     original = git_ops.git
     attempts = []
 
