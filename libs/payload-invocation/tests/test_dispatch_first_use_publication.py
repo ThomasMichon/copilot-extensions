@@ -62,9 +62,10 @@ def _selected_cell(fixture: dict, environment: dict[str, str]) -> tuple[Path, di
         "cell-standalone", "cell-healthy", "cell-healthy-lkg",
         "invalid", "foreign", "future", "old-resolver",
         "missing-admission", "changed-under-lock", "mode-changed-under-lock",
-        "custom-standalone", "custom-healthy",
     )
     for entry in ("global", "payload", "board")
+] + [
+    (state, "payload") for state in ("custom-standalone", "custom-healthy")
 ] + [
     (state, entry) for state in ("upstream-first", "upstream-policy-change", "upstream-mode-change")
     for entry in ("global", "board")

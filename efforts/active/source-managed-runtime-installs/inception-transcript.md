@@ -107,3 +107,21 @@ This approves the audited path without making it a prerequisite for explicit
 repair. The plan distinguishes operator authorization from native cleanup
 proof and retains the original failed outcome. The standing clarification is
 not itself a concrete request to run repair on any host.
+
+## Wholesale same-installation cutover
+
+After a progress update emphasized custom-root/installation-cell qualification,
+the operator clarified the existing runtime-only target:
+
+> I'm confused: with install-from-dev-branch, we do expect to be installing to the same global space, replacing the main-sourced install with dev install. It's just that the installers themselves source from a dev-hash instead of a main-version.
+
+> Er specifically have the global binstubs pointing at the dev install slot, and have the dev install work with the same runtime data as the main install would have
+
+> Right, we're not doing custom-cell/root for this. This is a wholesale cutover
+
+This is a wholesale replacement of code in the existing installation, not a
+second installation or runtime-data migration. Existing global commands and
+services must select the immutable Dev generation while using the existing
+Main installation's data/configuration. Separate scoped-install capability
+does not gate this transition. The clarification does not itself authorize
+a concrete host cutover, restart or configuration change.

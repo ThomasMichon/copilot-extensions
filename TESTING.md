@@ -7,6 +7,27 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional Dispatch scoped-stamp binding
+
+The manual `installation-context-full.yml` portfolio `dispatch-binding` runs
+`test_dispatch_scoped_publication.py` through the isolated `payload-invocation`
+runner on Ubuntu and Windows, with the existing 60-second test deadline.
+It does not expand required PR CI.
+
+The packet runs actual custom-root and active-cell stamps with and without
+pre-existing legacy primary/board launchers. Stamps must preserve every global
+launcher byte-for-byte or leave them absent while retaining selected-root helpers
+and healthy payload invocation. Ordinary-shell calls through existing globals
+must still reach the healthy legacy root or the active cell selected by the
+attributable publisher, never acquire an unselected custom root. Whole-home
+snapshots constrain healthy retained-command writes to their existing boot trace.
+Equivalent trailing-separator and dot-segment legacy roots must still publish
+the global commands. Distinct case-sensitive POSIX roots must preserve them;
+both Bash and PowerShell exercise that distinction.
+These controls do not qualify native scoped staging, service registration,
+runtime construction, host rollout or performance; cold scoped provisioning
+retains its explicit unsupported-readiness outcome.
+
 ## Optional Bridge scoped-stamp binding
 
 The manual `installation-context-full.yml` portfolio `bridge-binding` runs
