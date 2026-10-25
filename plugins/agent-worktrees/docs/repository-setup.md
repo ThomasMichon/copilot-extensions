@@ -45,7 +45,9 @@ to an ambient identity. Other credential-owner routes with no configured
 explicit account retain Git's own authentication behavior.
 The selected registry name's explicit account takes precedence over URL aliases.
 Without that selection, conflicting alias accounts refuse rather than choosing
-the first entry. Account selection is checked again before registration.
+the first entry. Only an explicit owner account map may supply an owner default;
+an unrelated sibling repository's account is not inferred as that default.
+Account selection is checked again before registration.
 
 Failed acquisition preserves a partial target and does not register it.
 Successful acquisition/registration is retained if subsequent repository setup

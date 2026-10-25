@@ -43,7 +43,7 @@ def https_url(value: str) -> str:
         or parsed.password is not None or parsed.query or parsed.fragment
         or "?" in value or "#" in value or "\\" in value
         or not parsed.path.strip("/")
-        or any(ord(c) < 32 or ord(c) == 127 for c in value)
+        or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in value)
     ):
         raise SetupError("Repository requires credential-free HTTPS without query or fragment.")
     host = parsed.hostname
@@ -112,7 +112,7 @@ def _tracked(path: Path, relative: str) -> Path:
     if (
         not isinstance(relative, str) or not relative or "\\" in relative
         or ":" in relative or relative.startswith("/")
-        or any(ord(c) < 32 or ord(c) == 127 for c in relative)
+        or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in relative)
         or any(part in ("", ".", "..") for part in relative.split("/"))
         or PurePosixPath(relative).is_absolute()
     ):
@@ -295,7 +295,7 @@ def _call(setup: Setup, mode: str) -> Outcome:
             raise SetupError("Repository setup returned an unknown status.")
         if (
             not isinstance(message, str) or not message.strip() or len(message) > 4096
-            or any(ord(c) < 32 or ord(c) == 127 for c in message)
+            or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in message)
         ):
             raise SetupError("Repository setup result requires a bounded display message.")
         return Outcome(status_value, message)

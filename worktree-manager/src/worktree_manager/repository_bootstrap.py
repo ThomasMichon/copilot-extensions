@@ -21,7 +21,7 @@ def _repository(value: str) -> str:
         or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", parsed.hostname)
         or parsed.username is not None or parsed.password is not None
         or not parsed.path.strip("/") or "?" in value or "#" in value or "\\" in value
-        or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value)
+        or any(c.isspace() or ord(c) < 32 or 127 <= ord(c) <= 159 for c in value)
         or any(p in ("", ".", "..") for p in parsed.path.rstrip("/").split("/")[1:])
     ):
         raise argparse.ArgumentTypeError("repository requires credential-free HTTPS without query or fragment")

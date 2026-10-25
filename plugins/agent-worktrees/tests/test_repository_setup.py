@@ -60,6 +60,7 @@ def source(tmp_path: Path) -> Path:
     "https://example.invalid/a/../b", "https://example.invalid/",
     "https://example.invalid:broken/a", "https://example.invalid/a\n",
     "https://bad%host/a", "https://example.invalid/a\\b",
+    "https://example.invalid/a\u009b",
 ])
 def test_rejects_unsupported_urls(url: str) -> None:
     with pytest.raises(setup.SetupError):
@@ -163,7 +164,7 @@ def test_tracked_glob_characters_are_literal_entries(source: Path) -> None:
     assert setup._tracked(source, "setu[p].ps1") == source / "setu[p].ps1"
 
 
-@pytest.mark.parametrize("control", ["\x00", "\x1b", "\t", "\n", "\r", "\x7f"])
+@pytest.mark.parametrize("control", ["\x00", "\x1b", "\t", "\n", "\r", "\x7f", "\u009b", "\u009d"])
 def test_control_characters_refuse_before_path_lookup(tmp_path, monkeypatch, control) -> None:
     monkeypatch.setattr(setup, "_git", lambda *a: pytest.fail("untrusted control path inspected"))
     with pytest.raises(setup.SetupError, match="repository-relative regular file"):
@@ -386,6 +387,7 @@ def test_real_consumer_terminal_check_never_applies(source: Path, status: str) -
     '{"version":1,"status":"ready","message":""}',
     '{"version":1,"status":"ready","message":"ok","extra":true}',
     '{"version":true,"status":"ready","message":"ok"}',
+    '{"version":1,"status":"ready","message":"\\u009b31m"}',
     "[]", "bad", "x" * (setup.LIMIT + 1),
 ])
 def test_real_consumer_cannot_fake_success(source: Path, result: str) -> None:

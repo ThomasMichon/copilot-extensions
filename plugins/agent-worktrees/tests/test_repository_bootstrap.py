@@ -118,6 +118,25 @@ def test_conflicting_alias_accounts_require_selected_account(registry) -> None:
         bootstrap._account(state, "sample", URL)
 
 
+@pytest.mark.parametrize("registered", [False, True])
+@pytest.mark.parametrize("owner_mapping", [False, True])
+def test_account_is_not_inferred_from_an_unrelated_sibling(
+    registry, registered, owner_mapping,
+) -> None:
+    selected = "https://github.com/example/sample.git"
+    state = repos.read_registry(strict=True)
+    state.repos["sibling"] = repos.RepoEntry(
+        name="sibling", remote="https://github.com/example/unrelated.git", account="wrong",
+    )
+    if registered:
+        state.repos["sample"] = repos.RepoEntry(name="sample", remote=selected)
+    if owner_mapping:
+        state.account_map["example"] = "declared-owner"
+    assert bootstrap._account(state, "sample", selected) == (
+        "declared-owner" if owner_mapping else ""
+    )
+
+
 @pytest.mark.parametrize("kind", ["dirty", "foreign", "registered-elsewhere", "managed", "alias"])
 def test_refusal_preserves_registry_bytes_and_source(source: Path, registry: Path, kind: str) -> None:
     if kind == "dirty":

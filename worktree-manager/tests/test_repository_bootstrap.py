@@ -51,6 +51,7 @@ def providers(monkeypatch, *, ready: bool = True) -> list[str]:
     ["--repository", "file:///local/source"],
     ["--repository", "https://name:secret@example.invalid/source"],
     ["--repository", "https://example.invalid/source?query"],
+    ["--repository", "https://example.invalid/source\u009b"],
     ["--repository", URL, "--repository-target", "relative"],
     ["--repository", URL, "--repository-target", ""],
 ])
