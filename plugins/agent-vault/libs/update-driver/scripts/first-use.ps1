@@ -50,6 +50,7 @@ switch -CaseSensitive ($plugin) {
     'agent-ssh' { $prefix = 'AGENT_SSH' }
     'agent-codespaces' { $prefix = 'AGENT_CODESPACES' }
     'agent-logger' { $prefix = 'AGENT_LOGGER' }
+    'agent-bridge' { $prefix = 'AGENT_BRIDGE' }
     default { throw 'Owning payload does not declare the fixed first-use provision recipe.' }
 }
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
@@ -68,8 +69,26 @@ if ($plugin -ceq 'agent-logger') {
         }
     }
 }
-if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger' }[$plugin]
+if ($plugin -ceq 'agent-bridge') {
+    foreach ($helper in @(
+        'installer-engine.ps1', 'installer-engine.sh',
+        'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
+        'installer_wheel_inputs.py', 'installer_wheel_snapshot.py', 'installer_wheel_acquisition.py',
+        'installer_dependency_policy.py', 'installer_dependency_config.py',
+        'installation-context\installation_context.py',
+        'installation-context\installation-context.ps1', 'installation-context\installation-context.sh',
+        'install.ps1', 'install.sh', 'repair-scheduled-task.ps1',
+        'versioned_runtime_native.ps1', 'versioned_runtime.py',
+        'versioned_runtime_construction.py', 'versioned_runtime_source.py',
+        'versioned_runtime_publication.py', 'versioned_runtime_leases.py'
+    )) {
+        if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
+            throw 'Bridge first use requires its complete materialized installation helpers.'
+        }
+    }
+}
+if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger', 'agent-bridge')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-codespaces' = 'CodeSpaces'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge' }[$plugin]
     $sshDeclaration = @{
         legacyRuntimeRoot = '.' + $plugin
         payloadRootEnv = $prefix + '_PAYLOAD_ROOT'
@@ -90,7 +109,7 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
         throw "$label first use requires its declared native runtime gate."
     }
 }
-if ($plugin -cin @('agent-codespaces', 'agent-logger') -and (
+if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge') -and (
     (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
     $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
     -not (

@@ -24,6 +24,7 @@ RECIPES = {
     "agent-ssh": "AGENT_SSH",
     "agent-codespaces": "AGENT_CODESPACES",
     "agent-logger": "AGENT_LOGGER",
+    "agent-bridge": "AGENT_BRIDGE",
 }
 LOGGER_COMMANDS = (
     ("agent-logger", "agent_logger"),
@@ -60,6 +61,24 @@ LOGGER_CONTEXT_KEYS = (
     "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
     "AGENT_LOGGER_HOME", "AGENT_LOGGER_INSTALLATION_ID",
     "AGENT_LOGGER_NO_SELFPROVISION", "AGENT_LOGGER_PINNED_CONTEXT",
+)
+BRIDGE_CONTEXT_KEYS = (
+    "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT",
+    "AGENT_BRIDGE_HOME", "AGENT_BRIDGE_INSTALLATION_ID",
+    "AGENT_BRIDGE_NO_SELFPROVISION", "AGENT_BRIDGE_PINNED_CONTEXT",
+    "AGENT_BRIDGE_ALLOW_DOWNGRADE", "AGENT_BRIDGE_NONINTERACTIVE",
+)
+BRIDGE_HELPERS = (
+    "installer-engine.ps1", "installer-engine.sh",
+    "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
+    "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "installer_wheel_acquisition.py",
+    "installer_dependency_policy.py", "installer_dependency_config.py",
+    "installation-context/installation_context.py",
+    "installation-context/installation-context.ps1", "installation-context/installation-context.sh",
+    "install.ps1", "install.sh", "repair-scheduled-task.ps1",
+    "versioned_runtime_native.ps1", "versioned_runtime.py",
+    "versioned_runtime_construction.py", "versioned_runtime_source.py",
+    "versioned_runtime_publication.py", "versioned_runtime_leases.py",
 )
 
 
@@ -99,6 +118,9 @@ def _environment(payload: Path) -> dict[str, str]:
         "AGENT_CODESPACES_ACTION", "AGENT_CODESPACES_FORCE", "AGENT_CODESPACES_DRY_RUN",
         "AGENT_LOGGER_VALIDATED_CONTEXT", "AGENT_LOGGER_PAYLOAD_ROOT",
         "AGENT_LOGGER_ACTION", "AGENT_LOGGER_DRY_RUN",
+        "AGENT_BRIDGE_VALIDATED_CONTEXT", "AGENT_BRIDGE_PAYLOAD_ROOT",
+        "AGENT_BRIDGE_ACTION", "AGENT_BRIDGE_DRY_RUN", "AGENT_BRIDGE_FORCE",
+        "AGENT_BRIDGE_CONFIG_DIR", "AGENT_BRIDGE_INSTALL_DIR",
     ):
         result.pop(key, None)
     return result
@@ -130,6 +152,12 @@ def _inspect(
     if installer_action == "install" and plugin != "agent-logger":
         raise ProvisionError("fixed install action requires Logger")
     prefix = RECIPES[plugin]
+    if plugin == "agent-bridge" and any(not (scripts / name).is_file() for name in BRIDGE_HELPERS):
+        raise ProvisionError("Bridge first use requires its complete materialized installation helpers")
+    if plugin == "agent-bridge" and sys.platform.startswith("linux"):
+        for tool in ("xargs", "seq"):
+            if shutil.which(tool) is None:
+                raise ProvisionError(f"Bridge first use requires native tool: {tool}")
     no_self = prefix + "_NO_SELFPROVISION"
     if (
         manifest.get("schema") != "copilot-extensions.payload-invocation"
@@ -159,8 +187,9 @@ def _inspect(
         raise ProvisionError("owning plugin self-provisioning is disabled")
     if prefix + "_PINNED_CONTEXT" in os.environ:
         raise ProvisionError("pinned identity reads require a prepared owning runtime")
-    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger"):
-        label = {"agent-ssh": "SSH", "agent-codespaces": "CodeSpaces", "agent-logger": "Logger"}[plugin]
+    if plugin in ("agent-ssh", "agent-codespaces", "agent-logger", "agent-bridge"):
+        label = {"agent-ssh": "SSH", "agent-codespaces": "CodeSpaces", "agent-logger": "Logger",
+                 "agent-bridge": "Bridge"}[plugin]
         if (
             (plugin != "agent-logger" and manifest.get("module") != plugin.replace("-", "_"))
             or manifest.get("legacyRuntimeRoot") != "." + plugin
@@ -170,7 +199,7 @@ def _inspect(
             }
         ):
             raise ProvisionError(f"{label} first use requires its declared native runtime gate")
-    if plugin in ("agent-codespaces", "agent-logger") and (
+    if plugin in ("agent-codespaces", "agent-logger", "agent-bridge") and (
         prefix + "_INSTALLATION_ID" in os.environ
         or runtime_root != Path.home() / ("." + plugin)
         or not (
@@ -314,6 +343,7 @@ def enqueue(
         "agent-ssh": SSH_CONTEXT_KEYS,
         "agent-codespaces": CODESPACES_CONTEXT_KEYS,
         "agent-logger": LOGGER_CONTEXT_KEYS,
+        "agent-bridge": BRIDGE_CONTEXT_KEYS,
     }[admission["plugin"]]
     context = {key: os.environ[key] for key in context_keys if key in os.environ}
     context["COPILOT_PLUGIN_ROOT"] = str(payload)
@@ -360,6 +390,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
             # Keep these files: native publication may retain a source path into them.
             legacy_stage = admission["plugin"] in {
                 "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
+                "agent-bridge",
             }
             inputs = _path(
                 runtime_root / ".install-stage" if legacy_stage

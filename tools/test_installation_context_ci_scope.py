@@ -587,6 +587,35 @@ def test_ssh_recipes_use_explicit_bounded_native_portfolio() -> None:
         ]
 
 
+def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "bridge-recipes" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("bridge-recipes-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("bridge-recipes-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-recipes'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        assert [step["run"].split() for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge.py",
+             "--test-timeout", "900", "--timeout", "1800"],
+            ["python", "tools/run-plugin-tests.py", "agent-bridge",
+             "--test-file", "tests/test_install_ps1_s4u_recovery.py",
+             "--test-file", "tests/test_install_lifecycle_emit.py",
+             "--test-timeout", "60", "--timeout", "180"],
+        ]
+
+
 def test_ssh_commands_use_explicit_bounded_native_portfolio() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()

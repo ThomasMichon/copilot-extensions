@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
+import subprocess
+
+import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
@@ -87,5 +91,54 @@ def test_provision_routes_never_run_s4u_recovery_through_elevated_repair():
     register = body.index("Register-ScheduledTask_", repair)
 
     assert explicit < s4u < never_ran < repair < register
-    assert "& $pwsh -NoProfile -ExecutionPolicy Bypass -File $repair" in body
+    assert "[Environment]::GetCommandLineArgs() -icontains '-NonInteractive'" in body
+    assert "$repairHostArguments += '-NonInteractive'" in body
+    assert "& $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair" in body
     assert "if ($repairExit -ne 0)" in body
+
+
+def test_unattended_repair_refuses_before_elevation_or_task_mutation():
+    text = (_PLUGIN_ROOT / "scripts/repair-scheduled-task.ps1").read_text(encoding="utf-8")
+    gate = text.index("if ($needsElevation -and -not (Test-IsAdmin))")
+    refusal = text.index("unattended repair left the existing task unchanged", gate)
+    elevation = text.index("Start-Process -FilePath $exe -Verb RunAs", gate)
+    mutation = text.index("Unregister-ScheduledTask -TaskName $TaskName", gate)
+    assert gate < refusal < elevation < mutation
+    assert "[Environment]::GetCommandLineArgs() -icontains '-NonInteractive'" in text[gate:refusal]
+
+
+def test_repair_executable_is_local_to_retained_native_installer():
+    body = _function_body("Get-ScheduledTaskRepairScript")
+    assert "Join-Path $PSScriptRoot 'repair-scheduled-task.ps1'" in body
+    assert "COPILOT_PLUGIN_STAGED_FROM" not in body
+    assert "System32\\WindowsPowerShell\\v1.0\\powershell.exe" in _function_body("Get-PwshPath")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual unattended Windows PowerShell repair")
+def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path):
+    source = (_PLUGIN_ROOT / "scripts/repair-scheduled-task.ps1").read_text(encoding="utf-8")
+    # Intercept only task access, the elevation capability and its launch.
+    source = source.replace(
+        "$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue",
+        "$existing = [pscustomobject]@{Principal=[pscustomobject]@{LogonType='S4U'}}",
+    )
+    gate = "if ($needsElevation -and -not (Test-IsAdmin)) {"
+    assert source.count(gate) == 1
+    source = source.replace(
+        gate,
+        "function Test-IsAdmin { return $false }\n"
+        "function Start-Process { throw 'fixture refuses any elevation launch' }\n" + gate,
+    )
+    path = tmp_path / "repair.ps1"
+    path.write_text(source, encoding="utf-8")
+    shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    result = subprocess.run(
+        [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(path)],
+        env={**os.environ, "AGENT_BRIDGE_CONFIG_DIR": str(tmp_path / "runtime")},
+        cwd=tmp_path, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode != 0
+    assert "unattended repair left the existing task unchanged" in result.stderr
+    assert "fixture refuses any elevation launch" not in result.stderr
+    assert not (tmp_path / "runtime").exists()

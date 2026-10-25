@@ -64,6 +64,7 @@ case "$plugin" in
     agent-ssh) prefix=AGENT_SSH ;;
     agent-codespaces) prefix=AGENT_CODESPACES ;;
     agent-logger) prefix=AGENT_LOGGER ;;
+    agent-bridge) prefix=AGENT_BRIDGE ;;
     *) printf 'Owning payload does not declare the fixed first-use provision recipe.\n' >&2; exit 1 ;;
 esac
 if [[ "$installer_action" == stamp-provision && "$plugin" != agent-ssh ]]; then
@@ -80,9 +81,28 @@ if [[ "$plugin" == agent-logger ]]; then
         }
     done
 fi
-if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == agent-bridge ]]; then
+    for tool in xargs seq; do
+        command -v "$tool" >/dev/null || {
+            printf 'Bridge first use requires native tool: %s\n' "$tool" >&2; exit 1;
+        }
+    done
+    for helper in installer-engine.ps1 installer-engine.sh installer_engine.py installer_engine_process.py runtime_launcher.py \
+        installer_wheel_inputs.py installer_wheel_snapshot.py installer_wheel_acquisition.py \
+        installer_dependency_policy.py installer_dependency_config.py installation-context/installation_context.py \
+        installation-context/installation-context.ps1 installation-context/installation-context.sh \
+        install.ps1 install.sh repair-scheduled-task.ps1 versioned_runtime_native.ps1 versioned_runtime.py \
+        versioned_runtime_construction.py versioned_runtime_source.py \
+        versioned_runtime_publication.py versioned_runtime_leases.py; do
+        [[ -f "$payload/scripts/$helper" ]] || {
+            printf 'Bridge first use requires its complete materialized installation helpers.\n' >&2; exit 1;
+        }
+    done
+fi
+if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
     label=SSH; [[ "$plugin" != agent-codespaces ]] || label=CodeSpaces
     [[ "$plugin" != agent-logger ]] || label=Logger
+    [[ "$plugin" != agent-bridge ]] || label=Bridge
     [[ ( "$plugin" == agent-logger || "$(query "$manifest" module)" == "${plugin//-/_}" ) &&
         "$(query "$manifest" legacyRuntimeRoot)" == ".$plugin" &&
         "$(query "$manifest" payloadRootEnv)" == "${prefix}_PAYLOAD_ROOT" &&
@@ -93,7 +113,7 @@ if [[ "$plugin" == agent-ssh || "$plugin" == agent-codespaces || "$plugin" == ag
         printf '%s first use requires its declared native runtime gate.\n' "$label" >&2; exit 1;
     }
 fi
-if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
     installation_hint="${prefix}_INSTALLATION_ID"
     [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&

@@ -612,7 +612,7 @@ def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monke
     assert sync_installer_engine.verify() == []
 
 
-@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces"])
+@pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-bridge"])
 def test_first_use_input_freezer_uses_canonical_projection_owner(plugin):
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
