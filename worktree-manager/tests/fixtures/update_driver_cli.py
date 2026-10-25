@@ -45,10 +45,22 @@ def main() -> int:
             }) + "\n")
             stream.flush()
         print("synthetic canonical updater started", file=sys.stderr, flush=True)
+        result = 6
+        if os.environ.get("UPDATE_DRIVER_TEST_ENGINE_HANDOFF"):
+            from agent_procutil.owned_process import run_owned
+
+            os.environ.update(boundary.handoff_environment(["update", "--no-manager"]))
+            child = run_owned(
+                [sys.executable, str(Path(__file__).with_name("update_driver_engine.py"))],
+                timeout=30,
+            )
+            if child.stderr:
+                print(child.stderr, file=sys.stderr, end="")
+            result = child.returncode
         time.sleep(0.1)
         with events.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"phase": "end", "pid": os.getpid(), "time": time.time()}) + "\n")
-        return 6
+        return result
 
     # Only the product body is synthetic; queue, worker and custody remain real.
     manager = ModuleType("worktree_manager.__main__")

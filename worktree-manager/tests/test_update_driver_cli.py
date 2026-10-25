@@ -88,6 +88,9 @@ def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, m
     ["--auth-report", "--supervised-debug"],
     ["--token", "synthetic-unknown-secret"],
     ["--auth-source", "https://example.invalid/tools.git"],
+    ["--request-status", "one", "--engine-acquisition-timeout", "600"],
+    ["--recovery-status", "--engine-acquisition-timeout", "600"],
+    ["--auth-report", "--engine-acquisition-timeout", "600"],
 ])
 def test_invalid_observer_combinations_refuse(flags):
     with pytest.raises(SystemExit) as error:
@@ -217,15 +220,29 @@ def test_engine_acquisition_budget_is_captured_by_the_durable_request(queued, mo
     key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
     monkeypatch.setenv(key, "600")
     assert driver.cmd_update_request([]) == 6
-    assert dict(seen["spec"].context)[key] == "600"
-    assert key in seen["runner"].context_keys
+    assert key not in dict(seen["spec"].context)
+    assert key not in seen["runner"].context_keys
+    assert seen["spec"].argv == ("--engine-acquisition-timeout", "600.0")
+    options, forwarded = driver.parse_options(list(seen["spec"].argv))
+    assert forwarded == []
     monkeypatch.setenv(key, "180")
-    with driver._request_environment(seen["spec"].context):
-        assert driver.os.environ[key] == "600"
+    with driver._request_environment(seen["spec"].context), driver._acquisition_environment(
+        options.engine_acquisition_timeout,
+    ):
+        assert driver.os.environ[key] == "600.0"
     assert driver.os.environ[key] == "180"
-    with driver._request_environment(()):
+    with driver._acquisition_environment(None):
         assert key not in driver.os.environ
     assert driver.os.environ[key] == "180"
+
+
+def test_manager_budget_is_consumed_before_engine_argument_forwarding():
+    options, forwarded = driver.parse_options([
+        "--repair-engine", "/fresh/source", "--engine-acquisition-timeout", "600",
+        "--no-anchor-sync",
+    ])
+    assert options.engine_acquisition_timeout == "600"
+    assert forwarded == ["--repair-engine", "/fresh/source", "--no-anchor-sync"]
 
 
 def test_invalid_engine_acquisition_budget_is_not_enqueued(queued, monkeypatch):
@@ -459,7 +476,41 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     assert [record["provider"] for record in starts] == [
         ["synthetic-first-provider"], ["synthetic-second-provider"], accepted,
     ]
-    assert [record["acquisition_budget"] for record in starts] == ["600", "1200", None]
+    assert [record["acquisition_budget"] for record in starts] == ["600.0", "1200.0", None]
+
+
+@pytest.mark.timeout(4 * _NATIVE_QUEUE_TIMEOUT)
+def test_real_manager_to_engine_custody_keeps_the_legacy_context_contract(
+    tmp_path, monkeypatch, short_home,
+):
+    import json
+    import sys
+    import update_driver
+    from agent_procutil.owned_process import run_owned
+
+    events = tmp_path / "events.jsonl"
+    key = "WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"
+    monkeypatch.setenv("HOME", str(short_home))
+    monkeypatch.setenv("USERPROFILE", str(short_home))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", "1")
+    monkeypatch.setenv(key, "600")
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    result = run_owned(
+        [sys.executable, str(fixture), "submit", "--wait"],
+        timeout=3 * _NATIVE_QUEUE_TIMEOUT,
+    )
+    assert result.returncode == 6, result.stderr
+    records = [json.loads(line) for line in events.read_text().splitlines()]
+    manager = next(record for record in records if record["phase"] == "start")
+    engine = next(record for record in records if record["phase"] == "engine")
+    assert manager["acquisition_budget"] == "600.0"
+    assert manager["arguments"] == []
+    assert engine["no_manager"] is True and key not in engine["context_keys"]
+    assert manager["pid"] != engine["pid"]
+    requests = update_driver.status(root=short_home / ".copilot-extensions" / "update-driver")
+    assert len(requests) == 1 and requests[0].state == "completed"
+    assert requests[0].exit_code == 6
 
 
 def test_recovery_inspection_and_settlement_never_start_an_updater(queued, monkeypatch, capsys):

@@ -221,8 +221,11 @@ does not prove a healthy, selected engine runtime.
 For a measured slow-host recovery, set
 `WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC` for that update invocation to
 a positive finite duration of at most 3,600 seconds, for example `600`. The
-durable request captures this value, and the worker restores that exact budget
-rather than inheriting a later caller's setting. Invalid values refuse submission.
+durable Manager invocation captures this value, and the worker restores that
+budget rather than inheriting a later caller's setting. An absent choice clears
+the worker's ambient override. Invalid values refuse submission. The internal
+Manager argument is consumed before engine handoff: no new shared execution-context
+key or engine argument is required, including for older engine participants.
 Retries still share one deadline and the same attempt ceiling; timeouts are not
 replayed. This does not change runtime-construction, dependency, health, cutover
 or rollback contracts. It is separate from the Worktrees installer watchdog.
