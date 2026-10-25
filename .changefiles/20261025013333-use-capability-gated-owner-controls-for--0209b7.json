@@ -1,0 +1,9 @@
+{
+  "comment": "Use capability-gated owner controls for Workers forms and preserve bounded source-authored field labels and descriptions.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

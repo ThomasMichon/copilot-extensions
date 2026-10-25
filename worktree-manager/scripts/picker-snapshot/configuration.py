@@ -28,20 +28,11 @@ def _catalog():
 
     sys.path.insert(0, str(ROOT / "plugins" / "agent-dispatch" / "src"))
     from agent_dispatch.workers_catalog import (
-        TEMPLATE_DESCRIPTIONS, _cards, _fields, _template_defaults, templates,
+        _cards, _fields, builtin_template_rows, templates,
     )
+    from agent_dispatch.worker_operator_inputs import builtin_fields, form
 
-    entries = []
-    for name, fragment in templates().items():
-        entries.append(_cards({
-            "id": f"template:{name}", "title": name, "group": "Available templates",
-            "description": TEMPLATE_DESCRIPTIONS[name],
-            "provenance": "built-in recipe", "validity": "template",
-            "enabled": "not-instantiated", "activity": "not-applicable",
-            "editable": "false", "instantiable": "true", "revision": "fixture",
-            "fields": _fields("", _template_defaults(fragment)),
-        }, "Supply a unique local name and a complete declaration. "
-           "Required dependencies must resolve before saving. Source remains unchanged."))
+    entries = builtin_template_rows()
     document = copy.deepcopy(templates()["worker-pool"])
     document["description"] = "One lane for queued documentation tasks"
     instance = _cards({
@@ -51,6 +42,9 @@ def _catalog():
         "lanes": 1, "editable": "true", "instantiable": "false",
         "revision": "fixture", "publication": "published",
         "fields": _fields("docs-worker", document),
+        "operator_editable": "true",
+        "operator_contract_version": "1",
+        "operator_fields": form(builtin_fields("worker-pool"), name="docs-worker"),
     }, "User-local instance; published configuration, observed activity unknown.\n"
        "Statistics: 1 declaration / 1 lane. No fresh supervisor receipt.")
     source = _cards({
@@ -144,7 +138,7 @@ def capture_configuration(source, scenario):
         if scenario != "edit":
             editor._q[0]["primary"].value = "docs-worker-new"
         if scenario == "declaration":
-            await pilot.press("ctrl+right")
+            await pilot.press("ctrl+right", "ctrl+right")
             await pilot.pause()
         if scenario in ("instantiate", "declaration", "edit"):
             return

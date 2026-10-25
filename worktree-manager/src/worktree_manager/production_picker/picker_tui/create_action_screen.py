@@ -93,7 +93,7 @@ class CreateActionFormMixin(FieldQuestionsMixin):
                     yield from self._compose_one(f, i)
 
     def _compose_one(self, f: dict, i: int):
-        yield Static(self._q_label(f), classes="create-qlabel")
+        yield Static(self._q_label(f), classes="create-qlabel", markup=False)
         widgets, rec = compose_field(f, i)
         rec["show_when"] = f.get("show_when")
         rec["visible"] = True
@@ -108,7 +108,8 @@ class CreateActionFormMixin(FieldQuestionsMixin):
         if f.get("allow_other"):
             hint += " · Other… for free text"
         label = field_label(f)
-        return label + (f"  ({hint})" if hint else "") + ":"
+        question = label + (f"  ({hint})" if hint else "") + ":"
+        return question + (f"\n{f['description']}" if f.get("description") else "")
 
     def _foot(self) -> str:
         return ("Enter accept+next · Shift+Enter newline · Space toggle · "
@@ -160,8 +161,9 @@ class CreateActionFormMixin(FieldQuestionsMixin):
         # for most real labels ("Create this New task…?").
         text = f"Proceed with {self._label!r}?"
         if self._confirm_values:
+            labels = {field["name"]: field.get("label", field["name"]) for field in self._fields}
             text += "\n" + "\n".join(
-                f"{name}: {value}" for name, value in self._collect().items()
+                f"{labels.get(name, name)}: {value}" for name, value in self._collect().items()
             )
             if self._summary:
                 text += f"\n\n{self._summary}"

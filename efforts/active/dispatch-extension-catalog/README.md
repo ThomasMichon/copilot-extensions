@@ -134,6 +134,10 @@ implementation and validation choices remain proposed means.
   without changing registration identity, execution parameters or runtime
   behavior (#8841). Structured operator controls and independent client
   adoption remain separate acceptance.
+- [ ] Add source-declared bounded operator controls through the existing Save
+  lifecycle and native field vocabulary. Pin edits to the exact original
+  source, retain advanced CLI compatibility, and refuse unsupported human
+  editing rather than exposing declaration or agent-guidance JSON.
 - [x] Expose sufficient machine-readable inputs and prerequisites for clients
   to instantiate offered emitter, evaluator and pool templates; retain an
   advanced declaration path where appropriate. PR #8363 supplies the bounded

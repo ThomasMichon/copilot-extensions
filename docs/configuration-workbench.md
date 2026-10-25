@@ -58,9 +58,9 @@ provenance, and description. Templates are not instantiated or running.*
 
 | Resource | What it is | What you can do here |
 |----------|------------|----------------------|
-| Configured | A user-local instance | Edit the same identity; Save only or Save and Activate |
+| Configured | A user-local instance | Edit supported, revision-bound operator controls; Save only or Save and Activate |
 | Source declaration | Repository/plugin-owned configuration | Read details; use supported local enable/disable controls, never edit its source here |
-| Available template | A reusable recipe or worker-pool scaffold | Instantiate a distinct local configuration |
+| Available template | A reusable recipe or worker-pool scaffold | Instantiate when its owner declares safe operator controls; otherwise use its advanced owning CLI |
 
 **Enabled is not running.** A draft may be not-published; publication can be
 pending; absent or stale supervisor evidence means activity is unknown.
@@ -82,7 +82,8 @@ configuration.
 *Details remains part of Configuration, not a configuration-home dialog.*
 
 The worker-pool template is a complete starting scaffold with one headless
-lane watching `work`. Other built-in recipes require more input: issue/effort
+lane watching `work`, with bounded label, repository and capacity controls.
+Other built-in recipes remain advanced-only and require more input: issue/effort
 loops need repository context, labels, producer/reservation policy, and
 referenced dependencies; reviewer recipes need emitter and evaluator policy.
 Missing inputs and dependencies are refused before saving.
@@ -95,18 +96,15 @@ existing supervisor. Enter a unique instance name. New instances belong to the
 invoking CLI's **local user/machine**, independent of the operational Machines
 tab you previously selected.
 
-![Full-content Instantiate editor with a unique local name and activation effects](assets/configuration-workbench/instantiate.png)
-
 *The editor retains section navigation. Escape cancels without writing;
 changing section cancels unsaved edits.*
 
-Move through the field tabs using Ctrl+Left/Right. In **Declaration**, customize
-the complete JSON scaffold: watched labels, placement/filter, capacity, and
-worker body. Supply **Repo root** for recipes requiring an existing absolute
-repository root. This is a complete declaration editor, not a recipe-specific
-wizard.
-
-![Declaration tab showing the editable headless worker-pool JSON scaffold](assets/configuration-workbench/declaration.png)
+Move through the field tabs using Ctrl+Left/Right. Choose the **Watched task
+label**, **Repository scope** and **Worker capacity** for the pool template.
+Supply **Repository root** when the selected template requires an existing
+absolute execution directory. Labels and short descriptions come from the
+owner. Agent guidance, worker bodies and executable structure are not human
+editable; changes belong upstream or in explicitly permitted agent addenda.
 
 *Do not activate the default `work` watcher unchanged unless that is the queue
 you mean to consume. Instance creation never changes the template.*
@@ -120,8 +118,9 @@ Exact schema, recipe composition, validation and command examples belong to
 Select a **Configured** row and choose **Edit -- Save only** or
 **Edit -- Save and Activate**. Existing values are restored; retain the instance
 name. A stale edit baseline is refused instead of overwriting a newer edit.
-
-![Edit Save only editor with the existing docs-worker identity restored](assets/configuration-workbench/edit.png)
+Safe editing also requires the exact original template revision and verified
+saved parameter binding. Changed or unavailable providers and legacy/raw-edited
+instances remain advanced-only; they are never silently migrated.
 
 *Save-only edits the draft; an already published version remains unchanged
 until explicit activation.*
@@ -132,10 +131,8 @@ mask but neither starts a daemon nor establishes that a worker is running.
 ## 7. Review effects, then submit
 
 The final confirmation shows the submitted values and provider effects.
-**Cancel is selected initially.** Review the declaration and target before
+**Cancel is selected initially.** Review the parameter values and target before
 choosing the named action.
-
-![Save and Activate confirmation showing the full submitted declaration, effects, and default Cancel](assets/configuration-workbench/confirm.png)
 
 *Save and Activate may start/restart worker processes and bind queued work
 through the existing supervisor. Loop templates may create agentic tasks.*
@@ -181,6 +178,11 @@ Details for complete provenance, prerequisites, and effects; scroll for more
 rows. Do not confuse hidden columns with missing provider data.*
 
 ## Reproduce the images
+
+The field-editor PNGs from the former advanced JSON form are not shown: they
+do not represent the operator-safe controls above. The current fixture and its
+native compositor tests exercise those controls, including confirmation, without
+depending on the rasterizer.
 
 The source revision is the Git revision containing these PNGs and their fixture,
 not whichever Manager/provider happens to be installed on the rendering host.
