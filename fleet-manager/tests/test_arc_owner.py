@@ -84,13 +84,15 @@ def _helm_protocol(args, root, input_text):
 @pytest.fixture
 def rig(tmp_path, monkeypatch, keys, request):
     native_protocol = bool(getattr(request, "param", False))
+    now = int(time.time()) if getattr(request, "param", False) == "wall-clock-native" else NOW
     root = Path(__file__).absolute().parents[2]
     monkeypatch.syspath_prepend(str(root / "libs" / "agent-procutil" / "src"))
     from agent_procutil.owned_process import run_caller_owned
 
     harness = Harness(keys)
-    config, inventory, catalog = inputs(NOW)
-    plan = design_loadout(config, inventory, catalog, now=NOW)
+    harness.clock.value = now
+    config, inventory, catalog = inputs(now)
+    plan = design_loadout(config, inventory, catalog, now=now)
     store = PreparationStore(tmp_path / "preparation.db", fleet="example", installation="install-a")
     candidate = {
         "schema": "fleet-manager.loadout-candidate", "version": 1,
@@ -99,8 +101,8 @@ def rig(tmp_path, monkeypatch, keys, request):
         "plan_bytes": len(canonical(plan, output=True)),
         "inventory_expires_at": inventory["expires_at"], "execution_admission": "not-implemented",
     }
-    proposal = store.publish(candidate, plan, expected=0, now=NOW)
-    store.confirm(generation=1, selected_digest=proposal["digest"], now=NOW, reviewer={
+    proposal = store.publish(candidate, plan, expected=0, now=now)
+    store.confirm(generation=1, selected_digest=proposal["digest"], now=now, reviewer={
         "principal": "actor-a", "account": "account-a", "policy_revision": "policy-1",
     })
     allocation = plan["composition"]["allocations"]["runners"]
@@ -110,7 +112,7 @@ def rig(tmp_path, monkeypatch, keys, request):
         "fleet": "example", "installation": "install-a", "target": "worker-a",
         "allocation": "runners", "generation": 1, "preparation": proposal["digest"],
         "declaration": digest(allocation), "release_digest": "a" * 64,
-        "policy_revision": "selection-1", "valid_until": NOW + 100,
+        "policy_revision": "selection-1", "valid_until": now + 100,
         "outfitting_seconds": 20, "chart_sha256": hashlib.sha256(chart).hexdigest(),
         "references": {name: allocation["slots"][name] for name in (
             "artifact_ref", "configuration_ref", "credential_ref", "forge_scope_ref",
@@ -167,7 +169,10 @@ def rig(tmp_path, monkeypatch, keys, request):
     def permit(intent):
         return harness.admit(intent)
 
-    harness.current = policy(fleet="example", enrollments=(actor(operations=(
+    harness.current = policy(fleet="example", valid_from=now - 1,
+                            valid_until=now + 86400 * 31,
+                            identity_trust_until=now + 86400 * 31,
+                            enrollments=(actor(operations=(
         OperationGrant("runner.converge", "worker-a", 1, request().request_digest),
     )),))
     return {

@@ -14,6 +14,57 @@ The command is a foreground service. The selected external deployment manager
 owns its supervision, storage and eventual lifecycle; CLI invocation does not
 install dependencies, enroll machines or open provider policies.
 
+## In-process deployment owners
+
+An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
+to `build_app` or `start`. These owners run **inside the same Gateway process**,
+not a second controller or a policy-selected module/executable. Each binding
+names one complete immutable `ServiceSlot`; every request must still match that
+exact current desired slot, route and original authenticated caller. Changed
+identity, configuration reference or route refuses until the deployment owner
+registers the new binding through its controlled runtime lifecycle.
+
+Local slots support bounded buffered HTTP only, with one active request per
+slot and the existing global admission/body/deadline limits. They cannot also
+accept an outbound connector. Caller JWT/proof verification, enrollment/key/
+method policy, TLS and canonical target checks are unchanged. Existing
+unregistered slots retain their original outbound-channel behavior.
+Registering Python code is not installed/healthy/ready evidence for its backend.
+Embedding diagnostics report an exact matching binding as `registered-local`,
+without a service-grant generation; they do not label backend readiness.
+The foreground CLI does not discover these handlers or activate a deployment
+module merely because policy declares a slot.
+
+The handler receives `LocalServiceRequest`, containing the normal filtered
+`ServiceRequest` plus **process-local** authority custody. It must check lifetime
+at each effect checkpoint, settle bounded native workers before cancellation
+returns and report uncertain outcomes without replay. Cancellation closes its
+lifetime before cancelling the handler, and retains the slot until that handler
+has settled. A write whose handler was invoked but failed returns
+`outcome-unknown`, never automatic retry or fabricated success.
+Gateway shutdown closes admission and local lifetimes before cancellation and
+joins every accepted local handler, including its finite native settlement,
+before returning. Process replacement and physical backend fences remain with
+the existing deployment/lifecycle owner, not a second controller.
+
+`local.authorize_operation(intent, admission, authority=..., role=..., installation=...)`
+passes the **original authority-retained cryptographically verified identity**
+to an independently configured `AdmissionAuthority`. It never reconstructs
+identity from `CallerContext`, accepts a caller-supplied policy or serializes a
+Permit. The fleet must match the Gateway, and the authority must match the
+explicitly registered backend owner. Gateway routing identity and operation
+authority are separate namespaces. The original intent's actor,
+account, command, target, generation and applicable full content grant are
+checked before journal lookup or effects. Gateway caller/route/trust/lifetime
+checks remain bound to every permit revalidation/completion; a later revocation
+cannot reuse an earlier allow. These remain local checkpoints, not an atomic
+fence against a later external effect.
+
+The [fixed ARC owner](arc-owner.md#in-process-gateway-binding) provides one such
+named operation. Actual selected artifact/support/provider custody and adoption
+of an existing pool remain separate requirements. No Gateway handler
+registration retires an agent lease or authorizes replacing an incumbent release.
+
 ## Bootstrap and coherent live policy
 
 Listener configuration is strict bounded JSON with schema

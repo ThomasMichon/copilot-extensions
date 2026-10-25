@@ -1,7 +1,7 @@
 # Fixed ARC Helm convergence owner
 
 `fleet_manager.arc_owner.ArcHelmOwner` is an explicit internal owner adapter,
-not a new CLI command, Gateway endpoint, resident controller or installer.
+not a new CLI command, resident controller or installer.
 It runs a real fixed Helm 3 scale-set convergence operation. Official ARC
 continues to own its listener, ephemeral runner sets and pods; Komodo must not
 supervise those pods as competing container resources.
@@ -12,6 +12,38 @@ Drain, receipt-owned removal, authenticated readiness, automatic recovery,
 production controller binding and an authorized Actions job remain open.
 The normal preparation SDK still reports execution admission unimplemented:
 it does not manufacture a deployment policy or invoke this adapter.
+
+## In-process Gateway binding
+
+The adopted SDK embedding can register
+`owner.gateway_binding(exact_slot, role=..., installation=...)` through the
+existing service Gateway's explicit `local_handlers` input. This exposes only
+`POST <configured-prefix>/converge`, without queries, using canonical
+`runner.converge` intents and the existing references-only operation shape.
+It adds no standalone controller, issuer, module discovery, raw Helm/manifest
+endpoint or default CLI behavior.
+
+The Gateway verifies the original caller over TLS and supplies its retained
+identity directly to this owner's separate current operation policy. The
+selected role/installation are trusted registration inputs, not request fields.
+The expected operation authority comes from the owner's journal, not the
+Gateway's independent routing name.
+Default `jwt-pop-v1` and explicitly selected `enrolled-pop-v1` callers remain
+distinct admission profiles. Missing/revoked/different account, fleet, target,
+generation or full deployment digest refuses before native work. Review
+confirmation alone never creates an operation grant.
+
+The handler joins the existing finite, headless native owner off the event
+loop. Gateway and request withdrawal remain checked at every operation-permit
+checkpoint. A lost HTTP response cannot replay Helm: original-operation
+recovery consults the same durable journal and preserves UNKNOWN. The accepted
+effect's native settlement remains its owner's responsibility.
+
+This is an executable SDK binding, **not live adoption**. The fixed profile
+still refuses unowned incumbent releases; do not upgrade or retag one merely
+to acquire a marker. Published/selected artifacts, current support/credential
+owners, durable provider protection, an incumbent-preserving adoption transition
+and actual deployed controller reconciliation remain required.
 
 ## Existing-owner inputs
 

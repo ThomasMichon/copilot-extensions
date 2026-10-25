@@ -38,9 +38,9 @@ PROCESS_RESOURCES = {
 }
 
 
-def run(argv, *, cwd=None, env=None):
+def run(argv, *, cwd=None, env=None, timeout=30):
     return subprocess.run(
-        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=30, check=False, **FLAGS,
+        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, check=False, **FLAGS,
     )
 
 
@@ -84,6 +84,7 @@ def build(project, output, operation="build_wheel"):
         [sys.executable, "-I", "-c",
          f"from setuptools.build_meta import {operation}; {operation}({build_path(output)!r})"],
         cwd=build_path(project),
+        timeout=60 if operation == "build_wheel" else 30,
     )
 
 

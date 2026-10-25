@@ -27,6 +27,9 @@ from .gateway_service_listener import Listener, read_bounded
 from .gateway_service_policy import ServiceAuthority, ServiceCandidate
 from .gateway_manifest import RouteSpec, ServiceSlot
 from .gateway_service_handler import PROFILE
+from .gateway_service_handler import CallerContext, RequestLifetime, ServiceRequest, ServiceResponse
+from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest
+from .gateway_service_policy import CallerGrant
 
 LOG = logging.getLogger(__name__)
 STATE = web.AppKey("fleet-service-state", object)
@@ -57,10 +60,18 @@ class RuntimeStatus:
 
 class ServiceRuntime:
     def __init__(self, authority: ServiceAuthority, listener: Listener,
-                 reload_interval: float) -> None:
+                 reload_interval: float,
+                 local_handlers: tuple[LocalHandlerBinding, ...] = ()) -> None:
         check(type(reload_interval) in (int, float) and 0.05 <= reload_interval <= 60,
               "invalid-reload-interval")
         self.authority, self.listener = authority, listener
+        check(type(local_handlers) is tuple and len(local_handlers) <= 32
+              and all(type(item) is LocalHandlerBinding for item in local_handlers),
+              "invalid-local-handler")
+        self.local_handlers = {item.slot.name: item for item in local_handlers}
+        check(len(self.local_handlers) == len(local_handlers), "duplicate-local-handler")
+        self.local_busy: set[str] = set()
+        self.local_active: dict[asyncio.Future[ServiceResponse], RequestLifetime] = {}
         self.origin = listener.external_origin or listener.origin
         self.interval = reload_interval
         self.context: ServiceContext | None = None
@@ -86,7 +97,10 @@ class ServiceRuntime:
                     self.authority.revalidate_service(channel.grant)
                 except ServicePolicyError:
                     ready = False
-            roles.append(RoleStatus(slot.name, "ready" if ready else "unavailable",
+            local = self.local_handlers.get(slot.name)
+            registered = local is not None and local.slot == slot and not self.stopping
+            roles.append(RoleStatus(slot.name, "ready" if ready else (
+                "registered-local" if registered else "unavailable"),
                                     channel.grant.generation if ready else None))
         return RuntimeStatus(
             policy.revision, policy.generation, tuple(roles),
@@ -185,6 +199,9 @@ class ServiceRuntime:
         candidate = self.authority.prepare_service(
             value["access"], value["proof"], target_uri=self.origin + request.path,
             slot=value["slot"])
+        if value["slot"] in self.local_handlers:
+            self.authority.release_candidate(candidate)
+            raise TransportError("slot-locally-owned", 409)
         ticket = secrets.token_hex(32)
         self.tickets[ticket] = Ticket(candidate, time.monotonic() + 30, caller_context)
         return web.json_response({"ticket": ticket}, headers={"Cache-Control": "no-store"})
@@ -272,6 +289,8 @@ class ServiceRuntime:
         counted = False
         try:
             check(self.pending < GLOBAL_REQUESTS, "request-limit", 429)
+            if slot.name in self.local_handlers:
+                return await self.local(request, grant, slot, route, path, query)
             channel = self.channels.get(slot.name)
             check(channel is not None and not channel.closed, "service-unavailable", 503)
             assert channel is not None
@@ -345,6 +364,73 @@ class ServiceRuntime:
             if channel is not None and pending is not None:
                 await channel.cancel(pending)
 
+    async def local(
+        self, request: web.Request, grant: CallerGrant, slot: ServiceSlot,
+        route: RouteSpec, path: str, query: str,
+    ) -> web.Response:
+        binding = self.local_handlers[slot.name]
+        check(slot.name not in self.local_busy, "local-owner-busy", 429)
+        lifetime = None
+        task = None
+
+        def checkpoint() -> None:
+            check(not self.stopping, "gateway-unavailable", 503)
+            current = self.authority.revalidate_caller(grant)
+            selected, current_route = self.route(path, request.method)
+            check(current.slot == selected == binding.slot and current_route == route
+                  and current.method == request.method
+                  and current.target_uri == self.origin + path,
+                  "local-owner-changed", 403)
+            check(request.transport is not None and not request.transport.is_closing(),
+                  "request-disconnected", 503)
+
+        self.local_busy.add(slot.name)
+        self.pending += 1
+        try:
+            checkpoint()
+            payload = await body(request, BODY_BYTES)
+            checkpoint()
+            caller = self.authority.revalidate_caller(grant)
+            local_request = ServiceRequest(
+                CallerContext(self.listener.fleet, self.listener.gateway, slot.name,
+                              caller.principal, caller.expires_at),
+                request.method, (path[len(route.prefix):] or "/") + query,
+                tuple(headers(request.headers.items(), REQUEST_HEADERS).items()), payload)
+            lifetime = local_request.lifetime
+            local = LocalServiceRequest(local_request, self.authority, grant, checkpoint)
+            request[DISPATCHED] = True
+            task = asyncio.ensure_future(binding.handle(local))
+            self.local_active[task] = lifetime
+            try:
+                result = await asyncio.shield(task)
+            except asyncio.CancelledError:
+                lifetime.close()
+                task.cancel()
+                settled = asyncio.gather(task, return_exceptions=True)
+                while not settled.done():
+                    try:
+                        await asyncio.shield(settled)
+                    except asyncio.CancelledError:
+                        continue
+                settled.result()
+                raise
+            local.checkpoint()
+            check(type(result) is ServiceResponse, "invalid-backend-response")
+            return web.Response(status=result.status, headers=result.headers, body=result.body)
+        except (TransportError, ServicePolicyError, OSError,
+                asyncio.TimeoutError, asyncio.CancelledError):
+            raise
+        except Exception:
+            LOG.error("local-handler-refused code=handler-failed")
+            raise TransportError("handler-failed") from None
+        finally:
+            if lifetime is not None:
+                lifetime.close()
+            if task is not None:
+                self.local_active.pop(task, None)
+            self.pending -= 1
+            self.local_busy.remove(slot.name)
+
 
 async def body(request: web.Request, maximum: int) -> bytes:
     result = bytearray()
@@ -416,14 +502,15 @@ def outcome(request: web.Request, code: str) -> str:
 
 async def build_app(listener: Listener, policy_path: Path, *, reload_interval: float = 1,
                     clock: Callable[[], int] = lambda: int(time.time()),
-                    identity_provider: IdentityProvider | None = None) -> web.Application:
+                    identity_provider: IdentityProvider | None = None,
+                    local_handlers: tuple[LocalHandlerBinding, ...] = ()) -> web.Application:
     """Build without binding; the policy file is the sole explicit runtime source."""
     listener.tls()
     authority = ServiceAuthority(
         fleet=listener.fleet, gateway=listener.gateway,
         source=lambda: read_bounded(policy_path), clock=clock,
         identity_provider=identity_provider)
-    state = ServiceRuntime(authority, listener, reload_interval)
+    state = ServiceRuntime(authority, listener, reload_interval, local_handlers)
     await state.reload()
     app = web.Application(middlewares=[guarded], client_max_size=BODY_BYTES, handler_args={
         "logger": ValueFreeLogger(LOG, {}), "max_line_size": 8190,
@@ -454,8 +541,15 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
 
     async def shutdown(application: web.Application) -> None:
         state.stopping = True
-        await asyncio.gather(*(channel.close("gateway-shutdown")
-                               for channel in list(state.channels.values())))
+        local = tuple(state.local_active.items())
+        for task, lifetime in local:
+            lifetime.close()
+            task.cancel()
+        try:
+            await asyncio.gather(*(channel.close("gateway-shutdown")
+                                   for channel in list(state.channels.values())))
+        finally:
+            await asyncio.gather(*(task for task, _ in local), return_exceptions=True)
         for ticket in state.tickets.values():
             authority.release_candidate(ticket.candidate)
         state.tickets.clear()

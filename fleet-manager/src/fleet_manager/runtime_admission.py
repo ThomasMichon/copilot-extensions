@@ -13,6 +13,7 @@ from .observations import STATE_FIELDS
 from .operations import COMMAND_FIELDS, OperationIntent
 from .planning import PlanError, digest, identifier
 from .runtime_identity import VerifiedIdentity
+from .enrolled_identity import EnrolledIdentity, PROFILE as ENROLLED_PROFILE
 
 MAX_ENROLLMENTS = 64
 MAX_GRANTS = 256
@@ -168,6 +169,7 @@ class AuthoritySnapshot:
     valid_until: int
     identity_trust_until: int
     enrollments: tuple[Enrollment, ...]
+    identity_profile: str = "jwt-pop-v1"
 
     def __post_init__(self):
         _name(self.authority)
@@ -179,6 +181,8 @@ class AuthoritySnapshot:
             _time(value)
         if not self.valid_from < self.valid_until:
             raise AdmissionError("invalid-record")
+        if self.identity_profile not in ("jwt-pop-v1", ENROLLED_PROFILE):
+            raise AdmissionError("unsupported-profile")
         _items(self.enrollments, Enrollment, MAX_ENROLLMENTS)
         keys, actors = set(), {}
         grants = 0
@@ -248,6 +252,7 @@ class _Issued:
     permit: Permit
     identity: VerifiedIdentity
     request: Request
+    checkpoint: Callable[[], None] | None = None
 
 
 class AdmissionAuthority:
@@ -310,8 +315,10 @@ class AdmissionAuthority:
             raise AdmissionError("invalid-record")
         prior = self._last_snapshot
         if prior is not None:
-            if ((current.authority, current.fleet, current.issuer, current.audience)
-                    != (prior.authority, prior.fleet, prior.issuer, prior.audience)):
+            if ((current.authority, current.fleet, current.issuer, current.audience,
+                 current.identity_profile)
+                    != (prior.authority, prior.fleet, prior.issuer, prior.audience,
+                        prior.identity_profile)):
                 raise AdmissionError("authority-changed")
             if current.revision < prior.revision:
                 raise AdmissionError("stale-policy")
@@ -337,7 +344,10 @@ class AdmissionAuthority:
 
     @staticmethod
     def _identity(identity):
-        if type(identity) is not VerifiedIdentity or identity.profile != "jwt-pop-v1":
+        ordinary = type(identity) is VerifiedIdentity and identity.profile == "jwt-pop-v1"
+        enrolled = (type(identity) is EnrolledIdentity and identity.profile == ENROLLED_PROFILE
+                    and identity.kind == "caller")
+        if not (ordinary or enrolled):
             raise AdmissionError("invalid-identity")
         for value, bound in ((identity.issuer, 2048), (identity.subject, 256),
                              (identity.audience, 512), (identity.proof_key, 43)):
@@ -352,6 +362,8 @@ class AdmissionAuthority:
 
     @staticmethod
     def _valid(current, identity, now):
+        if current.identity_profile != identity.profile:
+            raise AdmissionError("unsupported-profile")
         if not current.valid_from <= now < current.valid_until:
             raise AdmissionError("stale-policy")
         if now >= current.identity_trust_until:
@@ -400,10 +412,13 @@ class AdmissionAuthority:
         return requested
 
     def authorize(self, identity: VerifiedIdentity, request: Request, *,
-                  role: str, installation: str) -> Permit:
+                  role: str, installation: str,
+                  checkpoint: Callable[[], None] | None = None) -> Permit:
         self._identity(identity)
         _name(role)
         _name(installation)
+        if checkpoint is not None and not callable(checkpoint):
+            raise AdmissionError("invalid-record")
         action, request_digest = _request(request)
         with self._guard():
             now = self._now()
@@ -422,10 +437,12 @@ class AdmissionAuthority:
             if len(self._issued) >= self._capacity or len(self._evidence) >= MAX_PERMITS:
                 raise AdmissionError("resource-limit")
             self._evidence[identity.evidence] = identity.verified_at + REQUEST_SECONDS
+            self._bound_checkpoint(checkpoint)
             current = self._current()
             self._valid(current, identity, self._now())
             enrolled = self._enrolled(current, identity, role, installation)
             resources = self._resources(current, enrolled, request)
+            self._bound_checkpoint(checkpoint)
             now = self._now()
             self._valid(current, identity, now)
             if now >= identity.verified_at + REQUEST_SECONDS:
@@ -436,8 +453,13 @@ class AdmissionAuthority:
                 min(now + PERMIT_SECONDS, current.valid_until,
                     current.identity_trust_until, identity.expires_at),
             )
-            self._issued[id(permit)] = _Issued(permit, identity, request)
+            self._issued[id(permit)] = _Issued(permit, identity, request, checkpoint)
             return permit
+
+    @staticmethod
+    def _bound_checkpoint(checkpoint):
+        if checkpoint is not None and checkpoint() is not None:
+            raise AdmissionError("invalid-checkpoint")
 
     def revalidate(self, permit: Permit, request: Request) -> Permit:
         """Consume the old handle; success returns the currently retained handle.
@@ -473,6 +495,7 @@ class AdmissionAuthority:
             if issued is None or issued.permit is not permit:
                 raise AdmissionError("unknown-permit")
             del self._issued[id(permit)]
+            self._bound_checkpoint(issued.checkpoint)
             now = self._now()
             if now >= permit.expires_at:
                 raise AdmissionError("expired-permit")
@@ -489,6 +512,7 @@ class AdmissionAuthority:
                 raise AdmissionError("enrollment-changed")
             if self._resources(current, enrolled, request) != permit.resources:
                 raise AdmissionError("scope-changed")
+            self._bound_checkpoint(issued.checkpoint)
             now = self._now()
             self._valid(current, issued.identity, now)
             if now >= permit.expires_at:
@@ -499,5 +523,6 @@ class AdmissionAuthority:
                                current.identity_trust_until, issued.identity.expires_at),
             )
             if retain:
-                self._issued[id(renewed)] = _Issued(renewed, issued.identity, request)
+                self._issued[id(renewed)] = _Issued(
+                    renewed, issued.identity, request, issued.checkpoint)
             return renewed
