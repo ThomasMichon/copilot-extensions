@@ -229,6 +229,13 @@ Both v1 and explicitly scoped v2 run that watcher path and the lost committed
 register/ACK/cancel recovery controls.
 The native child supplies synthetic provider snapshots; this is not live forge
 credential validation or acceptance of an independent periodic evaluator.
+`test_delegated_replay_credentials.py` joins that scoped service/queue path to
+the actual native GitHub credential-command reader and TLS credential exchange.
+It checks renewed per-request credentials rather than ambient fallback,
+unchanged shared observations, drained restart with provider refusal, retained
+original identities and one wake per wait after authorization recovers.
+Only forge CLI responses and the issuer/provider are synthetic; this does not
+qualify production provider permissions, an independent evaluator or deployment.
 These are isolated source tests,
 not installed service, production credential or representative fleet latency/CPU
 qualification. The scheduler adds no process, network call or tree/history
