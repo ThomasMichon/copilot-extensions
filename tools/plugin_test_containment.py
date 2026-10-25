@@ -48,6 +48,14 @@ else:
         GroupObservationChanged, _darwin_group_usage, _darwin_poll_group_usage, _ps_group_usage,
     )
 
+if __package__:
+    from . import plugin_test_cleanup
+else:
+    import plugin_test_cleanup
+
+SandboxCleanupError = plugin_test_cleanup.SandboxCleanupError
+cleanup_reaped_directory = plugin_test_cleanup.cleanup_reaped_directory
+
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
 sys.path.insert(
@@ -96,39 +104,6 @@ class UnreapedProcessError(ContainmentError):
         super().__init__(message)
         self.job = job
 
-class SandboxCleanupError(OSError):
-    """Cleanup exhausted its retry; an enclosing owner must retain the files."""
-
-
-def _cleanup_with_windows_retry(cleanup: Callable[[], _T]) -> _T:
-    retry_deadline = None
-    while True:
-        try:
-            return cleanup()
-        except OSError as error:
-            if sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32, 33):
-                raise
-            now = time.monotonic()
-            if retry_deadline is None:
-                retry_deadline = now + 5
-                print(
-                    "[WARN] Windows sandbox cleanup temporarily unavailable; "
-                    "retrying for at most 5 seconds.",
-                    file=sys.stderr,
-                )
-            remaining = retry_deadline - now
-            if remaining <= 0:
-                raise SandboxCleanupError(
-                    f"Windows sandbox cleanup retry expired: {error}",
-                ) from error
-            time.sleep(min(0.05, remaining))
-
-
-def cleanup_reaped_directory(path: Path | str) -> None:
-    """Remove a runner-owned directory only after its caller verifies reaping."""
-    _cleanup_with_windows_retry(lambda: NativeTemporaryDirectory._rmtree(path))
-
-
 class TestSandbox(NativeTemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
@@ -154,7 +129,7 @@ class TestSandbox(NativeTemporaryDirectory):
             return False
         exit_sandbox = super().__exit__
         try:
-            return _cleanup_with_windows_retry(
+            return plugin_test_cleanup._cleanup_with_windows_retry(
                 lambda: exit_sandbox(exc_type, exc_value, traceback),
             )
         except OSError as cleanup_error:
