@@ -57,7 +57,10 @@ jobs:
       - name: Qualify real tmux observer navigation
         run: >-
           python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers
-          --test-file tests/native/test_companion_pane_tmux.py --test-timeout 120
+          --test-file tests/native/test_companion_pane_tmux.py
+          --test-file tests/test_companion_topology.py
+          --test-file tests/test_companion_observations.py
+          --test-file tests/test_companion_topology_ui.py --test-timeout 120
 
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
