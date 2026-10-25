@@ -808,6 +808,10 @@ def _cmd_companion(rest: list[str]) -> int:
 
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
+    if rest and rest[0] == "review":
+        from .picker_review_cli import main as review
+
+        return review(rest[1:])
     args = list(rest)
     action = "run"
     if args and args[0] in {"mock", "screenshot"}:
@@ -1512,6 +1516,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  picker [<project>]     launch the production Picker (Textual)")
         print("  picker mock [<project>] [--local] [--json]")
         print("                         production UX with simulated mutations")
+        print("  picker review <project> [--candidate LABEL] [--capture F]")
+        print("                         read-only candidate with real local owner data")
         print("  picker screenshot [<project>] [--format svg|text|ansi] [--out F]")
         print("                         capture the production Picker headlessly")
         print("  picker [screenshot] --demo|--preview [<project>]")

@@ -730,6 +730,10 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
 
         def build():
             left = Text(" Worktree Manager", style="bold")
+            from ... import picker_review
+
+            if picker_review.active():
+                left.append(f" [READ-ONLY {picker_review.current().candidate}]", style="bold yellow")
             if present["version"]:
                 left.append(ver, style=C_DIM)
             # Manager-self update indicator: qualifies the version string

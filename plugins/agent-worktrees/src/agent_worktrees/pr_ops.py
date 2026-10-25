@@ -24,6 +24,7 @@ from .pr_patch_ids import (
     _patch_id as _patch_id,
 )
 from .pr_bypass_note import self_merge_bypass_note
+from .pr_observation_persistence import persist_observation as _persist_pr_observation
 from .tracking import PRRecord
 
 HOLD_LABEL = "do-not-merge"
@@ -1668,46 +1669,17 @@ def _reconcile_pr(
 
     if active.state == "merged" and not provider_terminal:
         return
-    with tracking._RecordLock(record.yaml_path, blocking=not best_effort) as lk:
-        if not lk.acquired:
+    try:
+        _persist_pr_observation(record, active, state, resolved, provider_terminal, pull, best_effort=best_effort)
+    except pr_authority.PublicationAuthorityBusy:
+        if best_effort:
             return
-        fresh = tracking.load_record(record.yaml_path)
-        current = pr_publish._publication_pr(fresh, active)
-        if current is None or pr_publication_state.authority(current) != pr_publication_state.authority(active):
-            return
-        claim_ref = _pr_claim_ref(active)
-        if not any(claim.ref == claim_ref for claim in fresh.resources):
-            pending_claim = next((claim for claim in record.resources
-                                  if claim.kind == "pr" and claim.ref == claim_ref), None)
-            if pending_claim is not None:
-                tracking.add_resource_claim(fresh, pending_claim, save=False)
-        before = (current.state, current.closed_at, current.head_sha)
-        claimed_ref = released_ref = None
-        if provider_terminal:
-            current.state = "merged" if active.state == "merged" else resolved
-            current.closed_at = current.closed_at or tracking._now_iso()
-            released_ref = _release_pr_claim(fresh, current)
-        elif state == "open":
-            current.state = "open"
-            current.closed_at = ""
-            current.head_sha = current.head_sha or pull.head_sha
-            claimed_ref = _ensure_pr_claim(fresh, current)
-            if resolved == "merged":
-                current.state = resolved
-                current.closed_at = tracking._now_iso()
-        if claimed_ref or released_ref or before != (current.state, current.closed_at, current.head_sha):
-            tracking.save_record(fresh)
-        pr_publication_state.copy_pr(active, current)
-        record.resources = fresh.resources
-        for name in ("status", "completed_at", "status_note_at", "last_finalized_at"):
-            setattr(record, name, getattr(fresh, name))
-    if released_ref or claimed_ref:
-        claim_history.record_pr_event(
-            released_ref or claimed_ref, worktree_id=record.worktree_id,
-            machine=record.execution_machine,
-            event="released" if released_ref else "claimed",
-            note=resolved if released_ref else "", project=record.repo,
-        )
+        if tracking._thread_sidecar_counts():
+            raise
+        # Never wait for publication authority while holding a record lock.
+        # Reload and revalidate the observation's authority after admission.
+        with pr_authority.guard(timeout=publication_deadline.lock_wait(publication_deadline.configured(prcfg))):
+            _persist_pr_observation(record, active, state, resolved, provider_terminal, pull)
 
 
 def _live_pr_state(
@@ -2178,8 +2150,12 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
                 "error": f"No tracking record found for '{worktree_id}'."}
     if config is None:
         config = cfg.load_config()
+    reconciliation = {}
     if live:
-        _reconcile_active_pr(record, config)
+        try:
+            _reconcile_active_pr(record, config)
+        except pr_authority.PublicationAuthorityBusy as exc:
+            reconciliation = exc.status_result()
     active = record.active_pr()
     result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
     if active is not None:
@@ -2193,6 +2169,7 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
                 result.update(live_block)
     if all_prs:
         result["prs"] = [_pr_to_dict(p) for p in record.prs]
+    result.update(reconciliation)
     return result
 
 

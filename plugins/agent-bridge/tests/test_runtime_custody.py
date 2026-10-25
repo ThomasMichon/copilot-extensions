@@ -168,6 +168,7 @@ def test_terminal_history_and_original_association_are_not_discarded(tmp_db):
 
 
 def test_empty_legacy_missing_and_unknown_cohorts_never_qualify(tmp_db):
+    tmp_db.execute_write("DROP TABLE acquisition_attempts")
     report = tmp_db.runtime_custody_inventory(installation(tmp_db))
     assert report["rows"]["acquisition_attempts"] is None
     assert report["storage_inventory_complete"] is False

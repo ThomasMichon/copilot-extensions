@@ -8,6 +8,7 @@ import sqlite3
 from .runtime_custody import RuntimeCustodyError
 from .inbox_custody import decode_handoff
 from .turn_custody import original_handoff as original_turn_handoff
+from .acquisition_custody import launch_observation
 
 
 COHORTS = {
@@ -17,7 +18,9 @@ COHORTS = {
               "native_accepted_at", "native_consumed_at", "native_outcome"),
     "workspace_embodiments": ("key_digest", "state", "session_id", "native_session_id", "turn_index"),
     "provider_embodiments": ("key_digest", "state", "session_id", "native_session_id"),
-    "acquisition_attempts": ("delivery_id", "target", "worktree_id", "state"),
+    "acquisition_attempts": ("delivery_id", "target", "worktree_id", "state", "request_digest",
+                             "runtime_custody_json", "launch_handoff_json", "launch_started_at",
+                             "launch_result_json"),
     "acquisition_effects": ("delivery_id", "stage"),
     "acquisition_bindings": ("session_id", "native_session_id", "worktree_id", "retired"),
     "acquisition_launch_gates": ("worktree_id", "delivery_id", "mode", "session_id"),
@@ -85,11 +88,17 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
             f"SELECT {','.join(columns)} FROM {table} ORDER BY {','.join(columns[:2])}"
         )]
         rows_by_table[table] = rows
-        if table in ("sessions", "turns", "live_messages"):
+        if table in ("sessions", "turns", "live_messages", "acquisition_attempts"):
             for row in rows:
                 association = row["runtime_custody_json"]
                 if table == "turns" and row["native_handoff_json"] is not None:
                     original_turn_handoff(row)
+                if table == "acquisition_attempts" and row["launch_handoff_json"] is not None:
+                    launch_observation(row)
+                if table == "acquisition_attempts" and row["launch_handoff_json"] is None and (
+                    row["launch_started_at"] is not None or row["launch_result_json"] is not None
+                ):
+                    raise RuntimeCustodyError("Acquisition launch lost its original handoff")
                 if table == "live_messages" and row["handoff_json"] is not None:
                     handoff = decode_handoff(row["handoff_json"])
                     if handoff["message_id"] != row["id"] or handoff["admission"] != association:
@@ -122,7 +131,7 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
         "version": 1, "coverage": "bridge-db-session-turn-inbox-foundation-v1",
         "epoch": epoch, "producers": producers, "rows": rows_by_table,
         "revision_coverage": ["sessions", "turns", "live_messages", "producer-enrollment",
-                              "consumer-enrollment", "epoch"],
+                              "consumer-enrollment", "acquisition_attempts", "acquisition_effects", "epoch"],
         "storage_inventory_complete": not missing and not unknown,
         "unmediated_cohorts": list(UNMEDIATED), "blockers": blockers,
         "restore_qualified": False, "acknowledged": False,

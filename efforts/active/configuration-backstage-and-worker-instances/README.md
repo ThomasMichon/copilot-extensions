@@ -336,6 +336,12 @@ configuration, arbitrary source editing, or automatic maintenance dispatch.
 Historical entries are preserved in dated journals. The Plan and Validation Plan
 above remain the completion gate; journal milestones do not close the effort.
 
+2026-10-24: #8686 merged the reviewed #8678 source-review amendment after an
+approving current-head review and required green CI. Implementation now proceeds
+against the existing resident feed and explicit read-only execution boundaries.
+No installed rollout, service recovery or activation was performed. Parent
+installed acceptance and all remaining Plan/Validation gates stay open.
+
 - [2026-10-23 - installed acceptance and resident repository map](journal/2026/10.23-installed-acceptance-and-repository-map.md)
 - [2026-10-19 - reviewed documentation corrections](journal/2026/10.19-reviewed-documentation-corrections.md)
 - [2026-10-16 - configuration acceptance](journal/2026/10.16-configuration-acceptance.md)

@@ -1079,6 +1079,26 @@ wait behind network I/O. The published source
 is pinned from the validated owning branch, never a later mutable `HEAD`.
 Review the rewritten diff and obtain current review before merging.
 
+PR observation reconciliation first attempts its ordinary record transaction.
+On publication-authority contention it releases the record lock, waits within
+the configured deadline-derived publication lock budget, then reloads and
+revalidates the exact PR association before persisting the observation. Provider
+reads happen outside this wait; best-effort background reconciliation skips a
+contended write rather than waiting. Fenced finalization also uses this
+nonwaiting mode: its outer record lock must never wait for publication
+authority. Foreground reconciliation refuses to wait while any outer record
+sidecar remains held. Unchanged observations need no authority wait.
+
+If the budget expires, `pr-status --json` returns a nonzero exit with
+`error_code: pr_authority_busy`, `retryable: true`, `retry_after_seconds: 2`
+and `reconciliation_pending: true`, retaining available tracked/live status.
+This is local bookkeeping contention, not evidence of a failed review or a
+stale lock. Agents should wait at least the indicated delay and retry the same
+status command in the same worktree without asking the operator. If contention
+persists, retain the obligation and defer a later retry instead of spinning.
+Do not repeat a push or merge to reconcile a completed effect, delete a lock,
+terminate its owner, or bypass ownership checks.
+
 Persisted provider-native `active` PR states remain live for selection and
 ownership refresh, as well as explicit rewrite admission; `completed` and
 `abandoned` remain terminal. Classification does not require rewriting a legacy

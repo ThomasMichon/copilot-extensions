@@ -1350,7 +1350,7 @@ def validate_and_finalize(
         from . import pr_ops as _pr_ops
 
         fresh = _authority_fenced_write(
-            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config),
+            yaml_path, config, lambda r: _pr_ops._reconcile_active_pr(r, config, best_effort=True),
         )
         record = fresh if fresh is not None else record
 

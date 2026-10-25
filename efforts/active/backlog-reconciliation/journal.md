@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-24 - Succession family: six direct consolidations and four protected graph arrivals](<journal/2026/10.24 succession-family-93.md>)
 - [2026-10-24 - Title, verdict and configuration families: six complete consolidations](<journal/2026/10.24 title-verdict-configuration-family-92.md>)
 - [2026-10-24 - Initial graph accounted for; first family receives eleven lossless consolidations](<journal/2026/10.24 graph-sweep-and-family-91.md>)
 - [2026-10-24 - Operator-directed graph-first thematic sweep](<journal/2026/10.24 graph-first-direction.md>)

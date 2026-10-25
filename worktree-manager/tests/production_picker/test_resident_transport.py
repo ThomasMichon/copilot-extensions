@@ -101,6 +101,19 @@ def test_socket_transactions_use_the_existing_atomic_receiver(tmp_path):
     assert requests == ["health", "worktrees-feed"]
 
 
+def test_review_reads_real_socket_snapshot_and_closes(tmp_path, monkeypatch):
+    from worktree_manager import picker_review
+
+    monkeypatch.setattr(picker_review, "_review", picker_review.Review(
+        tmp_path / "candidate", tmp_path, "native-test", ("unused",),
+    ))
+    with server(tmp_path, values=transactions()[:3]) as (requests, _, _):
+        rows = picker_review.worktree_rows("sample")
+    assert rows[0]["id"] == "one"
+    assert rows[0]["_projection"]["quality"] == "current"
+    assert requests == ["health", "worktrees-feed"]
+
+
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
 def test_socket_feed_preserves_default_cli_selection(tmp_path, monkeypatch, platform):
     monkeypatch.setattr(resident_transport, "detect_platform", lambda: platform)

@@ -12,6 +12,7 @@ from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_load
 from .inbox import ensure_inbox
 from .selection import ListSelection
 from .. import update_stage
+from ... import picker_review
 
 log = logging.getLogger("agent-worktrees.picker")
 
@@ -96,7 +97,7 @@ class PickerScreenRuntimeMixin:
         override moments after it was set -- a real, observed capture-race,
         not just a hypothetical one. Re-checked again in ``_done`` below, in
         case the pin lands while the background call is in flight."""
-        if getattr(self, "_update_state_pinned", False):
+        if picker_review.active() or getattr(self, "_update_state_pinned", False):
             return
         now = time.monotonic()
         if now - self._last_update_state_poll < UPDATE_STATE_POLL_SECS:
@@ -131,7 +132,7 @@ class PickerScreenRuntimeMixin:
         ``_manager_update_state_pinned`` is set -- see ``_poll_update_state``'s
         docstring for why an unconditional assignment here can clobber an
         explicit capture/audit override."""
-        if getattr(self, "_manager_update_state_pinned", False):
+        if picker_review.active() or getattr(self, "_manager_update_state_pinned", False):
             return
         from ... import manager_update_check as _muc
 
@@ -180,6 +181,8 @@ class PickerScreenRuntimeMixin:
         overlap; a generation counter (bumped per call, compared in
         ``_done``) guards against an older request finishing after a
         newer one and clobbering its fresher snapshot with stale data."""
+        if picker_review.active():
+            return
         now = time.monotonic()
         checked_at = getattr(self, "_orphans_checked_at", None)
         if not force and checked_at is not None and now - checked_at < self._ORPHAN_POLL_SECS:

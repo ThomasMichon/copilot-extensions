@@ -97,6 +97,7 @@ from .engine_worktree_actions import PickerScreenWorktreeActionsMixin
 from .create_action_screen import CreateActionScreen  # noqa: F401 -- re-export for tests
 from .listview import ListView
 from .selection import ListSelection
+from ... import picker_review
 from .steering import (
     PivotCardScreen,
     PivotFormScreen,
@@ -390,7 +391,7 @@ class PickerScreen(
         # never triggered implicitly. See _resolve_mock_mode: entered via
         # `picker mock`, AGENT_WORKTREES_PICKER_MOCK=1, or the deprecated
         # AGENT_WORKTREES_PICKER_REAL_OPS=0.
-        self.mock_mode = _resolve_mock_mode(mock_mode)
+        self.mock_mode = picker_review.active() or _resolve_mock_mode(mock_mode)
         self.real_ops = not self.mock_mode
         self.last_pr = 0              # remembered Profiles grid row (Tab in/out)
         self.btn_idx = 0              # active button within the current group

@@ -138,15 +138,59 @@ Twenty initial identities are no longer open; #8709 also changed closed before
 current body admission and receives no campaign credit. #8702 and #8715 have
 admitted semantic deltas but retain their explicit source claims. #8715's
 author-reported source delivery does not establish release, rollout or headed
-acceptance. Four arrivals remain metadata-only pending their own admission.
+acceptance. At that snapshot, four arrivals remained metadata-only pending admission.
 The original research layers and all provenance remain unchanged.
+
+## Third delivered consolidation
+
+Batch 93 considered eleven succession and session-reader issues. Six redundant
+trackers were superseded into **OPEN #84** only after complete additive
+receiving delivery and full current-body readback:
+
+| Direct unfinished outcome | Superseded tracker |
+|---------------------------|--------------------|
+| Native predecessor/successor render noncollision | #4126 |
+| Explicit owning-project selection for both session commands | #4134 |
+| Honest exclusive-consume versus durable-promotion results, including all six inherited #4131 rows | #5684 |
+| Ledger-only anchor session registration and ordinary readers | #5997 |
+| Read-only historical chain planning and explicit partial outcomes | #6144 |
+| Authoritative-head agreement in actual JSON and ordinary resume selection | #6279 |
+
+The entire 4,817-byte incumbent prefix and all five direct #112 rows survive.
+The final 23,849-byte body adds 52 unchecked Plan, Validation and continuing
+Coordination rows: 57 total. The original finite command/fixture, native and
+installed-adoption tiers remain distinct. A native render case does not add
+an every-host gate to a deterministic reader case.
+
+**#912, #3000, #3584 and #6579 remain independently OPEN.** Their original
+nonexpiring claim, 31-row arbitration contract, nine-row ground-admission
+contract and actual assignment respectively are not transferred to #84.
+The existing #5997 contributor/provider path also remains intact. No product
+completion, source/resource handoff, token operation or runtime action occurred.
+
+All eleven public bodies/states/reasons, unchanged original discussions and
+actual custody were audited before the next census: **923 whole-queue open
+at 2026-10-24 16:55:09 PDT**, comprising 763 original-cohort and 160 inflow
+issues. There are 676 eligible open issues and 247 untouched excluded-author
+issues, still 194 above the fixed checkpoint.
+
+The graph now retains **703 historical eligible identities**, not 703 current
+open issues. Its initial research layers remain unchanged. Four previously
+pending arrivals, #8729, #8733, #8735 and #8736, have complete original/current
+discussion admission and 23 finite acceptance clauses. Their credential
+authority, same-process search consistency, scheduled accounting and promotion
+source/control responsibilities remain independently claimed. Six new
+source-supported discovery links do not establish receiving acceptance or
+independently verify reported providers. New #8754 is metadata-only pending
+its own admission.
 
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
 per-track families still have receiving-fit and custody obligations, not
-automatic closure lists. The same four researchers are selecting coherent
-families from their completed graph partitions rather than repeating the sweep.
+automatic closure lists. The same four researchers have selected coherent
+next families from their completed graph partitions rather than repeating
+the sweep; their proposals still require complete direct receiving admission.
 In particular, #5922's scenario-axis contract and #8511's concurrent artifact
 allocation remain independent rather than becoming optimistic reduction credit.
 
