@@ -73,6 +73,8 @@ knowledge binding, not the ambient project's map. Force drops only settings
 that the project scaffold will actually replace; retained global and drop-in
 knowledge bindings still participate. The selected source uses the ordinary
 canonical-plus-legacy map merge, including for a knowledge checkout.
+Admission checks both explicit-project loading and ordinary loading when a
+retained `repo_name` selects a different repository or drop-in scope.
 Conflicting platform/profile bindings,
 ambiguous associations, execution-name collisions and invalid declarations
 produce a nonzero diagnostic before state preparation or launcher publication.

@@ -385,7 +385,8 @@ def test_registration_matches_retained_binding_precedence(
 @pytest.mark.parametrize("command", ["register", "install"])
 @pytest.mark.parametrize("case", [
     "fresh", "retained", "aliased-foreign", "aliased-map", "aliased-map-valid",
-    "aliased-map-shadowed", "missing-receipt", "foreign-receipt",
+    "aliased-map-shadowed", "aliased-checkout", "aliased-checkout-valid",
+    "aliased-checkout-forced", "missing-receipt", "foreign-receipt",
 ])
 def test_namespaced_registration_checks_prospective_owned_state_before_writes(
     registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -395,6 +396,7 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
     from test_registry_paths import _payload, _register_repo, _select, _stamp
 
     fixture = registration
+    fixture.args.force = case == "aliased-checkout-forced"
     payload = _payload(tmp_path, "payload")
     with monkeypatch.context() as native:
         native.setattr(installation_cli.subprocess, "run", fixture.originals["subprocess_run"])
@@ -428,6 +430,21 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
             "machine": "foreign-space" if case in ("aliased-foreign", "aliased-map") else "local-space",
             "repos": {"registered": {"anchor": str(fixture.repo)}},
         }))
+        if case.startswith("aliased-checkout"):
+            previous_checkout = tmp_path / "previous-checkout"
+            previous_checkout.mkdir()
+            (state / "config.yaml").write_text(yaml.safe_dump({
+                "repo_name": previous, "machine": "local-space",
+                "repos": {previous: {"anchor": str(previous_checkout)}},
+            }))
+            (previous_checkout / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+                "local-space": {
+                    "physical_host": "friendly-host",
+                    "execution_platform": platform if case == "aliased-checkout-valid" else (
+                        "windows" if platform == "wsl" else "wsl"
+                    ),
+                },
+            }}))
         identity_path = state.parent / "identity.json"
         if case == "missing-receipt":
             identity_path.unlink()
@@ -453,7 +470,9 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
         }}}))
     before = {str(p.relative_to(tmp_path)): p.read_bytes()
               for p in tmp_path.rglob("*") if p.is_file()}
-    refused = case in ("aliased-foreign", "aliased-map", "missing-receipt", "foreign-receipt")
+    refused = case in (
+        "aliased-foreign", "aliased-map", "aliased-checkout", "missing-receipt", "foreign-receipt",
+    )
     assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == (1 if refused else 0)
     if refused:
         assert fixture.effects == []
