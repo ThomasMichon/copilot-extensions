@@ -1491,6 +1491,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  doctor [--json] [--apply-daemon-health]")
         print("                         report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
+        print("    [--repository HTTPS_URL] [--repository-target ABSOLUTE_PATH]")
+        print("    [--trust-repository-setup]  optional engine-owned repository setup after core readiness")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  source                 show the self-update source (git repo + ref/branch)")
         print("  source set [--repo URL] [--ref BRANCH]   track a fork / canary branch for updates")

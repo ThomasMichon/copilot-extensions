@@ -981,9 +981,10 @@ broader effort and adopter acceptance remain separately owned.)_
 
 _(Agent-recommended realization of the 2026-10-24 operator direction.
 Participant: Composite-source contributor; bounded tracker: #8736.
-Status: proposed; plan review precedes implementation.)_
+Status: Active; reviewed plan #8745 precedes implementation.)_
 
-- [ ] Land this amendment through current-head review and required CI.
+- [x] Land this amendment through current-head review and required CI: #8745,
+      `85c5d7a3fd8790886808c3fa571f947e1f0d64b1`.
 - [ ] Implement the [complete-source and late-control plan](complete-source-and-late-controls.md)
       through the existing composer, publisher and admission paths.
 - [ ] Preserve other active artifact/profile, construction, runtime and
@@ -1230,6 +1231,57 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-24 - Complete-source implementation, not yet activated
+
+The first Phase 9d implementation extends the existing Dev-owned publisher with
+a complete raw-object source ZIP and external generation manifest. It preserves
+the existing signed index unchanged, including optional profiles, and requires
+fresh source-subject attestations and independent raw readback before the
+publication receipt. The controller proposal prepares and attests those
+subjects before opening the final Main PR. Shared seams were coordinated on
+#8367; its producer/API ownership is unchanged.
+
+Local evidence: 80 new pure archive/publication/object cases passed; 100
+source/evidence compatibility cases passed with the existing 128 MiB boundary
+case deselected from that bounded development command. The separate fresh-Git
+reconstruction witness passed, as did the exact immutable-code-reuse witness.
+The changed CLI refusal and controller-ordering selection passed 32 cases.
+An earlier aggregate hit its development-command deadline and is incomplete,
+not a passing qualification. Fatal Python lint passed after removing an unused
+import. The positive manifest preserves all 1509 prior nodes and adds 82 pure
+nodes; actual Main workflow proposal checks remain outside that source packet.
+
+This is not current-head packet qualification, a merged implementation, Main
+activation or a clean live cycle. Late-control reconciliation, fresh policy
+admission, server-enforced base freshness and the actual under-thirty-minute
+publication-before-PR / exact-merged-tree witness remain open.
+
+The first implementation head then qualified all 1669 admitted units through
+hosted CI before #8790 opened. A later inventory reconciliation preserved
+1594 incoming selections and placed the 82 owned additions beside related
+evidence groups, rather than the shared append seam. Re-review found that
+lexical link checks missed chained escapes and cycles. Ten new creation/
+readback controls reproduced that gap. Complete in-memory graph resolution,
+case-alias refusal and explicit literal/traversal bounds now pass all 98
+source/archive/publication/object cases; fresh current-head CI and review
+remain required before merge.
+
+### 2026-10-24 - Phase 9d plan reviewed; production implementation next
+
+Plan #8745 merged as `85c5d7a3fd8790886808c3fa571f947e1f0d64b1`.
+The genuine current-head Copilot review approved the complete plan with no
+findings, and every required check passed. The local whole-repository
+documentation command had stopped at its ad hoc 60-second wrapper limit;
+that result remains incomplete, not a passing local claim. Required CI
+subsequently completed successfully without changing the guard or its policy.
+
+The managed source worktree is pulled forward onto the reviewed plan.
+Implementation starts with complete-source production and its existing
+supplementary-evidence publication seam, keeping the optional-profile
+producer/API and all unrelated runtime work with their owners. Main-control
+refresh and the live complete-cycle witness remain open. The plan merge is
+not implementation, activation or Phase 9d completion.
 
 ### 2026-10-24 - Complete-source and late-control amendment proposed
 

@@ -25,6 +25,8 @@ class AcpPromptMixin:
             raise RuntimeError("No active ACP session")
         if self._idle_transport is not None and not self.is_running:
             raise RuntimeError("Private idle ACP continuation is not activated")
+        if self._acquisition_launch is not None and self._native_turn_transport is None:
+            raise RuntimeCustodyError("Original acquisition turn transport has not been captured")
         if (
             self._native_turn_transport is not None
             and (native_attempt is None or native_attempt.owner is not self._native_turn_transport)

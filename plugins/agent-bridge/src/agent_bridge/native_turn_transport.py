@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from acp.client.connection import ClientSideConnection
 
     from .acp_client import AcpClient
+    from .acquisition_host_transport import AcquisitionHostTransport
     from .db import Database
     from .session_manager import Session, SessionManager
     from .transport import SpawnTarget
@@ -148,7 +149,7 @@ class NativeTurnTransport:
 
 @dataclass(frozen=True)
 class NativeTurnAttempt:
-    owner: NativeTurnTransport
+    owner: NativeTurnTransport | AcquisitionHostTransport
     index: int
     prompt: str
 

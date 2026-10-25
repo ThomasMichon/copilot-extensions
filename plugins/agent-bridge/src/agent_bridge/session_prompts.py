@@ -121,6 +121,10 @@ class _SessionPromptMixin:
         native_owner = session._native_turn_transport
         if native_owner is not None:
             native_owner.require_current()
+        else:
+            from .acquisition_launch_owner import require_unassociated_session
+
+            require_unassociated_session(self, session, operation="prompt")
 
         # Auto-resume if the process is dead but session is recoverable
         if not session.client or not session.client.is_running:

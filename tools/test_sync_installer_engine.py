@@ -510,6 +510,50 @@ def _mk_plugin_scripts(repo: Path, name: str) -> Path:
     return scripts
 
 
+def test_evaluator_bootstrap_delivery_is_scoped_and_byte_identical(fake_repo, monkeypatch):
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
+    source.write_bytes(b"function Resolve-EvaluatorBootstrapPython {}\n")
+    for plugin in (*sync_installer_engine.BOOTSTRAP_ADOPTERS, "agent-unrelated"):
+        _mk_plugin_scripts(fake_repo, plugin)
+    assert len(sync_installer_engine.verify()) == 2
+    written = sync_installer_engine.sync()
+    assert set(written) == {
+        f"plugins/{name}/scripts/bootstrap-python.ps1"
+        for name in sync_installer_engine.BOOTSTRAP_ADOPTERS
+    }
+    assert sync_installer_engine.verify() == []
+    assert not (fake_repo / "plugins/agent-unrelated/scripts/bootstrap-python.ps1").exists()
+    target = fake_repo / "plugins/agent-codespaces/scripts/bootstrap-python.ps1"
+    target.write_bytes(b"drift\n")
+    assert any("evaluator bootstrap" in problem for problem in sync_installer_engine.verify())
+    assert sync_installer_engine.sync() == ["plugins/agent-codespaces/scripts/bootstrap-python.ps1"]
+    assert target.read_bytes() == source.read_bytes()
+    source.unlink()
+    assert any("evaluator bootstrap" in problem for problem in sync_installer_engine.verify())
+    with pytest.raises(FileNotFoundError, match="canonical evaluator bootstrap"):
+        sync_installer_engine.sync()
+
+
+def test_evaluator_bootstrap_refuses_linked_delivery(fake_repo, monkeypatch):
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    source = sync_installer_engine.CANONICAL_DIR / sync_installer_engine.BOOTSTRAP_FILE
+    source.write_bytes(b"canonical\n")
+    scripts = _mk_plugin_scripts(fake_repo, "agent-codespaces")
+    foreign = fake_repo / "foreign.ps1"
+    foreign.write_bytes(b"preserve\n")
+    try:
+        (scripts / sync_installer_engine.BOOTSTRAP_FILE).symlink_to(foreign)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows symlink permission is unavailable")
+        raise
+    assert any("symlink" in problem for problem in sync_installer_engine.verify())
+    with pytest.raises(RuntimeError, match="linked evaluator bootstrap"):
+        sync_installer_engine.sync()
+    assert foreign.read_bytes() == b"preserve\n"
+
+
 def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monkeypatch):
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
     monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ("agent-python",))

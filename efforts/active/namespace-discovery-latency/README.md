@@ -134,6 +134,18 @@ coordinating with its existing owner. This selects design work rather than
 silently trusting PATH or an unadmitted runtime; it does not grant shared
 implementation ownership or installed rollout.
 
+Subsequent operator selection, captured verbatim:
+
+> assign-new-selector-scope
+
+**Bounded assignment:** Implement a new payload-local native selector under
+`libs/installer-engine`, its focused tests/sync declaration, and
+Containers/Codespaces delivery. This explicit assignment resolves the earlier
+acknowledgement gate; it is not inferred from the existing owner's silence.
+Existing installer-selection behavior, SDK validation algorithms,
+Manager/lifetime work and installed rollout remain excluded. Coordinate any
+newly overlapping consumer PR rather than modifying its still-open change.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -239,6 +251,276 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Corrected native cost and retained PowerShell home fallback
+
+- Rebuilt both normal installations from corrected source `b5905b6d62` in a
+  separate fresh profile: Worktrees completed in 214.453 seconds and Containers
+  in 63.266 seconds, both with zero exit and no stderr. Generated deployed
+  global Worktrees commands match the ordinary legacy frontdoor, not a payload
+  wrapper. Host selectors and source bytes remain unchanged.
+- Repeated only the combined evaluator comparison after the native alias
+  correction: PowerShell 5.1 native/admitted pairs measured 4.117/2.591,
+  3.614/2.185 and 3.858/2.515 seconds; pwsh measured 3.278/2.444,
+  3.168/2.134 and 3.152/2.197. All twelve complete SDK JSON values, zero
+  exits and empty stderr agree. Every pair retains 0.834-1.526 seconds
+  of benefit with native drive-root admission and compilation included.
+  No unchanged whole-provider cohort was retried or credited.
+- The second review confirmed both original findings resolved but identified
+  another Medium issue in its summary: initial durable-home construction
+  required `USERPROFILE` even for POSIX pwsh with an explicit runtime root.
+  Both gates now derive Copilot and durable homes from the native evaluator's
+  shared `USERPROFILE`-or-`$HOME` fallback. No SDK algorithm changes.
+- Eight new absent-`USERPROFILE` legacy/namespaced ABI controls and eight
+  selected-route controls pass on both Windows hosts/adopters. The other
+  previously passing consumer logic and native helper are unchanged.
+  An exact-owned, network-disabled, read-only probe of the existing Linux
+  clean-room base confirmed no `pwsh`; its temporary container was removed.
+  Windows ABI controls are not a native POSIX-pwsh pass. POSIX shell dispatch
+  remains untouched; no new tool installation or held venue substitutes.
+- Current-head review/CI and merge remain required. The parent retains its
+  actual 9.378-second whole-discovery failure, further owner-coordinated
+  startup work, release/control adoption and authorized installed acceptance.
+
+### 2026-10-24 - Native alias and provenance-home review corrections
+
+- #8789's first review found two concrete boundaries. Native controls
+  reproduced eight addressed-runtime exclusion failures through ordinary
+  SUBST and raw DOS-device aliases, including missing aliased suffixes.
+  Four actual-SDK legacy controls reproduced differing complete status when
+  `HOME` and `USERPROFILE` disagree. The positive signed-base controls passed;
+  those failures were not treated as unavailable native fixtures.
+- Admission now verifies drive-root handle identity against its addressed
+  drive before candidate execution, reusing the existing final-path primitive.
+  Candidate and exclusion aliases refuse; ordinary missing local suffixes
+  remain supported. Temporary native test aliases are removed by exact target
+  in caller-owned cleanup. Both adopter copies are synchronized.
+- Both portable status/validation calls explicitly pass the native evaluator's
+  Copilot home. This retains native provenance semantics without changing SDK
+  source/policy algorithms. ABI expectations include that exact argument.
+- All 62 native helper cases plus four real signed-base consumer cases pass
+  without skips. The remaining 116 two-adopter ABI/actual-SDK cases also pass
+  without skips, accounting for all 120 consumer cases. Lint passes with the
+  existing tooling; no dependency installation, timeout or coverage waiver
+  was needed. Review of the corrected head and final combined-cost evidence
+  remain required before merge.
+
+### 2026-10-24 - Component publication retains shared-library release fan-out
+
+- Opened #8789 for the bounded selector/two-adopter implementation, with
+  actual-profile paired benefit and the unresolved whole-discovery failure
+  stated separately. The managed flow rebased cleanly onto current Dev.
+- Its first required source guard correctly rejected missing changefile entries
+  for seven existing installer-engine consumers. The guard deliberately charges
+  a canonical shared-library source addition to its full declared consumer set,
+  even though only Containers and Codespaces adopt this new helper.
+- Added those required release entries rather than narrowing the guard or
+  changing unrelated installers. Required units executed successfully on that
+  head; the overall source check remains failed until a corrected head passes.
+  Current-head review/CI, merge and parent acceptance are still open.
+
+### 2026-10-24 - Normal-install evaluator comparison retains a bounded benefit
+
+- Compared the actual normal-profile SDK through twelve fresh outer processes:
+  three alternating-order native/admitted pairs for each Windows host.
+  The admitted route includes registry discovery, offline trust verification,
+  native helper compilation, fresh isolated/no-site SDK execution and guard
+  disposal. The native route starts the same host's canonical PowerShell SDK.
+  Both routes receive identical payload/plugin/legacy inputs.
+- PowerShell 5.1 native/admitted seconds were 5.576/3.019, 4.034/3.214 and
+  3.463/1.772. pwsh measured 2.886/2.441, 3.157/2.067 and 3.886/2.791.
+  Every pair retained a benefit, ranging from 0.445 to 2.557 seconds.
+  All twelve full SDK JSON values and zero exits agree, with no stderr.
+  Host selectors and candidate source hashes remain unchanged.
+- These are paired evaluator measurements, not a new complete-provider
+  cohort, first-touch claim or tail-latency guarantee. The actual legacy
+  frontdoor's retained 9.378-second whole-command failure remains open.
+  Do not substitute isolated SDK time or an average for the unchanged
+  eight-second discovery requirement.
+- Proceed with bounded selector/two-adopter source review, explicitly retaining
+  that residual parent gate. Further Worktrees eager-import or native-frontdoor
+  work needs its own owner-coordinated source slice; it is not added to this
+  selector assignment. No installed update, shared service or control changed.
+
+### 2026-10-24 - Source-independent native construction exposes the residual budget gap
+
+- Built normal, non-developer Worktrees and Containers installations from
+  canonical materialized payloads into a fresh private profile. Construction
+  completed in 211.047 and 53.253 seconds; canonical provider registration
+  completed in 1.105 seconds. All three returned zero with no stderr.
+  Host selectors and the executing source hashes remained unchanged.
+- Full bound state-root JSON matches the current host. Both installed module
+  origins lie inside the private profile, match the candidate source bytes,
+  and have no original source-checkout prefix in their import paths.
+  The fixture now distinguishes original-checkout independence from the
+  earlier developer-runtime construction.
+- The first whole command used the attributable payload Worktrees frontdoor
+  for its peer and returned a complete empty roster in 15.348 seconds.
+  Source inspection then confirmed this caller's actual legacy contract is
+  PATH lookup of the deployed global compatibility command. Those generated
+  private command files are byte-identical to the host's. Using that exact
+  legacy contract preserves the full state-root response but still takes
+  9.378 seconds, with exit zero and no stderr. Retain both measurements with
+  their distinct frontdoors; neither qualifies the unchanged eight-second
+  requirement. No repeated cold cohort or Bridge pass is claimed.
+- A separate actual-profile admission probe selects signed base CPython in
+  1.137 seconds. Profiling its guarded, fresh canonical SDK reports 0.398
+  seconds of SDK work and complete ready/legacy output; these are distinct
+  diagnostic samples, not an additive whole-command timeline.
+- Direct selected Worktrees Python returns the complete state-root response
+  in 2.254 seconds. Its diagnostic profile attributes 1.371 seconds to eager
+  imports; the 0.930-second handler includes subprocess waits. The matching
+  Containers runtime profile remains dominated by its real peer wait.
+  Existing low-overhead boot tracing is retained separately and is not
+  credited as a passing performance sample.
+- The independently admitted route is implemented and functionally qualified,
+  but whole-source headroom is still open. Establish the final actual-profile
+  evaluator comparison before publishing a performance claim, then review
+  any further eager-import or native startup slice with its retained owner.
+  No SDK validation, timeout, service, control pin or installed runtime was
+  changed to make these measurements pass.
+
+### 2026-10-24 - Both consumers integrated after the retained owner's merge
+
+- Confirmed #8666 merged as `98c990a4c28e02014618335f56d3d96535cbaef0`
+  before integrating Containers. Its legacy predicate, selected runtime-root
+  and generation checks, publication/legacy-management probes and under-lock
+  refresh remain unchanged. Only initial status/validation uses the new route.
+- The shared two-adopter consumer packet passed 112 cases on Windows
+  PowerShell 5.1 and pwsh, with no skips and an explicit signed fixture.
+  It covers complete SDK status/refusal parity, isolation, cleanup, runtime
+  package-site initialization and exact argument/environment contracts.
+- That packet exposed a quoted-argument split in the unchanged Dev Containers
+  gate on PowerShell 5.1. A separate baseline control reproduced it before
+  correction. Legacy forwarding now reuses Codespaces' existing encoded-argv
+  module entry; modern argument passing is unchanged. All 24 selected-route
+  and empty/numeric/quoted/Unicode/trailing-slash controls passed.
+- Boundary review then reproduced a linked addressed-root exclusion escaping
+  independence checks, with a real signed positive control on both hosts.
+  A small shared root-to-leaf path walk now rejects candidate or addressed-root
+  redirection before descending through it. Remote exclusions refuse before
+  verification; absent local suffixes remain first-use compatible. The
+  inverse short-path hypothesis did not reproduce: existing full-path
+  normalization already handles it. Retained both-direction controls instead
+  of adding unnecessary native directory APIs.
+- The final helper passed all 50 native admission cases and all four real
+  admitted-base consumer cases, with no skips. Its two payload copies remain
+  byte-identical. The other 108 dispatcher cases exercise unchanged consumer
+  code. Existing Containers publication coverage passed in complementary
+  partitions: 30 payload cases plus 25 global/fallback cases, with eight
+  explicit POSIX-only skips. The final helper was exercised again in the
+  payload partition; the earlier other-entry partition covers unchanged
+  normal-root publication behavior.
+- A combined 175-node invocation exhausted its existing 900-second controller
+  envelope without a test verdict. That was not credited as a pass; exact
+  complementary partitions account for every existing node without raising
+  per-test, production or controller deadlines.
+- Next qualification builds both runtimes from materialized source into a
+  fresh private profile, with canonical generated commands and provider
+  registration. Unlike the earlier developer-Worktrees fixture, this must
+  prove no original checkout is needed at runtime before crediting first touch.
+  Whole-provider/Bridge headroom, release and authorized installed consumption
+  remain open.
+
+### 2026-10-24 - Codespaces evaluator integration and combined native cost
+
+- Integrated only initial status/selected-context validation in the Codespaces
+  Windows gate. Selection precedes evaluation; no post-selection failure
+  retries through another interpreter or native helper. Complete SDK output,
+  generation checks, ordinary package-site loading, both streams and exact
+  forwarded arguments remain intact. The guard is disposed before runtime
+  resolution, including refusal and malformed-output paths.
+- Native PowerShell 5.1 and pwsh passed 45 focused consumer cases with no
+  skips, including real signed-base admission and actual canonical SDK
+  legacy/namespaced/deactivation JSON equality. Refusals cover foreign
+  namespace source, stale context and malformed policy. Twelve existing
+  selected-publication-policy cases also pass. Unicode/apostrophe payloads,
+  ambient Python poisoning, selector/protocol/launch failures and guard
+  cleanup are included. These native cases are not pure-unit admission.
+- The first ABI run exposed local shadowing of PowerShell's automatic native
+  exit variable; initialization now uses its actual global scope. Subsequent
+  stricter assertions corrected two fixture assumptions: launch exceptions
+  terminate with code 1, and source refusal must alter the actual namespace
+  receipt, not settings overridden by an explicit context or an unknown field.
+- Measured twelve fresh real dispatcher processes, including actual registry
+  discovery, offline native trust compilation, canonical SDK evaluation,
+  readiness and a minimal selected runtime. Three alternating-order pairs
+  for PowerShell 5.1 measured native/selected seconds:
+  3.850225/3.155037, 3.259938/2.547828 and 3.333858/2.465372.
+  pwsh measured 4.787203/2.878162, 3.479542/2.369438 and
+  3.496756/2.343991. All twelve returned identical complete legacy status,
+  exact runtime output and no stderr. This includes selector cost, not just
+  a Python SDK microbenchmark; three pairs do not qualify tails or the
+  parent's whole-provider/Bridge eight-second requirement.
+- Documentation now distinguishes Codespaces' opted-in reads from Containers'
+  delivered-but-inactive helper. #8666 still owns the open Containers gate.
+  No installed payload/runtime, service, maintenance or control was changed.
+  Consumer review/CI, containing release, whole-provider qualification and
+  authorized rollout remain open.
+
+### 2026-10-24 - Native bootstrap selector and scoped delivery implemented
+
+- Implemented the independent helper at the assigned installer-engine owner,
+  without changing existing installer selection or SDK validation algorithms.
+  The sync owner delivers identical source only to Containers and Codespaces.
+- Native PowerShell 5.1 and pwsh contracts passed all 42 cases with an explicit
+  signed fixture and no skips. They include real PSF signature admission,
+  actual trusted other-publisher and missing-signature refusals, a held write-exclusion guard,
+  modified/foreign architecture inputs, registry and verifier errors,
+  opaque-tag precedence, ordinal tie-breaking, venv/embedded/linked paths,
+  and an actual short-path alias of an excluded runtime.
+- Default fixture discovery initially selected an unsigned development
+  interpreter and skipped positive cases; those results were not credited as
+  native admission. The explicit fixture run exposed a test producer's OEM
+  encoding at a non-ASCII path. Matching the real gate's existing UTF-8
+  initialization fixed that producer, without lossy decoding or output masking.
+- The complete installer-engine delivery/materialization cohort passed
+  74 tests with its one explicit POSIX-on-Windows exclusion. Scoped drift,
+  missing-source and linked-delivery controls pass. Lint and sync parity pass.
+- This is component source, not complete consumer integration or eight-second
+  acceptance. The next slice wires only the assigned initial status/validation
+  reads while preserving publication/provisioning gates. #8666 still owns the
+  overlapping Containers gate; do not pre-patch its open change.
+
+### 2026-10-24 - Operator assigns the independent selector implementation
+
+- The operator explicitly selected `assign-new-selector-scope` after the
+  retained coordinator could not be reached through the available live-session
+  registry. Its active upstream source work is not presumed orphaned.
+- Pulled the sole local journal onto current Dev with a backup and explicit
+  commit-range checks after ordinary managed sync refused the deleted plan
+  publication ref. The implementation starts from the current source rather
+  than the earlier qualification fixture.
+- New open #8666 owns Containers' first-use runtime gate. Keep that file with
+  its current owner while implementing the independent native selector,
+  focused tests and scoped payload delivery; coordinate consumer integration
+  instead of pre-patching the open PR.
+- The periodic existing PR observation remains read-only and unchanged.
+  No installed runtime, service, held venue, source-policy algorithm or
+  release control changed as part of this assignment.
+
+### 2026-10-24 - Bootstrap design reviewed; shared assignment remains open
+
+- #8486 merged to Dev as
+  `e75ca8ed86212e8dcc50b4256ec47c7a5164275d` after actual
+  Copilot approval `5637026840` of head
+  `9398aea865a71aa587ade9319941e8595a1e769f`, complete empty
+  inline/comment/thread reads, and successful required CI
+  `40066709523` plus lockdown/attribution `40066709604`.
+- Provider readback confirmed the merge. The managed Maintainer completion
+  omitted only the confirmed extra CODEOWNER vote; no required check or
+  feedback gate was bypassed. The clean accepted design was pulled forward
+  after merged-ancestor and file-equality checks.
+- Re-read the parent plan and bootstrap contract after merge. Only the design
+  review item is complete. The #6812 shared-selector implementation assignment
+  has not been received; silence is not a grant to edit its shared helper.
+- The proposed bounded assignment is a standalone native selector at the
+  existing installer-engine owner, its focused tests and the two explicitly
+  qualified consumer deliveries. Preserve existing installer selection and
+  SDK algorithms. Implementation and native evidence remain open.
+- No new evaluation, host update, held venue, release pin or shared service
+  changed. The latest complete native provider cohort still fails at
+  8.844 seconds; the parent effort remains Active.
 
 ### 2026-10-24 - Independent bootstrap contract proposed
 

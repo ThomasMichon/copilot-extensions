@@ -113,6 +113,13 @@ the rebase auto-aborts so the branch is left untouched -- resolve by hand, then
 re-run. Because the PR squashed your work into one commit, conflicts are
 uncommon.
 
+Remote PR branches may be deleted immediately after merge. If the tracked PR
+still appears open when its remote branch is gone, `sync` refreshes that PR's
+provider state itself; a confirmed terminal PR permits pull-forward. It does
+not require retaining the remote branch, delete the local worktree branch, or
+finalize the worktree. An open or unobservable PR with a missing ref still
+refuses rather than inferring a merge.
+
 This is the **review-gate continuation** for efforts: submit the effort PR ->
 it's reviewed + merged -> confirm via `pr-status` -> `git sync` -> build Phase
 work on top.

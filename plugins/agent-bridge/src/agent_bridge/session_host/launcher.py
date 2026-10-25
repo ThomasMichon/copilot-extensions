@@ -37,7 +37,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent_procutil import (
     contained_test_mode,
@@ -51,12 +51,16 @@ from . import protocol as proto
 from .host import SessionHost
 from .osutil import child_preexec
 
+if TYPE_CHECKING:
+    from ..acquisition_launch_owner import AcquisitionLaunchOwner
+
 _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 
 # Env var carrying the connect-auth nonce to the host process (kept off the
 # command line so it does not leak to ps/Task Manager). Stripped before the
 # copilot child is spawned so the child never inherits it.
 _NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
+_ACQUISITION_ENV = "AGENT_BRIDGE_ORIGINAL_ACQUISITION"
 
 # How much of the host process's combined stdout/stderr (up through
 # readiness) to retain for surfacing in an "exited early" RuntimeError. A
@@ -214,6 +218,7 @@ def launch_session_host(
     host_version: str = "",
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
+    acquisition_launch: AcquisitionLaunchOwner | None = None,
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
@@ -260,7 +265,18 @@ def launch_session_host(
         child_env.update(env)
     if nonce:
         child_env[_NONCE_ENV] = nonce
+    child_env.pop(_ACQUISITION_ENV, None)
+    if acquisition_launch is not None:
+        from ..acquisition_launch_owner import AcquisitionLaunchOwner
+        from ..runtime_custody import RuntimeCustodyError
 
+        if type(acquisition_launch) is not AcquisitionLaunchOwner or session_id != acquisition_launch.session_id:
+            raise RuntimeCustodyError("Local Host launch requires its original acquisition owner")
+        child_env[_ACQUISITION_ENV] = acquisition_launch.child_context(child_argv, cwd)
+
+    spawn_options = host_spawn_kwargs()
+    if acquisition_launch is not None:
+        acquisition_launch.begin_host()
     proc = subprocess.Popen(
         host_argv,
         stdin=subprocess.DEVNULL,
@@ -268,7 +284,7 @@ def launch_session_host(
         stderr=subprocess.STDOUT,
         env=child_env,
         cwd=cwd or None,
-        **host_spawn_kwargs(),
+        **spawn_options,
     )
     crash_tail = _CrashTailCapture(proc.stdout)
     expected_identity: str | None = None
@@ -423,6 +439,14 @@ async def _spawn_child(
     # on Windows, where preexec_fn is unsupported.
     preexec = child_preexec()
     spawn_argv = _resolve_child_exe(argv, child_env.get("PATH"))
+    admission = child_env.pop(_ACQUISITION_ENV, None)
+    if admission is not None:
+        from ..acquisition_host_admission import require_child_admission
+
+        require_child_admission(
+            admission, cwd=cwd or os.getcwd(),
+            session_id=child_env.get("AGENT_BRIDGE_SESSION_ID", ""),
+        )
     return await asyncio.create_subprocess_exec(
         *spawn_argv,
         stdin=asyncio.subprocess.PIPE,
@@ -468,12 +492,24 @@ async def run_host(
     require_path_hosting(cwd or os.getcwd())
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
+    admission = (env or {}).get(_ACQUISITION_ENV) or os.environ.get(_ACQUISITION_ENV)
+    before_exec = None
+    if admission is not None:
+        from ..acquisition_host_admission import require_child_admission
+
+        def before_exec() -> None:
+            require_child_admission(admission, cwd=cwd or os.getcwd(), session_id=session_id, argv=child_argv)
+
+        before_exec()
     from ..preference_attestation import SHELL_MARKER
 
     if child_argv and child_argv[0] == SHELL_MARKER:
         from .preference_spawn import spawn_attested
 
-        child, preference_receipt = await spawn_attested(child_argv, cwd, env, _spawn_child)
+        child, preference_receipt = await spawn_attested(
+            child_argv, cwd, env, _spawn_child,
+            **({"before_exec": before_exec} if before_exec is not None else {}),
+        )
     else:
         child = await _spawn_child(child_argv, cwd, env)
         preference_receipt = execution_receipt(child_argv, env, child.pid or 0)

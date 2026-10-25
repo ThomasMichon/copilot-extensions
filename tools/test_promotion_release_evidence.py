@@ -112,3 +112,33 @@ def test_new_evidence_cannot_overfill_release_and_existing_evidence_reuses_at_ca
     assert len(server.writes) == len(writes) + int(not existing)
     assert reuse.reuse_artifacts(restored, **kwargs) == index
     assert {path.name for path in restored.iterdir()} == {path.name for path in directory.iterdir()}
+
+
+def test_complete_source_subjects_preserve_opaque_index_and_original_code_reuse(source_release, monkeypatch):
+    import promotion_source_archive as source_io
+    from promotion_complete_source import canonical_bytes
+    from promotion_unit_tests.test_complete_source import case
+
+    directory, restored, index, server, _attestations, kwargs = source_release
+    files, identity = case()
+    receipt = {
+        **{key: identity[key] for key in ("candidate_sha", "tree")},
+        "dev_sha": kwargs["dev_head"], "main_before": kwargs["main_before"],
+        "control_sha": kwargs["main_before"], "profile": "candidate-units-v3",
+    }
+    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    subjects = directory.parent / "complete-source"
+    monkeypatch.setattr(source_io, "read_tree", lambda *args, **kwargs: files)
+    source_io.prepare_source(
+        subjects, repo=kwargs["repo"], index_raw=before[publisher.INDEX_NAME], receipt=receipt,
+    )
+    result = evidence.publish_complete_source(
+        directory, source_directory=subjects, repository=kwargs["repository"],
+        tag=f"python-artifacts-{kwargs['dev_head']}", index=index, receipt=receipt,
+        qualification_digest=hashlib.sha256(canonical_bytes(receipt)).hexdigest(),
+    )
+    assert len(result["assets"]) == 2
+    assert all(item["filename"] in server.assets for item in result["assets"])
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
+    assert reuse.reuse_artifacts(restored, **kwargs) == index
+    assert {path.name: path.read_bytes() for path in restored.iterdir()} == before

@@ -37,6 +37,7 @@ from .transport import SpawnTarget, spawn
 if TYPE_CHECKING:
     from .acp_client import AcpClient
     from .native_turn_transport import NativeTurnTransport
+    from .acquisition_host_transport import AcquisitionHostTransport
 
 
 def __getattr__(name: str) -> type[AcpClient]:
@@ -787,7 +788,7 @@ class Session:
         if not preserve_target:
             migrate_selected_instance(target)
         self.client: AcpClient | None = None
-        self._native_turn_transport: NativeTurnTransport | None = None
+        self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
         self._handoff_in_progress = False
         self._remote_affinity_cookies: Any = None
         self._remote_requested_session_id: str | None = None

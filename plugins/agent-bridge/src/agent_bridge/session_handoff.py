@@ -51,6 +51,10 @@ class _SessionHandoffMixin:
             return False
         if session._native_turn_transport is not None:
             return False
+        from .acquisition_launch_owner import session_association
+
+        if session_association(self, session) is not None:
+            return False
         if session.target.type == "remote-acp":
             return False
         if _workspace_key(session.agent_name, session.target, session.caller_id):
@@ -205,6 +209,10 @@ class _SessionHandoffMixin:
         """
         turn_index = session.turn_count
         native_owner = session._native_turn_transport
+        if native_owner is None:
+            from .acquisition_launch_owner import require_unassociated_session
+
+            require_unassociated_session(self, session, operation="handoff prompt")
         native_attempt = native_owner.attempt(turn_index, prompt) if native_owner is not None else None
         custody = ({
             "runtime_admission": native_owner.admission, "native_consumer": native_owner.consumer,
@@ -295,6 +303,9 @@ class _SessionHandoffMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .acquisition_launch_owner import require_unassociated_session
+
+        require_unassociated_session(self, session, operation="lifecycle handoff")
         if session._native_turn_transport is not None:
             from .runtime_custody import RuntimeCustodyError
 
@@ -303,6 +314,7 @@ class _SessionHandoffMixin:
         from .cold_outages import assert_prompt_allowed
 
         hosting_fence = await require_session_hosting(self, session, operation="handoff successor")
+        require_unassociated_session(self, session, operation="lifecycle handoff")
         assert_prompt_allowed(self._db, session_id, None)
         # A cooperative stop announced before or at any point during this
         # handoff wins: never leave a successor the stop can't reach.

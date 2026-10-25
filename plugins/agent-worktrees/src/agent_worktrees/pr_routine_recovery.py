@@ -12,6 +12,7 @@ from . import (
     git_ops,
     output,
     pr_authority,
+    pr_ops,
     pr_publication_state,
     pr_publish,
     pr_recovery,
@@ -61,6 +62,10 @@ def reconcile(config: Config, record: tracking.WorktreeRecord | None, *, cwd: st
             if observed == pr.head_sha:
                 return ""
             if not observed:
+                if observed == "":
+                    pr_ops._reconcile_pr(record, pr, config)
+                    if tracking._pr_is_terminal(pr):
+                        return ""
                 raise ValueError(
                     f"Cannot confirm PR ref '{pr.branch}' on remote '{target.remote}' "
                     "for routine reconciliation."
@@ -86,11 +91,11 @@ def _settle(
     source = pr_recovery._rev("HEAD", cwd)
     operation = pr_recovery_plan.build(
         config, record, pr, source_head=source, expected_head=observed,
-        identity=identity, overrides=(), cwd=cwd,
+        identity=identity, overrides=(), cwd=cwd, routine=True,
     )
     pr_recovery_plan.revalidate(
         config, record, pr, operation, remote=remote, observe=pr_rewrite.observe_pr, cwd=cwd,
-        allow_feature_head=True,
+        allow_feature_head=True, routine=True,
     )
     if operation.action != "settle-publication":
         if operation.evidence_status == "unusable" or not _verified_fallback(
@@ -129,7 +134,7 @@ def _settle(
         pr_rewrite._validate(record.worktree_id, config, record, cwd, pr=pr, allow_feature_head=True)
         pr_recovery_plan.revalidate(
             config, record, pr, operation, remote=remote, observe=pr_rewrite.observe_pr, cwd=cwd,
-            allow_feature_head=True,
+            allow_feature_head=True, routine=True,
         )
         settlement_attempted = True
         if legacy_destination:

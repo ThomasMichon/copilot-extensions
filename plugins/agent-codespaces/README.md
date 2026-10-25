@@ -136,6 +136,16 @@ provision status or orchestration locks; context validation alone is not
 deployment permission. Missing or older admission support produces an explicit
 readiness error rather than an alternate installer or completion parser.
 
+On Windows, initial installation `status` and selected-context `validate`
+reads may use the payload's canonical SDK in a fresh isolated, no-site Python
+process. The [independent bootstrap selector](../../docs/install-contract.md#independent-windows-evaluator-bootstrap)
+admits a registered signed CPython base before it executes; PATH and the
+addressed runtime do not establish admission. Missing optional support or an
+unavailable base selects native PowerShell before evaluation. Once selected,
+interpreter/SDK failures are terminal, not a reason to try another evaluator.
+The file guard is released before ordinary package-site/runtime resolution;
+publication admission and provisioning retain their existing ordering.
+
 Windows stamping captures the private snapshot candidate's canonical source
 before publishing the command and replacing the previous selection. Failed
 resolver or command publication leaves that previous snapshot and its selectors

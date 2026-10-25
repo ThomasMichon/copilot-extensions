@@ -16,6 +16,7 @@ from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
+    from .acquisition_launch_owner import AcquisitionLaunchOwner
     from .local_launch_preparation import PreparedLocalLaunch
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
@@ -48,6 +49,7 @@ class _SessionHostConnectionMixin:
         effort: str | None = None,
         parity_fault_result: dict[str, Any] | None = None,
         prepared_local_launch: PreparedLocalLaunch | None = None,
+        acquisition_launch: AcquisitionLaunchOwner | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).
@@ -75,6 +77,10 @@ class _SessionHostConnectionMixin:
                 active_reap_seconds=self._session_host_active_reap_seconds,
                 ready_timeout=self._timeouts.session_host_ready,
             )
+        if acquisition_launch is not None:
+            if type(spawner) is not LocalSpawner or remote_child_argv is not None:
+                raise ValueError("Original acquisition requires the actual local Host spawner")
+            acquisition_launch.bind(self, self.get_session(session_id), target)
 
         timing = _AcpLaunchTiming(
             session_id=session_id,
@@ -159,6 +165,7 @@ class _SessionHostConnectionMixin:
                 await require_target_hosting(target)
             spawned = await step("session-host-start", spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
+                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
             ))
             timing.add("host_spawn", time.monotonic() - step_started)
             # Retain a remote-boundary forward so reattach can refresh it and
@@ -227,6 +234,8 @@ class _SessionHostConnectionMixin:
                             f"(code={streams.child_exit_code})"
                         )
                     session_cwd = remote_cwd or target.cwd or _default_cwd(target)
+                    if acquisition_launch is not None:
+                        acquisition_launch.attach_transport(client, spawned)
                     if load_session_id:
                         step_started = time.monotonic()
                         await step("native-session-load", asyncio.wait_for(
@@ -235,6 +244,7 @@ class _SessionHostConnectionMixin:
                                 session_id=load_session_id,
                                 mcp_servers=mcp_servers,
                                 timing_callback=timing.add,
+                                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                             ),
                             timeout=self._timeouts.session_new,
                         ))
@@ -247,6 +257,7 @@ class _SessionHostConnectionMixin:
                                 cwd=session_cwd,
                                 mcp_servers=mcp_servers,
                                 timing_callback=timing.add,
+                                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                             ),
                             timeout=self._timeouts.session_new,
                         ))
@@ -624,6 +635,9 @@ class _SessionHostConnectionMixin:
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.endpoints import CredentialRelayReadinessError
+        from .acquisition_launch_owner import require_unassociated_session
+
+        require_unassociated_session(self, session, operation="Host reattachment")
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             self._route_acp_event(session, event_type, data)

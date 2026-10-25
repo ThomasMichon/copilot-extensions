@@ -1,7 +1,8 @@
 # Optional repository bootstrap caller
 
-- **Status:** Proposed contract; no repository option or setup declaration is
-  implemented by this document.
+- **Status:** Reviewed contract with a bounded engine seam and optional Manager
+  caller implemented in source. Fresh-entry and attended-provider qualification
+  remain open; this is not a working adopter onboarding claim.
 - **Parent:** [Worktree Manager control plane](README.md), Phase 5.
 - **Coordination:** #8545 owns the optional bootstrap caller and its bounded
   prerequisites. #356 retains first-repository registration, setup, trust and
@@ -19,12 +20,22 @@ then acquire through Git's credential owner and run explicitly trusted,
 repository-owned setup. Preserve the no-repository journey and the Manager's
 separate installation/update source.
 
-Everything below is **agent-recommended design**, submitted before code.
+The contract below was submitted and reviewed before implementation.
 It specifies the caller's requirements on the existing acquisition/setup owners,
 not a second engine or permission to implement another participant's reserved
 scope. Repository-specific identity, knowledge, machine and connectivity policy
 remain downstream. No source maintenance, updater enrollment, agent launch,
 service role or fleet allocation follows merely from selecting a repository.
+
+### Bounded implementation ownership
+
+Following the explicit operator-authorized transfer recorded on #356, the
+#8545 driver now owns the shared acquisition/registration/setup/trust/readiness
+seam required by this caller. The reviewed behavior below is unchanged. Preserve
+earlier unpublished work; standalone discovery, guided local/remote/skip UI and
+the broader Configuration workbench remain outside this transfer. References
+to the #356 owner below continue to identify that one shared implementation
+boundary, not a competing engine.
 
 ## Source-grounded composition
 
@@ -42,7 +53,7 @@ uses a best-effort scoped-auth override. A zero exit from that path is not
 evidence that this attended contract exists. Extend the owner seam where
 necessary; do not hide those gaps behind a Manager-side direct `git clone`.
 
-## Proposed caller interface
+## Caller interface
 
 The Manager command is:
 
@@ -53,7 +64,8 @@ worktree-manager setup [--apply]
   [--trust-repository-setup]
 ```
 
-These are **proposed**, not commands to copy into an adopter README yet.
+The bounded caller exists in source; do not copy it into an adopter README as
+a working onboarding command before the remaining qualifications pass.
 The existing bootstrap forwards the equivalent `setup` argument array; it needs
 no second installer, environment-variable repository selector or change to
 `source set`. `--repository-target` and `--trust-repository-setup` without a
@@ -118,7 +130,7 @@ No hard authentication timeout may be disguised as cancellation or automatic
 retry. Use the existing process/progress lifecycle contract, forwarding useful
 progress rather than buffering a provider prompt until it has already timed out.
 
-## Proposed shared repository setup declaration
+## Shared repository setup declaration
 
 The #356 owner retains implementation of this shared seam. The proposed
 repository-owned path is `.agent-worktrees/repository-setup.json`:
@@ -191,16 +203,16 @@ establish the required outcomes.
 
 ## Implementation and validation plan
 
-- [ ] Reconcile this consumer contract with #356's shared setup owner. Preserve
+- [x] Reconcile this consumer contract with #356's shared setup owner. Preserve
   that reservation; make any API differences explicit in this one contract,
   not duplicate implementation or an invented acknowledgement ceremony.
 - [ ] Qualify the owner acquisition/registration seam for existing-target
   identity, preservation, exact source selection and attended credentials.
   Keep standalone discovery/UI and local/remote/skip acceptance with #356.
-- [ ] Implement the #8545 caller with strict arguments, readiness ordering,
+- [x] Implement the #8545 caller with strict arguments, readiness ordering,
   inherited attended IO and unchanged no-repository behavior. An old engine
   lacking the required seam refuses just the requested repository stage.
-- [ ] Implement the shared declaration/check/apply seam only through its
+- [x] Implement the shared declaration/check/apply seam only through its
   retained owner; add a synthetic repository consumer before a real adopter.
 - [ ] Qualify fresh-entry interpreter and configured dependency-feed routing
   before claiming support on a managed device; do not depend on code available
@@ -224,3 +236,30 @@ establish the required outcomes.
   authorized installation and actual runtime proof. Update living Manager
   and contract docs only when the interface exists. This plan does not close
   #8545, #356 or the parent effort.
+
+## Bounded implementation evidence
+
+The engine's [repository setup reference](../../../plugins/agent-worktrees/docs/repository-setup.md)
+owns the implemented CLI and request/result details; the
+[Manager reference](../../../worktree-manager/README.md#optional-repository-setup)
+documents its caller. Existing managed anchors remain owner-reconciled rather
+than converted by acquisition. Explicit account selection is currently
+qualified only for GitHub.com with a supported GCM helper; unsupported routes
+refuse instead of silently falling back.
+
+Native Windows isolated controls passed: the protocol/acquisition and existing
+registry-preservation packet (108 passed, one native POSIX case skipped),
+Manager caller plus prerequisite compatibility (52 passed), and the corrected
+runtime dependency boundary (six passed). The complete real
+Manager-to-engine-to-PowerShell process path passed. A disposable loopback TLS
+Git server also exercised actual clone, Git-owned credential-helper challenge,
+registration and final setup readiness without changing global credential
+configuration. That synthetic helper is not evidence of actual GCM browser
+authentication.
+
+The dependency guard's scan now distinguishes deployed runtime sources from
+cross-component test harnesses, while a positive control still rejects
+production imports. Native Windows tests used the existing contained runner;
+Linux-only devcontainer isolation, native POSIX execution, a fresh managed
+device and a real attended provider lane were not available in this slice.
+No installed runtime or target machine was updated.

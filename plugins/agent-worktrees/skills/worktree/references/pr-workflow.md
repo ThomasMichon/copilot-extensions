@@ -1131,13 +1131,21 @@ destination evidence still requires explicit reconciliation. An inconsistent
 PR identity or branch correction remains refused; a matching-looking suffix is
 never proof by itself.
 
-#### Routine backed publication reconciliation
+#### Routine publication reconciliation
 
-An intact backed-sync result already accepted by the provider/ref can be
-reconciled automatically by normal `push-changes` or `git sync`, with ordinary
-exclusive ownership and no override. See
+Normal `push-changes` or `git sync` reconciles a provider/ref-agreed head that is
+an ancestor of the pinned local source, with ordinary exclusive ownership and
+no override. An accepted backed-sync result or verified non-forcing
+`source-lineage` continuation does not require new operator approval. A stale
+saved head on an older lineage does not make the latter a history rewrite.
+Missing acknowledgement or a missing old replay checkpoint alone is not a
+reason to ask for "publication recovery" or "exact-head recovery" approval. See
 [routine publication reconciliation](../../../docs/cli-reference.md#routine-publication-reconciliation)
 for the admission, retention, non-forcing transport and refusal contract.
+For an intentional rebase or squash of the host's own private PR, the existing
+`push-changes --rewrite-pr` command is the host's intent confirmation under its
+normal delegated task, not a request for another operator approval. Its owning
+worktree, exact saved/live lease and exclusive-destination checks must still pass.
 
 #### Operator-confirmed break glass
 

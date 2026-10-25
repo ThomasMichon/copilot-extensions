@@ -178,9 +178,36 @@ before the publication receipt can enable Main merge. The receipt also binds
 the retained evidence identity. No generated report, packet or archive is
 added to the Source or generated Main tree.
 
+The current candidate-unit publisher additionally requires a self-contained ZIP
+of **every tracked blob in the final candidate tree**, including metadata,
+admitted Main controls and materialized first-party sources. Raw Git object
+batches avoid `git archive`'s `export-ignore` and `export-subst` transformations.
+The verifier reconstructs the exact Git tree from member bytes and modes,
+without extracting files or following source links. Link resolution uses the
+complete in-memory graph, including case-equivalent references; chained
+escapes, cycles, more than 40 traversals or literal targets over 4096 bytes
+fail closed. Unsupported submodules and unsafe/ambiguous paths are refused.
+The existing artifact
+bounds remain 512 MiB for the archive and expanded tree, 128 MiB per file and
+100,000 files.
+
+An external canonical source manifest binds that full tree, Dev, candidate,
+Main base, current controller, qualification digest and the **whole unchanged
+source-index digest**, including any optional profiles. It records the archive
+digest without being added to the tree it describes. Both subjects receive
+fresh trusted-Main attestations and immutable hash-named assets on the same
+Dev-owned release. The existing publisher verifies the exact subject signatures
+and independent raw-byte readback before including them in its publication
+receipt; missing subjects or failed readback cannot enable the final Main PR.
+This does not reinterpret the signed index's existing `content_tree` or
+authorize another candidate, controller, runtime profile or package build.
+The Dev tag's automatic archive and an incremental candidate Git bundle are
+not substitutes for this complete-source proof.
+
 Readiness and frozen-code reuse recognize only the bounded, hash-named
 supplementary evidence namespace for that same Dev release (at most 64
-retained candidate-evidence assets). It grants no code-execution or
+retained packet/source/manifest assets in total). They retain earlier immutable
+generations without overwriting them. This data namespace grants no code-execution or
 qualification authority. The separately attested code/index inventory remains
 exact; foreign, malformed, duplicate or arbitrary extra assets are refused.
 Actions artifacts remain the original producing-job evidence, while the

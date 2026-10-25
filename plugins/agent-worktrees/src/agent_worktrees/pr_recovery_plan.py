@@ -49,13 +49,25 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
     point = None
     if isinstance(data, dict):
         points = data.get("checkpoints")
-        point = points.get(pr.pr_id) if isinstance(points, dict) else data
+        point = points.get(pr.pr_id) if isinstance(points, dict) else (
+            data if data.get("pr_id") == pr.pr_id else None
+        )
     refs = {}
     unusable = False
     if isinstance(point, dict):
+        if point.get("pr_id") != pr.pr_id:
+            unusable = True
+        if any(
+            not isinstance(point.get(field), str)
+            or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", point[field])
+            for field in ("local_head", "target_head", "published_head", "lineage_head", "synced_head")
+        ):
+            unusable = True
         for field in ("local_ref", "published_ref", "lineage_ref"):
             ref = point.get(field)
-            if isinstance(ref, str) and ref:
+            if not isinstance(ref, str) or not ref:
+                unusable = True
+            else:
                 try:
                     result = git_ops.git(
                         "--no-replace-objects", "rev-parse", "--verify", "--end-of-options",
@@ -65,36 +77,77 @@ def _evidence_snapshot(pr: tracking.PRRecord, cwd: str) -> tuple[str, bool]:
                     unusable = True
                     refs[field] = {"probe_error": type(exc).__name__, "errno": getattr(exc, "errno", None)}
                 else:
-                    refs[field] = (result.returncode, result.stdout.strip())
+                    head = result.stdout.strip()
+                    refs[field] = (result.returncode, head)
+                    if result.returncode or head != point.get(field.replace("_ref", "_head")):
+                        unusable = True
+        if not unusable:
+            try:
+                commits = pr_recovery._commits((
+                    point["local_ref"], point["published_ref"], point["lineage_ref"],
+                    point["target_head"], point["synced_head"],
+                ), cwd)
+                lineage = git_ops.is_commit_ancestor(
+                    point["published_head"], point["lineage_head"], cwd=cwd,
+                )
+                target = git_ops.is_commit_ancestor(
+                    point["target_head"], point["synced_head"], cwd=cwd,
+                )
+                refs["integrity"] = (commits, lineage, target)
+                if commits != tuple(point[field] for field in (
+                    "local_head", "published_head", "lineage_head", "target_head", "synced_head",
+                )) or not lineage or not target:
+                    unusable = True
+            except (ValueError, OSError, git_ops.GitError) as exc:
+                refs["integrity"] = {"probe_error": type(exc).__name__, "errno": getattr(exc, "errno", None)}
+                unusable = True
     return _fingerprint({"bytes": hashlib.sha256(raw).hexdigest(), "refs": refs}), unusable
 
 
 def build(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     *, source_head: str, expected_head: str, identity: str, overrides: tuple[str, ...],
-    cwd: str,
+    cwd: str, routine: bool = False,
 ) -> pr_break_glass.RecoveryPreview:
     point = None
     evidence = ""
     unusable = False
     if expected_head != pr.head_sha:
         evidence, unusable = _evidence_snapshot(pr, cwd)
-        try:
-            point = pr_recovery.synced(record, pr, pr.head_sha, source_head, cwd=cwd)
-        except (ValueError, OSError, git_ops.GitError):
-            unusable = True
+        if not unusable:
+            try:
+                point = pr_recovery.synced(record, pr, pr.head_sha, source_head, cwd=cwd)
+            except (ValueError, OSError, git_ops.GitError):
+                unusable = True
         if point is not None and not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", point.target_head):
             unusable = True
         if unusable:
             point = None
             output.warn(
-                "Recovery settlement evidence is unusable; the preview requires explicit rewrite sign-off. "
-                "Historical evidence is preserved, not repaired or treated as publication authority."
+                ("Recovery settlement evidence is unusable; normal publication is refused. "
+                 if routine else
+                 "Recovery settlement evidence is unusable; the preview requires explicit rewrite sign-off. ")
+                + "Historical evidence is preserved, not repaired or treated as publication authority."
             )
         if point is not None and point.synced_head != expected_head:
             point = None
     if pr.number is None:
         raise ValueError("Recovery requires a numbered existing PR.")
+    forward = (
+        routine and point is None and not unusable
+        and git_ops.is_commit_ancestor(expected_head, source_head, cwd=cwd)
+    )
+    publication_base = ""
+    if forward:
+        repo = config.default_repo
+        upstream = pr_recovery._rev(f"refs/remotes/{repo.remote}/{repo.default_branch}", cwd)
+        bases = git_ops.git(
+            "--no-replace-objects", "merge-base", "--all", expected_head, upstream,
+            cwd=cwd, isolated_repository=True,
+        ).stdout.split()
+        if len(bases) != 1 or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", bases[0]):
+            raise ValueError("Cannot establish a unique accepted-publication base; refresh upstream and retry normally.")
+        publication_base = bases[0]
     return pr_break_glass.RecoveryPreview(
         provider=pr.provider or config.default_repo.pr.provider,
         repo=pr.repo, number=pr.number, branch=pr.branch,
@@ -104,10 +157,16 @@ def build(
             record.worktree_id, record.repo, record.worktree_path, record.branch,
             pr.pr_id, pr_publication_state.authority(pr), config.default_repo.pr.api_base,
         )),
-        action="settle-publication" if point is not None else "rewrite",
-        evidence_fingerprint=_fingerprint((evidence, asdict(point))) if point is not None else evidence,
-        evidence_status="unusable" if unusable else "backed-sync" if point is not None else "none",
-        rebase_base_sha=point.target_head if point is not None else "",
+        action="settle-publication" if point is not None or forward else "rewrite",
+        evidence_fingerprint=(
+            _fingerprint((evidence, asdict(point))) if point is not None else
+            _fingerprint(("source-lineage", evidence, expected_head, source_head)) if forward else evidence
+        ),
+        evidence_status=(
+            "unusable" if unusable else "backed-sync" if point is not None else
+            "source-lineage" if forward else "none"
+        ),
+        rebase_base_sha=point.target_head if point is not None else publication_base,
         overrides=overrides,
     )
 
@@ -116,7 +175,7 @@ def revalidate(
     config: Config, record: tracking.WorktreeRecord, pr: tracking.PRRecord,
     operation: pr_break_glass.RecoveryPreview, *, remote: str,
     observe: Callable[[Config, tracking.PRRecord], PullResult], cwd: str,
-    allow_feature_head: bool = False,
+    allow_feature_head: bool = False, routine: bool = False,
 ) -> None:
     """Refuse changed input after retention; transport still CASes the exact ref."""
     pr_publication_state.require_current(record, pr)
@@ -154,7 +213,9 @@ def revalidate(
         raise ValueError("Provider and remote no longer agree on the exact recovery PR head.")
     current = build(
         config, record, pr, source_head=source, expected_head=tip,
-        identity=identity, overrides=operation.overrides, cwd=cwd,
+        identity=identity, overrides=operation.overrides, cwd=cwd, routine=routine,
     )
     if current != operation:
+        if routine:
+            raise ValueError("Routine publication state changed; retry the normal command against current state.")
         raise ValueError("Recovery plan changed before publication; obtain a fresh preview and sign-off.")

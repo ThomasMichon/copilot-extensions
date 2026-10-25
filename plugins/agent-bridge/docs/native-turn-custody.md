@@ -3,7 +3,8 @@
 Back to the [runtime custody foundation](runtime-custody-foundation.md) and
 [restoration effort](../../../efforts/active/bridge-retained-runtime-restoration/README.md).
 This is an internal original-turn owner foundation with explicit, local
-process-owned ACP selection, not a supported HTTP contract, restoration command
+process-owned ACP selection and an original-acquisition local Host adapter,
+not a supported HTTP contract, restoration command
 or deployment authorization.
 
 ## Original admission, never retrospective enrollment
@@ -71,8 +72,15 @@ cancellation after final admission retains unknown outcome. A lost begin reply
 leaves the original started marker outstanding and cannot grant another send.
 Original reporting remains valid after epoch closure or native replacement.
 
-Host, remote, command/provider and private idle-continuation transports refuse
-selection. Selected transports refuse implicit resume and lifecycle handoff
+The generic enrollment method still refuses Host, remote, command/provider and
+private idle-continuation transports. The narrower
+[original-acquisition adapter](acquisition-custody.md#explicit-local-effect-owners)
+can retain the actual local Host handle, child birth, socket, client and SDK
+connection after its own new/load acceptance and select that same transport
+into this original-turn protocol. It cannot enroll a discovered, reattached or
+independently owned Host. No extra turn ledger or alternate prompt sender is added.
+
+Selected transports refuse implicit resume and lifecycle handoff
 rather than downgrading a replacement/successor to ordinary custody.
 Auto-handoff is ineligible for this selected cohort. Creation, start/resume,
 background/host/remote custody and installer binding remain separate gates;

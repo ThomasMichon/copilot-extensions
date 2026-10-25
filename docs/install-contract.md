@@ -2733,6 +2733,54 @@ delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
 ## Shared installer-engine helpers (`libs/installer-engine/`)
 
+### Independent Windows evaluator bootstrap
+
+`bootstrap-python.ps1` is a standalone, read-only selector for an existing
+external CPython base that can evaluate the owning payload's stdlib SDK.
+`sync-installer-engine.py` delivers byte-identical copies only to the declared
+Containers and Codespaces adopters. Loading the file or delivering a copy does
+not opt a caller into another evaluator or change its installer selection.
+
+`Resolve-EvaluatorBootstrapPython -ExcludedRoots <runtime/cell roots>` reads
+PEP 514 `PythonCore` registration as data, honoring current-user shadowing
+without interpreting opaque tags as versions or executing a launcher.
+It admits only ordinary, fixed-local-drive, non-venv bases: no remote or
+redirected paths, embedded path overrides or addressed runtime. Actual PE
+version/architecture, offline Windows Authenticode trust and the verified
+signer's CPython publisher establish admission before any Python runs.
+Final native paths and guarded metadata prevent a short-path alias or changed
+file from substituting for an independent executable.
+Candidate and addressed-root ancestors are inspected from the drive downward,
+before descending through any reparse point. A remote or redirected addressed
+root cannot establish independence and leaves the optional bootstrap unavailable;
+a genuinely missing local root suffix remains valid for first use.
+Native drive-root handle identity also rejects DOS-device/SUBST aliases on
+candidate or addressed-root drives, including missing suffixes beneath an alias.
+
+The result has `Status`, `Reason`, `Python` and `Guard`. `selected` retains a
+read-only file guard; the caller must dispose it after its finite SDK reads.
+`unavailable` has no executable or guard. Unexpected I/O or native-verifier
+errors throw rather than becoming successful absence. There is no persistent
+path/admission cache, state write, interpreter acquisition or Manager dependency.
+The native verifier uses System32 libraries, no UI and cache-only URL retrieval.
+
+The selector never invokes Python itself. An opting-in caller chooses native
+PowerShell before evaluation when no independently admitted bootstrap exists.
+Once evaluation starts, interpreter/SDK failures remain terminal, not reasons
+to try another authority. SDK execution uses isolated no-site startup in a fresh
+process; ordinary plugin package-site initialization remains unchanged.
+Selection and evaluation together, including native compilation, still need
+the caller's real cold/first-touch and refusal qualification.
+
+Codespaces' and Containers' Windows runtime gates opt in for their initial
+`status` and selected-context `validate` reads. They pass the same explicit SDK
+expectations and the native evaluator's explicit Copilot home, even when `HOME`
+differs from `USERPROFILE`. They retain complete JSON and generation checks, and dispose the executable guard before
+resolving the ordinary plugin runtime. Missing optional bootstrap support,
+unavailable admission, or path inputs requiring native environment/drive
+semantics select PowerShell before evaluation. Publication probes and installer
+selection remain on their existing paths. POSIX dispatch is unchanged.
+
 ### Binstub publication failures
 
 The simple binstub writers reject unavailable supplied resolver sources and

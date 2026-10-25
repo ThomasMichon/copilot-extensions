@@ -46,6 +46,8 @@ FILES = ier.FILES
 # so the canonical engine can migrate one plugin at a time.
 ADOPTERS = ier.ADOPTERS
 PYTHON_ADOPTERS = ier.PYTHON_ADOPTERS
+BOOTSTRAP_ADOPTERS = ("agent-containers", "agent-codespaces")
+BOOTSTRAP_FILE = "bootstrap-python.ps1"
 
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
@@ -56,6 +58,14 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         )
         for plugin in ADOPTERS
         for name in (*FILES, *ier.support_files(CANONICAL_DIR))
+    ]
+
+
+def bootstrap_vendor_pairs() -> list[tuple[Path, Path]]:
+    return [
+        (CANONICAL_DIR / BOOTSTRAP_FILE, REPO / "plugins" / plugin / "scripts" / BOOTSTRAP_FILE)
+        for plugin in BOOTSTRAP_ADOPTERS
+        if os.path.lexists(REPO / "plugins" / plugin)
     ]
 
 
@@ -315,6 +325,16 @@ def verify() -> list[str]:
                     problems.append(f"{destination.relative_to(REPO)} differs from canonical native engine")
                 elif os.name != "nt" and stat.S_IMODE(destination.stat().st_mode) != stat.S_IMODE(source.stat().st_mode):
                     problems.append(f"{destination.relative_to(REPO)} has a different canonical native mode")
+    for source, destination in bootstrap_vendor_pairs():
+        indirect = next(
+            (found for path in (source, destination)
+             if (found := uer._find_symlinked_ancestor(path, REPO.resolve())) is not None),
+            None,
+        )
+        if indirect is not None:
+            problems.append(f"{indirect} is a symlink -- refusing")
+        elif not source.is_file() or not destination.is_file() or source.read_bytes() != destination.read_bytes():
+            problems.append(f"{destination.relative_to(REPO)} differs from canonical evaluator bootstrap")
     plugins = REPO / "plugins"
     for candidate in plugins.iterdir() if plugins.is_dir() else ():
         if candidate.name not in PYTHON_ADOPTERS and any(
@@ -418,6 +438,18 @@ def sync() -> list[str]:
             if os.name != "nt":
                 shutil.copymode(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
+    for source, destination in bootstrap_vendor_pairs():
+        for path in (source, destination):
+            indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+            if indirect is not None:
+                raise RuntimeError(f"{indirect}: linked evaluator bootstrap refused")
+        if not source.is_file():
+            raise FileNotFoundError(f"canonical evaluator bootstrap is missing: {source}")
+        if destination.is_file() and destination.read_bytes() == source.read_bytes():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        written.append(destination.relative_to(REPO).as_posix())
     return written
 
 

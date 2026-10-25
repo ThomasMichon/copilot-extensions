@@ -540,13 +540,20 @@ does not authorize that action. Full narrative in
 ### Routine publication reconciliation
 
 Normal `push-changes` and `git sync` automatically reconcile a lost publication
-acknowledgement when the source-owning checkout still has intact backed-sync
-evidence. The unique live numbered private PR must retain ordinary publication
-ownership and an exclusive destination. Fresh provider/ref observations must
-agree on the checkpoint's already accepted result, which must be an ancestor of
-the pinned, clean source commit. No confirmation token or ownership waiver is
-used. Unknown evidence, changed ownership/destination, and unrelated history
-remain refusals.
+acknowledgement from the source-owning checkout. The unique live numbered private
+PR must retain ordinary publication ownership and an exclusive destination.
+Fresh provider/ref observations must agree on a head that is an ancestor of the
+pinned, clean source commit. An intact completed backed-sync checkpoint proves
+an accepted rebase result; without that checkpoint, the same verified ancestry
+permits a non-forcing continuation recorded as `source-lineage`. The stale saved
+head need not be an ancestor of the accepted result: an earlier successful
+rebase publication can legitimately have replaced it. Both heads are retained,
+not discarded. Source-lineage settlement also records the unique immutable
+merge base of the accepted head and configured upstream, so later sync and
+publication do not mistake upstream merge history for the PR's source series.
+That base is revalidated with the rest of the plan.
+No confirmation token or ownership waiver is used. Changed
+ownership/destination, corrupt evidence and unrelated history remain refusals.
 
 Acknowledgement loss outside that settlement case still uses the existing
 verified publication paths: a non-forcing fast-forward retry, or an independently
@@ -561,12 +568,24 @@ It settles tracking through the normal publication transaction without a push or
 PR edit. `push-changes` then publishes the pinned source with bounded, non-forcing
 transport and normal hooks; a racing unrelated remote update is not overwritten.
 `git sync` instead preserves the next backed transition before rebasing.
+When the remote PR ref has been deleted, reconciliation first refreshes the
+tracked PR through its provider. A confirmed merged/closed PR no longer needs a
+live publication ref; an open or unobservable PR still refuses. Remote branch
+deletion after merge is normal. Sync does not finalize or delete the local
+worktree branch, and preserves genuinely new local commits while pulling forward.
 Dry runs do not reconcile. Review/check/merge gates and rollout policy are unchanged.
 
 ### Explicit operator recovery
 
-Prefer invoking publication from the source-owning worktree's CWD. When that
-historical context or its ownership/replay evidence is unavailable, select the
+Prefer normal `push-changes` or `git sync` from the source-owning worktree's CWD.
+Do not request operator approval merely because publication acknowledgement or
+the old replay checkpoint is missing: a verified owned fast-forward above is
+ordinary continuation, not history replacement. An intentional rebase or squash
+of an owned private PR whose provider/ref still matches the saved lease uses
+the existing `push-changes --rewrite-pr` ownership checks; the host's explicit
+command confirms that intent without a separate operator recovery ceremony.
+When that context or ordinary
+ownership/lineage proof is unavailable, select the
 recovery worktree explicitly with its project configuration and request a preview:
 
 ```text
