@@ -897,6 +897,24 @@ def find_worktree_for_path(
     return None
 
 
+def worktree_status_bundle(
+    project: str | None, worktree_id: str, *, runner=None,
+) -> dict:
+    """Read the owning engine's independently marked status facts."""
+    obj = run_json(
+        project,
+        ["worktree-status-bundle", "--worktree", worktree_id, "--json"],
+        runner=runner,
+    )
+    if (
+        not isinstance(obj, dict)
+        or obj.get("worktree_id") != worktree_id
+        or not isinstance(obj.get("facts"), dict)
+    ):
+        raise EngineError("The status bundle does not describe the selected worktree.")
+    return obj
+
+
 def list_worktree_sessions(
     project: str,
     worktree_id: str,

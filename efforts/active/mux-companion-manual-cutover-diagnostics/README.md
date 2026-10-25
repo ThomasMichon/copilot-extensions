@@ -386,7 +386,7 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ### Step 6 - Purpose-first Summary and Claims continuation (#8811)
 
-- [ ] Land reviewed [purpose-first intent and sequence](purpose-first.md)
+- [x] Land reviewed [purpose-first intent and sequence](purpose-first.md)
       and the revised `visions/mux-companion` before implementation.
 - [ ] Reuse existing authoritative purpose, summary and claims sources in
       the default Textual dialog; retain recovery as a secondary view.
@@ -400,7 +400,7 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ## Validation Plan
 
-- [ ] Purpose-first: confirm the captured continuation preserves the request
+- [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
 - [ ] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
       long values, missing/stale/error sources and secondary recovery actions.
@@ -466,6 +466,25 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-24 - Reviewed intent merged; Summary/Claims source slice
+
+- #8815 merged after Copilot approval and required CI. Re-read the parent
+  Step 6 and Validation Plan; the entire effort remains Active.
+- Extended the existing Companion with Summary as initial view, actual Claims
+  and secondary Recovery. The process-boundary engine client consumes the
+  existing independently marked `worktree-status-bundle` contract and rejects
+  wrong-worktree/malformed envelopes. No new ledger or phase inference.
+- Startup and refresh reads run off the Textual event loop; unavailable facts
+  and lineage failures remain visible. The existing human-gated cutover
+  action is preserved. These are application tabs, not the requested mux tabs.
+- Initial focused source validation: 144 tests passed, including actual
+  Textual tab/cutover interaction, partial failures, literal claim labels and
+  blocked-producer responsiveness. Further process-boundary and native
+  acceptance is retained; no installed runtime or live mux change is claimed.
+- Native relay constraint from existing source: the current psmux click bind
+  is deliberately withheld because it corrupts the supported root table.
+  Do not silently enable it to satisfy view-tab presentation.
 
 ### 2026-10-24 - Purpose-first continuation proposed
 

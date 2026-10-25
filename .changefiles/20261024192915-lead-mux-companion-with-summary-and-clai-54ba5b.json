@@ -1,0 +1,9 @@
+{
+  "comment": "Lead Mux Companion with Summary and Claims tabs, preserve recovery actions, and read status facts without blocking the UI.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
