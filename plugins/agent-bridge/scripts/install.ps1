@@ -1298,7 +1298,8 @@ function New-SignedVenv {
         -PythonVersion '3.10' `
         -UvCommand 'uv' `
         -RequireSignedBase ($env:OS -eq 'Windows_NT') `
-        -AllowExisting $true)
+        -AllowExisting $true `
+        -WithoutPip)
 }
 
 # #1643: venue providers (agent-codespaces / agent-containers) are PURE

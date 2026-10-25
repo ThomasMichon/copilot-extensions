@@ -78,6 +78,37 @@ platform/concurrency acceptance. The separate #6598 construction change has its
 own native macOS lane and must not be treated as evidence for this campaign
 before its exact relevant checks pass.
 
+## Installation latency audit
+
+Dependency footprint is not the installation-time acceptance criterion.
+A 2026-10-25 read-only audit of twenty retained update histories from one
+Windows adopter found successful runs taking roughly 28-53 minutes.
+Runtime reconciliation alone took 13-34 minutes in several runs; individual
+Codespaces package-install spans took 96-198 seconds. Two later Worktrees
+attempts reached their roughly ten-minute engine-build deadline. Payload
+refresh also consumed minutes, and a newer failure occurred before any
+runtime installer ran, after a marketplace-cache sharing violation and timeout.
+These are distinct bottlenecks; increasing an installer timeout does not fix
+them.
+
+A disposable, host-isolated comparison used the same signed CPython base,
+stdlib `EnvBuilder`, copied interpreters and canonical child ownership:
+
+| Construction | Observed wall time | Inner-phase evidence |
+|--------------|--------------------|----------------------|
+| Unseeded copied venv | 2.760 seconds | Interpreter copy: 0.126 s; script setup: 0.731 s; stdlib post-setup: 0 s |
+| Seeded copied venv | Timed out at 45.059 seconds | Interpreter copy finished in 0.043 s; the process remained in `ensurepip` |
+
+The seeded control was terminated with all owned descendants settled.
+This isolates unnecessary seeding as a real cost; it is not a total-update
+speedup measurement or evidence about service-specific post-copy hooks.
+Several UV-owned installers still paid that cost, while Codespaces separately
+ran nine retained compiler/install transactions for its nine local roots.
+The targeted source changes opt those known UV callers out of seeding and
+batch the Codespaces closure without changing dependency, signature, health
+or service authority. Whole-update cold/warm timing and installed-state
+qualification remain required after authorized rollout.
+
 ## Unresolved custody, not completion by renaming
 
 | Remaining requirement | Existing objective and boundary |

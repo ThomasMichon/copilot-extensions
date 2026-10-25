@@ -369,6 +369,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
+        "source-build-linux", "source-build-windows",
+        "installer-latency-linux", "installer-latency-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
         "chat-construction-linux", "chat-construction-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
@@ -743,7 +745,32 @@ def test_compile_acceptance_is_bounded_native_and_independently_selected() -> No
             'python -m pytest -q tools/test_installer_dependency_compile.py '
             'tools/test_installer_dependency_policy.py '
             'tools/test_runtime_source_lock.py '
-            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock"',
+            'tools/test_runtime_source_authentication.py '
+            'tools/test_runtime_source_feed.py '
+            '-k "compile or real_uv_registry_transitive_and_isolated_build_age or runtime_source_lock '
+            'or runtime_source_authentication or runtime_source_feed"',
+        ]
+
+
+def test_installer_latency_contracts_are_native_bounded_and_opt_in() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = workflow["jobs"][f"installer-latency-{platform}"]
+        assert job["if"] == "${{ inputs.dependency_compile }}"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 6
+        assert not job.get("strategy") and not job.get("continue-on-error")
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        assert commands[:2] == [
+            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml",
+            "python -m pytest -q tools/test_installer_venv_seeding.py",
+        ]
+        assert shlex.split(commands[2]) == [
+            "python", "tools/run-plugin-tests.py", "agent-codespaces", "--allow-explicit-tiers",
+            "--test-file", "tests/test_installer_engine_adoption.py",
+            "-k", "library_install_order_retry_and_errors or native_batch_installs_cold or signed_venv_recovery",
+            "--test-timeout", "180", "--timeout", "300",
         ]
 
 

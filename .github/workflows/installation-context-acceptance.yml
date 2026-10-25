@@ -773,6 +773,36 @@ jobs:
     timeout-minutes: 6
     steps: *source-build-steps
 
+  installer-latency-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Installer latency contracts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &installer-latency-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml
+      - name: Signed-copy seeding policy and actual unseeded UV install
+        run: python -m pytest -q tools/test_installer_venv_seeding.py
+      - name: Exact batched closure, retries, warm edits and recovery
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces
+          --allow-explicit-tiers
+          --test-file tests/test_installer_engine_adoption.py
+          -k "library_install_order_retry_and_errors or native_batch_installs_cold or signed_venv_recovery"
+          --test-timeout 180 --timeout 300
+
+  installer-latency-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Installer latency contracts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *installer-latency-steps
+
   wheel-inputs-linux:
     if: ${{ inputs.wheel_inputs }}
     name: Wheel-byte inspection (Linux)

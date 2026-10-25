@@ -827,7 +827,7 @@ try {
 
     if (-not $slotAlreadyComplete) {
         if ($Force -or -not (Test-Path $VenvPython) -or -not (Test-Path (Join-Path $VenvDir 'pyvenv.cfg'))) {
-            if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+            if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
                 Write-Fail "Venv creation failed -- $VenvPython not found"
                 exit 1
             }

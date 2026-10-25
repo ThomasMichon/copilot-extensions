@@ -759,14 +759,16 @@ function Install-PackageInto {
         'agent-remote-login-shell' = $RemoteLoginShellDir
         'agent-codespaces' = $PluginDir
     }
+    $installArguments = @('--python', $Python)
     foreach ($entry in $sources.GetEnumerator()) {
-        $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', $entry.Key })
-        $result = Invoke-UvPipInstallResilient -UvCommand $UvCommand `
-            -Arguments (@('--python', $Python) + $modeArgs + @($entry.Value, '--quiet'))
-        if ($result.ExitCode -ne 0) {
-            Write-ServiceErr "$($entry.Key) install failed (exit $($result.ExitCode)): $($result.Output)"
-            return $false
-        }
+        if ($Editable) { $installArguments += @('--editable', $entry.Value) }
+        else { $installArguments += @('--reinstall-package', $entry.Key, $entry.Value) }
+    }
+    $result = Invoke-UvPipInstallResilient -UvCommand $UvCommand `
+        -Arguments ($installArguments + @('--quiet'))
+    if ($result.ExitCode -ne 0) {
+        Write-ServiceErr "agent-codespaces closure install failed (exit $($result.ExitCode)): $($result.Output)"
+        return $false
     }
     # Strip the uv-regenerated console-script trampoline(s) (SAC-blocked, unused).
     Remove-ConsoleTrampolines -VenvDir (Split-Path -Parent (Split-Path -Parent $Python))
@@ -948,7 +950,7 @@ function Deploy-Venv {
         }
     }
     if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+        & $signedBase -m venv --copies --without-pip $VenvDir 2>&1 | Out-Null
         $signedRc = $LASTEXITCODE
         if (Test-PythonVenv -Dir $VenvDir -Python $VenvPython) {
             if ($signedRc -ne 0) {

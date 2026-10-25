@@ -576,6 +576,18 @@ consumer enablement or live private-feed operations. The build checks have
 their own six-minute Linux/Windows jobs under `dependency_compile=true`, rather
 than extending the existing compile job's budget or required unit CI.
 
+The same optional `dependency_compile=true` selector also runs independent
+six-minute Linux/Windows installer-latency contract jobs. They check the
+shared signed-venv helper's preserved seeded default and explicit UV-owned
+`-WithoutPip` mode. Windows additionally verifies real signed copied interpreters,
+absence of pip/setuptools and actual fixture-wheel installation by UV.
+The canonical Codespaces runner selects only the batched closure/retry,
+signed recovery and native cold/warm source-edit cases. Every explicit local
+root and reinstall/editable selection is preserved in one retained transaction;
+the real native case checks all nine installed distributions and refreshed
+same-version source. These are disposable correctness checks, not a
+whole-update speedup claim, and do not expand required unit-only PR CI.
+
 `tools/test_installer_wheel_acquisition.py` uses a public test-only localhost TLS
 certificate/key and real owned workers to check exact file/redirect trust,
 credential isolation, file policy, inclusive byte/storage limits, blocked DNS,

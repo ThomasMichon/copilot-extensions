@@ -3973,10 +3973,23 @@ failed health, timeout and abrupt caller death. Equivalent POSIX execution and
 the authorized installed signed-Python deployment lane remains unverified; these
 fixtures do not complete the first-adopter or portfolio acceptance gates.
 
+`New-SignedVenv` retains seeded stdlib construction by default. UV-owned
+callers can pass `-WithoutPip`: the signed `--copies` path then also uses
+`--without-pip`, avoiding an unused `ensurepip` installation. Bridge, Logger,
+Vault, Pull Requests, the SSH UV branch and the foundation prerequisite producer
+use that option. It does not remove pip from existing slots or change genuine
+Python/pip fallback construction. Signature, slot-health and publication checks
+remain unchanged.
+
 `agent-codespaces` uses the canonical-reference form for both installers.
-Its Connection Owner service, sibling-library install order, and Windows
+Its Connection Owner service, complete explicit local closure, and Windows
 signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,
 transient retries, and deploy-manifest writing use the shared engine.
+Both installers submit the eight helper roots and plugin root in one retained
+UV transaction, preserving every named `--reinstall-package` selection or all
+nine editable roots. UV resolves their dependency order once; a closure failure
+still refuses construction. Windows requires UV and omits pip seeding from
+its signed-copy venv as well.
 PowerShell `stamp` materializes both engine files and all declared local
 libraries into the snapshot, rewriting canonical references to snapshot-local
 paths before publishing it. POSIX `stamp` retains its owning-payload pointer;
