@@ -46,6 +46,54 @@ def bootstrap(store):
     return result
 
 
+@pytest.mark.parametrize("mode", ["configured-bindings", "peer-approval"])
+@pytest.mark.parametrize("invalid,expected", [
+    ({"host_key": None}, "inbound-host-pin-required"),
+    ({"relay_public_key": key(1)}, "relay-key-must-be-distinct"),
+])
+def test_invalid_candidate_is_rejected_before_original_request_is_journaled(
+    config, mode, invalid, expected,
+):
+    store = DirectoryStore(selected(config) if mode == "peer-approval" else config)
+    request = {**enrollment(), "enrollment_policy": mode}
+    before = store.snapshot()
+    with pytest.raises(SSHServiceError, match=expected):
+        store.enroll("principal-worker-a", {**request, **invalid})
+    assert store.snapshot() == before
+    with sqlite3.connect(store.path) as db:
+        for table in ("requests", "enrollment_pending", "enrollments"):
+            assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
+    result, changed = store.enroll("principal-worker-a", request)
+    if mode == "peer-approval":
+        assert not changed and result["status"] == "pending"
+        result, changed = store.approval.decide(
+            "recovery-owner", decision(result, confirm=True, reason="first-peer"),
+            recovery=True,
+        )
+        assert result["status"] == "active"
+    assert changed
+    assert store.snapshot()["directory"]["machines"][0]["host_key"] == request["host_key"]
+
+
+@pytest.mark.parametrize("mode", ["configured-bindings", "peer-approval"])
+def test_client_only_enrollment_does_not_require_an_inbound_host_pin(config, mode):
+    value = config.to_dict()
+    value["policy"]["machines"][0].update(role="client-only", inbound=False)
+    value["bindings"][0]["reverse_port"] = None
+    config = ServiceConfig.from_dict(value)
+    store = DirectoryStore(selected(config) if mode == "peer-approval" else config)
+    result, changed = store.enroll(
+        "principal-worker-a", {**enrollment(), "enrollment_policy": mode, "host_key": None})
+    if mode == "peer-approval":
+        assert not changed and result["status"] == "pending"
+        result, changed = store.approval.decide(
+            "recovery-owner", decision(result, confirm=True, reason="first-peer"),
+            recovery=True,
+        )
+        assert result["status"] == "active"
+    assert changed and store.snapshot()["directory"]["machines"][0]["host_key"] is None
+
+
 def test_pending_is_durable_but_not_directory_or_relay_admission(config):
     config = selected(config)
     store = DirectoryStore(config)

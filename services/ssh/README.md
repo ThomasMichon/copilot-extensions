@@ -136,6 +136,11 @@ Observing an unchanged admitted incumbent durably records that derived retained
 outcome in the existing transaction; it does not grant admission. Equivalent
 request IDs reuse an existing candidate decision instead of inventing another
 revision. Caller withdrawal before commit rolls back any such receipt repair.
+An inbound-enabled enrollment requires its host pin before the original request
+or pending candidate is journaled, so a corrected retry can use that same request
+ID. Outbound-only clients may still omit a host pin.
+A relay key equal to that candidate's client key is likewise rejected before
+journaling; approval cannot make that intrinsically conflicting identity valid.
 
 Enrollment receipts include the decision's original `directory_revision`, not
 an embedded global directory. Read the current directory through its existing

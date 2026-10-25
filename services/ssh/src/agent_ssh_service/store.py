@@ -207,9 +207,12 @@ class DirectoryStore:
         public_key(request["public_key"])
         if request["host_key"] is not None:
             public_key(request["host_key"])
+        check(not decision["effective_inbound"] or request["host_key"] is not None,
+              "inbound-host-pin-required")
         relay_key = request.get("relay_public_key")
         if relay_key is not None:
             public_key(relay_key)
+            check(relay_key != request["public_key"], "relay-key-must-be-distinct")
         check("relay" not in self.config.to_dict() or relay_key is not None,
               "relay-public-key-required")
         return binding

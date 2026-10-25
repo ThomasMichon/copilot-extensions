@@ -503,6 +503,16 @@ takeover or implementation completion is asserted.
   passes. The preceding head passed both hosted native jobs in run
   [40182383847](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40182383847);
   this corrected head still requires fresh review, CI and native qualification.
+- Review of the next head found an intrinsically invalid inbound candidate
+  could be journaled without its required host pin. Validation now refuses
+  that candidate before recording its request, and likewise refuses a relay
+  key identical to its own client key. Corrected original-ID retries remain
+  usable in both modes; outbound-only clients may still omit host pins.
+  The host-pin controls first reproduced the defect against the preceding
+  installed wheel. The rebuilt final Windows suite passes 133 tests with six
+  Linux-only skips; Ruff passes. The preceding head passed both native jobs
+  in run [40187342145](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40187342145).
+  Fresh current-head review and qualification remain required before merge.
 
 ### 2026-10-16 - Intake and current boundary
 
