@@ -43,7 +43,10 @@ versions include Manager `0.6.130-dev2`, Worktrees `1.24.249-dev2`, Bridge
 implementation and the full creation/resume/installed matrix, without enabling
 ordinary tuple producers or changing existing identities. The
 [current journal](journal/2026/10.24%20progress.md) preserves the release and
-guest acceptance boundary; the parent effort remains Active.
+guest acceptance boundary. The additive shared local-context foundation merged
+in #8652 with its final selector regressions and passing required CI.
+Configuration, producers, retained-allocation/receiving-side checks and installed
+acceptance remain open; the parent effort remains Active.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is

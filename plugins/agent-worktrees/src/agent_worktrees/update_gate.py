@@ -33,12 +33,9 @@ def runtime_allowed(
         if allowed is not None:
             physical_machine = machine
             if repo_dir is not None:
-                from .machine_identity import resolve_execution_context
+                from .machine_identity import runtime_policy_physical_machine
 
-                physical_machine = resolve_execution_context(
-                    machine, repo_dir, environment=cfg.detect_platform(),
-                    config=config,
-                ).target.machine
+                physical_machine = runtime_policy_physical_machine(machine, repo_dir, config=config)
             return machine in allowed or physical_machine in allowed
         return not gate_present
     return False
@@ -81,9 +78,8 @@ def _machine_gate_blocks(name: str, scope: str, context: Path | None) -> bool:
     try:
         machine = cfg.detect_machine(repo_dir, value=config.configured_machine, config=config)
     except Exception as error:
-        # Never fall back to a bare hostname: detection raises on purpose when
-        # an explicit execution space is required or the machine registry is
-        # invalid, and launch-time reconcile refuses in that case too.
+        # Optional topology is not enrollment. Invalid or conflicting local
+        # customization must still refuse, just as launch-time reconcile does.
         raise MachineDetectionError(f"could not detect machine identity for {name}: {error}") from error
     gate = reconcile.load_runtime_gate(repo_dir)
     gate_present = reconcile.gate_manifest_present(repo_dir)
