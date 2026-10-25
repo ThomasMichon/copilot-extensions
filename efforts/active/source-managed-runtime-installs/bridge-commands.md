@@ -58,6 +58,10 @@ Replace only that cold execution ownership with the qualified driver.
    stdout protocol or consume its input. A launch acknowledgement remains
    distinct from an ordinary committed receipt. Re-resolve actual completed
    readiness after successful operation; no interpreter-only success fallback.
+   Retain the documented `::agent-provisioning::` wait cue on stderr, binding
+   any status reference to canonical driver-owned progress rather than
+   recreating private provision status. Do not present an unsupported ETA as
+   readiness or installer ownership.
 6. Preserve Bridge's real platform-specific provision behavior and context.
    Do not substitute Logger's service-less options or bootstrap's Windows
    unattended `install` choice. Registration, start, failure and prepared
@@ -91,6 +95,9 @@ Replace only that cold execution ownership with the qualified driver.
   and POSIX. Qualify the cold queued wait's transport behavior separately
   from real installed Bridge health; label synthetic transport consumers
   precisely and never rewrite a completed slot to create a probe.
+  Assert the documented provisioning cue, driver-owned progress and actual
+  wait outcome separately; a time estimate, created file or launch
+  acknowledgement is not operation readiness.
 - Run actual no-write refusal for managed/changed policy, no-self-provision,
   pinned/nested calls, malformed or unavailable source/selection, ordinary
   copies, old or missing dispatchers/drivers/resolvers and unsupported cold
