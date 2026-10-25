@@ -824,7 +824,7 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin):
             return (f"◀▶ view / ⚙ Config (on {self.htabs[self.htab]})"
                     f" · Enter: focus body · Tab region · [ ] view")
         if zone == "CFG":
-            return ("◀▶ back to pivots · Enter: open Configuration"
+            return ("◀▶ back to pivots · Enter: focus sections"
                     " · ↑↓ move · Tab region")
         if zone == "M":
             if self._in_configuration():
