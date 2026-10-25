@@ -393,9 +393,9 @@ not installation, credential or live-adoption authority.
 - [x] Implement optional exact-fingerprint peer admission and separate explicit
   bootstrap/recovery in the existing SSH service, preserving its automatic
   configured-binding baseline when the policy is absent.
-- [ ] Qualify the actual client/Gateway/store contract, restart, original-request
+- [x] Qualify the actual client/Gateway/store contract, restart, original-request
   recovery, stale/unauthorized decisions and mixed-version refusal.
-- [ ] Merge the bounded source and record its retained release/adoption boundary;
+- [x] Merge the bounded source and record its retained release/adoption boundary;
   do not mark the broader setup or live mesh items complete.
 
 ## Validation Plan
@@ -431,10 +431,10 @@ not installation, credential or live-adoption authority.
 - [ ] Clean-room and available live lanes; mark synthetic versus real evidence
   explicitly, including unexercised suspend/logout and channel-close cases.
 - [ ] Verify private policy is not embedded in public examples, tests or docs.
-- [ ] Peer-approval selection: pending public identities never enter active
+- [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.
-- [ ] Peer-approval compatibility: absent policy retains the old contract;
+- [x] Peer-approval compatibility: absent policy retains the old contract;
   incapable or rolled-back providers refuse the required policy before effects.
 
 ## Proposal
@@ -445,6 +445,29 @@ retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
 takeover or implementation completion is asserted.
 
 ## Journal
+
+### 2026-10-25 - Peer-approval source merged; integration remains open
+
+- #8917 merged to `dev` as `e5ec299aceb81808a987e8752fa47566a630ae23`
+  at 13:34:11Z. Exact submitted head
+  `ccd78d077dea205091d515e89a38f4ef3b1930b7` received approval
+  `5643362836`; all three review threads were resolved and required CI passed.
+- Both full native service suites passed on that exact head in
+  [40197079356](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40197079356):
+  Windows control-plane and Linux service/native-relay qualification. These
+  are disposable authenticated Gateway/CLI fixtures, not installed adoption.
+- The rebuilt local focused packet passed all 55 enrollment cases. Seven
+  installed production modules matched source. The local whole-suite startup
+  timeouts under measured CPU saturation were not relabeled passing or waived:
+  the same unchanged deadlines passed in the pinned full native suites.
+- Re-read the Plan and Validation Plan and resolved only the four explicit
+  peer-approval source/qualification items. The parent remains Active.
+  Release, authentication/setup composition, provider interoperability, actual
+  fleet adoption and predecessor retirement remain with #6681 and its existing
+  owners; this source slice transfers its remaining responsibility there.
+- No installation, runtime update, credential action, fleet deployment or
+  serving-predecessor retirement occurred. Source merge is not release or
+  evidence that a running deployment enforces the selected policy.
 
 ### 2026-10-24 - Foreground Fleet SSH consumer source
 
