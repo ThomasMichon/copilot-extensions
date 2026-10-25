@@ -151,7 +151,8 @@ def test_namespace_recreate_reports_post_removal_failure(capsys):
 
 
 @pytest.mark.parametrize("wrapper", [False, True])
-def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrapper):
+def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrapper, monkeypatch):
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", lambda *a, **k: None)
     from agent_containers.session_host_context import TrustedContext
 
     command = ("{{target_preference_launcher}} " if wrapper else "") + "copilot --acp --stdio"
@@ -206,7 +207,8 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     result = json.loads(capsys.readouterr().out)
     assert result["reverse_forwards"] == ["9857:127.0.0.1:61234"]
     assert result["remote_command"].startswith("source /tmp/")
-    assert result["acp_command"] == command
+    assert command in result["acp_command"]
+    assert result["acp_command"].endswith("repository_policy_launch")
     assert result["execution_instance"] == "instance-fixture"
     assert write_env.call_args.args[0] == "instance-fixture"
     assert result["preference_wrapper"] == (
@@ -223,7 +225,8 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys, wrappe
     deploy.assert_called_once_with("instance-fixture", ado=True)
 
 
-def test_session_host_prepare_uses_process_auth_not_host_environment(capsys):
+def test_session_host_prepare_uses_process_auth_not_host_environment(capsys, monkeypatch):
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", lambda *a, **k: None)
     from agent_containers.session_host_context import TrustedContext
 
     config = types.SimpleNamespace(
@@ -294,7 +297,8 @@ def test_session_host_prepare_uses_process_auth_not_host_environment(capsys):
     )
 
 
-def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys):
+def test_session_host_prepare_fails_closed_with_no_matching_copilot_cli_login(capsys, monkeypatch):
+    monkeypatch.setattr("agent_containers.hosting_policy.require_container_hosting", lambda *a, **k: None)
     """A configured copilot_cli_account with no live host login must abort
     the launch entirely -- never silently fall back to GH_TOKEN's identity."""
     from agent_containers.session_host_context import TrustedContext

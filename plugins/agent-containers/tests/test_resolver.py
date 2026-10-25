@@ -494,7 +494,8 @@ def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
     assert transport["name"] == "myrepo-1"
     assert transport["workspace_folder"] == "/workspaces/myrepo"
     assert transport["security_profile"] == "trusted"
-    assert transport["acp_command"] == "copilot --acp --stdio"
+    assert "copilot --acp --stdio" in transport["acp_command"]
+    assert transport["acp_command"].endswith("repository_policy_launch")
     assert transport["ssh"]["host_alias"] == "agent-container-myrepo-1"
     assert transport["provider_command"] == ["/payload/bin/agent-containers"]
     assert spec["venue"]["target_id"] == "container:myrepo-1"

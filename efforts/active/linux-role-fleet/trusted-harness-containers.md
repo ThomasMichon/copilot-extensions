@@ -1,7 +1,7 @@
 # Trusted harness containers
 
 Parent: [Linux role fleet](README.md), #6030.
-Initial image slice: #8352. **Status: implementation candidate; native validation open.**
+Initial image slice: #8352. **Status: image source delivered; adapter/integration open.**
 The plan merged in #8358 and execution was explicitly authorized. The campaign
 owner retains integration and publication. Source and offline tests do not prove
 a built image, native readiness, live provisioning or rollout.
@@ -327,6 +327,18 @@ also run `python tools/check-dependency-age.py`. Image builds, clean-room/native
 and live validations run only after the execution and venue gates above.
 
 ## Journal
+
+- 2026-10-25: Image slice merged in #8385. Exact merged base and consuming
+  source revisions built successfully on the qualified Gateway builder.
+  All 42 base contracts pass; this does not close runtime/auth/manager gates.
+  External lifecycle ownership plan #8788 merged after approval. The #8787
+  implementation preserves running trusted-session use while refusing direct,
+  fleet and implicit lifecycle mutations against externally owned members.
+  Native Docker qualification refuses all eight start/stop/unpause/remove
+  attempts across declared and removed configuration; an independent managed
+  fixture still stops, starts and removes normally. Both fixtures are retired
+  and pre-existing services preserved. These are lifecycle-ownership proofs,
+  not remote transport, deployed services or credential-renewal qualification.
 
 - 2026-10-23: Drafted the #8352 bounded image plan within #6030. Source
   reservations and build interface are proposed; no implementation, build,
