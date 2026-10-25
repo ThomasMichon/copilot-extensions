@@ -79,7 +79,10 @@ CUTOVER_CRASH_EXIT_CODES = {
 
 
 def _expected_installation_id() -> str:
-    return os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+    return (
+        os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
+        or os.environ.get("AGENT_INDEX_NATIVE_INSTALLATION_ID", "")
+    )
 
 
 def _selected_interpreter_matches(environment_name: str) -> bool:
@@ -102,7 +105,7 @@ def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _validated_cell_transaction() -> dict[str, Any] | None:
-    installation_id = _expected_installation_id()
+    installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
     if not installation_id:
         return None
     root_value = os.environ.get("AGENT_INDEX_HOME", "")
@@ -271,7 +274,7 @@ def _configured_service_role() -> str | None:
 
 
 def _validate_cell_start_authority(*, passive: bool) -> None:
-    installation_id = _expected_installation_id()
+    installation_id = os.environ.get("AGENT_INDEX_INSTALLATION_ID", "")
     if not installation_id:
         raise ServiceOwnershipError(
             "the private cell startup path requires a namespaced installation"
@@ -1374,7 +1377,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             return int(sock.getsockname()[1])
 
     def spawn_passive(port: int):
-        start_command = "__cell-start" if expected_installation else "start"
+        start_command = "__cell-start" if os.environ.get("AGENT_INDEX_INSTALLATION_ID") else "start"
         python = str(host_runtime_python())
         cmd = [
             windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",

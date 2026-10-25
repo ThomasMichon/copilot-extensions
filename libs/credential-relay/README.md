@@ -1,5 +1,11 @@
 # credential-relay
 
+**Opt-in resident account workers:** see
+[`account-relay`](../../plugins/agent-index/docs/account-relay.md) for the dedicated
+Bridge-owned account-only listener and exact source/account/recipient grants.
+This mode neither changes legacy transports nor represents account tokens as
+downscoped credentials.
+
 Shared credential relay framework + host-credential sources for Copilot CLI
 plugins (distribution `agent-credential-relay`, import module `credential_relay`).
 

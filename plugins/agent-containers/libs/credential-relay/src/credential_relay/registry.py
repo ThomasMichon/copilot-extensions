@@ -86,6 +86,7 @@ class RelayBuilder:
     azure_resources: set[str] = field(default_factory=set)
     _azure_enabled: bool = False
     http_sources: HttpSourceRegistry = field(default_factory=HttpSourceRegistry)
+    account_relay: object | None = None
 
     def add_source(self, source: CredentialSource) -> None:
         """Register a credential source (deduped by ``name``; first wins).
@@ -170,7 +171,7 @@ class RelayBuilder:
 
     @property
     def empty(self) -> bool:
-        return not self.sources and not self._azure_enabled
+        return not self.sources and not self._azure_enabled and self.account_relay is None
 
     def build(self) -> CredentialRelayServer:
         """Construct a CredentialRelayServer from the accumulated config."""
@@ -192,6 +193,8 @@ class RelayBuilder:
             sources.append(AzLoginSource(allowed_resources=azure_allowed))
         policy = RelayPolicy(allowed_hosts=list(self.allowed_hosts))
         kwargs: dict = {"sources": sources, "policy": policy}
+        if self.account_relay is not None:
+            kwargs["account_relay"] = self.account_relay
         if self.port is not None:
             kwargs["port"] = self.port
         if self.ado_host is not None:

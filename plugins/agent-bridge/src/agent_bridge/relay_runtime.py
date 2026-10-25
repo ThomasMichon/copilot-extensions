@@ -57,6 +57,7 @@ class _RelayState:
     validators: list[_CallbackState]
     authorizers: list[_CallbackState]
     static_resources: list[str]
+    account_policy: str | None = None
 
 
 _ADAPTER = TypeAdapter(_RelayState)
@@ -117,7 +118,10 @@ def _decode(payload: object) -> _RelayState:
     try:
         wire = _encode(payload)
         state = _ADAPTER.validate_json(wire, strict=True)
-        if _encode(json.loads(_ADAPTER.dump_json(state))) != wire or not 0 <= state.port <= 65535:
+        normalized = json.loads(_ADAPTER.dump_json(state))
+        if state.account_policy is None:
+            normalized.pop("account_policy")
+        if _encode(normalized) != wire or not 0 <= state.port <= 65535:
             raise PrivateIPCError(Refusal.AUTHORITY)
         if state.gate == "none" and (
             state.required_actions or state.validators or state.authorizers or state.static_resources
@@ -176,7 +180,16 @@ def capture_relay(server: CredentialRelayServer) -> dict[str, object]:
             list(server.policy.allowed_hosts), [_source_state(source) for source in server.sources],
             gate_kind, sorted(server.token_required_actions), validators, authorizers, static_resources,
         )
+        if server.account_relay is not None:
+            from credential_relay.account_relay import AccountRelay
+            if type(server.account_relay) is not AccountRelay:
+                raise PrivateIPCError(Refusal.AUTHORITY)
+            if server.account_relay._tasks:
+                raise PrivateIPCError(Refusal.AUTHORITY)
+            state.account_policy = server.account_relay.policy_path
         payload = json.loads(_encode(asdict(state)))
+        if state.account_policy is None:
+            payload.pop("account_policy")
         _decode(payload)
         return payload
     except (TypeError, ValueError, AttributeError, RecursionError):
@@ -235,6 +248,9 @@ def restore_relay(payload: object) -> CredentialRelayServer:
             token_validator=gate.validate if state.gate == "validator" else None,
             token_authorizer=gate.authorize if state.gate == "authorizer" else None,
         )
+        if state.account_policy is not None:
+            from credential_relay.account_relay import AccountRelay
+            server.account_relay = AccountRelay(state.account_policy)
         # None is effective state, not permission to reload the child's env.
         server.ado_host = state.ado_host
         if _encode(capture_relay(server)) != _encode(payload):

@@ -255,6 +255,7 @@ class CredentialRelayServer:
         token_validator: Callable[[str], bool] | None = None,
         token_authorizer: Callable[[str, str, dict[str, str]], bool] | None = None,
         token_required_actions: frozenset[str] | None = None,
+        account_relay=None,
     ) -> None:
         self.port = port
         self.sources = sources or []
@@ -275,6 +276,7 @@ class CredentialRelayServer:
         # may mint) rather than a bare token check.
         self.token_authorizer = token_authorizer
         self.token_required_actions = token_required_actions or frozenset()
+        self.account_relay = account_relay
         # Default ADO host for bare `get-access-token` requests that carry no
         # host (e.g. npm/nuget via ado-auth-helper). Resolved from the explicit
         # arg or the CODESPACES_ADO_HOST env var; never hardcoded to a specific
@@ -338,6 +340,12 @@ class CredentialRelayServer:
         # the dynamic default (port 0 -> OS-assigned). relay_state publishes THIS
         # to consumers, so discovery follows the real port (dotfiles #694/#540).
         self.port = self._server.sockets[0].getsockname()[1]
+        if self.account_relay is not None:
+            try:
+                await self.account_relay.start()
+            except BaseException:
+                await self.stop()
+                raise
         self.stats.start_time = time.time()
         log.info(
             "Credential relay started on 127.0.0.1:%d (%d sources, %d allowed hosts)",
@@ -348,11 +356,18 @@ class CredentialRelayServer:
 
     async def stop(self) -> None:
         """Stop the relay server gracefully."""
-        if self._server:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
-            log.info("Credential relay stopped")
+        legacy = self._server
+        if legacy:
+            legacy.close()
+        try:
+            if self.account_relay is not None:
+                await self.account_relay.stop()
+        finally:
+            if legacy:
+                await legacy.wait_closed()
+                if self._server is legacy:
+                    self._server = None
+                log.info("Credential relay stopped")
 
     async def _handle_client(
         self,

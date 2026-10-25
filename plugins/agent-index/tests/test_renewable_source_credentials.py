@@ -20,6 +20,113 @@ def test_renewed_header_is_not_masked() -> None:
     assert value.split()[0].lower() == "bear" + "er"
 
 
+def test_account_relay_is_explicit_and_not_the_scoped_broker(monkeypatch, tmp_path):
+    from agent_index.indexing import engine
+    from agent_index import source_account_relay as account_relay
+
+    calls = []
+    monkeypatch.setattr(account_relay, "token_provider", lambda path, **kwargs: (
+        calls.append((path, kwargs)) or (lambda: "renewed-account-token")
+    ))
+    spec = engine.SourceSpec(
+        name="github:example/project", type="github", auth_account="account-a",
+        auth_relay=str(tmp_path / "worker.json"),
+    )
+    kwargs = engine._connector_kwargs(spec)
+    assert kwargs["token_provider"]() == "renewed-account-token"
+    assert calls == [(tmp_path / "worker.json", {
+        "source": "github:example/project", "account": "account-a", "host": "github.com",
+    })]
+    from dataclasses import replace
+    with pytest.raises(SourceCredentialError, match="source-provider-policy-invalid"):
+        engine._connector_kwargs(replace(spec, auth_gateway=str(tmp_path / "other.json")))
+
+
+@pytest.mark.parametrize("reference", [None, "", "relative"])
+def test_core_corpus_config_rejects_present_invalid_relay(monkeypatch, tmp_path, reference):
+    import base64
+    import json
+    from agent_index import config
+    from agent_index.indexing import engine
+
+    auth = {"account": "selected", "relay": reference}
+    value = {"corpus": {"sources": [{"name": "github:example/project", "auth": auth}]}}
+    monkeypatch.setenv(config.CONFIG_DATA_ENV, base64.urlsafe_b64encode(
+        json.dumps(value).encode(),
+    ).decode())
+    monkeypatch.setenv(config.SOURCE_MODE_ENV, "explicit")
+    monkeypatch.delenv("AGENT_INDEX_SOURCES", raising=False)
+    assert config.read_corpus_sources()[0]["auth"] == auth
+    with pytest.raises(SourceCredentialError, match="source-provider-policy-invalid"):
+        engine.configured_source_specs()
+
+
+def test_core_corpus_config_rejects_null_gateway_alongside_relay(monkeypatch, tmp_path):
+    import base64
+    import json
+    from agent_index import config
+    from agent_index.indexing import engine
+
+    auth = {"account": "selected", "gateway": None, "relay": str(tmp_path / "worker.json")}
+    value = {"corpus": {"sources": [{"name": "github:example/project", "auth": auth}]}}
+    monkeypatch.setenv(config.CONFIG_DATA_ENV, base64.urlsafe_b64encode(
+        json.dumps(value).encode(),
+    ).decode())
+    monkeypatch.setenv(config.SOURCE_MODE_ENV, "explicit")
+    monkeypatch.delenv("AGENT_INDEX_SOURCES", raising=False)
+    with pytest.raises(SourceCredentialError, match="source-provider-policy-invalid"):
+        engine.configured_source_specs()
+
+
+@pytest.mark.parametrize("kind,provider_host", [("git", "github.com"), ("github", "enterprise.example")])
+def test_relay_destination_mismatch_denies_before_credential_delivery(
+    monkeypatch, tmp_path, kind, provider_host,
+):
+    import json
+    from types import SimpleNamespace
+    from agent_index.indexing import engine
+    from agent_index import source_account_relay as account_relay
+
+    capability = tmp_path / "capability"
+    capability.write_text("isolated-account-capability-value-123456789")
+    source = "git:project" if kind == "git" else "github:example/project"
+    policy = tmp_path / "worker.json"
+    policy.write_text(json.dumps({
+        "schema": "credential-relay.account-worker", "version": 1,
+        "transport": {"host": "127.0.0.1", "port": 19999},
+        "bindings": [{
+            "source": source, "account": "selected", "recipient": "index",
+            "host": provider_host, "action": "get-github-token",
+            "capability_file": str(capability),
+        }],
+    }))
+    monkeypatch.setattr(account_relay, "exchange", lambda *a, **k: pytest.fail(
+        "destination mismatch requested an account credential",
+    ))
+    if kind == "git":
+        monkeypatch.setattr(GitRepoConnector, "materialize", lambda **kwargs: SimpleNamespace(
+            source_name=source, repo_path=tmp_path / "project",
+        ))
+    spec = engine.SourceSpec(
+        name=source, type=kind, auth_account="selected", auth_relay=str(policy),
+        repo_path=str(tmp_path / "project"), remote_url="https://other.example/project.git",
+    )
+    kwargs = engine._connector_kwargs(spec)
+    if kind == "git":
+        with pytest.raises(RuntimeError, match="unavailable"):
+            kwargs["token_provider"]()
+    else:
+        connector = GitHubConnector(
+            source, **kwargs, min_interval_s=0,
+            transport=httpx.MockTransport(lambda request: pytest.fail("unexpected upstream request")),
+        )
+        try:
+            with pytest.raises(SourceCredentialError, match="unavailable"):
+                connector.discover()
+        finally:
+            connector._client.close()
+
+
 def test_http_refreshes_every_page_and_retry_without_ambient_fallback(monkeypatch) -> None:
     monkeypatch.setenv("GH_TOKEN", "wrong-ambient-token")
     monkeypatch.setattr("time.sleep", lambda _: None)
