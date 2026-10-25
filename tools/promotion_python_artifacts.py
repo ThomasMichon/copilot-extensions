@@ -175,7 +175,8 @@ def build_candidate_bundles(
             continue
         directory = builder.PLUGINS_DIR / plugin
         for source in [directory, *(path for _name, path in builder.resolve_vendored_libs(directory))]:
-            validate_static_build(source)
+            from plugin_runtime_resources import build_inputs
+            build_inputs(source, root=root)
     entries = []
     with tempfile.TemporaryDirectory(prefix="promotion-build-toolchain-") as temporary:
         toolchain = resolve_toolchain_lock(
@@ -488,7 +489,8 @@ def validate_wheel_sources(
             data = validate_build(source_dir, component=component, root=candidate_root)
             injected = injected_resources(component, candidate_root)
         else:
-            data = validate_static_build(source_dir)
+            from plugin_runtime_resources import build_inputs
+            data, injected = build_inputs(source_dir, root=candidate_root)
         tool = data.get("tool", {})
         settings = tool.get("setuptools", {}) if isinstance(tool, dict) else None
         if not isinstance(settings, dict):
@@ -722,6 +724,8 @@ def validate_source_binding(manifest: dict, root: Path) -> None:
                 raise PromotionArtifactError("manifest build resource closure differs from candidate")
         else:
             libs = builder.resolve_vendored_libs(plugin_dir)
+            from plugin_runtime_resources import build_inputs
+            build_inputs(plugin_dir, root=root)
         directories = [plugin_dir, *(directory for _name, directory in libs)]
         expected = {
             directory.resolve().relative_to(root.resolve()).as_posix(): directory

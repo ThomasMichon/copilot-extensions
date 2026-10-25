@@ -756,7 +756,10 @@ def resolve_toolchain_lock(*args, **kwargs):
         Path(artifacts.__file__).parents[1] / "libs" / "installer-engine" / inspector.name,
         inspector,
     )
-    for name in ("artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py"):
+    for name in (
+        "artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py",
+        "plugin_runtime_resources.py",
+    ):
         shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
     shutil.copy(Path(promotion.__file__).with_name("promotion_candidate.py"), driver / "promotion_candidate.py")
@@ -1685,7 +1688,22 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     assert publisher_step["env"]["GH_TOKEN"] == "${{ secrets.APERTURE_RELEASE_TOKEN }}"
     assert publisher_step["env"]["ARTIFACT_VERIFY_TOKEN"] == "${{ github.token }}"
     assert all("env" not in step for step in publishing["steps"] if "uses" in step)
-    assert "id-token" not in publishing["permissions"]
+    if current:
+        assert publishing["permissions"] == {
+            "contents": "read", "actions": "read", "attestations": "write",
+            "id-token": "write", "pull-requests": "read",
+        }
+        source_attestation = next(
+            step for step in publishing["steps"]
+            if step.get("name") == "Attest the complete source and its external generation manifest"
+        )
+        assert source_attestation["uses"] == attestation["uses"]
+        assert source_attestation["with"] == {
+            "subject-path": "${{ runner.temp }}/complete-source/*",
+        }
+        assert publishing["steps"].index(source_attestation) < publishing["steps"].index(publisher_step)
+    else:
+        assert "id-token" not in publishing["permissions"]
     assert "publish-python-artifacts" in jobs["report-failure"]["needs"]
     assert "promote" in jobs["report-failure"]["needs"]
     assert "needs.promote.result == 'failure'" in jobs["report-failure"]["if"]

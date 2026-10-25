@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Iterator
 
 _runtime_spec = importlib.util.spec_from_file_location(
-    "containers_profile_runtime", Path(__file__).with_name("versioned_runtime.py"),
+    "containers_profile_runtime", Path(__file__).with_name(
+        "_versioned_runtime.py" if __package__ == "agent_containers" else "versioned_runtime.py"
+    ),
 )
 if _runtime_spec is None or _runtime_spec.loader is None:
     raise RuntimeError("The owning Containers runtime helper is unavailable")
@@ -242,6 +244,10 @@ def _fingerprint(payload: Path, libraries: list[Path]) -> str:
     paths = []
     for root in [payload, *libraries]:
         paths.append(root / "pyproject.toml")
+        for name in ("setup.py", "setup.cfg", "MANIFEST.in", "_standalone_runtime_build.py"):
+            path = root / name
+            if path.exists() or path.is_symlink():
+                paths.append(path)
         paths.extend(root.glob("README*"))
         for directory in ("src", "scripts"):
             for path in (root / directory).rglob("*"):

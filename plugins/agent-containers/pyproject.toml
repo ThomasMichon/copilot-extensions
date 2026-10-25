@@ -100,6 +100,7 @@ provider-exec = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "setuptools>=83.0.0",
 ]
 
 [tool.ruff.lint]

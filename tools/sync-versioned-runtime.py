@@ -28,6 +28,9 @@ drifted (``tools/check-install-contract.py`` independently enforces the
 ``pyproject.toml`` **and** a runtime installer (``install.*`` or ``init.*``) --
 the exact set the install contract requires to carry the primitive.
 Both modes refuse linked destinations and ancestors before reading or writing.
+Containers also adopts the canonical ``standalone_build.py`` resource builder.
+Its synchronized scripts are complete build inputs, so package construction
+does not discover a sibling checkout or import a mutable installer at runtime.
 """
 from __future__ import annotations
 
@@ -66,6 +69,7 @@ RESOLVER_NAMES = ("resolve-runtime.sh", "resolve-runtime.ps1")
 # a hardcoded root and its own deploy path, #1106/#742); it is intentionally not
 # the parameterized canonical, so the fan-out never overwrites it.
 RESOLVER_BESPOKE = frozenset({"agent-worktrees"})
+BUILD_HELPER_CONSUMERS = frozenset({"agent-containers"})
 
 
 def _has_installer(plugin: Path) -> bool:
@@ -145,6 +149,12 @@ def main() -> int:
         pairs.append((policy_bytes, plugin / "scripts" / DEPENDENCY_POLICY.name))
         pairs.append((config_bytes, plugin / "scripts" / DEPENDENCY_CONFIG.name))
         pairs.extend((data, plugin / "scripts" / name) for name, data in component_bytes.items())
+        if plugin.name in BUILD_HELPER_CONSUMERS:
+            helper = RESOLVER_DIR / "standalone_build.py"
+            if helper.is_symlink() or not helper.is_file():
+                print("canonical runtime build helper missing or linked", file=sys.stderr)
+                return 1
+            pairs.append((helper.read_bytes(), plugin / "scripts" / helper.name))
 
     resolver_plugins = _resolver_plugins()
     resolver_bytes: dict[str, bytes] = {}
