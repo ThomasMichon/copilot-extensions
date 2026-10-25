@@ -310,12 +310,20 @@ def test_source_execution_revalidates_without_legacy_install_retry(selected, mon
     assert not step.fallback_argv
     step = dataclasses.replace(step, fallback_argv=step.argv)
     captured = []
+    references = []
 
     def run(argv, **kwargs):
         captured.append((argv, kwargs))
-        return SimpleNamespace(status="installer exited 1")
+        return SimpleNamespace(
+            status="installer exited 1",
+            diagnostics={"attempt": f"{len(captured):032x}", "status": "available"},
+        )
 
     monkeypatch.setattr(update_runtime, "_run_human_installer", run)
+    monkeypatch.setattr(
+        update_runtime.update_events, "installer_diagnostics",
+        lambda component, reference: references.append((component, reference)),
+    )
     assert update_runtime._execute_runtime_step(step) == "installer exited 1"
     assert len(captured) == 1
     for argv, kwargs in captured:
@@ -326,8 +334,13 @@ def test_source_execution_revalidates_without_legacy_install_retry(selected, mon
         assert kwargs["cwd"] == artifact
         assert kwargs["env"][PIN_ENV] == source.identity
         assert kwargs["target_version"] == source.application.version
+        assert kwargs["diagnostics"] is True
         assert kwargs["receipt"]() is None
     assert "--install-application" in captured[0][0]
+    assert references == [
+        ("agent-worktrees@copilot-extensions", {"attempt": f"{index:032x}", "status": "available"})
+        for index in (1,)
+    ]
 
 
 def test_source_execution_refuses_changed_inputs_before_launch(selected, monkeypatch):
