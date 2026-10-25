@@ -702,9 +702,14 @@ required no-actor unit packet without adding native builds to required CI.
 The manual `installation-context-acceptance.yml` selector `pr_service=true`
 runs the focused PR serving/observation lifecycle on Linux and Windows:
 `test_watch_replay_store.py`, `test_watch_service.py`, `test_watch_gateway.py`,
-`test_watch_gateway_transport.py` and `test_watch_observer.py`, through the
+`test_watch_gateway_transport.py`, `test_watch_observer.py`,
+`test_watch_replay_client.py`, `test_watch_replay_binding.py` and
+`test_watch_replay_client_transport.py`, through the
 existing contained plugin runner. It exercises real locks/disk/native children,
 TLS/PoP reconnect, restart and drain, with synthetic issuer/provider inputs.
+V1/v2 client controls cover expected scope, post-discovery remapping,
+legacy-provider rollback without downgrade, original-ID reconciliation and
+credential/channel loss before lookup or during an already-started commit.
 It adds no required-PR process matrix and does not qualify a production
 credential provider, installed artifact or fleet placement.
 
