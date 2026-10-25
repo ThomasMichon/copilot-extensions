@@ -1041,6 +1041,15 @@ jobs:
           --test-file tests/test_claims_transitive.py
           --test-file tests/test_claims_find.py
           --allow-explicit-tiers --test-timeout 60 --timeout 540
+      - name: Install seasoned guard tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest pyyaml
+      - name: Qualify publication guards and native finite-reader boundary
+        env:
+          PYTHONPATH: tools
+        run: >-
+          timeout --signal=TERM --kill-after=10s 120s
+          python -m pytest -q tools/test_check_large_files.py
+          tools/test_check_no_internal_identifiers.py
   foundation-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
     name: foundation construction (Windows)

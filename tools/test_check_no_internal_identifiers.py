@@ -513,6 +513,26 @@ def test_native_live_sweep_quotes_command_binstub_without_provisioning(tmp_path)
     assert json.loads(result.stdout) == {"error": None, "entries": []}
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX command and finite-reader boundary")
+def test_native_posix_live_sweep_preserves_command_and_deadline(tmp_path):
+    module = _load_module(SCRIPT.parent.parent)
+    command = tmp_path / "owner's & catalog"
+    command.write_text(
+        "#!/bin/sh\n"
+        'test "$AGENT_WORKTREES_NO_SELFPROVISION" = 1 || exit 9\n'
+        'test "$1" = "literal argument" || exit 8\n'
+        "printf '%s\\n' '{\"error\":null,\"entries\":[]}'\n",
+    )
+    command.chmod(0o700)
+    result = module._run_live_sweep([str(command), "literal argument"])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"error": None, "entries": []}
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        module._run_live_sweep([sys.executable, "-c", "import time; time.sleep(60)"])
+    assert time.monotonic() - started < 15
+
+
 def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
     repo: Path, monkeypatch: pytest.MonkeyPatch,
 ):

@@ -43,6 +43,11 @@ shell cases skip on the other OS; inspect actual outcomes instead of crediting
 skips as qualification. It exercises the real CLI in a synthetic registered
 context, known read-only claims adapter, exact quoted catalog paths,
 unsupported-old-client refusal and owned descendant timeout.
+The same manual job separately runs the publication blob/identifier guards
+through bounded pytest tooling, including native POSIX quoted-command
+and finite-reader timeout proof. Windows additionally qualifies pipe-holding
+descendant retirement and command-binstub quoting. These remain optional
+native checks, not an expansion of required CI.
 Live read/coverage evidence remains separate and never requires lifting a
 held route or installing the candidate into another owner's runtime.
 

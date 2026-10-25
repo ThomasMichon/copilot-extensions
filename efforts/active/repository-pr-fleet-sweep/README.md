@@ -275,3 +275,39 @@ had65 passes and one process-count assertion, subsequently corrected and
 rerun against the new single reference batch.
 The real whole-guard candidate check now completes in16.46 seconds.
 Actual managed push remains the final publication-budget proof.
+
+### 2026-10-25 - Reconciled candidate and concrete safety failures
+
+Managed publication succeeded on the bounded-reader candidate; its exact-head
+manual Ubuntu packet also passed. The next review found that concrete
+output-limit and cleanup errors inherit from `SubprocessError` and were still
+treated as optional absence. Only missing-command/OS errors and ordinary
+timeouts now retain the optional policy; all other observation failures block
+publication. Regressions raise the real canonical exception classes.
+PR parsing also preserves terminal repository/number identity when owner or
+repository names themselves contain `pull`, `pulls`, or numeric segments.
+
+Rebased the owned implementation onto current Dev after preserving its commits
+in a local backup. Both the independently added promotion-control portfolio
+and this PR's optional sweep portfolio remain intact. The reconciled Windows
+seven-file packet passed206 cases with four platform skips. The guard/workflow
+packet passed191 cases with one platform skip and two failures: its sweep
+assertion observed an intermediate edit, and an existing inventory omitted the
+actual SSH-service selector/jobs. Both final inventory assertions now pass;
+neither production workflow nor any deadline was weakened.
+All13 install contracts and touched-source lint pass.
+
+The manual Linux portfolio additionally runs the publication guards and a
+real POSIX quoted-command/finite-timeout check. An initial local attempt used
+an unsupported tools-component selector and a misspelled legacy-WSL test;
+both refused before executing tests. Corrected commands use existing runners
+and bounded pytest tooling, not a new runner or required CI matrix.
+
+Documentation impact was reassessed against the complete rebased diff:
+`pr-sweep.md` remains the command/output/error authority, with README and
+CLI-reference pointers; `TESTING.md` describes the optional native guard
+packet, and `CONTRIBUTING.md` describes the unchanged publication deadline and
+fail-closed observation policy. This remains a finite read-only command and a
+below-altitude publication implementation fix, with no daemon, installer,
+new dependency or rollout. Final exact-head Linux, full review, required CI,
+implementation merge and source-effort closeout remain open.
