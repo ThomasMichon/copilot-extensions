@@ -175,7 +175,7 @@ class _Partition:
         self.rows[wid] = row
         self.floors[wid] = revision
         self.tombstones.pop(wid, None)
-        if wid not in self.order:
+        if previous is None:
             self.order.append(wid)
 
     def delete(self, wid: str, revision: int) -> None:

@@ -267,6 +267,7 @@ def test_delete_only_commits_at_complete_barrier_and_rejects_equal_resurrection(
     with pytest.raises(ValueError, match="tombstone"):
         point(store, epoch, envelope(12, [row(revision=10)]))
     assert point(store, epoch, envelope(12, [row(revision=12, title="recreated")]))
+    assert list(store.records()) == [(SOURCE, PROJECT, "tree")]
 
 
 def test_deletion_older_than_point_preserves_row_then_newer_deletion_wins():
@@ -723,3 +724,38 @@ def test_availability_control_preserves_empty_roster_tombstones_and_absence_rece
     assert not store.records() and dict(state(store)) == {**before, "stale": True}
     assert feed(store, epoch, [availability_control(11, empty=True)])
     assert state(store) == before
+
+
+@pytest.mark.parametrize("size", [100, 1000])
+def test_full_roster_order_work_has_no_per_row_linear_membership(size, monkeypatch):
+    counts = {"membership_calls": 0, "equality_checks": 0}
+
+    class CountedOrder(list):
+        def __contains__(self, value):
+            counts["membership_calls"] += 1
+            for member in self:
+                counts["equality_checks"] += 1
+                if member == value:
+                    return True
+            return False
+
+    partition_type = publications._Partition
+
+    def partition(*args, **kwargs):
+        value = partition_type(*args, **kwargs)
+        value.order = CountedOrder(value.order)
+        return value
+
+    monkeypatch.setattr(publications, "_Partition", partition)
+    items = [row(str(i)) for i in range(size)]
+    store, epoch = seeded(items)
+    fresh = dict(counts)
+    store._partitions[SOURCE, PROJECT].order = CountedOrder(
+        store._partitions[SOURCE, PROJECT].order,
+    )
+    counts.update(membership_calls=0, equality_checks=0)
+    assert snapshot(store, epoch, envelope(11, items))
+    refreshed = dict(counts)
+    assert [key[2] for key in store.records()] == [str(i) for i in range(size)]
+    print(f"order-work rows={size} fresh={fresh} refresh={refreshed}")
+    assert fresh == refreshed == {"membership_calls": 0, "equality_checks": 0}

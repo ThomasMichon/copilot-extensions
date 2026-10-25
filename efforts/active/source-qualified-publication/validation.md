@@ -104,6 +104,35 @@ transcript-only. No shared producer/receiver semantics, wire fields or public
 API changed. This remains private source compatibility qualification, not UI,
 Inbox, F2/F4, native, installed or whole-effort acceptance.
 
+### Full-roster order work-count correction
+
+The review summary's quadratic order-scan observation was confirmed in the
+private row insertion path and treated as blocking without waiting for an
+inline severity label. Two deterministic cases instrument the actual order
+list membership operation on fresh and refreshed 100/1,000-row snapshots.
+Captured fail-first output against unchanged
+`a1c3d2760654c593a818e53465096a50debc90bc` records **2 failed, 56 deselected**:
+
+| Rows | Fresh membership calls / equality checks | Refresh calls / checks |
+|---|---|---|
+| 100 | 100 / 4,950 | 100 / 5,050 |
+| 1,000 | 1,000 / 499,500 | 1,000 / 500,500 |
+
+The surgical fix uses the existing previous-row dictionary lookup to decide
+whether to append, preserving the live-row/order invariant without a new
+persistent index. Corrected captured output records **zero membership calls
+and zero order equality checks** for both sizes and both paths. The expanded
+focused packet reports **83 passed in 7.97s**, exit 0, with real JUnit and
+captured passing work-count output. Existing exact reorder/front insertion,
+empty/deletion/recreation, point-only-tail, revision/absence/availability,
+atomicity and twenty-heartbeat zero-copy controls remain selected.
+
+All **283** prior captured artifact files are inventoried before this run and
+remain immutable, including the earlier 63/69/75/81 and fail-first evidence.
+New raw streams/JUnit are separately named. These are operation counts, not a
+native or wall-clock performance benchmark. The source-only, unwired boundary,
+remaining phase/installed gates and explicit merge hold are unchanged.
+
 Coverage includes A10 locked → point A11 unlocked → twenty heartbeat/read
 ticks, independent B11 and feed base10, A12 new-owner supersession, source/
 project collisions, selected-identity refusal, epoch cancellation,

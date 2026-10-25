@@ -344,6 +344,15 @@ The existing admission method returns true for accepted metadata controls;
 that return does not claim a semantic publication. Mixed controls/transactions
 are refused. There is no new shared parser, wire field, generic API or importer.
 
+Order insertion reuses the row-presence lookup already needed for revision
+validation, not a per-row scan of the order list. Between serialized admissions,
+order contains each live accepted identity exactly once. Deletion is internal
+to complete replacement, which rebuilds order before committing; a later point
+recreation therefore appends a genuinely absent identity. Full replacement
+still applies authoritative order plus the retained newer point-only tail.
+This makes that order-bookkeeping work linear in roster size without a new
+persistent membership index, cache or public abstraction.
+
 `_Receipt` is an optional **private intent**, not an F2 response decoder or
 evidence that any owner endpoint exists. A future adapter would have to prove
 request/source/identity correlation and supply its durable exact-row
