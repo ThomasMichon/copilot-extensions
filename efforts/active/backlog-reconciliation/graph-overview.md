@@ -298,6 +298,45 @@ completion credit. New #8796, #8797 and #8802 remain metadata-only.
 Nine numeric and three existing ROOT intakes have been received; the original
 research layers and provenance remain unchanged.
 
+## Seventh delivered consolidation
+
+Batch 97 considered thirteen CodeSpace lifecycle and durable-relay issues.
+Eight redundant trackers were administratively superseded only after complete
+direct receiving delivery and full actual-body/discussion readback:
+
+| Unfinished outcome | Superseded tracker | Existing receiving home |
+|--------------------|--------------------|-------------------------|
+| Structured occupied-target refusal, provisioning truth and credential consistency, complete managed-SSH fallback mode, exhaustive checkout protection and precreation rejoin authorization | #4012, #5760, #5762, #5774, #5837 | OPEN #2709 |
+| Recreated remote-binding cardinality, shared provider relay with actual demand lifetime and reboot/resumed-child listener publication | #4011, #4030, #7046 | OPEN #4309 |
+
+The actual #2709 body has 32,671 bytes and 81 unchecked rows; #4309 has
+23,647 bytes and 45 unchecked rows. Both preserve every incumbent raw byte,
+all 85 earlier unchecked rows, transfer markers, eligible comments and actual
+custody. The additional direct Plan rows have paired Validation and continuing
+Coordination. Original alternatives, optional improvements and distinct
+source/native qualification remain intact; no ROOT was amended or substituted.
+
+**#4303, #3442 and #8551 remain independently OPEN**, as do both receivers.
+Generic existing-requested-branch alignment spans more than a CodeSpace-only
+lifecycle. Both-provider credential modes, presentation and long-duration
+authenticated continuation are not merely transport ownership. The account-relay
+issue's explicit implementation claim is protected, not expired by an empty
+assignee list. See the [dated checkpoint](<journal/2026/10.24 lifecycle-and-relay-family-97.md>).
+
+All thirteen public dispositions, original bodies, 23 original comments and
+current custody were audited before the census: **913 whole-queue open
+at 2026-10-24 19:16:49 PDT**, comprising 743 original-cohort and 170 inflow
+issues. There are 666 eligible open issues and 247 untouched excluded-author
+issues, still 184 above the fixed checkpoint. One new arrival partly offset
+the eight administrative closures.
+
+The graph retains **717 historical eligible identities**: 666 open and
+51 closed, comprising 44 audited graph supersessions and seven external
+changes with no credit. New #8811 and earlier #8796, #8797 and #8802 remain
+metadata-only pending their own admission. Eleven numeric and three existing
+ROOT intakes have been received; original research layers and provenance
+remain unchanged.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
