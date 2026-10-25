@@ -21,6 +21,7 @@ from test_first_use_bridge import (
     materialized_bridge as materialized_bridge, native_recipe_runner as native_recipe_runner,
 )
 from test_first_use_native import native_command
+from test_first_use_genesis import observe
 from test_first_use_vault import cold_environment, native_genesis
 
 
@@ -86,6 +87,32 @@ def test_bridge_selected_snapshot_retains_source_context_and_native_installer(se
     for name in ("snapshot-provenance.json", "runtime-source.json"):
         assert (frozen / name).read_bytes() == (payload / name).read_bytes()
     assert not (installation / "active.json").exists()
+
+
+@native_genesis
+def test_actual_stamp_preserves_bridge_selected_provenance(
+    materialized_bridge, area, monkeypatch,
+):
+    payload, installation, project = materialized_bridge
+    if os.name == "nt":
+        monkeypatch.setenv("PATH", str(Path(os.environ["SystemRoot"]) / "System32"))
+    identity = qualify_source(payload)
+    root = area / "queue"
+    request = provision.enqueue(payload, installation, project, root=root, installer_action="stamp")
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed" and result.exit_code == 0, result.log_path.read_text()
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    assert snapshot == installation / "snapshots" / identity.runtime_version
+    provenance = json.loads((snapshot / "snapshot-provenance.json").read_text(encoding="utf-8-sig"))
+    assert provenance["snapshotId"] == snapshot.name
+    assert provenance["payloadVersion"] == identity.runtime_version
+    assert provenance["resolution"]["sourceFingerprint"] == json.loads(request.spec.source)["source_fingerprint"]
+    payload.rename(payload.with_name("unavailable-installed-payload"))
+    admission = provision.inspect(snapshot, installation, project)
+    assert admission["runtime_source"] == identity.document()
+    assert not (installation / "current-version").exists()
+    assert not (installation / "start-agent-bridge.ps1").exists()
 
 
 @pytest.mark.parametrize("native", [False, True])
@@ -175,7 +202,8 @@ def test_bridge_selected_snapshot_refusal_precedes_acquisition_queue_and_writes(
 
 @pytest.mark.parametrize("change", [
     "reselected", "substituted", "unavailable", "source-tree", "missing-source",
-    "manifest-array", "identity-array", "invalid-installer", "dependency-loop",
+    "manifest-array", "identity-array", "invalid-installer", "empty-installer",
+    "raising-installer", "dependency-loop",
 ])
 def test_bridge_selected_snapshot_change_settles_without_installer_or_selection_mutation(
     selected_bridge_snapshot, area, change,
@@ -202,6 +230,11 @@ def test_bridge_selected_snapshot_change_settles_without_installer_or_selection_
         )
     elif change == "invalid-installer":
         (payload / "scripts/installer_engine.py").write_text("def broken(\n", encoding="utf-8")
+    elif change in {"empty-installer", "raising-installer"}:
+        (payload / "scripts/installer_engine.py").write_text(
+            "" if change == "empty-installer" else 'raise RuntimeError("fixture damaged engine")\n',
+            encoding="utf-8",
+        )
     elif change == "dependency-loop":
         dependency = payload / "libs"
         dependency.mkdir(exist_ok=True)
@@ -339,18 +372,23 @@ def test_actual_bridge_source_selected_snapshot_caller_loss_generations_and_fail
     checkout.rename(area / "unavailable-source-checkout")
     receipt = (snapshot / "snapshot-provenance.json").read_bytes()
     caller, _log = native_recipe_runner.start(
-        command(snapshot), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        command(snapshot), env=env, cwd=project, root=root, diagnostic=diagnostic, contain_caller=True,
     )
-    caller.kill()
-    caller.wait(timeout=30)
-    follower = native_recipe_runner.run(
-        command(snapshot), env=env, cwd=project, root=root, diagnostic=diagnostic,
-    )
-    assert follower.returncode == 0, follower.stdout + diagnostic()
+    native_recipe_runner.lose_caller(caller)
+    observe(lambda: len(status(root=root)) == 1 and status(root=root)[0].state == "completed", 900, diagnostic)
     accepted = status(root=root)
-    assert 1 <= len(accepted) <= 2
+    assert len(accepted) == 1
     assert all(item.state == "completed" and item.exit_code == 0
                and json.loads(item.spec.source) == admission for item in accepted), diagnostic()
+    concurrent = [
+        native_recipe_runner.start(command(snapshot), env=env, cwd=project, root=root, diagnostic=diagnostic)
+        for _ in range(2)
+    ]
+    for process, log in concurrent:
+        assert process.wait(timeout=900) == 0, log.read_text(errors="replace") + diagnostic()
+    assert 2 <= len(status(root=root)) <= 3
+    assert all(item.state == "completed" and item.exit_code == 0
+               and json.loads(item.spec.source) == admission for item in status(root=root)), diagnostic()
     assert (snapshot / "snapshot-provenance.json").read_bytes() == receipt
     assert_bridge_registration(installation, adapter)
     selected = (installation / "current-version").read_text().strip()

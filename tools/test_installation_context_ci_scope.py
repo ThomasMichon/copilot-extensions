@@ -623,13 +623,19 @@ def test_bridge_snapshots_use_explicit_bounded_native_portfolio() -> None:
         assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
         checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
         assert checkout["with"]["persist-credentials"] is False
+        bootstrap = next(step for step in job["steps"]
+                         if step.get("name") == "Preserve canonical-installed-only bootstrap publication")
+        assert bootstrap["env"]["UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE"] == "1"
         assert [step["run"].split() for step in job["steps"] if "run" in step] == [
             ["python", "tools/run-plugin-tests.py", "update-driver",
              "--test-file", "tests/test_first_use_bridge_snapshot.py",
              "-k", '"not', 'actual"', "--test-timeout", "90", "--timeout", "600"],
             ["python", "tools/run-plugin-tests.py", "update-driver",
              "--test-file", "tests/test_first_use_bridge_snapshot.py",
-             "-k", "actual", "--test-timeout", "900", "--timeout", "1080"],
+             "-k", '"actual', "and", "not", 'actual_stamp"', "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_snapshot.py",
+             "-k", "actual_stamp", "--test-timeout", "900", "--timeout", "1080"],
             ["python", "tools/run-plugin-tests.py", "update-driver",
              "--test-file", "tests/test_first_use_bridge.py",
              "-k", '"not', 'native_caller_loss"', "--test-timeout", "900", "--timeout", "900"],

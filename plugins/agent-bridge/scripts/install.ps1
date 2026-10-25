@@ -2382,6 +2382,13 @@ function Invoke-Stamp {
         }
         $snapDir = $snapshot.Trim()
         [void](Test-PayloadUnchangedSinceAdmission -SourceIdentityOnly)
+        $sourceRoot = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $sourceProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } elseif ($env:COPILOT_PROJECT_DIR) { $env:COPILOT_PROJECT_DIR } else { (Get-Location).Path }
+        Publish-LegacySnapshotSource -SnapshotDir $snapDir -HelperDirectory $ScriptDir `
+            -PayloadRoot $sourceRoot -PluginId agent-bridge -RuntimeRoot $InstallDir `
+            -ProjectRoot $sourceProject -SnapshotId (Split-Path -Leaf $snapDir) -PayloadVersion $SrcVersion
         $nativeError = ''
         [void](Invoke-Hidden -FilePath $py -ArgList @(
             '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'), '--root', $InstallDir,

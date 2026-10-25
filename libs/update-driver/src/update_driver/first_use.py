@@ -129,6 +129,18 @@ def _environment(payload: Path) -> dict[str, str]:
 def _inspect(
     payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
 ) -> dict:
+    """Normalize source-controlled validation failures without enclosing custody operations."""
+    try:
+        return _inspect_payload(payload, runtime_root, project, installer_action=installer_action)
+    except ProvisionError:
+        raise
+    except (AttributeError, RuntimeError) as error:
+        raise ProvisionError(f"owning source validation failed: {error}") from error
+
+
+def _inspect_payload(
+    payload: Path, runtime_root: Path, project: Path, *, installer_action: str = "provision",
+) -> dict:
     """Run only in the isolated inspection/owned execution process."""
     sys.dont_write_bytecode = True
     if installer_action not in INSTALLER_ACTIONS:
@@ -238,7 +250,7 @@ def _inspect(
 
     try:
         roots = engine._package_roots(payload)
-    except RuntimeError as error:
+    except (AttributeError, RuntimeError) as error:
         raise ProvisionError(f"owning source dependencies refused: {error}") from error
     if any(not root.is_relative_to(payload) for root in roots):
         raise ProvisionError("first-use provisioning requires a self-contained owning payload")

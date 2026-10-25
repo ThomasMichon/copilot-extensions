@@ -1538,6 +1538,10 @@ do_stamp() {
             _fail "Source snapshot publisher returned no path"; return 1;
         }
         _payload_unchanged_since_admission source-only || return 1
+        publish_legacy_snapshot_source "$snapshot" "$SCRIPT_DIR" \
+            "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" agent-bridge "$INSTALL_DIR" \
+            "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-${COPILOT_PROJECT_DIR:-$PWD}}" \
+            "$(basename -- "$snapshot")" "$SRC_VERSION" || return 1
         "$py" -I -B "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
             publish-redirects --payload-dir "$snapshot" --version "$SRC_VERSION" \
             --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" || return 1

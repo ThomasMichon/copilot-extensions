@@ -338,14 +338,25 @@ def assert_bridge_registration(installation, adapter, *, unattended=False):
 @pytest.fixture
 def native_recipe_runner(area):
     calls, owners, descriptors, roots = [], [], [], {}
+    caller_jobs = {}
 
-    def start(command, *, env, cwd, root, diagnostic):
+    def start(command, *, env, cwd, root, diagnostic, contain_caller=False):
         path = area / f"native-recipe-{len(calls)}.log"
         output = path.open("wb")
-        process = subprocess.Popen(
-            command, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
-            stdout=output, stderr=subprocess.STDOUT, **no_window_kwargs(),
+        arguments = dict(
+            env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=output,
+            stderr=subprocess.STDOUT, **no_window_kwargs(),
         )
+        if contain_caller and os.name == "nt":
+            from agent_procutil import spawn_sync_in_kill_on_close_job
+            process, job = spawn_sync_in_kill_on_close_job(
+                command, require_job=True, allow_breakaway=False, **arguments,
+            )
+            caller_jobs[process] = job
+        else:
+            process = subprocess.Popen(command, start_new_session=contain_caller, **arguments)
+            if contain_caller:
+                caller_jobs[process] = None
         calls.append((process, output, path))
         roots[root] = diagnostic
         prefix = "[installation-driver] launch acknowledgement: "
@@ -371,8 +382,17 @@ def native_recipe_runner(area):
         code = process.wait(timeout=900)
         return subprocess.CompletedProcess(command, code, path.read_text(errors="replace"), "")
 
+    def lose_caller(process):
+        assert process in caller_jobs and process.poll() is None
+        job = caller_jobs.pop(process)
+        if os.name == "nt":
+            job.close()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=30)
+
     try:
-        yield SimpleNamespace(start=start, run=run)
+        yield SimpleNamespace(start=start, run=run, lose_caller=lose_caller)
     finally:
         with ExitStack() as settlement:
             for _process, output, _path in calls:
@@ -388,6 +408,11 @@ def native_recipe_runner(area):
                         observe, lambda descriptor=descriptor: _pidfd_exited(descriptor), 900,
                         lambda: "native supervisor still running",
                     )
+            for process, job in caller_jobs.items():
+                if job is not None:
+                    job.close()
+                elif process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
             for process, _output, _path in calls:
                 if process.poll() is None:
                     process.kill()

@@ -64,7 +64,12 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_bridge_snapshot.py
-          -k actual --test-timeout 900 --timeout 1080
+          -k "actual and not actual_stamp" --test-timeout 900 --timeout 1080
+      - name: Qualify source-qualified native stamp in its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k actual_stamp --test-timeout 900 --timeout 1080
       - name: Preserve installed-source fixed recipes and native lifecycle
         run: >-
           python tools/run-plugin-tests.py update-driver
@@ -76,6 +81,8 @@ jobs:
           --test-file tests/test_first_use_logger_snapshot.py
           -k "not actual" --test-timeout 90 --timeout 600
       - name: Preserve canonical-installed-only bootstrap publication
+        env:
+          UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
         run: >-
           python tools/run-plugin-tests.py agent-bridge
           --test-file tests/test_bootstrap_driver.py

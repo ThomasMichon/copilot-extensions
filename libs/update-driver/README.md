@@ -713,7 +713,10 @@ Only `provision` additionally admits the exact source-qualified selected legacy
 snapshot. Its canonical provenance must describe the current `payload-dir` and
 `stamped-version`; its full immutable runtime-source identity and assembly are
 validated before durable queue acceptance and rechecked around complete-input
-freezing. The native Python-free admission checks the ordinary source declaration
+freezing. Source-qualified native stamp captures that canonical provenance with
+the shared legacy snapshot publisher before publishing selection redirects;
+ordinary unreceipted stamping is unchanged.
+The native Python-free admission checks the ordinary source declaration
 and canonical selection before acquisition; launch acknowledgement is not
 durable request acceptance. A changed accepted snapshot records an explicit,
 settled nonzero refusal before any installer starts, without switching sources.
