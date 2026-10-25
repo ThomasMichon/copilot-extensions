@@ -28,6 +28,15 @@ resource references, states and notes. Each observation retains its own
 confirmation marker and timestamp; unavailable data is not an empty ledger.
 Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 
+Graph shows bounded recorded disposition history and directed resource
+references, with reported subagents kept distinct from resource ownership.
+Opening Graph reads the selected head session's optional, versioned
+`session-observations` provider off the UI loop; initial Summary does not wait
+for retained-history scans. Statistics count recorded starts/completions in the
+retained file, not unique calls or lifetime totals. Missing, partial, stale and
+unsupported evidence remain visible. Reported completion is not agent retirement.
+Refresh reloads the graph; leaving the app cancels its owned reads.
+
 Recovery retains session lineage and the explicit, human-gated Cut over action
 for an already-prepared handoff. Selecting a tab never triggers cutover.
 The existing Ctrl+K popup also offers **Show Summary pane**. It opens or
@@ -54,7 +63,7 @@ otherwise-ended CLI session alive indefinitely or adopt a successor pane.
 An already-bound observer continues checking its pinned native owner if
 registry or CLI metadata disappears.
 
-Topology/statistics, attention indicators and two-line clickable mux chrome
+Attention indicators and two-line clickable mux chrome
 remain tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
 
 ## Set up the harness
