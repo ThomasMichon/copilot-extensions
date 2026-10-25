@@ -469,6 +469,34 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ## Journal
 
+### 2026-10-25 - Root-attention provider merged; optional UI consumer next
+
+- #8928 merged after current-head Copilot approval and required CI. Re-read
+  this entire root; retain every direct manual/head, app-input, relay,
+  source/provider and native hold. The combined switching/attention row
+  stays unchecked until the optional indicator and its consumer tests land.
+- Added the versioned read-only `session-attention` provider over one bounded
+  root live-pulse register. It exposes only last-reported busy, idle or
+  awaiting-operator state and transition time. Runtime continuity remains
+  unknown; initial busy may lack a transition timestamp. No intent,
+  question, transcript, event-tail, TTL or legacy-idle inference is used.
+- Final staged Windows packet: 145 passed, Ruff clean, install-contract
+  clean for 13 plugins. All 197 admitted source hashes matched after the
+  one reviewed additive routing hash change; inventory and budgets stayed
+  unchanged. Actual fresh-home CLI tests retained source-hosting denial and
+  whole-fixture byte/no-write controls.
+- Exact source `9a173d0ebead8d8a85c9ee063274fcc770a92018` passed 43 attention
+  provider/process tests and 77 graph/native tests, zero skips in either
+  packet, on Ubuntu 24.04 / tmux 3.4 in run `40179632871`.
+  This is isolated source/native evidence, not human input, status rendering
+  or a production deployment. No live repair or rollout was performed.
+- Continue with one optional cancellable attention consumer, selected-head
+  fencing and explicit uncertainty, then the outstanding native chrome and
+  broader status work. Unsupported providers must preserve all existing
+  views; the indicator may nudge a return to CLI but never send an answer.
+  The interrupted keyed workspace allocation remains separately owned and
+  pending; this merge does not settle it or grant manual state repair.
+
 ### 2026-10-25 - Graph consumer merged; attention is the next source slice
 
 - #8916 merged after current-head Copilot approval and required CI. Re-read

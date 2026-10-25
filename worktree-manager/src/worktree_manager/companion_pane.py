@@ -26,7 +26,7 @@ class PaneError(RuntimeError):
     """No verified same-window navigation target is available."""
 
 
-def _call(mapping: dict, *args: str, cancelled=None) -> str:
+def _call(mapping: dict, *args: str, cancelled=None, timeout=5) -> str:
     if cancelled is not None and cancelled.is_set():
         raise PaneError("View switch cancelled.")
     environment = dict(os.environ)
@@ -45,7 +45,7 @@ def _call(mapping: dict, *args: str, cancelled=None) -> str:
         result = run_mux_child(
             [mapping["mux_bin"], *arguments], capture_output=True, text=True,
             env=environment,
-            timeout=5, **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            timeout=timeout, **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
     except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
         raise PaneError(f"Mux navigation failed: {exc}") from exc

@@ -12,7 +12,7 @@ import uuid
 
 import pytest
 
-from worktree_manager import companion_pane, mux_mapping_registry
+from worktree_manager import companion_lifecycle, companion_pane, mux_mapping_registry
 from _manager_process_fixture import synthetic_runtime
 
 
@@ -39,9 +39,9 @@ def test_native_tmux_option_targets_and_same_window(tmp_path, monkeypatch):
     observed = tmp_path / "observer.json"
     package = slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages" / "worktree_manager"
     (package / "mux_companion.py").write_text(
-        "import json,sys,time\nfrom pathlib import Path\n"
+        "import json,os,sys,time\nfrom pathlib import Path\n"
         "from worktree_manager.companion_lifecycle import cli_alive\n"
-        f"Path({str(observed)!r}).write_text(json.dumps({{'argv':sys.argv[1:],'prefix':sys.prefix}}))\n"
+        f"Path({str(observed)!r}).write_text(json.dumps({{'argv':sys.argv[1:],'prefix':sys.prefix,'pane':os.environ.get('TMUX_PANE')}}))\n"
         "options=dict(zip(sys.argv[1::2],sys.argv[2::2]))\n"
         "for _ in range(900):\n"
         " if cli_alive(options['--project'],options['--worktree-id'],options['--cli-pane'],"
@@ -82,6 +82,8 @@ def test_native_tmux_option_targets_and_same_window(tmp_path, monkeypatch):
         assert observed.exists(), mux("capture-pane", "-p", "-t", observer)
         receipt = json.loads(observed.read_text(encoding="utf-8"))
         assert Path(receipt["prefix"]).resolve() == slot.resolve()
+        assert receipt["pane"] == observer
+        assert companion_lifecycle.observer_visible("example", "fixture", observer, incarnation) is False
         assert receipt["argv"] == [
             "--cli-pane", cli, "--cwd", str(cwd.resolve()),
             "--project", "example", "--worktree-id", "fixture",

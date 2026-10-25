@@ -143,16 +143,30 @@ controls are independent of the heavier Git-backed publication packet.
 ## Optional native Mux Companion navigation
 
 The manual `installation-context-full.yml` portfolio `mux-companion` runs
-`tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 against the dispatch's
-recorded immutable source. It verifies actual tmux option targeting, a fresh
+`tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 and
+`tests/native/test_companion_pane_native.py` on Windows with digest-pinned
+disposable PSMux 3.3.6 against the dispatch's recorded immutable source.
+It verifies actual native option targeting, a fresh
 synthetic constructed-prefix invocation, same-window reuse and the unchanged
 CLI process in an isolated socket. It is not a required PR lane or a production
-runtime rollout. The Windows counterpart is
-`tests/native/test_companion_pane_native.py`, run through the same explicit
-plugin runner with `--allow-explicit-tiers --test-file <path>`.
+runtime rollout. Both use the explicit plugin runner with
+`--allow-explicit-tiers --test-file <path>`. For local Windows qualification,
+`PSMUX_TEST_BIN` selects a disposable binary without changing the installation;
+without it the fixture uses the existing PSMux on PATH.
 The same optional portfolio also runs the bounded root-attention provider and
 actual fresh-home CLI subprocess contract on Linux. This does not qualify a
 live pending question, human input, native status chrome or a deployed runtime.
+The optional attention client and real Textual packet additionally exercise
+provider rollback, head changes, hidden/unknown visibility, failure backoff,
+single-flight, stale-result rejection and actual process exit while an
+attention child stays blocked. Native pane fixtures verify the observer's
+own pane environment and that detached sessions are not considered visible;
+these are not proof of rendered or real-client input/click acceptance.
+The older PSMux 3.3.5 baseline has exhibited immediate session exits and later
+CLI/directory loss in this fixture. Those observations remain an unqualified
+stability gap under #8811, not a reason to skip a failed test or claim that
+3.3.6 qualification proves 3.3.5. The fixture does not retry past failures,
+weaken native identity checks or modify any installed mux.
 
 ## Optional native PSMux launch-directory control
 
