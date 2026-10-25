@@ -5,17 +5,33 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS, REMOTE_MARKETPLACE_SOURCE_KINDS
 from .execution import execution_environment, execution_executable
-from .marketplace import load_marketplace, marketplace_manifest_path, plugin_dir
+from .marketplace import _is_reparse, load_marketplace, marketplace_manifest_path, plugin_dir
 from .payload import catalog_metadata, plugin_manifest, publication_metadata
 from .remote_identity import normalize_remote
 from .registration import _settings_document, strict_json
 from .settings import split_source
+
+
+def _require_unlinked_path(root: Path, path: Path) -> None:
+    relative = path.relative_to(root)
+    if ".." in relative.parts:
+        raise ValueError("Native cache evidence requires a contained path")
+    member = root
+    for part in ("", *relative.parts):
+        member = member / part
+        try:
+            info = member.lstat()
+        except FileNotFoundError:
+            break
+        if stat.S_ISLNK(info.st_mode) or _is_reparse(info):
+            raise ValueError("Linked native cache evidence path")
 
 
 def inventory_paths(repo: Path, environment: dict[str, str] | None) -> tuple[Path, Path]:
@@ -160,7 +176,7 @@ def inventory_item(
     ):
         return None
     remote = normalize_remote(
-        f"https://github.com/{origin[field]}" if kind == "github" else origin[field],
+        f"https://github.com/{origin[field]}.git" if kind == "github" else origin[field],
     )
     if remote is None or not remote.startswith("network:"):
         return None
@@ -179,11 +195,18 @@ def inventory_item(
     executable = execution_executable("git", env, cwd)
 
     def git(root, *arguments):
-        result = subprocess.run(
-            [executable, "-c", "core.fsmonitor=false", "-C", str(root), *arguments],
-            capture_output=True, text=True, encoding="utf-8", timeout=30, env=env,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        try:
+            result = subprocess.run(
+                [executable, "-c", "core.fsmonitor=false", "-C", str(root), *arguments],
+                capture_output=True, text=True, encoding="utf-8", timeout=30, env=env,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired:
+            logging.getLogger("plugin-resolve").warning(
+                "%s native cache candidate is ineligible (probe-timeout); "
+                "ordinary acquisition remains available", source,
+            )
+            return None
         return result.stdout.rstrip("\r\n") if result.returncode == 0 else None
 
     from .reflection import _allowed, subset
@@ -200,14 +223,8 @@ def inventory_item(
         path = marketplace_manifest_path(root)
         if path is None:
             continue
-        member = path
-        while member != candidate:
-            if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
-                break
-            member = member.parent
-        if member != candidate:
-            continue
         try:
+            _require_unlinked_path(candidate, path)
             document = strict_json(path)
         except (OSError, ValueError):
             logging.getLogger("plugin-resolve").warning(
@@ -236,10 +253,13 @@ def inventory_item(
         if payload is None:
             continue
         top = git(candidate, "rev-parse", "--show-toplevel")
+        if top is None or Path(top).resolve() != candidate.resolve():
+            continue
         actual_remote = git(candidate, "config", "--get", "remote.origin.url")
         if (
-            top is None or Path(top).resolve() != candidate.resolve()
-            or actual_remote is None or normalize_remote(actual_remote) != remote
+            actual_remote is None
+            or (normalize_remote(actual_remote) != remote if kind == "github"
+                else actual_remote != origin[field])
         ):
             continue
         head = git(candidate, "rev-parse", "--verify", "HEAD^{commit}")
@@ -251,14 +271,10 @@ def inventory_item(
         references: set[Path] = set()
         try:
             declared = Path(catalog.plugin_root) / catalog.plugins[name].source
-            if ".." in declared.parts:
-                raise ValueError("Native cache source requires an unlinked contained path")
-            member = root
-            for part in declared.parts:
-                member = member / part
-                if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
-                    raise ValueError("Linked native cache source path")
+            _require_unlinked_path(candidate, root / declared)
             content = subset(candidate, payload, referenced_paths=references)
+            for member in references:
+                _require_unlinked_path(candidate, member)
             metadata, entry = publication_metadata(root, source)
             catalog_metadata(source, plugin_manifest(payload), metadata, entry)
         except (OSError, ValueError):

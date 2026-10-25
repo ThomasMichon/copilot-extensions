@@ -250,9 +250,12 @@ cache when no user-global registration exists. A catalog name or legacy installe
 manifest alone is insufficient. The actual clone must match the declared Git
 origin, requested commit/ref and catalog location, have unchanged selected
 catalog/payload content and required asset closure, and contain the uniquely
-declared plugin. The declared source path, including `pluginRoot`, must have no
-symlink/reparse components; resolving a link to another clean directory is not
-origin proof. Only network origins qualify: filesystem and relative Git origins
+declared plugin. The declared source path, including `pluginRoot`, and required
+asset paths must have no symlink/reparse components; resolving a link to another
+clean directory is not origin proof. Generic Git URLs match the configured
+origin exactly; GitHub declarations retain transport-compatible repository
+identity, including repository names ending in `.git`. Only network origins
+qualify: filesystem and relative Git origins
 retain ordinary acquisition rather than treating compatibility normalization as
 exact filesystem identity. Unrelated clone changes are not scanned. Preparation returns
 that qualified cache payload, not an unproven legacy installed copy, while
@@ -262,6 +265,8 @@ enabled sources are qualified again before any settings are written. Ambiguous
 clones refuse. Missing or incompatible evidence follows ordinary isolated
 installation; malformed/unreadable catalogs and invalid payload closures are
 reported as ineligible cache candidates rather than blocking that fallback.
+Git qualification probes keep their 30-second deadline; a probe timeout reports
+an ineligible candidate and leaves ordinary acquisition available.
 Catalog plugin entries must be objects and owner/location metadata must be valid.
 Referenced sibling files and directories remain in the qualification path set
 even when missing from the current tree, so deleted required assets cannot

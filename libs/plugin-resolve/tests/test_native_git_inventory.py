@@ -63,6 +63,15 @@ def no_install(*args, **kwargs):
     raise AssertionError("cold installation was selected")
 
 
+def directory_link(link, target):
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
 def test_native_git_cache_reuses_qualified_payload_without_global_registration(
     native_inventory,
     monkeypatch,
@@ -399,12 +408,7 @@ def test_linked_declared_source_cannot_redirect_native_cache_payload(
     git(clone, "commit", "--quiet", "-m", "source redirection fixture")
     definition["source"]["ref"] = "HEAD"
     selected.rename(selected.with_name("retained-original"))
-    if os.name == "nt":
-        import _winapi
-
-        _winapi.CreateJunction(str(redirected), str(selected))
-    else:
-        selected.symlink_to(redirected, target_is_directory=True)
+    directory_link(selected, redirected)
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
@@ -455,3 +459,104 @@ def test_invalid_native_catalog_schema_falls_back(
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
+
+
+def test_linked_required_asset_parent_prevents_native_cache_reuse(
+    native_inventory,
+    monkeypatch,
+    caplog,
+):
+    target, _home, clone, definition, environment = native_inventory
+    real_support = clone / "real-support"
+    real_support.mkdir()
+    guide = real_support / "guide.md"
+    guide.write_text("required guide")
+    scripts = clone / "catalog-a" / "helper" / "scripts"
+    scripts.mkdir()
+    (scripts / "use.txt").write_text("../../support/guide.md")
+    directory_link(clone / "support", real_support)
+    link_target = clone / ".git" / "link-target"
+    link_target.write_bytes(b"real-support")
+    blob = git(clone, "hash-object", "-w", str(link_target))
+    git(clone, "add", "real-support", "catalog-a")
+    git(clone, "update-index", "--add", "--cacheinfo", "120000", blob, "support")
+    git(clone, "commit", "--quiet", "-m", "linked required asset fixture")
+    definition["source"]["ref"] = "HEAD"
+    guide.write_text("modified required guide")
+    if os.name != "nt":
+        assert not git(clone, "status", "--porcelain", "--", "support/guide.md")
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert "invalid-payload" in caplog.text
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+@pytest.mark.parametrize("probe", ["rev-parse", "status"])
+def test_native_cache_git_probe_timeout_uses_ordinary_installation(
+    native_inventory,
+    monkeypatch,
+    caplog,
+    probe,
+):
+    import plugin_resolve.inventory as inventory
+
+    target, _home, clone, definition, environment = native_inventory
+    original = inventory.subprocess.run
+    timed_out = []
+
+    def timeout(arguments, **kwargs):
+        if "-C" in arguments and arguments[arguments.index("-C") + 1] == str(clone):
+            if arguments[arguments.index("-C") + 2] == probe:
+                assert kwargs["timeout"] == 30
+                timed_out.append(probe)
+                raise subprocess.TimeoutExpired(arguments, 30)
+        return original(arguments, **kwargs)
+
+    monkeypatch.setattr(inventory.subprocess, "run", timeout)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert timed_out == [probe]
+    assert "probe-timeout" in caplog.text
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+@pytest.mark.parametrize("kind", ["git", "github"])
+def test_distinct_network_repository_names_do_not_share_inventory(
+    native_inventory,
+    monkeypatch,
+    kind,
+):
+    target, _home, clone, definition, environment = native_inventory
+    if kind == "git":
+        definition["source"]["url"] = definition["source"]["url"].removesuffix(".git")
+    else:
+        git(clone, "remote", "set-url", "origin", "https://github.com/example/catalog.git")
+        definition["source"] = {
+            "source": "github",
+            "repo": "example/catalog.git",
+            "path": "catalog-a",
+            "ref": "first",
+        }
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+def test_github_repository_name_ending_in_git_reuses_exact_repository(
+    native_inventory,
+    monkeypatch,
+):
+    target, _home, clone, definition, environment = native_inventory
+    git(clone, "remote", "set-url", "origin", "git@github.com:example/catalog.git.git")
+    definition["source"] = {
+        "source": "github",
+        "repo": "example/catalog.git",
+        "path": "catalog-a",
+        "ref": "first",
+    }
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    assert prepare(request(target, definition), environment=environment) == {
+        "helper@git-fixture": str(clone / "catalog-a" / "helper"),
+    }

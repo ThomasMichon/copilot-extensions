@@ -365,6 +365,29 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-25 - Close native inventory provenance and fallback review gaps
+
+- #8911 review identified required assets reached through linked parent
+  directories and optional Git-probe timeouts that bypassed ordinary
+  acquisition. Qualification now rejects linked/reparse components in the
+  catalog, declared payload and referenced asset paths. Missing references
+  remain in the scoped Git status proof.
+- Each Git probe retains its 30-second deadline. A timed-out probe reports a
+  bounded ineligible-candidate diagnostic and falls back to ordinary
+  installation; failed top-level discovery short-circuits further probes.
+- Generic Git URLs now require exact origin spelling rather than lossy
+  compatibility normalization. GitHub declarations retain transport
+  compatibility without collapsing repository names ending in `.git`.
+- Six additional failing-first regressions cover these cases. The native
+  inventory packet passes all 41 cases, including native Windows junction
+  checks. Git itself marks the junction fixture's scoped asset untracked on
+  Windows; the regression separately requires explicit linked-parent
+  rejection rather than crediting that incidental Git refusal. The actual
+  native-cache read-only probe qualifies in 2.56 seconds.
+- Full-suite validation, the current-head review and required CI still gate
+  merge. No rollout or further original-task launch has occurred. Productive
+  headed acceptance and the remaining venue gates stay open.
+
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 
 - Natural release `40151837824` published #8800 through pinned Main
