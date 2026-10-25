@@ -10,7 +10,7 @@
   },
   "expected": {
     "advertised": {"protocol_version": 50, "min_protocol_version": 1},
-    "schema": {"version": 37, "pending_index": true},
+    "schema": {"version": 38, "pending_index": true},
     "empty_without_initialization": true,
     "idle_custody": {
       "retained_reaped": 0,
