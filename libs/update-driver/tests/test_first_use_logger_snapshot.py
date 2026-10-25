@@ -278,6 +278,10 @@ def test_actual_logger_selected_snapshot_concurrent_provision_reuse_and_consumer
         and json.loads(item.spec.source) == admission for item in provisions
     ), diagnostic()
     assert (snapshot / "snapshot-provenance.json").read_bytes() == receipt
+    fresh_manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    fresh_owner = fresh_manifest["commandLifecycle"]["owner"]
+    assert fresh_owner["sourceFingerprint"] == admission["source_fingerprint"]
+    assert not fresh_owner.get("unattributed") and ".install-stage" not in json.dumps(fresh_owner)
     selected = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / selected
     completion = slot / ".install-complete.json"

@@ -56,6 +56,28 @@ if ($LASTEXITCODE -ne 0 -or $nativeError -cne 'diagnostic') {{ throw 'native cap
 
 
 @pytest.mark.parametrize("host", ["pwsh", "powershell"])
+def test_native_capture_supplies_stdin_and_drains_both_streams(tmp_path, host):
+    code = (
+        "import json,sys; sys.stdout.write('o'*131072); sys.stdout.flush(); "
+        "sys.stderr.write('e'*131072); sys.stderr.flush(); "
+        "print(json.dumps(sys.stdin.buffer.read().decode('utf-8')))"
+    )
+    script = f"""
+$nativeError = ''
+$inputText = '{{"source":"two words","version":"1.2.3"}}' + [char]0x03bb
+$output = Invoke-Hidden -FilePath {_quote(sys.executable)} `
+    -ArgList @('-I', '-c', {_quote(code)}) -InputText $inputText -ErrorOutput ([ref]$nativeError)
+if ($LASTEXITCODE -ne 0 -or $nativeError -cne ('e' * 131072)) {{ throw 'stdin capture failed' }}
+[Console]::Out.Write($output)
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    assert result.stdout[:131072] == "o" * 131072
+    assert json.loads(result.stdout[131072:]) == '{"source":"two words","version":"1.2.3"}' + chr(0x03bb)
+
+
+@pytest.mark.parametrize("host", ["pwsh", "powershell"])
 def test_native_capture_drains_both_streams_and_preserves_failure(tmp_path, host):
     code = "import sys; sys.stdout.write('o'*131072); sys.stderr.write('e'*131072); sys.exit(7)"
     script = f"""
@@ -136,6 +158,10 @@ def test_fresh_containers_stamp_publishes_snapshot_with_only_py(tmp_path, host):
         shutil.copy2(plugin / "scripts" / name, scripts / name)
     for path in LIBRARY.glob("versioned_runtime*.*"):
         shutil.copy2(path, scripts / path.name)
+    shutil.copytree(
+        REPOSITORY / "libs/installation-context", scripts / "installation-context",
+        ignore=shutil.ignore_patterns("tests", "__pycache__"),
+    )
     version = "1.2.3"
     (payload / "plugin.json").write_text(
         json.dumps({"name": "agent-containers", "version": version}), encoding="utf-8",

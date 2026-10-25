@@ -1321,7 +1321,23 @@ function Write-LoggerDeployManifest {
         $gitInfo = { param($Path) $script:SourceManifestGitInfo }
     }
     Assert-SourceRuntime
-    Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo $gitInfo -SourcePathOverride $manifestSource -PayloadHash (Get-PayloadHash) -VersionOverride $PackageVersion -AdditionalFields (Get-SourceRuntimeFields)
+    $legacyPublication = -not $script:SourceRuntimeIdentity -and -not $env:COPILOT_EXTENSIONS_CONTEXT
+    $manifest = Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo $gitInfo -SourcePathOverride $manifestSource -PayloadHash (Get-PayloadHash) -VersionOverride $PackageVersion -AdditionalFields (Get-SourceRuntimeFields) -PassThru:$legacyPublication
+    if ($legacyPublication) {
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Command ownership publication requires a bootstrap Python interpreter' }
+        $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'command_binding.py'),
+            '--payload-root', $PluginDir, '--plugin-id', 'agent-logger',
+            '--legacy-root', $InstallDir, '--source-payload-root', $sourcePath,
+            '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+        ) -InputText ($manifest | ConvertTo-Json -Depth 6 -ErrorAction Stop)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command ownership validation refused Logger deploy-manifest publication: $result"
+        }
+        Write-Ok "Deploy manifest written (source: $($manifest.source.kind))"
+    }
 }
 
 function Install-Package {

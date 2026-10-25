@@ -64,6 +64,48 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
+@pytest.mark.parametrize("shell", ["pwsh", "powershell"])
+def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} unavailable")
+    script = tmp_path / "manifest.ps1"
+    helper = REPO / "libs/installer-engine/installer-engine.ps1"
+    def quote(path):
+        return "'" + str(path).replace("'", "''") + "'"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f". {quote(helper)}\n"
+        "function Write-Ok { param($Message) }\n"
+        "$arguments = @{\n"
+        "Service='agent-logger'; Plugin='agent-logger'; VersionOverride='1.2.3'\n"
+        f"InstallPath={quote(tmp_path)}; PluginPath={quote(tmp_path)}; VenvPath={quote(tmp_path / 'slot')}\n"
+        "GetSourceKind={ param($Path) 'local' }\n"
+        "GetGitInfo={ param($Path) @{commit='abc'; branch='dev'; dirty=$false} }\n"
+        "AdditionalFields=@{preserved='value'}\n"
+        "}\n"
+        "$manifest = Write-DeployManifest @arguments -PassThru\n"
+        f"if (Test-Path -LiteralPath {quote(tmp_path / 'deploy-manifest.json')}) "
+        "{ throw 'Builder published unbound manifest' }\n"
+        "Write-DeployManifest @arguments\n"
+        "$manifest | ConvertTo-Json -Depth 6\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=20,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    built = json.loads(result.stdout)
+    published = json.loads((tmp_path / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    for manifest in (built, published):
+        assert manifest["source"]["version"] == "1.2.3"
+        assert manifest["source"]["commit"] == "abc"
+        assert manifest["preserved"] == "value"
+        assert manifest["venv"] == (tmp_path / "slot").as_posix()
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
 def test_installer_action_identity_uses_existing_progress_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,

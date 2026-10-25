@@ -65,6 +65,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tomllib
 import venv
 from datetime import datetime, timedelta, timezone
@@ -79,7 +80,27 @@ if args == ['--version']:
 if args[:1] == ['venv']:
     target = Path(args[1])
     assert target.resolve().is_relative_to(root.resolve())
-    venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
+    managed = os.environ.get('UV_PYTHON_INSTALL_DIR')
+    if sys.platform == 'linux' and managed:
+        base = Path(managed)
+        assert base.resolve().is_relative_to(root.resolve())
+        executable = base / 'bin' / 'python'
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(sys._base_executable, executable)
+        library = base / 'lib'
+        stdlib = Path(sysconfig.get_path('stdlib'))
+        shutil.copytree(
+            stdlib, library / stdlib.name, dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns('site-packages', 'dist-packages', '__pycache__'),
+        )
+        for shared in Path(sysconfig.get_config_var('LIBDIR')).glob('libpython*.so*'):
+            shutil.copy2(shared, library / shared.name)
+        subprocess.run(
+            [str(executable), '-I', '-m', 'venv', '--without-pip', '--symlinks', str(target)],
+            check=True, timeout=60,
+        )
+    else:
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(target)
     raise SystemExit(0)
 assert args[:2] == ['pip', 'install'], args
 if '--show-settings' in args:
@@ -715,6 +736,8 @@ def test_provision_publishes_durable_compatibility_wrappers(
     assert wrapper.is_file()
     assert calls.is_file()
     _assert_complete_runtime(home)
+    manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,
@@ -818,6 +841,8 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     assert f"agent-logger {version}" in provision.stdout
     assert calls.is_file()
     _assert_complete_runtime(home)
+    manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
+    assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,

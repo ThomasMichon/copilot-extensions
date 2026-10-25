@@ -129,6 +129,9 @@ arbitrary installed-payload fallback. The snapshot dispatcher and packaged
 client must declare their queued-command support before cold invocation.
 Publication and exact source/root/project are revalidated by the existing
 canonical admission/execution owners.
+Fresh legacy deploy-manifest publication uses the canonical command-binding
+writer on both native paths, preserving the active lifecycle reservation
+without an intermediate unbound manifest.
 
 Healthy managed and installation-cell runtimes remain callable without
 installer work, preserving the command's module arguments and exit status.
