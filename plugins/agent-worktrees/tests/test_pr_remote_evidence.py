@@ -1,10 +1,12 @@
 """Fresh URL authority and exact, batched transport configuration."""
 
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import git_ops, pr_publish
+from agent_worktrees import git_ops, pr_publish, tracking
+from agent_worktrees.config import PRConfig
 from agent_worktrees.git_push_transport import REMOTE_TRANSPORT_SETTINGS
 from pr_test_helpers import _stub_remote_target
 
@@ -117,6 +119,45 @@ def test_remote_snapshot_refuses_a_push_destination_changed_between_reads(reposi
     monkeypatch.setattr(git_ops, "git", repoint_after_fetch)
     _, _, result = pr_publish._remote_snapshot("fork", cwd=str(repository))
     assert result.head_repo == result.head_identity == ""
+
+
+def test_head_absence_uses_one_lock_probe_and_refuses_a_recorded_repoint(
+    repository, tmp_path, monkeypatch,
+):
+    remote = tmp_path / "first.git"
+    other = tmp_path / "second.git"
+    for path in (remote, other):
+        git_ops.git("init", "--template=", "--bare", "-b", "main", str(path))
+    git_ops.git("remote", "add", "fork", str(remote), cwd=repository)
+    repo = SimpleNamespace(remote="origin", pr=PRConfig())
+    pr = tracking.PRRecord(
+        branch="feature/absent", remote="fork",
+        head_repo=git_ops.slug_from_url(str(remote)),
+        head_identity=pr_publish._identity(str(remote), str(repository)),
+    )
+    original = git_ops.git
+    calls = []
+
+    def observed(*args, **kwargs):
+        calls.append(args)
+        if args[:2] == ("remote", "get-url") or "ls-remote" in args:
+            assert pr_publish._held.paths
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "git", observed)
+    assert pr_publish.head_branch_gone(repo, pr, str(repository)) is True
+    assert calls.count(("rev-parse", "--git-common-dir")) == 1
+    assert ("remote",) not in calls
+    assert calls.count(("remote", "get-url", "--push", "--all", "fork")) == 1
+    original("remote", "set-url", "fork", str(other), cwd=repository)
+    calls.clear()
+    assert pr_publish.head_branch_gone(repo, pr, str(repository)) is False
+    assert calls.count(("rev-parse", "--git-common-dir")) == 1
+    assert not any("ls-remote" in args for args in calls)
+    original("remote", "remove", "fork", cwd=repository)
+    calls.clear()
+    assert pr_publish.head_branch_gone(repo, pr, str(repository)) is False
+    assert not any("ls-remote" in args for args in calls)
 
 
 @pytest.mark.parametrize("detail,error", [

@@ -249,8 +249,6 @@ def _select_push_target(repo, pr, worktree_path: str) -> PushTarget | None:
     """
     recorded = (getattr(pr, "remote", "") or "").strip()
     if recorded:
-        if not git_ops.has_remote(recorded, cwd=worktree_path):
-            return None
         # The name alone isn't proof: fork setup repoints `fork` when the identity changes,
         # and a repoint to another host can keep the same owner/name.
         want = (getattr(pr, "head_repo", "") or "").lower()
@@ -309,10 +307,10 @@ def head_branch_gone(repo, pr, worktree_path: str) -> bool:
     Unreadable or undecided is never "gone"."""
     try:
         with publish_lock(worktree_path, push_timeout_seconds=publication_deadline.configured(repo.pr)):
-            where = push_remote(repo, pr, worktree_path)
+            target = _select_push_target(repo, pr, worktree_path)
             # The exact ref: `ls-remote <branch>` is a tail glob, so an unrelated
             # `archive/<branch>` would keep a deleted head looking present.
-            return where is not None and _tip(where, pr.branch, worktree_path) == ""
+            return target is not None and _tip(target.remote, pr.branch, worktree_path) == ""
     except PublishLockTimeout:
         return False
 

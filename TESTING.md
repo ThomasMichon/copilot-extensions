@@ -1058,6 +1058,16 @@ rule or collection-root restriction is rewritten. Every admitted case must
 contribute actual library call coverage under the same observer and budget.
 This qualifies that bounded library cohort, not the whole historical census.
 
+`tools/promotion_unit_tests/test_pr_target_probes.py` re-exports the nine
+original in-process controls from Worktrees' `test_pr_target_probes.py`.
+Their source, adapter and canonical import closure are hash-bound. Each case
+must contribute actual `pr_publish` call coverage under the unchanged effect
+observer and unit budget. The controls preserve fresh destination authority
+and lock coverage while rejecting redundant target enumeration and nested
+lock resolution. Real-Git missing-remote, repoint and lock-count counterparts
+in `test_pr_remote_evidence.py` remain outside the unit packet. This enrollment
+does not establish native latency or complete Windows qualification.
+
 `tools/promotion_unit_tests/test_worktree_identity.py` re-exports the eight
 original codec test functions and their unchanged parameterization from
 `libs/worktree-identity/tests/test_worktree_identity.py`. Replacing only the
