@@ -9,11 +9,13 @@ import subprocess
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
+from yaml import YAMLError
 
 from . import git_ops, installer as inst, launch_wrapper_assets as lwa, output, picker_profiles_cli
 from . import config as cfg
 from . import repos_cli, status_bar_cli
 from . import worktree_identity
+from .installation_identity import local_registration_identity
 from .project_adoption import admit_cli
 from .project_adoption import prepare_namespaced_project_state as _prepare_namespaced_project_state
 
@@ -365,19 +367,17 @@ def cmd_install(args: argparse.Namespace) -> int:
         return 1
 
     project = cfg.project_name()
-    machine = args.machine or cfg.detect_machine(repo_dir)
-    plat = cfg.detect_platform()
+    try:
+        machine, plat, machine_entry = local_registration_identity(
+            repo_dir, args.machine, project, force=getattr(args, "force", False),
+        )
+    except (OSError, RuntimeError, ValueError, YAMLError) as error:
+        output.err(f"Local installation identity refused: {error}")
+        return 1
     print(f"  Machine:  {machine}")
     print(f"  Platform: {plat}")
     print(f"  Project:  {project}")
     print(f"  Repo:     {repo_dir}")
-
-    # Machine registry is optional -- repos without machines.yaml still work
-    machine_entry: cfg.MachineEntry | None = None
-    if cfg.machines_yaml_path(repo_dir).exists():
-        machine_entry = _core_helper("_validate_machine_registry", _validate_machine_registry)(repo_dir, machine)
-        if machine_entry is None:
-            return 1
 
     from . import _command_binding, _command_lifecycle, _installation_context, registry_paths
     from contextlib import nullcontext
@@ -421,7 +421,7 @@ def _install_project(
 
     # Deploy global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
-    _core_helper("_write_global_config", _write_global_config)(machine, plat, repo_dir.parent)
+    _core_helper("_write_global_config", _write_global_config)(args.machine, plat, repo_dir.parent)
     if not config_path.exists() or args.force:
         _core_helper("_write_config", _write_config)(config_path, repo_dir, machine, plat, project)
     else:
@@ -613,8 +613,13 @@ def cmd_register(args: argparse.Namespace) -> int:
     if not admit_cli(repo_dir, operation="project adoption", checkout=adoption_checkout):
         return 1
 
-    machine = args.machine or cfg.detect_machine(repo_dir)
-    plat = cfg.detect_platform()
+    try:
+        machine, plat, machine_entry = local_registration_identity(
+            repo_dir, args.machine, project, force=getattr(args, "force", False),
+        )
+    except (OSError, RuntimeError, ValueError, YAMLError) as error:
+        output.err(f"Local registration identity refused: {error}")
+        return 1
 
     # Auto-detect default branch if not specified. Respect the REMOTE's
     # configured default -- never a stale local `master` (dotfiles#1046):
@@ -656,13 +661,6 @@ def cmd_register(args: argparse.Namespace) -> int:
     print(f"  Machine:  {machine}")
     print(f"  Platform: {plat}")
 
-    # Machine registry is optional -- external repos may not have machines.yaml
-    machine_entry: cfg.MachineEntry | None = None
-    if cfg.machines_yaml_path(repo_dir).exists():
-        machine_entry = _core_helper("_validate_machine_registry", _validate_machine_registry)(repo_dir, machine)
-        if machine_entry is None:
-            return 1
-
     if not _core_helper("_prepare_namespaced_project_state", _prepare_namespaced_project_state)(project, repo_dir, plat):
         return 1
 
@@ -673,7 +671,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Write global machine-wide config (lowest tier), then per-project config
     config_path = proj_dir / "config.yaml"
-    _core_helper("_write_global_config", _write_global_config)(machine, plat, repo_dir.parent)
+    _core_helper("_write_global_config", _write_global_config)(args.machine, plat, repo_dir.parent)
     # Resolve agent exposure up front: explicit flags win, else the repos.yaml
     # classification, else default ON (adopting a repo means working in it).
     # A no-agent adoption is worked programmatically (create --json) rather than

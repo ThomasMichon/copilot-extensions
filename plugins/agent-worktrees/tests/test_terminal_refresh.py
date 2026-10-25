@@ -104,7 +104,7 @@ def test_register_without_active_project_refreshes_the_registered_target(monkeyp
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", None)
     monkeypatch.setattr(m.cfg, "project_dir", lambda name: tmp_path / "config")
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: "windows")
-    monkeypatch.setattr(m.cfg, "machines_yaml_path", lambda path: repo / "missing.yaml")
+    monkeypatch.setattr(m.cfg, "machines_yaml_path", lambda path, **k: repo / "missing.yaml")
     monkeypatch.setattr(
         m.cfg, "load_config",
         lambda *a, **k: SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(enabled=False))),
@@ -159,7 +159,7 @@ def test_resolved_machine_without_project_machine_setting(monkeypatch, tmp_path,
         global_config.write_text("machine: global-host\n", encoding="utf-8")
     monkeypatch.setattr(m.cfg, "global_config_path", lambda: global_config)
     monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
-    monkeypatch.setattr(m.cfg, "detect_machine", lambda *a: "detected-host")
+    monkeypatch.setattr(m.cfg, "detect_machine", lambda *a, **k: k.get("value") or "detected-host")
     monkeypatch.setattr(m.cfg, "_ACTIVE_PROJECT", None)
     monkeypatch.setattr(
         manager_launch_cli, "_discover_control_plane_provider_manifests",
