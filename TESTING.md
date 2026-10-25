@@ -735,13 +735,17 @@ lifespan/drain. Default-import protection covers that front door with neither
 optional PR nor Fleet package admitted.
 
 The same manual packet includes `test_delegated_replay_credentials.py`, a T2
-integration over the actual watcher, scoped Dispatch consumer, native GitHub PR reader
+integration over the actual watcher, scoped Dispatch consumer, native GitHub/ADO readers
 and typed TLS credential exchange. Per-request renewal must override poisoned
 ambient credentials; provider refusal across a drained watcher restart must
 retain original waits without a wake even when the synthetic PR has merged.
 Restored authorization settles one wake per wait without persisted credentials.
-The fixture substitutes forge CLI responses, not credential acquisition or
-native snapshot construction. It is not a live provider or deployment test.
+The fixture substitutes GitHub forge CLI responses or ADO HTTP responses after
+the actual native request/header construction, not credential acquisition or
+native snapshot construction. The ADO control uses bearer authentication and
+the configured observation reader, not the legacy `az` snapshot path; it does
+not certify basic-auth or broader ADO conformance. It is not a live provider,
+forge TLS-transport or deployment test.
 Its two service lifetimes and nested native commands have a 180-second Windows
 and 120-second non-Windows item watchdog; production deadlines and the existing
 ten-minute manual jobs remain unchanged. This does not add native work to the
