@@ -3494,7 +3494,7 @@ case "$ACTION" in
 
         # Remove tool binstubs
         for stub in mark-session-complete agent-worktrees; do
-            local stub_path="$LOCAL_BIN/$stub"
+            stub_path="$LOCAL_BIN/$stub"
             if [[ -f "$stub_path" ]]; then
                 rm -f "$stub_path"
                 changed "Removed binstub: $stub_path"
