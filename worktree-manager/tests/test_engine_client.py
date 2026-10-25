@@ -16,6 +16,7 @@ import sys
 import pytest
 
 from worktree_manager import engine_client as ec
+from worktree_manager import companion_client as cc
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +89,7 @@ def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch):
         ec, "run_json",
         lambda project, args, **kw: calls.append((project, args)) or bundle,
     )
-    assert ec.worktree_status_bundle("project", "wt-selected") is bundle
+    assert cc.worktree_status_bundle("project", "wt-selected") is bundle
     assert calls == [("project", [
         "worktree-status-bundle", "--worktree", "wt-selected", "--json",
     ])]
@@ -103,7 +104,7 @@ def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch):
 def test_worktree_status_bundle_refuses_wrong_or_unavailable_identity(monkeypatch, payload):
     monkeypatch.setattr(ec, "run_json", lambda *a, **k: payload)
     with pytest.raises(ec.EngineError, match="selected worktree"):
-        ec.worktree_status_bundle(None, "wt-selected")
+        cc.worktree_status_bundle(None, "wt-selected")
 
 
 def test_worktree_status_bundle_through_real_subprocess(tmp_path):
@@ -119,7 +120,7 @@ def test_worktree_status_bundle_through_real_subprocess(tmp_path):
     )
     ec.set_engine_command([sys.executable, str(script)])
     try:
-        bundle = ec.worktree_status_bundle("example project", "wt-selected")
+        bundle = cc.worktree_status_bundle("example project", "wt-selected")
     finally:
         ec.set_engine_command(None)
     assert bundle["facts"]["claims"]["value"]["resources"] == []

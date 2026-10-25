@@ -15,6 +15,7 @@ import sys
 import pytest
 
 from worktree_manager import engine_client as ec
+from worktree_manager import companion_client as cc
 from worktree_manager import handoff_client as hc
 from worktree_manager import mux_companion as companion
 
@@ -42,8 +43,8 @@ def _bundle(worktree_id="wt-ab12", *, confirmed=True):
 
 @pytest.fixture(autouse=True)
 def _fake_status_bundle(monkeypatch):
-    original = ec.worktree_status_bundle
-    monkeypatch.setattr(ec, "worktree_status_bundle", lambda *a, **k: _bundle())
+    original = cc.worktree_status_bundle
+    monkeypatch.setattr(cc, "worktree_status_bundle", lambda *a, **k: _bundle())
     return original
 
 
@@ -415,7 +416,7 @@ def test_load_bundle_failure_preserves_status_and_recovery(monkeypatch):
     def fail(*a, **k):
         raise ec.EngineError("older engine has no status bundle")
 
-    monkeypatch.setattr(ec, "worktree_status_bundle", fail)
+    monkeypatch.setattr(cc, "worktree_status_bundle", fail)
     data = companion._load_current_worktree("/w")
     assert data.error is None
     assert data.sessions[0]["id"] == "old"
@@ -472,7 +473,7 @@ def test_textual_summary_through_real_engine_subprocess(tmp_path, _fake_status_b
         "print(json.dumps(payloads[sys.argv[1]]))\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(ec, "worktree_status_bundle", _fake_status_bundle)
+    monkeypatch.setattr(cc, "worktree_status_bundle", _fake_status_bundle)
     ec.set_engine_command([sys.executable, str(script)])
 
     async def run():

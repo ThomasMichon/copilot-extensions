@@ -45,6 +45,7 @@ from textual.widgets import (
 )
 
 from . import engine_client as ec
+from . import companion_client as cc
 from . import handoff_client as hc
 
 #: Blocker code (from the closure descriptor's ``blockers`` list) -> a short,
@@ -145,7 +146,7 @@ def _load_current_worktree(cwd: str | None = None, *, runner=None) -> _Companion
         except ec.EngineError as exc:
             sessions_error = str(exc)
         try:
-            bundle = ec.worktree_status_bundle(None, worktree_id, runner=runner)
+            bundle = cc.worktree_status_bundle(None, worktree_id, runner=runner)
         except ec.EngineError as exc:
             bundle_error = str(exc)
 
@@ -424,7 +425,7 @@ class MuxCompanionApp(App):
         try:
             self._data = await asyncio.to_thread(
                 _load_current_worktree, self._cwd,
-                runner=ec.cancellable_read_runner(cancelled),
+                runner=cc.cancellable_read_runner(cancelled),
             )
         finally:
             cancelled.set()
