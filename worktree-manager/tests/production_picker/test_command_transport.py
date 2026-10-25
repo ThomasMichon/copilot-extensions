@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -129,6 +131,68 @@ def test_generated_sibling_reparse_cannot_redirect_transport(tmp_path, monkeypat
     monkeypatch.setattr(Path, "resolve", redirect)
     with pytest.raises(OSError, match="matching PowerShell sibling"):
         tasks._resolve_command(["fixture", "value"])
+
+
+@pytest.mark.parametrize("output", ["", None, " \r\n", "not JSON"])
+def test_list_rejects_invalid_output_even_when_wrapper_reports_success(monkeypatch, output):
+    from worktree_manager.production_picker.picker_tui import pivot_list_command
+
+    diagnostic = "provider: unrecognized arguments: --limit-per-category"
+    monkeypatch.setattr(tasks, "_resolve_command", lambda argv: argv)
+    monkeypatch.setattr(
+        pivot_list_command, "run_caller_owned",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, output, diagnostic),
+    )
+    state, rows, error, summary = _runtime("fixture")._exec_list({})
+    assert (state, rows, summary) == ("error", [], {})
+    assert error == "list command did not print JSON: " + diagnostic
+
+
+@pytest.mark.parametrize("output", ["[]", '{"entries": [], "summary": {"total": 0}}'])
+def test_list_accepts_explicit_empty_json(monkeypatch, output):
+    from worktree_manager.production_picker.picker_tui import pivot_list_command
+
+    monkeypatch.setattr(tasks, "_resolve_command", lambda argv: argv)
+    monkeypatch.setattr(
+        pivot_list_command, "run_caller_owned",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, output, ""),
+    )
+    state, rows, error, _summary = _runtime("fixture")._exec_list({})
+    assert (state, rows, error) == ("ready", [], "")
+
+
+def test_list_missing_json_diagnostic_is_bounded_and_optional(monkeypatch):
+    from worktree_manager.production_picker.picker_tui import pivot_list_command
+
+    monkeypatch.setattr(tasks, "_resolve_command", lambda argv: argv)
+    for diagnostic, expected in (
+        ("", "list command did not print JSON"),
+        ("earlier line\n" + "x" * 300, "list command did not print JSON: " + "x" * 200),
+    ):
+        monkeypatch.setattr(
+            pivot_list_command, "run_caller_owned",
+            lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", diagnostic),
+        )
+        assert _runtime("fixture")._exec_list({}) == ("error", [], expected, {})
+
+
+def test_native_legacy_batch_failure_cannot_become_empty_ready_scope(tmp_path):
+    if os.name != "nt":
+        pytest.skip("native Windows legacy batch exit-code regression")
+    command = tmp_path / "legacy-board.cmd"
+    command.write_text(
+        "@echo off\n"
+        'if "1"=="1" (\n'
+        f'  "{sys.executable}" -c "import sys; '
+        "sys.stderr.write('provider: unsupported category window\\n'); sys.exit(2)\"\n"
+        "  exit /b %ERRORLEVEL%\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    state, rows, error, summary = _runtime(command)._exec_list({})
+    assert (state, rows, summary) == ("error", [], {})
+    assert "unsupported category window" in error
+    assert "did not print JSON" in error
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows argv contract")

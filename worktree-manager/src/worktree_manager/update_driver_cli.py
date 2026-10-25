@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
+
 _CONTEXT_KEYS = (
     "AGENT_HOME",
     "AGENT_WORKTREES_UPDATE_CONTEXT",
@@ -56,12 +58,17 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     mode.add_argument("--recover-after-restart", action="store_true")
     mode.add_argument("--recover-for-repair", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--engine-acquisition-timeout", help=argparse.SUPPRESS)
     options, forwarded = parser.parse_known_args(rest)
     if "--auth-report" in forwarded and (options.detach or options.supervised_debug):
         parser.error("--auth-report cannot select an installation execution mode")
     recovery = options.recovery_status or options.recover_after_restart or options.recover_for_repair
-    if (options.request_status or recovery) and forwarded:
+    if (options.request_status or recovery) and (
+        forwarded or options.engine_acquisition_timeout is not None
+    ):
         parser.error("request inspection/recovery does not accept installation options")
+    if "--auth-report" in forwarded and options.engine_acquisition_timeout is not None:
+        parser.error("authentication inspection does not accept an acquisition budget")
     if options.json and not (options.detach or options.request_status or recovery or "--auth-report" in forwarded):
         parser.error("--json requires request inspection, recovery, --detach or --auth-report")
     canonical = argparse.ArgumentParser(prog="worktree-manager update", add_help=False, allow_abbrev=False)
@@ -134,6 +141,23 @@ def _request_environment(context):
         os.environ.update(previous)
 
 
+@contextmanager
+def _acquisition_environment(value: str | None):
+    previous = os.environ.get(TIMEOUT_ENV)
+    selected = None if value is None else str(acquisition_timeout({TIMEOUT_ENV: value}))
+    try:
+        if selected is None:
+            os.environ.pop(TIMEOUT_ENV, None)
+        else:
+            os.environ[TIMEOUT_ENV] = selected
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(TIMEOUT_ENV, None)
+        else:
+            os.environ[TIMEOUT_ENV] = previous
+
+
 def _source_key() -> str:
     return json.dumps(source_identity(), sort_keys=True, separators=(",", ":"))
 
@@ -167,8 +191,8 @@ def _report(request, *, as_json: bool) -> None:
 def cmd_update_request(rest: list[str]) -> int:
     import update_driver as driver
 
-    from . import __main__ as manager
     from .engine_client import EngineError
+    from .update_orchestration import extract_project
 
     options, forwarded = parse_options(rest)
     request = None
@@ -205,7 +229,7 @@ def cmd_update_request(rest: list[str]) -> int:
         if "--auth-report" in forwarded:
             from . import engine_client
 
-            project, args = manager._extract_project(forwarded)
+            project, args = extract_project(forwarded)
             return engine_client.run_engine_passthrough(
                 project, ["update", "--no-manager", *args, *(["--json"] if options.json else [])],
             )
@@ -215,18 +239,29 @@ def cmd_update_request(rest: list[str]) -> int:
                 request = driver.status(custody.request_id, root=custody.root)
                 if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
                     raise driver.StateError("Manager does not own the active update request")
-                with _request_environment(request.spec.context):
+                with _request_environment(request.spec.context), _acquisition_environment(
+                    options.engine_acquisition_timeout,
+                ):
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
                         raise driver.StateError("Manager source changed after submission; submit a new request")
                     custody.assert_owned()
+                    from . import __main__ as manager
+
                     return manager._cmd_update(forwarded)
-        project, _args = manager._extract_project(forwarded)
+        project, _args = extract_project(forwarded)
         cwd = Path.cwd().resolve()
+        arguments = list(forwarded)
+        budget = options.engine_acquisition_timeout
+        if budget is None:
+            budget = os.environ.get(TIMEOUT_ENV)
+        if budget is not None:
+            selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
+            arguments.extend(["--engine-acquisition-timeout", selected_budget])
         spec = driver.RequestSpec(
-            backend="manager", argv=tuple(forwarded), project=project or "",
+            backend="manager", argv=tuple(arguments), project=project or "",
             cwd=str(cwd), source=_source_key(), context=tuple(request_context().items()),
         )
-        argv, env = driver.runtime_command("worktree_manager", ["update", *forwarded])
+        argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
                 argv, str(cwd), env=tuple(env.items()), context_keys=_CONTEXT_KEYS,

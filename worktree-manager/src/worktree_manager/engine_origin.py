@@ -28,8 +28,10 @@ from plugin_resolve.preparation import _failure
 from plugin_resolve.reflection import identity
 from plugin_resolve.registration import _settings_document, strict_json
 
+from .engine_acquisition_budget import DEFAULT_TIMEOUT_S, acquisition_timeout
+
 _WINDOWS = os.name == "nt"
-_ACQUISITION_TIMEOUT_S = 180.0
+_ACQUISITION_TIMEOUT_S = DEFAULT_TIMEOUT_S
 _SHARING_ATTEMPTS = 3
 _SHARING_BACKOFF_S = 1.0
 _SHARING_ERROR = re.compile(r"\b(?:WinError\s+|os\s+error\s+)(?:32|33)\b", re.IGNORECASE)
@@ -307,6 +309,7 @@ def refresh_registered_origin(
         return selected
 
     try:
+        timeout = acquisition_timeout(environment)
         revalidate()
         registrations = copy.deepcopy(_registrations(origin.copilot_home))
         verb = "update" if _ledger(origin.copilot_home, origin.source, origin.payload) else "install"
@@ -332,7 +335,7 @@ def refresh_registered_origin(
         scratch = tempfile.TemporaryDirectory(prefix="engine-origin-")
         retained = False
         try:
-            deadline = monotonic() + _ACQUISITION_TIMEOUT_S
+            deadline = monotonic() + timeout
             for attempt in range(_SHARING_ATTEMPTS):
                 if attempt:
                     revalidate()
@@ -342,7 +345,7 @@ def refresh_registered_origin(
                         raise ValueError("Native update ledger changed before retry")
                 remaining = deadline - monotonic()
                 if remaining <= 0:
-                    raise subprocess.TimeoutExpired(argv, _ACQUISITION_TIMEOUT_S)
+                    raise subprocess.TimeoutExpired(argv, timeout)
                 try:
                     result = _native_acquisition(
                         argv, child, Path(scratch.name), timeout=remaining,
