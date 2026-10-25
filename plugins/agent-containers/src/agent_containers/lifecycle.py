@@ -48,6 +48,10 @@ _EXEC_OPTIONS_WITH_VALUE = {
 }
 
 
+class ContainerNotFoundError(RuntimeError):
+    """Docker explicitly confirmed absence of the requested inspect target."""
+
+
 def _creation_flags() -> int:
     return no_window_flags()
 
@@ -350,6 +354,13 @@ def inspect_container(name: str) -> dict:
     """Return one container's Docker inspect document."""
     res = _docker(["inspect", name], timeout=30)
     if res.returncode != 0:
+        detail = (res.stderr.strip() or res.stdout.strip())
+        if detail in {
+            f"Error: No such object: {name}",
+            f"Error: No such container: {name}",
+            f"Error response from daemon: No such container: {name}",
+        }:
+            raise ContainerNotFoundError(f"docker inspect {name} failed: {detail}")
         raise RuntimeError(
             f"docker inspect {name} failed: {res.stderr.strip() or res.stdout.strip()}"
         )
