@@ -278,7 +278,10 @@ def owning_bridge(owning_codespaces):
     for name in provision.BRIDGE_HELPERS:
         path = payload / "scripts" / name
         if not path.exists():
-            source = repository / "plugins/agent-bridge/scripts" / name
+            source = repository / (
+                "libs/installer-engine" if name in ("installer-engine.ps1", "installer-engine.sh")
+                else "plugins/agent-bridge/scripts"
+            ) / name
             shutil.copyfile(source, path)
     return payload, installation.with_name(".agent-bridge"), project
 

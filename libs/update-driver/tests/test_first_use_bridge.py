@@ -71,7 +71,7 @@ def test_bridge_fixed_action_retains_context_staging_and_native_result(
 @pytest.mark.parametrize("reason", [
     "client-only", "no-self", "pinned", "managed", "malformed", "copy", "custom-root",
     "snapshot", "dispatcher", "module", "provision-mode", "compound", "install",
-    "nested", "cell", "missing-helper",
+    "nested", "cell", "missing-helper", "missing-native-ps1", "missing-native-sh",
 ])
 def test_bridge_refusal_precedes_acquisition_queue_and_plugin_writes(
     owning_bridge, area, monkeypatch, native, action, reason,
@@ -99,8 +99,13 @@ def test_bridge_refusal_precedes_acquisition_queue_and_plugin_writes(
             "owner": module._deployment_owner(resolution, arguments), "managed": True,
         } if reason == "managed" else {"version": 999}
         (installation / "runtime-deployment.json").write_text(json.dumps(policy), encoding="utf-8")
-    elif reason == "missing-helper":
-        (payload / "scripts/versioned_runtime_publication.py").unlink()
+    elif reason in {"missing-helper", "missing-native-ps1", "missing-native-sh"}:
+        name = {
+            "missing-helper": "versioned_runtime_publication.py",
+            "missing-native-ps1": "installer-engine.ps1",
+            "missing-native-sh": "installer-engine.sh",
+        }[reason]
+        (payload / "scripts" / name).unlink()
     elif reason in {"dispatcher", "module", "provision-mode"}:
         path = payload / "payload-invocation.json"
         manifest = json.loads(path.read_text())

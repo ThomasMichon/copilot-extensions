@@ -69,6 +69,7 @@ BRIDGE_CONTEXT_KEYS = (
     "AGENT_BRIDGE_ALLOW_DOWNGRADE", "AGENT_BRIDGE_NONINTERACTIVE",
 )
 BRIDGE_HELPERS = (
+    "installer-engine.ps1", "installer-engine.sh",
     "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
     "installer_wheel_inputs.py", "installer_wheel_snapshot.py", "installer_wheel_acquisition.py",
     "installer_dependency_policy.py", "installer_dependency_config.py",

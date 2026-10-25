@@ -71,6 +71,7 @@ if ($plugin -ceq 'agent-logger') {
 }
 if ($plugin -ceq 'agent-bridge') {
     foreach ($helper in @(
+        'installer-engine.ps1', 'installer-engine.sh',
         'installer_engine.py', 'installer_engine_process.py', 'runtime_launcher.py',
         'installer_wheel_inputs.py', 'installer_wheel_snapshot.py', 'installer_wheel_acquisition.py',
         'installer_dependency_policy.py', 'installer_dependency_config.py',

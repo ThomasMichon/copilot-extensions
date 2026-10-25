@@ -688,8 +688,9 @@ serving readiness; no real CodeSpace or connection is needed.
 Bridge's fixed `stamp`/`provision` prerequisite admits only its canonical
 installed payload and default legacy root, required direct command/module
 declaration and native runtime gates. Its canonical Python engine helpers
-provide the existing complete-input freezer; Bridge's native installers still
-own construction, immutable completion/activation, publication and service
+provide the existing complete-input freezer. Both materialized native engine
+files are also required before acquisition or queue writes. Bridge's native
+installers still own construction, immutable completion/activation, publication and service
 lifecycle. Linux admission also requires the owning installer's `xargs` content
 fingerprinting and `seq` service-loop tools before acquisition or queue writes.
 The queue supplies no service override: Windows cold provision
