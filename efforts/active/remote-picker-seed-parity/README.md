@@ -167,6 +167,14 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #9008 merged explicit configured-SSH metadata inspection
+  after current-head review, required CI and resolution of all four concrete
+  findings. Windows and frozen-source POSIX packets each pass 225 cases.
+  Both parent plans were re-read; metadata source progress does not prove
+  installed target compatibility or prompt delivery. Continue per-owner
+  terminal observations and selected-machine protected detail, then containing
+  release, authorized rollout and the original installed conversation /
+  exactly-once / cleanup gates. Neither effort is Done.
 - **2026-10-25** -- Prepared explicit configured-SSH metadata inspection under
   #8375, using existing transport and target Manager reader ownership without
   setup or replay. A selected live SSH target returned incompatible non-JSON

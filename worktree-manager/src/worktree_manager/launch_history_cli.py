@@ -115,7 +115,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--receipt-after")
     parser.add_argument(
         "--summary", action="store_true",
-        help="Bounded positive local owner evidence across pages; not prompt acceptance or a remote sweep",
+        help="Bounded local owner progress and exits across pages; not prompt acceptance or a remote sweep",
     )
     args = parser.parse_args(argv)
     if args.sweep_project is not None or args.source_machine is not None:

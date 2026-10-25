@@ -1,0 +1,9 @@
+{
+  "comment": "Expose bounded per-operation resolver and execution terminal observations, keeping wrapper and child exits distinct.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

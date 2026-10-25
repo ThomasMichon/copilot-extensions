@@ -1,4 +1,4 @@
-"""Bounded positive owner evidence, never absence, acceptance or replay authority."""
+"""Bounded owner observations, never absence, acceptance or replay authority."""
 
 from __future__ import annotations
 
@@ -32,6 +32,91 @@ def _opaque(value: object) -> str:
     return value
 
 
+def _owner_value(row: dict, attempt_id: str) -> dict:
+    operation = _identity(row["operation_id"])
+    source, value = row["source"], row["evidence"]
+    if (
+        source not in ("resolution", "execution") or not isinstance(value, dict)
+        or value["attempt_id"] != attempt_id or value["operation_id"] != operation
+        or value["schema"] != "worktree-launch-" + source
+        or type(value["version"]) is not int
+        or value["version"] not in ((1,) if source == "resolution" else (1, 2))
+    ):
+        raise ValueError("Mismatched owner evidence")
+    return value
+
+
+def _owner_observation(row: dict, attempt_id: str) -> dict | None:
+    if row["source"] == "native":
+        return None
+    value = _owner_value(row, attempt_id)
+    execution = row["source"] == "execution"
+    terminal = (
+        {"execution-returned", "unknown"} if execution
+        else {"plan-ready", "forwarded", "remote-admission-returned", "unknown"}
+    )
+    phases = terminal | ({"execution-requested", "seed-claimed", "process-spawned"}
+                         if execution else {"resolution-requested"})
+    events = value["events"]
+    if not isinstance(events, list) or not 1 <= len(events) <= (4 if execution else 2):
+        raise ValueError("Invalid owner events")
+    seen = []
+    for event in events:
+        if (
+            not isinstance(event, dict) or set(event) != {"at", "phase", "details"}
+            or not isinstance(event["phase"], str) or event["phase"] not in phases
+            or not isinstance(event["details"], dict)
+            or not isinstance(event["at"], str) or len(event["at"]) > 64
+            or datetime.fromisoformat(event["at"]).tzinfo is None
+        ):
+            raise ValueError("Invalid owner event")
+        seen.append(event["phase"])
+    if (
+        seen[0] != ("execution-requested" if execution else "resolution-requested")
+        or len(seen) != len(set(seen)) or any(phase in terminal for phase in seen[:-1])
+        or ("seed-claimed" in seen and "process-spawned" in seen
+            and seen.index("seed-claimed") > seen.index("process-spawned"))
+    ):
+        raise ValueError("Invalid owner event order")
+    last = events[-1]
+    details = last["details"]
+    exit_code = details.get("exit_code")
+    if exit_code is not None and type(exit_code) is not int:
+        raise ValueError("Invalid owner exit")
+    result = {
+        "operation_id": row["operation_id"], "last_phase": last["phase"], "at": last["at"],
+        "terminal_phase": last["phase"] if last["phase"] in terminal else None,
+        "wrapper_exit_code": exit_code if last["phase"] in terminal else None,
+    }
+    if execution:
+        parent, nonce = value["parent_id"], value["creation_nonce"]
+        if parent is not None:
+            _identity(parent)
+        if nonce is not None:
+            _opaque(nonce)
+        result.update(
+            resolution_id=_identity(value["resolution_id"]), parent_id=parent,
+            worktree_id=_opaque(value["worktree_id"]), creation_nonce=nonce,
+            process_exit_code=None, receipt_uncertain=None,
+        )
+        if last["phase"] == "execution-returned":
+            if (
+                set(details) != {"exit_code", "process_exit_code", "receipt_uncertain"}
+                or type(exit_code) is not int
+                or (details["process_exit_code"] is not None
+                    and type(details["process_exit_code"]) is not int)
+                or type(details["receipt_uncertain"]) is not bool
+            ):
+                raise ValueError("Invalid execution terminal")
+            result.update(
+                process_exit_code=details["process_exit_code"],
+                receipt_uncertain=details["receipt_uncertain"],
+            )
+        elif details and last["phase"] in terminal:
+            raise ValueError("Invalid unknown execution terminal")
+    return result
+
+
 def _fact(row: dict, attempt_id: str) -> tuple[str, dict] | None:
     operation = _identity(row["operation_id"])
     value = row["evidence"]
@@ -49,15 +134,7 @@ def _fact(row: dict, attempt_id: str) -> tuple[str, dict] | None:
             "native_session_id": _opaque(value["native_session_id"]),
             "source_identity": _opaque(value["source_identity"]),
         }
-    if row["source"] not in ("resolution", "execution"):
-        raise ValueError("Invalid evidence owner")
-    if (
-        value["attempt_id"] != attempt_id or value["operation_id"] != operation
-        or value["schema"] != "worktree-launch-" + row["source"]
-        or type(value["version"]) is not int
-        or value["version"] not in ((1,) if row["source"] == "resolution" else (1, 2))
-    ):
-        raise ValueError("Mismatched owner evidence")
+    value = _owner_value(row, attempt_id)
     if row["source"] == "resolution":
         return None  # A returned plan is not proof of allocation or process start.
     events = value["events"]
@@ -142,6 +219,7 @@ def read_summary(
     if detail["events_has_more"]:
         errors.append({"source": "manager", "code": "event-limit"})
     facts: dict[str, list[dict]] = {boundary: [] for boundary in _BOUNDARIES}
+    observations: dict[str, list[dict]] = {"resolution": [], "execution": [], "admission": []}
     engine = {
         "scope": "local-project", "status": "unavailable", "pages_read": 0,
         "receipts_read": 0, "has_more": None, "next_after": None,
@@ -196,15 +274,28 @@ def read_summary(
                 if fact is not None:
                     boundary, value = fact
                     facts[boundary].append(value)
+                observation = _owner_observation(row, attempt_id)
+                if observation is not None:
+                    observations[source].append(observation)
             except (ValueError, TypeError, KeyError):
                 errors.append({"source": "engine", "code": "invalid-receipt"})
         for value in page["admissions"]:
             try:
                 request = _identity(value["request_id"])
                 allocation = _allocation(value)
-                if request in admissions and admissions[request] != allocation:
-                    errors.append({"source": "admission", "code": "changed-between-pages"})
-                admissions[request] = allocation
+                observation = {
+                    "request_id": request, "worktree_id": _opaque(value["worktree_id"]),
+                    "seed_id": _identity(value["seed_id"]), "kind": value["kind"],
+                    **{field: value[field] for field in (
+                        "creation_started", "creation_complete", "admission_accepted",
+                    )},
+                }
+                if request in admissions:
+                    if admissions[request] != observation:
+                        errors.append({"source": "admission", "code": "changed-between-pages"})
+                if observation not in observations["admission"]:
+                    observations["admission"].append(observation)
+                admissions[request] = observation
                 if allocation is not None and allocation not in facts["allocation"]:
                     facts["allocation"].append(allocation)
             except (ValueError, TypeError, KeyError):
@@ -237,6 +328,7 @@ def read_summary(
             "scope": "local-manager-and-project", "observation": "non-atomic",
             "selected_remote": "not-queried", "absence": "unknown",
             "manager_events_has_more": detail["events_has_more"],
+            "owner_observations": observations,
             "boundaries": {
                 name: {"status": "observed" if values else "unknown", "evidence": values}
                 for name, values in facts.items()

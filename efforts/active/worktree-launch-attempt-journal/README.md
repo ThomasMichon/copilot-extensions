@@ -141,12 +141,15 @@ The following decomposition and detailed evidence rules are agent-recommended.
 
 ### Phase 4 -- Inspect, sweep and retain
 
-- [ ] Expose a discoverable Manager history/detail path and bounded structured
-  local reader, filterable by time, action, project, venue, outcome and attempt.
-  Prompt contents require explicit detail retrieval.
-- [ ] Add a read-only sweep over explicitly selected configured reachable
+- [x] Expose a discoverable Manager history/detail path and bounded structured
+  local reader, filterable by time, action, project, venue, Manager-boundary
+  outcome and attempt. Prompt contents require explicit detail retrieval;
+  complete owner-terminal classification remains in Phase 3.
+- [x] Add a read-only metadata sweep over explicitly selected configured SSH
   machines through existing transports, preserving per-source errors,
   unavailable machines and source identity rather than reporting empty success.
+- [ ] Add explicit selected-machine exact detail and protected-input retrieval,
+  retaining source identity and errors without implicitly revealing prompts.
 - [x] Enforce 90-day prompt retention, including a documented policy for legacy
   seed-history copies, SQLite sidecars, expiry and explicit deletion. Do not
   silently leave a second indefinite full-prompt copy or delete pending intent.
@@ -199,6 +202,42 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+- **2026-10-25** -- The bounded local summary now projects existing resolver,
+  execution and admission observations separately. Resolver uncertainty and
+  missing terminals remain distinct; execution wrapper and actual child exits,
+  receipt uncertainty and parent identities are retained per operation. No new
+  producer or engine invocation is required, and no admission refusal, crash,
+  prompt acceptance or replay permission is inferred. Windows and frozen-source
+  POSIX packets each pass 75 cases, including the real Manager-to-engine reader
+  across 104 receipts in two pages and unchanged synthetic fixture state.
+  This qualifies source inspection, not installed conversation delivery.
+  Selected-machine protected detail, accepted-turn correlation, release,
+  authorized rollout and the original installed acceptance remain open.
+
+### 2026-10-25 -- Explicit configured-SSH metadata inspection merged
+
+- #9008 merged as `57c63a574296ffa248bc77a1fc146e684b84c91e` after a passing
+  current-head Copilot Comment, all required CI and complete thread resolution.
+  Four concrete review findings were fixed and qualified; the unthreaded
+  registry-directory suggestion was evaluated against the actual engine and
+  Manager legacy-root owners and explained without inventing a new redirect.
+  The managed merge used the verified Maintainer review-rule exception, not a
+  CI exception.
+- Re-read both parent plans after merge. The local history interfaces and
+  explicit metadata sweep are implemented; selected-machine protected detail,
+  complete owner-terminal observations, containing release, authorized rollout
+  and installed prompt/conversation acceptance remain open. Neither parent
+  tracker closed, and both efforts remain Active.
+- Pull-forward initially auto-aborted on the squash-merged incremental history.
+  With the original head retained, a clean tree, provider-confirmed merge and
+  matching changed files proved there were no surviving local commits. A
+  zero-local-range rebase restored the existing owned branch, and managed
+  synchronization then succeeded. No reset, stash, remote rewrite or worktree
+  finalization was used.
+- Continue the existing Phase 3 owner-terminal slice using actual resolver,
+  execution and admission observations. Wrapper and child exits must remain
+  separate, missing terminals unknown, and zero return never prompt acceptance.
 
 ### 2026-10-25 -- Explicit configured-SSH metadata inspection prepared
 

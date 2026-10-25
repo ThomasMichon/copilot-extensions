@@ -116,7 +116,8 @@ def test_resolution_zero_exit_and_seed_claim_are_not_allocation_or_start(saved, 
         "source": "resolution", "operation_id": "d" * 32, "evidence": {
             "schema": "worktree-launch-resolution", "version": 1,
             "attempt_id": ATTEMPT, "operation_id": "d" * 32,
-            "events": [{"at": AT, "phase": "plan-ready", "details": {
+            "events": [{"at": AT, "phase": "resolution-requested", "details": {}},
+                       {"at": AT, "phase": "plan-ready", "details": {
                 "worktree_id": "example-worktree", "exit_code": 0,
             }}],
         },
@@ -296,3 +297,119 @@ def test_manager_event_and_reference_caps_remain_visible(saved, monkeypatch):
         {"source": "manager", "code": "reference-limit"},
         {"source": "manager", "code": "event-limit"},
     ]
+
+
+@pytest.mark.parametrize("wrapper,child,uncertain", [
+    (0, 0, False), (3, 0, False), (7, 7, False), (3, None, True), (-9, -9, False),
+])
+def test_execution_terminal_keeps_wrapper_and_child_exits_distinct(saved, wrapper, child, uncertain):
+    row = execution()
+    row["evidence"]["events"].append({
+        "at": AT, "phase": "execution-returned", "details": {
+            "exit_code": wrapper, "process_exit_code": child, "receipt_uncertain": uncertain,
+        },
+    })
+    result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: page(receipts=[row]))
+    assert result["summary"]["owner_observations"]["execution"] == [{
+        "operation_id": "c" * 32, "last_phase": "execution-returned", "at": AT,
+        "terminal_phase": "execution-returned", "wrapper_exit_code": wrapper,
+        "resolution_id": "d" * 32, "parent_id": None, "worktree_id": "example-worktree",
+        "creation_nonce": "nonce", "process_exit_code": child, "receipt_uncertain": uncertain,
+    }]
+    assert result["summary"]["boundaries"]["backend_start"]["status"] == "observed"
+    assert result["summary"]["absence"] == result["prompt_acceptance"] == "unknown"
+    assert result["summary"]["errors"] == []
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_execution_missing_and_explicit_unknown_terminals_never_imply_crash(saved, unknown):
+    row = execution()
+    if unknown:
+        row["evidence"]["events"].append({"at": AT, "phase": "unknown", "details": {}})
+    result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: page(receipts=[row]))
+    observed = result["summary"]["owner_observations"]["execution"][0]
+    assert observed["last_phase"] == ("unknown" if unknown else "process-spawned")
+    assert observed["terminal_phase"] == ("unknown" if unknown else None)
+    assert observed["wrapper_exit_code"] is observed["process_exit_code"] is None
+    assert observed["receipt_uncertain"] is None
+    assert result["summary"]["absence"] == result["prompt_acceptance"] == "unknown"
+    assert "crash" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("phase,exit_code", [
+    ("resolution-requested", None), ("plan-ready", 0), ("forwarded", 0),
+    ("remote-admission-returned", 3), ("unknown", 2),
+])
+def test_resolution_observations_do_not_become_allocation_or_acceptance(saved, phase, exit_code):
+    events = [{"at": AT, "phase": "resolution-requested", "details": {}}]
+    if phase != "resolution-requested":
+        events.append({"at": AT, "phase": phase, "details": {"exit_code": exit_code}})
+    row = {"source": "resolution", "operation_id": "d" * 32, "evidence": {
+        "schema": "worktree-launch-resolution", "version": 1,
+        "attempt_id": ATTEMPT, "operation_id": "d" * 32, "events": events,
+    }}
+    result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: page(receipts=[row]))
+    assert result["summary"]["owner_observations"]["resolution"] == [{
+        "operation_id": "d" * 32, "last_phase": phase, "at": AT,
+        "terminal_phase": phase if len(events) == 2 else None, "wrapper_exit_code": exit_code,
+    }]
+    assert all(value["status"] == "unknown" for value in result["summary"]["boundaries"].values())
+    assert result["summary"]["errors"] == []
+
+
+def test_each_execution_owner_remains_independent_across_pages_and_failure(saved):
+    parent = execution(boundary="launcher-command")
+    parent["evidence"]["events"].append({"at": AT, "phase": "execution-returned", "details": {
+        "exit_code": 0, "process_exit_code": 0, "receipt_uncertain": False,
+    }})
+    child = execution("e" * 32)
+    child["evidence"]["parent_id"] = "c" * 32
+    child["evidence"]["events"].append({"at": AT, "phase": "unknown", "details": {}})
+    calls = []
+    def read(*args, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 3:
+            raise engine_client.EngineError("private process output")
+        return page(receipts=[parent if len(calls) == 1 else child], has_more=True,
+                    next_after=("c" if len(calls) == 1 else "e") * 32 + ".execution.json")
+    result = summary.read_summary(saved, ATTEMPT, read_page=read)
+    observations = result["summary"]["owner_observations"]["execution"]
+    assert [row["operation_id"] for row in observations] == ["c" * 32, "e" * 32]
+    assert observations[0]["terminal_phase"] == "execution-returned"
+    assert observations[1]["parent_id"] == "c" * 32
+    assert observations[1]["terminal_phase"] == "unknown"
+    assert result["summary"]["boundaries"]["launcher_start"]["status"] == "observed"
+    assert result["summary"]["boundaries"]["backend_start"]["status"] == "observed"
+    assert result["summary"]["errors"] == [{"source": "engine", "code": "unavailable-or-incompatible"}]
+
+
+def test_admission_progress_is_deduplicated_without_inventing_a_terminal(saved):
+    pages = iter([
+        page(admissions=[admission(creation_complete=False, admission_accepted=False)],
+             has_more=True, next_after="c" * 32 + ".json"),
+        page(admissions=[admission()], has_more=True, next_after="e" * 32 + ".json"),
+        page(admissions=[admission()]),
+    ])
+    result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: next(pages))
+    observed = result["summary"]["owner_observations"]["admission"]
+    assert len(observed) == 2
+    assert not observed[0]["creation_complete"] and not observed[0]["admission_accepted"]
+    assert observed[1]["creation_complete"] and observed[1]["admission_accepted"]
+    assert all("terminal_phase" not in row for row in observed)
+    assert result["summary"]["errors"] == [{"source": "admission", "code": "changed-between-pages"}]
+
+
+@pytest.mark.parametrize("change", [
+    {"exit_code": True}, {"exit_code": "private exit"},
+    {"process_exit_code": False}, {"receipt_uncertain": "private uncertainty"},
+])
+def test_invalid_terminal_retains_independent_positive_process_evidence(saved, change):
+    row = execution()
+    row["evidence"]["events"].append({"at": AT, "phase": "execution-returned", "details": {
+        "exit_code": 3, "process_exit_code": 0, "receipt_uncertain": False, **change,
+    }})
+    result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: page(receipts=[row]))
+    assert result["summary"]["boundaries"]["backend_start"]["status"] == "observed"
+    assert result["summary"]["owner_observations"]["execution"] == []
+    assert result["summary"]["errors"] == [{"source": "engine", "code": "invalid-receipt"}]
+    assert "private" not in json.dumps(result)
