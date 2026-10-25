@@ -27,7 +27,11 @@ from .execution_identity import (
     resolve_machine_identity,
 )
 from .identity import is_local_machine, local_execution_platform, is_observed_local_name
-from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
+from .local_execution import LocalExecutionContext, resolve_local_execution_context
+from .machine_environment import (
+    MachineEnvironment, known_environment_label, legacy_alias_forms,
+    normalize_environment, split_machine_environment,
+)
 from .registry import (
     AmbiguousMachineError,
     MachineEntry,
@@ -57,11 +61,14 @@ __all__ = [
     "ControlPlaneError",
     "ControlPlaneRepositories",
     "IdentityError",
+    "LocalExecutionContext",
+    "resolve_local_execution_context",
     "MachineEntry",
     "MachineEnvironment",
     "MachineSelection",
     "entry_physical_host",
     "normalize_environment",
+    "known_environment_label",
     "legacy_alias_forms",
     "resolve_machine_selection",
     "find_machine_metadata",

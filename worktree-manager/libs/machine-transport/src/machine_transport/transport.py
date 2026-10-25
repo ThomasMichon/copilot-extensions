@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from remote_login_shell import is_posix_login_shell, wrap_login_shell
 
 from .identity import is_local_machine
+from .machine_environment import known_environment_label
 from .registry import AmbiguousMachineError, MachineEntry, find_machine_entry
 
 __all__ = [
@@ -38,7 +39,7 @@ def default_shell_for_env_name(env_name: str, shell: str) -> str:
     """The effective shell for an SSH environment: the configured ``shell``
     value when set, else ``"pwsh"`` for a ``windows`` environment and
     ``"bash"`` otherwise."""
-    return shell or ("pwsh" if env_name == "windows" else "bash")
+    return shell or ("pwsh" if known_environment_label(env_name) == "windows" else "bash")
 
 
 def resolve_ssh_target(entry: MachineEntry) -> tuple[str, str]:
@@ -60,18 +61,18 @@ def resolve_ssh_target(entry: MachineEntry) -> tuple[str, str]:
         if len(entry.ssh_environments) != 1:
             raise AmbiguousMachineError(f"machine {entry.key!r} has ambiguous SSH profiles")
         ssh_env = entry.ssh_environments[0]
-        if ssh_env.name != entry.execution_platform:
+        if known_environment_label(ssh_env.name) != entry.execution_platform:
             raise ValueError(f"machine {entry.key!r} has a mismatched SSH platform")
         return ssh_env.alias, default_shell_for_env_name(ssh_env.name, ssh_env.shell)
 
     env_lower = entry.environment.lower()
     if "windows" in env_lower:
         for ssh_env in entry.ssh_environments:
-            if ssh_env.name == "windows":
+            if known_environment_label(ssh_env.name) == "windows":
                 return ssh_env.alias, default_shell_for_env_name("windows", ssh_env.shell)
     else:
         for ssh_env in entry.ssh_environments:
-            if ssh_env.name in ("linux", "wsl"):
+            if known_environment_label(ssh_env.name) in ("linux", "wsl"):
                 return ssh_env.alias, default_shell_for_env_name(ssh_env.name, ssh_env.shell)
 
     first = entry.ssh_environments[0]

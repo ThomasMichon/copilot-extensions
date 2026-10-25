@@ -70,7 +70,8 @@ def test_committed_provenance_is_not_locale_decoded(
             {"note": "caf\u00e9 \u65e5\u672c\u8a9e"},
         ]
     else:
-        packet = tmp_path / preparation.PACKET
-        packet.parent.mkdir(parents=True, exist_ok=True)
-        packet.write_bytes(codec.encode({"captured_from": {"commit": commit}}))
+        for relative in preparation.PACKETS:
+            packet = tmp_path / relative
+            packet.parent.mkdir(parents=True, exist_ok=True)
+            packet.write_bytes(codec.encode({"captured_from": {"commit": commit}}))
         assert preparation.prepare(tmp_path, "https://example.invalid/repository.git") == commit

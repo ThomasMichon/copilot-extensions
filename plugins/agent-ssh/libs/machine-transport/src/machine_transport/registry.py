@@ -29,7 +29,13 @@ from typing import Any, Generic, Protocol, TypeVar
 
 import yaml
 
-from .machine_environment import MachineEnvironment, legacy_alias_forms, normalize_environment, split_machine_environment
+from .machine_environment import (
+    MachineEnvironment,
+    known_environment_label,
+    legacy_alias_forms,
+    normalize_environment,
+    split_machine_environment,
+)
 
 _SafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
 
@@ -57,6 +63,14 @@ class AmbiguousMachineError(ValueError):
     """A configured identity matches more than one machine or SSH target."""
 
 
+class MissingExecutionSpaceError(ValueError):
+    """A known physical family has no entry for the requested environment."""
+
+    def __init__(self, message: str, *, physical_host: str = "") -> None:
+        super().__init__(message)
+        self.physical_host = physical_host
+
+
 class PhysicalMachineError(ValueError):
     """Physical metadata needs an execution context to select a logical machine."""
 
@@ -78,6 +92,20 @@ class MachineIdentity(Protocol):
 
 
 _Machine = TypeVar("_Machine", bound=MachineIdentity)
+
+
+def _profile_conflicts(entry: MachineIdentity, name: str, environment: str) -> bool:
+    if name.strip().casefold() == entry.key.strip().casefold():
+        return False
+    for env in getattr(entry, "ssh_environments", ()):
+        if not isinstance(env.alias, str) or env.alias.casefold() != name.casefold() or env.name is None:
+            continue
+        if not isinstance(env.name, str):
+            raise ValueError("SSH environment name must be a string or null")
+        profile_environment = known_environment_label(env.name)
+        if profile_environment and profile_environment != environment:
+            return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -242,7 +270,9 @@ def parse_machines_yaml(
             raise ValueError("execution-space keys must be nonempty canonical names, not paths or references")
         if not isinstance(physical_host, str):
             raise ValueError(f"execution space '{key}' physical_host must be a string")
-        if execution_platform and any(env.name != execution_platform for env in ssh_envs):
+        if execution_platform and any(
+            known_environment_label(env.name) != execution_platform for env in ssh_envs
+        ):
             raise ValueError(f"execution space '{key}' cannot contain another space's SSH environment")
         compatibility_aliases = data.get("compatibility_aliases", []) or []
         if not isinstance(compatibility_aliases, (list, tuple)) or any(
@@ -271,13 +301,21 @@ def parse_machines_yaml(
 
 def machine_identity_names(
     entry: MachineIdentity, *, entries: Mapping[str, MachineIdentity] | None = None,
-    include_metadata: bool = True,
+    include_metadata: bool = True, observed_hostname: str | None = None,
 ) -> tuple[str, ...]:
     """Selection names; metadata exclusion leaves only keys, aliases and profiles."""
     values = (entry.key,)
     if include_metadata and not getattr(entry, "execution_platform", ""):
         hostname = entry.hostname
-        if hostname and split_machine_environment(entry.key).environment == "wsl":
+        literal = observed_hostname is not None and hostname.strip().casefold() == observed_hostname.casefold()
+        if literal:
+            hostname = hostname.strip()
+            if (
+                entry.key.strip().casefold() != observed_hostname.casefold()
+                and split_machine_environment(entry.key).environment == "wsl"
+            ):
+                hostname = f"{hostname}-wsl"
+        elif hostname and split_machine_environment(entry.key).environment == "wsl":
             hostname = split_machine_environment(hostname, "wsl").logical_machine
         values += (hostname,)
     values += (entry.alias,)
@@ -319,7 +357,7 @@ def machine_identity_names(
 
 
 def normalize_machine_entries(
-    entries: Mapping[str, MachineEntry],
+    entries: Mapping[str, MachineEntry], *, observed_hostname: str | None = None,
 ) -> dict[str, MachineEntry]:
     """Project legacy Windows/WSL hosts into independently addressable machines.
 
@@ -327,7 +365,13 @@ def normalize_machine_entries(
     execution-space keys and SSH aliases are never rewritten. A legacy WSL
     declaration supplies the Windows association; other mixed platforms, duplicate
     profiles, and generated-key/alias collisions require explicit topology repair.
+    ``observed_hostname`` is an optional literal OS observation for contextual
+    hostname-label validation, never a requested target or ownership grant.
     """
+    if observed_hostname is not None and (
+        not isinstance(observed_hostname, str) or not observed_hostname.strip()
+    ):
+        raise ValueError("observed hostname must be a nonempty string")
     result: dict[str, MachineEntry] = {}
 
     def add(entry: MachineEntry) -> None:
@@ -341,7 +385,13 @@ def normalize_machine_entries(
         result[entry.key] = entry
 
     for entry in entries.values():
-        platforms = [env.name for env in entry.ssh_environments]
+        platforms = [known_environment_label(env.name) for env in entry.ssh_environments]
+        canonical_profiles = [
+            replace(env, name=platform) if platform is not None and env.name != platform else env
+            for env, platform in zip(entry.ssh_environments, platforms)
+        ]
+        if canonical_profiles != entry.ssh_environments:
+            entry = replace(entry, ssh_environments=canonical_profiles)
         for platform_name in ("windows", "wsl", "linux"):
             if platforms.count(platform_name) > 1:
                 raise AmbiguousMachineError(
@@ -375,7 +425,7 @@ def normalize_machine_entries(
 
     owners: dict[str, str] = {}
     for entry in result.values():
-        for name in machine_identity_names(entry):
+        for name in machine_identity_names(entry, observed_hostname=observed_hostname):
             prior = owners.setdefault(name.casefold(), entry.key)
             if prior != entry.key:
                 raise AmbiguousMachineError(
@@ -446,9 +496,15 @@ def _find_machine_entry(
             _find_machine_entry(entries, name, reject_ambiguous=reject_ambiguous)
             if not any(getattr(entry, "execution_platform", "") for entry in entries.values()) or any(
                 name.casefold() in {value.casefold() for value in machine_identity_names(entry)}
+                or (
+                    not getattr(entry, "execution_platform", "")
+                    and entry.display_name.casefold() == name.casefold()
+                )
                 for entry in entries.values()
             ) else None
         )
+        if selected is not None and _profile_conflicts(selected, name, execution_platform):
+            raise ValueError(f"registered machine {name!r} conflicts with the requested environment")
         if selected and getattr(selected, "execution_platform", "") == execution_platform:
             return selected
         if (
@@ -460,20 +516,24 @@ def _find_machine_entry(
                 entries, split_machine_environment(selected.key, "wsl").logical_machine,
                 reject_ambiguous=reject_ambiguous,
             )
-            if guest is not None and split_machine_environment(guest.key).environment == "wsl":
+            if (
+                guest is not None and split_machine_environment(guest.key).environment == "wsl"
+                and entry_physical_host(guest).casefold() == entry_physical_host(selected).casefold()
+            ):
                 return guest
         def physical_host(entry: MachineIdentity) -> str:
             return entry_physical_host(entry)
 
         physical = physical_host(selected) if selected else ""
-        physical_matches = {
-            physical_host(entry).casefold()
+        physical_names = [
+            physical_host(entry)
             for entry in entries.values()
             if name.casefold() in {
                 entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
                 entry.display_name.casefold(), physical_host(entry).casefold(),
             }
-        } if selected is None else set()
+        ] if selected is None else []
+        physical_matches = {value.casefold() for value in physical_names}
         candidates = [
             entry for entry in entries.values()
             if getattr(entry, "execution_platform", "") == execution_platform
@@ -497,22 +557,26 @@ def _find_machine_entry(
             if not getattr(entry, "execution_platform", "")
             and split_machine_environment(entry.key).environment == execution_platform
             and (
-                physical_host(entry).casefold() == name.casefold()
+                (selected is None and physical_host(entry).casefold() == name.casefold())
                 or (physical and physical_host(entry).casefold() == physical.casefold())
             )
         ]
-        if selected is None and len(legacy_candidates) > 1:
+        legacy_guest = (
+            execution_platform == "wsl" and selected is not None
+            and not getattr(selected, "execution_platform", "")
+            and not split_machine_environment(selected.key).environment
+        )
+        if (selected is None or legacy_guest) and len(legacy_candidates) > 1:
             raise AmbiguousMachineError(f"Machine {name!r} has ambiguous legacy {execution_platform} entries")
-        if selected is None and legacy_candidates:
+        if (selected is None or legacy_guest) and legacy_candidates:
             return legacy_candidates[0]
-        if (selected and getattr(selected, "execution_platform", "")) or any(
-            getattr(entry, "execution_platform", "") and name.casefold() in {
-                entry.hostname.casefold(), getattr(entry, "physical_host", "").casefold(),
-                physical_host(entry).casefold(),
-            }
-            for entry in entries.values()
-        ):
-            raise ValueError(f"machine {name!r} has no {execution_platform} logical entry")
+        if len(physical_matches) > 1:
+            raise AmbiguousMachineError(f"Machine {name!r} has ambiguous physical associations")
+        if (selected and getattr(selected, "execution_platform", "")) or physical_matches:
+            raise MissingExecutionSpaceError(
+                f"machine {name!r} has no {execution_platform} logical entry",
+                physical_host=physical or min(physical_names, default=""),
+            )
         return selected if selected and not getattr(selected, "execution_platform", "") else None
     if name in entries:
         return entries[name]
@@ -622,9 +686,11 @@ def resolve_machine_selection(
     if direct is not None:
         declared = getattr(direct, "execution_platform", "")
         implied = declared or split_machine_environment(direct.key).environment
+        if wanted and _profile_conflicts(direct, raw, wanted):
+            raise ValueError(f"registered machine {raw!r} conflicts with the requested environment")
         if wanted and implied and implied != wanted:
             profile_only = raw.casefold() != direct.key.casefold() and any(
-                raw.casefold() == env.alias.casefold()
+                isinstance(env.alias, str) and raw.casefold() == env.alias.casefold()
                 for env in getattr(direct, "ssh_environments", ())
             )
             physical = raw.casefold() == entry_physical_host(direct).casefold()
@@ -654,7 +720,10 @@ def resolve_machine_selection(
             if (
                 target.environment == "wsl" and not getattr(entry, "execution_platform", "")
                 and split_machine_environment(entry.key).environment != "wsl"
-                and not any(env.name == "wsl" for env in getattr(entry, "ssh_environments", ()))
+                and not any(
+                    known_environment_label(env.name) == "wsl"
+                    for env in getattr(entry, "ssh_environments", ())
+                )
             ):
                 physical = entry_physical_host(entry)
                 guest_key = MachineEnvironment(physical, "wsl").logical_machine

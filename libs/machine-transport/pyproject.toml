@@ -10,7 +10,7 @@ exclude-newer = "7 days"
 # dependency-confusion; the import module is ``machine_transport``.
 # Mirrors agent-remote-login-shell / agent-procutil.
 name = "agent-machine-transport"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Shared machines.yaml registry parsing, canonicalized local-machine identity, and local-vs-SSH transport resolution across Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"
@@ -50,3 +50,4 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["contract(name): behavioral contract attribution"]

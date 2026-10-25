@@ -17,6 +17,7 @@ PACKETS = (
     PACKET,
     "plugins/agent-bridge/contract/fixtures/http/current/http48-retained-inbox.json",
     "plugins/agent-bridge/contract/fixtures/http/current/http49-retained-producer.json",
+    "plugins/agent-bridge/contract/fixtures/http/current/http50-retained-recovery.json",
 )
 
 
@@ -84,7 +85,7 @@ def main() -> int:
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         print(f"prepare-bridge-contract-evidence: FAILED: {error}", file=sys.stderr)
         return 1
-    print(f"Captured Bridge source checkpoints ready: HTTP-47/48/49 (primary {commit})")
+    print(f"Captured Bridge source checkpoints ready: HTTP-47/48/49/50 (primary {commit})")
     return 0
 
 
