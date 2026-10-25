@@ -8,37 +8,61 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 
 import pytest
 
 from worktree_manager import self_install as si
+from worktree_manager import source_config
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_manager_runtime_install import _environment, _prepare_constructed, _run
+from test_manager_runtime_install import SOURCE, _environment, _prepare_constructed, _run
+
+
+def _repository(directory, env):
+    repo = directory / "upstream"
+    payload = repo / "worktree-manager"
+    si._copy_payload(SOURCE, payload, mark_complete=False)
+    tools = repo / "tools"
+    tools.mkdir()
+    for name in json.loads((SOURCE / "packaged-assets.json").read_text())["files"]:
+        shutil.copy2(SOURCE.parent / "tools" / name, tools / name)
+    (payload / "plugin.json").write_text(json.dumps({
+        "name": "worktree-manager", "version": si.payload_version(payload),
+    }))
+    for arguments in (
+        ["init", "-q", "-b", "main"], ["add", "."],
+        ["-c", "user.name=Example", "-c", "user.email=fixture@example.invalid",
+         "commit", "-qm", "Isolated release source"],
+        ["switch", "-qc", "dev"],
+    ):
+        result = _run(["git", "-C", repo, *arguments], env, directory)
+        assert result.returncode == 0, result.stderr
+    (payload / "source-fixture.txt").write_text("Merged development acquisition witness\n")
+    for arguments in (
+        ["add", "."],
+        ["-c", "user.name=Example", "-c", "user.email=fixture@example.invalid",
+         "commit", "-qm", "Merged development source"],
+        ["switch", "-q", "main"],
+    ):
+        result = _run(["git", "-C", repo, *arguments], env, directory)
+        assert result.returncode == 0, result.stderr
+    return repo
 
 
 def _prepare_source_repair(directory, constructed):
     directory.mkdir()
     env = _environment(Path(constructed["directory"]))
-    root, previous, original = (
-        Path(constructed[key]) for key in ("root", "slot", "qualified")
+    root, previous = (
+        Path(constructed[key]) for key in ("root", "slot")
     )
-    payload = directory / "payload"
-    si._copy_payload(original, payload, mark_complete=False)
+    repo = _repository(directory, env)
     source = si._runtime_installer().runtime_source
-    identity = source.read_source_identity(payload, si.payload_version(payload), plugin="worktree-manager")
-    (payload / "source-fixture.txt").write_text("Independent prepared-assembly repair fixture\n")
-    digest = source.assembly_hash(payload)
-    identity = source.SourceIdentity(
-        identity.plugin, identity.package_version, identity.source_commit, identity.source_tree,
-        digest, source.runtime_version(identity.package_version, identity.source_commit, digest),
-    )
-    (payload / "runtime-source.json").write_text(json.dumps(identity.document()))
-    target = si.version_slot(identity.runtime_version, root)
     config = root / "config.toml"
-    config.write_text('[source]\nref = "fixture-canary"\n[runtime_source]\nkind = "marketplace"\n')
+    config.write_text('[runtime_source]\nchannel = "main"\nrepo = "https://example.invalid/service.git"\n')
+    source_config.set_source(repo=str(repo), ref="dev", root=root)
     database = root / "continuity.sqlite"
     with sqlite3.connect(database) as connection:
         connection.executescript(
@@ -55,13 +79,23 @@ def _prepare_source_repair(directory, constructed):
         # No alternate data-root override: both installed interpreters resolve
         # the fixture's existing default root, as the global binstub does.
         patch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
+        patch.setattr("worktree_manager.mux_daemon_cutover.activate_after_update",
+                      lambda **kw: {"action": "fixture", "slot": str(kw["slot"])})
         si._runtime_installer().activate(root, Path(constructed["target"]).name, expected=previous.name)
-        planned = si.self_install(payload, root=root, dry_run=True)
-        assert planned.action == "planned" and planned.slot == str(target), planned
-        selected = si.self_install(payload, root=root, dry_run=False)
-        assert selected.action == "installed" and selected.slot == str(target), selected
-        initial = si.self_install(payload, root=root, dry_run=True)
-        assert initial.action == "already-current" and initial.marker == target.name, initial
+        planned = si.self_update(root=root, dry_run=True)
+        assert planned.action == "updated", planned
+        receipt, = (root / "manager-source/runtime-sources/prepared/worktree-manager").glob("*/runtime-source.json")
+        payload = receipt.parent
+        identity = source.read_source_identity(payload, si.payload_version(payload), plugin="worktree-manager")
+        assert identity is not None
+        assert identity.source_commit == _run(["git", "-C", repo, "rev-parse", "dev"], env, directory).stdout.strip()
+        assert (payload / "source-fixture.txt").read_text() == "Merged development acquisition witness\n"
+        target = si.version_slot(identity.runtime_version, root)
+        assert si.current_version(root) == Path(constructed["target"]).name
+        selected = si.self_update(root=root, dry_run=False)
+        assert selected.action == "updated" and si.current_version(root) == target.name, selected
+        initial = si.self_update(root=root, dry_run=True)
+        assert initial.action == "already-current", initial
         python = si._runtime_installer().runtime.slot_python(root, target.name)
         module = _run([
             python, "-I", "-c", "import worktree_manager.__main__;print(worktree_manager.__main__.__file__)",
@@ -74,13 +108,22 @@ def _prepare_source_repair(directory, constructed):
         )}
         diagnostics = io.StringIO()
         with redirect_stderr(diagnostics):
-            repaired = si.self_install(payload, root=root, dry_run=False)
-        assert repaired.action == "installed", repaired
+            repaired = si.self_update(root=root, dry_run=False)
+        assert repaired.action == "updated", repaired
         assert "controlled installed Manager health failure" in diagnostics.getvalue()
-        repair = Path(repaired.slot)
+        repair = si.version_slot(si.current_version(root), root)
         assert repair.name.startswith(target.name + ".repair.") and repair != target
-        again = si.self_install(payload, root=root, dry_run=False)
-        assert again.action == "already-current" and again.slot == repaired.slot, again
+        again = si.self_update(root=root, dry_run=False)
+        assert again.action == "already-current" and si.current_version(root) == repair.name, again
+        assert repaired.cutover == {"action": "fixture", "slot": str(repair)}
+        checkout, = (root / "manager-source/runtime-sources").glob("*/checkout")
+        assert _run(["git", "-C", checkout, "rev-parse", "HEAD"], env, directory).stdout == _run([
+            "git", "-C", repo, "rev-parse", "main",
+        ], env, directory).stdout
+        (checkout / "untracked-refusal.txt").write_text("Acquisition must refuse this dirty checkout\n")
+        refused = si.self_update(root=root, dry_run=True)
+        assert refused.action == "error" and "untracked or ignored" in refused.reason, refused
+        assert si.current_version(root) == repair.name
         plan = si.self_install(payload, root=root, dry_run=True)
         assert plan.action == "already-current" and plan.marker == repair.name, plan
         assert all(path.read_bytes() == content for path, content in retained.items())
@@ -111,7 +154,8 @@ def _prepare_source_repair(directory, constructed):
         assert commands and all(path.read_bytes() == content for path, content in commands.items())
     return {
         "repair": str(repair), "target": str(target), "previous": str(previous),
-        "reused": again.slot == repaired.slot, "selection": si.current_version(root),
+        "acquired_commit": identity.source_commit, "acquisition_refused": refused.action == "error",
+        "reused": again.action == "already-current", "selection": si.current_version(root),
         "retained": all(path.read_bytes() == content for path, content in retained.items()),
         "data_preserved": all((path.read_bytes(), path.stat().st_dev, path.stat().st_ino) == record
                               for path, record in before.items()),
@@ -121,6 +165,7 @@ def _prepare_source_repair(directory, constructed):
 def test_source_generation_repair_reuses_exact_selection_and_preserves_default_data():
     result = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["source_repair"]
     assert result["reused"] and result["retained"] and result["data_preserved"]
+    assert result["acquisition_refused"] and len(result["acquired_commit"]) == 40
     assert result["selection"] == Path(result["previous"]).name
     assert Path(result["repair"]).name.startswith(Path(result["target"]).name + ".repair.")
 

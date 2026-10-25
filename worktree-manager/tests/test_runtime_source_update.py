@@ -12,6 +12,7 @@ import pytest
 
 from worktree_manager import engine_client as ec
 from worktree_manager import runtime_source_config as config
+from worktree_manager import runtime_source_prepare as preparation
 from worktree_manager import runtime_source_update as update
 from worktree_manager import self_install, update_orchestration
 from worktree_manager.runtime_source import ResolvedSource
@@ -223,7 +224,7 @@ def test_preparer_process_is_own_isolated_code_and_receipt_checked(
         }))
 
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "hostile"))
-    monkeypatch.setattr(update.subprocess, "run", execute)
+    monkeypatch.setattr(preparation.subprocess, "run", execute)
     monkeypatch.setattr(source, "read_source_identity", lambda *a, **kw: None if fault == "bytes" else identity)
     if fault:
         with pytest.raises(ValueError):

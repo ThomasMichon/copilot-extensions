@@ -3205,7 +3205,11 @@ It retains the 300-second group and 30-second item budgets without adding cold
 builds to the original runtime lane or required PR CI. The source lane uses
 an automatically cleaned OS-temporary sandbox, avoiding Windows path-length
 failures from source-plus-repair identities below a deep checkout. It constructs
-real non-editable same-package source generations, repairs an intentionally
+real non-editable same-package source generations. Manager's explicit Dev
+self-update acquires a clean standalone fixture's merged `dev` tip using its
+own trusted preparer, independently of a different service-source policy.
+The lane refuses a subsequently dirtied acquisition checkout without changing
+the installed selection, repairs an intentionally
 damaged installed module into a distinct slot, then reuses that exact healthy
 repair. Dry-run reports the actual source selection; the damaged slot and its
 completion/origin receipts remain unchanged.
@@ -3214,8 +3218,7 @@ the same fixture-default data root without a root override, report their actual
 installed prefix/module/generation, and read the original SQLite witness and
 schema version. Config, database bytes/file identity and global command contents
 are preserved. This is synthetic compatible-state continuity, not qualification
-of production data migrations, clean-source self-update acquisition or host
-rollout.
+of production data migrations, standalone bootstrap acquisition or host rollout.
 
 The archived normal-updater consumer has its own explicit Windows contract:
 

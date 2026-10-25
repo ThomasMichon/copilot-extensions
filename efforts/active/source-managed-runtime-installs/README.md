@@ -270,7 +270,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.
 - [ ] Qualify Manager's own clean-source, immutable non-editable installation and recovery independently of the selected service-runtime source.
-- [ ] **Agent-recommended prepared Manager slice:** qualify exact-source dry-run/currentness, distinct installed-health repair and reuse of its healthy source generation, preserving the existing default config/data and global command through compatible-state recovery. Keep clean-source self-update acquisition, production migration compatibility and actual adoption separate.
+- [x] **Agent-recommended prepared Manager slice:** qualify exact-source dry-run/currentness, distinct installed-health repair and reuse of its healthy source generation, preserving the existing default config/data and global command through compatible-state recovery. Keep clean-source self-update acquisition, production migration compatibility and actual adoption separate.
+- [ ] **Agent-recommended independent Manager acquisition slice:** route explicit Manager `[source] ref = "dev"` through the existing clean merged-source acquisition and trusted preparer, independently of service policy, into the same immutable installer and cutover owner. Qualify native Windows/Linux acquisition, source refusal, exact repair/reuse and fixture-default data continuity without changing Main/custom-ref/Git-optional behavior. Keep standalone bootstrap acquisition, production data compatibility and actual adoption separate.
 
 ### Phase 4a - Manager-owned opt-in background maintenance
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence

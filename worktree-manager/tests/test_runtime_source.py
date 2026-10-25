@@ -241,6 +241,29 @@ def test_source_git_child_uses_original_shared_deadline(repository, monkeypatch)
     assert len(timeouts) == 1 and 0 < timeouts[0] <= 5
 
 
+def test_acquisition_threads_child_auth_environment_and_scrubs_routing(
+    repository, tmp_path, monkeypatch,
+):
+    repo, _release, development = repository
+    environment = dict(os.environ, GIT_DIR=str(tmp_path / "hostile"), APPROVED_AUTH="fixture")
+    original = source.subprocess.run
+    observed = []
+
+    def run(command, **options):
+        child = options["env"]
+        assert child["APPROVED_AUTH"] == "fixture" and "GIT_DIR" not in child
+        assert child["GIT_TERMINAL_PROMPT"] == "0"
+        observed.append(command)
+        return original(command, **options)
+
+    monkeypatch.setattr(source.subprocess, "run", run)
+    with source.acquire(
+        config.RuntimeSource("dev", str(repo), allow_dev=True),
+        root=tmp_path / "manager", environment=environment,
+    ) as resolved:
+        assert resolved.commit == development
+    assert observed and environment["GIT_DIR"] == str(tmp_path / "hostile")
+    assert os.environ.get("APPROVED_AUTH") != "fixture"
 def test_unavailable_configured_source_does_not_fall_back_to_cwd(repository, tmp_path, monkeypatch):
     repo, _release, _development = repository
     monkeypatch.chdir(repo)

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify independent merged-Dev Manager self-update through clean acquisition and trusted source preparation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

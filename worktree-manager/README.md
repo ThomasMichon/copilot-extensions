@@ -1298,8 +1298,17 @@ source evidence is an explicit error; dry-run does not construct or publish.
 Apply still runs installed health before reuse. A selected healthy repair of
 the same source generation is reused instead of repeatedly rebuilding repairs
 from a damaged base slot. Neither path changes the existing config/data root.
-This prepared-payload contract does not yet make the independent `[source]`
-Git/tarball acquisition source-qualified.
+An explicit `[source] ref = "dev"` now acquires that Manager repository's
+merged `dev` tip in its own clean, owned checkout and prepares it through the
+running Manager's trusted tools. Fetched tools are never executed. Its cache
+and immutable prepared payloads live below
+`<manager-root>/manager-source/runtime-sources/`, independently of the service
+`[runtime_source]` selection. The ordinary versioned installer, global commands,
+data root and mux cutover owner are unchanged. Acquisition, preparation or
+receipt failures are reported without an unqualified fallback; this mode
+requires Git. Main and other refs retain their existing Git/GitHub-tarball
+path and are not yet source-qualified by this contract. The standalone
+bootstrap's source-fetch path is not changed by Manager self-update support.
 
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the

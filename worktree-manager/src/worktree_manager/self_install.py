@@ -990,7 +990,8 @@ def self_update(
 ) -> SelfUpdateResult:
     """Fetch and version-install the Manager through its existing source authority.
 
-    Fetch uses Git or GitHub codeload; non-GitHub sources without Git are skipped.
+    Dev uses clean, merged Git acquisition and the running Manager's preparer.
+    Other refs use Git or GitHub codeload; non-GitHub sources without Git are skipped.
     Prepared source payloads select their exact immutable generation, not merely
     an equal package version. A healthy matching selection can be reused.
 
@@ -1007,15 +1008,26 @@ def self_update(
     previous = current_version(r)
 
     staging = r / STAGING_DIR
+    payload = staging / "worktree-manager"
     use_git = shutil.which("git") is not None
     try:
         from . import engine_client, source_config, update_auth
 
         repo = source_config.absolute_local_source(repo)
-        staging.mkdir(parents=True, exist_ok=True)
-        auth_env = update_auth.environment(repo, cwd=staging) if use_git else None
+        if ref == "dev" and not use_git:
+            return SelfUpdateResult(
+                action="skipped", previous=previous,
+                reason="Manager merged-Dev acquisition requires git; no unqualified tarball fallback",
+            )
+        fetch_root = r / "manager-source" if ref == "dev" else staging
+        fetch_root.mkdir(parents=True, exist_ok=True)
+        auth_env = update_auth.environment(repo, cwd=fetch_root) if use_git else None
         environment = {"env": auth_env} if auth_env is not None else {}
-        if use_git:
+        if ref == "dev":
+            from .runtime_source_self_update import fetch
+
+            payload = fetch(repo, r, environment=auth_env)
+        elif use_git:
             if (staging / ".git").is_dir():
                 subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
                                 repo, ref], check=True, capture_output=True,
@@ -1040,11 +1052,10 @@ def self_update(
             _fetch_via_tarball(staging, url)
     except update_auth.AuthRequired as e:
         return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
-    except (OSError, subprocess.SubprocessError, engine_client.EngineError) as e:
+    except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as e:
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetch failed: {e}")
 
-    payload = staging / "worktree-manager"
     if not (payload / "pyproject.toml").is_file():
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetched payload not found at {payload}")
