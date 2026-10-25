@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import compileall
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -42,6 +43,9 @@ def test_windowless_parent_retains_native_pipe_delivery(tmp_path, monkeypatch):
 
 def test_legacy_decision_and_slot_selection_belong_to_packaged_owners(tmp_path, monkeypatch):
     calls = []
+    python = tmp_path / "versions" / "1.0.0" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("not executed")
 
     class Primitive:
         def probe_legacy_entrypoint(self, **kwargs):
@@ -51,7 +55,10 @@ def test_legacy_decision_and_slot_selection_belong_to_packaged_owners(tmp_path, 
     class Runtime:
         def resolve_python(self, root):
             assert root == tmp_path
-            return tmp_path / "owned-python"
+            return python
+
+        def versions_root(self, root):
+            return root / "versions"
 
     monkeypatch.setattr(
         launcher,
@@ -67,7 +74,7 @@ def test_legacy_decision_and_slot_selection_belong_to_packaged_owners(tmp_path, 
             "VIRTUAL_ENV": "foreign",
         },
     )
-    assert command[:4] == [str(tmp_path / "owned-python"), "-I", "-X", "utf8"]
+    assert command[:4] == [str(python), "-I", "-X", "utf8"]
     assert calls[0]["plugin_id"] == "agent-ssh"
     assert not {"PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"} & environment.keys()
     assert environment["AGENT_SSH_NO_SELFPROVISION"] == "1"
@@ -103,6 +110,87 @@ def test_missing_completed_runtime_cannot_fall_back_to_running_interpreter(tmp_p
         launcher.runtime_command(tmp_path, "agent-ssh", {})
 
 
+def _slot_command(root, monkeypatch):
+    runtime = load(_PLUGIN / "scripts" / "versioned_runtime.py", "snapshot_slot_authority")
+    original = launcher.load
+
+    class Primitive:
+        def probe_legacy_entrypoint(self, **_):
+            return {"probeReason": "legacy-active", "legacy": {"root": str(root)}}
+
+    monkeypatch.setattr(
+        launcher,
+        "load",
+        lambda path, name: (
+            Primitive()
+            if "installation-context" in str(path)
+            else runtime
+            if path.name == "versioned_runtime.py"
+            else original(path, name)
+        ),
+    )
+    slot = root / "versions" / "1.0.0"
+    slot.mkdir(parents=True)
+    (slot / ".install-complete.json").write_text(
+        json.dumps(
+            {
+                "version": "1.0.0",
+                "completed_at": "2026-01-01T00:00:00Z",
+                "pid": 1,
+            }
+        )
+    )
+    (root / "current-version").write_text("1.0.0")
+    return slot
+
+
+def test_redirected_interpreter_directory_is_refused(tmp_path, monkeypatch):
+    slot = _slot_command(tmp_path / "owner", monkeypatch)
+    outside = tmp_path / "outside" / "Scripts"
+    outside.mkdir(parents=True)
+    (outside / "python.exe").write_text("must not execute")
+    link = slot / "Scripts"
+    if os.name == "nt":
+        result = run_caller_owned(
+            [os.environ["COMSPEC"], "/d", "/c", "mklink", "/J", str(link), str(outside)],
+            timeout=5,
+            max_stdout_bytes=4096,
+            max_stderr_bytes=4096,
+        )
+        assert result.returncode == 0, result.stderr
+    else:
+        link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="interpreter"):
+        launcher.runtime_command(tmp_path, "agent-ssh", {})
+
+
+def test_interpreter_leaf_is_never_resolved(tmp_path, monkeypatch):
+    slot = _slot_command(tmp_path / "owner", monkeypatch)
+    binary = slot / "bin"
+    binary.mkdir()
+    python = binary / "python"
+    python.write_text("not executed")
+    original = Path.resolve
+
+    def resolve(path, *args, **kwargs):
+        assert path != python, "interpreter leaf was resolved"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    argv, _ = launcher.runtime_command(tmp_path, "agent-ssh", {})
+    assert argv[0] == str(python)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX venv interpreter symlink")
+def test_posix_interpreter_leaf_symlink_remains_supported(tmp_path, monkeypatch):
+    slot = _slot_command(tmp_path / "owner", monkeypatch)
+    (slot / "bin").mkdir()
+    python = slot / "bin" / "python"
+    python.symlink_to(sys.executable)
+    argv, _ = launcher.runtime_command(tmp_path, "agent-ssh", {})
+    assert argv[0] == str(python)
+
+
 def _purelib(python, *, scheme=None):
     code = (
         "import json,sys,sysconfig; "
@@ -121,6 +209,40 @@ def _purelib(python, *, scheme=None):
     if not path.is_absolute():
         raise ValueError("Selected interpreter purelib must be absolute")
     return path
+
+
+def _older_snapshot_slot():
+    root = Path.home() / ".agent-ssh"
+    slot = root / "versions" / "0.9.0"
+    shutil.copytree(
+        root / "versions" / "1.0.0",
+        slot,
+        ignore=shutil.ignore_patterns(".install-complete.json", "__pycache__"),
+    )
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    legacy = (_PLUGIN / "src" / "agent_ssh" / "session_snapshot.py").read_bytes()
+    legacy = (
+        legacy.replace(b"\r\n", b"\n").split(b'\nif __name__ == "__main__":', 1)[0].rstrip()
+        + b"\n"
+    )
+    # Exact released snapshot module from 75424b8, before its executable tail.
+    assert hashlib.sha256(legacy).hexdigest() == (
+        "d8dfe999045d24b4fa9517f1e32f3a74d56233b5d3c90086da1cfb0920068098"
+    )
+    (_purelib(python) / "agent_ssh" / "session_snapshot.py").write_bytes(legacy)
+    (slot / ".install-complete.json").write_text(
+        json.dumps(
+            {
+                "version": "0.9.0",
+                "completed_at": "2026-01-01T00:00:00Z",
+                "pid": os.getpid(),
+            }
+        )
+    )
+    (root / "versions" / "2.0.0").mkdir()
+    (root / "current-version").write_text("2.0.0")
+    (root / "last-known-good").write_text("0.9.0")
+    return python
 
 
 def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch):
@@ -532,6 +654,41 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
         machines.write_text(machines.read_text().replace("host-a", "host-b"))
     assert captured[0] != captured[1]
     assert writer._SUBPROCESS_TIMEOUT_S == 10
+    old_python = _older_snapshot_slot()
+    empty = run_caller_owned(
+        [str(old_python), "-I", "-X", "utf8", "-m", "agent_ssh.session_snapshot"],
+        cwd=repo,
+        env=dict(os.environ),
+        timeout=10,
+        max_stdout_bytes=8192,
+        max_stderr_bytes=8192,
+    )
+    assert empty.returncode == 0 and not empty.stdout.strip()
+    old_samples, old_captured = [], []
+    for _ in range(2):
+        started = time.monotonic()
+        assert writer.write_session_guidance(
+            {"sessionId": "session-1", "cwd": str(repo)}, home=home
+        )
+        old_samples.append(round(time.monotonic() - started, 3))
+        value = _snapshot(home)
+        assert value["topology"]["status"] == "available"
+        assert value["state_root"] == "bound"
+        old_captured.append(value["captured_at"])
+    assert old_captured[0] != old_captured[1]
+    with capsys.disabled():
+        print(
+            json.dumps(
+                {
+                    "measurement": "new-payload-released-old-snapshot-module-lkg-runtime",
+                    "n": 2,
+                    "samples_seconds": old_samples,
+                    "cache": "not-controlled",
+                    "phases": ["fresh", "resumed"],
+                    "topology": "available",
+                }
+            )
+        )
     from agent_ssh import session_snapshot
 
     profiles = tmp_path / "profiles"

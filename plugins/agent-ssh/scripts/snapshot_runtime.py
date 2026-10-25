@@ -72,6 +72,16 @@ def runtime_command(payload: Path, plugin: str, environment: dict) -> tuple[list
         if own is None:
             raise FileNotFoundError("Selected completed runtime is unavailable")
         raise ValueError("Selected completed runtime is unavailable")
+    versions = Path(own["versionsRoot"]) if own is not None else runtime.versions_root(root)
+    # Retain the canonical peer-launch physical-parent fence, not the leaf:
+    # a normal POSIX venv's python may itself point outside its completed slot.
+    parent = python.parent.resolve()
+    if (
+        python.parent.parent.parent != versions
+        or parent.parent.parent != versions.resolve()
+        or parent.parent != python.parent.parent.resolve()
+    ):
+        raise ValueError("Selected interpreter directory escaped its completed slot")
     if own is not None:
         _, slot, _ = primitive._runtime_slot_paths(
             own,
@@ -239,7 +249,11 @@ def main() -> int:
     try:
         if sys.argv[1:] == ["snapshot"]:
             command, environment = runtime_command(owner, "agent-ssh", dict(os.environ))
-            command[-1] = "agent_ssh.session_snapshot"
+            command[-2:] = [
+                "-c",
+                "import json; from agent_ssh.session_snapshot import capture,guidance; "
+                "print(json.dumps({'additionalContext':guidance(capture())}))",
+            ]
         else:
             raise ValueError("Unsupported read-only snapshot invocation")
         return subprocess.call(
