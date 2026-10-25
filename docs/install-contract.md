@@ -78,6 +78,21 @@ Index uses the same comparison for active/stamped publication freshness.
 These checks retain genuine package-downgrade refusal; portable comparison
 does not authorize a forced downgrade, source replacement or runtime rollout.
 
+The ordinary POSIX session-bootstrap hooks for Bridge, Dispatch and MCP
+use the vendored resolver in read-only mode for completed-runtime no-ops.
+Readiness requires the expected generation to be selected by `current-version`,
+its canonical completion marker and interpreter, and matching deployed/payload
+package identity. A healthy last-known-good or newest-slot fallback is recovery,
+not proof that the selected generation is ready. Prepared source payloads also
+retain canonical source-receipt and payload-byte validation against the deployment
+manifest; repair generations retain their package version. Valid pre-marker
+legacy links remain compatible, but cannot hide a broken/different selector or
+missing source receipt. No readiness cache, legacy link or publication permission
+is created. These predicates do not change admission, reconciliation or deadlines.
+`python tools/check-bootstrap-sync.py --sync-readiness` copies the Bridge
+reference predicate to these adopting families; the ordinary check detects drift.
+Other deploy-model families keep their own readiness contracts.
+
 The root `snapshot-provenance.json` installation-cell receipt is published after
 assembly and is validated independently by the cell contract; it is not a runtime
 source-hash input. It must still be an ordinary file. Nested files with that name

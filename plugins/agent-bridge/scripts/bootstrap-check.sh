@@ -103,10 +103,65 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
-# The stable runtime link is named '.venv' for most plugins but 'venv' for a
-# few (agent-bridge); accept EITHER so this early-exit actually fires instead of
-# re-launching the installer on every session start.
-if { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; } && [ "$deployed" = "$current" ]; then exit 0; fi
+# --- selected completed runtime readiness (reference: agent-bridge) ---
+provisioned=0
+if [ "$deployed" = "$current" ]; then
+  expected_slot="$("$py" -I -B - "$ScriptDir" "$PluginDir" "$Manifest" "$current" "$name" <<'EXPECTED_SLOT'
+import json
+import pathlib
+import sys
+
+sys.path.insert(0, sys.argv[1])
+payload, manifest = pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+current, name = sys.argv[4:]
+deployment = json.loads(manifest.read_text(encoding="utf-8-sig"))
+receipt = payload / "runtime-source.json"
+fields = {}
+if receipt.exists() or receipt.is_symlink() or deployment.get("runtime_source") is not None:
+    from versioned_runtime_source import manifest_fields, read_source_identity
+    fields = manifest_fields(read_source_identity(payload, current, plugin=name))
+    if deployment.get("runtime_source") != fields.get("runtime_source"):
+        raise ValueError("Payload and deployment source identities differ")
+expected = fields.get("runtime_version", deployment.get("runtime_version", current))
+if deployment.get("runtime_version", expected) != expected:
+    raise ValueError("Deployment generation does not match the payload")
+if expected != current:
+    from versioned_runtime_source import package_version
+    if package_version(expected) != current or (
+        ("+source." in expected or ".source." in expected) and not fields
+    ):
+        raise ValueError("Deployment package version does not match the payload")
+print(expected)
+EXPECTED_SLOT
+)" || expected_slot=""
+  # Legacy installations have no selector. A link must not hide a broken or
+  # different selection in the marker-only layout.
+  if [ "$expected_slot" = "$current" ] &&
+     [ ! -e "$InstallDir/current-version" ] && [ ! -L "$InstallDir/current-version" ] &&
+     [ ! -e "$PluginDir/runtime-source.json" ] && [ ! -L "$PluginDir/runtime-source.json" ] &&
+     { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; }; then
+    provisioned=1
+  elif [ -f "$InstallDir/current-version" ] && [ -f "$ScriptDir/resolve-runtime.sh" ]; then
+    selected="$(tr -d ' \t\r\n' < "$InstallDir/current-version")"
+    if [ -n "$expected_slot" ] && [ "$selected" = "$expected_slot" ]; then
+      # Subshell scopes resolver variables and read-only suppresses durable
+      # traces. A healthy fallback must never stand in for this exact selection.
+      resolved="$(
+        AGENT_RT_ROOT="$InstallDir"
+        AGENT_RT_RESOLVE_TRACE_MODE=read-only
+        . "$ScriptDir/resolve-runtime.sh"
+        printf '%s' "$AGENT_RT_PY"
+      )"
+      if [ -n "$resolved" ] &&
+         { [ "$resolved" = "$InstallDir/versions/$selected/bin/python" ] ||
+           [ "$resolved" = "$InstallDir/versions/$selected/Scripts/python.exe" ]; }; then
+        provisioned=1
+      fi
+    fi
+  fi
+fi
+if [ "$provisioned" = 1 ]; then exit 0; fi
+# --- end selected completed runtime readiness ---
 
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")

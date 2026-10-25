@@ -1,0 +1,17 @@
+{
+  "comment": "Recognize the exact completed marker-only runtime at POSIX session bootstrap without reconciliation",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
