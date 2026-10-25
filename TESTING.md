@@ -88,6 +88,31 @@ not converted. Generator controls retain its required-context/vendored-primitive
 guard and unchanged command/catalog rendering. No required unit-only CI packet
 is expanded.
 
+## Optional service-less collected-source updater witnesses
+
+Set `COPILOT_TEST_NATIVE_SOURCE_SIMPLE=1` and select
+`plugins/agent-worktrees/tests/test_source_simple_native.py` through the bounded
+test runner. SSH and Machines exercise real materialized native provisioning,
+the collected source updater and canonical installed-owner lifecycle admission.
+The witnesses check installed module/interpreter/distribution identity, original command
+binding, default fixture config/SQLite identity, exact selected-source
+currentness, completion-preserving reuse and global help after prepared inputs
+become unavailable. Machines retains its CMD-only Windows global launcher.
+The original owner is built with a higher package label than the selected source
+to distinguish publisher delivery, actual installed version and exact source
+selection without imposing version ordering. The helper code remains current;
+this is not a claim that arbitrary older helper ABIs are supported.
+
+Use short Windows and private Linux-native temporary paths. The Windows witness
+also compares persistent User PATH fingerprints; contained installers may update
+only their child process environment. Source receipts and account homes remain
+synthetic fixtures, not Git admission, production data-format/serving proof,
+service-role adoption or a full eligible-portfolio rollout. No required unit-only
+CI packet is expanded, and neither witness starts a resident service.
+Companion controls in `tools/test_native_source_manifest_publication.py` exercise
+the actual native publication blocks with a refusing SDK child, retaining prior
+manifest bytes and the original-owner argv without a success-shaped result.
+
 ## Optional native source-profile updater witness
 
 Set `COPILOT_TEST_NATIVE_SOURCE_PROFILE=1` and select

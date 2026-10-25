@@ -2038,6 +2038,8 @@ fi
 SOURCE_PLUGIN_DIR="$PLUGIN_DIR"
 if [[ "$CELL_MODE" == 1 ]]; then
     SOURCE_PLUGIN_DIR="$ORIGIN_PAYLOAD_ROOT"
+elif [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+    SOURCE_PLUGIN_DIR="$SOURCE_OWNER"
 fi
 if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
     VER="$PACKAGE_VERSION"
@@ -2068,7 +2070,7 @@ else
         SOURCE_FIELDS=", ${SOURCE_FIELDS%\}}"
     fi
     if [[ -z "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _assert_source_runtime_identity || exit 1; fi
-    cat > "$TMP" << EOF
+    manifest_json="$(cat << EOF
 {
   "schema_version": 3,
   "service": "agent-machines",
@@ -2088,7 +2090,21 @@ else
   "runtime": "python"$SOURCE_FIELDS
 }
 EOF
-    mv -f "$TMP" "$INSTALL_DIR/deploy-manifest.json"
+    )" || exit 1
+    if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+        if ! printf '%s\n' "$manifest_json" |
+            "$VENV_PYTHON" -I -B -X utf8 "$SOURCE_PLUGIN_DIR/scripts/command_binding.py" \
+                --payload-root "$SOURCE_PLUGIN_DIR" --source-payload-root "$SOURCE_PLUGIN_DIR" \
+                --plugin-id agent-machines --legacy-root "$INSTALL_DIR" \
+                --project-root "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" \
+                --publish-legacy --write-manifest >/dev/null; then
+            _fail 'Command ownership validation refused Machines source manifest publication.'
+            exit 1
+        fi
+    else
+        printf '%s\n' "$manifest_json" > "$TMP"
+        mv -f "$TMP" "$INSTALL_DIR/deploy-manifest.json"
+    fi
     _ok "Deploy manifest written (source: $KIND)"
 fi
 

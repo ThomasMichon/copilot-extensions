@@ -106,6 +106,49 @@ def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
         assert manifest["venv"] == (tmp_path / "slot").as_posix()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX manifest renderer")
+def test_posix_deploy_manifest_can_build_without_publishing(tmp_path: Path) -> None:
+    shell = shutil.which("bash")
+    if shell is None:
+        pytest.skip("Bash unavailable")
+    root = tmp_path / "runtime"
+    root.mkdir()
+    script = tmp_path / "manifest.sh"
+    script.write_text(
+        """set -euo pipefail
+. "$1"
+unset _RUNTIME_PUBLICATION_EVIDENCE
+_ok() { :; }
+_fail() { printf '%s\\n' "$*" >&2; }
+_source_kind() { printf marketplace; }
+_git_info() { printf 'abc dev false\\n'; }
+_payload_hash() { printf fixture-hash; }
+date() { printf '2026-01-01T00:00:00Z\\n'; }
+hostname() { printf example; }
+uname() { printf Linux; }
+built="$(render_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3)"
+if [[ -n "$(find "$2" -mindepth 1 -print -quit)" ]]; then
+    printf 'Renderer wrote into the runtime root\\n' >&2
+    exit 1
+fi
+printf '%s\\n' "$built"
+write_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [shell, str(script), str(REPO / "libs/installer-engine/installer-engine.sh"),
+         str(root), str(tmp_path), str(root / "slot")],
+        capture_output=True, text=True, timeout=20, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    built = json.loads(result.stdout)
+    published = json.loads((root / "deploy-manifest.json").read_text(encoding="utf-8"))
+    assert built == published
+    assert built["source"]["version"] == "1.2.3"
+    assert built["preserved"] == "value"
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
 def test_installer_action_identity_uses_existing_progress_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,

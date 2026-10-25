@@ -933,6 +933,7 @@ $env:AGENT_MACHINES_EXPECTED_SOURCE_IDENTITY = $selectedSourceIdentity
 # Source manifest inputs are captured before activation.
 if ($SourceRuntimeIdentity) {
     $sourceOwner = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+    $script:SourceManifestPath = $sourceOwner
     $script:SourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceOwner))
 }
 if (
@@ -2584,7 +2585,9 @@ if (-not $CellMode) {
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-$sourcePluginDir = if ($CellMode) { $OriginPayloadRoot } else { $PluginDir }
+$sourcePluginDir = if ($CellMode) { $OriginPayloadRoot } elseif ($SourceRuntimeIdentity) {
+    $script:SourceManifestPath
+} else { $PluginDir }
 $kind = Get-SourceKind -PluginPath $sourcePluginDir
 $ver = if ($SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
@@ -2634,8 +2637,23 @@ if ($CellMode) {
             $manifest[$_.Name] = $_.Value
         }
     }
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
+    if ($env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) {
+        $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } else { (Get-Location).Path }
+        $result = Invoke-Hidden -FilePath $pythonCmd -ArgList @(
+            '-I', '-B', '-X', 'utf8', (Join-Path $sourcePluginDir 'scripts/command_binding.py'),
+            '--payload-root', $sourcePluginDir, '--source-payload-root', $sourcePluginDir,
+            '--plugin-id', 'agent-machines', '--legacy-root', $InstallDir,
+            '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+        ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command ownership validation refused Machines source manifest publication: $result"
+        }
+    } else {
+        $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+        Move-Item -Force -Path $tmp -Destination $manifestPath
+    }
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 

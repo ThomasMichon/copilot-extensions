@@ -1218,7 +1218,28 @@ if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY#\{}"
     SOURCE_FIELDS="${SOURCE_FIELDS%\}}"
 fi
-if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+    if ! manifest_json="$(
+        _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
+        _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }
+        render_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" \
+            "$VENV_DIR" "$SOURCE_FIELDS" "$SOURCE_PATH" "$PACKAGE_VERSION"
+    )"; then
+        _fail "Source deploy manifest rendering failed: $manifest_json"
+        exit 1
+    fi
+    py="$(_source_python)" || exit 1
+    if ! printf '%s\n' "$manifest_json" |
+        "$py" -I -B -X utf8 "$SOURCE_PATH/scripts/command_binding.py" \
+            --payload-root "$SOURCE_PATH" --source-payload-root "$SOURCE_PATH" \
+            --plugin-id agent-ssh --legacy-root "$INSTALL_DIR" \
+            --project-root "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" \
+            --publish-legacy --write-manifest >/dev/null; then
+        _fail 'Command ownership validation refused SSH source manifest publication.'
+        exit 1
+    fi
+    _ok "Deploy manifest written (source: $(_source_kind "$SOURCE_PATH"))"
+elif [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
     (
         _payload_hash() { printf '%s\n' "$SOURCE_MANIFEST_HASH"; }
         _git_info() { printf '%s\n' "$SOURCE_MANIFEST_GIT"; }

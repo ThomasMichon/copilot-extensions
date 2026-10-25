@@ -1276,7 +1276,8 @@ if ($SourceRuntimeIdentity) {
 } elseif (Test-Path $snapshotSourceMarker) {
     $sourcePath = (Get-Content -LiteralPath $snapshotSourceMarker -Raw).Trim()
 }
-Write-DeployManifest `
+$sourcePublication = [bool]$env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN
+$manifest = Write-DeployManifest `
     -Service 'agent-ssh' `
     -Plugin 'agent-ssh' `
     -InstallPath $InstallDir `
@@ -1295,7 +1296,23 @@ Write-DeployManifest `
         ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $fields[$_.Name] = $_.Value }
         $fields
     } else { @{} }) `
-    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash })
+    -PayloadHash $(if ($SourceRuntimeIdentity) { $sourceManifestHash } else { Get-PayloadHash }) `
+    -PassThru:$sourcePublication
+if ($sourcePublication) {
+    $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).Path }
+    $result = Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+        '-I', '-B', '-X', 'utf8', (Join-Path $sourcePath 'scripts/command_binding.py'),
+        '--payload-root', $sourcePath, '--source-payload-root', $sourcePath,
+        '--plugin-id', 'agent-ssh', '--legacy-root', $InstallDir,
+        '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+    ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command ownership validation refused SSH source manifest publication: $result"
+    }
+    Write-Ok "Deploy manifest written (source: $($manifest.source.kind))"
+}
 
 $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
