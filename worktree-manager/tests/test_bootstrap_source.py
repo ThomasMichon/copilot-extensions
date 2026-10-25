@@ -93,7 +93,8 @@ def test_dev_uses_only_own_declared_helper_before_shared_acquisition(
             helper.manager_payload(tmp_path / "original", tmp_path)
         assert calls == []
     else:
-        assert helper.manager_payload(tmp_path / "original", tmp_path) == tmp_path / "qualified"
+        monkeypatch.chdir(tmp_path)
+        assert helper.manager_payload(tmp_path / "original", Path(".")) == tmp_path / "qualified"
         assert calls == [(str(tmp_path / "upstream"), tmp_path)]
     assert helper.sys.path == before
 

@@ -97,7 +97,7 @@ def _prepare_source_repair(directory, constructed):
         selected = _prepare_command([
             Path(getattr(sys, "_base_executable", sys.executable)), "-I", "-S", "-B",
             str(SOURCE / "scripts/runtime_install.py"),
-            "--root", str(root), "--payload", str(SOURCE), "--", "--version",
+            "--root", os.path.relpath(root, directory), "--payload", str(SOURCE), "--", "--version",
         ], env, directory)
         assert selected.returncode == 0, selected.stdout + selected.stderr
         assert si.current_version(root) == target.name

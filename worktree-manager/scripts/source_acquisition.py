@@ -14,6 +14,7 @@ import versioned_runtime_source as runtime_source
 def manager_payload(payload: Path, root: Path) -> Path:
     from worktree_manager.self_install import manager_ref, manager_repo, payload_version
 
+    root = root.resolve()
     if manager_ref(root) != "dev":
         return payload
     receipt = payload / runtime_source.SOURCE_FILE
