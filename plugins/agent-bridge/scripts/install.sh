@@ -1476,6 +1476,7 @@ deploy_binstub() {
     cat >> "$BINSTUB" << 'STUB'
 set -euo pipefail
 export PYTHONUTF8=1
+unset PYTHONPATH PYTHONHOME
 _snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
 _payload="$_snap"
 # Prefer the exact publisher for old snapshots lacking canonical source proof.

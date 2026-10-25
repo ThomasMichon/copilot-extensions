@@ -351,6 +351,8 @@ def test_bridge_cell_stamp_preserves_global_ownership(
     *[("legacy", state, entry)
       for state in ("healthy-stale-current", "healthy-incomplete-current")
       for entry in ("stamped-global", "stamped-unavailable", "stamped-no-pointer")],
+    *[("legacy", "healthy-python-environment", entry)
+      for entry in ("stamped-global", "stamped-unavailable", "stamped-no-pointer")],
     *[pytest.param("legacy", "failed-resolver", entry, marks=pytest.mark.skipif(
         os.name == "nt", reason="Bash resolver error propagation",
     )) for entry in ("payload", "stamped-no-pointer")],
@@ -609,6 +611,24 @@ def test_bridge_actual_first_use_publication(
                                  else "# Older resolver without deferred tracing"),
                 encoding="utf-8-sig" if shell == "powershell" else "utf-8",
             )
+    if state == "healthy-python-environment":
+        if entry == "stamped-global":
+            gate = fixture["payload"] / f"scripts/runtime-gate.{suffix}"
+            gate.write_text(
+                "throw 'unqualified older gate must not execute'\n" if shell == "powershell" else
+                "printf 'unqualified older gate must not execute' >&2\nexit 99\n", encoding="utf-8",
+            )
+        ambient = fixture["home"] / "ambient-python"
+        ambient.mkdir()
+        (ambient / "agent_bridge.py").write_text(
+            'raise RuntimeError("ambient Bridge must not be imported")\n', encoding="utf-8",
+        )
+        environment.update(
+            PYTHONPATH=str(ambient), PYTHONHOME=str(fixture["home"] / "missing-python-home"),
+        )
+        if host:
+            host.close()
+            host = powershell_host(fixture, environment)
     entry_path = (
         fixture["home"] / ".local/bin/agent-bridge" if entry.startswith("stamped-") else
         fixture["payload"] / "bin/agent-bridge"

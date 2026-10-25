@@ -618,7 +618,9 @@ Generated global wrappers retain the exact publisher or their source-qualified
 selected snapshot; unreceipted Windows copies require their exact publisher
 for cold execution. If that source is unavailable, only a healthy legacy runtime
 may run through its qualified deployed resolver. A requested installation context
-never falls back to that legacy runtime. Explicit installers and bootstrap have
+never falls back to that legacy runtime. Both primary wrappers clear ambient
+`PYTHONPATH`/`PYTHONHOME` before resolver-only fallback, matching the payload gate.
+Explicit installers and bootstrap have
 their own action contracts; command adoption does not change their service
 options or enroll maintenance.
 

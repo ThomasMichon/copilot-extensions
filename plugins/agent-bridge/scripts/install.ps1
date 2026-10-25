@@ -2175,6 +2175,8 @@ function Write-Binstubs {
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $env:PYTHONUTF8 = '1'
+Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $_root = '__ROOT__'
 # -File's redirected native stdin is not an object pipeline.
 $_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
