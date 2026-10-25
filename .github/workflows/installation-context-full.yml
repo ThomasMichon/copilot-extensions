@@ -23,12 +23,45 @@ on:
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
+          - promotion-controls
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  promotion-controls:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
+    name: Promotion control retirement (actual Git)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Install seasoned integration tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system pytest packaging pyyaml
+      - name: Record immutable integration source
+        run: git show --no-patch --format='source=%H parents=%P'
+      - name: Exercise real composition and repeated retirement
+        env:
+          PYTHONPATH: tools
+        run: >-
+          timeout --signal=TERM --kill-after=10s 100s python -m pytest -q
+          tools/test_promotion_control.py::test_main_deleted_control_stays_deleted_across_promotions
+          tools/test_promotion_control.py::test_explicit_retirement_returns_path_to_dev_composition
+          tools/test_promotion_control.py::test_preservation_uses_pinned_main_not_live_main_or_dev
+          tools/test_promotion_control.py::test_trusted_artifact_recomposition_uses_same_control_tree
+          tools/test_promotion_control.py::test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci
+          tools/test_promotion_control.py::test_manifest_removal_cannot_reactivate_deleted_dev_workflow
+
   dispatch-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-binding'
     name: Dispatch scoped-stamp binding (Ubuntu)

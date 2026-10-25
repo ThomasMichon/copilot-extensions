@@ -7,6 +7,23 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
 
+## Optional promotion-control retirement witness
+
+The manual `installation-context-full.yml` portfolio `promotion-controls` runs
+six actual-Git cases and their workflow guard on an ephemeral Ubuntu runner, with a 100-second packet
+deadline and a five-minute setup/job envelope. It records the exact checked-out
+commit and parents, uses read-only permissions and no persisted credentials,
+and does not expand required PR CI or the promotion unit portfolio.
+The cases prove repeated deletion/rename preservation through real composition,
+ordinary declassification, pinned-Main selection and artifact recomposition.
+Recorded ownership cannot be removed to reactivate a deleted Dev workflow.
+It is not a live controller, artifact-reuse or late-merge race qualification.
+
+```bash
+gh workflow run installation-context-full.yml --ref <published-branch> \
+  -f portfolio=promotion-controls
+```
+
 ## Optional Dispatch scoped-stamp binding
 
 The manual `installation-context-full.yml` portfolio `dispatch-binding` runs

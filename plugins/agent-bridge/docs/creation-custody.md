@@ -2,7 +2,7 @@
 
 Back to the [DB custody foundation](runtime-custody-foundation.md) and
 [Bridge restoration effort](../../../efforts/active/bridge-retained-runtime-restoration/README.md).
-This is an internal DB foundation, not an allocation/native effect grant,
+This is an internal DB and explicit local allocation foundation, not a native effect grant,
 automatic producer enrollment, public capability or restore qualification.
 
 ## Original attempts
@@ -49,12 +49,49 @@ unassociated attempts. An explicitly associated attempt instead refuses
 `creation_custody_required` before ordinary allocation or native launch. It
 cannot downgrade into an unfenced legacy path.
 
-No route selects this journal or accepts a caller-supplied admission. No actual
-allocation, provider execution, Host/native launch, bind, resume or first-turn
-effect is qualified by these methods. The later frontend integration must
-retain the actual owner and original effect handoffs, recheck the open epoch at
-each final boundary, preserve ambiguous outcomes and reconcile through these
-same rows. Ordinary legacy replay is not evidence of complete runtime closure.
+No route selects this journal or accepts a caller-supplied admission. Provider
+execution, Host/native launch, bind, resume and first-turn effects remain
+unsupported for associated creation. Ordinary legacy replay is not evidence of
+complete runtime closure.
+
+## Explicit local allocation owner
+
+An internal `CreationFrontend.capture` binds the actual manager, DB object and
+file identity to its already-enrolled frontend process and birth. It does not
+enroll or reopen anything. Its separately selected `allocate` method retains the
+complete original target, prompt and options, including the full owner reference,
+before awaiting policy or owner preparation. It uses the existing keyed creation
+executor and the same `create --creation-key --no-owner --interface acp` command
+as ordinary workspace creation. Existing-workspace, remote, elevated and provider
+targets refuse before a new attempt.
+
+Immediately before the existing `worktree_command` subprocess spawn, the same
+owner rechecks manager, process, DB file, target and open epoch. A short FULL
+transaction moves that original row from `allocating` to `allocation_started`;
+it can happen only once. No transaction spans process execution. The window
+after final admission is outstanding allocation custody, not evidence that
+the external allocation completed or did not happen.
+
+An exact successful keyed allocation response records its project, path,
+worktree ID and nonce on the same row as `allocated`, including after closure.
+A replay by the original captured frontend validates its identity and retained
+producer history without requiring an open epoch, even during draining. It
+returns that observation without another subprocess or inventory revision.
+Fresh allocation still requires open admission before policy preparation and
+again at the final subprocess boundary. Lost, malformed,
+cancelled or wrong-project replies retain `allocation_started` without retry
+permission; a restarted reader can observe the same attempt. A changed result
+cannot replace the retained identity. The ground owner's own keyed allocation
+protocol remains unchanged; this slice does not claim to enroll that process,
+negotiate a child epoch or qualify its internal filesystem effects.
+
+`allocate` returns an allocation observation, never a native session or a
+complete embodiment receipt. It does not call `start_session`, bind a native
+head, resume or submit a prompt. Full `workspace_creation.start` continues to
+refuse associated attempts before ordinary effects. This separate internal
+entry prevents allocating only to discover an unsupported native boundary
+later in an otherwise full-start request. Native integration and complete
+cross-owner allocation qualification remain later source/validation gates.
 
 ## Cost and validation
 
@@ -65,10 +102,20 @@ uses one FULL transaction and restores the connection's prior synchronous
 policy on success/refusal. Full-row input decoding belongs only to explicit
 journal reads and strict inventory, not every ordinary start.
 
+Selected allocation adds bounded process/DB identity reads and FULL transitions
+to its existing one-subprocess command. Replay adds no subprocess or network
+work. The ordinary path gains only a shared Python helper call with its command
+and response checks unchanged. The acquisition frontend reuses the same process
+validator without adding an owner, process or background scan.
+
 Focused controls cover both creation kinds, original inputs and immutable
 history, closure/replay, concurrent SQLite owners, process exit after a committed
 claim, FULL durability on normal/adopted connections, migration from the frozen
 legacy schema, damaged-layout refusal and real owner-path downgrade refusal.
-These are isolated source/storage controls, not native performance budgets,
+The allocation controls additionally cover the actual subprocess callback with
+a synthetic owner, executor exclusion across an await, closure during resolver
+preparation, closure after final admission, unknown replies, immutable outcomes
+and observation through a fresh DB connection. These are isolated source/storage
+and synthetic-process controls, not native performance budgets,
 SDK acceptance, attributed consumption, platform qualification or running
 adoption. The effort's full cohort and installer gates remain open.

@@ -8,6 +8,7 @@ import json
 import re
 import sqlite3
 from typing import TYPE_CHECKING, Literal
+from pathlib import PurePosixPath, PureWindowsPath
 import uuid
 
 from .acquisition_contract import AcquisitionRefused
@@ -157,4 +158,60 @@ class CreationJournal:
         with self.db._runtime_transaction(write=False) as conn:
             return self._original(conn.execute(
                 f"SELECT * FROM {table} WHERE key_digest=?", (request.key_digest,),
+            ).fetchone(), request)
+
+    def begin_allocation(
+        self, request: CreationRequest, installation: RuntimeInstallation, admission: RuntimeAdmission,
+    ) -> None:
+        """Record one outstanding owner call immediately before subprocess spawn."""
+        if type(request) is not CreationRequest or request.kind != "workspace":
+            raise RuntimeCustodyError("Allocation custody supports original workspaces only")
+        identity = self.db._runtime_installation(installation)
+        with self.db._runtime_transaction(write=True) as conn:
+            self.db._runtime_admission(conn, identity, admission, cohort="Creation allocation")
+            row = self._original(conn.execute(
+                "SELECT * FROM workspace_embodiments WHERE key_digest=?", (request.key_digest,),
+            ).fetchone(), request, admission)
+            if (
+                row["state"] != "allocating" or row["worktree_json"] is not None
+                or row["native_session_id"] is not None or row["turn_index"] is not None
+            ):
+                raise RuntimeCustodyError("Original allocation is already outstanding or observed; do not retry")
+            conn.execute(
+                "UPDATE workspace_embodiments SET state='allocation_started' WHERE key_digest=?",
+                (request.key_digest,),
+            )
+
+    def report_allocation(self, request: CreationRequest, worktree: dict) -> dict:
+        """Retain the same result after closure; never grant another owner call."""
+        if type(request) is not CreationRequest or request.kind != "workspace":
+            raise RuntimeCustodyError("Allocation custody supports original workspaces only")
+        target = decode(request.facts_json)["target"]
+        for field in ("id", "repo", "path", "creation_nonce"):
+            nonblank(worktree.get(field))
+        path = worktree["path"]
+        if (
+            worktree["repo"] != target.get("project")
+            or not (PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute())
+            or ".." in PurePosixPath(path).parts or ".." in PureWindowsPath(path).parts
+        ):
+            raise RuntimeCustodyError("Original allocation returned another workspace identity")
+        document = encode(worktree)
+        with self.db._runtime_transaction(write=True) as conn:
+            row = self._original(conn.execute(
+                "SELECT * FROM workspace_embodiments WHERE key_digest=?", (request.key_digest,),
+            ).fetchone(), request)
+            if row["state"] == "allocated" and row["worktree_json"] == document:
+                return row
+            if (
+                row["state"] != "allocation_started" or row["worktree_json"] is not None
+                or row["native_session_id"] is not None or row["turn_index"] is not None
+            ):
+                raise RuntimeCustodyError("Original allocation result cannot be replaced")
+            conn.execute(
+                "UPDATE workspace_embodiments SET state='allocated',worktree_json=? WHERE key_digest=?",
+                (document, request.key_digest),
+            )
+            return self._original(conn.execute(
+                "SELECT * FROM workspace_embodiments WHERE key_digest=?", (request.key_digest,),
             ).fetchone(), request)

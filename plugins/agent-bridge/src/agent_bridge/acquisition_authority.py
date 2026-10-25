@@ -39,7 +39,9 @@ def _bounded_log_text(text: str | None, limit: int) -> str | None:
     return clipped(low)
 
 
-async def worktree_command(args: list[str], project: str | None) -> dict[str, Any]:
+async def worktree_command(
+    args: list[str], project: str | None, *, before_spawn: Callable[[], None] | None = None,
+) -> dict[str, Any]:
     try:
         prefix = _agent_worktrees_launch_prefix()
     except ContextRefused as exc:
@@ -52,6 +54,8 @@ async def worktree_command(args: list[str], project: str | None) -> dict[str, An
 
     started = time.monotonic()
     correlation_id = uuid.uuid4().hex
+    if before_spawn is not None:
+        before_spawn()
     proc = await asyncio.create_subprocess_exec(
         *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=env, **no_window_kwargs(),

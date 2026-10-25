@@ -146,7 +146,7 @@ require their own review and qualification.
       exclusions. Other creation/background/host/remote cohorts and full
       installed qualification remain open. The internal
       [keyed-creation DB foundation](../../../plugins/agent-bridge/docs/creation-custody.md)
-      is under source validation; actual allocation/native effect-owner
+      merged in #8823; actual allocation/native effect-owner
       integration remains open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
@@ -262,6 +262,36 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original local allocation owner under validation
+
+- Add a separately selected internal allocation method on the actual creation
+  frontend. Reuse the existing creation executor, embodiment row and ground
+  owner command; retain one outstanding `allocation_started` transition at the
+  subprocess boundary and an immutable original allocation observation.
+- Keep lost/cancelled replies outstanding rather than allocate again. Validate
+  exact frontend/process/DB/target identity and closure at the final spawn,
+  including a synthetic actual-subprocess control and fresh-connection recovery.
+- This is a bounded Phase 1 allocation slice, not full keyed creation. The full
+  start route still refuses associated attempts; provider/native launch,
+  bind/resume/first-turn and cross-owner/native qualification remain open.
+  No default enrollment, wire generation, installer or running adoption changes.
+
+### 2026-10-24 - Keyed-creation DB source merged; allocation effect owners next
+
+- #8823 merged as `ae0e2416665a317fd90b8d20682256e0239ec1ac` after independent
+  current-head approval `5641691401` on
+  `7228f93750a99c4476c0dafe9e06a44d085a6b4b`, required green CI and resolution
+  of the replacement-update retention finding. No public capability or default
+  enrollment was added.
+- The original schema-36 capture source remains retrievable at
+  `refs/tags/contract-evidence/http50-f3f5257ed41ecf10abcb2d52bc3c80d0190d672c`.
+  This retains exact source evidence, not installation or native qualification.
+- Re-read the full Plan and Validation Plan after merge. The next bounded source
+  stretch carries an actual original creation owner through workspace allocation
+  and native launch, preserving the existing attempt and refusing unsupported
+  provider/native boundaries. Full Phase 1/1b, remaining cohorts, compatibility,
+  guarded installer restoration and separately authorized adoption remain open.
 
 ### 2026-10-24 - Original keyed-creation DB foundation under validation
 
