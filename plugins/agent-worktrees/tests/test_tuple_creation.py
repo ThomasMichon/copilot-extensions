@@ -485,13 +485,17 @@ def test_completed_key_replays_after_optional_customization(
     assert record_path.read_bytes() == before
     with sqlite3.connect(journal) as connection:
         assert connection.execute("SELECT * FROM creations").fetchall() == admitted
-    for foreign in (
+    foreign_configs = [
         replace(renamed, machine="foreign-space", configured_machine="foreign-space"),
-        replace(renamed, platform="windows" if platform != "windows" else "wsl"),
         replace(renamed, repos={renamed.repo_name: replace(
             renamed.default_repo, worktree_root=str(tmp_path / "foreign"),
         )}),
-    ):
+    ]
+    if first_mode == "tuple-v1":
+        foreign_configs.append(replace(
+            renamed, platform="windows" if platform != "windows" else "wsl",
+        ))
+    for foreign in foreign_configs:
         with pytest.raises((ValueError, RuntimeError)):
             m._create_worktree_core(foreign, creation_key="request", identity_mode=first_mode)
         assert record_path.read_bytes() == before
@@ -501,6 +505,41 @@ def test_completed_key_replays_after_optional_customization(
     assert record_path.read_bytes() == before
     with sqlite3.connect(journal) as connection:
         assert connection.execute("SELECT * FROM creations").fetchall() == admitted
+
+
+@pytest.mark.parametrize("actual,override", [
+    ("windows", "wsl"), ("windows", "linux"), ("wsl", "windows"),
+    ("wsl", "linux"), ("linux", "windows"), ("linux", "wsl"),
+])
+@pytest.mark.parametrize("historical_receipt", [False, True])
+def test_completed_legacy_key_preserves_unchanged_platform_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    actual: str, override: str, historical_receipt: bool,
+) -> None:
+    config = replace(_setup(tmp_path, monkeypatch, platform=actual), machine="raw-host", platform=override)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n  peer-space:\n    physical_host: peer\n    execution_platform: windows\n",
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir(name) / "worktrees")
+    first = m._create_worktree_core(config, creation_key="request")
+    record_path = cfg.tracking_dir() / f"{first['worktree']['id']}.yaml"
+    assert tracking.load_record(record_path).platform == actual
+    journal = cfg.project_dir() / "workspace-creation.sqlite3"
+    with sqlite3.connect(journal) as connection:
+        if historical_receipt:
+            receipt = json.loads(connection.execute("SELECT worktree FROM creations").fetchone()[0])
+            del receipt["execution_origin"]
+            connection.execute("UPDATE creations SET worktree=?", (json.dumps(receipt),))
+    before = record_path.read_bytes(), journal.read_bytes()
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: pytest.fail("must not carve"))
+    replayed = m._create_worktree_core(config, creation_key="request")
+    assert replayed["worktree"] == first["worktree"]
+    assert replayed["creation"]["replayed"] is True
+    assert (record_path.read_bytes(), journal.read_bytes()) == before
 
 
 @pytest.mark.parametrize("field,value", [

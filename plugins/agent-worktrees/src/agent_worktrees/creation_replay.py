@@ -50,7 +50,8 @@ def require_completed_record(
     context = execution_spaces.current_execution_context(config)
     if (
         record.repo != config.repo_name or record.platform != cfg.detect_platform()
-        or record.platform != config.platform or not record_namespace_matches(record, config)
+        or (record.machine_identity is not None and record.platform != config.platform)
+        or not record_namespace_matches(record, config)
     ):
         raise execution_spaces.ExecutionSpaceError(
             "Retained creation conflicts with the receiving project/platform namespace",

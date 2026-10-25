@@ -172,6 +172,9 @@ The completed journal must still prove the original intent, checkout and exact
 record; the receiving project/root, actual environment and original configured
 binding must agree. A foreign host, sibling environment, changed binding,
 redirected ledger or changed owner/pair evidence refuses without carving.
+Supported legacy platform/path overrides remain compatible with replay of the
+proven actual-platform record. Tuple records and explicit non-legacy execution
+keys still require the configured platform to agree with actual execution.
 Older receipts are not backfilled: a literal original OS-derived identity can
 be reconstructed, but a former customized identity with no retained observation
 must still satisfy ordinary ownership checks or refuse. Refusal never permits
