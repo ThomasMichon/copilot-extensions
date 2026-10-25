@@ -52,12 +52,14 @@ def prepare_dependencies(
     iterator = iter(selected)
     for argument in iterator:
         name, equal, value = argument.partition("=")
-        if canonicalize(name) != "--test-file":
+        flag = canonicalize(name)
+        if flag not in {"--test-file", "--test-profile"}:
             prep_passthrough.append(argument)
             continue
-        path = value if equal else next(iterator, "")
-        if not path or (not equal and path.startswith("-")):
-            raise ValueError("--test-file requires a path")
+        parameter = value if equal else next(iterator, "")
+        if not parameter or (not equal and parameter.startswith("-")):
+            required = "a path" if flag == "--test-file" else "a value"
+            raise ValueError(f"{flag} requires {required}")
     if not any(
         canonicalize(arg.partition("=")[0]) == "--prepare-only"
         for arg in prep_passthrough

@@ -7,13 +7,17 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import textwrap
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from _pytest.mark import Expression, KeywordMatcher
 
 SCRIPT = Path(__file__).resolve().parent / "run-plugin-tests.py"
 _previous_path = sys.path.copy()
@@ -28,6 +32,7 @@ try:
     import plugin_test_containment as containment
     import pytest_portfolio_guard as portfolio_guard
     import _admission_protocol as admission
+    import _devcontainer_network_scope as network_scope
 finally:
     sys.path[:] = _previous_path
 
@@ -830,6 +835,327 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
     assert str(Path("tests") / "test_selected.py") in calls[0]
     assert not any("unrelated" in argument for argument in calls[0])
     assert calls[0][-3:-1] == ["-k", "example"]
+
+
+@pytest.fixture
+def codespaces_native_plan(monkeypatch):
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        tests = root / "tests"
+        tests.mkdir()
+        target = tests / "test_installer_engine_adoption.py"
+        target.write_text(textwrap.dedent("""
+        import pytest
+        @pytest.mark.parametrize("editable", [False, True])
+        def test_codespaces_library_install_order_retry_and_errors(editable): pass
+        @pytest.mark.parametrize("editable", [False, True])
+        @pytest.mark.parametrize("case", ["healthy-source", "sre-source", "future-source"])
+        def test_codespaces_real_admission_replays_captured_source(editable, case): pass
+        def test_codespaces_admission_spy_refuses_incorrect_or_bypassed_calls(): pass
+        @pytest.mark.parametrize("layout", [False, True])
+        def test_codespaces_stamp_snapshot_is_standalone(layout): pass
+        def test_native_dev_generation_dependency_failure_preserves_working_runtime(): pass
+        @pytest.mark.parametrize("value", [False, True])
+        def test_future_unclassified_contract(value): pass
+        """), encoding="utf-8")
+        (tests / "test_other.py").write_text("def test_unrelated_file(): pass\n", encoding="utf-8")
+        monkeypatch.setattr(runner, "_plugin_dir", lambda _name: root)
+        monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
+        monkeypatch.setenv("TEMP", str(root))
+        original_plan = runner._test_group_plan
+        monkeypatch.setattr(
+            runner, "_test_group_plan",
+            lambda name, groups: original_plan(name, groups, windows=True),
+        )
+        yield root, target, original_plan
+
+
+@pytest.mark.parametrize("kexpr", [None, " ", "True", "future", "never_matches"])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_codespaces_normal_runner_partitions_collect_exactly_once(
+    codespaces_native_plan, monkeypatch, kexpr, explicit,
+):
+    plugin, target, _ = codespaces_native_plan
+    selections = []
+    commands = []
+    limits = containment.Limits(
+        wall_seconds=300, max_processes=19, max_memory_mb=222,
+        max_temp_mb=333, poll_seconds=0.15,
+    )
+    inventory = []
+
+    class Inventory:
+        def pytest_collection_finish(self, session):
+            inventory.extend(session.items)
+
+    baseline = [
+        "-q", "--collect-only", "--import-mode=importlib", f"--rootdir={plugin}",
+        "-p", "no:cacheprovider",
+    ]
+    if kexpr:
+        baseline += ["-k", kexpr]
+    baseline += [str(target.relative_to(plugin)) if explicit else "tests"]
+    with monkeypatch.context() as context:
+        context.chdir(plugin)
+        baseline_status = pytest.main(baseline, plugins=[Inventory()])
+
+    def collect(command, **kwargs):
+        commands.append((command, kwargs))
+        selector = command[command.index("-k") + 1] if "-k" in command else ""
+        expression = Expression.compile(selector) if selector.strip() else None
+        files = {argument.replace("\\", "/") for argument in command if argument.endswith(".py")}
+        selected = [
+            item.nodeid for item in inventory
+            if item.nodeid.split("::", 1)[0] in files
+            and (expression is None or expression.evaluate(KeywordMatcher.from_item(item)))
+        ]
+        selections.append(selected)
+        return 0 if selected else 5
+
+    monkeypatch.setattr(runner, "run_contained", collect)
+    files = (str(runner._CODESPACES_NATIVE_FILE),) if explicit else ()
+    status = runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=kexpr,
+        test_files=files, collect_only=True, limits=limits,
+        plugin_timeout=900, test_timeout=30, max_files_per_subsuite=25,
+    )
+    partitioned = [node for selection in selections for node in selection]
+    expected = [item.nodeid for item in inventory]
+    assert Counter(partitioned) == Counter(expected)
+    assert len(partitioned) == len(set(partitioned))
+    assert status == baseline_status
+    assert len(commands) == (6 if explicit else 7)
+    for command, kwargs in commands:
+        assert "--timeout=30" in command and "--collect-only" in command
+        actual = kwargs["limits"]
+        assert 0 < actual.wall_seconds <= 300
+        assert (
+            actual.max_processes, actual.max_memory_mb, actual.max_temp_mb, actual.poll_seconds
+        ) == (19, 222, 333, 0.15)
+        assert kwargs["cwd"] == plugin
+        assert kwargs["env"]["HOME"] != os.environ.get("HOME")
+    if kexpr is None:
+        offset = 0 if explicit else 1
+        assert all("healthy-source" in node for node in selections[offset])
+        assert any("sre-source" in node for node in selections[offset + 1])
+        assert any("future-source" in node for node in selections[offset + 1])
+        assert any("admission_spy_refuses" in node for node in selections[offset + 3])
+        assert all("future_unclassified" not in node for node in selections[offset])
+        assert any("future_unclassified" in node for node in selections[-1])
+        assert any("unrelated_file" in node for node in partitioned) is not explicit
+
+
+def test_codespaces_plan_preserves_other_suites_platforms_and_file_groups(codespaces_native_plan):
+    _, target, planner = codespaces_native_plan
+    groups = runner._test_file_groups("example", 1)
+    assert planner("example", groups, windows=True) == [(group, None) for group in groups]
+    assert planner("agent-codespaces", groups, windows=False) == [
+        (group, None) for group in groups
+    ]
+    other = [path for group in groups for path in group if path != target]
+    assert planner("agent-codespaces", [other], windows=True) == [(other, None)]
+
+
+@pytest.mark.parametrize("filter_mode", ["keyword", "guard", "unfiltered"])
+@pytest.mark.parametrize("all_empty", [False, True])
+def test_codespaces_mixed_explicit_files_preserve_filtered_empty_groups(
+    monkeypatch, filter_mode, all_empty,
+):
+    with tempfile.TemporaryDirectory() as temporary:
+        plugin = Path(temporary)
+        tests = plugin / "tests"
+        tests.mkdir()
+        files = (runner._CODESPACES_NATIVE_FILE, Path("tests") / "test_other.py")
+        for path in files:
+            (plugin / path).write_text("def test_example(): pass\n", encoding="utf-8")
+        monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+        monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+        monkeypatch.setenv("TEMP", str(plugin))
+        planner = runner._test_group_plan
+        monkeypatch.setattr(
+            runner, "_test_group_plan",
+            lambda name, groups: planner(name, groups, windows=True),
+        )
+        codes = iter([5, 5 if all_empty else 0, 5, 5, 5, 5, 5])
+        calls = []
+
+        def execute(command, **kwargs):
+            calls.append(command)
+            return next(codes)
+
+        monkeypatch.setattr(runner, "run_contained", execute)
+        filtered = filter_mode != "unfiltered"
+        result = runner.run_plugin(
+            "agent-codespaces", "unused", reinstall=False,
+            kexpr="installer" if filter_mode == "keyword" else None,
+            guards=filter_mode == "guard", test_files=tuple(map(str, files)),
+            limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+            test_timeout=30, max_files_per_subsuite=25,
+        )
+        assert result == (0 if filtered and not all_empty else 5)
+        assert len(calls) == (7 if filtered else 1)
+        assert str(Path("tests") / "test_other.py") in calls[0]
+
+
+@pytest.mark.parametrize("include_guards", [False, True])
+def test_codespaces_exact_selection_preserves_manifest_admission(
+    codespaces_native_plan, monkeypatch, include_guards,
+):
+    plugin, _, _ = codespaces_native_plan
+    payload = {
+        "version": 1, "plugin": "agent-codespaces",
+        "nodes": [
+            "tests/test_installer_engine_adoption.py::"
+            "test_codespaces_library_install_order_retry_and_errors[True]"
+        ],
+        "files": [], "include_guards": include_guards,
+    }
+    manifest = plugin / "selection.json"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        assert "-k" not in command
+        assert command[command.index("-p") + 1] == runner.PORTFOLIO_PLUGIN
+        selected = next(
+            argument.split("=", 1)[1] for argument in command
+            if argument.startswith("--exact-selection=")
+        )
+        assert json.loads(Path(selected).read_text(encoding="utf-8")) == payload
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=None,
+        selection_file=manifest, limits=containment.Limits(wall_seconds=300),
+        plugin_timeout=900, test_timeout=30, max_files_per_subsuite=25,
+    ) == 0
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("codes,kexpr,guards,explicit,expected", [
+    ([0, 1, 0, 0, 0, 0], None, False, True, 1),
+    ([1, 0, 0, 0, 0, 0], None, False, True, 1),
+    ([1, 5, 5, 5, 5, 5], "True", False, True, 1),
+    ([1, 5], None, False, True, 5),
+    ([0, 5], None, False, True, 5),
+    ([5, 0, 5, 5, 5, 5], "True", False, True, 0),
+    ([5, 5, 5, 5, 5, 5], "missing", False, True, 5),
+    ([5, 5, 5, 5, 5, 5], None, True, True, 5),
+    ([5, 5, 5, 5, 5, 5, 5], None, True, False, 0),
+])
+def test_codespaces_partition_failures_and_empty_selections_remain_fail_closed(
+    codespaces_native_plan, monkeypatch, codes, kexpr, guards, explicit, expected,
+):
+    returns = iter(codes)
+    calls = []
+    def execute(command, **kwargs):
+        calls.append(command)
+        return next(returns)
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=kexpr, guards=guards,
+        test_files=(str(runner._CODESPACES_NATIVE_FILE),) if explicit else (),
+        limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+        test_timeout=30, max_files_per_subsuite=25,
+    ) == expected
+    assert len(calls) == len(codes)
+
+
+@pytest.mark.parametrize("first_result", [0, 1])
+def test_codespaces_partitions_share_the_unchanged_plugin_aggregate(
+    codespaces_native_plan, monkeypatch, first_result,
+):
+    clock = iter([0, 0, 250, 650, 901, 901])
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    seen = []
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda command, **kw: seen.append(kw["limits"]) or first_result,
+    )
+    assert runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=None,
+        test_files=(str(runner._CODESPACES_NATIVE_FILE),),
+        limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+        test_timeout=30, max_files_per_subsuite=25,
+    ) == 124
+    assert [limit.wall_seconds for limit in seen] == [300, 300, 250]
+
+
+@pytest.mark.parametrize("fatal", [2, 3, 4, 5, 124, 125, 126, 130, -9])
+def test_assertion_aggregation_does_not_mask_fatal_group_status(
+    codespaces_native_plan, monkeypatch, fatal,
+):
+    returns = iter([1, fatal])
+    calls = []
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda command, **kwargs: calls.append(command) or next(returns),
+    )
+    assert runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=None,
+        test_files=(str(runner._CODESPACES_NATIVE_FILE),),
+        limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+        test_timeout=30, max_files_per_subsuite=25,
+    ) == fatal
+    assert len(calls) == 2
+
+
+def test_assertion_aggregation_does_not_swallow_containment_exceptions(
+    codespaces_native_plan, monkeypatch,
+):
+    calls = []
+    def execute(command, **kwargs):
+        calls.append(command)
+        if len(calls) == 2:
+            raise containment.ContainmentError("fixture containment failure")
+        return 1
+    monkeypatch.setattr(runner, "run_contained", execute)
+    with pytest.raises(containment.ContainmentError, match="fixture containment failure"):
+        runner.run_plugin(
+            "agent-codespaces", "unused", reinstall=False, kexpr=None,
+            test_files=(str(runner._CODESPACES_NATIVE_FILE),),
+            limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+            test_timeout=30, max_files_per_subsuite=25,
+        )
+    assert len(calls) == 2
+
+
+def test_real_contained_partition_assertion_runs_later_passing_partition(tmp_path, monkeypatch):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    sentinel = tmp_path / "later-group-ran"
+    (tests / "test_01_failure.py").write_text(
+        "def test_first_group(): assert False, 'intentional assertion failure'\n", encoding="utf-8",
+    )
+    (tests / "test_02_pass.py").write_text(
+        f"from pathlib import Path\ndef test_later_group(): Path({str(sentinel)!r}).write_text('passed')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
+    monkeypatch.setattr(
+        runner, "_test_group_plan",
+        lambda _name, groups: [(group, "test_first_group or test_later_group") for group in groups],
+    )
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    real_run = runner.run_contained
+    statuses = []
+    def execute(command, **kwargs):
+        code = real_run(command, **kwargs)
+        statuses.append(code)
+        return code
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "example", "unused", reinstall=False, kexpr=None,
+        limits=containment.Limits(wall_seconds=300), plugin_timeout=900,
+        test_timeout=30, max_files_per_subsuite=1,
+    ) == 1
+    assert statuses == [1, 0]
+    assert sentinel.read_text() == "passed"
+
+
 def test_explicit_file_selection_avoids_unrelated_collection(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "PLUGINS", tmp_path)
     tests = tmp_path / "example" / "tests"
@@ -1642,6 +1968,167 @@ def test_explicit_file_group_limit_must_remain_positive(size):
     with pytest.raises(SystemExit) as error:
         runner.main(["agent-pull-requests", "--max-files-per-sub-suite", str(size)])
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("profile_arguments", [
+    ["--test-profile", "busy-host-functional"],
+    ["--test-profile=busy-host-functional"],
+])
+def test_codespaces_functional_profile_preparation_strips_test_only_flags(
+    monkeypatch, profile_arguments,
+):
+    commands = []
+    monkeypatch.setattr(
+        network_scope.subprocess, "run",
+        lambda command: commands.append(command) or SimpleNamespace(returncode=0),
+    )
+    arguments = [
+        "agent-codespaces", *profile_arguments,
+        "--test-file", "tests/test_snapshot_copy_contract.py",
+    ]
+    original = arguments.copy()
+    with tempfile.TemporaryDirectory(prefix="profile-preparation-") as directory:
+        root = Path(directory)
+        network_scope.prepare_dependencies(
+            "devcontainer", root, "container", root / "devcontainer.json",
+            arguments, lambda flag: flag,
+        )
+    assert commands[0][-2:] == ["agent-codespaces", "--prepare-only"]
+    assert arguments == original
+
+
+@pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
+def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, profile):
+    class Lease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
+    observed = []
+    monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: observed.append(kw) or 0)
+    files = [str(runner._CODESPACES_NATIVE_FILE)]
+    arguments = ["agent-codespaces", "--test-file", files[0]]
+    if profile is not None:
+        arguments += ["--test-profile", profile]
+    assert runner.main(arguments) == 0
+    options = observed[0]
+    busy = profile == "busy-host-functional"
+    assert options["limits"].wall_seconds == (900 if busy else 300)
+    assert options["plugin_timeout"] == (2700 if busy else 900)
+    assert options["test_timeout"] == 30
+    assert options["test_files"] == tuple(files)
+    assert options["kexpr"] is None and options["selection_file"] is None
+    assert options["test_profile"] == (profile or "standard")
+    assert (
+        options["limits"].max_processes, options["limits"].max_memory_mb,
+        options["limits"].max_temp_mb,
+    ) == (128, 4096, 2048)
+    output = capsys.readouterr().out
+    assert ("functional evidence only, not original-budget/performance PASS" in output) == busy
+
+
+@pytest.mark.parametrize("arguments", [
+    ["agent-codespaces"],
+    ["agent-bridge", "--test-file", "tests/test_installer_engine_adoption.py"],
+    ["agent-codespaces", "--test-file", "tests/test_install_ps1_recovery.py"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "-k", "healthy"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--timeout", "900"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--plugin-timeout", "2700"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--test-timeout", "180"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-processes", "129"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-memory-mb", "4097"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-temp-mb", "2049"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--collect-only"],
+])
+def test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides(monkeypatch, arguments):
+    monkeypatch.setattr(
+        runner, "_acquire_admission",
+        lambda *_args: pytest.fail("Invalid profile must fail before admission"),
+    )
+    with pytest.raises(SystemExit) as error:
+        runner.main([*arguments, "--test-profile", "busy-host-functional"])
+    assert error.value.code == 2
+
+
+def test_codespaces_functional_profile_refuses_unknown_name():
+    with pytest.raises(SystemExit) as error:
+        runner.main(["agent-codespaces", "--test-profile", "busy"])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("profile", ["standard", "busy-host-functional"])
+def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
+    codespaces_native_plan, monkeypatch, profile,
+):
+    plugin, _, _ = codespaces_native_plan
+    monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "unrequested-ambient-profile")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only -k healthy")
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"].get(runner._CODESPACES_PROFILE_ENV) == (
+            None if profile == "standard" else profile
+        )
+        assert kwargs["env"].get("PYTEST_ADDOPTS") == (
+            "--collect-only -k healthy" if profile == "standard" else None
+        )
+        assert (
+            kwargs["limits"].max_processes, kwargs["limits"].max_memory_mb,
+            kwargs["limits"].max_temp_mb,
+        ) == (128, 4096, 2048)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=None,
+        test_files=(str(runner._CODESPACES_NATIVE_FILE),),
+        limits=containment.Limits(wall_seconds=900 if profile != "standard" else 300),
+        plugin_timeout=2700 if profile != "standard" else 900,
+        test_timeout=30, max_files_per_subsuite=25, test_profile=profile,
+    ) == 0
+    assert len(calls) == 6
+    assert [command[command.index("-k") + 1] for command in calls] == list(
+        runner._CODESPACES_WINDOWS_PARTITIONS
+    )
+    assert all(str(runner._CODESPACES_NATIVE_FILE) in command for command in calls)
+    assert plugin.is_dir()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.parametrize("profile,status,executed", [
+    ("standard", 0, False), ("busy-host-functional", 1, True),
+])
+def test_codespaces_functional_profile_runs_assertions_despite_ambient_collect_only(
+    monkeypatch, profile, status, executed,
+):
+    with tempfile.TemporaryDirectory(prefix="profile-assertion-") as directory:
+        root = Path(directory)
+        tests = root / "tests"
+        tests.mkdir()
+        sentinel = root / "assertion-ran"
+        target = Path("tests") / "test_installer_test_support.py"
+        (root / target).write_text(
+            "from pathlib import Path\n"
+            "def test_assertions_execute():\n"
+            f"    Path({str(sentinel)!r}).write_text('executed')\n"
+            "    assert False, 'functional-profile-sentinel'\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(runner, "_plugin_dir", lambda _name: root)
+        monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+        monkeypatch.setenv("TEMP", str(root))
+        monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only")
+        assert runner.run_plugin(
+            "agent-codespaces", "unused", reinstall=False, kexpr=None,
+            test_files=(str(target),), test_profile=profile,
+            limits=containment.Limits(wall_seconds=30), plugin_timeout=60,
+            test_timeout=10, max_files_per_subsuite=25,
+        ) == status
+        assert sentinel.exists() is executed
+        if executed:
+            assert sentinel.read_text() == "executed"
 
 
 def test_prepare_only_takes_environment_admission(monkeypatch) -> None:

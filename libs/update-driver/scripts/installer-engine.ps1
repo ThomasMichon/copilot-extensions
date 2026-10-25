@@ -17,6 +17,27 @@
 # Packaged human-output initialization: installer-human-output.ps1
 $script:InstallerDependencyPolicy = Join-Path $PSScriptRoot 'installer_dependency_policy.py'
 
+function Copy-InstallSnapshotItem {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Destination
+    )
+    # Avoid per-file provider overhead without dropping any snapshot bytes.
+    $attributes = [System.IO.File]::GetAttributes($Source)
+    if ($attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        Copy-Item -LiteralPath $Source -Destination $Destination -Recurse -Force
+    } elseif ($attributes -band [System.IO.FileAttributes]::Directory) {
+        [System.IO.Directory]::CreateDirectory($Destination) | Out-Null
+        foreach ($child in [System.IO.Directory]::GetFileSystemEntries($Source)) {
+            Copy-InstallSnapshotItem -Source $child -Destination (
+                [System.IO.Path]::Combine($Destination, [System.IO.Path]::GetFileName($child))
+            )
+        }
+    } else {
+        [System.IO.File]::Copy($Source, $Destination, $true)
+    }
+}
+
 function Remove-InstallRuntimeEntry {
     param([Parameter(Mandatory)][System.IO.FileSystemInfo]$Entry)
 

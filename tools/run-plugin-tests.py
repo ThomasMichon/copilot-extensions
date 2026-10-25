@@ -62,6 +62,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
+from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 # Preserve the runner's existing public map as an explicit re-export.
@@ -494,6 +495,47 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                 raise failure
 
 
+_CODESPACES_NATIVE_FILE = Path("tests") / "test_installer_engine_adoption.py"
+_CODESPACES_PROFILE_ENV = "CODESPACES_INSTALLER_TEST_PROFILE"
+_CODESPACES_ADMISSION = (
+    "codespaces_library_install_order_retry_and_errors or "
+    "codespaces_real_admission_replays_captured_source"
+)
+_CODESPACES_FALSE = f"({_CODESPACES_ADMISSION}) and False"
+_CODESPACES_TRUE = f"({_CODESPACES_ADMISSION}) and True"
+_CODESPACES_NEGATIVE = "codespaces_admission_spy_refuses_incorrect_or_bypassed_calls"
+_CODESPACES_LIFECYCLE = "stamp_snapshot or native_dev_generation_dependency_failure"
+_CODESPACES_WINDOWS_PARTITIONS = (
+    f"({_CODESPACES_FALSE}) and healthy",
+    f"({_CODESPACES_FALSE}) and not healthy",
+    f"not ({_CODESPACES_FALSE}) and ({_CODESPACES_TRUE}) and healthy",
+    f"not ({_CODESPACES_FALSE}) and "
+    f"((({_CODESPACES_TRUE}) and not healthy) or {_CODESPACES_NEGATIVE})",
+    f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE}) "
+    f"and ({_CODESPACES_LIFECYCLE})",
+    f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE} "
+    f"or {_CODESPACES_LIFECYCLE})",
+)
+
+
+def _test_group_plan(
+    name: str, groups: list[list[Path]], *, windows: bool | None = None,
+) -> list[tuple[list[Path], str | None]]:
+    """Partition only the Codespaces native contract; retain every other file."""
+    native = sys.platform == "win32" if windows is None else windows
+    target = _plugin_dir(name) / _CODESPACES_NATIVE_FILE
+    plan = []
+    for group in groups:
+        if name != "agent-codespaces" or not native or target not in group:
+            plan.append((group, None))
+            continue
+        other_files = [path for path in group if path != target]
+        if other_files:
+            plan.append((other_files, None))
+        plan.extend(([target], selector) for selector in _CODESPACES_WINDOWS_PARTITIONS)
+    return plan
+
+
 def run_plugin(
     name: str,
     uv: str,
@@ -511,6 +553,7 @@ def run_plugin(
     allow_host_state: bool = False,
     test_files: tuple[str, ...] = (),
     selection_file: Path | None = None,
+    test_profile: str = "standard",
 ) -> int:
     selection: TestSelection | None = None
     if selection_file is not None:
@@ -528,6 +571,11 @@ def run_plugin(
         name, max_files_per_subsuite, filtered=bool(guards or kexpr or selection),
         test_files=test_files,
     )
+    plan = (
+        [(group, None) for group in groups]
+        if selection is not None else _test_group_plan(name, groups)
+    )
+    partitioned_plan = any(selector is not None for _, selector in plan)
     if not _has_suite(name) and selection is None:
         print(f"[SKIP] {name}: no test suite")
         return 0
@@ -570,11 +618,19 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
+        # Ambient profile state must never silently relax an ordinary run.
+        env.pop(_CODESPACES_PROFILE_ENV, None)
+        if test_profile != "standard":
+            env[_CODESPACES_PROFILE_ENV] = test_profile
+            env.pop("PYTEST_ADDOPTS", None)
         if selection is not None:
             env.pop("PYTEST_ADDOPTS", None)
             snapshot = sandbox / "selection.json"
             snapshot.write_text(json.dumps(selection.as_dict()), encoding="utf-8")
-        for index, group in enumerate(groups, start=1):
+        passed_group = False
+        failed_assertions = False
+        fatal_group = False
+        for index, (group, partition_selector) in enumerate(plan, start=1):
             remaining = plugin_timeout - (time.monotonic() - plugin_started)
             if remaining <= 0:
                 print(
@@ -614,12 +670,18 @@ def run_plugin(
                 ]
             if guards:
                 cmd += ["-m", "guard"]
-            if kexpr:
-                cmd += ["-k", kexpr]
+            selector = kexpr
+            if partition_selector:
+                selector = (
+                    f"({kexpr}) and ({partition_selector})"
+                    if kexpr and kexpr.strip() else partition_selector
+                )
+            if selector:
+                cmd += ["-k", selector]
             cmd.extend(str(path.relative_to(_plugin_dir(name))) for path in group)
-            if len(groups) > 1:
+            if len(plan) > 1:
                 print(
-                    f"[RUN ] {name}: sub-suite {index}/{len(groups)} "
+                    f"[RUN ] {name}: sub-suite {index}/{len(plan)} "
                     f"({len(group)} files)"
                 )
             returncode = run_contained(
@@ -634,9 +696,16 @@ def run_plugin(
             cleanups.append(cleanup_pool.submit(
                 tempfile.TemporaryDirectory._rmtree, group_temp,
             ))
-            if returncode == 5 and (guards or kexpr) and not test_files:
+            passed_group |= returncode == 0
+            if returncode == 1 and partition_selector is not None:
+                failed_assertions = True
+                continue
+            if returncode == 5 and (guards or kexpr) and (
+                not test_files or partitioned_plan
+            ):
                 continue
             if returncode != 0:
+                fatal_group = True
                 break
     elapsed = time.monotonic() - plugin_started
     if elapsed > plugin_timeout:
@@ -647,6 +716,10 @@ def run_plugin(
             file=sys.stderr,
         )
         return 124
+    if failed_assertions and not fatal_group:
+        returncode = 1
+    elif returncode == 5 and passed_group and (guards or kexpr) and not fatal_group:
+        returncode = 0
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
     if guards and returncode == 5 and not test_files:
@@ -718,6 +791,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="timeout for each individual pytest item (default: 30, higher "
                          "for certain plugins -- see _TEST_TIMEOUT_OVERRIDES; an "
                          "explicit value here always wins)")
+    ap.add_argument(
+        "--test-profile", choices=("standard", "busy-host-functional"), default="standard",
+        help="explicit Codespaces installer functional qualification profile; "
+             "busy-host-functional is not original-budget or performance evidence",
+    )
     ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
                     metavar="COUNT",
                     help="maximum test files per sequential sub-suite "
@@ -731,6 +809,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    try:
+        validate_profile(args)
+    except ValueError as exc:
+        ap.error(str(exc))
     if args.selection_file is not None and (
         len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
         or args.test_file or args.guards or args.kexpr or args.collect_only
@@ -830,6 +912,14 @@ def main(argv: list[str] | None = None) -> int:
                     if args.test_timeout is not None
                     else _TEST_TIMEOUT_OVERRIDES.get(name, 30.0)
                 )
+                if args.test_profile == "busy-host-functional":
+                    effective_subsuite_timeout = 900.0
+                    effective_plugin_timeout = 2700.0
+                    print(
+                        "[PROFILE] busy-host-functional: native=135s module-item=180s "
+                        "default-item=30s group=900s plugin=2700s; "
+                        "functional evidence only, not original-budget/performance PASS"
+                    )
                 plugin_limits = Limits(
                     wall_seconds=effective_subsuite_timeout,
                     max_processes=limits.max_processes,
@@ -857,6 +947,7 @@ def main(argv: list[str] | None = None) -> int:
                     allow_host_state=args.allow_host_state,
                     test_files=tuple(args.test_file),
                     selection_file=args.selection_file,
+                    test_profile=args.test_profile,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

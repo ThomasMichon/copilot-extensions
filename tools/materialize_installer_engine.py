@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 from pathlib import Path
 
 import installer_engine_ref as ier
@@ -10,6 +11,24 @@ import installer_engine_ref as ier
 
 def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
     root_r = root.resolve()
+    if path.is_absolute() and path.is_relative_to(root_r) and ".." not in path.parts:
+        current = path
+        while True:
+            try:
+                info = current.lstat()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                break
+            else:
+                if stat.S_ISLNK(info.st_mode):
+                    return current
+                if getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+                    break
+            if current == root_r:
+                return None
+            current = current.parent
+    # Aliases and reparse points retain the resolved walk rather than cached identity.
     current = path
     while True:
         if current.is_symlink():
