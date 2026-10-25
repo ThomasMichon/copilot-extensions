@@ -67,6 +67,15 @@ def test_projects_schema_registered_at_v2():
 
 def _patch_registry_path(monkeypatch, tmp_path: Path) -> Path:
     target = tmp_path / "projects.yaml"
+    checkout = tmp_path / "repository"
+    checkout.mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        repos, "find_repo",
+        lambda name: repos.RepoEntry(
+            name=name, repo_class="worktree",
+            paths={platform: str(checkout) for platform in ("windows", "linux", "macos")},
+        ),
+    )
     monkeypatch.setattr(installer, "projects_yaml_path", lambda: target)
     monkeypatch.setattr(installer.output, "ok", lambda *_a, **_k: None)
     return target

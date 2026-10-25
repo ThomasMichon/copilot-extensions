@@ -1,0 +1,9 @@
+{
+  "comment": "Use canonical native runtime resolution for bounded SSH session snapshots and optional external-state lookup.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
