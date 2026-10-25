@@ -125,6 +125,33 @@ def test_newer_remote_tip_is_not_substituted_for_installed_source(registered_sou
         assert selected.identity.source_commit == fixture["commit"]
 
 
+def test_explicit_copilot_home_does_not_require_an_environment_duplicate(registered_source):
+    fixture = registered_source
+    home = fixture["home"].with_name("custom-copilot")
+    fixture["home"].rename(home)
+    payload = home / "installed-plugins" / fixture["key"] / "agent-example"
+    installation = fixture["adopter"][1]
+    installation["copilot_home"] = home
+    installation["payload_root"] = payload
+    installation["environment"].pop("COPILOT_HOME")
+    write(home / "config.json", {"installedPlugins": [
+        {**fixture["ledger"], "cache_path": str(payload)},
+    ]})
+    with retain(fixture) as selected:
+        assert selected.identity.source_commit == fixture["commit"]
+
+
+def test_explicit_source_provenance_is_unavailable_without_an_installed_locator(
+    registered_source, monkeypatch,
+):
+    fixture = registered_source
+    fixture["adopter"][1]["source_descriptor"] = fixture["definition"]["source"]
+    monkeypatch.setattr(runtime_source, "acquire", lambda *a, **k: pytest.fail("explicit origin acquired"))
+    with pytest.raises(ProfileUnavailable, match="installed native origin"):
+        with retain(fixture):
+            pytest.fail("explicit source provenance was promoted to installed authority")
+
+
 def test_preparation_preserves_acquisitions_long_path_support(registered_source):
     fixture = registered_source
     name = "long-" + "x" * 230 + ".py"

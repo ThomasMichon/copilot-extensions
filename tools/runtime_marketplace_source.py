@@ -35,8 +35,8 @@ def _registered(installation: dict, policy: dict):
             "source_descriptor", "marketplace_key", "environment",
         ) if key in installation
     })
-    locator = provenance.get("locator", {})
-    if locator.get("kind") != "installed":
+    locator = provenance.get("locator")
+    if not isinstance(locator, dict) or locator.get("kind") != "installed":
         raise ProfileUnavailable("marketplace source requires an installed native origin")
     if (
         provenance["sourceFingerprint"] != policy["owner"]["sourceFingerprint"]
@@ -82,7 +82,10 @@ def retain_authenticated_marketplace_source(
     origin = _registered(installation, policy)
     # Reject unsupported definitions before probing or acquiring another source.
     repo = _repository(origin)
-    environment = dict(installation.get("environment") or os.environ)
+    environment = {
+        **(installation.get("environment") or os.environ),
+        "COPILOT_HOME": str(origin.copilot_home),
+    }
     home, cache = inventory_paths(
         Path(installation.get("project_root") or origin.copilot_home), environment,
     )
