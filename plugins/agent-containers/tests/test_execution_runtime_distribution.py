@@ -185,6 +185,42 @@ print(json.dumps({"slot_owned":True,"retainedCreation":False}))
 """
     result = _run([str(python), "-I", "-B", "-c", probe, str(root)], cwd=tmp_path)
     assert result.stdout.strip() == '{"slot_owned": true, "retainedCreation": false}'
+    site = Path(_run([
+        str(python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
+    ], cwd=tmp_path).stdout.strip())
+    package = site / "agent_containers"
+    outside = tmp_path / "mutable-code"
+    outside.mkdir()
+    for name in ("package", "__init__.py", "execution_runtime.py", *RESOURCES.values()):
+        source = package if name == "package" else package / name
+        target = outside / name
+        source.rename(target)
+        try:
+            try:
+                source.symlink_to(target, target_is_directory=name == "package")
+            except OSError as error:
+                if os.name == "nt" and getattr(error, "winerror", None) == 1314:
+                    pytest.skip("linked-origin controls require native symlink privilege")
+                raise
+            refusal = """
+from pathlib import Path
+import sys
+from agent_containers.execution_runtime import retain_current_execution
+try:
+    with retain_current_execution(
+        Path(sys.argv[1]),version="1.0.0+base",payload_hash="a"*64,timeout=0,
+    ):
+        raise AssertionError("mutable linked code escaped the slot retention boundary")
+except RuntimeError as error:
+    assert "slot-owned resources" in str(error)
+else:
+    raise AssertionError("linked origin was not refused")
+"""
+            _run([str(python), "-I", "-B", "-c", refusal, str(root)], cwd=tmp_path)
+        finally:
+            if source.is_symlink():
+                source.unlink()
+            target.rename(source)
 
 
 @pytest.mark.parametrize("missing", [

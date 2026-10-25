@@ -98,6 +98,9 @@ hook and each injected wheel member against those inputs.
 Internal `agent_containers.execution_runtime.retain_current_execution` reads
 this process's `sys.executable` slot, requires the expected version and payload
 hash and a package inside that slot, then enters the same retention context.
+Containment uses resolved resource origins, including the initializer, context
+and helper family; a file or package-directory link to mutable code outside
+the slot refuses before importing the profile owner.
 It does not consult `current-version`, provision, activate or invoke a mutable
 payload shim. Missing packaged resources or conflicting/legacy slot evidence
 refuse; an editable source import is not an immutable executing runtime.
