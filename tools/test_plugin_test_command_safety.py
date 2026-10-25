@@ -301,7 +301,7 @@ def test_native_startup_failure_keeps_bounded_diagnostics_without_native_executi
         node for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name in {"_read", "_startup_diagnostics"}
     ]
-    namespace = {"json": json, "re": re, "subprocess": subprocess}
+    namespace = {"json": json, "re": re, "subprocess": subprocess, "os": os}
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
     (tmp_path / "owner.log").write_text("l" * 16000)
     session = "picker-" + "a" * 24
@@ -317,4 +317,10 @@ def test_native_startup_failure_keeps_bounded_diagnostics_without_native_executi
     report = json.loads(namespace["_startup_diagnostics"](tmp_path, command))
     assert report["owner_log_tail"] == "l" * 4096
     assert report["panes"][0]["tail"] == "p" * 4096
-    assert calls == [(("capture-pane", "-p", "-t", session), {"timeout": 0.5})]
+    assert report["panes"][0]["metadata"] == "p" * 4096
+    assert report["owner_descendants"] == []
+    assert calls == [
+        (("list-panes", "-t", session, "-F",
+          "#{pane_pid}:#{pane_current_command}:#{pane_dead}:#{pane_dead_status}"), {"timeout": 0.5}),
+        (("capture-pane", "-p", "-t", session), {"timeout": 0.5}),
+    ]

@@ -54,14 +54,35 @@ def _startup_diagnostics(root, command):
         if not isinstance(session, str) or re.fullmatch(r"picker-[a-f0-9]{24}", session) is None:
             continue
         try:
+            metadata = command(
+                "list-panes", "-t", session, "-F",
+                "#{pane_pid}:#{pane_current_command}:#{pane_dead}:#{pane_dead_status}",
+                timeout=0.5,
+            )
             captured = command("capture-pane", "-p", "-t", session, timeout=0.5)
             panes.append({
                 "session": session, "returncode": captured.returncode,
-                "tail": captured.stdout[-4096:],
+                "tail": captured.stdout[-4096:], "stderr": captured.stderr[-4096:],
+                "metadata": metadata.stdout[-4096:],
+                "metadata_returncode": metadata.returncode,
             })
         except (OSError, subprocess.TimeoutExpired) as error:
             panes.append({"session": session, "error": type(error).__name__})
-    return json.dumps({"startup": state, "owner_log_tail": log_tail, "panes": panes}, indent=2)
+    children = []
+    if os.name == "nt":
+        owner = _read(root / "owner.json")
+        if owner is not None and _live(owner):
+            from mux_windows_observer import descendants, processes
+
+            table = processes()
+            children = [
+                {"pid": pid, "name": table[pid][0], "parent": table[pid][1]}
+                for pid in sorted(descendants(owner["pid"], table))[:32] if pid in table
+            ]
+    return json.dumps({
+        "startup": state, "owner_log_tail": log_tail, "panes": panes,
+        "owner_descendants": children,
+    }, indent=2)
 
 
 def _live(identity):
