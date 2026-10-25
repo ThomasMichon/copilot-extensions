@@ -271,11 +271,11 @@ def retain_source_runtime_inputs(
 
 @contextmanager
 def _manager_source_inputs(plan, *, revoked_inputs, **options):
-    root = Path(plan.policy()["owner"]["runtimeRoot"])
-    current = engine.runtime.current_version(root)
-    if current and ".profile." in current:
-        from runtime_source_reuse import retain_source_runtime_reuse
+    from runtime_source_reuse import retain_source_runtime_reuse, selected_generation
 
+    root = Path(plan.policy()["owner"]["runtimeRoot"])
+    current = selected_generation(root)
+    if current and ".profile." in current:
         with retain_authenticated_source(
             plan, installation=options["installation"], deadline=options["deadline"],
         ) as authenticated, retain_source_configuration(

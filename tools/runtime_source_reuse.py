@@ -29,6 +29,15 @@ def _canonical(record) -> str:
     return json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def selected_generation(root: Path) -> str | None:
+    generation = engine.runtime._read_current_marker(root) or engine.runtime.current_version(root)
+    try:
+        engine.runtime._validate_dev_previous_version(generation)
+    except ValueError as error:
+        raise ProfileError("existing source runtime selector evidence is corrupt") from error
+    return generation
+
+
 @dataclass(frozen=True)
 class SourceReuseInputs:
     payload: Path
@@ -146,14 +155,10 @@ def retain_source_runtime_reuse(
     authenticated.verify()
     configuration.verify()
     root = Path(configuration.record()["policy"]["owner"]["runtimeRoot"])
-    generation = engine.runtime._read_current_marker(root) or engine.runtime.current_version(root)
+    generation = selected_generation(root)
     if not generation or generation == "dev":
         yield None
         return
-    try:
-        engine.runtime._validate_dev_previous_version(generation)
-    except ValueError as error:
-        raise ProfileError("existing source runtime selector evidence is corrupt") from error
     with ExitStack() as custody:
         try:
             slot, _descriptor = custody.enter_context(engine.runtime.retention_custody(

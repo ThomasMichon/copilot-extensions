@@ -1,5 +1,6 @@
 """Synthetic receipt admission; the separate native lane drives real owners."""
 from dataclasses import replace
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -245,7 +246,8 @@ def test_nonordinary_selected_generation_refuses_before_path_consumption(existin
 
 
 @pytest.mark.parametrize("corruption", ["file", "link", "dangling"])
-def test_corrupt_slot_never_degrades_to_source_availability(existing, corruption):
+@pytest.mark.parametrize("entry", ["retained", "manager"])
+def test_corrupt_slot_never_degrades_to_source_availability(existing, monkeypatch, corruption, entry):
     saved = existing.slot.with_name(existing.slot.name + ".saved")
     existing.slot.rename(saved)
     if corruption == "file":
@@ -257,8 +259,31 @@ def test_corrupt_slot_never_degrades_to_source_availability(existing, corruption
             if os.name == "nt":
                 pytest.skip("native Windows symlink creation needs elevation")
             raise
+    context = retain(existing)
+    if entry == "manager":
+        import runtime_source_build as builds
+
+        @contextmanager
+        def authenticate(*args, **kwargs):
+            yield existing.authenticated
+
+        @contextmanager
+        def configuration(*args, **kwargs):
+            yield existing.captured
+
+        monkeypatch.setattr(builds, "retain_authenticated_source", authenticate)
+        monkeypatch.setattr(builds, "retain_source_configuration", configuration)
+        monkeypatch.setattr(builds, "retain_source_runtime_inputs", lambda *args, **kwargs: pytest.fail(
+            "corrupt selected slot reached cold source admission",
+        ))
+        plan = SimpleNamespace(policy=lambda: {"owner": {"runtimeRoot": str(existing.root)}})
+        context = builds._manager_source_inputs(
+            plan, revoked_inputs=None, installation={}, target={}, component="fixture",
+            uv=Path("uv"), python=Path(sys.executable), deadline=time.monotonic() + 60,
+            max_snapshot_bytes=1 << 20, wheel_limits=SimpleNamespace(max_tags=100),
+        )
     with pytest.raises(ProfileError, match="slot evidence"):
-        with retain(existing):
+        with context:
             pytest.fail("corrupt slot triggered cold source admission")
 
 
