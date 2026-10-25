@@ -1199,3 +1199,19 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   Python diagnostics entry/caller implementations and guardian are unchanged.
   All eight shell, nine Python and one standalone native consumer synchronize;
   no source-hash check, installer deadline or native opt-in was removed.
+- Required CI passed the reconciled draft `9c22497f4a` in runs `40189565533`
+  and `40189664971`, including guards, eligible units and the PR gate.
+  Attribution and lockdown also passed, and the provider confirmed a mergeable
+  draft. Both new findings received explicit repair replies without claiming
+  broader native acceptance. A fresh review was requested on that head.
+- Before dispatch, the packet inventory exposed a qualification gap: its five
+  original files did not include `test_installer_launch_diagnostics.py`, so a
+  successful run would not exercise the new full-caller-stderr regression.
+  Both opt-in jobs now include that sixth one-file sub-suite. The exact-scope
+  guard and testing/pipeline documentation name it; all existing deadlines,
+  immutable/read-only checkout, hardened Linux execution, pinned UV and the
+  disabled Windows portfolio remain unchanged. No incomplete five-file run
+  was launched or credited as caller qualification.
+- The updated exact-scope guard passes (**1 passed, 76 deselected, 0.42
+  seconds**) and targeted Ruff passes. This is structural routing evidence
+  only; the sixth native sub-suite is not yet hosted qualification.

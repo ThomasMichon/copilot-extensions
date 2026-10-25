@@ -726,6 +726,7 @@ def test_installer_diagnostics_is_manual_exact_head_and_preserves_test_budgets()
              "--test-file", "tests/test_installer_presentation.py",
              "--test-file", "tests/test_installer_bash_diagnostics.py",
              "--test-file", "tests/test_installer_python_producer.py",
+             "--test-file", "tests/test_installer_launch_diagnostics.py",
              "--test-file", "tests/test_installer_guardian.py",
              "--max-files-per-sub-suite", "1"],
             ["python", wrapper, "agent-worktrees",

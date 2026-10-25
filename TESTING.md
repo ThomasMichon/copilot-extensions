@@ -854,8 +854,8 @@ placement, provider/Vault admission or a preserving production migration.
 ## Focused installer diagnostics
 
 The manual `installation-context-acceptance.yml` selector
-`installer_diagnostics=true` runs the Worktrees capture, standalone producer
-and retained guardian controls, followed by both real-UV construction variants
+`installer_diagnostics=true` runs the Worktrees capture, standalone producer,
+caller-reference and retained guardian controls, followed by both real-UV construction variants
 (capture disabled/enabled). Linux uses the canonical hardened, network-isolated
 test-container wrapper; hosted Windows uses the existing native contained runner.
 Both check out the dispatch's immutable source SHA without persisted credentials.
@@ -878,6 +878,10 @@ mode restoration. No-redundant-read controls distinguish the current in-memory
 capture buffer from a real disk backlog. Bash controls retain Python reservation
 whitespace and composed lease/diagnostic exit handling. These are assertions
 to execute, not a claim that every native host has qualified them.
+Caller controls also exercise missing/import-failed helper handling and native
+exit preservation when caller stderr is full but the child's explicit output
+destination remains healthy. Each of the six files retains its own sub-suite;
+adding caller coverage does not extend any item, group or aggregate deadline.
 
 ## Optional diagnostic telemetry
 
