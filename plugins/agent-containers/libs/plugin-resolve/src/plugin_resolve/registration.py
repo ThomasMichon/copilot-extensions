@@ -173,6 +173,7 @@ def register_prepared(
     diagnostics: list[dict], initial_owned_plugins: dict[str, bool],
     check_cancelled=lambda: None,
     inventory: tuple[Path, Path] | None = None,
+    environment=None,
     prepared_context: dict | None = None,
 ) -> dict:
     """Merge only unclaimed or unchanged owned keys; return effective directories.
@@ -245,13 +246,18 @@ def register_prepared(
             if "inventory_origin" in details:
                 inventory_sources[source] = details["inventory_origin"]
             if "inventory" in details:
-                from .inventory import installed_item
+                from .inventory import inventory_item
 
-                verified = installed_item(source, *inventory)
-                if verified.get("inventory") != details["inventory"]:
+                verified = inventory_item(
+                    source, *inventory, definition=details.get("marketplace"),
+                    environment=environment, execution_cwd=repo,
+                )
+                if verified is None or verified.get("inventory") != details["inventory"]:
                     raise ValueError(f"Installed inventory changed during preparation: {source}")
                 authority = operator.marketplaces.get(marketplace)
-                if authority is not None and verified["inventory"]["registration"] != authority:
+                if authority is not None and (
+                    verified.get("marketplace") or verified["inventory"]["registration"]
+                ) != authority:
                     raise ValueError(f"Installed inventory does not match target-native origin: {source}")
                 if (
                     source in receipt.get("inventorySources", {})
@@ -429,12 +435,19 @@ def register_prepared(
                         resolved[source] = str(candidate.resolve())
                         continue
                 if inventory is not None and (authority is None or kind in REMOTE_MARKETPLACE_SOURCE_KINDS):
-                    from .inventory import installed_item
+                    from .inventory import inventory_item
 
-                    verified = installed_item(source, *inventory)
-                    if "inventory" not in verified:
+                    verified = inventory_item(
+                        source, *inventory, definition=authority,
+                        environment=environment, execution_cwd=repo,
+                    )
+                    if verified is None or "inventory" not in verified:
                         raise ValueError(f"Registered local inventory catalog was not prepared: {source}")
-                    if authority is not None and verified["inventory"]["registration"] != authority:
+                    if "inventory" in details and verified["inventory"] != details["inventory"]:
+                        raise ValueError(f"Installed inventory changed during preparation: {source}")
+                    if authority is not None and (
+                        verified.get("marketplace") or verified["inventory"]["registration"]
+                    ) != authority:
                         raise ValueError(f"Installed inventory does not match target-native origin: {source}")
                     resolved[source] = verified["inventory"]["payload"]
                 continue

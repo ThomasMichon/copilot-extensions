@@ -13,6 +13,69 @@ from agent_ssh.__main__ import main
 from test_gateway_provider import fixture_files, key
 
 
+@pytest.mark.parametrize("owner", ["S-1-5-21-123-456-789-1001", "BA", "SY"])
+def test_native_privileged_file_owner_keeps_the_same_closed_access_grants(owner):
+    sid = "S-1-5-21-123-456-789-1001"
+    grants = f"(A;ID;FA;;;{sid})(A;ID;FA;;;SY)"
+    authorization._validate_windows_descriptor(f"O:{owner}D:AI{grants}", sid, directory=False)
+    if owner != sid:
+        with pytest.raises(PermissionError, match="owner-private"):
+            authorization._validate_windows_descriptor(
+                f"O:{owner}D:P{grants}", sid, directory=True,
+            )
+    with pytest.raises(PermissionError, match="unexpected access grant"):
+        authorization._validate_windows_descriptor(
+            f"O:{owner}D:AI{grants}(A;;FA;;;BA)", sid, directory=False,
+        )
+
+
+def test_foreign_file_owner_is_not_a_privileged_native_default():
+    sid = "S-1-5-21-123-456-789-1001"
+    with pytest.raises(PermissionError, match="owner-private"):
+        authorization._validate_windows_descriptor(
+            f"O:S-1-5-21-987-654-321-1001D:AI(A;ID;FA;;;{sid})", sid, directory=False,
+        )
+
+
+def test_private_descriptor_failure_reports_shape_without_account_identifiers():
+    sid = "S-1-5-21-123-456-789-1001"
+    foreign = "S-1-5-21-987-654-321-1001"
+    with pytest.raises(PermissionError) as caught:
+        authorization._validate_windows_descriptor(
+            f"O:{foreign}D:AI(A;ID;FA;;;{sid})(A;ID;FA;;;SY)", sid, directory=True,
+        )
+    message = str(caught.value)
+    assert "directory descriptor=O:OTHERD:AI" in message
+    assert "(A;ID;FA;;;CURRENT)" in message
+    assert sid not in message and foreign not in message
+
+
+def test_canonical_current_account_alias_is_not_a_foreign_owner_or_grant():
+    grants = "(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)"
+    authorization._validate_windows_descriptor("O:LAD:P" + grants, "LA", directory=True)
+    authorization._validate_windows_descriptor("O:BAD:AI" + grants, "LA", directory=False)
+    with pytest.raises(PermissionError, match="owner-private"):
+        authorization._validate_windows_descriptor("O:LGD:P" + grants, "LA", directory=True)
+    with pytest.raises(PermissionError, match="unexpected access grant"):
+        authorization._validate_windows_descriptor(
+            "O:LAD:P" + grants + "(A;;FA;;;BA)", "LA", directory=True,
+        )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native SID spelling and protected Windows ACLs")
+def test_native_identity_spelling_round_trip_keeps_authorization_scope_private(tmp_path):
+    assert authorization._windows_sddl_sid("S-1-5-18") == "SY"
+    assert authorization._windows_sddl_sid("S-1-5-32-544") == "BA"
+    root = tmp_path / "private-authorization"
+    authorization._windows_create_directory(root)
+    authorization._windows_private(root, directory=True)
+    target = root / "native-file"
+    from dropin_registry import atomic_write_text
+
+    atomic_write_text(target, "fixture")
+    authorization._windows_private(target, directory=False)
+
+
 def arguments(root: Path, **changes):
     _, directory = fixture_files(root, **changes)
     return [

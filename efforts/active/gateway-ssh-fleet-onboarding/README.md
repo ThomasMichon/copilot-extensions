@@ -34,6 +34,7 @@ resource acquisition and identity bindings remain external adapters.
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
 | `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
+| `squeaky-buckle` | Bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | #6681 source reservation6394061625 |
 
 ## Coordination
 
@@ -50,6 +51,12 @@ resource acquisition and identity bindings remain external adapters.
   Gateway/SSH onboarding integration and validation matrix.
 - No edits to reserved installer, authentication, ledger, controller or shared
   CLI files before their retained owners agree the integration seam.
+- The bounded normal SSH consumer continuation is now selected under #6681:
+  `squeaky-buckle` drives new `ssh_machine.py`/`ssh_machine_config.py`, focused
+  tests/docs and narrow `serve --role ssh-client`/optional-closure wiring.
+  This is an explicit source slice, not takeover of retained worktrees,
+  construction/admission or operational authority. Existing shared lifecycle,
+  provider, credential and deployment gates remain with their owners.
 - The construction owner accepted two exclusive new source leaves:
   `fleet-manager/src/fleet_manager/gateway_ssh_policy.py` and its matching
   `test_gateway_ssh_policy.py` belong to `ticking-wrench`; the separate
@@ -351,6 +358,10 @@ onboarded merely because its source is published.
 
 ### Phase 3 - Actual setup and durable convergence
 
+- [x] Implement the bounded explicit foreground Fleet SSH-directory consumer,
+  composing the existing authenticated client and local profile/login-key
+  writers with native lease and shutdown custody. This is source capability,
+  not managed setup, enrollment or an adopted installation.
 - [ ] Wire the accepted role setup entry point to admitted target-local
   lifecycle/enrollment/authorization/profile effects.
 - [ ] Persist stage outcomes, desired/applied digests, owner generation and
@@ -428,6 +439,26 @@ retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
 takeover or implementation completion is asserted.
 
 ## Journal
+
+### 2026-10-24 - Foreground Fleet SSH consumer source
+
+- Added the explicitly selected `serve --role ssh-client` path and strict local
+  configuration, with packaged runtime contract metadata and an optional
+  dependency closure. Default installation/planning stays thin and inert.
+- The fixed adapter composes the existing authenticated directory client,
+  credential references, profile writer and target-login authorization owner.
+  Repeated cancellation retains the watch and native lease through settlement;
+  restart revalidates the current snapshot and existing writer floors.
+- Focused local qualification covers schema/refusal behavior, real local writes,
+  restart/no-op, lease/signal custody, missing dependencies and existing Gateway
+  runtime compatibility. Installed CLI fixtures exercise the real disposable
+  TLS/JWT/DPoP Gateway and registered service, including a connected later join
+  and offline catch-up with a second consumer. The Windows process fixture
+  qualifies abrupt kernel-lease recovery, not graceful Windows signal delivery.
+- This source does not install or update a managed role, enroll a machine,
+  acquire/rotate keys, renew a provider, change sshd, deploy or retire a
+  predecessor. General node hosting and the broader Plan/Validation items stay
+  open; release/artifact selection and actual adoption require their owners.
 
 ### 2026-10-16 - Intake and current boundary
 
@@ -657,3 +688,80 @@ takeover or implementation completion is asserted.
   authentication/proof compatibility, managed setup, live transport, migration
   or fleet adoption. No keys, credentials, installation, runtime update, service
   restart or deployment were performed by this source slice.
+
+### 2026-10-25 - Foreground SSH consumer publication follow-through
+
+- #8910 adds the explicitly selected Fleet SSH directory subscriber after
+  #8000. Source review exposed unsupported cross-plugin UV references; the
+  optional SDK names now use normal dependency metadata and standalone test
+  preparation selects the first-party packages explicitly. The actual release
+  materializer regression passes without a plugin-vendoring exception.
+- The isolated native run found a coupled elevated Windows authorization-file
+  owner check. The correction accepts only OS-default privileged file owners
+  under the unchanged protected current-account directory and closed user/SYSTEM
+  grant policy; foreign owners/grants still refuse, with no ACL repair.
+  The corrected published head still owes both native platform lanes.
+- Local focused Fleet/Gateway/SSH/materializer checks passed 72 cases; the
+  installed real TLS/DPoP service packet passed 24 and affected preparation
+  families passed 10. These are disposable source/package fixtures, not a
+  production deployment or complete source-free shared-library closure.
+- Managed publication hit its unchanged 30-second transport deadline because
+  a timed-out live identifier sweep waited on descendant-held pipes. Reused the
+  canonical caller-owned capture helper with its unchanged 10-second sweep
+  deadline. All identifier sources, configuration-failure/partial-entry rules
+  and both independent publication guards remain enabled. Missing capture code,
+  output overflow and unconfirmed cleanup fail closed; cleanup errors retain
+  exact custody instead of masquerading as optional-source absence.
+- The 63-case identifier/publication packet passes, including native
+  parent-exits/descendant-holds-pipes retirement with a birth-pinned observer.
+  The same-input identifier guard body fell from 42.266 to 12.674 seconds.
+  This measures deadline recovery, not a successful complete live sweep:
+  the optional producer still times out and contributes no additional entries.
+  Review, required current-head CI and the corrected native lane remain open;
+  this shared effort and its release/setup/adoption obligations stay Active.
+- Reconciliation with the concurrently merged #8855 retains its equivalent
+  caller-owned sweep, no-self-provision environment, Windows batch quoting and
+  32 MiB/1 MiB stream limits. This branch adds canonical-source verification,
+  explicit missing-helper refusal and exact cleanup-error custody, plus the
+  birth-pinned inherited-pipe control; it does not replace those upstream fixes.
+- Review follow-through reproduced the stale Fleet-only preparation assertion
+  and corrected it to the explicit SSH/lease source contract. Reject all three
+  output destinations inside the normalized lease-state tree before effects;
+  unit controls cover equality, nesting, normalized aliases and sibling names,
+  and installed CLI controls prove refusal before credentials/state creation.
+  The complete preparation/scope/authorization packet passed 126 cases with
+  six native-platform skips; the installed connected/restart/refusal file
+  passed all six cases locally.
+- Exact-head native run40185328158 passed Linux's 78 service cases (seven
+  platform skips) and two real StrictModes/login cases, but both new Windows
+  connected/restart cases still refuse an authorization descriptor. The earlier
+  privileged-file-owner correction is not a qualified Windows fix. Added bounded
+  descriptor-shape diagnostics that redact every account SID; the owner/grant
+  policy is unchanged while this failure is diagnosed. No blind retry, ACL
+  relaxation or production repair is authorized by that observation.
+- Diagnostic run40186763879 identified the actual remaining mismatch:
+  Windows renders the exact current account SID as `LA` in both owner and
+  grants. Normalize the expected current SID through the same native
+  owner-only SDDL round trip before comparing. This is not a RID-based guess
+  or blanket acceptance of `LA`; foreign owners and extra group grants still
+  refuse, and the protected directory/current-account policy is unchanged.
+  The 55-case Fleet/authorization packet and six rebuilt installed-role cases
+  pass locally, including real native SID formatting and private ACLs.
+  Corrected hosted Windows qualification and fresh review are still required.
+- Exact-head run40187652857 qualified that correction: Windows passed 82 cases
+  with six platform skips; Linux passed 81 with seven platform skips plus two
+  real StrictModes/login cases. Every selected native job/step succeeded.
+  Subsequent reconciliation preserves #8953's independently merged
+  configured-only publication policy: live discovery is now an explicit manual
+  audit and size enforcement stays in CI. This branch does not restore retired
+  push scans or opt out of any current gate. The reconciled identifier packet
+  passed 65 cases with one POSIX-only skip on Windows.
+- Followed through the body-only review observations as well: preflight the
+  exact source/lock directories derived by the canonical local writers, not
+  just the three configured destinations. Fleet calls that adapter-owned check
+  before policy/credentials/lease effects; an older partial adapter refuses
+  before effects. Failure-path test teardown now settles all retained tasks,
+  process, diagnostic and rig even if one owner fails.
+  The 69-case Fleet/authorization/adapter packet and nine rebuilt installed
+  consumer cases pass locally. Final-head native/CI/review remain pending;
+  earlier native success is not substituted for the newer source.

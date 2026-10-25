@@ -25,7 +25,7 @@ from .registration import (
     atomic_json, checkout_lock, register_prepared, strict_json,
 )
 from .settings import RepoPluginSettings, local_marketplace_path
-from .inventory import inventory_paths, installed_item
+from .inventory import inventory_paths, installed_item, inventory_item
 from .execution import execution_environment, execution_executable, windows_batch_command
 from .target import bind_target
 
@@ -391,12 +391,12 @@ def prepare(
             continue
         _name, marketplace = identity(source)
         if inventory is not None and "marketplace" in item:
-            registered = _settings_document(inventory[0] / "settings.json", jsonc_header=True).get(
-                "extraKnownMarketplaces", {},
-            ).get(marketplace)
-            payload = inventory[0] / "installed-plugins" / marketplace / _name
-            if registered == item["marketplace"] and payload.is_dir():
-                item = {**item, **installed_item(source, *inventory)}
+            available = inventory_item(
+                source, *inventory, definition=item["marketplace"],
+                environment=environment, execution_cwd=execution_cwd,
+            )
+            if available is not None:
+                item = {**item, **available}
         if item.get("resolve_on_target"):
             if marketplace not in native_settings.marketplaces:
                 if inventory is None:
@@ -486,6 +486,7 @@ def prepare(
         diagnostics=requirements, initial_owned_plugins=ownership.get("enabledPlugins", {}),
         check_cancelled=check_cancelled,
         inventory=inventory,
+        environment=environment,
         prepared_context=prepared_context,
     )
     if diagnostics is not None:

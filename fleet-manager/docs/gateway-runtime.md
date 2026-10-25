@@ -19,8 +19,11 @@ fleet-manager serve --role gateway --config explicit-gateway.json
 ```
 
 This is foreground serving, not another installer or supervisor. The configured
-service/deployment owner must manage process lifetime. `node` hosting is not
-implemented. The controller is a Python SDK role (`Controller.serve(stop)`),
+service/deployment owner must manage process lifetime. General `node` hosting is
+not implemented. The separately selected
+[SSH client role](ssh-machine.md) provides only foreground SSH-directory/local
+writer convergence; it is not a complete machine connector or setup installer.
+The controller is a Python SDK role (`Controller.serve(stop)`),
 hosted in the external custodian's own process; there is deliberately no CLI
 that imports an arbitrary provider or fabricates production credentials.
 The SDK does not host services, acquire installation cells or change #6424.

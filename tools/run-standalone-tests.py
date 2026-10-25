@@ -170,7 +170,12 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
             raise ValueError("uv replaced the leased environment directory")
     sources: list[str] = []
-    if component == "services/index":
+    if component == "fleet-manager":
+        sources = [
+            str(REPO / "plugins" / "agent-ssh"),
+            str(REPO / "libs" / "single-instance-lease"),
+        ]
+    elif component == "services/index":
         sources = [
             str(REPO / "plugins" / "agent-index") + ("" if smoke else "[store,server]"),
         ]
@@ -183,7 +188,8 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         ]
     elif component == "services/ssh":
         sources = [
-            str(REPO / "fleet-manager") + "[service-gateway]",
+            str(REPO / "fleet-manager") + "[service-gateway,ssh-client]",
+            str(REPO / "plugins" / "agent-ssh"),
             str(REPO / "libs" / "single-instance-lease"),
             str(REPO / "libs" / "agent-procutil"),
         ]
@@ -234,8 +240,10 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
             fleet = (REPO / "fleet-manager").resolve().as_uri()
             lease = (REPO / "libs" / "single-instance-lease").resolve().as_uri()
             procutil = (REPO / "libs" / "agent-procutil").resolve().as_uri()
+            ssh = (REPO / "plugins" / "agent-ssh").resolve().as_uri()
             override.write_text(
-                f"fleet-manager[service-gateway] @ {fleet}\n"
+                f"fleet-manager[service-gateway,ssh-client] @ {fleet}\n"
+                f"agent-ssh @ {ssh}\n"
                 f"agent-single-instance-lease @ {lease}\n"
                 f"agent-procutil @ {procutil}\n", encoding="utf-8",
             )

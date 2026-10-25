@@ -257,8 +257,10 @@ below used those effective runtime versions, not a source-only patch.
   settled. The #8405 caller/preflight correction is now published and verified
   in the running controller. The subsequent namespace-identity repair #8715
   is also published and verified in the active Bridge and Dispatch. The
-  targeted-allocation recovery correction #8796 still requires its containing
-  release and authorized rollout before retained headed acceptance.
+  targeted-allocation recovery correction #8796 is published and verified
+  live; the original recovery succeeded without replacing its allocation.
+  Native preparation now needs the separately tracked #8900 availability
+  correction, its release and authorized rollout before headed acceptance.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -363,6 +365,113 @@ or a reason to create a daemon.
 
 ## Journal
 
+### 2026-10-25 - Close native inventory provenance and fallback review gaps
+
+- #8911 review identified required assets reached through linked parent
+  directories and optional Git-probe timeouts that bypassed ordinary
+  acquisition. Qualification now rejects linked/reparse components in the
+  catalog, declared payload and referenced asset paths. Missing references
+  remain in the scoped Git status proof.
+- Each Git probe retains its 30-second deadline. A timed-out probe reports a
+  bounded ineligible-candidate diagnostic and falls back to ordinary
+  installation; failed top-level discovery short-circuits further probes.
+- Generic Git URLs now require exact origin spelling rather than lossy
+  compatibility normalization. GitHub declarations retain transport
+  compatibility without collapsing repository names ending in `.git`.
+- Six additional failing-first regressions cover these cases. The native
+  inventory packet passes all 41 cases, including native Windows junction
+  checks. Git itself marks the junction fixture's scoped asset untracked on
+  Windows; the regression separately requires explicit linked-parent
+  rejection rather than crediting that incidental Git refusal. The actual
+  native-cache read-only probe qualifies in 2.56 seconds.
+- Full-suite validation, the current-head review and required CI still gate
+  merge. No rollout or further original-task launch has occurred. Productive
+  headed acceptance and the remaining venue gates stay open.
+- A further current-head review identified padded source spellings resolved
+  differently by the path guard and marketplace loader. A native junction
+  regression reproduces that bypass. Qualification now uses the loader's
+  source whitespace normalization and requires every catalog/source component
+  to exist; missing suffixes remain allowed only for referenced-asset status
+  evidence. All 12 targeted spelling, link and deletion controls pass.
+- The intermediate full suite exhausted its 900-second orchestration budget
+  before reporting a result. It is not a pass. The next full run receives a
+  larger bounded orchestration window with duration reporting, retaining the
+  per-test timeout, containment, host-state guards and production deadlines.
+- The complete suite at the normalized-path head subsequently passed 348 tests
+  with one skip in 854.33 seconds and clean host-state readback. A requested
+  actionable re-review then identified deleted higher-priority catalogs and
+  non-UTF-8 status filenames. Both now have failing-first regressions.
+- Direct content checks also reproduced false acceptance with
+  `assume-unchanged` and `skip-worktree`. Qualification now hashes selected
+  ordinary files against their committed Git blob identities instead of
+  treating status as byte proof. Byte-transformed checkouts retain ordinary
+  acquisition; native fixture clones explicitly disable checkout conversion.
+  Higher-priority catalog paths are included even when deleted, lower-priority
+  unrelated catalogs remain excluded, and Git filename decoding is lossless.
+  Final reviewed-head validation remains open; no live adoption is claimed.
+- The committed-byte head then passed the complete contained suite: 354 tests,
+  one platform skip, 709.19 seconds and clean host-state readback. The next
+  concrete review identified referenced files below a sibling Gitlink, which
+  parent path-scoped probes can omit, and cache-directory enumeration denial.
+- Both findings have failing-first controls. Every reflected closure member
+  must now belong to the verified ordinary-blob set; clean or modified sibling
+  submodule files without that parent proof retain ordinary acquisition.
+  Enumeration errors report bounded unavailable-inventory diagnostics rather
+  than aborting installation fallback. Final-head validation remains open.
+- The complete-closure head passed 357 tests with one platform skip in
+  576.10 seconds, with a clean host-state result. The next review identified
+  executable-mode drift hidden by `core.filemode` and candidate-path permission
+  errors outside the catalog guard. Failing-first controls reproduce both.
+- Candidate discovery, inspection and canonicalization now share the existing
+  bounded invalid-catalog fallback. Git top-level comparison reuses that
+  verified canonical root. POSIX qualification compares the owner executable
+  bit with the committed mode; Windows does not inherit POSIX bit semantics.
+  Controlled-stat tests cover both platforms, and native POSIX chmod controls
+  are included for POSIX runners rather than claimed exercised on Windows.
+- The mode/path head passed 363 tests with three platform skips in 547.67
+  seconds and clean host-state readback. The next review found excluded payload
+  roots producing vacuous content proof and cache-root directory checks outside
+  the unavailable-inventory guard. Additional failing-first coverage reproduced
+  a deleted required file below a sibling Gitlink.
+- Excluded payload roots now refuse optional reuse, initial cache-root checks
+  share the enumeration fallback, and committed ancestors are verified by
+  depth before selected-file proof. Direct and nested Gitlinks with clean,
+  modified or deleted files all refuse. A broad recursive metadata prototype
+  qualified the real cache in 15.89 seconds; replacing it with exact ancestor
+  queries restored read-only qualification to 1.50 seconds without changing
+  deadlines or scanning unrelated working-tree content.
+- The root/ancestor head passed the full contained suite: 370 tests, three
+  explicit platform skips, 601.39 seconds and clean host-state readback.
+  The next review identified older-Python symlink-loop exceptions escaping
+  optional cache qualification.
+- Four failing-first controls reproduced `RuntimeError` from candidate/catalog
+  resolution, declared-source lookup and required-asset reflection. Those
+  candidate-input boundaries now report ineligible cache evidence and retain
+  ordinary installation across supported Python versions. The inventory
+  packet passes 70 cases with three explicit native-POSIX skips; a real POSIX
+  cyclic-source control is included rather than claimed exercised on Windows.
+
+### 2026-10-25 - Recover the retained allocation and qualify native availability
+
+- Natural release `40151837824` published #8800 through pinned Main
+  `6ecdab6f77b42c7a24bd480584dcc54be85b3838`, recording Dev
+  `8b09a79c01bd6c1b77d6af1ee0f62d323007c3ff`. Authorized managed adoption
+  verified the correction in the actual Dispatch `0.18.102-dev1` service;
+  Bridge `0.9.163.dev1` retained its normal acquisition authority.
+- Control-only recovery succeeded on the original targeted reservation,
+  preserving its project, path and history. Later attempts positively refused
+  during plugin preparation before task delivery; they are not productive
+  headed sessions or permission to replace the retained allocation.
+- #8900 tracks origin-qualified native Git-cache availability when global
+  registration is absent. Legacy installed bytes are not accepted on catalog
+  name alone. Reference preparation retains the declared Git source and repeats
+  its commit/content checks under registration authority; copy mode retains
+  normal acquisition. This is separate from #8242's installer-cache slice.
+- The regression fails before the correction. Source contracts and a read-only
+  native-cache probe qualify this source slice; productive headed acceptance,
+  reviewed publication, authorized adoption and the other venue gates remain
+  open. The effort remains Active.
+
 ### 2026-10-25 - Activate the hosting correction and retain targeted recovery
 
 - Natural release run `40141562435` completed qualification, publication/readback
@@ -395,6 +504,10 @@ or a reason to create a daemon.
   permission, target drift, unknown ownership, active reservation, cleanup and
   native-holder controls. Publication, authorized adoption and the original
   headed native acceptance remain open; this is not a replacement test.
+- #8800 merged as `8b09a79c01bd6c1b77d6af1ee0f62d323007c3ff` after Copilot
+  approved exact head `07af052caaa2ced3766be494ffa7156557947235` with no inline
+  findings and every required check passed. Managed completion reconciled the
+  merged squash while retaining this Active effort and source worktree.
 - Container, SSH, privileged and parent issue reconciliation gates remain open.
 
 ### 2026-10-24 - Verify installed local ACP and preserve execution ownership
