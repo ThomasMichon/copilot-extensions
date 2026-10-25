@@ -62,6 +62,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 
+from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 # Preserve the runner's existing public map as an explicit re-export.
@@ -495,11 +496,6 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
 
 
 _CODESPACES_NATIVE_FILE = Path("tests") / "test_installer_engine_adoption.py"
-_CODESPACES_FUNCTIONAL_FILES = {
-    _CODESPACES_NATIVE_FILE,
-    Path("tests") / "test_snapshot_copy_contract.py",
-    Path("tests") / "test_installer_test_support.py",
-}
 _CODESPACES_PROFILE_ENV = "CODESPACES_INSTALLER_TEST_PROFILE"
 _CODESPACES_ADMISSION = (
     "codespaces_library_install_order_retry_and_errors or "
@@ -812,26 +808,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
-    if args.test_profile == "busy-host-functional":
-        selected = {Path(path.replace("\\", "/")) for path in args.test_file}
-        if (
-            args.plugins != ["agent-codespaces"] or not selected
-            or not selected <= _CODESPACES_FUNCTIONAL_FILES
-            or args.all or args.changed or args.prepare_only or args.selection_file
-            or args.guards or args.kexpr or args.collect_only or args.list_only
-            or args.exclude or args.pre_push or args.allow_host_state
-            or args.allow_explicit_tiers
-        ):
-            ap.error("busy-host-functional requires agent-codespaces --test-file "
-                     "with only installer adoption, snapshot-copy or installer-support files")
-        if (
-            any(value is not None for value in (
-                args.subsuite_timeout, args.plugin_timeout, args.test_timeout,
-                args.max_files_per_sub_suite,
-            ))
-            or (args.max_processes, args.max_memory_mb, args.max_temp_mb) != (128, 4096, 2048)
-        ):
-            ap.error("busy-host-functional cannot be combined with limit overrides")
+    try:
+        validate_profile(args)
+    except ValueError as exc:
+        ap.error(str(exc))
     if args.selection_file is not None and (
         len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
         or args.test_file or args.guards or args.kexpr or args.collect_only
