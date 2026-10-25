@@ -650,7 +650,7 @@ def test_cleanup_after_verified_job_close_retries_only_readers_and_root(monkeypa
     monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
     monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
     monkeypatch.setattr(pt, "no_window_kwargs", lambda: {})
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (Process(), Job()))
+    monkeypatch.setattr(pt, "_spawn_observation", lambda *a, **k: (Process(), Job()))
     with pytest.raises(pt.ObservationCleanupError) as error:
         pt.run_bounded(["git"], cwd="worktree", env={}, timeout=15,
                        observation_deadline=go.time.monotonic() + 15)

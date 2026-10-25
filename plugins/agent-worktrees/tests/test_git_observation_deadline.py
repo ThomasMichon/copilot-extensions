@@ -222,7 +222,7 @@ def test_bounded_runner_reserves_cleanup_inside_total(monkeypatch, clock, cancel
 
     monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
     monkeypatch.setattr(pt, "no_window_kwargs", lambda: {})
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (Process(), Job()))
+    monkeypatch.setattr(pt, "_spawn_observation", lambda *a, **k: (Process(), Job()))
     with pytest.raises(KeyboardInterrupt if cancel else subprocess.TimeoutExpired) as error:
         pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=115)
     if not cancel:
@@ -236,7 +236,7 @@ def test_bounded_runner_reserves_cleanup_inside_total(monkeypatch, clock, cancel
 
 
 def test_runner_short_deadline_refuses_before_spawn(monkeypatch, clock):
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail("spawn"))
+    monkeypatch.setattr(pt, "_spawn_observation", lambda *a, **k: pytest.fail("spawn"))
     with pytest.raises(subprocess.TimeoutExpired) as error:
         pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=104)
     assert error.value.observation_started is False
@@ -245,7 +245,7 @@ def test_runner_short_deadline_refuses_before_spawn(monkeypatch, clock):
 def test_inherited_posix_scope_is_not_swept(monkeypatch, clock):
     monkeypatch.setattr(pt.platform, "system", lambda: "Linux")
     monkeypatch.setattr(pt, "detached_kwargs", lambda: {})
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail("spawn"))
+    monkeypatch.setattr(pt, "_spawn_observation", lambda *a, **k: pytest.fail("spawn"))
     with pytest.raises(pt.ObservationUnavailable):
         pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=115)
 
@@ -311,7 +311,7 @@ def test_full_capability_failure_prevents_spawn(monkeypatch, clock, failure):
     monkeypatch.setattr(pt, "detached_kwargs", lambda: {"start_new_session": True})
     monkeypatch.setattr(owned_process, "_require_posix_execution_support", lambda: None)
     monkeypatch.setattr(owned_process, "require_caller_owned_support", require_support)
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail("spawn before support"))
+    monkeypatch.setattr(pt, "_spawn_observation", lambda *a, **k: pytest.fail("spawn before support"))
     with pytest.raises(pt.ObservationUnavailable) as error:
         pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=115)
     assert error.value.__cause__ is failure
@@ -345,7 +345,7 @@ def test_failed_job_cleanup_retains_handle_for_confirmation_retry(monkeypatch, c
     process, job = Process(), Job()
     monkeypatch.setattr(pt.platform, "system", lambda: "Windows")
     monkeypatch.setattr(pt, "no_window_kwargs", lambda: {})
-    monkeypatch.setattr(pt, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (process, job))
+    monkeypatch.setattr(pt, "_spawn_observation", lambda *a, **k: (process, job))
     with pytest.raises(pt.ObservationCleanupError) as error:
         pt.run_bounded(["git"], cwd=".", env={}, timeout=15, observation_deadline=115)
     assert error.value.process is process and error.value.job is job

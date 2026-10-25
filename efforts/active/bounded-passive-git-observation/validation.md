@@ -8,6 +8,44 @@ not native/process-survival or installed qualification.
 
 ## Windows-first caller-custody checkpoint
 
+### Independent atomic creation and local facade
+
+Final affected selection: **138 passed, 99 deselected**; canonical shared
+atomic/Job selection: **37 passed, 1 native case deselected**. Raw receipt:
+`.venv-tools/r1a-atomic-final-units-20261024.log` (15.53 seconds plugin pytest /
+32.09 seconds including preparation; 1.73 seconds shared pytest). These are
+diagnostic durations, not native latency qualification.
+
+Captured fail-first shared tests exposed ignored invalid/expired deadlines;
+the post-create interruption escaped rather than retaining owned cleanup.
+The local facade's four initial contracts failed because it did not exist.
+Raw output is retained in `.venv-tools/r1a-atomic-failfirst-20261024.log`.
+
+The new shared tests inject the real private adapter's Windows API boundary:
+actual attribute backing arrays/order, no CreateProcess on capability failure,
+Unicode/empty environment and cwd, before-resume interruption at D, exact
+retained native root/Job/open parent streams, remaining budget and unchanged
+default cleanup. Consumer composition tests run the actual R1a observation
+helper, atomic adapter and local facade together, not a mock past that helper.
+They also preserve cleanup-phase cancellation through zero-wait settlement.
+No native process is launched by these tests.
+
+Facade tests use actual bounded reader threads with injected roots and byte
+streams: decoding/replacement/newline behavior, partial startup, interrupted
+join, no release before root/readers/Job completion, and zero-wait settlement
+without clock renewal or starting unattempted readers. Readers are joined;
+native root close follows verified settlement. No generic factory,
+`owned_process.py`, POSIX, service or installed behavior was changed.
+
+The independent receiving contract remains proposal-only. Both intentionally
+failing recovery-boundary probes at `01c80dcbb` remain in the source; they are
+not included in the atomic green selection or waived. Any resulting full PR
+CI failure must be reported as that unresolved gate, not bypassed.
+
+Future native caller-death proof must keep its supervisor's outer Job alive,
+kill only the exact owned caller, and avoid retaining a duplicate inner Job
+handle that would prevent kill-on-close. No such native run is admitted here.
+
 ### Contained review corrections after source refresh
 
 After the mechanical index-only rebase, the focused consumer selection below

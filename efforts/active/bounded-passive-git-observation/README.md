@@ -22,13 +22,25 @@ performance-measurement, headless-launch and process-containment patterns.
 
 ### Current admitted slice
 
-**Current stop:** the caller-only guarded recovery amendment is admitted,
+**Independent atomic checkpoint:** the private Windows spawn now has the
+admitted opt-in absolute cleanup deadline and pre-unwind stream transfer.
+R1a consumes creation-time Job assignment through its local binary-reader/root
+facade; legacy generic spawn/POSIX and no-opt-in behavior are unchanged.
+Injected tests include the actual consumer → private atomic adapter → local
+facade chain. This is not native caller-death qualification.
+
+Recovery remains a separate hold. The
+[guarded-undrain decision packet](guarded-undrain-contract-decision.md)
+identifies the missing old-target request binding and proposes a capability-
+negotiated versioned operation, without implementation or fallback permission.
+
+**Recovery-only stop:** the caller-only guarded recovery amendment is admitted,
 but two injected guarded-rollback/actual-client boundary cases still issue
 unbound undrain after PID/start reuse or a third-owner publication. The
 counterexample and exact receiving-side fence candidate are at the top of
 the [recovery proposal](atomic-creation-and-drain-review-proposal.md).
 The new regression cases intentionally fail locally; they are not published
-or waived. No additional production/native/client implementation is claimed.
+or waived. No recovery/client implementation or native qualification is claimed.
 
 The implementation amendment is **Windows first; keep POSIX work open**.
 The draft #8458 now includes the exact instance-owned caller-custody and

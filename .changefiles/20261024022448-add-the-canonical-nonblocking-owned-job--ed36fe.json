@@ -1,5 +1,5 @@
 {
-  "comment": "Add the canonical nonblocking owned-Job settlement method; preserve existing positive-timeout behavior.",
+  "comment": "Add nonblocking owned-Job settlement and an opt-in atomic-spawn cleanup deadline; preserve default behavior.",
   "changes": [
     {
       "plugin": "agent-bridge",
