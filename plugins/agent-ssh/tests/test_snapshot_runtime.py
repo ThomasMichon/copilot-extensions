@@ -12,8 +12,10 @@ import subprocess
 import sys
 import time
 import venv
+from types import SimpleNamespace
 
 import pytest
+from agent_procutil.owned_process import run_caller_owned
 
 _PLUGIN = Path(__file__).resolve().parents[1]
 _REPO = _PLUGIN.parents[1]
@@ -97,8 +99,48 @@ def test_missing_completed_runtime_cannot_fall_back_to_running_interpreter(tmp_p
             return None
 
     monkeypatch.setattr(launcher, "load", lambda *_: Primitive())
-    with pytest.raises(ValueError, match="completed runtime"):
+    with pytest.raises(FileNotFoundError, match="completed runtime"):
         launcher.runtime_command(tmp_path, "agent-ssh", {})
+
+
+def _purelib(python, *, scheme=None):
+    code = (
+        "import json,sys,sysconfig; "
+        "options={'scheme':sys.argv[1]} if len(sys.argv)>1 else {}; "
+        "print(json.dumps(sysconfig.get_path('purelib',**options)))"
+    )
+    result = run_caller_owned(
+        [str(python), "-I", "-X", "utf8", "-c", code, *([scheme] if scheme else [])],
+        timeout=5,
+        max_stdout_bytes=8192,
+        max_stderr_bytes=8192,
+    )
+    if result.returncode:
+        raise ValueError("Selected interpreter purelib query failed")
+    path = Path(json.loads(result.stdout))
+    if not path.is_absolute():
+        raise ValueError("Selected interpreter purelib must be absolute")
+    return path
+
+
+def test_selected_peer_purelib_uses_its_minor_not_the_runner_minor(monkeypatch):
+    selected_python = sys.executable
+    selected_version = sys.version_info
+    runner_minor = 10 if selected_version.minor != 10 else 11
+    module = sys.modules[__name__]
+    monkeypatch.setattr(
+        module,
+        "sys",
+        SimpleNamespace(
+            executable=selected_python,
+            version_info=SimpleNamespace(major=3, minor=runner_minor),
+        ),
+    )
+    # Ask the real selected interpreter for a POSIX layout even on Windows;
+    # no second host runtime or fabricated interpreter answer is required.
+    path = _purelib(selected_python, scheme="posix_prefix")
+    assert f"python{selected_version.major}.{selected_version.minor}" in str(path)
+    assert f"python3.{runner_minor}/" not in path.as_posix()
 
 
 def _cell(root, monkeypatch, *, host_context=False, legacy=False):
@@ -112,11 +154,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
         peer_python = runtime.resolve_python(original_home / ".agent-worktrees")
         assert peer_python is not None
         original_peer_python = peer_python
-        original_peer_site = peer_python.parent.parent / (
-            "Lib/site-packages"
-            if os.name == "nt"
-            else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
-        )
+        original_peer_site = _purelib(peer_python)
     if legacy:
         home = root / "home"
         home.mkdir(parents=True)
@@ -307,6 +345,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False):
     if not legacy:
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(contexts["agent-ssh"]))
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(payloads["agent-ssh"]))
+    monkeypatch.setenv("AGENT_SSH_PAYLOAD_ROOT", str(payloads["agent-ssh"]))
     monkeypatch.setenv("AGENT_RT_ROOT", str(contexts["agent-ssh"].parent))
     return contexts, payloads
 
@@ -423,6 +462,20 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
     repo, machines = _configured_caller(tmp_path)
     assert not (Path.home() / ".agent-worktrees" / "payload-dir").exists()
     monkeypatch.setenv("AGENT_SSH_NO_SELFPROVISION", "1")
+    observed_calls = []
+    owned = writer._run_owned_contributor
+
+    def observed(*args, **kwargs):
+        started = time.monotonic()
+        try:
+            result = owned(*args, **kwargs)
+            observed_calls.append((round(time.monotonic() - started, 3), result.returncode))
+            return result
+        except Exception as error:
+            observed_calls.append((round(time.monotonic() - started, 3), type(error).__name__))
+            raise
+
+    monkeypatch.setattr(writer, "_run_owned_contributor", observed)
     # A controlled slow shell reproduces the old route's deadline failure.
     shell_script = (
         payloads["agent-ssh"]
@@ -466,7 +519,10 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
             home=home,
         )
         samples.append(time.monotonic() - started)
-        value = _snapshot(home)
+        try:
+            value = _snapshot(home)
+        except StopIteration:
+            pytest.fail(f"contributor outcomes: {observed_calls}; writer samples: {samples}")
         assert value["connectivity"] == value["effective_routes"] == "unobserved"
         assert value["topology"]["status"] == "available", (value["state_root"], samples)
         assert value["topology"]["origin"] == "external-state"
@@ -476,6 +532,19 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
         machines.write_text(machines.read_text().replace("host-a", "host-b"))
     assert captured[0] != captured[1]
     assert writer._SUBPROCESS_TIMEOUT_S == 10
+    from agent_ssh import session_snapshot
+
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    controls = load(_PLUGIN / "tests" / "test_session_snapshot.py", "snapshot_profile_controls")
+    config_d = controls.fragment(profiles)
+    before = {path: path.read_bytes() for path in profiles.rglob("*") if path.is_file()}
+    shutil.rmtree(Path.home() / ".agent-worktrees" / "versions")
+    unavailable = session_snapshot.capture(cwd=repo, config_d=config_d)
+    assert unavailable["topology"]["status"] == unavailable["state_root"] == "unavailable"
+    assert unavailable["profiles"]["validation"] == "non-executing-structure-and-source"
+    assert unavailable["profiles"]["status"] != "not-inspected"
+    assert before == {path: path.read_bytes() for path in profiles.rglob("*") if path.is_file()}
     # A recorded payload marker is not a readiness requirement for an already
     # completed, inventory-qualified legacy runtime.
     (Path.home() / ".agent-worktrees" / "payload-dir").write_text("relative-peer")
@@ -566,6 +635,10 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
                 }
             )
         )
+    for field in ("generation", "namespaceGeneration", "sourceFingerprint"):
+        restricted = {**active, field: "changed"}
+        with pytest.raises(_worktrees.ContextRefused):
+            _worktrees.state_root(repo, restricted)
     slot = Path(argv[0]).parent.parent
     site = slot / (
         "Lib/site-packages"
@@ -579,6 +652,9 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
         assert _worktrees.state_root(repo, active) == (None, "unavailable")
     finally:
         api.write_bytes(supported)
+    shutil.rmtree(contexts["agent-worktrees"].parent / "versions")
+    with pytest.raises(_worktrees.ContextRefused):
+        _worktrees.state_root(repo, active)
     contexts["agent-worktrees"].unlink()
     with pytest.raises(_worktrees.ContextRefused):
         _worktrees.state_root(tmp_path, active)
@@ -595,33 +671,44 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
 
 @pytest.mark.timeout(150)
 def test_native_optional_deadline_reaps_actual_adapter_descendants(tmp_path, monkeypatch):
+    from agent_ssh import _worktrees
+
     _, payloads = _cell(tmp_path / "cell", monkeypatch, legacy=True)
     repo, _ = _configured_caller(tmp_path)
-    home = tmp_path / "output"
-    home.mkdir()
-    pid_file = tmp_path / "child.pid"
+    resolver = payloads["agent-ssh"] / "scripts" / "snapshot_runtime.py"
+    original = resolver.read_text(encoding="utf-8")
     adapter = payloads["agent-ssh"] / "scripts" / "snapshot_worktrees.py"
-    adapter.write_text(
-        "import os,subprocess,sys,time\nfrom pathlib import Path\n"
-        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
-        "creationflags=0x08000000 if os.name=='nt' else 0)\n"
-        f"Path({str(pid_file)!r}).write_text(str(p.pid))\n"
-        "time.sleep(60)\n",
-        encoding="utf-8",
-    )
     controls = load(
         _PLUGIN / "tests" / "test_write_session_guidance.py", "snapshot_cleanup_controls"
     )
-    try:
-        assert writer.write_session_guidance(
-            {"sessionId": "session-1", "cwd": str(repo)}, home=home
+    for phase in ("resolution", "execution"):
+        pid_file = tmp_path / f"{phase}.pid"
+        blocked = (
+            "import os,subprocess,sys,time\nfrom pathlib import Path\n"
+            "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+            "creationflags=0x08000000 if os.name=='nt' else 0)\n"
+            f"Path({str(pid_file)!r}).write_text(str(p.pid))\n"
+            "time.sleep(60)\n"
         )
-        assert _snapshot(home)["topology"]["status"] == "unavailable"
-        assert pid_file.is_file()
-        assert not controls._pid_running(int(pid_file.read_text()))
-    finally:
-        if pid_file.exists() and controls._pid_running(int(pid_file.read_text())):
-            os.kill(int(pid_file.read_text()), __import__("signal").SIGTERM)
+        resolver.write_text(original, encoding="utf-8")
+        if phase == "resolution":
+            resolver.write_text(
+                original
+                + "\ndef worktrees_command(*args):\n"
+                + "".join("    " + line + "\n" for line in blocked.splitlines()),
+                encoding="utf-8",
+            )
+        else:
+            adapter.write_text(blocked, encoding="utf-8")
+        try:
+            started = time.monotonic()
+            assert _worktrees.state_root(repo, None) == (None, "unavailable")
+            assert time.monotonic() - started < 8  # 5s plus owned cleanup, not a new deadline.
+            assert pid_file.is_file()
+            assert not controls._pid_running(int(pid_file.read_text()))
+        finally:
+            if pid_file.exists() and controls._pid_running(int(pid_file.read_text())):
+                os.kill(int(pid_file.read_text()), __import__("signal").SIGTERM)
 
 
 @pytest.mark.skipif(

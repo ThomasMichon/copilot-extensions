@@ -426,11 +426,16 @@ lookup uses the existing qualified installed-inventory API; no `payload-dir`
 marker is required for an already completed runtime. Legacy source/snapshot
 payloads without native inventory qualify their recorded payload against the
 caller's canonical source. Neither path substitutes another source after refusal.
-Absent or incompatible peers remain unavailable. Older callers without the
-native adapter retain the existing no-context compatibility path.
+Absent or incompatible peers remain unavailable. A missing completed legacy
+Worktrees runtime also remains unavailable, so independent local profile
+inspection still runs. A present but incomplete explicit same-cell installation
+remains a refusal. An unresolved owning payload never selects a PATH substitute.
 
 The contributor deadline remains **10 seconds**. Optional-peer resolution and
-execution share the original **5-second** budget. Both process boundaries
+execution share the original **5-second** budget inside one interruptible
+caller-owned worker, including inventory, receipt and filesystem resolution.
+Captured caller metadata only restricts fresh canonical validation in that
+worker; it cannot grant authority or select another owner. Both process boundaries
 retain caller-owned descendant cleanup. Snapshots perform no connection probes,
 OpenSSH evaluation, installation or profile writes; unavailable/refused evidence
 is not an empty or available topology.
@@ -447,6 +452,8 @@ overlays the candidate Worktrees package, so this is source-consumer validation,
 not proof of an installed release. Namespaced fixtures install their registries
 and repository identity through the canonical owner APIs and remove legacy
 duplicates before the positive read.
+Fixture package locations are queried through the selected interpreter's
+`sysconfig` API rather than inferred from the test runner's Python minor version.
 Fresh/resumed delivery measurements do not qualify the composed two-second
 startup gate, cold-cache behavior or latency tails.
 

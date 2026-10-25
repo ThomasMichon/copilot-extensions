@@ -495,23 +495,13 @@ def test_worktrees_lookup_timeout_reaps_nested_resolver(tmp_path, monkeypatch):
         f"Path({str(pid_file)!r}).write_text(str(child.pid))\n"
         "time.sleep(60)\n", encoding="utf-8",
     )
-    command = tmp_path / ("peer.ps1" if os.name == "nt" else "peer")
-    if os.name == "nt":
-        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
-        command.write_text(
-            f"& {quote(sys.executable)} {quote(resolver)} @args\n", encoding="utf-8",
-        )
-    else:
-        command.write_text(
-            f'#!/usr/bin/env bash\nexec {shlex.quote(sys.executable)} {shlex.quote(str(resolver))} "$@"\n',
-            encoding="utf-8",
-        )
-        command.chmod(0o755)
-    original = shutil.which
-    monkeypatch.setattr(
-        _worktrees.shutil, "which",
-        lambda name: str(command) if name == "agent-worktrees" else original(name),
-    )
+    original = _worktrees.run_caller_owned
+
+    def blocked_worker(argv, **kwargs):
+        assert "agent_ssh._worktrees" in argv
+        return original([sys.executable, str(resolver)], **kwargs)
+
+    monkeypatch.setattr(_worktrees, "run_caller_owned", blocked_worker)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     try:
         assert _worktrees.state_root(tmp_path, None) == (None, "unavailable")

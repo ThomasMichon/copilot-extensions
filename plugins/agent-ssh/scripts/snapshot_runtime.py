@@ -69,6 +69,8 @@ def runtime_command(payload: Path, plugin: str, environment: dict) -> tuple[list
     runtime = load(payload / "scripts" / "versioned_runtime.py", "_snapshot_runtime")
     python = runtime.resolve_python(root)
     if python is None:
+        if own is None:
+            raise FileNotFoundError("Selected completed runtime is unavailable")
         raise ValueError("Selected completed runtime is unavailable")
     if own is not None:
         _, slot, _ = primitive._runtime_slot_paths(
@@ -162,7 +164,9 @@ def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str],
         owner / "scripts" / "installation-context" / "installation_context.py",
         "_snapshot_peer_provenance",
     )
-    marker = Path.home() / ".agent-worktrees" / "payload-dir"  # marketplace-isolation: allow legacy source/snapshot ownership compatibility
+    marker = (
+        Path.home() / ".agent-worktrees" / "payload-dir"
+    )  # marketplace-isolation: allow legacy source/snapshot ownership compatibility
     payload = Path(marker.read_text(encoding="utf-8").strip())
     if not payload.is_absolute():
         raise ValueError("Optional owner payload must be absolute")
@@ -182,7 +186,7 @@ def legacy_worktrees_command(owner: Path, environment: dict) -> tuple[list[str],
 
 
 def worktrees_command(owner: Path, own: dict | None) -> tuple[list[str], dict]:
-    """Compose existing owners in-process; the caller bounds resolution and execution."""
+    """Compose existing owners inside the caller-owned request worker."""
     if own is None:
         command, environment = legacy_worktrees_command(owner, dict(os.environ))
     else:
@@ -236,8 +240,6 @@ def main() -> int:
         if sys.argv[1:] == ["snapshot"]:
             command, environment = runtime_command(owner, "agent-ssh", dict(os.environ))
             command[-1] = "agent_ssh.session_snapshot"
-        elif sys.argv[1:] == ["state-root", "--json"]:
-            command, environment = worktrees_command(owner, None)
         else:
             raise ValueError("Unsupported read-only snapshot invocation")
         return subprocess.call(
