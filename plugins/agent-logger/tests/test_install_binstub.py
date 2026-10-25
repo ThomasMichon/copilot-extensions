@@ -87,6 +87,10 @@ if args[:1] == ['venv']:
         executable = base / 'bin' / 'python'
         executable.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(sys._base_executable, executable)
+        for name in ('python3', 'python' + str(sys.version_info.major) + '.' + str(sys.version_info.minor)):
+            alias = executable.with_name(name)
+            if not alias.exists():
+                alias.symlink_to(executable.name)
         library = base / 'lib'
         stdlib = Path(sysconfig.get_path('stdlib'))
         shutil.copytree(
@@ -224,6 +228,7 @@ class Launcher {
         shutil.copyfile(driver, command)
         command.chmod(0o755)
     env["PATH"] = f"{fixture}{os.pathsep}{env['PATH']}"
+    env["UV_PYTHON_INSTALL_DIR"] = str(fixture / "python")
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell")
         selected = subprocess.run(
@@ -239,6 +244,33 @@ class Launcher {
     assert probe.stdout.startswith("PipInstallSettings {")
     assert not calls.exists()
     return calls
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux private acquisition layout")
+@pytest.mark.parametrize("foundation", [False, True])
+def test_offline_uv_provides_private_interpreter_layout(tmp_path: Path, foundation: bool) -> None:
+    env = _isolated_install_env(tmp_path / "home")
+    env["UV_PYTHON_INSTALL_DIR"] = str(tmp_path.parent / "must-not-use-inherited-base")
+    _offline_uv(tmp_path, env)
+    assert Path(env["UV_PYTHON_INSTALL_DIR"]).is_relative_to(tmp_path)
+    if foundation:
+        env["UV_PYTHON_INSTALL_DIR"] = str(tmp_path / "bootstrap" / "python")
+    managed = Path(env["UV_PYTHON_INSTALL_DIR"])
+    command = shutil.which("uv", path=env["PATH"])
+    assert command is not None
+    target = tmp_path / "venv"
+    subprocess.run(
+        [command, "venv", str(target), "--python", "3.11"],
+        env=env, capture_output=True, text=True, check=True, timeout=60,
+    )
+    assert (target / "bin" / "python").resolve().is_relative_to(managed)
+    for executable in (target / "bin" / "python", managed / "bin" / "python3"):
+        result = subprocess.run(
+            [str(executable), "-I", "-c",
+             "import json,sys; print(json.dumps(sys.base_prefix))"],
+            env=env, capture_output=True, text=True, check=True, timeout=20,
+        )
+        assert Path(json.loads(result.stdout)) == managed
 
 
 def _assert_complete_runtime(home: Path) -> None:
