@@ -98,6 +98,22 @@ def test_each_distinct_required_capture_is_prepared_and_validated(tmp_path, monk
     ]
 
 
+def test_retained_recovery_checkpoint_is_independently_prepared(tmp_path, monkeypatch):
+    _packet(tmp_path)
+    recovery = "plugins/agent-bridge/contract/fixtures/http/current/http50-retained-recovery.json"
+    commit = "5" * 40
+    (tmp_path / recovery).write_text(json.dumps({
+        "captured_from": {"commit": commit},
+    }), encoding="utf-8")
+    calls = _runner(monkeypatch, iter([0, 1, 0, 0]))
+    assert preparation.prepare(tmp_path, REMOTE) == COMMIT
+    assert (
+        ("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
+         "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, commit), 60,
+    ) in calls
+    assert (("show", f"{commit}:{codec.REGISTRY}"), 10) in calls
+
+
 @pytest.mark.parametrize("relative", preparation.PACKETS[1:])
 @pytest.mark.parametrize("fault", ["missing", "malformed"])
 def test_required_later_capture_refuses_before_git(tmp_path, monkeypatch, relative, fault):

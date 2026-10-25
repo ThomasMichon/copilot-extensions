@@ -55,6 +55,24 @@ before implementation.
    reviewed, qualified and verified through installed opt-in boundaries.
    Review ordinary-default activation separately after those gates pass.
 
+### Shared-context foundation
+
+The additive `machine_transport.resolve_local_execution_context` API separates
+current OS/configuration observations from target selection. Its immutable
+result preserves observed hostname, physical name, actual environment,
+one-term execution identity and optional customization key. Pure source cases
+cover Windows, WSL and Linux with empty, unrelated and matching maps, literal
+platform-like hostname suffixes, projected legacy names, explicit configured
+selection, ambiguity and generated-key collisions. Target selection retains its
+authority boundaries; mixed-registry legacy guest lookup and conflicting named
+profiles have focused compatibility regressions.
+
+This foundation does not yet change registration/configuration, tuple producers,
+receiving-side writes or Manager entry points. Steps 2-3 and the complete
+validation matrix below remain open. In particular, observed naming facts are
+not receiving-project or allocation authority; existing admission receipts and
+identifiers must not be regenerated from a later optional customization.
+
 ## Validation Plan
 
 - [ ] Cross Windows, WSL and Linux source cases with absent, empty, unrelated-only

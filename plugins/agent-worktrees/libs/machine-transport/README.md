@@ -82,6 +82,95 @@ resolved -- network call to reach a host that is actually the caller itself.
 
 ## Usage
 
+### Current-machine context without enrollment
+
+`resolve_local_execution_context(entries, *, hostname, environment,
+configured_machine=None)` returns immutable `LocalExecutionContext` naming
+facts: observed `hostname`, physical `machine`, actual `environment`, one-term
+`execution_machine` and optional `customization_key`. The caller supplies the
+current OS/substrate observations and, when applicable, its existing configured
+binding. Missing-file handling and configuration provenance remain caller-owned.
+An empty map or a map containing only other machines does not deny this local
+context. A matching map can customize physical and execution names. An observed
+physical hostname resembling `-wsl`, `-win` or a parenthesized environment label
+is literal, not address syntax.
+Physical grouping names are structured clean strings, not execution-reference
+tokens. When a mapped physical label cannot form an execution token and the
+current platform has no declared execution key, the observed hostname supplies
+the fallback execution name (with `-wsl` for a guest), without changing the
+physical label. This fallback uses the same collision checks as other local
+execution names. Allocation callers still own portable path/Git-ref validation.
+
+This is an additive API for the reviewed local-first correction, not an
+activation of tuple producers or an automatic migration of existing consumers.
+The existing target selectors and ownership fences retain their contracts.
+In particular, a missing guest customization can yield local guest naming
+facts here without making its native registry entry a guest target. Explicit
+configured conflicts, ambiguous customizations and invalid declarations still
+raise. Inferred binding qualifiers must agree with the actual platform; exact
+registered keys, aliases and applicable display selectors retain precedence.
+Do not supply a requested target or a record's stored owner as the
+current configured binding.
+
+An established guest binding remains usable when only its native customization
+exists. This local adapter handles the registry's specific
+`MissingExecutionSpaceError` (`ValueError` subtype); the target selector still
+refuses the missing logical target. The exception retains the resolved
+`physical_host`, so guest-qualified key, alias and display bindings keep the
+mapped family rather than reverting to their input spelling. Ambiguous physical
+families remain errors. Both configured and observed results check
+execution-key collisions against keys, compatibility names and profile aliases.
+Execution names are normalized before checking every colliding entry; trimming
+or presentation conversion cannot bypass that check. The scan includes other
+entries' projected execution keys, not just their original presentation labels.
+Registry-key whitespace does not change a literal OS observation.
+Configured native bindings also match trimmed legacy keys while retaining the
+original customization key and key precedence over SSH profile aliases.
+Multiple normalized keys remain ambiguous; foreign execution-key collisions
+still fail. Contextual legacy display selection does not change
+when unrelated scoped entries are present, and a selected physical family
+constrains guest candidates even when another key resembles its shorthand.
+An unnamed legacy SSH
+profile does not assert a contradictory environment. Legacy null profile names
+and aliases remain absent metadata, not fabricated identity labels or foreign
+environment assertions; invalid selected non-string names raise `ValueError`.
+Aliases of a literal observed host retain the same naming facts; an explicit
+profile/environment conflict is still a refusal. Actual-platform entries take precedence over
+unscoped native fallbacks, and a selected entry keeps its registry key rather
+than regenerating it from aliases or physical metadata.
+Locally associated legacy display-name bindings use the shared selector before
+literal-host format handling; keys and aliases retain precedence, and ambiguous
+local display lookups remain errors. Unrelated display metadata cannot replace
+an established one-term configured execution identity. An explicitly multi-term
+legacy display selector may resolve uniquely without hostname metadata.
+A derived guest with no guest
+declaration has no `customization_key`: borrowing a physical name does not
+declare guest roles or loadouts.
+Legacy parenthesized presentation keys are projected to one-term execution
+names while retaining their original `customization_key`; explicit canonical
+keys are not reformatted. Contextual normalization receives the literal observed
+hostname so native/guest sibling labels cannot trim it before selection.
+The optional `observed_hostname` keyword is current-OS context, not target
+authority. Logical projection canonicalizes recognized profile environment
+labels in copies; original raw inputs, machine keys, aliases and other
+transport fields are retained. `known_environment_label()` classifies legacy
+metadata without validating it; `normalize_environment()` remains the strict
+requested-environment validator.
+The same context is used for legacy hostname-address collision checks.
+Mixed scoped/unscoped registries resolve an existing legacy guest before
+generating a fallback, while named native profiles retain their environment
+refusals even through qualified aliases. Profile environment labels use the
+shared environment normalizer.
+The Bridge adapter correlates missing-alias defaults with their exact source
+profile, so canonical role names cannot fill an explicitly empty/null alias.
+
+Consumers must separately prove the receiving project, namespace, ledger and
+retained allocation before writing or replaying. New naming facts do not
+authorize relabeling an admitted allocation, changing its references or
+transferring an incumbent owner. Consumer integration and installed acceptance
+remain tracked by the
+[local-first amendment](../../efforts/active/machine-alias-compatibility-and-locality/manifest-independent-local-identity.md).
+
 ### Contextual historical aliases
 
 `resolve_machine_selection()` is the shared address map; format parsing belongs
