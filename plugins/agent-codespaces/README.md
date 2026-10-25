@@ -482,6 +482,27 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   account when a CodeSpace uses ambient ownership. Each must be logged in with
   the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
   login flow.
+- **Connection Owner observation waves:** due session holds share one immutable,
+  per-account inventory; a poll with no due holds does not list accounts. The
+  flattened `list_codespaces()` API remains unchanged. Owner-only qualified
+  listings retain errors and treat the 50-row limit as incomplete. Missing,
+  ambiguous, incomplete or expired observations never authorize a connection.
+  Admission revalidates installation, effective configuration, candidate accounts
+  and selected credential digests without relisting. This still performs metadata
+  work; listing-call savings are not a measured whole-system CPU improvement.
+  Up to four venues are probed concurrently by default, with one complete,
+  versioned mux batch per venue and a 30-second inventory admission window.
+  Expired queued venues defer to the next due wave instead of refreshing secretly.
+  The owner pins the observed account directly, bounds config acquisition to one
+  admitted attempt, drains its child on cancellation, and checks admission before
+  connection/exec retries. Stopped venues are never connected; an unknown state
+  is not a negative mux verdict. Missing tmux, malformed output and missing batch
+  completion remain unknown. Session renewal and release compare launch
+  generations under the existing owner lock. Legacy two-argument probe providers
+  remain supported. Default bridge proof reuses inventory admission but opens and
+  closes its own manager; no transport is borrowed or shared, and transcript
+  transport behavior is unchanged. Scope is rechecked after execution and
+  disconnect before publishing a verdict; registry checks run off the owner loop.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
@@ -558,6 +579,26 @@ provider after success.
 Authentication and inventory use one shared set of mapped, bound, configured,
 provider-authorized and active account candidates. A mapped-only account
 missing scope therefore offers Authorize even when another account has rows.
+
+The internal `account_candidates.read_candidates(*, on_account=None,
+concurrent=False)` seam returns a frozen `CandidateRead` containing that
+invocation's ordered accounts, routing inventory, effective configuration,
+actual configuration-provider reports and bound/provider/active selection
+observations. `candidates()` remains the ordered accounts tuple. The result
+contains no credentials and is not a cache or a currentness authority; nested
+source-owned configuration/routing values must not be mutated. Consumers make
+their own immutable projection. The Connection Owner uses the actual reports
+to withhold authority when a provider is indeterminate, including when retained
+configuration would otherwise produce the same merged value.
+
+`inventory_store` is an **unwired internal JSON/storage prototype**, not an
+enabled inventory cache. Its caller supplies an absolute existing data parent,
+source identity, explicit limits and policy. It reuses existing operation
+custody/atomic-replace primitives and compares source, creation epoch and
+revision before replacement. Read failures remain unknown; snapshots contain
+no credentials or credential digests. Pure freshness results label status only
+and cannot authorize connection or tenant mutation. No runtime path, production
+defaults, timer, provider read, push transport or consumer is activated.
 
 No private broker, persistent authentication daemon, PAT or repository opt-out
 is required. A remote terminal without an available browser can still use the

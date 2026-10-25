@@ -369,12 +369,13 @@ def get_pending_delivery(codespace: str, tenant: str) -> dict | None:
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,
+    *, generation: str | None = None,
 ) -> OwnerHold | None:
     """Refresh ``tenant``'s heartbeat. Returns the hold, or ``None`` if absent.
 
-    Unlike :func:`hold`, does not create a missing hold or a missing tenant --
-    heartbeating a tenant that was already reclaimed is a no-op (returns the hold
-    if it still exists for other reasons, else ``None``).
+    Unlike :func:`hold`, does not create missing holds or tenants. A reclaimed
+    tenant returns the hold if it still exists for other reasons, else ``None``.
+    A supplied generation atomically fences renewal against replacement.
     """
     now = time.time()
     with _owner_lock():
@@ -382,6 +383,8 @@ def heartbeat(
         existing = holds.get(codespace)
         if existing is None:
             return None
+        if generation is not None and (existing.sessions.get(tenant) or {}).get("generation") != generation:
+            return existing
         if tenant in existing.tenants:
             existing.tenants[tenant] = now
             existing.heartbeat_at = now
