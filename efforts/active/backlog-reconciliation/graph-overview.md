@@ -384,6 +384,46 @@ metadata-only arrivals remain at this snapshot. Twelve numeric and three
 existing ROOT intakes have been received; initial research layers and
 provenance remain unchanged.
 
+## Ninth delivered consolidation
+
+Batch 99 considered twelve mesh, venue-input and supervisor-control issues.
+Five redundant trackers were administratively superseded only after complete
+direct numeric receiving and ENTIRE actual-body/discussion/custody readback:
+
+| Unfinished outcome | Superseded tracker | Existing receiving home |
+|--------------------|--------------------|-------------------------|
+| Bounded in-module SSH validation, delegated obsolete-pin retirement and all-alias validation before transactional refresh | #1438, #4184, #5477 | OPEN #63 |
+| Faithful actual attached-Container seed input through the shared reader | #5926 | OPEN #954 |
+| Durable registration upgrade/reconciliation AND non-erasing safety-option placement | #4232 | OPEN #2793 |
+
+The actual receivers contain 18,077, 13,348 and 6,291 UTF-8 bytes, with
+33, 23 and five unchecked rows respectively. All incumbent bytes remain
+contiguous after the new top disclosure; all 35 earlier checklist rows,
+check states, markers and original comments survive. Each case has direct
+Plan, Validation and continuing Coordination. No ROOT was changed.
+
+**#1414, #4227, #6189 and #7206 remain independently OPEN**, as do all
+three receivers. The specific affected-P3 mapping condition is unresolved;
+client CWD routing exceeds supervisor settings; both transfer/emitter designs
+and assigned connectivity convergence retain their complete scope.
+#2793's whole-mapping ownership condition is obeyed by retaining that owner,
+not waived or turned into a new leaf gate. See the
+[dated checkpoint](<journal/2026/10.24 mesh-venue-supervisor-family-99.md>).
+
+All twelve public dispositions, original bodies, forty original comments,
+whole receiving bodies and current custody were audited before the census:
+**904 whole-queue OPEN at 2026-10-24 20:42:13 PDT**, comprising 735
+original-cohort and 169 inflow issues. There are 657 eligible open and 247
+untouched excluded-author issues, still 175 above the fixed checkpoint.
+No new arrival or external closure intervened.
+
+The graph retains **717 historical eligible identities**: 657 open and sixty
+closed, comprising 52 audited graph supersessions and eight external changes
+with no credit. Fifteen numeric and three existing ROOT intakes have been
+received. No metadata-only arrival is pending; initial research layers and
+provenance remain unchanged. These are tracking outcomes, not implementation,
+native qualification, source/resource transfers or parent completion.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
