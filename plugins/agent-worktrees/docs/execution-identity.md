@@ -180,8 +180,27 @@ be reconstructed, but a former customized identity with no retained observation
 must still satisfy ordinary ownership checks or refuse. Refusal never permits
 a replacement allocation. Ordinary record mutation, arbitrary allocation
 objects, launch admissions and interrupted creation-tail repair do not gain
-authority from this read-only completed-key path; their remaining retained
-customization compatibility is separate.
+authority from this read-only completed-key path; each uses its own
+independently validated operation boundary.
+
+Explicit `doctor --repair-creation` validates the actual registered tracking
+record, original allocation and nonce, Git repository/branch, stopped session
+and unclaimed retained New intent before applying naming compatibility.
+An original literal OS-derived legacy owner or tuple remains repairable after
+optional naming changes without relabeling it. A former custom identity that
+cannot be reconstructed must still pass ordinary ownership checks.
+The receiving project, actual environment and any qualified parent retain
+independent record/namespace authority. A knowledge companion additionally
+requires its own current receiving-project anchor, worktree root, platform and
+execution binding; the parent alone cannot authorize it. Equivalent resolved
+checkout/parent paths retain their stored spelling; relative paths, symlinks
+and escapes from the receiving root do not qualify. Missing companions
+use the original pair allocation, with authority rechecked inside its allocation
+lock. Existing companions keep their original identity and owner/pair references.
+Every repeated repair check binds the complete retained seed, including text and
+revision, not just its ID. Conflict refuses without replacing the allocation or
+consuming/restoring a prompt. This bounded repair does not change generic
+record mutation, fresh tuple admission or ordinary producer defaults.
 
 `load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
 internal opt-in for genuinely new records. The existing if-absent record lock

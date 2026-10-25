@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import time
@@ -42,6 +43,8 @@ class Governance:
         )
         self.initial = self.read()
         self.publication_locks = ()
+        self.command_lock = None
+        self.retained_binding = None
 
     def read(self) -> tuple[dict, dict | None]:
         arguments = {
@@ -130,18 +133,82 @@ class Governance:
         }
 
     @contextmanager
+    def manifest_publication(self, content: bytes):
+        if self.context:
+            yield content
+            return
+        import command_binding as binding
+
+        if self.retained_binding is not None:
+            ownership = binding.retained_legacy_binding(
+                self.helper, self.command_lock, payload_root=self.payload,
+                plugin_id="agent-worktrees", legacy_root=self.root,
+                project_root=self.project_root,
+            )
+            if ownership != self.retained_binding:
+                raise InstallationRefused("Retained command ownership changed during restoration")
+            manifest = json.loads(content)
+            if (
+                manifest.get("schema_version") != 3
+                or manifest.get("service") != "agent-worktrees"
+                or "commandBinding" in manifest
+                or "commandLifecycle" in manifest
+            ):
+                raise InstallationRefused("Restoration requires an unbound Worktrees manifest")
+            yield (json.dumps({**manifest, **ownership}, indent=2) + "\n").encode("utf-8")
+            self.command_lock.assert_owned()
+            return
+        with binding.legacy_manifest_publication(
+            self.helper, json.loads(content), payload_root=self.payload,
+            plugin_id="agent-worktrees", legacy_root=self.root,
+            project_root=self.project_root,
+        ) as (manifest, result, _lock):
+            if result["status"] == "unresolved":
+                print(
+                    f"Command ownership was not published: {result['reason']}",
+                    file=sys.stderr, flush=True,
+                )
+            yield (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
+
+    @contextmanager
     def held(self, *, timeout: float = 180):
-        if self.publication_locks:
+        if self.publication_locks or self.command_lock is not None:
             for lock in self.publication_locks:
                 lock.assert_owned()
+            if self.command_lock is not None:
+                self.command_lock.assert_owned()
             self.recheck()
             yield
             return
         deadline = time.monotonic() + timeout
         with ExitStack() as stack:
             locks = []
+            command_lock = None
             receipt = self.initial[1]
-            if receipt is not None and os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):
+            retained = self._retained_bootstrap()
+            if retained:
+                import command_binding as binding
+
+                arguments = {
+                    "payload_root": self.payload, "plugin_id": "agent-worktrees",
+                    "legacy_root": self.root, "project_root": self.project_root,
+                }
+                command_lock = stack.enter_context(binding._load_lifecycle()._lock(
+                    self.helper, arguments,
+                    timeout_seconds=max(0, deadline - time.monotonic()),
+                ))
+                ownership = binding.retained_legacy_binding(self.helper, command_lock, **arguments)
+            elif receipt is None:
+                import command_binding as binding
+
+                lease = stack.enter_context(binding._load_lifecycle().legacy_lifecycle(
+                    binding._rules(), self.helper, reserve=False,
+                    payload_root=self.payload, plugin_id="agent-worktrees",
+                    legacy_root=self.root, project_root=self.project_root,
+                    lock_timeout=max(0, deadline - time.monotonic()),
+                ))
+                command_lock = lease.lock
+            elif receipt is not None and os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):
                 locks.extend(self.helper.borrow_runtime_publication(
                     legacy_root=Path.home() / ".agent-worktrees", payload_root=self.payload,
                     plugin_id="agent-worktrees", durable_home=self.durable_home,
@@ -162,7 +229,31 @@ class Governance:
             self.recheck()
             previous = self.publication_locks
             self.publication_locks = tuple(locks)
+            previous_command_lock = self.command_lock
+            self.command_lock = command_lock
+            previous_binding = self.retained_binding
+            if retained:
+                self.retained_binding = ownership
             try:
                 yield
             finally:
                 self.publication_locks = previous
+                self.command_lock = previous_command_lock
+                self.retained_binding = previous_binding
+
+    def _retained_bootstrap(self) -> bool:
+        if self.context:
+            return False
+        slot = Path(sys.prefix).resolve()
+        if (
+            slot.parent != self.root / "versions"
+            or self.payload != slot / ".runtime-bootstrap"
+            or SCRIPTS != self.payload
+        ):
+            return False
+        import versioned_runtime
+
+        if versioned_runtime.read_marker(self.root, slot.name) is None:
+            raise InstallationRefused("Retained restoration requires a completed control slot")
+        manifest = self.helper.read_deployment_manifest(self.root / "deploy-manifest.json")
+        return "commandBinding" in manifest
