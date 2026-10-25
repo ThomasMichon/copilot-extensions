@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.163-dev1",
+      "version": "0.9.164-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -44,13 +44,13 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.2.110-dev1",
+      "version": "0.2.111-dev1",
       "source": "plugins/agent-containers"
     },
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.92-dev1",
+      "version": "0.2.93-dev1",
       "source": "plugins/agent-mcp"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.18.102-dev1",
+      "version": "0.18.103-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -122,7 +122,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.2.76-dev1",
+      "version": "0.2.77-dev1",
       "source": "plugins/agent-machines"
     },
     {
@@ -146,7 +146,7 @@
     {
       "name": "budget-guidance",
       "description": "Provider-neutral current usage-budget posture with strict static readings, deterministic field-level source resolution, sustainable-rate arithmetic, and shared human and machine-readable status.",
-      "version": "0.1.61-dev1",
+      "version": "0.1.62-dev1",
       "source": "plugins/budget-guidance"
     },
     {

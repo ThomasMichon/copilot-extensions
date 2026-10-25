@@ -25,6 +25,10 @@ had to be hand-propagated) -- and forces a *conscious* FAMILIES edit when a new
 plugin or a new variant is introduced, while permitting the intentional
 divergence. Run with ``--list`` to print the current grouping.
 
+The ordinary POSIX selected-runtime readiness fragment is shared independently
+of those deploy-model families. Its Bridge reference is synchronized with
+``--sync-readiness``; the default check also detects fragment drift.
+
 Usage::
 
     python tools/check-bootstrap-sync.py           # verify (CI / pre-push)
@@ -34,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -86,6 +91,12 @@ FAMILIES: dict[str, list[str]] = {
     "lib-copy/agent-worktrees": ["agent-worktrees"],
 }
 
+SELECTED_RUNTIME_PLUGINS = (
+    "agent-bridge", "agent-dispatch", "agent-mcp",
+)
+READINESS_START = "# --- selected completed runtime readiness (reference: agent-bridge) ---"
+READINESS_END = "# --- end selected completed runtime readiness ---"
+
 _HOOK_PS1 = "scripts/bootstrap-check.ps1"
 _HOOK_SH = "scripts/bootstrap-check.sh"
 
@@ -109,6 +120,11 @@ def _runtime_plugins() -> list[str]:
 def verify() -> list[str]:
     """Return a list of human-readable problems; empty means the check passes."""
     problems: list[str] = []
+    reference = PLUGINS_DIR / "agent-bridge" / _HOOK_SH
+    readiness = _readiness(reference)
+    for plugin in SELECTED_RUNTIME_PLUGINS:
+        if readiness is None or _readiness(PLUGINS_DIR / plugin / _HOOK_SH) != readiness:
+            problems.append(f"{plugin}: selected-runtime readiness differs from agent-bridge")
 
     classified: dict[str, str] = {}
     for family, members in FAMILIES.items():
@@ -163,6 +179,39 @@ def verify() -> list[str]:
     return problems
 
 
+def _readiness(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if text.count(READINESS_START) != 1 or text.count(READINESS_END) != 1:
+        return None
+    return text.split(READINESS_START, 1)[1].split(READINESS_END, 1)[0]
+
+
+def sync_readiness() -> None:
+    reference = _readiness(PLUGINS_DIR / "agent-bridge" / _HOOK_SH)
+    if reference is None:
+        raise ValueError("agent-bridge readiness reference is missing or ambiguous")
+    replacement = READINESS_START + reference + READINESS_END
+    for plugin in SELECTED_RUNTIME_PLUGINS[1:]:
+        path = PLUGINS_DIR / plugin / _HOOK_SH
+        if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+            raise ValueError(f"Refusing linked bootstrap destination: {path}")
+        text = path.read_text(encoding="utf-8")
+        pattern = (
+            re.escape(READINESS_START) + r".*?" + re.escape(READINESS_END)
+            if READINESS_START in text else
+            r'# "Provisioned" no longer implies a \.venv:.*?'
+            r'if \[ "\$provisioned" = 1 \] && \[ "\$deployed" = "\$current" \]; then exit 0; fi'
+        )
+        updated, count = re.subn(pattern, lambda _: replacement, text, flags=re.DOTALL)
+        if count != 1:
+            raise ValueError(f"Expected one readiness block: {path}")
+        if updated != text:
+            path.write_text(updated, encoding="utf-8", newline="\n")
+
+
 def _print_list() -> None:
     for family, members in FAMILIES.items():
         print(f"{family}:")
@@ -177,8 +226,14 @@ def main() -> int:
     ap.add_argument(
         "--list", action="store_true", help="print the family grouping and exit"
     )
+    ap.add_argument(
+        "--sync-readiness", action="store_true",
+        help="copy the agent-bridge selected-runtime predicate to its adopting hook families",
+    )
     args = ap.parse_args()
 
+    if args.sync_readiness:
+        sync_readiness()
     if args.list:
         _print_list()
         return 0
