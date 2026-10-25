@@ -931,10 +931,12 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
 - [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
       documentation acceptance; reconcile Phase 7 preset scope to avoid a
       second implementation.
-- [ ] Installation and Updates (#8877, `ticking-compass`): deliver the bounded
+- [x] Installation and Updates (#8877, `ticking-compass`): delivered the bounded
       standing inventory and genuinely component-scoped durable updates in the
       [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877).
-      The operator request and Plan/Validation live there; #7028 maintenance,
+      Reviewed intent #8879 and runtime #8891 are merged. The operator request
+      and source Plan/Validation live there; native/installed/release/rollout
+      acceptance remains in Wave 5. #7028 maintenance,
       #8545/#356 setup and all broader workbench waves retain existing owners.
 
 ### Phase 6 — Retire the bundled Picker (Done — the operator-visible end-state)
@@ -2382,6 +2384,22 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-25 - Installation and Updates bounded source delivered
+
+- Merged reviewed intent #8879 (`9caead7b9065688367ffb70ffbd631cb073d2d47`),
+  then runtime #8891 (`3e9cea6b20c48c8e19e562baec20262edf85514b`), after
+  current-head independent review and green required CI. The canonical
+  [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877)
+  records the actual owner interfaces, isolated validation and remaining
+  evidence tiers. No plugin roster, installation queue or scheduler was
+  duplicated, and no host rollout was performed.
+- Re-read the parent and phase Plan/Validation. Only #8877's bounded source
+  acceptance is resolved: 182 Manager / 50 engine tests passed, with the
+  existing opt-in live Workers check skipped. Native Windows, installed
+  cutover/UI, release and rollout gates remain in Phase 5 Wave 5 with their
+  existing owners. The effort stays Active; #7028 maintenance, #8545/#356 setup,
+  the broader workbench and all other unchecked Plan items retain custody.
 
 ### 2026-10-24 - Installation and Updates proposal
 
