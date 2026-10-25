@@ -188,16 +188,39 @@ def test_invalid_service_selector_is_rejected(selector):
         ServiceConfig(local_execution_space=selector)
 
 
-def test_hostname_is_not_a_current_space_selector():
+def test_hostname_and_platform_select_the_matching_space():
     with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
             patch("socket.gethostname", return_value="workstation"):
-        with pytest.raises(ValueError, match="explicit local_execution_space"):
-            agent_registry._detect_local_machine(_spaces())
+        current, platform = agent_registry._detect_local_machine(_spaces())
+        assert current.key == "workstation-windows"
+        assert platform == "windows"
         current, platform = agent_registry._detect_local_machine(
             _spaces(), "workstation-windows",
         )
     assert current.key == "workstation-windows"
     assert platform == "windows"
+
+
+def test_unmatched_hostname_does_not_invent_local_ownership():
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="unregistered-host"):
+        current, platform = agent_registry._detect_local_machine(_spaces())
+    assert current is None
+    assert platform == "windows"
+
+
+def test_same_platform_hostname_ambiguity_requires_explicit_selection():
+    spaces = _spaces()
+    spaces["another-windows"] = MachineConfig(
+        key="another-windows", display_name="Other", hostname="workstation",
+        physical_host="workstation", execution_platform="windows",
+    )
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        with pytest.raises(ValueError, match="[Aa]mbiguous"):
+            agent_registry._detect_local_machine(spaces)
+        current, _ = agent_registry._detect_local_machine(spaces, "workstation-windows")
+    assert current.key == "workstation-windows"
 
 
 def test_scoped_topology_rejects_an_unscoped_local_selection():

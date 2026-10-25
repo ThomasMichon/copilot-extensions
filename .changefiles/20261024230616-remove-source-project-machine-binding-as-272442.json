@@ -1,0 +1,9 @@
+{
+  "comment": "Remove source-project machine binding as a Bridge startup prerequisite; retain unambiguous topology detection and explicit selector validation.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
