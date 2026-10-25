@@ -103,6 +103,9 @@ Derived names retain their observation provenance: a physical customization
 ending in `-win` or `-wsl` is not reparsed as an explicit environment choice.
 Parent-obligation settlement uses the same validated execution owner, including
 when the map customizes only the native or guest sibling.
+The reciprocal creation claim uses the admitted tuple owner as well; native
+configuration may retain its raw hostname without changing the child's qualified
+reference. Legacy creation and settlement preserve their original owner labels.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names

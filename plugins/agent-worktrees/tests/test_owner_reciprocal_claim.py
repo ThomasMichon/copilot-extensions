@@ -18,22 +18,27 @@ from agent_worktrees import state_root
 from agent_worktrees import tracking
 
 
+@pytest.fixture(autouse=True)
+def _execution_platform(monkeypatch):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+
+
 def _seed_owner(tmp_path, monkeypatch, *, machine="anomalous-potato", project="example-web",
-                owner_id="wt-owner"):
+                owner_id="wt-owner", platform="wsl"):
     """Create an owner record under project_dir(project)/worktrees and point
     project_dir at a scratch tree."""
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / f".{name}")
     owner_dir = tmp_path / f".{project}" / "worktrees"
     owner_dir.mkdir(parents=True, exist_ok=True)
     (owner_dir.parent / "config.yaml").write_text(json.dumps({
-        "machine": machine, "platform": "wsl", "repo_name": project,
+        "machine": machine, "platform": platform, "repo_name": project,
         "repos": {project: {"anchor": str(tmp_path)}},
     }), encoding="utf-8")
     wdir = tmp_path / owner_id
     wdir.mkdir(exist_ok=True)
     tracking.create_new_record(
         owner_id, f"worktree/{owner_id}", str(wdir), project,
-        machine, "wsl", owner_dir,
+        machine, platform, owner_dir,
     )
     return owner_dir
 
@@ -93,7 +98,9 @@ def test_owned_create_rejects_unready_before_source_or_worktree_side_effects(
         tmp_path,
         monkeypatch,
         project="owner-project",
+        platform="windows",
     )
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     owner_path = owner_dir / "wt-owner.yaml"
     before = owner_path.read_bytes()
     anchor = tmp_path / "anchor"
@@ -158,6 +165,7 @@ def test_ownerless_create_reaches_source_preparation_when_unready(
     tmp_path,
     monkeypatch,
 ):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     config = cfg.Config(

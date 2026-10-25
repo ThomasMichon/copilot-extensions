@@ -636,7 +636,7 @@ def test_known_parent_io_failure_reports_unconfirmed_settlement(
 def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
     tmp_path, monkeypatch, platform,
 ):
-    from agent_worktrees import creation_identity, obligations
+    from agent_worktrees import creation_identity, obligations, worktree_creation
 
     (tmp_path / "machines.yaml").write_text(yaml.safe_dump({"machines": {
         "sibling-space": {
@@ -646,14 +646,21 @@ def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
     }}))
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
     monkeypatch.setattr(cfg, "detect_platform", lambda: platform)
-    config = cfg.Config(
-        srcroot=str(tmp_path), machine=cfg.detect_machine(tmp_path),
-        platform=platform, repo_name="project",
-        repos={"project": cfg.RepoConfig(
-            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
-        )},
-    )
     monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / (name or "project"))
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+    path = cfg.project_dir("project") / "config.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(yaml.safe_dump({
+        "repo_name": "project", "repos": {"project": {
+            "anchor": str(tmp_path), "worktree_root": str(tmp_path / "trees"),
+        }},
+    }))
+    config = cfg.load_config(
+        path, project="project",
+        include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert config.machine == ("friendly-host-wsl" if platform == "wsl" else "raw-host")
     monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
     identity = creation_identity.new_machine_identity(config, "tuple-v1")
     records = cfg.tracking_dir("project")
@@ -661,14 +668,17 @@ def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
         "parent", "worktree/parent", str(tmp_path / "trees" / "parent"),
         "project", identity.machine, platform, records, machine_identity=identity,
     )
-    parent.resources = [tracking.ResourceClaim(
-        kind="worktree", ref=f"{config.machine}/project/child", state=obligations.ACTIVE,
-    )]
-    tracking.save_record(parent)
+    assert worktree_creation._journal_owner_reciprocal_claim(
+        config, "child", f"{identity.execution_machine}/project/parent",
+        machine_identity=identity,
+    )
+    parent = tracking.load_record(parent.yaml_path)
+    assert parent.resources[0].state == obligations.ACTIVE
+    assert parent.resources[0].ref == f"{identity.execution_machine}/project/child"
     child = tracking.create_new_record(
         "child", "worktree/child", str(tmp_path / "trees" / "child"),
         "project", identity.machine, platform, records, machine_identity=identity,
-        owner_ref=f"{config.machine}/project/parent",
+        owner_ref=f"{identity.execution_machine}/project/parent",
     )
     successes, warnings = [], []
     execution_spaces.settle_parent_obligation(
@@ -678,7 +688,7 @@ def test_sibling_only_map_settles_actual_parent_without_target_enrollment(
     assert len(successes) == 1
     saved = tracking.load_record(parent.yaml_path)
     assert saved.resources[0].state == obligations.AT_REST
-    assert saved.resources[0].ref == f"{config.machine}/project/child"
+    assert saved.resources[0].ref == f"{identity.execution_machine}/project/child"
 
 
 @pytest.mark.parametrize(("body", "error"), [

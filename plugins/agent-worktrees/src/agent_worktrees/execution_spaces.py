@@ -119,7 +119,8 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
         if owner is None or not owner.is_qualified:
             return
         require_record_mutation(record, config)
-        if owner.machine == config.machine:
+        caller_key = current_execution_context(config).execution_machine
+        if owner.machine in (config.machine, caller_key):
             parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
             legacy_parent = False
         else:
@@ -137,10 +138,11 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
-            caller_key = current_execution_context(config).execution_machine
             if not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
-            child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
+            child_ref = tracking.format_claim_ref(
+                getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
+            )
             if child_ref == paired_claims.paired_ref(parent) and any(
                 c.ref == child_ref and c.kind == "worktree" and c.state == obligations.RELEASED
                 for c in parent.resources

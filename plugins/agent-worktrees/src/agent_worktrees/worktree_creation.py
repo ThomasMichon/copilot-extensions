@@ -409,6 +409,7 @@ def _journal_owner_reciprocal_claim(
     owner_ref: str | None,
     *,
     owner_locked: bool = False,
+    machine_identity: WorktreeMachineIdentity | None = None,
 ) -> bool:
     """Journal the reciprocal ``worktree`` claim onto an owner's ledger (Ph3c).
 
@@ -440,8 +441,9 @@ def _journal_owner_reciprocal_claim(
         owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
         if owner_path is None or not owner_path.exists():
             return False
+        require_same_machine_identity(config, machine_identity)
         child_ref = tracking.format_claim_ref(
-            config.machine,
+            machine_identity.execution_machine if machine_identity is not None else config.machine,
             config.repo_name,
             worktree_id,
         )
@@ -844,7 +846,8 @@ def _create_worktree_core(
                     "branch": branch, "repo": config.repo_name,
                 })
             if owner_guard is not None and not core._journal_owner_reciprocal_claim(
-                config, worktree_id, owner_ref, owner_locked=True
+                config, worktree_id, owner_ref, owner_locked=True,
+                **({"machine_identity": machine_identity} if machine_identity is not None else {}),
             ):
                 raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
 

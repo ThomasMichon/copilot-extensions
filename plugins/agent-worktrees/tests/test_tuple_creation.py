@@ -166,6 +166,56 @@ def test_actual_local_tuple_creation_without_map_enrollment(
     assert record.yaml_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_owned_tuple_creation_journals_and_settles_its_execution_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    from agent_worktrees import creation_identity, obligations
+
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n  sibling-space:\n    hostname: raw-host\n"
+        "    physical_host: friendly-host\n    execution_platform: wsl\n",
+    )
+    config = replace(config, machine="raw-host")
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(
+        cfg, "project_dir", lambda name=None: tmp_path / "state" / (name or config.repo_name),
+    )
+    monkeypatch.setattr(
+        cfg, "tracking_dir", lambda name=None: cfg.project_dir(name) / "worktrees",
+    )
+    monkeypatch.setattr(
+        m, "_coordination_readiness_for_owner_ref", lambda *_a: SimpleNamespace(ready=True),
+    )
+    identity = creation_identity.new_machine_identity(config, "tuple-v1")
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(tmp_path / "worktrees" / "parent"),
+        config.repo_name, identity.machine, platform, cfg.tracking_dir(),
+        machine_identity=identity,
+    )
+    owner_ref = f"{identity.execution_machine}/{config.repo_name}/parent"
+    row = m._create_worktree_core(
+        config, owner_ref=owner_ref, identity_mode="tuple-v1",
+        creation_intent=lambda _allocation: None,
+    )["worktree"]
+    child = tracking.load_record(cfg.tracking_dir() / f"{row['id']}.yaml")
+    saved = tracking.load_record(parent.yaml_path)
+    assert saved.resources[0].ref == (
+        f"{child.execution_machine}/{config.repo_name}/{child.worktree_id}"
+    )
+    assert saved.resources[0].state == obligations.ACTIVE
+    warnings = []
+    execution_spaces.settle_parent_obligation(
+        child, config, child.worktree_id,
+        output=SimpleNamespace(ok=lambda _message: None, warn=warnings.append),
+    )
+    assert warnings == []
+    assert tracking.load_record(parent.yaml_path).resources[0].state == obligations.AT_REST
+
+
 def test_changed_tuple_refuses_before_reserving_or_carving(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
