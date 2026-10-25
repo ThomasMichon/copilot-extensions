@@ -314,7 +314,12 @@ def test_actual_bridge_hook_deadline_caller_loss_drift_install_and_consumers(
     history.write_text('{"launched_pid":1,"at":"2000-01-01T00:00:00Z"}', encoding="utf-8")
     history_bytes = history.read_bytes()
 
-    # The existing stamp manifest selects drift install even without caller Python.
+    manifest = installation / "deploy-manifest.json"
+    assert not manifest.exists()
+    # A prior unprepared deployment, unlike stamp alone, selects drift install.
+    manifest.write_text(json.dumps({
+        "source": {"version": "0.0.0", "path": str(payload)},
+    }), encoding="utf-8")
     with owned("drift-install") as caller:
         caller.close_caller()
         observe(lambda: receipt_completed_count(root, count + 1, caller.receipt_log), 850, diagnostic)
@@ -330,8 +335,8 @@ def test_actual_bridge_hook_deadline_caller_loss_drift_install_and_consumers(
     complete = completion.read_bytes()
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     healthy_env = dict(env)
-    if os.name != "nt":
-        (Path(env["PATH"]) / "python3").symlink_to(python)
+    assert shutil.which("python3", path=healthy_env["PATH"]) is None
+    assert shutil.which("python", path=healthy_env["PATH"]) is None
     healthy = subprocess.run(
         command, env=healthy_env, cwd=project, capture_output=True, text=True,
         timeout=deadline, **agent_procutil.no_window_kwargs(),

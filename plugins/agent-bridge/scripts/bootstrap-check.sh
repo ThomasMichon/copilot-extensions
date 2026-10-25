@@ -53,9 +53,17 @@ if [[ -f "$Manifest" ]]; then
     refuse 'owning payload version is unavailable.'
   fi
   [[ -n "$current" ]] || refuse 'owning payload version is unavailable.'
-  # Python is optional for cold admission, but the existing source-aware readiness
-  # probe still owns the healthy short circuit when an interpreter is available.
+  # A completed owned runtime can supply the read-only identity probe even when
+  # the caller has no Python. Selection/source checks below still decide readiness.
   py="$(command -v python3 || command -v python || true)"
+  if [[ -z "$py" && -f "$ScriptDir/resolve-runtime.sh" ]]; then
+    py="$(
+      AGENT_RT_ROOT="$InstallDir"
+      AGENT_RT_RESOLVE_TRACE_MODE=read-only
+      . "$ScriptDir/resolve-runtime.sh"
+      printf '%s' "$AGENT_RT_PY"
+    )"
+  fi
   if [[ -n "$py" ]]; then
 # --- selected completed runtime readiness (reference: agent-bridge) ---
 provisioned=0

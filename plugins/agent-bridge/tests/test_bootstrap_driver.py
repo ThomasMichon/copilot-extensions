@@ -49,7 +49,11 @@ def test_deadlines_and_guidance_remain_independent():
 )
 @pytest.mark.parametrize("phase", ["cold", "drift", "healthy", "incomplete", "corrupt"])
 @pytest.mark.parametrize("condition", [
-    "ordinary", "empty-no-self", "no-ack", "foreign-ack", "driver-refused",
+    "ordinary", "empty-no-self",
+    pytest.param("no-python", marks=pytest.mark.skipif(
+        os.name == "nt", reason="runtime-owned interpreter fallback is POSIX",
+    )),
+    "no-ack", "foreign-ack", "driver-refused",
     "old-driver", "wrong-plugin", "array-plugin", "snapshot", "ordinary-copy",
 ])
 def test_native_handoff_preserves_project_history_and_unattended_mode(tmp_path, phase, condition):
@@ -123,9 +127,14 @@ def test_native_handoff_preserves_project_history_and_unattended_mode(tmp_path, 
             python.chmod(0o755)
             if phase != "incomplete":
                 (slot / ".install-complete.json").write_text(
-                    "{" if phase == "corrupt" else '{"version":"1.0.0","completed_at":"now","pid":0}',
+                    "{" if phase == "corrupt" else json.dumps({
+                        "version": "1.0.0", "completed_at": "now", "pid": 0,
+                    }),
                     encoding="utf-8",
                 )
+            if condition == "no-python" and os.name != "nt" and phase == "healthy":
+                python.unlink()
+                python.symlink_to(sys.executable)
     before = {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()}
     env = {
         key: value for key, value in os.environ.items()
@@ -137,6 +146,16 @@ def test_native_handoff_preserves_project_history_and_unattended_mode(tmp_path, 
     )
     if condition == "empty-no-self":
         env["AGENT_BRIDGE_NO_SELFPROVISION"] = ""
+    if condition == "no-python" and os.name != "nt":
+        tools = tmp_path / "native-tools"
+        tools.mkdir()
+        for name in ("awk", "bash", "cut", "date", "dirname", "grep", "sed", "sort", "tr", "uname"):
+            executable = shutil.which(name)
+            assert executable is not None, name
+            (tools / name).symlink_to(executable)
+        env["PATH"] = str(tools)
+        assert shutil.which("python3", path=env["PATH"]) is None
+        assert shutil.which("python", path=env["PATH"]) is None
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
         quote = lambda value: "'" + str(value).replace("'", "''") + "'"
@@ -155,7 +174,7 @@ def test_native_handoff_preserves_project_history_and_unattended_mode(tmp_path, 
     healthy = phase == "healthy" and (
         os.name != "nt" or condition not in {"wrong-plugin", "array-plugin"}
     )
-    refused = not healthy and condition not in {"ordinary", "empty-no-self"}
+    refused = not healthy and condition not in {"ordinary", "empty-no-self", "no-python"}
     assert result.returncode == (3 if refused else 0), result.stdout + result.stderr
     assert result.stdout == "{}"
     assert ("supervision launched" in result.stderr) == (not refused and not healthy)
