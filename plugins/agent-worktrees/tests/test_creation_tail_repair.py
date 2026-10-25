@@ -652,7 +652,7 @@ def test_creation_refuses_retained_companion_with_foreign_parent(creation, monke
 
 @pytest.mark.parametrize("tuple_identity", [False, True])
 @pytest.mark.parametrize("registry_kind", ["empty", "unscoped"])
-@pytest.mark.parametrize("conflict", ["platform", "binding"])
+@pytest.mark.parametrize("conflict", ["platform", "binding", "bound-owner"])
 def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
     tmp_path, monkeypatch, capsys, tuple_identity, registry_kind, conflict,
 ):
@@ -685,7 +685,7 @@ def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
     parent_checkout.mkdir(parents=True)
     parent = tracking.create_new_record(
         "parent", "worktree/parent", str(parent_checkout), parent_project,
-        creation.record.execution_machine,
+        "other-space" if conflict == "bound-owner" else creation.record.execution_machine,
         ("wsl" if actual != "wsl" else "windows") if conflict == "platform" else actual,
         creation.projects[parent_project] / "worktrees",
     )
@@ -695,7 +695,7 @@ def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
                 "hostname": "other-host", "physical_host": "other-host",
             }}}),
         )
-    if conflict == "binding":
+    if conflict in {"binding", "bound-owner"}:
         creation.configs[parent_project] = replace(
             parent_config, machine="other-space", configured_machine="other-space",
         )
@@ -714,25 +714,34 @@ def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
 
 
 @pytest.mark.parametrize("tuple_identity", [False, True])
+@pytest.mark.parametrize("child_naming", [False, True])
 def test_creation_repairs_native_child_with_nonce_less_legacy_parent(
-    tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity,
+    tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, child_naming,
 ):
     creation = _creation_fixture(
         tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
         tuple_identity=tuple_identity, observed_identity=True,
     )
-    parent_checkout = creation.roots["harness"] / "parent"
-    parent_checkout.mkdir()
+    parent_checkout = creation.roots["knowledge"] / "parent"
+    parent_checkout.mkdir(parents=True)
     parent = tracking.create_new_record(
-        "parent", "worktree/parent", str(parent_checkout), "harness",
+        "parent", "worktree/parent", str(parent_checkout), "knowledge",
         creation.record.execution_machine, cfg.detect_platform(),
-        creation.projects["harness"] / "worktrees",
+        creation.projects["knowledge"] / "worktrees",
     )
     parent.creation_nonce = None
     tracking.save_record(parent)
     record = tracking.load_record(creation.record.yaml_path)
-    record.owner_ref = tracking.format_claim_ref(parent.execution_machine, "harness", "parent")
+    record.owner_ref = tracking.format_claim_ref(parent.execution_machine, "knowledge", "parent")
     tracking.save_record(record)
+    if child_naming:
+        (creation.anchors["harness"] / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml").write_text(
+            json.dumps({"machines": {"friendly-space": {
+                "hostname": "raw-host", "physical_host": "friendly-host",
+                "execution_platform": cfg.detect_platform(),
+            }}}),
+        )
+        creation.configs["harness"] = replace(creation.configs["harness"], machine="friendly-space")
     before = parent.yaml_path.read_bytes()
     code, report = _run(creation, capsys, fix=True)
     assert code == 0 and report["prepared"], report["error"]
