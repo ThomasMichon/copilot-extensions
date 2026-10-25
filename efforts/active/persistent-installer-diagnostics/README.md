@@ -1087,3 +1087,34 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   was removed. Hosted Linux remains the canonical whole-packet lane.
   Its source-admission guard stays intact. Hosted native dispatch remains
   deferred until the repaired head is published, reviewed and passes CI.
+- One explicitly authorized publication-only **180-second** managed attempt
+  published the repair; its temporary configuration was removed, leaving the
+  normal 30-second transport and every test/installer budget unchanged. The
+  contribution base then advanced to `de9cd33fef`, requiring another preserved
+  eight-commit replay. Only generated human-output hashes conflicted; canonical
+  regeneration retained the upstream targeted-update entrypoint behavior.
+  A subsequent ordinary push timed out, but the provider positively confirmed
+  exact head `360d7d9681f349ed5b30851256ade8a5728dc8a0`.
+- That head passed required CI `40179137411`, including the genuine eligible
+  unit packet, guards and the required PR gate. Copilot review `5642413763`
+  assessed that exact head and recognized the cleanup-retention repair. The
+  original output/backpressure and Bash qualification threads remain open;
+  no merge approval or native qualification is inferred from its Comment.
+- Manual native run `40180104836` checked out that immutable head. Only the
+  two selected diagnostics jobs executed. The hardened Linux lane passed its
+  five one-file groups (**82 passed, 43 platform skips**) and both real-UV
+  capture-off/on variants (**2 passed**). The skipped Windows-only cases are
+  not Windows evidence.
+- Hosted Windows stopped in its first Bash group: four composed-exit tests
+  tried to read the UTF-8 installer using the Python 3.12 host locale, cp1252,
+  and raised `UnicodeDecodeError` before native execution. Three POSIX-only
+  reservation cases skipped. No later group or real-UV Windows control ran.
+  The Bash fixture now names UTF-8 explicitly for source, receipt and archive
+  reads/writes rather than changing the runner locale or excluding the tests.
+- A targeted local check confirmed UTF-8 mode disabled and cp1252 selected,
+  then progressed beyond that source read but timed out inside the first
+  Bash subprocess cleanup; the runner failed at **118.91 seconds** and reaped
+  its owned group. This is not a successful native result or a proven pipe/
+  compiler cause. No local timing retry or budget increase is admitted.
+  The fixture repair requires a new exact-head hosted run; all draft and
+  rollout holds remain.
