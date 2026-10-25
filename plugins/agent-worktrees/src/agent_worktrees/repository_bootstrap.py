@@ -110,14 +110,23 @@ def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
     if result.returncode not in (0, 1):
         raise protocol.SetupError("Could not inspect the repository credential owner.")
     helpers: list[str] = []
+    settings: dict[str, str] = {}
     for line in result.stdout.splitlines():
         key, _, value = line.partition(" ")
+        settings[key.casefold()] = value.strip()
         if key.casefold() == "credential.helper":
             if not value:
                 helpers.clear()
             else:
                 helpers.append(value.strip())
-    if len(helpers) != 1 or helpers[0] not in ("manager", "manager-core"):
+    provider = (
+        os.environ.get("GCM_PROVIDER") or settings.get("credential.provider") or "auto"
+    ).strip().casefold()
+    authority = os.environ.get("GCM_AUTHORITY") or settings.get("credential.authority")
+    if (
+        len(helpers) != 1 or helpers[0] not in ("manager", "manager-core")
+        or provider not in ("auto", "github") or authority
+    ):
         raise protocol.SetupError(
             "An explicit repository account requires a qualified GCM account-filtering owner; "
             "ambient authentication was not attempted.",
@@ -126,6 +135,7 @@ def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
         "-c", "credential.helper=",
         "-c", f"credential.helper={helpers[0]}",
         "-c", f"credential.{url}.username={account}",
+        "-c", f"credential.{url}.provider=github",
         "-c", "credential.gitHubAccountFiltering=true",
         "-c", "credential.useHttpPath=true",
         "-c", "http.extraHeader=",
@@ -134,9 +144,7 @@ def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
 
 
 def _acquisition_environment() -> dict[str, str]:
-    environment = repository_identity_env()
-    environment["GIT_TERMINAL_PROMPT"] = "1" if _terminal() else "0"
-    return environment
+    return protocol._environment(attended=_terminal())
 
 
 def _clone(url: str, path: Path, credential_args: list[str]) -> None:

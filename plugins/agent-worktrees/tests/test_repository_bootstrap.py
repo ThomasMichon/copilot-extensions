@@ -233,6 +233,67 @@ def test_real_multi_helper_and_http_header_isolation(tmp_path, monkeypatch) -> N
     assert config.read_bytes() == before
 
 
+@pytest.mark.parametrize("override", ["config-provider", "env-provider", "legacy-authority"])
+def test_explicit_account_refuses_unqualified_gcm_provider(tmp_path, monkeypatch, override) -> None:
+    config = tmp_path / "provider.gitconfig"
+    git(tmp_path, "config", "--file", str(config), "credential.helper", "manager")
+    if override == "config-provider":
+        git(tmp_path, "config", "--file", str(config),
+            "credential.https://github.com/example/sample.git.provider", "generic")
+    elif override == "env-provider":
+        monkeypatch.setenv("GCM_PROVIDER", "generic")
+    else:
+        monkeypatch.setenv("GCM_AUTHORITY", "basic")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    before = config.read_bytes()
+    with pytest.raises(protocol.SetupError, match="ambient authentication was not attempted"):
+        bootstrap._credential_args(
+            "https://github.com/example/sample.git", "selected-login", cwd=tmp_path,
+        )
+    assert config.read_bytes() == before
+
+
+def test_redirected_git_refuses_without_askpass_or_credential_ui(tmp_path, monkeypatch) -> None:
+    config = tmp_path / "isolated.gitconfig"
+    helper = tmp_path / "owner.py"
+    helper.write_text(
+        "import json,os,pathlib,sys\n"
+        "sys.stdin.read()\n"
+        "pathlib.Path(__file__).with_suffix('.called').write_text(json.dumps({"
+        "k:os.environ.get(k) for k in ['GCM_INTERACTIVE','GCM_GUI_PROMPT']}))\n",
+        encoding="utf-8",
+    )
+    askpass = tmp_path / "askpass.py"
+    askpass.write_text(
+        "import pathlib\npathlib.Path(__file__).with_suffix('.called').write_text('unsafe')\n"
+        "print('fixture-value')\n", encoding="utf-8",
+    )
+    command = "!" + shlex.quote(sys.executable) + " " + shlex.quote(str(helper))
+    ask = shlex.quote(sys.executable) + " " + shlex.quote(str(askpass))
+    git(tmp_path, "config", "--file", str(config), "credential.helper", command)
+    git(tmp_path, "config", "--file", str(config), "core.askPass", ask)
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in ("GIT_ASKPASS", "SSH_ASKPASS"):
+        monkeypatch.setenv(name, ask)
+    for name in ("GIT_TERMINAL_PROMPT", "GCM_INTERACTIVE", "GCM_GUI_PROMPT"):
+        monkeypatch.setenv(name, "1")
+    monkeypatch.setattr(bootstrap, "_terminal", lambda: False)
+    result = subprocess.run(
+        ["git", "credential", "fill"], cwd=tmp_path, input=f"url={URL}\n\n",
+        text=True, capture_output=True, timeout=30,
+        env=bootstrap._acquisition_environment(), **no_window_kwargs(),
+    )
+    assert result.returncode != 0
+    assert not askpass.with_suffix(".called").exists()
+    assert json.loads(helper.with_suffix(".called").read_text()) == {
+        "GCM_INTERACTIVE": "0", "GCM_GUI_PROMPT": "0",
+    }
+    assert os.environ["GCM_INTERACTIVE"] == "1"
+    assert os.environ["GIT_ASKPASS"] == ask
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native unavailable Windows drive")
 @pytest.mark.parametrize("apply", [False, True])
 def test_unreachable_drive_refuses_before_any_effect(tmp_path, monkeypatch, apply) -> None:

@@ -206,11 +206,21 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
 def test_redirected_consumer_cannot_inherit_attended_git_prompt(source: Path, monkeypatch) -> None:
     selected = consumer(source, """
 if ($env:GIT_TERMINAL_PROMPT -ne '0') { throw 'Redirected caller enabled a terminal prompt' }
+if ($env:GCM_INTERACTIVE -ne '0' -or $env:GCM_GUI_PROMPT -ne '0') {
+    throw 'Redirected caller enabled credential-owner interaction'
+}
+if ($env:GIT_ASKPASS -or $env:SSH_ASKPASS) { throw 'Redirected caller inherited askpass' }
 [IO.File]::WriteAllText($r.result_file, '{"version":1,"status":"ready","message":"Owner checked"}')
 """)
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
+    monkeypatch.setenv("GCM_INTERACTIVE", "1")
+    monkeypatch.setenv("GCM_GUI_PROMPT", "1")
+    monkeypatch.setenv("GIT_ASKPASS", "must-not-run")
+    monkeypatch.setenv("SSH_ASKPASS", "must-not-run")
     assert setup.run(selected, apply=False, trusted=True).status == "ready"
     assert os.environ["GIT_TERMINAL_PROMPT"] == "1"
+    assert os.environ["GCM_INTERACTIVE"] == "1"
+    assert os.environ["GIT_ASKPASS"] == "must-not-run"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows PowerShell fallback")

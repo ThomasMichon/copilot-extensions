@@ -240,6 +240,20 @@ def _stdio_kwargs() -> dict:
     return options
 
 
+def _environment(*, attended: bool) -> dict[str, str]:
+    environment = repository_identity_env()
+    environment["GIT_TERMINAL_PROMPT"] = (
+        os.environ.get("GIT_TERMINAL_PROMPT", "1") if attended else "0"
+    )
+    if not attended:
+        environment.update(
+            GIT_ASKPASS="", SSH_ASKPASS="", GCM_INTERACTIVE="0", GCM_GUI_PROMPT="0",
+        )
+    for variable in ("BASH_ENV", "ENV"):
+        environment.pop(variable, None)
+    return environment
+
+
 def _call(setup: Setup, mode: str) -> Outcome:
     setup.verify()
     executable = _interpreter(setup.runtime)
@@ -263,12 +277,7 @@ def _call(setup: Setup, mode: str) -> Outcome:
         else:
             argv = [executable, str(setup.script), "--request-file", str(request)]
         # Inherit handles: a credential owner may need the actual caller terminal.
-        environment = repository_identity_env()
-        environment["GIT_TERMINAL_PROMPT"] = (
-            os.environ.get("GIT_TERMINAL_PROMPT", "1") if _terminal() else "0"
-        )
-        for variable in ("BASH_ENV", "ENV"):
-            environment.pop(variable, None)
+        environment = _environment(attended=_terminal())
         completed = subprocess.run(
             argv, cwd=setup.source.path, env=environment,
             **_stdio_kwargs(),

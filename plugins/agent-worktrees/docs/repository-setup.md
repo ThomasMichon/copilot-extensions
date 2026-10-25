@@ -36,9 +36,10 @@ itself adopt a project.
 Git uses its configured credential owner with inherited stdio and no fixed
 authentication deadline. It does not receive a copied token or change global
 authentication. Explicit account selection is currently qualified only for
-GitHub.com with a qualified `manager`/`manager-core` GCM helper and GCM account
-filtering. Call-scoped resets isolate that helper and clear inherited HTTP
-headers for the selected URL without changing persisted Git configuration;
+GitHub.com with a qualified `manager`/`manager-core` GCM helper, the GitHub
+provider and GCM account filtering. Foreign provider or legacy authority
+overrides refuse before authentication. Call-scoped resets isolate that helper
+and clear inherited HTTP headers for the selected URL without changing persisted Git configuration;
 unsupported explicit-account routes refuse rather than fall back
 to an ambient identity. Other credential-owner routes with no configured
 explicit account retain Git's own authentication behavior.
@@ -97,6 +98,9 @@ Native Windows attended calls retain their actual console for Git, the setup
 entry and its descendants; redirected/background calls remain windowless.
 Both paths explicitly inherit native standard descriptors so a headless child
 does not silently replace redirected caller pipes with another console's handles.
+Nonterminal acquisition and setup also disable GCM interaction and inherited
+Git/SSH askpass fallbacks call-locally, rather than relying on Git's terminal
+prompt flag alone. Cached credential reads remain available.
 Each invocation gets fresh caller-owned temporary communication files:
 
 ```json
