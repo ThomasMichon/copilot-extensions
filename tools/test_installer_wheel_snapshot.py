@@ -57,6 +57,23 @@ def test_snapshot_is_exact_readonly_and_independent(tmp_path, origin):
     assert all(stream.closed for stream in snapshot.archives.values())
 
 
+def test_snapshot_subset_borrows_original_handles_and_owner_lifetime(tmp_path):
+    paths, hashes = inputs(tmp_path)
+    selected = next(iter(paths))
+    with retain(paths, hashes) as snapshot:
+        subset = snapshot.subset((selected,))
+        assert set(subset.paths) == {selected}
+        assert subset.archives[selected] is snapshot.archives[selected]
+        assert subset.paths[selected] == snapshot.paths[selected]
+        assert subset.digests[selected] == hashes[selected]
+        subset.verify()
+        for invalid in ((), (selected, selected), ("missing.whl",), [selected], (1,)):
+            with pytest.raises(ValueError, match="subset"):
+                snapshot.subset(invalid)
+    assert subset.archives[selected].closed
+    assert not subset.paths[selected].exists()
+
+
 @pytest.mark.parametrize("option,value,message", [
     ("max_wheels", 1, "count"), ("max_archive_bytes", 5, "archive"),
     ("max_total_bytes", 10, "total"), ("max_snapshot_bytes", 10, "storage"),
@@ -206,6 +223,7 @@ def test_windows_read_guard_does_not_treat_access_metadata_as_byte_mutation(tmp_
     class AccessUpdate:
         def __init__(self, info):
             self.info = info
+            self.st_birthtime_ns = getattr(info, "st_birthtime_ns", info.st_ctime_ns)
             self.st_ctime_ns = info.st_ctime_ns + 1
 
         def __getattr__(self, name):

@@ -221,9 +221,12 @@ def _selected(entries, expected, base, cutoff):
     if timestamp > cutoff:
         raise AcquisitionUnavailable("selected exact wheel does not satisfy seasoning")
     hint = item.get("requires-python")
-    if hint not in (None, "") and hint != expected.get("requires_python"):
-        raise WheelError("selected wheel index Python hint differs from its profile")
-    return urljoin(base, location), timestamp.astimezone(timezone.utc).isoformat()
+    if hint not in (None, ""):
+        if not isinstance(hint, str) or hint != hint.strip() or len(hint) > 4096:
+            raise WheelError("selected wheel index Python hint is malformed")
+        if "requires_python" in expected and hint != expected["requires_python"]:
+            raise WheelError("selected wheel index Python hint differs from its profile")
+    return urljoin(base, location), timestamp.astimezone(timezone.utc).isoformat(), hint
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -453,12 +456,12 @@ def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context
                     response.close()
             # The first configured feed owning this project owns selection.
             if entries:
-                location, uploaded = _selected(entries, item, base, cutoffs[name])
-                chosen = feed, origin, location, uploaded, chain
+                location, uploaded, hint = _selected(entries, item, base, cutoffs[name])
+                chosen = feed, origin, location, uploaded, hint, chain
                 break
         if chosen is None:
             raise AcquisitionUnavailable("selected exact project is unavailable on permitted feeds")
-        feed, origin, location, uploaded, chain = chosen
+        feed, origin, location, uploaded, hint, chain = chosen
         response = None
         try:
             response, _, downloads = client.request(
@@ -477,6 +480,7 @@ def _download(root, expected, feeds, origins, cutoffs, limits, deadline, context
                 "filename": item["filename"], "sha256": digest, "size": size,
                 "feed": feed.identity, "uploaded": uploaded,
                 "source_origins": [*chain, *downloads], "yanked": False, "withdrawn": False,
+                **({"requires_python": hint} if hint not in (None, "") else {}),
             })
         finally:
             if response is not None:

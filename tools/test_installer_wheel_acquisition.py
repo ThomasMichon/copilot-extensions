@@ -37,11 +37,17 @@ EXPECTED = {
 def feeds():
     owned = []
 
-    def create():
+    def create(*, certificate=CERTIFICATE):
         state = {"routes": {}, "requests": []}
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
+                self.respond(head=False)
+
+            def do_HEAD(self):
+                self.respond(head=True)
+
+            def respond(self, *, head):
                 state["requests"].append((self.path, dict(self.headers)))
                 if state.get("authorize") and not state["authorize"](self.headers):
                     self.send_response(401)
@@ -58,14 +64,15 @@ def feeds():
                     self.send_header(key, value)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                if not head:
+                    self.wfile.write(body)
 
             def log_message(self, *_arguments):
                 pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.load_cert_chain(CERTIFICATE)
+        context.load_cert_chain(certificate)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
         thread.start()

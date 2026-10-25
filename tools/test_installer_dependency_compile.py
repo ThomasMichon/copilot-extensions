@@ -300,6 +300,35 @@ def test_source_compile_refuses_effective_disabled_source_mappings(tmp_path, mon
             pytest.fail("disabled source mappings reached export")
 
 
+@pytest.mark.parametrize("native_format", ["PylockToml", "RequirementsTxt"])
+def test_only_explicit_source_compile_can_export_verified_native_wheel_lock(
+    tmp_path, monkeypatch, native_format,
+):
+    project = source_project(tmp_path / "root")
+    projection = source_compile_settings([]).replace(
+        "settings: PipSettings {",
+        "settings: PipSettings {\nformat: Some(" + native_format + ",),",
+    )
+    monkeypatch.setattr(
+        policy.subprocess, "run",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, projection, ""),
+    )
+    arguments = [str(project / "pyproject.toml"), "--format", "pylock.toml"]
+    if native_format == "RequirementsTxt":
+        with pytest.raises(policy.DependencyPolicyError, match="format"):
+            with policy.retain_uv_source_compile(
+                "fixture-uv", arguments, env={}, cwd=tmp_path,
+                trusted_source_roots=(tmp_path,), now=NOW,
+            ):
+                pytest.fail("wrong native output format was retained")
+    else:
+        with policy.retain_uv_source_compile(
+            "fixture-uv", arguments, env={}, cwd=tmp_path,
+            trusted_source_roots=(tmp_path,), now=NOW,
+        ) as transaction:
+            assert transaction.argv[transaction.argv.index("--format") + 1] == "pylock.toml"
+
+
 @pytest.mark.parametrize("expire_at", [1, 2])
 def test_retained_compile_deadline_bounds_both_context_entry_probes(tmp_path, monkeypatch, expire_at):
     project = source_project(tmp_path / "root")
