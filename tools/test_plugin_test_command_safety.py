@@ -324,3 +324,23 @@ def test_native_startup_failure_keeps_bounded_diagnostics_without_native_executi
           "#{pane_pid}:#{pane_current_command}:#{pane_dead}:#{pane_dead_status}"), {"timeout": 0.5}),
         (("capture-pane", "-p", "-t", session), {"timeout": 0.5}),
     ]
+
+
+def test_native_fixture_environment_disables_shell_network_side_effects(tmp_path, monkeypatch):
+    import ast
+    import json
+
+    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "tests" / "native" / "test_warm_picker_lifetime.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_environment"
+    ]
+    namespace = {"json": json, "os": os, "sys": sys, "Path": Path, "__file__": str(source)}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
+    monkeypatch.setenv("AGENT_BRIDGE_TEST_VALUE", "must-not-escape")
+    environment = namespace["_environment"](tmp_path)
+    assert environment["POWERSHELL_TELEMETRY_OPTOUT"] == "1"
+    assert environment["POWERSHELL_UPDATECHECK"] == "Off"
+    assert "AGENT_BRIDGE_TEST_VALUE" not in environment
+    assert Path(environment["USERPROFILE"]).is_relative_to(tmp_path)

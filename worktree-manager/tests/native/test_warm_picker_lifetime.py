@@ -125,6 +125,7 @@ def _environment(root):
         env[key] = str(path)
     env.update(
         PSMUX_NO_WARM="1", TERM="xterm-256color",
+        POWERSHELL_TELEMETRY_OPTOUT="1", POWERSHELL_UPDATECHECK="Off",
         AGENT_WORKTREES_LAUNCH_TRACE=str(root / "launch.jsonl"),
         WORKTREE_MANAGER_ENGINE_ARGV=json.dumps([
             sys.executable, "-I", "-B", str(Path(__file__).resolve()), "engine", str(root),
