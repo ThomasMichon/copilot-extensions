@@ -16,7 +16,7 @@ from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
-    from .acquisition_launch_owner import AcquisitionLaunchOwner
+    from .local_launch_owner import LocalLaunchOwner
     from .local_launch_preparation import PreparedLocalLaunch
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
@@ -49,7 +49,7 @@ class _SessionHostConnectionMixin:
         effort: str | None = None,
         parity_fault_result: dict[str, Any] | None = None,
         prepared_local_launch: PreparedLocalLaunch | None = None,
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).
@@ -61,10 +61,8 @@ class _SessionHostConnectionMixin:
         can re-forward and reattach. Teardown DETACHES (host-mode
         ``AcpClient.shutdown``), never reaping the child inadvertently -- goal 1.
         """
-        from . import __version__
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
-        from .session_host.host_index import HostRecord
         from .session_host.spawner import LocalSpawner
         from .transport import resolve_local_launch
         from .hosting_policy import require_path_hosting, require_target_hosting
@@ -183,12 +181,16 @@ class _SessionHostConnectionMixin:
             sock = await step(
                 "session-host-connect", SessionHostClient.connect(port=spawned.local_port),
             )
+            if acquisition_launch is not None:
+                acquisition_launch._socket = sock
             timing.add("host_connect", time.monotonic() - step_started)
             step_started = time.monotonic()
             hello = await step("session-host-attach", sock.attach(0, nonce=spawned.nonce.encode()))
             timing.add("host_attach", time.monotonic() - step_started)
             step_started = time.monotonic()
             streams = await step("session-host-streams", open_acp_streams(sock))
+            if acquisition_launch is not None:
+                acquisition_launch._streams = streams
             timing.add("host_streams", time.monotonic() - step_started)
 
             async def _closer() -> None:
@@ -211,6 +213,8 @@ class _SessionHostConnectionMixin:
             # Retain the host control channel so the manager can push STATUS
             # (reapable) / DETACH (graceful) for host self-reap (#51).
             client.session_host_client = sock
+            if acquisition_launch is not None:
+                acquisition_launch.retain_client(client)
             if permission_callback:
                 client.auto_approve = False
             with capture_acp_parse_errors() as parse_errors:
@@ -277,6 +281,13 @@ class _SessionHostConnectionMixin:
                             "timing_ms": timing.step_map_ms(),
                         })
                     log.warning("ACP launch timing: result=timeout %s", timing.summary())
+                    if acquisition_launch is not None:
+                        acquisition_launch.retain_failed_start()
+                        raise ConnectError(
+                            ConnectStage.LAUNCH_ACP, "Original local startup timed out; "
+                            "Host and child custody remain held, do not retry",
+                            retryable=False, cause=exc,
+                        ) from exc
                     cleanup_confirmed = await self._rollback_failed_host_launch(
                         spawner,
                         spawned,
@@ -312,6 +323,9 @@ class _SessionHostConnectionMixin:
                         type(exc).__name__,
                         timing.summary(),
                     )
+                    if acquisition_launch is not None:
+                        acquisition_launch.retain_failed_start()
+                        raise
                     cleanup_confirmed = await self._rollback_failed_host_launch(
                         spawner,
                         spawned,
@@ -339,6 +353,30 @@ class _SessionHostConnectionMixin:
                         raise ConnectionError(f"{exc} -- {truncation_note}") from exc
                     raise
 
+        record = (
+            acquisition_launch._host_record if acquisition_launch is not None
+            else self._register_host_launch(spawned, session_id)
+        )
+        if record is not None:
+            from .privileged_plugins import remember_host_launch
+
+            remember_host_launch(self._db, target, client, record, acp_sid)
+        # #4272 bridge-lock: mark this bridge-owned session's liveness as a
+        # lattice file the picker reads cheaply, so a bare/bridge Copilot
+        # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
+        # child_pid is far-side, so its liveness isn't provable locally. Best-
+        # effort: never breaks a launch.
+        if getattr(spawned, "boundary", "local") == "local":
+            from . import bridge_lock
+            with contextlib.suppress(Exception):
+                await bridge_lock.write(
+                    session_id, target.worktree_id, spawned.child_pid)
+        return client, acp_sid
+
+    def _register_host_launch(self, spawned: Any, session_id: str) -> Any:
+        from . import __version__
+        from .session_host.host_index import HostRecord
+
         if self._host_index is not None:
             record = HostRecord(
                 session_id=session_id,
@@ -363,20 +401,8 @@ class _SessionHostConnectionMixin:
                 },
             )
             self._host_index.register(record)
-            from .privileged_plugins import remember_host_launch
-
-            remember_host_launch(self._db, target, client, record, acp_sid)
-        # #4272 bridge-lock: mark this bridge-owned session's liveness as a
-        # lattice file the picker reads cheaply, so a bare/bridge Copilot
-        # (cwd=home) still shows ACTIVE (#1416). LOCAL boundary only -- a remote
-        # child_pid is far-side, so its liveness isn't provable locally. Best-
-        # effort: never breaks a launch.
-        if getattr(spawned, "boundary", "local") == "local":
-            from . import bridge_lock
-            with contextlib.suppress(Exception):
-                await bridge_lock.write(
-                    session_id, target.worktree_id, spawned.child_pid)
-        return client, acp_sid
+            return record
+        return None
 
     async def _rollback_failed_host_launch(
         self,

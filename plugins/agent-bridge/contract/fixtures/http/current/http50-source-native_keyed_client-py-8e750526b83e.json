@@ -6,11 +6,11 @@
   },
   "advertisement_evidence": {
     "path": "plugins/agent-bridge/contract/fixtures/http/current/http50-retained-recovery.json",
-    "sha256": "f37fdd658942a5f4f2bce5380ee26f240e9d20aa1c0fbf7d62ec4cf818a5956d"
+    "sha256": "a162c707fd27613de90177e77764d9e686633659af99849b336308af3e9e5a46"
   },
   "scope": "unchanged source and immutable prior operation; no new runtime observation",
   "captured_from": {
-    "commit": "f3f5257ed41ecf10abcb2d52bc3c80d0190d672c",
+    "commit": "0459ebed61ce3f0c52677c0e2a390290fdc377d1",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 50,
     "source_path": "plugins/agent-bridge/src/agent_bridge/native_keyed_client.py",

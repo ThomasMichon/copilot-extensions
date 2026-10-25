@@ -45,7 +45,7 @@ from .privileged_plugins import relay_agent, start_client
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
-    from .acquisition_launch_owner import AcquisitionLaunchOwner
+    from .local_launch_owner import LocalLaunchOwner
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
 
@@ -90,7 +90,7 @@ class _SessionStartMixin:
         retain_container_lock_on_failure: bool = False,
         creation_session_id: str | None = None,
         creation_before_launch: Callable[[], Awaitable[None]] | None = None,
-        acquisition_launch: AcquisitionLaunchOwner | None = None,
+        acquisition_launch: LocalLaunchOwner | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -797,7 +797,7 @@ class _SessionStartMixin:
             # session binding* names "a spawned successor, a headless launch").
             # LOCAL worktrees only -- a remote worktree's ground layer lives on
             # its own machine. Best-effort / fail-open: never breaks a launch.
-            if target.type == "local" and target.worktree_id and acp_sid:
+            if acquisition_launch is None and target.type == "local" and target.worktree_id and acp_sid:
                 from . import worktree_lineage
                 with contextlib.suppress(Exception):
                     worktree_lineage.register_session(

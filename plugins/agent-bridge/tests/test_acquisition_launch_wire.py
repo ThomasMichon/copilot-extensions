@@ -49,9 +49,11 @@ async def assert_direct_lifecycle_refused(client: AcpClient, cwd: str) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind,mode", [
     ("new", "reply"), ("load", "reply"), ("new", "drop-reply"), ("load", "drop-reply"),
+    ("new", "live-drop-reply"), ("load", "live-drop-reply"),
     ("new", "close-before-capture"), ("load", "close-before-capture"),
     ("new", "stop-reap-resume"),
     ("new", "shutdown-rehydrate"),
+    ("new", "shutdown-active-reaper"),
 ])
 async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, mode: str,
@@ -61,12 +63,24 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     producer = RuntimeProducer("synthetic-frontend", os.getpid(), process_start_time(os.getpid()))
     admission = rig.db.enroll_runtime_producer(identity, epoch.epoch, producer)
     frontend = AcquisitionFrontend.capture(rig.runtime, identity, admission)
+    if mode == "live-drop-reply":
+        rig.manager._timeouts = rig.manager._timeouts.model_copy(update={"session_new": 0.25})
+    if mode in ("shutdown-rehydrate", "shutdown-active-reaper"):
+        rig.manager._session_host_active_reap_seconds = (
+            1800.0 if mode == "shutdown-rehydrate" else 0.1
+        )
     audit = tmp_path / "received.jsonl"
     peer = Path(__file__).parent / "fixtures" / "acquisition_launch_peer.py"
-    handles = []
-    from agent_bridge.session_host import spawner
+    handles, captures = [], []
+    from agent_bridge.session_host import launcher, spawner
 
     original_launch = spawner.launch_session_host
+    original_tail_capture = launcher._CrashTailCapture
+
+    def capture_tail(*args, **kwargs):
+        capture = original_tail_capture(*args, **kwargs)
+        captures.append(capture)
+        return capture
 
     def record_launch(*args, **kwargs):
         handle = original_launch(*args, **kwargs, state_dir=tmp_path / "host-state")
@@ -80,6 +94,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
         )
 
     monkeypatch.setattr(spawner, "launch_session_host", record_launch)
+    monkeypatch.setattr(launcher, "_CrashTailCapture", capture_tail)
     monkeypatch.setattr("agent_bridge.transport.resolve_local_launch", resolve)
     monkeypatch.setattr("agent_bridge.local_static_preparation.prepare_for_launch", AsyncMock())
     monkeypatch.setattr(SessionManager, "_connect_via_session_host", _SessionHostConnectionMixin._connect_via_session_host)
@@ -123,11 +138,18 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
             prior_session_id=session.session_id, prior_native_session_id=session.acp_session_id,
         )
     try:
-        if mode == "drop-reply":
+        if mode in ("drop-reply", "live-drop-reply"):
             with pytest.raises((RuntimeError, ConnectionError, asyncio.TimeoutError)):
                 await asyncio.wait_for(rig.runtime.acquire(original, custody=frontend), 15)
             with pytest.raises(RuntimeCustodyError, match="held"):
                 await rig.runtime.acquire(original, custody=frontend)
+            if mode == "live-drop-reply":
+                session = rig.manager.list_sessions()[0]
+                owner = session._local_launch_owner
+                assert owner is not None and owner._host_process is handles[0].proc
+                assert handles[0].proc.poll() is None and process_start_time(handles[0].child_pid)
+                assert session.client is owner._client and owner._connection is session.client._connection
+                assert rig.manager._host_index.get(session.session_id) is owner._host_record
             if kind == "load":
                 close(rig.db, identity, producer)
                 spawn = AsyncMock(side_effect=AssertionError("must not spawn"))
@@ -183,11 +205,19 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                     )
                 assert rig.runtime.store.journal.read_launch(continuation)["started_at"] is None
                 assert session._native_turn_transport is retained_owner
-            elif mode == "shutdown-rehydrate":
+            elif mode in ("shutdown-rehydrate", "shutdown-active-reaper"):
+                detach = session.client.session_host_client.detach
+                detach_spy = AsyncMock(wraps=detach)
+                monkeypatch.setattr(session.client.session_host_client, "detach", detach_spy)
                 await rig.manager.stop_session(
                     session.session_id, cancel_turn=False, allow_background_recovery=True,
                 )
+                detach_spy.assert_awaited_once_with(False)
+                await asyncio.sleep(0.4)
                 assert handles[0].proc.poll() is None
+                argv = handles[0].proc.args
+                assert float(argv[argv.index("--active-reap-seconds") + 1]) == 0
+                assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 0
                 stored = rig.db.get_session(session.session_id)
                 assert not stored["background_recovery_enabled"]
                 assert stored["cold_recovery_stop_token"] is None
@@ -209,10 +239,10 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                     )
                 with pytest.raises(RuntimeCustodyError, match="prompt"):
                     await successor.submit_prompt(session.session_id, "must not recover")
-                assert retained.client is None and handles[0].proc.poll() is None
+                assert retained.client is None and handles[0].proc.poll() is None, captures[0].tail_text()
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         assert [item["method"] for item in received] == (
-            [f"session/{kind}"] if mode in ("drop-reply", "close-before-capture")
+            [f"session/{kind}"] if mode in ("drop-reply", "live-drop-reply", "close-before-capture")
             else [f"session/{kind}", "session/prompt"]
         )
         assert len(handles) == 1
@@ -220,7 +250,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
         row = rig.db.execute_read("SELECT * FROM acquisition_attempts")[0]
         assert {item["handoff"] for item in received} == {json.loads(row["launch_handoff_json"])["id"]}
         assert row["runtime_custody_json"] == admission.document()
-        assert (row["launch_result_json"] is not None) == (mode != "drop-reply")
+        assert (row["launch_result_json"] is not None) == (mode not in ("drop-reply", "live-drop-reply"))
         assert rig.db.runtime_custody_inventory(identity)["restore_qualified"] is False
     finally:
         for session in rig.manager.list_sessions():
