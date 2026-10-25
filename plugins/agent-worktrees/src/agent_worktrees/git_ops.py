@@ -24,6 +24,7 @@ from agent_procutil import no_window_kwargs
 
 from . import env_scrub, git_tree_diff, push_timeout
 from .git_errors import GitError, _redact_args as _redact_args
+from .repos_registry_reader import RepositoryResolutionError
 from .github_credentials import (
     AccountCredentialError as AccountCredentialError,
     GitAuthArgs, account_selection,
@@ -1354,14 +1355,14 @@ def _auth_config_args_for_url(url: str) -> list[str]:
     if not owner:
         return []
     slug = slug_from_url(url)
-    selection = account_selection(slug)
-    account = selection.login or owner
-    active = _active_gh_account()
-    if active and active.casefold() == account.casefold():
-        return []
     try:
+        selection = account_selection(slug)
+        account = selection.login or owner
+        active = _active_gh_account()
+        if active and active.casefold() == account.casefold():
+            return []
         token = gh_token_for_target(selection)
-    except AccountCredentialError as exc:
+    except (AccountCredentialError, RepositoryResolutionError) as exc:
         raise GitError(["git", "authenticate"], 1, str(exc)) from exc
     if not token:
         return []

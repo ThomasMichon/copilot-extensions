@@ -677,7 +677,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
         try:
             env, login, injected = _core()._gh_env_for_repo(target)
-        except git_ops.AccountCredentialError as exc:
+        except (git_ops.AccountCredentialError, repos.RepositoryResolutionError) as exc:
             output.err(str(exc))
             return 1
         if login and not injected:

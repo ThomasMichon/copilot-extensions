@@ -373,7 +373,7 @@ def _resolve_fork_credential(repo_slug: str, prcfg) -> tuple[str | None, str]:
     """
     if getattr(prcfg, "provider", "") != "github":
         return None, ""
-    from .providers.base import resolve_token
+    from .providers.base import ProviderError, resolve_token
 
     token = resolve_token(prcfg)
     if token:
@@ -381,13 +381,16 @@ def _resolve_fork_credential(repo_slug: str, prcfg) -> tuple[str | None, str]:
 
     from . import git_ops
     from .github_credentials import account_selection
+    from .repos_registry_reader import RepositoryResolutionError
 
-    selection = account_selection(repo_slug)
+    try:
+        selection = account_selection(repo_slug)
+    except RepositoryResolutionError as exc:
+        raise ProviderError(str(exc)) from exc
     account = selection.login or ""
     active = git_ops.active_gh_account() or ""
     if not account or (active and active.casefold() == account.casefold()):
         return None, active
-    from .providers.base import ProviderError
     try:
         minted = git_ops.gh_token_for_target(selection)
     except git_ops.AccountCredentialError as exc:

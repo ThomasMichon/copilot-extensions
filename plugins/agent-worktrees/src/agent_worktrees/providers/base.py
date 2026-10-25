@@ -704,8 +704,12 @@ def account_token_for_slug(slug: str | None, prcfg) -> str | None:
         return None
     from .. import git_ops
     from ..github_credentials import account_selection
+    from ..repos_registry_reader import RepositoryResolutionError
 
-    selection = account_selection(slug)
+    try:
+        selection = account_selection(slug)
+    except RepositoryResolutionError as exc:
+        raise ProviderError(str(exc)) from exc
     account = selection.login
     if not account:
         return None

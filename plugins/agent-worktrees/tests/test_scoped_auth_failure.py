@@ -332,6 +332,70 @@ def test_account_selection_uses_one_registry_snapshot(registry, monkeypatch):
     assert reads == [{"strict": True}]
 
 
+@pytest.mark.parametrize("kind", ["syntax", "mapping", "unreadable"])
+@pytest.mark.parametrize(
+    "operation", ["gh", "push", "fetch", "clone", "provider", "fork", "prune", "lease"],
+)
+def test_registry_failure_uses_existing_error_channel(
+    tmp_path, monkeypatch, capfd, kind, operation,
+):
+    from agent_worktrees import lease_store, repos_registry_reader
+    from agent_worktrees.lease_config import LeaseSettings
+
+    path = tmp_path / "repos.yaml"
+    path.write_text("repos: [\n" if kind == "syntax" else "[]\n", encoding="utf-8")
+    if kind == "unreadable":
+        def denied(path):
+            raise PermissionError("synthetic registry access denied")
+
+        monkeypatch.setattr("agent_worktrees.repos_registry_transaction.read_bytes", denied)
+    monkeypatch.setattr(
+        repos, "read_registry", lambda **kwargs: repos_registry_reader.read_registry(path, **kwargs),
+    )
+    url = "https://github.com/example-org/sample.git"
+    monkeypatch.setattr(git_ops, "_remote_url", lambda *args, **kwargs: url)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "gh")
+    monkeypatch.setattr(
+        git_ops, "gh_token_for_account", lambda *args: pytest.fail("must not acquire credentials"),
+    )
+    monkeypatch.setattr(
+        subprocess, "run", lambda *args, **kwargs: pytest.fail("must not launch transport"),
+    )
+    prcfg = config.PRConfig(provider="github")
+    if operation == "gh":
+        assert cli.cmd_repos_dispatch(
+            ["gh", "example-org/sample", "--", "issue", "create"],
+        ) == 1
+        assert "repository registry" in capfd.readouterr().out
+    elif operation == "push":
+        result = git_ops.push("origin", "topic", cwd=tmp_path)
+        assert not result.ok
+        assert "repository registry" in result.stderr
+    elif operation == "fetch":
+        with pytest.raises(git_ops.GitError, match="repository registry"):
+            git_ops.fetch("origin", cwd=tmp_path)
+    elif operation == "clone":
+        assert repos.clone_repo(url, name="sample", target=str(tmp_path / "clone")) is None
+        assert "repository registry" in capfd.readouterr().out
+    elif operation in ("provider", "fork"):
+        with pytest.raises(base.ProviderError, match="repository registry"):
+            if operation == "provider":
+                base.account_token_for_slug("example-org/sample", prcfg)
+            else:
+                fork_pr._resolve_fork_credential("example-org/sample", prcfg)
+    elif operation == "prune":
+        lookup = cli._make_pr_lookup(
+            SimpleNamespace(default_repo=SimpleNamespace(pr=prcfg)),
+        )
+        assert lookup("example-org/sample", 42) is None
+        assert "repository registry" in capfd.readouterr().out
+    else:
+        with pytest.raises(lease_store.GitError, match="repository registry"):
+            lease_store.GitLeaseStore(
+                LeaseSettings(origin=url, auth_remote="origin", auth_cwd=str(tmp_path)),
+            )
+
+
 def test_stale_provider_token_fails_without_ambient_retry(registry, monkeypatch):
     pin(registry, "repo")
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda account: "stale-token")
