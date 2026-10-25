@@ -29,6 +29,11 @@ _bootstrap_progress() {
     done <<< "$message"
 }
 
+if [ "${1-}" = --system-python ]; then
+    _bootstrap_progress '--system-python is a Windows WinGet bootstrap mode; unsupported on POSIX.' failed
+    exit 2
+fi
+
 ROOT="${WORKTREE_MANAGER_ROOT:-$HOME/.worktree-manager}"
 STAGING="$ROOT/staging"
 CONFIG="$ROOT/config.toml"

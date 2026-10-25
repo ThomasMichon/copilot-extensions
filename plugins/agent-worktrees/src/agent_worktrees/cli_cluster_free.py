@@ -29,6 +29,7 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "session_binding_cli",
     "session_inspection_cli",
     "session_metadata_cli",
+    "session_observations_cli",
     "session_tracking_cli",
     "status_bar_cli",
     "status_cli",
