@@ -115,7 +115,9 @@ def test_tuple_mutation_never_uses_physical_host_equality(
     monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path / project)
     path = tmp_path / "project" / "worktrees" / "owned.yaml"
     path.parent.mkdir(parents=True)
-    tracking.save_record(_record(path), path)
+    record = _record(path)
+    record.worktree_path = str(Path(config.default_repo.worktree_root) / record.worktree_id)
+    tracking.save_record(record, path)
     record = tracking.load_record(path)
     execution_spaces.require_record_mutation(record, config)
     if defect == "physical":
@@ -155,6 +157,9 @@ def test_tuple_requires_exact_local_context_without_optional_map(
 ) -> None:
     config = cfg.Config(
         srcroot=str(tmp_path), machine="desk-wsl", platform="wsl", repo_name="project",
+        repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+        )},
     )
     monkeypatch.setattr(execution_spaces, "registry_for_config", lambda config: {})
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
@@ -197,6 +202,7 @@ def test_optional_map_never_replaces_receiving_record_fences(
     path = tmp_path / "project" / "worktrees" / "owned.yaml"
     path.parent.mkdir(parents=True)
     record = _record(path, versioned=False)
+    record.worktree_path = str(Path(config.default_repo.worktree_root) / record.worktree_id)
     record.machine = "desk"
     record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "desk-wsl")
     tracking.save_record(record, path)

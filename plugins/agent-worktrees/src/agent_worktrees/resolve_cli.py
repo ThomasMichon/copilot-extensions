@@ -9,7 +9,8 @@ import platform
 import sys
 import threading
 
-from machine_transport import split_machine_environment, resolve_machine_selection
+from machine_transport import normalize_environment, split_machine_environment, resolve_machine_selection
+from machine_transport.registry import machine_identity_names
 
 from . import activity, agent_policy, local_cache_refresh, output, profile_assignment, restore_launch, sessions, tracking, tracking_write, worktree_identity
 from . import codename_tracking, config as cfg, machine_identity
@@ -34,11 +35,24 @@ def _target_is_local(
 ) -> bool:
     if not name:
         return False
-    if not environment and config.machine and name.casefold() == config.machine.casefold():
-        return machine_identity.is_local_machine(name, config)
-    from .execution_spaces import registry_for_config
-
+    if (
+        not environment and config.machine and name.casefold() == config.machine.casefold()
+        and name.casefold() != cfg.socket.gethostname().casefold()
+        and machine_identity.is_local_machine(name, config)
+    ):
+        return True
     entries = registry_for_config(config)
+    named_target = any(
+        name.casefold() in {
+            value.casefold() for value in machine_identity_names(entry, include_metadata=False)
+        } for entry in entries.values()
+    )
+    if config.machine and not named_target:
+        from .execution_spaces import current_execution_context
+
+        context = current_execution_context(config)
+        if name.casefold() in {context.hostname.casefold(), context.execution_machine.casefold()}:
+            return not environment or normalize_environment(environment) == context.environment
     selected = resolve_machine_selection(entries, name, environment, allow_physical_context=True)
     target = selected.target
     if entries:
@@ -552,14 +566,15 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
                 target_is_local = _target_is_local(
                     config, state.requested_machine, getattr(args, "environment", None),
                 )
+                requested_environment = (
+                    cfg.detect_platform() if target_is_local else resolve_machine_selection(
+                        registry_for_config(config), state.requested_machine,
+                        getattr(args, "environment", None), allow_physical_context=True,
+                    ).target.environment
+                )
             except (ValueError, ExecutionSpaceError) as exc:
                 output.err(str(exc))
                 return 1
-            from .execution_spaces import registry_for_config
-            requested_environment = resolve_machine_selection(
-                registry_for_config(config), state.requested_machine,
-                getattr(args, "environment", None), allow_physical_context=True,
-            ).target.environment
             remote_args: list[str] = []
             if not target_is_local or (
                 requested_environment and requested_environment != cfg.detect_platform()
@@ -685,14 +700,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         same_machine = _target_is_local(
             config, state.requested_machine, getattr(state.args, "environment", None),
         )
+        requested_environment = (
+            cfg.detect_platform() if same_machine else resolve_machine_selection(
+                registry_for_config(config), state.requested_machine,
+                getattr(state.args, "environment", None), allow_physical_context=True,
+            ).target.environment if state.requested_machine else ""
+        )
     except (ValueError, ExecutionSpaceError) as exc:
         return output._json_error(str(exc))
-    requested_environment = (
-        resolve_machine_selection(
-            registry_for_config(config), state.requested_machine,
-            getattr(state.args, "environment", None), allow_physical_context=True,
-        ).target.environment if state.requested_machine else ""
-    )
     same_environment = True
     if requested_environment:
         same_environment = requested_environment == cfg.detect_platform()

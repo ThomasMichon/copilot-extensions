@@ -112,7 +112,9 @@ New before bounded OS-derived naming compatibility. It independently checks
 the companion's receiving project and repeats original allocation/seed checks
 inside companion allocation. Existing parent/companion references remain
 unchanged; foreign owners, namespaces and changed intent refuse.
-This slice still needs review/merge. Complete registration and Manager
+This slice merged in #8865 after current-head approval and required CI,
+including equivalent resolved paths and independently checked historical
+parents without nonce backfill. Complete registration and Manager
 entry-point proof and the installed validation gates below remain open.
 
 ## Validation Plan
@@ -125,8 +127,10 @@ entry-point proof and the installed validation gates below remain open.
 - [ ] Preserve custom names and execution keys without losing uncustomized local
   operation; retain explicit ambiguity, malformed declaration, platform,
   foreign-guest, receiving-project and namespace refusals.
-- [ ] Replay admitted legacy and tuple allocations unchanged, including when
+- [x] Replay admitted legacy and tuple allocations unchanged, including when
   optional customization is added later; no implicit relabel or owner transfer.
+  Bounded source replay/repair merged in #8852, #8857 and #8865; installed
+  opt-in acceptance remains independently required below.
 - [ ] Pass bounded decision/ownership regressions and existing guarded Source CI.
   Keep actual native, installer, Git and process evidence outside promotion.
 - [ ] Qualify and release the corrective source, verify installed opt-in behavior
