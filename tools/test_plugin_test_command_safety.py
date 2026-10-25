@@ -507,5 +507,6 @@ def test_native_fixture_environment_disables_shell_network_side_effects(tmp_path
     environment = namespace["_environment"](tmp_path)
     assert environment["POWERSHELL_TELEMETRY_OPTOUT"] == "1"
     assert environment["POWERSHELL_UPDATECHECK"] == "Off"
+    assert environment["PSMUX_NO_PASSTHROUGH"] == "1"
     assert "AGENT_BRIDGE_TEST_VALUE" not in environment
     assert Path(environment["USERPROFILE"]).is_relative_to(tmp_path)
