@@ -278,7 +278,7 @@ def cmd_update_request(rest: list[str]) -> int:
         cwd = Path.cwd().resolve()
         arguments = list(forwarded)
         budget = options.engine_acquisition_timeout
-        if budget is None:
+        if budget is None and options.target is None:
             budget = os.environ.get(TIMEOUT_ENV)
         if budget is not None:
             selected_budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))

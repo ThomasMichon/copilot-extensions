@@ -302,6 +302,22 @@ def test_malformed_explicit_runtime_scope_is_not_payload_only(installed, monkeyp
     assert owner.update_target("guide") == 1
 
 
+def test_acquired_runtime_policy_block_is_failure_not_success(installed, monkeypatch):
+    plans = iter([
+        update_runtime_plan.RuntimeUpdateStep("guide", "runtime_reconcile", installed["guide"], status="payload-only"),
+        update_runtime_plan.RuntimeUpdateStep("guide", "runtime_reconcile", installed["guide"], status="SKIPPED (machine policy)"),
+    ])
+    monkeypatch.setattr(owner, "target_plan", lambda *a: next(plans))
+
+    def acquire(*args, **kwargs):
+        (installed["guide"] / "plugin.json").write_text('{"name":"guide","version":"3","runtimeScope":"machine-gated"}')
+        return "OK"
+
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", acquire)
+    monkeypatch.setattr(update_runtime, "_execute_runtime_step", lambda *a: pytest.fail("policy-blocked runtime executed"))
+    assert owner.update_target("guide") == 1
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
 def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
     name = "agent-example"

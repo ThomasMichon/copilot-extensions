@@ -252,7 +252,8 @@ def test_refreshed_inventory_uses_owner_version_not_receipt_success(inventory):
     assert ui.inventory()["entries"][1]["payload"] == "3"
 
 
-def test_real_detached_target_request_survives_submitter_exit_and_retains_failure(tmp_path, monkeypatch):
+@pytest.mark.parametrize("suite_budget", [None, "120"])
+def test_real_detached_target_request_survives_submitter_exit_and_retains_failure(tmp_path, monkeypatch, suite_budget):
     import update_driver
     from agent_procutil import no_window_kwargs
 
@@ -262,6 +263,8 @@ def test_real_detached_target_request_survives_submitter_exit_and_retains_failur
     monkeypatch.setenv("USERPROFILE", str(home))
     events = tmp_path / "events.jsonl"
     monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    if suite_budget is not None:
+        monkeypatch.setenv(update_driver_cli.TIMEOUT_ENV, suite_budget)
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
     result = subprocess.run(
         [sys.executable, str(fixture), "submit", "--detach", "--json", "--target", "worktree-manager"],

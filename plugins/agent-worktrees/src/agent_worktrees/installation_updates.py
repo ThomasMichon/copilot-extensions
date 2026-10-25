@@ -156,7 +156,7 @@ def update_target(name: str) -> int:
         if not target.required and _target_scope(acquired) != "none":
             raise ValueError("Acquired release now requires a runtime; enable through configuration before updating its runtime")
         step = target_plan(name, target)
-        if step.blocked:
+        if step.blocked or (not step.eligible and step.status != "payload-only"):
             raise ValueError(step.status)
         if name == reconcile.SELF_PLUGIN and not step.status:
             return update_runtime._run_engine_installer(
