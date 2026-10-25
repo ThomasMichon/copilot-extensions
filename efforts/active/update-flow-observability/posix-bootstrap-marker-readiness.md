@@ -185,3 +185,27 @@ Implementation choices below are _(agent-recommended)_:
   consumer with the unchanged harness contract and existing deadlines.
   Source preparation passed; runtime installation is in progress. Do not
   turn that partial stage into a clean-room pass or production rollout claim.
+- The corrected fresh trial subsequently passed **all six stages** and the
+  required independent literal evaluation. Both original first-attempt tasks
+  were performed by their own workers, confirmed by the trusted evaluator and
+  retained through supported Bridge native-history reads. No setup recovery
+  was required in this trial. Source/installed-body receipts, paired allocations
+  and the immutable README reference corroborate what was exercised.
+- Required review and CI then accepted published head
+  `cd47ef39ba60837fee814666c90fb45a798c2ffe`; #8889 actually merged as
+  `86c5e69c5e26412fbcce6c7a031061b4d75d0ae8`. That published head's complete
+  native selection also passed 76 cases with one intentional skip, in 35.23s
+  pytest and 43.47s including preparation/cleanup. Its before/after witness
+  retained one versus zero installer children, at 0.164s versus 0.434s.
+  These are no-op correctness results, not a foreground-hook speedup.
+- The containing normal release and authorized installed rollout still gate
+  adoption. The independent fresh verdict does not claim one-minute READY,
+  full role/fleet activation or final retirement, and the broader effort is
+  still Active.
+- Normal promotion #8897 subsequently published Main
+  `e4df117084aa50298efc3248357a6d831fa091d4` from Dev
+  `a79749ee98e70da62919c0c8228c9a094506453e`, which contains #8889's exact
+  merge. The annotated promotion tag agrees, and all three accepted readiness
+  fragments are byte-identical in Main. The slice is released, not installed:
+  qualified adopter rollout remains separately gated by native updater
+  qualification and its existing owner, without another updater lane.
