@@ -12,7 +12,7 @@ from pathlib import Path
 from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS, REMOTE_MARKETPLACE_SOURCE_KINDS
 from .execution import execution_environment, execution_executable
 from .marketplace import load_marketplace, marketplace_manifest_path, plugin_dir
-from .payload import plugin_manifest, publication_metadata
+from .payload import catalog_metadata, plugin_manifest, publication_metadata
 from .remote_identity import normalize_remote
 from .registration import _settings_document, strict_json
 from .settings import split_source
@@ -162,7 +162,7 @@ def inventory_item(
     remote = normalize_remote(
         f"https://github.com/{origin[field]}" if kind == "github" else origin[field],
     )
-    if remote is None:
+    if remote is None or not remote.startswith("network:"):
         return None
     location = Path(origin.get("path", "."))
     if location.is_absolute() or ".." in location.parts:
@@ -217,6 +217,20 @@ def inventory_item(
             continue
         if document.get("name") != marketplace:
             continue
+        entries, metadata, owner = (
+            document.get("plugins"), document.get("metadata", {}), document.get("owner"),
+        )
+        if (
+            not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries)
+            or not isinstance(metadata, dict) or not isinstance(metadata.get("pluginRoot", ""), str)
+            or not isinstance(owner, dict) or not isinstance(owner.get("name"), str)
+            or not owner["name"].strip()
+        ):
+            logging.getLogger("plugin-resolve").warning(
+                "%s native cache candidate is ineligible (invalid-catalog); "
+                "ordinary acquisition remains available", source,
+            )
+            continue
         catalog = load_marketplace(root)
         payload = plugin_dir(catalog, name) if catalog is not None else None
         if payload is None:
@@ -236,8 +250,17 @@ def inventory_item(
             continue
         references: set[Path] = set()
         try:
+            declared = Path(catalog.plugin_root) / catalog.plugins[name].source
+            if ".." in declared.parts:
+                raise ValueError("Native cache source requires an unlinked contained path")
+            member = root
+            for part in declared.parts:
+                member = member / part
+                if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
+                    raise ValueError("Linked native cache source path")
             content = subset(candidate, payload, referenced_paths=references)
             metadata, entry = publication_metadata(root, source)
+            catalog_metadata(source, plugin_manifest(payload), metadata, entry)
         except (OSError, ValueError):
             logging.getLogger("plugin-resolve").warning(
                 "%s native cache candidate is ineligible (invalid-payload); "

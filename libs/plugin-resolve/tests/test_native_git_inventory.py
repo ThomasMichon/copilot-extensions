@@ -29,10 +29,12 @@ def native_inventory(tmp_path, git_origin):
     clone.parent.mkdir(parents=True)
     git(tmp_path, "clone", "--quiet", str(origin), str(clone))
     git(clone, "checkout", "--quiet", first)
+    remote = "https://example.invalid/native-fixture.git"
+    git(clone, "remote", "set-url", "origin", remote)
     definition = {
         "source": {
             "source": "git",
-            "url": origin.as_uri(),
+            "url": remote,
             "ref": "first",
             "path": "catalog-a",
         }
@@ -364,3 +366,92 @@ def test_deleted_required_sibling_asset_prevents_native_cache_reuse(
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+@pytest.mark.parametrize("component", ["source", "plugin-root"])
+def test_linked_declared_source_cannot_redirect_native_cache_payload(
+    native_inventory,
+    monkeypatch,
+    component,
+):
+    target, _home, clone, definition, environment = native_inventory
+    catalog_root = clone / "catalog-a"
+    selected = catalog_root / "helper"
+    if component == "plugin-root":
+        parent = catalog_root / "payloads"
+        parent.mkdir()
+        selected.rename(parent / "helper")
+        path = catalog_root / "marketplace.json"
+        catalog = json.loads(path.read_text())
+        catalog["metadata"] = {"pluginRoot": "payloads"}
+        atomic_json(path, catalog)
+        selected, redirected = parent, catalog_root / "other-parent"
+    else:
+        redirected = catalog_root / "other-helper"
+    shutil.copytree(selected, redirected)
+    marker = (
+        redirected / "helper" / "marker.txt"
+        if component == "plugin-root"
+        else redirected / "marker.txt"
+    )
+    marker.write_text("redirected payload")
+    git(clone, "add", ".")
+    git(clone, "commit", "--quiet", "-m", "source redirection fixture")
+    definition["source"]["ref"] = "HEAD"
+    selected.rename(selected.with_name("retained-original"))
+    if os.name == "nt":
+        import _winapi
+
+        _winapi.CreateJunction(str(redirected), str(selected))
+    else:
+        selected.symlink_to(redirected, target_is_directory=True)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+@pytest.mark.parametrize("style", ["uri", "path"])
+def test_distinct_local_origins_with_git_suffix_do_not_share_inventory(
+    native_inventory,
+    git_origin,
+    monkeypatch,
+    style,
+):
+    target, _home, clone, definition, environment = native_inventory
+    original = git_origin[0]
+    different = original.with_name(original.name + ".git")
+    init_checkout(different)
+    encode = (lambda path: path.as_uri()) if style == "uri" else str
+    git(clone, "remote", "set-url", "origin", encode(original))
+    definition["source"] = {
+        "source": "git",
+        "url": encode(different),
+        "path": "catalog-a",
+    }
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+@pytest.mark.parametrize("schema", ["null-entry", "scalar-entry", "owner", "plugin-root"])
+def test_invalid_native_catalog_schema_falls_back(
+    native_inventory,
+    monkeypatch,
+    schema,
+):
+    target, _home, clone, definition, environment = native_inventory
+    path = clone / "catalog-a" / "marketplace.json"
+    catalog = json.loads(path.read_text())
+    if schema.endswith("entry"):
+        catalog["plugins"].insert(0, None if schema == "null-entry" else "unexpected")
+    elif schema == "owner":
+        catalog["owner"] = {}
+    else:
+        catalog["metadata"] = {"pluginRoot": 42}
+    atomic_json(path, catalog)
+    git(clone, "add", ".")
+    git(clone, "commit", "--quiet", "-m", "invalid catalog fixture")
+    definition["source"]["ref"] = "HEAD"
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)

@@ -250,7 +250,11 @@ cache when no user-global registration exists. A catalog name or legacy installe
 manifest alone is insufficient. The actual clone must match the declared Git
 origin, requested commit/ref and catalog location, have unchanged selected
 catalog/payload content and required asset closure, and contain the uniquely
-declared plugin. Unrelated clone changes are not scanned. Preparation returns
+declared plugin. The declared source path, including `pluginRoot`, must have no
+symlink/reparse components; resolving a link to another clean directory is not
+origin proof. Only network origins qualify: filesystem and relative Git origins
+retain ordinary acquisition rather than treating compatibility normalization as
+exact filesystem identity. Unrelated clone changes are not scanned. Preparation returns
 that qualified cache payload, not an unproven legacy installed copy, while
 retaining the complete Git declaration in repository settings. Its commit and
 filtered payload digest are rechecked under the publication lock; effectively
@@ -258,6 +262,7 @@ enabled sources are qualified again before any settings are written. Ambiguous
 clones refuse. Missing or incompatible evidence follows ordinary isolated
 installation; malformed/unreadable catalogs and invalid payload closures are
 reported as ineligible cache candidates rather than blocking that fallback.
+Catalog plugin entries must be objects and owner/location metadata must be valid.
 Referenced sibling files and directories remain in the qualification path set
 even when missing from the current tree, so deleted required assets cannot
 disappear from the Git status check. Copy mode and conflicting global
