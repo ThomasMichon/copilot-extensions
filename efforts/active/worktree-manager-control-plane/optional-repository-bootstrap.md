@@ -71,6 +71,16 @@ no second installer, environment-variable repository selector or change to
 `source set`. `--repository-target` and `--trust-repository-setup` without a
 repository are argument errors, detected before provisioning.
 
+The optional Windows bootstrap mode `--system-python` precedes that argument
+array and is consumed by bootstrap, not forwarded to Manager. Prefer a qualified
+signed physical system Python 3.11+; otherwise use the existing WinGet owner for
+user-scoped Python acquisition from an actual attended terminal and re-qualify.
+Do not infer interpreter readiness from a package exit, fall back to an unsigned
+managed interpreter, change ordinary no-option bootstrap, or override device
+policy. Existing runtime migration remains outside this acquisition choice.
+The Windows-specific mode explicitly refuses on POSIX; full first-touch package
+and attended-provider proof remain validation obligations, not inferred results.
+
 Version 1 accepts only an HTTPS Git repository URL without credentials, query
 or fragment. Reject local paths, arbitrary transport helpers, SSH and malformed
 URLs explicitly; they remain possible future owner extensions, not silent

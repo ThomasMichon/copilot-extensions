@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit Windows system-Python bootstrap using signature qualification and attended WinGet acquisition without changing ordinary bootstrap",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

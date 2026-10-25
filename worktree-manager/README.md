@@ -108,6 +108,39 @@ the supported declaration is unsupported, not inferred from a README or hook.
 Native synthetic consumer coverage is not proof of actual attended provider
 authentication or a working adopter onboarding command.
 
+### Optional Windows system Python bootstrap
+
+The Windows **bootstrap**, not the installed Manager CLI, accepts
+`--system-python` as its first argument:
+
+```powershell
+& .\bootstrap.ps1 --system-python setup --apply --repository <https-git-url>
+```
+
+It qualifies a physical Python 3.11+ from PATH or the standard Windows Python
+registration, requiring a valid Authenticode signature before probing it.
+Signature verification loads the security module from the current host's
+`PSHOME`, not an inherited module-search path from another PowerShell version.
+WindowsApps aliases and virtual environments are not substitutes. If no
+qualified interpreter exists, an actual interactive terminal may install the
+user-scoped `Python.Python.3.11` package through WinGet. Bootstrap repeats
+signature, version and base-interpreter qualification, then exposes only the
+qualified directory at the front of its process PATH;
+a package-manager success code alone is insufficient. A blocked/failed install
+or missing WinGet remains an error, without a managed-Python fallback or device
+policy, Defender, registry-policy or execution-policy override.
+An unexpected verification error or cancellation is not interpreter absence:
+it stops before package discovery/acquisition instead of triggering an install.
+
+The selected interpreter hosts canonical Manager runtime installation; this mode
+does not migrate existing runtimes or change their lifecycle owner. UV/Git
+provisioning, repository arguments and Manager source/update configuration retain
+their existing owners. Without the option, the existing UV-based bootstrap is
+unchanged. Repeated mode flags and repair combinations refuse before acquisition.
+The Bash counterpart explicitly refuses this Windows-specific mode before
+effects; it does not silently substitute a distribution package route.
+This optional mode alone is not a full adopter readiness or attended-auth claim.
+
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine
 retains the source/dependency/configuration inputs and constructs a non-editable

@@ -93,6 +93,18 @@ def test_bootstrap_invalid_repair_is_an_explicit_failed_diagnostic(tmp_path):
     ), result.stderr
 
 
+def test_system_python_mode_is_explicitly_unsupported_before_posix_effects(tmp_path):
+    root = tmp_path / "manager-root"
+    result = subprocess.run(
+        [BASH, str(BOOTSTRAP), "--system-python", "--version"],
+        env={**os.environ, "WORKTREE_MANAGER_ROOT": str(root)},
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 2
+    assert "Windows WinGet bootstrap mode; unsupported on POSIX" in result.stderr
+    assert not root.exists()
+
+
 def test_bootstrap_progress_frames_each_physical_message_line():
     header = BOOTSTRAP.read_text(encoding="utf-8").split("\nROOT=", 1)[0]
     result = subprocess.run(
