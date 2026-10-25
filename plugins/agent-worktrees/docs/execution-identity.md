@@ -72,10 +72,13 @@ The typed tracking accessor preserves the exact historical machine label for
 legacy records. Ordinary saves do not migrate their format or alter a versioned
 identity. Concurrent changes to environment, execution owner or identity version
 invalidate a loaded writer even when its physical host is unchanged. Mutation
-still requires the receiving project's shared registry and actual execution
+still requires the receiving project's current execution context and actual
 platform; sharing a physical host does not make native and guest owners equal.
-Versioned records require an actual receiving-registry entry even when an
-unregistered execution spelling would match the legacy configuration fallback.
+The optional receiving registry customizes that context rather than enrolling
+the local machine. The complete physical/environment/execution tuple must match
+the validated context, and explicit registered execution keys retain their
+canonical-key and platform checks. Project and actual-ledger snapshot checks
+remain independent of naming; a detected name is not a receiving-record grant.
 Cleanup, including forced removal, applies that tuple check before any missing,
 empty or unscoped registry fallback retained for historical records. Resolved
 controller navigation and strict resource-owner scans use the execution owner;
@@ -91,8 +94,10 @@ is reported and leaves the pending resource claim unsettled.
 
 `_create_worktree_core` has an internal `identity_mode="tuple-v1"` opt-in;
 omitting it retains `legacy`. It derives the physical/environment/owner tuple
-from the existing receiving registry and actual platform, then revalidates it
-before allocation. Missing or conflicting local execution evidence refuses.
+from existing receiving configuration, the OS hostname and actual platform,
+with optional registry customization, then revalidates it before allocation.
+Absent, empty or unrelated-only maps do not prevent local tuple creation.
+Conflicting local execution evidence still refuses.
 Callers cannot supply arbitrary tuple metadata through this mode.
 
 New session and bridge names use the selected physical machine and environment;
@@ -129,6 +134,9 @@ checks without being rewritten. Explicit creation-tail repair uses the retained
 tuple and exact pair stub, not a fresh allocation. A proven compatible legacy
 registry alias keeps its original record and reciprocal-reference spelling.
 Replacement of the retained nonce or owner during repair refuses.
+Later customization that changes the current tuple still refuses explicitly;
+it cannot reformat an already admitted allocation. Compatibility for that
+retained case remains separate from prospective derivation.
 
 `load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
 internal opt-in for genuinely new records. The existing if-absent record lock

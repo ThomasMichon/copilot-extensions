@@ -432,11 +432,15 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
         )
 
     monkeypatch.setattr(_cfg, "load_project_config", fake_load_project_config)
+    monkeypatch.setattr(_cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(_cfg, "load_machines_yaml", lambda *_a, **_k: {})
+    completed = []
 
     def run():
         execution_spaces.require_project_record_mutation(
             SimpleNamespace(repo="a", machine="m", platform="wsl", owner_ref=None),
         )
+        completed.append(True)
 
     thread = threading.Thread(target=run)
     thread.start()
@@ -445,6 +449,8 @@ def test_project_record_mutation_holds_a_lock_around_active_project_mutation(
     thread.join(timeout=5)
 
     assert held_during_call is True
+    assert not thread.is_alive()
+    assert completed == [True]
     assert not execution_spaces._project_config_lock.locked()
 
 
@@ -520,7 +526,10 @@ def test_legacy_multi_environment_registry_keeps_lifecycle_behavior(tmp_path, mo
         ],
     )}
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: entries)
-    config = SimpleNamespace(machine="workstation", default_repo=SimpleNamespace(anchor=tmp_path))
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    config = SimpleNamespace(
+        machine="workstation", platform="windows", default_repo=SimpleNamespace(anchor=tmp_path),
+    )
     record = SimpleNamespace(
         machine="workstation", worktree_id="legacy", owner_ref="workstation/project/parent",
     )

@@ -10,6 +10,7 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg, local_cache_refresh, tracking
@@ -79,13 +80,15 @@ def test_ordinary_producer_stays_legacy(tmp_path: Path, monkeypatch: pytest.Monk
     assert "machine_identity_version" not in row and "execution_machine" not in row
 
 
-@pytest.mark.parametrize("defect", ["missing", "foreign-platform", "config-platform", "unknown-mode"])
+@pytest.mark.parametrize("defect", ["invalid-map", "foreign-platform", "config-platform", "unknown-mode"])
 def test_tuple_refusal_precedes_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
     config = _setup(tmp_path, monkeypatch)
-    if defect == "missing":
-        (Path(config.default_repo.anchor) / "machines.yaml").write_text("machines: {}\n")
+    if defect == "invalid-map":
+        (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+            "machines:\n  guest-space: {execution_platform: windows}\n",
+        )
     elif defect == "foreign-platform":
         monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     elif defect == "config-platform":
@@ -99,6 +102,56 @@ def test_tuple_refusal_precedes_allocation(
         )
     assert effects == []
     assert not (tmp_path / "tracking").exists()
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching"])
+@pytest.mark.parametrize("kind", ["session", "bridge", "system"])
+def test_actual_local_tuple_creation_without_map_enrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, map_kind: str, kind: str,
+) -> None:
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host-wsl")
+    topology = Path(config.default_repo.anchor) / "machines.yaml"
+    maps = {
+        "empty": {},
+        "unrelated": {"peer-space": {
+            "execution_platform": "linux", "physical_host": "peer-host",
+        }},
+        "matching": {"local-space": {
+            "hostname": "Observed-Host-wsl", "execution_platform": platform,
+            "physical_host": "friendly-host",
+        }},
+    }
+    if map_kind == "absent":
+        topology.unlink()
+    else:
+        topology.write_text(yaml.safe_dump({"machines": maps[map_kind]}))
+    config = replace(config, machine=cfg.detect_machine(config.default_repo.anchor))
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    physical = "friendly-host" if map_kind == "matching" else "observed-host-wsl"
+    execution = "local-space" if map_kind == "matching" else (
+        "observed-host-wsl-wsl" if platform == "wsl" else "observed-host-wsl"
+    )
+    result = m._create_worktree_core(
+        config, kind=kind, name="service", identity_mode="tuple-v1",
+        creation_key="local-request",
+    )
+    row = result["worktree"]
+    record = tracking.load_record(tmp_path / "tracking" / f"{row['id']}.yaml")
+    assert record.machine_identity == WorktreeMachineIdentity(physical, platform, execution)
+    assert {key: row[key] for key in record.machine_fields} == record.machine_fields
+    before = record.yaml_path.read_bytes()
+    monkeypatch.setattr(
+        m.git_ops, "create_worktree", lambda *_a: pytest.fail("replay must not allocate"),
+    )
+    replayed = m._create_worktree_core(
+        config, kind=kind, name="service", identity_mode="legacy",
+        creation_key="local-request",
+    )
+    assert replayed["worktree"] == row
+    assert record.yaml_path.read_bytes() == before
 
 
 def test_changed_tuple_refuses_before_reserving_or_carving(
