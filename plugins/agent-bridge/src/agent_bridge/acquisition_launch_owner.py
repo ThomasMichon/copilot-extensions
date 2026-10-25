@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-import os
 from pathlib import Path
 import time
 from typing import TYPE_CHECKING, Any
@@ -13,11 +12,11 @@ import uuid
 from zdd.diagnostics import process_start_time
 
 from .acquisition_contract import AcquisitionRequest
-from .acquisition_custody import decode
+from .frontend_process import frontend_producer, require_frontend_process
 from .models import SessionStatus
 from .spawn_target import REQUEST_OVERRIDES_KEY
 from .runtime_custody import (
-    RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, RuntimeProducer, producer_id,
+    RuntimeAdmission, RuntimeCustodyError, RuntimeInstallation, RuntimeProducer,
 )
 
 if TYPE_CHECKING:
@@ -53,18 +52,9 @@ class AcquisitionFrontend:
         admission: RuntimeAdmission,
     ) -> AcquisitionFrontend:
         db = runtime.db
-        identity = db._runtime_installation(installation)
         if runtime.manager.db is not db or type(admission) is not RuntimeAdmission:
             raise RuntimeCustodyError("Acquisition custody requires its actual frontend owner")
-        with db._runtime_transaction(write=False) as conn:
-            db._runtime_admission(conn, identity, admission, cohort="Acquisition frontend")
-            row = conn.execute(
-                "SELECT producer_json FROM bridge_runtime_producers WHERE id=?", (admission.producer,),
-            ).fetchone()
-            try:
-                producer = RuntimeProducer(**decode(row["producer_json"]))
-            except (TypeError, ValueError) as exc:
-                raise RuntimeCustodyError("Malformed original acquisition frontend producer") from exc
+        producer = frontend_producer(db, installation, admission)
         stat = Path(installation.database).stat()
         owner = cls(
             runtime, runtime.manager, db, installation, admission, producer, (stat.st_dev, stat.st_ino),
@@ -74,28 +64,16 @@ class AcquisitionFrontend:
 
     def require_current(self) -> None:
         db = self.db
-        stat = Path(self.installation.database).stat()
         if (
             self.runtime.manager is not self.manager or self.manager.db is not db
             or self.runtime.db is not db or self.runtime.store.journal.db is not db
-            or (stat.st_dev, stat.st_ino) != self.database_identity
-            or os.getpid() != self.producer.pid
-            or process_start_time(self.producer.pid) != self.producer.process_start
-            or producer_id(self.installation.document(), self.admission.epoch, self.producer)
-            != self.admission.producer
         ):
             raise RuntimeCustodyError("Original acquisition frontend changed")
         if self.manager.is_draining:
             raise RuntimeCustodyError("Original acquisition frontend is draining")
-        identity = db._runtime_installation(self.installation)
-        with db._runtime_transaction(write=False) as conn:
-            db._runtime_admission(conn, identity, self.admission, cohort="Acquisition frontend")
-            row = conn.execute(
-                "SELECT producer_json FROM bridge_runtime_producers WHERE id=?",
-                (self.admission.producer,),
-            ).fetchone()
-            if row is None or row["producer_json"] != self.producer.document():
-                raise RuntimeCustodyError("Original acquisition frontend history changed")
+        require_frontend_process(
+            db, self.installation, self.admission, self.producer, self.database_identity,
+        )
 
     def prepare(
         self, request: AcquisitionRequest, *, session_id: str, native_session_id: str | None,
