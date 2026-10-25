@@ -154,7 +154,7 @@ def _load_state_root_authority(
 
 def load_project_authority_config(
     name: str, *, path: Path | None = None,
-):
+) -> Config:
     """Resolve only identity, registry, and state-root facts used by fences."""
     from . import config as cfg
 
@@ -177,11 +177,10 @@ def load_project_authority_config(
         or global_raw.get("platform")
         or cfg.detect_platform()
     )
-    machine = (
-        machine_raw.get("machine")
-        or global_raw.get("machine")
-        or cfg.detect_machine()
-    )
+    from .machine_identity import configured_machine_binding
+
+    configured_machine = configured_machine_binding(machine_raw, global_raw)
+    machine = configured_machine or cfg.detect_machine()
     machine_repos = machine_raw.get("repos") or {}
     machine_repo = (
         machine_repos.get(name) or {}
@@ -223,6 +222,7 @@ def load_project_authority_config(
         srcroot=machine_raw.get("srcroot") or global_raw.get("srcroot") or "",
         machine=machine,
         platform=platform_name,
+        configured_machine=configured_machine or None,
         repo_name=name,
         knowledge_repo=(
             machine_raw.get("knowledge_repo")

@@ -106,6 +106,12 @@ when the map customizes only the native or guest sibling.
 The reciprocal creation claim uses the admitted tuple owner as well; native
 configuration may retain its raw hostname without changing the child's qualified
 reference. Legacy creation and settlement preserve their original owner labels.
+Creation also checks the child's execution owner against the independently
+loaded parent project's context under the parent record lock. A prospective
+claim that the receiving project cannot later settle refuses before writing.
+Session-registration authority preserves explicit machine bindings from project,
+global and drop-in configuration, so an explicit key can disambiguate entries
+sharing the observed hostname; observation alone still cannot select among them.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names

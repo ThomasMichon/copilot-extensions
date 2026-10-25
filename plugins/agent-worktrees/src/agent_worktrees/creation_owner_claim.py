@@ -8,7 +8,10 @@ import sys
 
 from . import config as cfg, obligations, tracking
 from .creation_identity import require_same_machine_identity
-from .execution_spaces import require_project_record_mutation
+from .execution_spaces import (
+    ExecutionSpaceError, current_execution_context, project_record_config,
+    require_owner_identity, require_record_mutation,
+)
 from .worktree_machine_identity import WorktreeMachineIdentity
 
 
@@ -40,7 +43,12 @@ def journal_owner_claim(
 
         def write_claim() -> None:
             owner_rec = tracking.load_record(owner_path)
-            require_project_record_mutation(owner_rec)
+            receiving_config = project_record_config(owner_rec)
+            require_record_mutation(owner_rec, receiving_config)
+            if not require_owner_identity(
+                current_execution_context(config).execution_machine, receiving_config,
+            ):
+                raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
             tracking.add_resource_claim(
                 owner_rec,
                 tracking.ResourceClaim(

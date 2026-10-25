@@ -417,7 +417,7 @@ def monkeypatch_config(monkeypatch, tmp_path: Path, tmp_tracking_dir: Path):
 
     def _fake_load_project_config(name, **_kwargs):
         return _cfg.Config(
-            srcroot=str(tmp_path), machine="test", platform="wsl", repo_name=name,
+            srcroot=str(tmp_path), machine="test", platform=_cfg.detect_platform(), repo_name=name,
             repos={name: _cfg.RepoConfig(
                 anchor=str(fake_anchor), worktree_root=str(tmp_tracking_dir),
             )},
