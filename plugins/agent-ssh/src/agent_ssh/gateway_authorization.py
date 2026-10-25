@@ -56,6 +56,43 @@ def _windows_sid() -> str:
     return rows[0][1]
 
 
+@lru_cache(maxsize=1)
+def _windows_sddl_sid(sid: str) -> str:
+    """Use the same native SID spelling as the descriptor reader (for example LA)."""
+    from ctypes import wintypes as w
+
+    security = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        w.LPCWSTR, w.DWORD, ctypes.POINTER(w.LPVOID), w.LPVOID,
+    ]
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = w.BOOL
+    security.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = [
+        w.LPVOID, w.DWORD, w.DWORD, ctypes.POINTER(w.LPWSTR), w.LPVOID,
+    ]
+    security.ConvertSecurityDescriptorToStringSecurityDescriptorW.restype = w.BOOL
+    kernel.LocalFree.argtypes, kernel.LocalFree.restype = [w.LPVOID], w.LPVOID
+    descriptor, text = w.LPVOID(), w.LPWSTR()
+    if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        "O:" + sid, 1, ctypes.byref(descriptor), None,
+    ):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        if not security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor, 1, 1, ctypes.byref(text), None,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            value = text.value
+            if not value or not re.fullmatch(r"O:(?:[A-Z]{2}|S-1(?:-\d+)+)", value):
+                raise PermissionError("Cannot verify the native authorization identity")
+            return value[2:]
+        finally:
+            kernel.LocalFree(text)
+    finally:
+        kernel.LocalFree(descriptor)
+
+
 def _windows_create_directory(path: Path) -> None:
     from ctypes import wintypes as w
 
@@ -116,7 +153,7 @@ def _windows_private(path: Path, *, directory: bool) -> None:
         value = text.value
     finally:
         kernel.LocalFree(text)
-    _validate_windows_descriptor(value, sid, directory=directory)
+    _validate_windows_descriptor(value, _windows_sddl_sid(sid), directory=directory)
 
 
 def _validate_windows_descriptor(value: str, sid: str, *, directory: bool) -> None:

@@ -739,3 +739,12 @@ takeover or implementation completion is asserted.
   descriptor-shape diagnostics that redact every account SID; the owner/grant
   policy is unchanged while this failure is diagnosed. No blind retry, ACL
   relaxation or production repair is authorized by that observation.
+- Diagnostic run40186763879 identified the actual remaining mismatch:
+  Windows renders the exact current account SID as `LA` in both owner and
+  grants. Normalize the expected current SID through the same native
+  owner-only SDDL round trip before comparing. This is not a RID-based guess
+  or blanket acceptance of `LA`; foreign owners and extra group grants still
+  refuse, and the protected directory/current-account policy is unchanged.
+  The 55-case Fleet/authorization packet and six rebuilt installed-role cases
+  pass locally, including real native SID formatting and private ACLs.
+  Corrected hosted Windows qualification and fresh review are still required.

@@ -62,6 +62,9 @@ retained private state is validated, not repaired or adopted.
 The target-login writer separately retains its protected user/SYSTEM access
 grants; native privileged ownership of a newly created Windows file does not
 turn those closed grants into a shared authorization directory.
+Windows compares the descriptor with the native SDDL spelling of the exact
+current account SID, so an OS-rendered alias such as `LA` does not become a
+foreign identity. This does not admit another account, group grant or owner.
 
 The existing `SSHDirectoryClient.watch` first reads the current authenticated
 snapshot, then waits for revision changes. Transport availability retries and
