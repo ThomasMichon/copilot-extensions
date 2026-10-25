@@ -515,6 +515,7 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
                 require_current_execution_space(config)
                 payload["project_config"].update(
                     repo_dir=str(config.default_repo.anchor), machine=config.machine,
+                    configured_machine=config.configured_machine,
                 )
             except Exception as exc:
                 return output._json_error(f"Cannot resolve Picker project configuration: {exc}")

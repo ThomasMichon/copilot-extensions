@@ -73,6 +73,9 @@ def is_local(machine: str, env: str) -> bool:
     registry for exactly this reason; this is the equivalent check for a
     single ``(machine, env)`` pair rather than the whole roster.
 
+    Attributable bootstrap provenance uses the shared local context; a missing
+    map is absence, while invalid declarations refuse. Older bootstraps retain
+    the historical path below without treating detection as a configured grant.
     The ``env``-gate and hostname tuple fast path stay Picker-specific.
     Every readable roster uses the shared platform-aware lookup through
     ``roster``, including unscoped native/guest pairs. Registry outages retain
@@ -104,11 +107,27 @@ def is_local(machine: str, env: str) -> bool:
         return False
     except RuntimeError as exc:
         raise RuntimeError("Locality is not ready; refresh the machine registry before launching") from exc
-    except (FileNotFoundError, ValueError, KeyError) as exc:
+    except FileNotFoundError:
+        entries = {}
+    except (ValueError, KeyError) as exc:
         entries = {}
         registry_error = exc
     if revision is not None and cfg.ConfigCacheSession(ttl=60).revision is not revision:
         raise RuntimeError("Locality is not ready; configuration changed")
+    if getattr(config, "machine_binding_known", False):
+        if registry_error is not None:
+            raise RuntimeError("Locality is not ready; the machine registry is unavailable") from registry_error
+        actual = local_execution_platform()
+        try:
+            current = roster.local_context(config, entries, LOCAL[0], actual)
+            if machine.casefold() == current.execution_machine.casefold():
+                return True
+            target = resolve_machine_selection(entries, machine, actual).entry
+        except ValueError:
+            return False
+        if target is not None:
+            return target.key == current.customization_key
+        return machine.casefold() == LOCAL[0].casefold()
     if entries:
         actual = local_execution_platform()
         try:

@@ -16,7 +16,7 @@ the engine then falls back to its built-in default axes.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from machine_transport import (
@@ -24,6 +24,8 @@ from machine_transport import (
     split_machine_environment,
     entry_physical_host,
     resolve_machine_selection,
+    resolve_local_execution_context,
+    LocalExecutionContext,
 )
 
 from .. import project_config as cfg
@@ -118,6 +120,19 @@ def local_entry(entries, config_machine, hostname, execution_platform):
     return None
 
 
+def local_context(
+    config: cfg.ProjectConfig, entries: Mapping[str, cfg.MachineEntry],
+    hostname: str, execution_platform: str,
+) -> LocalExecutionContext | None:
+    """Use observed local authority only with attributable binding provenance."""
+    if not getattr(config, "machine_binding_known", False):
+        return None
+    return resolve_local_execution_context(
+        entries, hostname=hostname, environment=execution_platform,
+        configured_machine=config.configured_machine,
+    )
+
+
 def host_cols():
     """Profiles HOST columns: ``[(label, machine_key, env_label), ...]``.
 
@@ -156,12 +171,16 @@ def local_host():
 
     host_key = socket.gethostname().split(".")[0].lower()
     plat = local_execution_platform()
+    config = None
     try:
         config = cfg.load_config()
         config_machine = (config.machine or "").lower()
     except Exception:
         config_machine = ""
     entries = _entries()
+    current = local_context(config, entries, host_key, plat) if config is not None else None
+    if current is not None:
+        return current.execution_machine, _ENV_LABEL[plat]
     m = local_entry(entries, config_machine, host_key, plat)
     if m is not None and m.copilot:
         for env in m.ssh_environments:

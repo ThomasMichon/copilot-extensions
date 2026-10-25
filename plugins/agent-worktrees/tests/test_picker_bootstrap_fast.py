@@ -49,7 +49,8 @@ def test_optional_bootstrap_configuration_uses_one_effective_load(monkeypatch, t
     monkeypatch.setattr(worktree_identity, "tracked_invocation_record", lambda *a, **k: None)
     loads, validated = [], []
     config = SimpleNamespace(
-        machine="host", default_repo=SimpleNamespace(anchor=str(configured_anchor)),
+        machine="host", configured_machine=None,
+        default_repo=SimpleNamespace(anchor=str(configured_anchor)),
     )
     monkeypatch.setattr(
         context_cli.cfg, "load_config",
@@ -64,6 +65,7 @@ def test_optional_bootstrap_configuration_uses_one_effective_load(monkeypatch, t
     fields = json.loads(capfd.readouterr().out)["project_config"]
     assert fields == {
         "config_dir": str(tmp_path), "repo_dir": str(configured_anchor), "machine": "host",
+        "configured_machine": None,
     }
     assert fields["repo_dir"] != str(registry_anchor)
     assert loads == [{"include_control_plane_related_pr": False, "project": "project"}]

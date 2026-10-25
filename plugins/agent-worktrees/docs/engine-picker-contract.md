@@ -1094,6 +1094,26 @@ a machine-local repo anchor override can legitimately differ. Compatible
 consumers retain their existing effective repo-dir and machine queries, while
 older consumers may ignore the additive field.
 
+The existing `picker-bootstrap --project-config --json` form loads and validates
+the effective configuration once, then also returns `repo_dir`, the legacy
+`machine` scalar, and optional `configured_machine`. The resident
+`picker-bootstrap-v1` response carries the same fields. `configured_machine`
+is either the explicit binding selected by the real project/global/drop-in
+loader or JSON `null` for detected naming. It is not a new setting.
+Its presence distinguishes known absence of a binding from an older response
+that supplies no provenance; a plain `machine` scalar cannot establish that
+distinction. Non-null values must be nonempty strings.
+
+These additive fields keep bootstrap contract version 1. Older consumers ignore
+them; newer Manager consumers retain the historical strict roster path when
+`configured_machine` is absent, including after provider rollback. When present,
+Manager combines that provenance with its own observed OS hostname/environment
+and the actual optional machine map to derive its local source. This is naming
+and routing context, not receiving-project or actual-record mutation authority.
+Malformed/conflicting maps refuse, but missing local customization does not
+require a new registry entry. No additional RPC, CLI flag or enrollment mode is
+introduced, and existing effect-side admission remains required.
+
 ## Pinned action verbs (the Picker's control plane)
 
 | Verb (as invoked) | Purpose |

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve configured-machine provenance in cold and resident Picker bootstraps",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
