@@ -48,6 +48,24 @@ An unknown command/schema/version is not authority. The older `get machine`
 scalar remains unchanged and is not a substitute for this stronger contract.
 No sibling is required to install or operate Worktrees.
 
+## Local project registration and installation
+
+`register` and `install` validate local naming from the actual OS hostname and
+execution environment before writing project or runtime state. A missing,
+empty or unrelated machine map does not require enrollment. A matching
+customization supplies its own instruction metadata; a native/guest sibling's
+metadata does not become the current execution entry.
+
+The existing `--machine` option remains an explicit installation binding, with
+its original spelling retained in newly scaffolded global configuration.
+Detection retains legacy machine spellings; neither path changes existing
+user-owned global configuration or an existing project configuration without
+the latter's ordinary `--force` request. Conflicting platform/profile bindings,
+ambiguous associations, execution-name collisions and invalid declarations
+produce a nonzero diagnostic before state preparation or launcher publication.
+This naming admission does not replace repository hosting policy, installation
+ownership, receiving-project or actual-record mutation checks.
+
 ## Versioned tracking identity
 
 Tracking readers also recognize an explicitly versioned physical/environment
