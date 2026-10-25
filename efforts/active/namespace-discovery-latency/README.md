@@ -252,6 +252,20 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-24 - Component publication retains shared-library release fan-out
+
+- Opened #8789 for the bounded selector/two-adopter implementation, with
+  actual-profile paired benefit and the unresolved whole-discovery failure
+  stated separately. The managed flow rebased cleanly onto current Dev.
+- Its first required source guard correctly rejected missing changefile entries
+  for seven existing installer-engine consumers. The guard deliberately charges
+  a canonical shared-library source addition to its full declared consumer set,
+  even though only Containers and Codespaces adopt this new helper.
+- Added those required release entries rather than narrowing the guard or
+  changing unrelated installers. Required units executed successfully on that
+  head; the overall source check remains failed until a corrected head passes.
+  Current-head review/CI, merge and parent acceptance are still open.
+
 ### 2026-10-24 - Normal-install evaluator comparison retains a bounded benefit
 
 - Compared the actual normal-profile SDK through twelve fresh outer processes:
