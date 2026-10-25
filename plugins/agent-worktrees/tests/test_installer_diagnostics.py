@@ -221,9 +221,8 @@ def test_review_header_continuations_python_file_bytes(diagnostic_context):
     diagnostics, directory = diagnostic_context
     records, credential = constructed_review_records()
     raw = directory / "constructed.raw"
-    raw.write_bytes("".join(records).encode("utf-8"))
-    if os.name != "nt":
-        raw.chmod(0o600)
+    with os.fdopen(diagnostics.files().open_file(raw, create=True), "wb") as stream:
+        stream.write("".join(records).encode("utf-8"))
     assert raw.read_bytes().count(credential.encode()) == len(records)
     archive = io.StringIO()
     diagnostics.archive_snapshot(raw, archive, diagnostics._redactor())
@@ -736,9 +735,8 @@ with module.capture() as streams:
 def test_snapshot_bounds_oversized_records(diagnostic_context):
     diagnostics, directory = diagnostic_context
     path = directory / "large.raw"
-    path.write_bytes(b"x" * 1000000 + b"\nuseful error\n")
-    if os.name != "nt":
-        path.chmod(0o600)
+    with os.fdopen(diagnostics.files().open_file(path, create=True), "wb") as stream:
+        stream.write(b"x" * 1000000 + b"\nuseful error\n")
     archive = io.StringIO()
     diagnostics.archive_snapshot(path, archive, diagnostics._redactor())
     assert archive.getvalue() == "[oversized diagnostic record omitted]\nuseful error\n"

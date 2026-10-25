@@ -1240,3 +1240,31 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   relaxed. The updated install contract documents these remaining notification
   boundaries. Hosted native acceptance and current-head CI/review remain owed,
   with the earlier full qualification, merge and rollout holds unchanged.
+- Current-head CI `40191416395` and attribution/lockdown `40191414809` passed
+  `ace3e4b270e6cfebd9d83b2d6f19ccb6a92610c1`. Copilot review `5643152110`
+  assessed that exact head, acknowledged the guardian-import repair and added
+  no new finding. Existing qualification/repair threads remained open.
+- Manual native run `40192217369` checked out that exact immutable head and ran
+  only the two admitted diagnostics jobs. Hardened Linux passed all six
+  one-file groups (**124 passed, 52 platform skips**) and both real-UV
+  capture-off/on cases (**2 passed, 74 deselected**). Neither the platform
+  skips nor an earlier head's result is credited as Windows qualification.
+- Windows now passed the Bash group (**4 passed, 3 POSIX-only skips, 8.87
+  seconds**). Its next foundation group reported **2 failed, 40 passed,
+  60.64 seconds** and the runner stopped after **87.92 seconds** including
+  preparation and cleanup. Presentation, caller, producer and guardian groups,
+  plus real-UV construction, remained unexecuted rather than passing.
+- Both failures were synthetic raw-file fixtures:
+  `test_review_header_continuations_python_file_bytes` and
+  `test_snapshot_bounds_oversized_records` used ordinary `Path.write_bytes`,
+  which did not establish the required TokenUser ownership/private DACL on the
+  hosted Windows account. The production privacy check correctly refused them
+  before archival processing. Both fixtures now create their inputs through
+  the canonical private-file creator, matching the existing producer-fixture
+  pattern. Ownership, DACL, redaction and oversized-record checks remain intact.
+- Those two controls pass locally (**2 passed, 40 deselected, 0.61 seconds;
+  122.58 seconds including preparation and cleanup**), and targeted Ruff passes.
+  This proves the corrected fixture contract, not the hosted account's outcome.
+  The fix changes no production source or test deadline. A new reviewed,
+  CI-green exact head and native run remain necessary; the failed run is not
+  retried as a substitute for a versioned repair.
