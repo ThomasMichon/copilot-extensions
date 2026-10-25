@@ -3982,6 +3982,14 @@ use that option. It does not remove pip from existing slots or change genuine
 Python/pip fallback construction. Signature, slot-health and publication checks
 remain unchanged.
 
+Logger installs its existing setuptools/PyYAML prerequisites together, then
+submits its seven explicit helper roots and plugin root in one retained
+transaction. This replaces ten governed UV calls with two without removing
+dependencies or weakening build isolation, seasoning or reinstall policy.
+The local batch uses `--no-editable` to override canonical development
+mappings and preserves a named reinstall for every root. Either failure stops
+before runtime activation; retained healthy construction reuse stays unchanged.
+
 `agent-codespaces` uses the canonical-reference form for both installers.
 Its Connection Owner service, complete explicit local closure, and Windows
 signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,

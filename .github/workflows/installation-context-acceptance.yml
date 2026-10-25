@@ -804,6 +804,31 @@ jobs:
     timeout-minutes: 6
     steps: *installer-latency-steps
 
+  logger-installer-latency-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Logger installer batches (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &logger-installer-latency-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Two governed batches, failure refusal, reuse and native warm refresh
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --allow-explicit-tiers
+          --test-file tests/test_install_batch.py
+          --test-timeout 300 --timeout 300
+
+  logger-installer-latency-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Logger installer batches (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *logger-installer-latency-steps
+
   wheel-inputs-linux:
     if: ${{ inputs.wheel_inputs }}
     name: Wheel-byte inspection (Linux)

@@ -1253,102 +1253,36 @@ install_package() {
     fi
     chg "created venv at ${VENV}"
   fi
-  local setuptools_out
-  if ! setuptools_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet); then
-    printf '%s\n' "$setuptools_out" >&2
-    exit 1
-  fi
-  local pyyaml_out
-  if ! pyyaml_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'pyyaml>=6.0' --quiet); then
-    printf '%s\n' "$pyyaml_out" >&2
+  local bootstrap_out
+  if ! bootstrap_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' 'pyyaml>=6.0' --quiet); then
+    printf '%s\n' "$bootstrap_out" >&2
     exit 1
   fi
   # Local first-party code still resolves its external and build dependencies
-  # through the configured, seasoned index.
-  local cfg_migrate_dir="${PLUGIN_DIR}/libs/config-migrate"
-  if [ ! -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
-  fi
-  if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    local cfg_migrate_out
-    if ! cfg_migrate_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet); then
-      printf '%s\n' "$cfg_migrate_out" >&2
-      exit 1
+  # through the configured, seasoned index, in one retained transaction.
+  local -a install_args=(--python "${VENV}/bin/python" --no-editable)
+  local lib_spec lib_dir lib_package
+  for lib_spec in \
+    config-migrate:agent-config-migrate \
+    agent-procutil:agent-procutil \
+    single-instance-lease:agent-single-instance-lease \
+    update-driver:agent-update-driver \
+    dropin-registry:agent-dropin-registry \
+    plugin-resolve:agent-plugin-resolve \
+    plugin-activation:agent-plugin-activation; do
+    lib_dir="${PLUGIN_DIR}/libs/${lib_spec%%:*}"
+    lib_package="${lib_spec#*:}"
+    if [[ ! -f "${lib_dir}/pyproject.toml" ]]; then
+      lib_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/${lib_spec%%:*}"
     fi
-  fi
-  local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
-  if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
-    procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
-  fi
-  if [ -f "${procutil_dir}/pyproject.toml" ]; then
-    local procutil_out
-    if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
-      printf '%s\n' "$procutil_out" >&2
-      exit 1
+    if [[ -f "${lib_dir}/pyproject.toml" ]]; then
+      install_args+=(--reinstall-package "$lib_package" "$lib_dir")
     fi
-  fi
-  local lease_dir="${PLUGIN_DIR}/libs/single-instance-lease"
-  if [ ! -f "${lease_dir}/pyproject.toml" ]; then
-    lease_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/single-instance-lease"
-  fi
-  if [ -f "${lease_dir}/pyproject.toml" ]; then
-    local lease_out
-    if ! lease_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --reinstall-package agent-single-instance-lease "${lease_dir}" --quiet); then
-      printf '%s\n' "$lease_out" >&2
-      exit 1
-    fi
-  fi
-  local driver_dir="${PLUGIN_DIR}/libs/update-driver"
-  if [ ! -f "${driver_dir}/pyproject.toml" ]; then
-    driver_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/update-driver"
-  fi
-  if [ -f "${driver_dir}/pyproject.toml" ]; then
-    local driver_out
-    if ! driver_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --reinstall-package agent-update-driver "${driver_dir}" --quiet); then
-      printf '%s\n' "$driver_out" >&2
-      exit 1
-    fi
-  fi
-  # plugin_activation's own transitive deps first, then plugin_activation
-  # itself (schema v3's registered-project trust gate; module
-  # ``plugin_activation``, used by ``repo_trust.py`` for canonical git-remote
-  # identity normalization).
-  local dropin_registry_dir="${PLUGIN_DIR}/libs/dropin-registry"
-  if [ ! -f "${dropin_registry_dir}/pyproject.toml" ]; then
-    dropin_registry_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/dropin-registry"
-  fi
-  if [ -f "${dropin_registry_dir}/pyproject.toml" ]; then
-    local dropin_registry_out
-    if ! dropin_registry_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet); then
-      printf '%s\n' "$dropin_registry_out" >&2
-      exit 1
-    fi
-  fi
-  local plugin_resolve_dir="${PLUGIN_DIR}/libs/plugin-resolve"
-  if [ ! -f "${plugin_resolve_dir}/pyproject.toml" ]; then
-    plugin_resolve_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-resolve"
-  fi
-  if [ -f "${plugin_resolve_dir}/pyproject.toml" ]; then
-    local plugin_resolve_out
-    if ! plugin_resolve_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet); then
-      printf '%s\n' "$plugin_resolve_out" >&2
-      exit 1
-    fi
-  fi
-  local plugin_activation_dir="${PLUGIN_DIR}/libs/plugin-activation"
-  if [ ! -f "${plugin_activation_dir}/pyproject.toml" ]; then
-    plugin_activation_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-activation"
-  fi
-  if [ -f "${plugin_activation_dir}/pyproject.toml" ]; then
-    local plugin_activation_out
-    if ! plugin_activation_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python"  --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet); then
-      printf '%s\n' "$plugin_activation_out" >&2
-      exit 1
-    fi
-  fi
+  done
+  install_args+=(--reinstall-package agent-logger "${PLUGIN_DIR}" --quiet)
   export INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="${PLUGIN_DIR}"
   local install_out
-  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" "${PLUGIN_DIR}" --quiet); then
+  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" "${install_args[@]}"); then
     unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
     printf '%s\n' "$install_out" >&2
     exit 1

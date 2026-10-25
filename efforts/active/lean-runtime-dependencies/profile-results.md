@@ -114,6 +114,26 @@ batch the Codespaces closure without changing dependency, signature, health
 or service authority. Whole-update cold/warm timing and installed-state
 qualification remain required after authorized rollout.
 
+### Logger transaction consolidation
+
+Logger's existing construction used ten governed UV invocations: separate
+setuptools and PyYAML bootstrap installs, seven helper installs, and the plugin
+install. The follow-on source change uses two: the same prerequisites together,
+then all eight explicit local roots in one retained non-editable transaction.
+Every root retains its named reinstall selection; no dependency is removed.
+Reuse, source attribution, signature admission, build isolation, seasoning,
+retry and activation gates remain in their existing owners.
+
+The disposable Windows native fixture verifies both canonical editable
+references and materialized payloads, two calls per construction, all ten
+installed distributions including prerequisites, and a same-version helper edit
+on the warm run. Its private loopback PEP 691 index supplies explicit old upload
+times and hashes; ambient UV/PIP settings are removed, not allowed to redirect
+the test to a different feed. A separate offline full-provision case exercises
+the actual Logger package, helper closure, runtime health and publication flow.
+These are correctness/work-count observations, not a whole-update timing result.
+Cold and unchanged full-update qualification remains open with authorized rollout.
+
 ## Unresolved custody, not completion by renaming
 
 | Remaining requirement | Existing objective and boundary |

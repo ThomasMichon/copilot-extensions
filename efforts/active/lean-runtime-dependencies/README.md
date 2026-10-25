@@ -156,6 +156,9 @@ new package feeds.
 ### Phase 6 - Close the measured delta
 - [x] Publish before/after profile footprint and fresh-install evidence, with
   running-state proof for any authorized rollout.
+- [ ] Remove redundant package-preparation transactions identified by the
+  installation-latency audit, preserving build prerequisites, source/feed
+  admission, immutable construction and health/cutover semantics.
 - [ ] Resolve or explicitly transfer every implementation and validation item;
   experimental ONNX/storage replacements remain separately tracked decisions.
 - [ ] Update reality docs and archive only after the campaign completion gate.
@@ -184,6 +187,9 @@ new package feeds.
   live-venue evidence, or a specific reason a tier is unavailable.
 - [x] Measurement separates compressed downloads, unpacked logical files,
   hardlink-aware physical allocation, model/cache data and retained version slots.
+- [ ] Measure complete cold and unchanged-path update latency from the existing
+  updater's phase logs. Footprint reductions or isolated constructor timings
+  alone do not establish an end-to-end installation speedup.
 - [ ] Publication checks, changefiles, review, merge and release attribution are
   satisfied; rollout authorization and its completion owner are explicit.
 
@@ -1015,3 +1021,45 @@ transfer without acceptance by a named tracked objective.
   native import/provenance controls pass along with the updated CI-scope
   contracts. Hosted native lanes also include macOS without claiming
   standalone-service supervision or engine rollout parity.
+
+### 2026-10-25 - Source closure qualification retained
+- The complete source/helper closure contribution #8791 merged as
+  `7d2ba9dd76f7e25166ac9e84be555c967f7eb2aa`. Its qualified head passed actual
+  required CI `40170736550` with 1,788 units and all seven selected native
+  Linux/Windows/macOS source-profile, compile and wheel jobs in
+  `40170954816`.
+- This closes that source-preparation slice, not production source
+  authentication, governed acquisition, admitted persistent reuse or engine
+  adoption. The aggregate Plan and Validation Plan remain open.
+
+### 2026-10-25 - Installation latency takes priority over preparation plumbing
+- The operator reported general installation timeouts and reprioritized
+  historical-log analysis plus targeted performance fixes. Central rollout
+  remains with its existing deployment owner; this campaign runs no updater.
+- Audited twenty retained Windows update histories. Successful runs took
+  roughly 28-53 minutes; runtime reconciliation and repeated package operations
+  accounted for large spans. Marketplace refresh also caused failures before
+  runtime construction. Preserve the distinction between observed log spans,
+  buffered presentation and controlled physical-phase measurements.
+- A disposable same-base signed-Python comparison completed unseeded copied
+  venv construction in 2.760 seconds. Its seeded control reached 45.059 seconds
+  inside `ensurepip`; copying the interpreter itself took under 0.2 seconds.
+  This is not a total-update speedup measurement.
+- Merged #8970 as `1f5d2f0a3686ff9e409beebed7a06392c20f49d9` after current-head
+  approval, resolved review findings and green required CI `40193754354`.
+  Exact qualified head `4fc3f4bf1f9d6b531c92f1bdeb0f0128559fca2b` passed all
+  six selected Linux/Windows native jobs in `40193814889`.
+- Known UV-owned signed-venv callers now omit unused pip seeding; the generic
+  seeded default and genuine pip fallback remain. Codespaces submits its eight
+  helper roots and plugin in one retained transaction, with explicit
+  non-editable normal mode and preserved editable selection. Tests cover
+  canonical editable mappings, cold/warm source edits, signatures, retries
+  and recovery. No production deadline or admission check was weakened.
+- Post-package Bridge and Dispatch spans include real warm-up, graceful
+  handoff, drain and supervisor reconciliation, not only file copying.
+  No healthy-lifetime or re-adoption safeguard was removed. Whole-update
+  cold/warm evidence and the broader parent acceptance remain open.
+- Next reduce Logger's repeated governed install transactions while retaining
+  its existing setuptools/PyYAML prerequisites, then measure the authorized
+  updater's actual changed and unchanged paths. Do not restart profile plumbing
+  or infer an installed speedup from the merged source fix.

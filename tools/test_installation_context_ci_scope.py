@@ -371,6 +371,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "installer-latency-linux", "installer-latency-windows",
+        "logger-installer-latency-linux", "logger-installer-latency-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
         "chat-construction-linux", "chat-construction-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
@@ -406,6 +407,21 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         assert "-m " not in step["run"].rsplit("pytest", 1)[1]
         if runner == "windows-latest":
             assert step["env"]["INSTALLATION_CONTEXT_POWERSHELL"] == "powershell"
+
+
+def test_logger_batch_acceptance_is_optional_and_bounded() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
+        job = workflow["jobs"][f"logger-installer-latency-{platform}"]
+        assert job["if"] == "${{ inputs.dependency_compile }}"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 6
+        command = next(step["run"] for step in job["steps"] if "run" in step)
+        assert "agent-logger" in command and "--allow-explicit-tiers" in command
+        assert "--test-file tests/test_install_batch.py" in command
+        assert "--test-timeout 300 --timeout 300" in command
+        assert not job.get("continue-on-error")
 
 
 def test_foundation_snapshot_staging_is_disposable_and_bounded() -> None:

@@ -611,6 +611,21 @@ normal non-editable installation, all nine installed distributions and
 refreshed same-version source. These are disposable correctness checks, not a
 whole-update speedup claim, and do not expand required unit-only PR CI.
 
+The selector also runs independent six-minute Logger Linux/Windows batch jobs.
+`tests/test_install_batch.py` keeps its native cases in explicit T3: canonical
+and materialized payloads must make two governed calls, retain every local
+root and named reinstall, stop before activation on either transaction's
+failure, and skip package work for a reused construction. Real UV installs
+fixture build prerequisites and eight local distributions into a fresh
+unseeded slot, then refreshes a same-version source edit. Build isolation and
+seasoning remain enabled. The existing offline full-provision fixture checks
+the same batching against the real Logger package, health and publication flow.
+Logger's existing Windows retry fixtures allow 180 seconds for their native
+subprocess and 210 seconds per item: three/four-attempt cases exceeded the old
+20-second subprocess cap on a slow host. Exact attempt counts, mocked 3/6/10
+backoff, failure propagation and production deadlines are unchanged. Run these
+separately from the full-provision case to retain the aggregate runner budget.
+
 `tools/test_installer_wheel_acquisition.py` uses a public test-only localhost TLS
 certificate/key and real owned workers to check exact file/redirect trust,
 credential isolation, file policy, inclusive byte/storage limits, blocked DNS,

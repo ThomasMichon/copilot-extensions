@@ -1,0 +1,9 @@
+{
+  "comment": "Batch Logger build prerequisites and the explicit local helper closure into two governed UV installs instead of ten.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

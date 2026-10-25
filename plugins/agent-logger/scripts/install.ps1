@@ -1391,24 +1391,16 @@ function Install-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $setuptoolsResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'setuptools>=83.0.0', '--quiet')
-    $setuptoolsOut = $setuptoolsResult.Output
-    if ($setuptoolsResult.ExitCode -ne 0) {
+    $bootstrapResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'setuptools>=83.0.0', 'pyyaml>=6.0', '--quiet')
+    if ($bootstrapResult.ExitCode -ne 0) {
         $ErrorActionPreference = $prevEAP
-        Write-Fail "setuptools install failed"
-        if ($setuptoolsOut) { Write-Host ($setuptoolsOut | Out-String) }
-        exit 1
-    }
-    $pyyamlResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'pyyaml>=6.0', '--quiet')
-    $pyyamlOut = $pyyamlResult.Output
-    if ($pyyamlResult.ExitCode -ne 0) {
-        $ErrorActionPreference = $prevEAP
-        Write-Fail "pyyaml install failed"
-        if ($pyyamlOut) { Write-Host ($pyyamlOut | Out-String) }
+        Write-Fail "Build prerequisites install failed"
+        if ($bootstrapResult.Output) { Write-Host ($bootstrapResult.Output | Out-String) }
         exit 1
     }
     # Local first-party code still resolves its external and build dependencies
-    # through the configured, seasoned index.
+    # through the configured, seasoned index, in one retained transaction.
+    $installArgs = @('--python', $VenvPython, '--no-editable')
     foreach ($lib in @(
         @{
             Name = 'config-migrate'
@@ -1458,16 +1450,10 @@ function Install-Package {
             }
         }
         if (-not (Test-Path (Join-Path $libPath 'pyproject.toml'))) { continue }
-        $libResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, '--reinstall-package', $lib.Package, $libPath, '--quiet')
-        $libOut = $libResult.Output
-        if ($libResult.ExitCode -ne 0) {
-            $ErrorActionPreference = $prevEAP
-            Write-Fail "$($lib.Name) library install failed"
-            if ($libOut) { Write-Host ($libOut | Out-String) }
-            exit 1
-        }
+        $installArgs += @('--reinstall-package', $lib.Package, $libPath)
     }
-    $installResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -PayloadDirToScrub $PluginDir -Arguments @('--python', $VenvPython, "$PluginDir", '--quiet')
+    $installArgs += @('--reinstall-package', 'agent-logger', $PluginDir, '--quiet')
+    $installResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -PayloadDirToScrub $PluginDir -Arguments $installArgs
     $out = $installResult.Output
     $result = $installResult.ExitCode
     $ErrorActionPreference = $prevEAP
