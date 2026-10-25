@@ -30,9 +30,21 @@ Reads and Refresh run off the UI loop. `r` refreshes and Escape closes.
 
 Recovery retains session lineage and the explicit, human-gated Cut over action
 for an already-prepared handoff. Selecting a tab never triggers cutover.
-These are tabs inside the Companion, not mux CLI/Summary view switches.
-Alternate mux panes, topology/statistics and two-line clickable mux chrome
-remain separately tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
+The existing Ctrl+K popup also offers **Show Summary pane**. It opens or
+reuses an observer in the CLI's existing mux window and zooms it; **Return
+to CLI** restores the original CLI pane without restarting its process.
+The popup itself and its key remain unchanged. The explicit shell entry is
+`worktree-manager companion-pane --action show|return [--cwd PATH]`.
+
+Pane actions require an installed Manager runtime and an unambiguous,
+launcher-registered CLI pane. They verify the native session incarnation,
+pane directory and window before switching; older sessions without that
+identity refuse rather than guessing pane zero. Reattachment preserves a
+recorded CLI only when the same native session and live pane are confirmed.
+The observer uses the constructed runtime's bootstrap, not source or `uv`.
+
+Topology/statistics, attention indicators and two-line clickable mux chrome
+remain tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
 
 ## Set up the harness
 
