@@ -46,6 +46,40 @@ def engine_evidence(project: str, attempt_id: str, *, limit: int, after: str | N
     return value
 
 
+def read_detail(
+    store: LaunchAttempts, attempt_id: str, *, include_input: bool = False,
+    event_limit: int = 100, after_sequence: int = 0,
+    receipt_limit: int = 100, receipt_after: str | None = None,
+) -> dict:
+    """Join one explicit local detail request without replaying or repairing."""
+    detail = store.detail(
+        attempt_id, include_input=include_input,
+        event_limit=event_limit, after_sequence=after_sequence,
+    )
+    request_ids = list(dict.fromkeys(
+        event["details"]["request_id"] for event in detail["events"]
+        if "request_id" in event["details"]
+    ))
+    report = {
+        "schema": "worktree-manager-launch-history", "version": 1,
+        "scope": "local-manager", "attempt": detail, "prompt_acceptance": "unknown",
+        "engine": {"scope": "local-project", "status": "unavailable"},
+    }
+    try:
+        if len(request_ids) > 16:
+            raise engine_client.EngineError("Too many admission references in event page")
+        report["engine"] = {
+            "status": "read",
+            **engine_evidence(
+                detail["project"], attempt_id, limit=receipt_limit,
+                after=receipt_after, request_ids=request_ids,
+            ),
+        }
+    except engine_client.EngineError:
+        report["engine"]["code"] = "unavailable-or-incompatible"
+    return report
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="worktree-manager launch-attempts",
@@ -95,31 +129,11 @@ def main(argv: list[str]) -> int:
                 "next_before_id": rows[-1]["attempt_id"] if has_more else None,
             }
         else:
-            detail = store.detail(
-                args.attempt_id, include_input=args.include_input,
+            report = read_detail(
+                store, args.attempt_id, include_input=args.include_input,
                 event_limit=args.event_limit, after_sequence=args.after_sequence,
+                receipt_limit=args.receipt_limit, receipt_after=args.receipt_after,
             )
-            request_ids = list(dict.fromkeys(
-                event["details"]["request_id"] for event in detail["events"]
-                if "request_id" in event["details"]
-            ))
-            report = {
-                "schema": "worktree-manager-launch-history", "version": 1,
-                "scope": "local-manager", "attempt": detail, "prompt_acceptance": "unknown",
-                "engine": {"scope": "local-project", "status": "unavailable"},
-            }
-            try:
-                if len(request_ids) > 16:
-                    raise engine_client.EngineError("Too many admission references in event page")
-                report["engine"] = {
-                    "status": "read",
-                    **engine_evidence(
-                        detail["project"], args.attempt_id, limit=args.receipt_limit,
-                        after=args.receipt_after, request_ids=request_ids,
-                    ),
-                }
-            except engine_client.EngineError:
-                report["engine"]["code"] = "unavailable-or-incompatible"
     except LaunchAttemptError:
         _error(
             "unreadable-or-expired", "Could not read protected launch history; no launch was attempted.",

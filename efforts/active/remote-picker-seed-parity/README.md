@@ -167,6 +167,11 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #8990 merged bounded local Manager/engine attempt inspection
+  with current-head approval and required CI. Saved intent and qualified
+  receipts can be inspected without replaying prompts; acceptance remains
+  unknown. Interactive history, remote inspection, retention, release and
+  installed same-conversation New/cold Resume proof remain open.
 - **2026-10-25** -- #8961 merged binding-free Bridge startup after current-head
   approval and required CI. Discovery no longer requires source-project
   machine binding; explicit selectors and effect-side ownership remain.

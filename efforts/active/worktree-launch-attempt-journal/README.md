@@ -200,6 +200,40 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
 
+### 2026-10-25 -- Bounded local reader merged; interactive history next
+
+- #8990 merged with current-head approval and required CI. Manager metadata
+  lists and explicit-input detail now join bounded local engine receipts
+  without replay, provisioning or inferred prompt acceptance.
+- Review corrections complete full/lazy command registration and prove actual
+  cluster-free execution. The opt-in native consumer lane now strips Git
+  overrides before fixture setup and tests deliberately redirecting values.
+- Native Windows and earlier frozen-source Linux consumer evidence remain
+  separate from installed acceptance. The local reader does not query the
+  selected remote machine or establish whole-attempt terminal success.
+- Next, expose the existing protected metadata/detail reader from the
+  interactive Manager without blocking navigation or revealing prompts by
+  default. Outcome filtering, selected-machine sweeps, legacy retention,
+  release and installed local/SSH proof remain incomplete.
+
+### 2026-10-25 -- Interactive local history source
+
+- Both interactive Pickers now expose the same local history screen through
+  Ctrl+Shift+H. Metadata paging and project/action filters do not start an
+  engine; explicit row detail reuses the versioned CLI reader boundary.
+- Private input requires a separate exact-attempt reveal, respects expiry and
+  is removed from the view on return to the list. The screen retains source
+  errors, page cursors and unknown acceptance rather than inventing a terminal
+  outcome. Long previews identify truncation and direct further paging to the
+  CLI.
+- Headless Textual navigation exercises both entry points, read-only actual
+  SQLite data, privacy, paging, slow-read dismissal and preserved launch
+  shortcuts. The actual native Windows Manager/engine consumer lane also
+  passes after sharing the detail implementation.
+- This source increment does not close the composite Phase 4 item: outcome
+  filtering, selected-machine sweeps, retention, release and installed proof
+  remain open.
+
 ### 2026-10-24 -- Bounded local inspection prepared
 
 - Added a discoverable Manager CLI list/detail path. Lists query protected

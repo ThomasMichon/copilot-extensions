@@ -1020,6 +1020,22 @@ the protected Manager journal, not in these engine metadata receipts.
 
 #### Read saved launch attempts
 
+Press **Ctrl+Shift+H** in either interactive Picker to open local launch
+history. The production Picker's `?` legend and the compact Picker footer
+advertise the shortcut. Metadata pages contain at most 25 attempts; project
+and action filters and Newer/Older controls stay within the local protected
+journal. Opening or refreshing this list never queries an engine.
+
+Select a row for bounded local detail (at most 20 Manager events and 10 engine
+receipts). Source errors and incomplete-page cursors remain visible; the CLI
+below can retrieve further pages. **Reveal private input** is a separate,
+explicit action for that exact attempt, subject to its original expiry.
+Back to list clears the displayed private detail. Long details are labeled as
+truncated previews after 32,768 Unicode characters; use the CLI for the full detail.
+Reads run off the UI thread, and Escape/Close remains available while the
+local engine responds. The screen never retries a launch, changes retention,
+or contacts the selected remote venue.
+
 `worktree-manager launch-attempts --json` reads bounded, local saved-intent
 metadata without starting the engine. Filter with `--project`, `--action`,
 `--machine`, `--environment`, `--provider`, `--venue`, `--after` (inclusive Unix
@@ -1048,12 +1064,12 @@ Expired or erased input refuses that request; list and ordinary detail never
 select its text. Resolution, launcher exit, seed claim and original native-session
 observations remain separate evidence. `prompt_acceptance` stays `unknown`,
 including after a zero exit or a qualified native-session join. These commands
-do not launch, repair, expire, retry or sweep other machines. Interactive history,
+do not launch, repair, expire, retry or sweep other machines. Whole-attempt
 outcome aggregation, selected-machine sweeps and legacy-history retention
-integration are not supplied by this CLI reader.
+integration remain separate capabilities.
 
 The explicit cross-runtime source lane is
-`python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_launch_history_cli_native.py`.
+`python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_launch_history_cli_native.py`.
 Set `WORKTREE_MANAGER_TEST_ENGINE_ARGV` to a JSON array naming a prepared
 candidate engine interpreter/entry command. The lane runs the real Manager
 entry and engine CLI against isolated synthetic intent, checking metadata and
