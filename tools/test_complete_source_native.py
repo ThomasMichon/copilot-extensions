@@ -60,11 +60,18 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
         from promotion_source_archive import read_build_assets
         from promotion_unit_contract import decode_json
 
-        index.update(main_before=main, admission={
+        from promotion_python_artifacts import SCHEMA, validate_artifacts
+
+        index.update(schema=SCHEMA, artifacts=[], admission={
             "signer_digest": main, "source_digest": main, "source_ref": "refs/heads/main",
         })
-        index_path = tmp_path / "source-index.json"
+        packages = tmp_path / "packages"
+        packages.mkdir()
+        index_path = packages / "python-artifacts.json"
         index_path.write_bytes(canonical_bytes(index))
+        assert validate_artifacts(
+            packages, content_tree=tree, dev_head=main, main_before=main, projects={},
+        ) == index
         result = subprocess.run(
             [sys.executable, str(Path(__file__).with_name("promotion_source_archive.py")),
              "--repo", str(repo), "--directory", str(directory),
@@ -73,7 +80,7 @@ def test_fresh_git_objects_reconstruct_every_tracked_blob_mode_and_export_attrib
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         assert result.returncode == 0, result.stderr.decode(errors="replace")
-        identity = build_identity(index_path.read_bytes(), candidate_sha=candidate, tree=tree)
+        identity = build_identity(index_path.read_bytes(), candidate_sha=candidate, tree=tree, main_before=main)
         subjects = read_build_assets(directory, identity=identity)
         manifest = decode_json(next(raw for name, raw in subjects.items() if name.endswith(".json")))
         raw = next(raw for name, raw in subjects.items() if name.endswith(".zip"))

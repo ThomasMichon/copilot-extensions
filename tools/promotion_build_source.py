@@ -23,19 +23,19 @@ def validate_identity(identity: dict) -> None:
         raise ValueError("invalid original build-source identity")
 
 
-def build_identity(index_raw: bytes, *, candidate_sha: str, tree: str) -> dict:
+def build_identity(index_raw: bytes, *, candidate_sha: str, tree: str, main_before: str) -> dict:
     index = decode_json(index_raw)
     admission = index.get("admission") if isinstance(index, dict) else None
     if (
         not isinstance(index, dict) or type(index.get("schema_version")) is not int
-        or index["schema_version"] != 2 or not isinstance(admission, dict)
+        or index["schema_version"] != 2 or "main_before" in index or not isinstance(admission, dict)
         or admission.get("source_ref") != "refs/heads/main"
         or admission.get("source_digest") != admission.get("signer_digest")
     ):
         raise ValueError("original build source requires a trusted Main source index")
     identity = {
         "dev_sha": index.get("dev_head"), "candidate_sha": candidate_sha,
-        "main_before": index.get("main_before"), "control_sha": admission.get("signer_digest"),
+        "main_before": main_before, "control_sha": admission.get("signer_digest"),
         "content_tree": index.get("content_tree"), "tree": tree,
         "source_index_sha256": hashlib.sha256(index_raw).hexdigest(),
     }

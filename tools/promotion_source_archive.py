@@ -28,6 +28,20 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
     return result.stdout
 
 
+def candidate_tree_and_parent(repo: Path, *, candidate_sha: str) -> tuple[str, str]:
+    if not isinstance(candidate_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
+        raise ValueError("invalid original build candidate")
+    headers = _git(repo, ["cat-file", "commit", candidate_sha]).split(b"\n\n", 1)[0].splitlines()
+    parents = [line.removeprefix(b"parent ") for line in headers if line.startswith(b"parent ")]
+    if (
+        not headers or not headers[0].startswith(b"tree ") or len(parents) != 1
+        or not re.fullmatch(rb"[0-9a-f]{40}", headers[0][5:])
+        or not re.fullmatch(rb"[0-9a-f]{40}", parents[0])
+    ):
+        raise ValueError("original build candidate is not a single-parent Git tree")
+    return headers[0][5:].decode("ascii"), parents[0].decode("ascii")
+
+
 def read_tree(repo: Path, *, candidate_sha: str, main_before: str, tree: str) -> dict:
     """Batch raw blobs, not a worktree or git-archive's export-filtered representation."""
     if any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value)
@@ -195,10 +209,8 @@ def prepare_build_source(
     import promote_release as promotion
     from promotion_build_source import asset_name, build_archive, build_identity
 
-    if not isinstance(candidate_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
-        raise ValueError("invalid original build candidate")
-    tree = _git(repo, ["rev-parse", f"{candidate_sha}^{{tree}}"]).decode().strip()
-    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree)
+    tree, main_before = candidate_tree_and_parent(repo, candidate_sha=candidate_sha)
+    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree, main_before=main_before)
     if promotion._tree_excluding_state(tree, repo=repo) != identity["content_tree"]:
         raise ValueError("original build tree differs from the signed source index")
     raw, manifest = build_archive(
