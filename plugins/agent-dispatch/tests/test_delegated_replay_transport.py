@@ -306,6 +306,7 @@ def test_coordinator_scheduler_uses_real_transport_and_recovers_shutdown(
 
 
 @pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.timeout(120 if sys.platform == "win32" else 30)
 def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_path, monkeypatch, scoped):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
     from gateway_service_transport_fixtures import eventually, running

@@ -674,6 +674,13 @@ factory through the real front door's queue, active-route checkpoint and
 lifespan/drain. Default-import protection covers that front door with neither
 optional PR nor Fleet package admitted.
 
+The real watcher nonevent/restart/lost-ACK case has a 120-second item watchdog
+on Windows. Its two service lifetimes, native subprocess observations and
+durable recovery measured 20.90/23.46 seconds locally for v1/v2, while hosted
+Windows exhausted the ordinary 30-second item budget. This functional
+integration allowance leaves its readiness, request and drain deadlines,
+assertions, non-Windows item limit and runner/workflow budgets unchanged.
+
 The shared-maintenance cardinality case in `test_waiter_maintenance.py` retains
 real cold SQLite schema creation, 40 durable waiter preparations and a bounded
 32-row replay cycle. It has a 120-second item watchdog on Windows: hosted
