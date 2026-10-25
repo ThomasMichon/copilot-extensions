@@ -482,14 +482,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"artifact-ready: {tag}")
         if args.build_source_dir is not None:
-            import promote_release as promotion
             from promotion_release_evidence import publish_build_source
+            from promotion_source_archive import candidate_tree_and_parent
 
+            build_tree, build_parent = candidate_tree_and_parent(repo, candidate_sha=args.candidate_commit)
             build_source = publish_build_source(
                 args.directory, source_directory=args.build_source_dir,
                 repository=args.repository, tag=tag, index=signed_index,
                 candidate_sha=args.candidate_commit,
-                tree=promotion._git(["rev-parse", f"{args.candidate_commit}^{{tree}}"], cwd=repo),
+                tree=build_tree, main_before=build_parent,
                 signer_digest=args.signer_digest,
             )
             print(f"build-source-retained: {tag}/{build_source['candidate_sha']}")

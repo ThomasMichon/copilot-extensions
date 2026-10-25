@@ -209,6 +209,8 @@ qualification receipt exists. `promotion_source_archive.py --build-candidate
 <commit>` retains that exact Main-child Git tree against the original signed
 source index. Its external `copilot-extensions.promotion-build-source` manifest
 has no qualification digest and cannot be consumed as qualified final source.
+The Main base is read from the pinned candidate's single-parent Git header;
+schema-v2 indexes continue to omit any Main-container binding.
 After both subjects receive trusted-Main attestations, the existing publisher's
 `prepare --build-source-dir <directory>` verifies them and adds immutable
 `promotion-build-source-…zip` / `promotion-build-manifest-…json` assets to the

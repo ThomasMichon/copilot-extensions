@@ -1253,6 +1253,19 @@ review and hosted actual-Git CLI witness remain publication gates. This is
 source support only; build/landing equivalence, Main activation and actual
 new-contract promotion remain open.
 
+#8899 opened after exact-head hosted CI `40170996003` passed 1829 units and
+the observed packet in 36.157 seconds, coverage recorded once; separate
+fresh-Git witness `40171009922` passed nine cases in 2.17 seconds. Review
+identified a real contract mismatch hidden by synthetic fixtures: schema-v2
+indexes forbid `main_before`. A regression through the actual index validator
+reproduced the failure. Preparation/publication now derive the external
+manifest's Main base from the pinned candidate's single-parent Git header,
+leaving source-index bytes unchanged. Fixtures and the real-Git witness use
+the valid index shape; malformed parent and wrong-generation controls cover
+both boundaries. All 161 coupled cases passed in 13.99 seconds. Corrected-head
+hosted packet, witness and review remain required; the old green head does not
+qualify this fix.
+
 ### 2026-10-25 - Trusted retirement support merged; build/landing binding next
 
 #8838 merged as `010000e5c0cd3c557081c25d9e4341ee067b3d80` at

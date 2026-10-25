@@ -14,16 +14,18 @@ from promotion_unit_tests.test_complete_source import case
 def build_case():
     files, identity = case()
     index = {
+        "schema": "copilot-extensions.promotion-python-artifacts",
         "schema_version": 2, "dev_head": identity["dev_sha"],
-        "main_before": identity["main_before"], "content_tree": identity["content_tree"],
+        "content_tree": identity["content_tree"], "artifacts": [],
         "admission": {
             "signer_digest": identity["control_sha"], "source_digest": identity["control_sha"],
             "source_ref": "refs/heads/main",
         },
-        "runtime_profiles": [{"opaque": "not interpreted or approved"}],
     }
     raw = qualified.canonical_bytes(index)
-    identity = build.build_identity(raw, candidate_sha=identity["candidate_sha"], tree=identity["tree"])
+    identity = build.build_identity(
+        raw, candidate_sha=identity["candidate_sha"], tree=identity["tree"], main_before=identity["main_before"],
+    )
     return files, index, raw, identity
 
 
@@ -56,7 +58,7 @@ def test_original_build_source_cannot_relabel_any_signed_generation_input(field)
 
 @pytest.mark.parametrize("change", [
     "legacy", "boolean", "missing-admission", "source-ref", "source-digest",
-    "missing-source", "invalid-main", "invalid-tree", "extra-identity",
+    "missing-source", "invalid-main", "invalid-tree", "extra-identity", "bound-main",
 ])
 def test_original_build_source_refuses_untrusted_or_malformed_source_identity(change):
     _files, index, _index_raw, identity = build_case()
@@ -73,9 +75,11 @@ def test_original_build_source_refuses_untrusted_or_malformed_source_identity(ch
     elif change == "missing-source":
         del index["dev_head"]
     elif change == "invalid-main":
-        index["main_before"] = "not-a-sha"
+        identity["main_before"] = "not-a-sha"
     elif change == "invalid-tree":
         identity["tree"] = "not-a-tree"
+    elif change == "bound-main":
+        index["main_before"] = identity["main_before"]
     else:
         with pytest.raises(ValueError):
             build.validate_identity({**identity, "qualification_digest": "0" * 64})
@@ -83,6 +87,7 @@ def test_original_build_source_refuses_untrusted_or_malformed_source_identity(ch
     with pytest.raises(ValueError):
         build.build_identity(
             qualified.canonical_bytes(index), candidate_sha=identity["candidate_sha"], tree=identity["tree"],
+            main_before=identity["main_before"],
         )
 
 

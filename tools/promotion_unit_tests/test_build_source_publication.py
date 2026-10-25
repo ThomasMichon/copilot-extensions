@@ -14,8 +14,44 @@ import publish_python_artifacts as publisher
 from promotion_complete_source import canonical_bytes
 from promotion_unit_tests import test_complete_source_publication
 from promotion_unit_tests.test_build_source import build_case
+from promotion_unit_tests.test_complete_source import case
 
 publication = test_complete_source_publication.publication
+
+
+def test_valid_source_index_without_main_container_retains_verified_candidate_parent(tmp_path, monkeypatch):
+    from promotion_python_artifacts import SCHEMA, validate_artifacts
+
+    files, identity = case()
+    index = {
+        "schema": SCHEMA, "schema_version": 2, "dev_head": identity["dev_sha"],
+        "content_tree": identity["content_tree"], "artifacts": [],
+        "admission": {
+            "signer_digest": identity["control_sha"], "source_digest": identity["control_sha"],
+            "source_ref": "refs/heads/main",
+        },
+    }
+    packages = tmp_path / "packages"
+    packages.mkdir()
+    index_raw = canonical_bytes(index)
+    (packages / publisher.INDEX_NAME).write_bytes(index_raw)
+    assert validate_artifacts(
+        packages, content_tree=identity["content_tree"], dev_head=identity["dev_sha"],
+        main_before=identity["main_before"], projects={},
+    ) == index
+    def git(_repo, arguments, **kwargs):
+        if arguments[0] == "rev-parse":
+            return identity["tree"].encode()
+        assert arguments == ["cat-file", "commit", identity["candidate_sha"]]
+        return f"tree {identity['tree']}\nparent {identity['main_before']}\n\ncandidate\n".encode()
+    monkeypatch.setattr(source_io, "_git", git)
+    monkeypatch.setattr(source_io, "read_tree", lambda *args, **kwargs: files)
+    monkeypatch.setattr(promotion, "_tree_excluding_state", lambda *args, **kwargs: identity["content_tree"])
+    manifest = source_io.prepare_build_source(
+        tmp_path / "subjects", repo=tmp_path, index_raw=index_raw, candidate_sha=identity["candidate_sha"],
+    )
+    assert manifest["main_before"] == identity["main_before"]
+    assert (packages / publisher.INDEX_NAME).read_bytes() == index_raw and "main_before" not in index
 
 
 @pytest.fixture
@@ -29,7 +65,8 @@ def build_publication(publication, tmp_path, monkeypatch):
         raw=index_raw, size=len(index_raw), digest="sha256:" + hashlib.sha256(index_raw).hexdigest(),
     )
     subjects = tmp_path / "build"
-    monkeypatch.setattr(source_io, "_git", lambda *args, **kwargs: identity["tree"].encode())
+    monkeypatch.setattr(source_io, "_git", lambda *args, **kwargs:
+                        f"tree {identity['tree']}\nparent {identity['main_before']}\n\ncandidate\n".encode())
     monkeypatch.setattr(source_io, "read_tree", lambda *args, **kwargs: files)
     monkeypatch.setattr(promotion, "_tree_excluding_state", lambda *args, **kwargs: identity["content_tree"])
     manifest = source_io.prepare_build_source(
@@ -38,6 +75,7 @@ def build_publication(publication, tmp_path, monkeypatch):
     arguments = {
         "source_directory": subjects, "repository": arguments["repository"], "tag": arguments["tag"],
         "index": index, "candidate_sha": identity["candidate_sha"], "tree": identity["tree"],
+        "main_before": identity["main_before"],
         "signer_digest": identity["control_sha"],
     }
     return directory, arguments, manifest, assets, calls, admissions, downloads
@@ -63,7 +101,7 @@ def test_early_build_publication_attests_two_subjects_and_raw_reads_them_without
     }, readiness._expected(directory, arguments["index"])).keys() == {publisher.INDEX_NAME}
 
 
-@pytest.mark.parametrize("change", ["archive", "manifest", "index", "signer", "candidate", "tree", "missing", "extra", "attestation"])
+@pytest.mark.parametrize("change", ["archive", "manifest", "index", "signer", "candidate", "tree", "parent", "missing", "extra", "attestation"])
 def test_invalid_build_subjects_refuse_before_any_supplementary_release_write(build_publication, monkeypatch, change):
     directory, arguments, _manifest, _assets, calls, _admissions, downloads = build_publication
     subjects = arguments["source_directory"]
@@ -71,10 +109,10 @@ def test_invalid_build_subjects_refuse_before_any_supplementary_release_write(bu
         path = next(subjects.glob("*.zip" if change == "archive" else "*.json"))
         path.write_bytes(path.read_bytes() + b"x")
     elif change == "index":
-        arguments["index"]["runtime_profiles"].append({"opaque": "changed"})
+        arguments["index"]["artifacts"].append({"opaque": "changed"})
         (directory / publisher.INDEX_NAME).write_bytes(canonical_bytes(arguments["index"]))
-    elif change in ("signer", "candidate", "tree"):
-        field = {"signer": "signer_digest", "candidate": "candidate_sha", "tree": "tree"}[change]
+    elif change in ("signer", "candidate", "tree", "parent"):
+        field = {"signer": "signer_digest", "candidate": "candidate_sha", "tree": "tree", "parent": "main_before"}[change]
         arguments[field] = "1" * 40
     elif change == "missing":
         next(subjects.glob("*.zip")).unlink()
@@ -131,7 +169,8 @@ def test_build_auxiliary_metadata_retains_existing_bounds(kind, change):
 
 def test_build_preparation_refuses_index_tree_drift_before_creating_subject_directory(tmp_path, monkeypatch):
     _files, _index, index_raw, identity = build_case()
-    monkeypatch.setattr(source_io, "_git", lambda *args, **kwargs: identity["tree"].encode())
+    monkeypatch.setattr(source_io, "_git", lambda *args, **kwargs:
+                        f"tree {identity['tree']}\nparent {identity['main_before']}\n\ncandidate\n".encode())
     monkeypatch.setattr(promotion, "_tree_excluding_state", lambda *args, **kwargs: "1" * 40)
     directory = tmp_path / "subjects"
     with pytest.raises(ValueError, match="signed source index"):
@@ -188,3 +227,22 @@ def test_build_prepare_cli_refuses_untrusted_authority_before_publisher_effects(
         "--candidate-commit", identity["candidate_sha"], "--dev-head", identity["dev_sha"],
         "--build-source-dir", str(tmp_path / "subjects"),
     ]) == 1
+
+
+@pytest.mark.parametrize("change", ["root", "merge", "tree", "parent", "identity"])
+def test_original_build_candidate_parent_is_pinned_and_unambiguous(tmp_path, monkeypatch, change):
+    _files, _index, _raw, identity = build_case()
+    headers = f"tree {identity['tree']}\nparent {identity['main_before']}\n\ncandidate\n".encode()
+    if change == "root":
+        headers = f"tree {identity['tree']}\n\nroot\n".encode()
+    elif change == "merge":
+        headers = headers.replace(b"\n\n", b"\nparent " + b"1" * 40 + b"\n\n", 1)
+    elif change == "tree":
+        headers = headers.replace(identity["tree"].encode(), b"not-a-tree", 1)
+    elif change == "parent":
+        headers = headers.replace(identity["main_before"].encode(), b"not-a-parent", 1)
+    else:
+        identity["candidate_sha"] = "--not-a-candidate"
+    monkeypatch.setattr(source_io, "_git", lambda *args, **kwargs: headers)
+    with pytest.raises(ValueError):
+        source_io.candidate_tree_and_parent(tmp_path, candidate_sha=identity["candidate_sha"])

@@ -197,7 +197,7 @@ def publish_complete_source(
 
 def publish_build_source(
     directory: Path, *, source_directory: Path, repository: str, tag: str,
-    index: dict, candidate_sha: str, tree: str, signer_digest: str,
+    index: dict, candidate_sha: str, tree: str, main_before: str, signer_digest: str,
 ) -> dict:
     """Retain original inputs before qualification; do not issue a landing receipt."""
     import publish_python_artifacts as publisher
@@ -205,7 +205,7 @@ def publish_build_source(
     from promotion_source_archive import read_build_assets
 
     index_raw = (directory / publisher.INDEX_NAME).read_bytes()
-    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree)
+    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree, main_before=main_before)
     if json.loads(index_raw) != index or signer_digest != identity["control_sha"]:
         raise ValueError("original build-source publication differs from trusted admission")
     subjects = read_build_assets(source_directory, identity=identity)
