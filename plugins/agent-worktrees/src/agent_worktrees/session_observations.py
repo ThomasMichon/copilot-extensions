@@ -91,8 +91,10 @@ class _Observations:
             })
             agent["last_reported_lifecycle"] = phase
             agent["lifecycle_records"] += 1
+            parent_call = _token(data.get("toolCallId")) or _token(data.get("parentToolCallId"))
+            if parent_call is not None:
+                agent["parent_tool_call_id"] = parent_call
             for source, target, validator in (
-                ("parentToolCallId", "parent_tool_call_id", _token),
                 ("agentName", "name", _label),
                 ("agentDisplayName", "display_name", _label),
                 ("model", "model", _label),
@@ -137,7 +139,11 @@ def _scan(stream, size, observations, issues):
     """Read at most the initial size; bound a single record's parsing memory."""
     remaining, observed, buffer, oversized = size, 0, bytearray(), False
     while remaining:
-        chunk = stream.read(min(_CHUNK_BYTES, remaining))
+        try:
+            chunk = stream.read(min(_CHUNK_BYTES, remaining))
+        except OSError:
+            issues["read_error"] += 1
+            break
         if not chunk:
             issues["short_read"] += 1
             break

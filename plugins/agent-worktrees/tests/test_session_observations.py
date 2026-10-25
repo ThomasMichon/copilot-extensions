@@ -248,7 +248,8 @@ def test_symlink_escape_is_unavailable(history, tmp_path, monkeypatch):
     assert result["issues"] == {"unsafe_session_path": 1}
 
 
-def test_short_read_is_partial_without_fabricating_remaining_counts(history, monkeypatch):
+@pytest.mark.parametrize("failure", ["short_read", "read_error"])
+def test_short_read_is_partial_without_fabricating_remaining_counts(history, monkeypatch, failure):
     path = history([_event("session.start"), _event("tool.execution_start")])
     original = Path.open
 
@@ -267,6 +268,8 @@ def test_short_read_is_partial_without_fabricating_remaining_counts(history, mon
 
         def read(self, size):
             if self.read_once:
+                if failure == "read_error":
+                    raise OSError("private read error")
                 return b""
             self.read_once = True
             return self.stream.readline()
@@ -278,8 +281,27 @@ def test_short_read_is_partial_without_fabricating_remaining_counts(history, mon
     monkeypatch.setattr(Path, "open", opened)
     result = provider.session_observations("session-1")
     assert result["availability"] == "partial"
-    assert result["issues"] == {"short_read": 1}
+    assert result["issues"] == {failure: 1}
     assert result["tools"]["started_records"] == 0
+    assert 0 < result["source"]["observed_bytes"] < result["source"]["snapshot_bytes"]
+    assert result["history"]["valid_records"] == 1
+    assert "private read error" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("call_id,expected", [("launch", "launch"), ([], "fallback")])
+def test_lifecycle_launch_call_preserves_parent_metadata_without_inventing_agent_identity(
+    history, call_id, expected,
+):
+    history([
+        _event("subagent.started", {"toolCallId": call_id, "parentToolCallId": "fallback"},
+               agentId="actual-agent"),
+        _event("subagent.completed", {"toolCallId": "not-an-agent"}),
+    ])
+    agents = provider.session_observations("session-1")["subagents"]
+    assert len(agents["agents"]) == 1
+    assert agents["agents"][0]["agent_id"] == "actual-agent"
+    assert agents["agents"][0]["parent_tool_call_id"] == expected
+    assert agents["unattributed_records"] == 1
 
 
 def test_unknown_event_shapes_and_restarts_do_not_invent_observations(history):

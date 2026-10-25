@@ -74,6 +74,8 @@ and there is no synchronized-upgrade requirement.
   `agents` groups actual IDs with `last_reported_lifecycle`, optional
   `parent_tool_call_id`, `name`, `display_name`, `model`, and validated
   nonnegative integer `reported_duration_ms`/`reported_tool_calls`.
+  The launching-task reference uses validated lifecycle `toolCallId`, falling
+  back to `parentToolCallId`; neither supplies a missing `agentId`.
   The last valid report of each optional field is retained in file order.
   Completion/failure describes the reported invocation/turn, **not** permanent
   process retirement, deallocation, release or resource ownership.
