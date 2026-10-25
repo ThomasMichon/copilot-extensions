@@ -69,7 +69,13 @@ class ProvisionError(core.DriverError):
 
 def _path(path: Path, *, exists: bool = False) -> Path:
     path = Path(path)
-    if not path.is_absolute() or path.resolve() != path:
+    if not path.is_absolute():
+        raise ProvisionError("provision paths must be absolute and unlinked")
+    try:
+        resolved = path.resolve()
+    except RuntimeError as error:
+        raise ProvisionError(f"provision path resolution failed: {error}") from error
+    if resolved != path:
         raise ProvisionError("provision paths must be absolute and unlinked")
     if exists and not path.is_dir():
         raise ProvisionError("provision source or project directory is unavailable")
@@ -113,7 +119,10 @@ def _inspect(
     if not helper.is_file() or not (scripts / "installer_engine.py").is_file():
         raise ProvisionError("owning payload requires complete materialized installation helpers")
     manifest = json.loads((payload / "payload-invocation.json").read_text(encoding="utf-8"))
-    plugin = json.loads((payload / "plugin.json").read_text(encoding="utf-8")).get("name")
+    identity = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or not isinstance(identity, dict):
+        raise ProvisionError("owning payload requires object-shaped installation declarations")
+    plugin = identity.get("name")
     if not isinstance(plugin, str) or plugin not in RECIPES:
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
@@ -164,17 +173,22 @@ def _inspect(
     if plugin in ("agent-codespaces", "agent-logger") and (
         prefix + "_INSTALLATION_ID" in os.environ
         or runtime_root != Path.home() / ("." + plugin)
-        or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
-        or payload.name != plugin
+        or not (
+            payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
+            and payload.name == plugin
+            or plugin == "agent-logger" and installer_action == "provision"
+            and payload.parent == runtime_root / "snapshots"
+        )
     ):
         raise ProvisionError(
             f"{label} first use requires its canonical installed payload and default legacy root"
         )
-    if plugin in ("agent-pull-requests", "agent-ssh"):
-        label = "SSH" if plugin == "agent-ssh" else "Pull Requests"
+    if plugin in ("agent-pull-requests", "agent-ssh", "agent-logger"):
+        label = {"agent-ssh": "SSH", "agent-logger": "Logger",
+                 "agent-pull-requests": "Pull Requests"}[plugin]
         installed = (
             payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
-            and (plugin != "agent-ssh" or payload.name == plugin)
+            and (plugin == "agent-pull-requests" or payload.name == plugin)
         )
         snapshot = payload.parent == runtime_root / "snapshots"
         if runtime_root != Path.home() / ("." + plugin) or not (installed or snapshot):
@@ -192,7 +206,10 @@ def _inspect(
     sys.path.insert(0, str(scripts))
     import installer_engine as engine
 
-    roots = engine._package_roots(payload)
+    try:
+        roots = engine._package_roots(payload)
+    except RuntimeError as error:
+        raise ProvisionError(f"owning source dependencies refused: {error}") from error
     if any(not root.is_relative_to(payload) for root in roots):
         raise ProvisionError("first-use provisioning requires a self-contained owning payload")
     digest = engine.runtime.fingerprint_source(engine._source_files(roots))
@@ -325,37 +342,51 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         payload = Path(admission["payload"])
         runtime_root = Path(admission["runtime_root"])
         installer_action = admission.get("installer_action", "provision")
+        logger_snapshot = admission["plugin"] == "agent-logger" and payload.parent == runtime_root / "snapshots"
         if client_only and (
             installer_action != "provision" or admission["plugin"] != "agent-vault"
         ):
             raise ProvisionError("client-only selection requires the Vault provision action")
-        current = _inspect(
-            payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
-        )
-        if current != admission:
-            raise ProvisionError("owning provision source or installation changed after acceptance")
-        custody.assert_owned()
-        import installer_engine as engine
+        try:
+            current = _inspect(
+                payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
+            )
+            if current != admission:
+                raise ProvisionError("owning provision source or installation changed after acceptance")
+            custody.assert_owned()
+            import installer_engine as engine
 
-        # Reuse the canonical complete-input copier under this request's custody.
-        # Keep these files: native publication may retain a source path into them.
-        legacy_stage = admission["plugin"] in {
-            "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
-        }
-        inputs = _path(
-            runtime_root / ".install-stage" if legacy_stage
-            else root / "provision-inputs"
-        )
-        inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
-        destination = inputs / custody.request_id
-        if legacy_stage:
-            # Keep legacy staging reapers off this live, queue-owned native tree.
-            destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
-        frozen = engine.freeze_inputs(payload, destination)
-        if frozen.payload_hash != admission["input_hash"] or _inspect(
-            payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
-        ) != admission:
-            raise ProvisionError("owning source or installation changed while freezing provision inputs")
+            # Reuse the canonical complete-input copier under this request's custody.
+            # Keep these files: native publication may retain a source path into them.
+            legacy_stage = admission["plugin"] in {
+                "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
+            }
+            inputs = _path(
+                runtime_root / ".install-stage" if legacy_stage
+                else root / "provision-inputs"
+            )
+            inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
+            destination = inputs / custody.request_id
+            if legacy_stage:
+                # Keep legacy staging reapers off this live, queue-owned native tree.
+                destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
+            try:
+                frozen = engine.freeze_inputs(payload, destination)
+            except RuntimeError as error:
+                if not logger_snapshot:
+                    raise
+                raise ProvisionError(f"selected Logger snapshot freeze validation failed: {error}") from error
+            if frozen.payload_hash != admission["input_hash"] or _inspect(
+                payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
+            ) != admission:
+                raise ProvisionError("owning source or installation changed while freezing provision inputs")
+        except (ProvisionError, OSError, ValueError, ImportError, SyntaxError) as error:
+            if not logger_snapshot:
+                raise
+            # No installer has started; this new recipe can certify a settled refusal.
+            custody.assert_owned()
+            print(f"Selected Logger source refused before installer execution: {error}", file=sys.stderr)
+            return 1
         custody.assert_owned()
         environment = _environment(payload)
         # This trusted adapter, not ambient caller hints, attests the copied

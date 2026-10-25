@@ -226,11 +226,12 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_logger.py
-          --test-timeout 900 --timeout 1200
+          --test-file tests/test_first_use_logger_snapshot.py
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
       - name: Qualify Logger caller loss and ordinary durable result
         run: >-
           python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_genesis.py -k owning_logger
+          --test-file tests/test_first_use_genesis.py -k "owning_logger or selected_logger_snapshot"
           --test-timeout 900 --timeout 1080
   logger-recipes-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'
@@ -255,11 +256,12 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_logger.py
-          --test-timeout 900 --timeout 1200
+          --test-file tests/test_first_use_logger_snapshot.py
+          --max-files-per-sub-suite 1 --test-timeout 900 --timeout 1200
       - name: Qualify Logger caller loss and ordinary durable result
         run: >-
           python tools/run-plugin-tests.py update-driver
-          --test-file tests/test_first_use_genesis.py -k owning_logger
+          --test-file tests/test_first_use_genesis.py -k "owning_logger or selected_logger_snapshot"
           --test-timeout 900 --timeout 1080
   codespaces-bootstrap-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-bootstrap'

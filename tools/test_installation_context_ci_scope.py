@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -441,6 +442,31 @@ def test_codespaces_recipes_remain_manual_and_bounded() -> None:
              "--test-timeout", "900", "--timeout", "1080"],
             ["python", "tools/run-plugin-tests.py", "update-driver",
              "--test-file", "tests/test_first_use_genesis.py", "-k", "owning_codespaces",
+             "--test-timeout", "900", "--timeout", "1080"],
+        ]
+
+
+def test_logger_selected_snapshots_remain_manual_with_bounded_cleanup() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    for name, runner, opt_in in (
+        ("logger-recipes-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("logger-recipes-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'logger-recipes'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 25
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        assert [shlex.split(step["run"]) for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_logger.py",
+             "--test-file", "tests/test_first_use_logger_snapshot.py",
+             "--max-files-per-sub-suite", "1", "--test-timeout", "900", "--timeout", "1200"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_genesis.py", "-k", "owning_logger or selected_logger_snapshot",
              "--test-timeout", "900", "--timeout", "1080"],
         ]
 

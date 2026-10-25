@@ -685,7 +685,7 @@ disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
 
-Logger's fixed prerequisite admits only its canonical installed payload and
+Logger's fixed prerequisite admits its canonical installed payload at the
 default legacy root. It preserves the six declared command/module pairs,
 required context and native runtime gates without a top-level command/module
 or provision-mode declaration. The fixed adapter supplies no service flags:
@@ -707,9 +707,28 @@ Python-free caller loss/concurrency and no-write controls. It also executes
 the actual materialized `install` action behind isolated ScheduledTasks and
 `systemctl` adapters, inspecting registration/reuse/reconciliation and fatal
 or tolerated registration outcomes without starting a periodic worker. No
-personal sessions are processed. Adding these recipes does not migrate Logger's command
-or explicit installer publishers, qualify selected snapshots,
-admit cells/custom roots, enroll a periodic worker or authorize host rollout.
+personal sessions are processed. Adding these recipes does not migrate Logger's
+command or explicit installer publishers, admit cells/custom roots, enroll a
+periodic worker or authorize host rollout.
+
+Logger additionally admits its exact selected legacy snapshot for **provision
+only**. The existing provenance/publication/staged-origin readers require the
+canonical receipt, selected `payload-dir` and `stamped-version`, exact source
+identity, default legacy root and complete retained input graph. Admission is
+rechecked before execution and after freezing. An unavailable, reselected or
+changed accepted Logger snapshot records a logged, settled nonzero result
+before starting an installer; no source is substituted and queue history is
+retained. Canonical package inspection validates metadata table shapes for
+every local dependency, so malformed source metadata is a typed refusal rather
+than an accidental field-access failure. Uncertain execution/custody failures
+still interrupt normally.
+The fixed native lifecycle is reserved against the queued snapshot, not its
+frozen staging path. Repeated provision retains the healthy generation and
+canonical command owner. The explicit manual `logger-recipes` portfolio covers
+actual stamp-to-snapshot provision, installed six-command help/version consumers,
+failed-candidate preservation, Python-free concurrency/caller loss and early
+refusals. Snapshot `stamp`, `install` and bootstrap remain unsupported; their
+canonical-installed-source boundary is unchanged.
 
 Logger's legacy session bootstrap now submits `stamp` for a missing deployment
 manifest and `install` for runtime drift through its canonically packaged

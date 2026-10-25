@@ -551,8 +551,45 @@ _write_runtime_manifest() {
         return 0
     fi
     _assert_source_runtime || return 1
-    write_deploy_manifest agent-logger agent-logger "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV" \
-        "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
+    if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
+        write_deploy_manifest agent-logger agent-logger "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV" \
+            "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
+        return "$?"
+    fi
+    local py source_path kind commit branch dirty content_hash manifest_json
+    py="$(_bootstrap_python)" || return 1
+    source_path="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    kind="$(_source_kind "$source_path")" || return 1
+    commit=""; branch=""; dirty="false"
+    if [[ "$kind" == local ]]; then
+        local git_info
+        git_info="$(_git_info "$(dirname -- "$source_path")")" || return 1
+        read -r commit branch dirty <<<"$git_info" || return 1
+    fi
+    content_hash="$(_payload_hash)" || return 1
+    manifest_json="$("$py" -I -B -c '
+import datetime,json,platform,socket,sys
+kind,path,version,commit,branch,dirty,content_hash,venv = sys.argv[1:]
+source = dict(kind=kind,path=path,repo="copilot-extensions",plugin="agent-logger",
+              version=version,commit=commit or None,branch=branch or None,dirty=dirty=="true")
+if content_hash:
+    source["content_hash"] = content_hash
+print(json.dumps(dict(
+    schema_version=3,service="agent-logger",
+    deployed_at=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    deployed_by=socket.gethostname()+"-"+platform.system().lower(),
+    source=source,venv=venv,runtime="python",
+)))
+' "$kind" "$source_path" "$PACKAGE_VERSION" "$commit" "$branch" "$dirty" "$content_hash" "$VENV")" || return 1
+    if ! printf '%s\n' "$manifest_json" |
+        "$py" -I -B -X utf8 "$SCRIPT_DIR/command_binding.py" \
+            --payload-root "$PLUGIN_DIR" --plugin-id agent-logger --legacy-root "$INSTALL_DIR" \
+            --publish-legacy --write-manifest --source-payload-root "$source_path" \
+            --project-root "$__publication_project" >/dev/null; then
+        _fail 'Command ownership validation refused Logger deploy-manifest publication.'
+        return 1
+    fi
+    ok "Deploy manifest written (source: $kind)"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===

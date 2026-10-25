@@ -126,7 +126,10 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
         if not stat.S_ISREG(manifest.lstat().st_mode):
             raise ValueError(f"Runtime package manifest is not a regular file: {manifest}")
         data = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        name = data.get("project", {}).get("name")
+        project = data.get("project", {})
+        if not isinstance(project, dict):
+            raise ValueError(f"Runtime package project metadata must be a table: {manifest}")
+        name = project.get("name")
         if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
             raise ValueError(f"Runtime package has no ordinary distribution name: {manifest}")
         key = re.sub(r"[-_.]+", "-", name).lower()
@@ -138,7 +141,13 @@ def _package_roots(plugin: Path) -> tuple[Path, ...]:
             raise ValueError(f"Runtime input declares two sources for {name}: {names[key]}, {root}")
         names[key] = root
         roots.add(root)
-        sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+        tool = data.get("tool", {})
+        if not isinstance(tool, dict):
+            raise ValueError(f"Runtime package tool metadata must be a table: {manifest}")
+        uv = tool.get("uv", {})
+        if not isinstance(uv, dict):
+            raise ValueError(f"Runtime package uv metadata must be a table: {manifest}")
+        sources = uv.get("sources", {})
         if not isinstance(sources, dict):
             raise ValueError(f"Runtime package sources must be a table: {manifest}")
         for dependency, source in sources.items():

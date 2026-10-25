@@ -58,9 +58,12 @@ if ($InstallerAction -ceq 'install' -and $plugin -cne 'agent-logger') {
     throw 'Fixed install action requires Logger.'
 }
 if ($plugin -ceq 'agent-logger') {
-    foreach ($helper in @('command_binding.py', 'command_lifecycle.py')) {
+    foreach ($helper in @(
+        'command_binding.py', 'command_lifecycle.py', 'installer_engine.py',
+        'installation-context\installation_context.py'
+    )) {
         if (-not [IO.File]::Exists((Join-Path $Payload "scripts\$helper"))) {
-            throw 'Logger first use requires its canonical lifecycle helpers.'
+            throw 'Logger first use requires its complete materialized installation and lifecycle helpers.'
         }
     }
 }
@@ -89,16 +92,20 @@ if ($plugin -cin @('agent-ssh', 'agent-codespaces', 'agent-logger')) {
 if ($plugin -cin @('agent-codespaces', 'agent-logger') -and (
     (Test-Path ("Env:" + $prefix + '_INSTALLATION_ID')) -or
     $RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
-    [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ine
-        (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -or
-    [IO.Path]::GetFileName($Payload) -cne $plugin)) {
+    -not (
+        ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
+            (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
+            [IO.Path]::GetFileName($Payload) -ceq $plugin) -or
+        ($plugin -ceq 'agent-logger' -and $InstallerAction -ceq 'provision' -and
+            [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots'))
+    ))) {
     throw "$label first use requires its canonical installed payload and default legacy root."
 }
-if ($plugin -cin @('agent-pull-requests', 'agent-ssh')) {
-    $label = if ($plugin -ceq 'agent-ssh') { 'SSH' } else { 'Pull Requests' }
+if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-logger' = 'Logger'; 'agent-pull-requests' = 'Pull Requests' }[$plugin]
     $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
         (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
-        ($plugin -cne 'agent-ssh' -or [IO.Path]::GetFileName($Payload) -ceq $plugin)
+        ($plugin -ceq 'agent-pull-requests' -or [IO.Path]::GetFileName($Payload) -ceq $plugin)
     $snapshot = [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots')
     if ($RuntimeRoot -ine (Join-Path $env:USERPROFILE ('.' + $plugin)) -or
         -not ($installed -or $snapshot)) {
