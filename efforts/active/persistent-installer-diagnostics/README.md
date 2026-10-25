@@ -1188,3 +1188,14 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   current review and the previously admitted hosted native packet. It remains
   draft-only; no merge, rollout, larger deadline or broader native enrollment
   is authorized.
+- The repaired draft initially published as `21809a4fc9`, but the contribution
+  base had advanced and the provider reported a conflict, so no required-CI
+  run or native dispatch was inferred. Managed pull-forward auto-aborted
+  safely. A preserved twelve-commit replay then resolved only source-admission
+  hashes against actual merged bytes. All twelve original authors, author
+  dates, full messages and commit order were compared and retained.
+  The only new canonical engine delta permits the upstream inspected
+  third-party-only wheel closure without selecting local extras. The tested
+  Python diagnostics entry/caller implementations and guardian are unchanged.
+  All eight shell, nine Python and one standalone native consumer synchronize;
+  no source-hash check, installer deadline or native opt-in was removed.
