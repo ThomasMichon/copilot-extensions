@@ -32,6 +32,7 @@ from machine_transport import (
 )
 from machine_transport import resolve_machine_selection, split_machine_environment
 from machine_transport import is_local_machine as _mt_is_local_machine
+from machine_transport.registry import machine_identity_names
 
 from . import config as cfg
 
@@ -163,7 +164,16 @@ def runtime_policy_physical_machine(
     if binding is not None:
         local_names.add(binding.strip().casefold())
         local_names.add(config.machine.casefold())
-    if machine.casefold() in local_names:
+    requested = machine.strip().casefold()
+    registered_target = any(
+        requested in {
+            name.strip().casefold() for name in machine_identity_names(entry, include_metadata=False)
+        } for entry in entries.values()
+    )
+    # The context token already passed collision checks; an observation did not.
+    if requested in local_names and (
+        requested == context.execution_machine.casefold() or not registered_target
+    ):
         return context.machine
     target = resolve_machine_selection(entries, machine, cfg.detect_platform())
     return target.target.machine if target.entry is not None else machine

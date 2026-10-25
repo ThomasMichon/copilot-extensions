@@ -106,7 +106,7 @@ def test_update_gate_uses_local_naming_without_bypassing_runtime_policy(
     ) is (policy in ("absent", "matching"))
 
 
-@pytest.mark.parametrize("case", ["missing-guest", "literal-linux-hostname"])
+@pytest.mark.parametrize("case", ["missing-guest", "literal-linux-hostname", "literal-linux-matching"])
 @pytest.mark.parametrize("selector", ["execution", "physical", "foreign"])
 def test_local_runtime_policy_does_not_reinterpret_local_name_as_target(
     tmp_path, monkeypatch, case, selector,
@@ -120,7 +120,9 @@ def test_local_runtime_policy_does_not_reinterpret_local_name_as_target(
     machines = {"stable-host": {
         "execution_platform": "windows", "physical_host": "stable-host",
         "hostname": hostname,
-    }} if case == "missing-guest" else {}
+    }} if case == "missing-guest" else (
+        {hostname: {"hostname": hostname}} if case == "literal-linux-matching" else {}
+    )
     (anchor / "machines.yaml").write_text(
         yaml.safe_dump({"machines": machines}), encoding="utf-8",
     )
@@ -187,6 +189,42 @@ def test_unknown_nonlocal_runtime_target_retains_exact_name(tmp_path, monkeypatc
         "machine-gated", "agent-example", target,
         {"agent-example": {target}}, repo_dir=anchor, config=config,
     )
+
+
+@pytest.mark.parametrize("actual", ["windows", "wsl"])
+@pytest.mark.parametrize("field", ["key", "alias", "compatibility_alias", "profile"])
+@pytest.mark.parametrize("conflicting_platform", [False, True])
+def test_registered_target_identity_precedes_observed_hostname(
+    tmp_path, monkeypatch, actual, field, conflicting_platform,
+):
+    anchor = _configure(tmp_path, monkeypatch, actual)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    source = anchor / "machines.yaml"
+    raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+    raw["machines"]["local-space"]["physical_host"] = "local-host"
+    peer_platform = ("wsl" if actual == "windows" else "windows") if conflicting_platform else actual
+    peer = {"execution_platform": peer_platform, "physical_host": "peer-host"}
+    if field == "alias":
+        peer["alias"] = "raw-host"
+    elif field == "compatibility_alias":
+        peer["compatibility_aliases"] = ["raw-host"]
+    elif field == "profile":
+        peer["ssh"] = {"environments": [{"name": peer_platform, "alias": "raw-host"}]}
+    raw["machines"]["raw-host" if field == "key" else "peer-space"] = peer
+    source.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = cfg.load_config()
+
+    def allowed():
+        return reconcile.runtime_allowed(
+            "machine-gated", "agent-example", "raw-host",
+            {"agent-example": {"local-host"}}, repo_dir=anchor, config=config,
+        )
+
+    if conflicting_platform:
+        with pytest.raises(ValueError, match="conflicts"):
+            allowed()
+    else:
+        assert not allowed()
 
 
 @pytest.mark.parametrize("override_source", ["project", "dropin"])
