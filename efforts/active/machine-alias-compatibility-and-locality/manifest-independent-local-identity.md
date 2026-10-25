@@ -133,7 +133,7 @@ effects. The three-platform matrix covers all six map shapes, explicit binding
 provenance, literal observed suffixes and byte-preserved user configuration;
 invalid and foreign-platform controls refuse before writes. Independent review
 and merge remain required; Manager entry-point and installed proof are open.
-Review-driven controls additionally validate the effective retained global,
+Admission checks additionally validate the effective retained global,
 project and drop-in binding, including force precedence. New global scaffolds
 do not turn a detected physical projection into an explicit binding. Scoped
 adoption checks prospective retained state through the existing repository
