@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed increments against Dev
 - **Created:** 2026-10-24
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Session intelligence](../../../visions/plugins/agent-logger/session-intelligence/README.md): preserve-accounting-evidence, reproducible-rebuildable-products, bounded-safe-collection
 - **Umbrella issue:** #8735
 - **Sub-issues:** #8455, #8682
@@ -73,7 +73,7 @@ does not authorize unrelated host changes, destructive cleanup or gate bypass.
 
 ### Phase 1 - Establish the actual consumer budgets
 
-- [ ] Land this proposal through normal automated review before implementation.
+- [x] Land this proposal through normal automated review before implementation.
 - [ ] Attribute the real timeout to bounded source phases using content-free
   timings/counts and the actual scheduled-task result. _(agent-recommended)_
 - [ ] Inventory the relevant reader, ledger, change-tracker, filesystem-transfer,
@@ -157,3 +157,30 @@ existing behavior or permission to change evidence semantics.
   rather than disabling accounting, and confirmed this effort slug.
 - Created this plan-only proposal. No new accounting, transfer or task-lifetime
   implementation has begun under it.
+- Plan #8740 merged as `725712d4e1dd776caef19cf349321f613b2afc1d`
+  after current-head approval and green required CI. Phase 1 now owns measured
+  consumer attribution; no implementation or deployment success is inferred.
+
+### 2026-10-24 - Measured filesystem traversal
+
+- Two content-free live stack samples place the surviving timed-out consumer in
+  `FilesystemTarget.push` / `_iter_regular_source_files`, called from a full
+  reconciliation batch. Its iterator enters the entire source tree before the
+  file-level publication predicate discards unrelated files. Each batch repeats
+  that traversal, including non-session trees and unselected sessions.
+- The scheduled root had exited while its shell/runtime descendants retained
+  the sync lock. A later scheduled trigger returned zero only because it skipped
+  that lock; it is not a successful second-cycle validation.
+- Added directory pruning without changing file-level inclusion, index,
+  provenance, lock deferral or rescue replacement contracts. Six local/OneDrive
+  controls fail against the prior walk and pass after pruning. A read-only
+  real-corpus 100-session traversal visits 4,453 files in 3.674 seconds.
+- Added flushed phase timings so installed diagnostics can distinguish metadata,
+  accounting, transfer, compaction and retention; a timing completion marker does
+  not claim successful coverage or publication.
+- Focused transfer/protection/rescue tests pass (364, two platform skips).
+  Validation exposed an interpreter-dependent memory-fixture allocation:
+  Python 3.14's default read buffer is 128 KiB rather than 8 KiB. The fixture now
+  pins its buffer to 8 KiB while retaining its original measured threshold.
+- This increment does not resolve large-transcript accounting, bounded run
+  continuation or descendant cleanup. Those gates remain open.

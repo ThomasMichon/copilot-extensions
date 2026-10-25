@@ -1300,7 +1300,9 @@ def test_jsonl_transform_memory_tracks_records_not_file_size(tmp_path):
 
     tracemalloc.start()
     try:
-        with path.open("rb") as handle:
+        # Python 3.14 defaults to a 128 KiB buffer; measure the transform,
+        # not an interpreter-dependent fixed allocation.
+        with path.open("rb", buffering=8192) as handle:
             outcome = protection.transform_jsonl(protection.BoundedReader(handle, size), sink)
         peak = tracemalloc.get_traced_memory()[1]
     finally:

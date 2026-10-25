@@ -423,7 +423,7 @@ transaction execution from the existing recurring-maintenance assignment.
   checks, registration-failure outcomes and no personal sync/prune execution.
   No ordinary publisher, host registration, maintenance enrollment, selected
   snapshot, custom-root/cell or rollout is adopted by this prerequisite.
-- [ ] **Agent-recommended bounded bootstrap adoption:** route Logger's
+- [x] **Agent-recommended bounded bootstrap adoption:** route Logger's
   legacy bootstrap first stamp and drift `install` through its qualified
   fixed actions, packaged foundation and the same canonical queue. Preserve
   the six-command declaration, exact source/root/project, publication and
@@ -435,6 +435,19 @@ transaction execution from the existing recurring-maintenance assignment.
   sync/prune. Remove its age/PID installer guard and foreground fallback;
   selected snapshots, command/explicit-installer publishers, cells/custom
   roots, live periodic workers and rollout remain separate.
+- [ ] **Agent-recommended bounded source handoff:** qualify Logger's exact
+  selected legacy snapshot for the existing service-less `provision` recipe
+  through the same native foundation, canonical staged-origin reader, queue
+  and frozen-input owner before adopting ordinary command publishers.
+  Preserve the unchanged six-command declaration, complete dependency graph,
+  exact source/root/project, own controls and retained lifecycle source.
+  The [bounded plan](logger-selected-snapshot.md) requires actual materialized
+  Windows/Linux snapshot-only construction and safe installed consumers,
+  failed-candidate preservation and no-write refusal of substituted,
+  unselected, malformed or unavailable sources. Keep `stamp`, registration-
+  reconciling `install` and the already-qualified bootstrap limited to their
+  canonical installed source; do not infer adoption of command/explicit
+  installer publishers, live sync/prune, custom roots/cells or rollout.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
