@@ -10,7 +10,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS, REMOTE_MARKETPLACE_SOURCE_KINDS
+from .conventions import (
+    LOCAL_MARKETPLACE_SOURCE_KINDS, MARKETPLACE_MANIFEST_RELS, REMOTE_MARKETPLACE_SOURCE_KINDS,
+)
 from .execution import execution_environment, execution_executable
 from .marketplace import _is_reparse, load_marketplace, marketplace_manifest_path, plugin_dir
 from .payload import catalog_metadata, plugin_manifest, publication_metadata
@@ -199,8 +201,10 @@ def inventory_item(
     def git(root, *arguments):
         try:
             result = subprocess.run(
-                [executable, "-c", "core.fsmonitor=false", "-C", str(root), *arguments],
+                [executable, "--literal-pathspecs", "-c", "core.fsmonitor=false",
+                 "-C", str(root), *arguments],
                 capture_output=True, text=True, encoding="utf-8", timeout=30, env=env,
+                errors="surrogateescape",
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired:
@@ -277,6 +281,39 @@ def inventory_item(
             content = subset(candidate, payload, referenced_paths=references)
             for member in references:
                 _require_unlinked_path(candidate, member, allow_missing=True)
+            paths = []
+            for relative_catalog in MARKETPLACE_MANIFEST_RELS:
+                catalog_path = root.joinpath(*relative_catalog)
+                paths.append(str(catalog_path.relative_to(candidate)))
+                if catalog_path == path:
+                    break
+            paths.append(str(payload.relative_to(candidate)))
+            paths.extend(str(member.relative_to(candidate)) for member in sorted(references))
+            tree = git(candidate, "ls-tree", "-r", "-z", "--full-tree", head, "--", *paths)
+            if tree is None:
+                continue
+            committed = set()
+            for row in tree.split("\0"):
+                if not row:
+                    continue
+                metadata, separator, filename = row.partition("\t")
+                mode, object_type, object_id = metadata.split()
+                relative = Path(filename)
+                if not _allowed(relative):
+                    continue
+                if not separator or object_type != "blob" or mode not in {"100644", "100755"}:
+                    raise ValueError("Native cache member is not an ordinary committed file")
+                member = candidate / relative
+                _require_unlinked_path(candidate, member)
+                data = member.read_bytes()
+                algorithm = {40: "sha1", 64: "sha256"}.get(len(object_id))
+                if algorithm is None or hashlib.new(
+                    algorithm, b"blob " + str(len(data)).encode("ascii") + b"\0" + data,
+                ).hexdigest() != object_id:
+                    raise ValueError("Native cache bytes differ from the selected commit")
+                committed.add(relative)
+            if path.relative_to(candidate) not in committed:
+                raise ValueError("Native cache catalog is not in the selected commit")
             metadata, entry = publication_metadata(root, source)
             catalog_metadata(source, plugin_manifest(payload), metadata, entry)
         except (OSError, ValueError):
@@ -285,15 +322,9 @@ def inventory_item(
                 "ordinary acquisition remains available", source,
             )
             continue
-        relative_payload = payload.relative_to(candidate)
-        paths = [str(path.relative_to(candidate)), str(relative_payload)]
-        paths.extend(str(member.relative_to(candidate)) for member in sorted(references))
         status = git(candidate, "status", "--porcelain", "-z", "--untracked-files=all",
                      "--ignored=matching", "--", *paths)
         if status is None or any(_allowed(Path(row[3:])) for row in status.split("\0") if row):
-            continue
-        if git(candidate, "ls-files", "--error-unmatch", "--",
-               str(path.relative_to(candidate))) is None:
             continue
         matches.append({
             "marketplace": definition,

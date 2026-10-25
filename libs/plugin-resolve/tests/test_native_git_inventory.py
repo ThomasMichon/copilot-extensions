@@ -27,7 +27,7 @@ def native_inventory(tmp_path, git_origin):
     atomic_json(home / "settings.json", {"unrelated": "preserve"})
     clone = cache / "marketplaces" / "native-clone"
     clone.parent.mkdir(parents=True)
-    git(tmp_path, "clone", "--quiet", str(origin), str(clone))
+    git(tmp_path, "clone", "--quiet", "--config", "core.autocrlf=false", str(origin), str(clone))
     git(clone, "checkout", "--quiet", first)
     remote = "https://example.invalid/native-fixture.git"
     git(clone, "remote", "set-url", "origin", remote)
@@ -141,7 +141,17 @@ def test_native_git_inventory_streams_to_fresh_stdlib_only_receiver(native_inven
 
 
 @pytest.mark.parametrize(
-    "changed", ["origin", "revision", "tracked", "untracked", "ignored", "global"]
+    "changed",
+    [
+        "origin",
+        "revision",
+        "tracked",
+        "untracked",
+        "ignored",
+        "global",
+        "assume-unchanged",
+        "skip-worktree",
+    ],
 )
 def test_unqualified_native_git_cache_uses_ordinary_installation(
     native_inventory,
@@ -156,6 +166,9 @@ def test_unqualified_native_git_cache_uses_ordinary_installation(
         definition["source"]["sha"] = git(clone, "rev-parse", "origin/HEAD")
     elif changed == "tracked":
         (clone / "catalog-a" / "helper" / "marker.txt").write_text("modified")
+    elif changed in {"assume-unchanged", "skip-worktree"}:
+        git(clone, "update-index", "--" + changed, "catalog-a/helper/marker.txt")
+        (clone / "catalog-a" / "helper" / "marker.txt").write_text("hidden modification")
     elif changed in {"untracked", "ignored"}:
         (clone / "catalog-a" / "helper" / "extra.py").write_text("unexpected")
         if changed == "ignored":
@@ -193,7 +206,8 @@ def test_native_git_cache_keeps_explicit_target_disable(native_inventory, monkey
 
 
 @pytest.mark.parametrize(
-    "selector", ["github", "sha", "path", "runtime-cache", "unrelated", "source-spelling"],
+    "selector",
+    ["github", "sha", "path", "runtime-cache", "unrelated", "source-spelling"],
 )
 def test_native_git_cache_preserves_supported_source_selectors(
     native_inventory,
@@ -576,4 +590,92 @@ def test_github_repository_name_ending_in_git_reuses_exact_repository(
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
     assert prepare(request(target, definition), environment=environment) == {
         "helper@git-fixture": str(clone / "catalog-a" / "helper"),
+    }
+
+
+def test_deleted_higher_priority_catalog_prevents_native_cache_reuse(
+    native_inventory,
+    monkeypatch,
+):
+    target, _home, clone, definition, environment = native_inventory
+    catalog_root = clone / "catalog-a"
+    shutil.copytree(catalog_root / "helper", catalog_root / "other-helper")
+    catalog = json.loads((catalog_root / "marketplace.json").read_text())
+    catalog["plugins"][0]["source"] = "./other-helper"
+    primary = catalog_root / ".github" / "plugin" / "marketplace.json"
+    primary.parent.mkdir(parents=True)
+    atomic_json(primary, catalog)
+    git(clone, "add", ".")
+    git(clone, "commit", "--quiet", "-m", "native-priority catalog fixture")
+    definition["source"]["ref"] = "HEAD"
+    primary.unlink()
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+def test_non_utf8_git_status_uses_ordinary_installation(
+    native_inventory,
+    monkeypatch,
+):
+    import plugin_resolve.inventory as inventory
+
+    target, _home, clone, definition, environment = native_inventory
+    original = inventory.subprocess.run
+    observed = []
+
+    def raw_status(arguments, **kwargs):
+        if (
+            "-C" in arguments
+            and arguments[arguments.index("-C") + 1] == str(clone)
+            and arguments[arguments.index("-C") + 2] == "status"
+        ):
+            observed.append(True)
+            return original(
+                [sys.executable, "-c", r"import os; os.write(1, b'?? bad\xff.txt\x00')"],
+                **kwargs,
+            )
+        return original(arguments, **kwargs)
+
+    monkeypatch.setattr(inventory.subprocess, "run", raw_status)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert observed == [True]
+
+
+def test_byte_transformed_checkout_uses_ordinary_installation(
+    native_inventory,
+    monkeypatch,
+):
+    target, _home, clone, definition, environment = native_inventory
+    readme = clone / "catalog-a" / "helper" / "README.md"
+    readme.write_bytes(b"first line\nsecond line\n")
+    git(clone, "add", ".")
+    git(clone, "commit", "--quiet", "-m", "exact byte fixture")
+    definition["source"]["ref"] = "HEAD"
+    git(clone, "config", "core.autocrlf", "true")
+    readme.write_bytes(b"first line\r\nsecond line\r\n")
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+
+
+def test_unselected_lower_priority_catalog_changes_do_not_prevent_reuse(
+    native_inventory,
+    monkeypatch,
+):
+    target, _home, clone, definition, environment = native_inventory
+    catalog_root = clone / "catalog-a"
+    fallback = catalog_root / "marketplace.json"
+    primary = catalog_root / ".github" / "plugin" / "marketplace.json"
+    primary.parent.mkdir(parents=True)
+    atomic_json(primary, json.loads(fallback.read_text()))
+    git(clone, "add", ".")
+    git(clone, "commit", "--quiet", "-m", "unselected catalog fixture")
+    definition["source"]["ref"] = "HEAD"
+    fallback.write_text("unrelated malformed lower-priority catalog")
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    assert prepare(request(target, definition), environment=environment) == {
+        "helper@git-fixture": str(catalog_root / "helper"),
     }

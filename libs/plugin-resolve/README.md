@@ -250,7 +250,14 @@ cache when no user-global registration exists. A catalog name or legacy installe
 manifest alone is insufficient. The actual clone must match the declared Git
 origin, requested commit/ref and catalog location, have unchanged selected
 catalog/payload content and required asset closure, and contain the uniquely
-declared plugin. The declared source path, including `pluginRoot`, and required
+declared plugin. Selected ordinary files are hashed directly against their Git
+blob identities in the requested commit; status alone cannot prove unchanged
+bytes when the index has `assume-unchanged` or `skip-worktree` entries.
+Checkout transformations that change those bytes retain ordinary acquisition.
+The selected catalog and all higher-priority catalog locations participate in
+the proof even when currently missing; deleted native catalogs cannot silently
+select a fallback. Unselected lower-priority catalogs remain outside the proof.
+The declared source path, including `pluginRoot`, and required
 asset paths must have no symlink/reparse components; resolving a link to another
 clean directory is not origin proof. Generic Git URLs match the configured
 origin exactly; GitHub declarations retain transport-compatible repository
@@ -267,6 +274,8 @@ installation; malformed/unreadable catalogs and invalid payload closures are
 reported as ineligible cache candidates rather than blocking that fallback.
 Git qualification probes keep their 30-second deadline; a probe timeout reports
 an ineligible candidate and leaves ordinary acquisition available.
+Git filename output decodes losslessly with `surrogateescape`, so non-UTF-8
+POSIX filenames do not abort the optional qualification path.
 Catalog plugin entries must be objects and owner/location metadata must be valid.
 Referenced sibling files and directories remain in the qualification path set
 even when missing from the current tree, so deleted required assets cannot

@@ -397,6 +397,18 @@ or a reason to create a daemon.
   before reporting a result. It is not a pass. The next full run receives a
   larger bounded orchestration window with duration reporting, retaining the
   per-test timeout, containment, host-state guards and production deadlines.
+- The complete suite at the normalized-path head subsequently passed 348 tests
+  with one skip in 854.33 seconds and clean host-state readback. A requested
+  actionable re-review then identified deleted higher-priority catalogs and
+  non-UTF-8 status filenames. Both now have failing-first regressions.
+- Direct content checks also reproduced false acceptance with
+  `assume-unchanged` and `skip-worktree`. Qualification now hashes selected
+  ordinary files against their committed Git blob identities instead of
+  treating status as byte proof. Byte-transformed checkouts retain ordinary
+  acquisition; native fixture clones explicitly disable checkout conversion.
+  Higher-priority catalog paths are included even when deleted, lower-priority
+  unrelated catalogs remain excluded, and Git filename decoding is lossless.
+  Final reviewed-head validation remains open; no live adoption is claimed.
 
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 
