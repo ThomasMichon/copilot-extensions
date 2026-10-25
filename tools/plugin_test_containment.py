@@ -940,7 +940,7 @@ def run_contained(
     try:
         with daemon_test_lifecycle(
             owner=f"contained-test-runner:{os.getpid()}",
-            registry_root=sandbox.resolve(strict=True) / "daemon-instances",
+            registry_root=sandbox.resolve() / "daemon-instances",
             purpose=daemon_purpose,
             lease=daemon_lease,
         ) as daemon_environment:

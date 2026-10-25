@@ -62,6 +62,7 @@ def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path,
 
 @pytest.mark.parametrize("alias", [
     "parent-reference",
+    "missing-child",
     pytest.param("short-name", marks=pytest.mark.skipif(os.name != "nt", reason="Windows short path")),
 ])
 def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path, monkeypatch, alias):
@@ -70,7 +71,12 @@ def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path
     parent = tmp_path / "parent"
     parent.mkdir()
     sandbox = parent / ".." / "sandbox"
-    sandbox.mkdir()
+    if alias == "missing-child":
+        sandbox = parent / "pending" / "sandbox"
+        assert not sandbox.exists()
+    else:
+        sandbox.mkdir()
+    expected = sandbox.resolve() / "daemon-instances"
     if alias == "short-name":
         import ctypes
 
@@ -97,7 +103,7 @@ def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path
     assert plugin_test_containment.run_contained(
         ["unused"], cwd=tmp_path, env={}, sandbox=sandbox, limits=Limits(),
     ) == 0
-    assert admitted == [tmp_path.resolve() / "sandbox" / "daemon-instances"]
+    assert admitted == [expected]
 
 
 def test_tree_size_counts_nested_files_without_repeated_path_stats(tmp_path, monkeypatch):

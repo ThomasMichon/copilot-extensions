@@ -351,6 +351,10 @@ construction, installed-source recipe regressions, shared Logger behavior and
 canonical-installed-only bootstrap publication. A native launch acknowledgement
 is not durable request acceptance.
 
+Linux fixtures explicitly construct the disposable-daemon native support with
+its canonical build helper before cold admission. The synthetic source commit
+includes that support before source materialization and identity publication;
+no launcher compiles code or mutates an accepted source assembly.
 Acknowledged owners and foundation/queue/kernel custody settle before fixture
 cleanup, including failure paths. Registration/start effects alone use isolated
 synthetic adapters; no host task/unit or live bridge is launched. This portfolio

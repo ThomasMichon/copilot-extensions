@@ -4,6 +4,7 @@ from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
+import platform
 import runpy
 import re
 import shutil
@@ -219,6 +220,21 @@ def test_bridge_missing_fingerprint_tool_refuses_before_acquisition(
     assert not root.exists() and not installation.exists()
 
 
+def build_bridge_native_test_assets(payload, procutil):
+    if sys.platform != "linux":
+        return
+    package = procutil / "src/agent_procutil"
+    relative = Path("native") / f"linux-{platform.machine()}" / "daemon-instance"
+    result = subprocess.run(
+        [sys.executable, str(package / "_build_native.py"), "--output", str(package / relative)],
+        capture_output=True, text=True, timeout=90, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    destination = payload / "scripts" / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(package / relative, destination)
+
+
 @pytest.fixture
 def materialized_bridge(owning_bridge, area):
     payload, installation, project = owning_bridge
@@ -233,6 +249,7 @@ def materialized_bridge(owning_bridge, area):
     finally:
         sys.path[:] = previous
     assert not any(line.startswith("SKIP ") for line in result), result
+    build_bridge_native_test_assets(candidate, candidate / "libs/agent-procutil")
     shutil.rmtree(payload)
     shutil.copytree(candidate, payload)
     return payload, installation, project

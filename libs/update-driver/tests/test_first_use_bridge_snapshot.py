@@ -17,7 +17,7 @@ from update_driver import first_use as provision
 
 from test_first_use import primitive
 from test_first_use_bridge import (
-    REPOSITORY, assert_bridge_registration, bridge_service_adapter,
+    REPOSITORY, assert_bridge_registration, bridge_service_adapter, build_bridge_native_test_assets,
     materialized_bridge as materialized_bridge, native_recipe_runner as native_recipe_runner,
 )
 from test_first_use_native import native_command
@@ -301,6 +301,7 @@ def test_actual_bridge_source_selected_snapshot_caller_loss_generations_and_fail
     shutil.copytree(REPOSITORY / "libs", checkout / "libs", ignore=ignored)
     shutil.copytree(REPOSITORY / "tools", checkout / "tools", ignore=ignored)
     shutil.copytree(REPOSITORY / "docs", checkout / "docs", ignore=ignored)
+    build_bridge_native_test_assets(source_payload, checkout / "libs/agent-procutil")
     environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     environment["GIT_CONFIG_GLOBAL"] = os.devnull
     environment["GIT_CONFIG_NOSYSTEM"] = "1"
