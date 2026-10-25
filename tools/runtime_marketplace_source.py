@@ -82,8 +82,9 @@ def retain_authenticated_marketplace_source(
     origin = _registered(installation, policy)
     # Reject unsupported definitions before probing or acquiring another source.
     repo = _repository(origin)
+    declared_environment = installation.get("environment")
     environment = {
-        **(installation.get("environment") or os.environ),
+        **(os.environ if declared_environment is None else declared_environment),
         "COPILOT_HOME": str(origin.copilot_home),
     }
     home, cache = inventory_paths(

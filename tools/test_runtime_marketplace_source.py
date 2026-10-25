@@ -152,6 +152,30 @@ def test_explicit_source_provenance_is_unavailable_without_an_installed_locator(
             pytest.fail("explicit source provenance was promoted to installed authority")
 
 
+def test_empty_environment_does_not_inherit_ambient_cache_or_git_configuration(
+    registered_source, monkeypatch,
+):
+    fixture = registered_source
+    fixture["adopter"][1]["environment"] = {}
+    monkeypatch.setenv("COPILOT_CACHE_HOME", str(fixture["cache"]))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(fixture["home"].parent / "gitconfig"))
+    monkeypatch.setattr(
+        runtime_source, "acquire", lambda *a, **k: pytest.fail("ambient source configuration acquired"),
+    )
+    with pytest.raises(ProfileUnavailable, match="native Git source evidence is unavailable"):
+        with retain(fixture):
+            pytest.fail("explicitly empty environment inherited an ambient cache")
+
+
+def test_none_environment_keeps_normal_ambient_selection(registered_source, monkeypatch):
+    fixture = registered_source
+    fixture["adopter"][1]["environment"] = None
+    monkeypatch.setenv("COPILOT_CACHE_HOME", str(fixture["cache"]))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(fixture["home"].parent / "gitconfig"))
+    with retain(fixture) as selected:
+        assert selected.identity.source_commit == fixture["commit"]
+
+
 def test_preparation_preserves_acquisitions_long_path_support(registered_source):
     fixture = registered_source
     name = "long-" + "x" * 230 + ".py"
