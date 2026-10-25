@@ -104,6 +104,10 @@ before its first Python lookup and retains that physical path for acquisition
 and the subsequent lookup. It does not launch a WinGet executable link or
 reselect UV if PATH changes during bootstrap; missing or unsupported targets
 fail before runtime construction without changing Windows mitigation policy.
+Git staging checkout also enables long-path handling only for that invocation,
+without changing user or repository Git configuration. Before constructing the
+runtime, bootstrap verifies the tracked checkout is complete and unchanged;
+a zero checkout exit code alone is insufficient.
 
 Only a candidate passing isolated installed-origin and real CLI-import health
 receives canonical completion and becomes `current-version`. Construction failure

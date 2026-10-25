@@ -36,12 +36,21 @@ _GIT_ID = [
 ]
 
 
-def _source_repo(root: Path) -> Path:
+_LONG_SOURCE_PATH = Path("source-fixtures") / ("nested-" * 15) / ("file-" * 20 + ".txt")
+
+
+def _source_repo(root: Path, *, long_path: bool = False) -> Path:
     repo = root / "source"
     (repo / "worktree-manager").mkdir(parents=True)
     (repo / "worktree-manager" / "README.md").write_text("payload\n", "utf-8")
+    if long_path:
+        entry = repo / _LONG_SOURCE_PATH
+        entry.parent.mkdir(parents=True)
+        entry.write_text("long source path\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "core.longpaths=true", "add", "-A"], check=True,
+    )
     subprocess.run(["git", "-C", str(repo), *_GIT_ID, "commit", "-q", "-m", "payload"], check=True)
     return repo
 
@@ -78,8 +87,10 @@ def _fake_tools(bin_dir: Path, uv_exit: int, python_exit: int) -> None:
 def _run(
     tmp_path: Path, uv_exit: int, ref: str = "main", python_exit: int = 0,
     *, host: str | None = None, encoded: bool = False, linked_uv: bool = False,
+    long_path: bool = False, incomplete_checkout: bool = False,
+    longpaths_disabled: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    repo = _source_repo(tmp_path)
+    repo = _source_repo(tmp_path, long_path=long_path)
     root = tmp_path / "manager-root"
     root.mkdir()
     (root / "config.toml").write_text(
@@ -87,6 +98,19 @@ def _run(
     )
     fake_bin = tmp_path / "fake-bin"
     _fake_tools(fake_bin, uv_exit, python_exit)
+    if incomplete_checkout:
+        real_git = shutil.which("git")
+        assert real_git is not None
+        missing = root / "staging" / "worktree-manager" / "README.md"
+        (fake_bin / "git.ps1").write_text(
+            f"& {_quote(real_git)} @args\n"
+            "$code = $LASTEXITCODE\n"
+            "if ($code -eq 0 -and $args -contains 'checkout') {\n"
+            f"  Remove-Item -LiteralPath {_quote(missing)}\n"
+            "}\n"
+            "exit $code\n",
+            encoding="utf-8",
+        )
     selected_bin = fake_bin
     if linked_uv:
         selected_bin = tmp_path / "linked-tools"
@@ -100,6 +124,16 @@ def _run(
     env["WORKTREE_MANAGER_ROOT"] = str(root)
     env["USERPROFILE"] = str(tmp_path / "profile")
     env["PATH"] = str(selected_bin) + os.pathsep + env.get("PATH", "")
+    if long_path:
+        config = tmp_path / "global.gitconfig"
+        config.write_text(
+            "[core]\nlongpaths = false\n" if longpaths_disabled else "", encoding="utf-8",
+        )
+        env["GIT_CONFIG_GLOBAL"] = str(config)
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        for key in list(env):
+            if key.startswith(("GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")) or key == "GIT_CONFIG_COUNT":
+                env.pop(key)
     if linked_uv:
         poison = tmp_path / "poison"
         poison.mkdir()
@@ -139,6 +173,48 @@ def test_failed_runtime_command_fails_the_bootstrap(tmp_path):
 def test_successful_uv_succeeds(tmp_path):
     result = _run(tmp_path, uv_exit=0)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Git long-path checkout")
+@pytest.mark.parametrize("host_name", ["pwsh", "powershell"])
+def test_bootstrap_checks_out_long_source_paths_without_global_git_changes(tmp_path, host_name):
+    host = shutil.which(host_name)
+    if host is None:
+        pytest.skip(f"{host_name} unavailable")
+    result = _run(tmp_path, uv_exit=0, host=host, long_path=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    entry = tmp_path / "manager-root" / "staging" / _LONG_SOURCE_PATH
+    assert len(str(entry)) > 260
+    assert entry.read_text(encoding="utf-8") == "long source path\n"
+    assert "Filename too long" not in result.stdout + result.stderr
+    assert (tmp_path / "global.gitconfig").read_text(encoding="utf-8") == ""
+    checkout_config = (tmp_path / "manager-root" / "staging" / ".git" / "config").read_text(
+        encoding="utf-8",
+    )
+    assert "longpaths" not in checkout_config.lower()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Git long-path configuration")
+def test_bootstrap_preserves_global_disable_without_accepting_partial_source(tmp_path):
+    result = _run(tmp_path, uv_exit=0, long_path=True, longpaths_disabled=True)
+    assert (tmp_path / "global.gitconfig").read_text(encoding="utf-8") == (
+        "[core]\nlongpaths = false\n"
+    )
+    if result.returncode == 0:
+        entry = tmp_path / "manager-root" / "staging" / _LONG_SOURCE_PATH
+        assert entry.read_text(encoding="utf-8") == "long source path\n"
+        assert "Filename too long" not in result.stdout + result.stderr
+    else:
+        assert "source checkout is incomplete or changed" in result.stdout + result.stderr
+        assert not (tmp_path / "manager-root" / "current-version").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows Git script adapter")
+def test_bootstrap_refuses_incomplete_source_even_after_zero_exit_checkout(tmp_path):
+    result = _run(tmp_path, uv_exit=0, incomplete_checkout=True)
+    assert result.returncode != 0
+    assert "source checkout is incomplete or changed" in result.stdout + result.stderr
+    assert "refusing Manager construction" in result.stdout + result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows junction contract")
@@ -406,7 +482,7 @@ if (-not [BootstrapGuard]::SetProcessMitigationPolicy(
         )[0]
         + r"""
 $selected = $Uv
-if ($selected -cne $expected) { throw "Not the selected physical UV: $selected (expected $expected)" }
+if ($selected -ine $expected) { throw "Not the selected physical UV: $selected (expected $expected)" }
 foreach ($cycle in 1..2) {
     $blocked = $false
     try { & $logical --version 2>$null | Out-Null } catch { $blocked = $true }
