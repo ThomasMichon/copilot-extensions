@@ -14,9 +14,10 @@ import subprocess
 import sys
 import tempfile
 import uuid
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 _runtime_spec = importlib.util.spec_from_file_location(
     "containers_profile_runtime", Path(__file__).with_name("versioned_runtime.py"),
@@ -127,9 +128,15 @@ def select_execution(root: Path) -> ExecutionSelection:
     python = runtime.resolve_python(root)
     if python is None:
         raise RuntimeError("No completed Containers execution runtime is selected")
+    return _read_execution(root, python)
+
+
+def _read_execution(root: Path, python: Path) -> ExecutionSelection:
     slot = python.parent.parent
     if slot.parent != root / "versions" or slot.name.casefold() == runtime.DEV_VERSION:
         raise RuntimeError("Containers execution declaration requires an immutable slot")
+    if python != runtime.slot_python(root, slot.name):
+        raise RuntimeError("Containers execution interpreter conflicts with its slot")
     admission = runtime.check_admission(root, slot.name, payload_hash=None)
     if admission not in (runtime.ADMIT_REUSE, runtime.ADMIT_CONTENT_CONFLICT):
         raise RuntimeError(f"Selected Containers execution runtime is not complete: {admission}")
@@ -161,6 +168,28 @@ def select_execution(root: Path) -> ExecutionSelection:
         python=python, runtime_version=slot.name, payload_hash=value["payloadHash"],
         profile=value["profile"], contract_version=1, retained_creation=retained,
     )
+
+
+@contextmanager
+def retain_execution(
+    root: Path, selection: ExecutionSelection, *, timeout: float = 60.0,
+) -> Iterator[tuple[ExecutionSelection, int]]:
+    """Retain and revalidate one previously selected execution slot.
+
+    The descriptor is borrowed from the canonical retention owner, not a launch
+    grant. Never close it. POSIX children may inherit it deliberately; Windows
+    custody remains in this process. This context does not start any child or
+    establish provider/guest/native responsibility.
+    """
+    root = Path(os.path.abspath(root.expanduser()))
+    if selection.python.parent.parent != root / "versions" / selection.runtime_version:
+        raise RuntimeError("Containers execution selection belongs to a different slot")
+    with runtime.retention_custody(
+        root, selection.runtime_version, payload_hash=selection.payload_hash, timeout=timeout,
+    ) as (_, descriptor):
+        if _read_execution(root, selection.python) != selection:
+            raise RuntimeError("Containers execution declaration changed after selection")
+        yield selection, descriptor
 
 
 def selected_profile(root: Path, requested: str | None = None) -> str:

@@ -1,8 +1,8 @@
-# Original provider creation storage
+# Original provider creation prerequisites
 
-Back to the [Containers guide](../README.md). This is an **internal storage
-prerequisite**, not a supported retained provider launch, CLI operation or
-native qualification. Both runtime dependency profiles still declare
+Back to the [Containers guide](../README.md). These are **internal storage and
+selected-slot retention prerequisites**, not a supported retained provider
+launch, CLI operation or native qualification. Both dependency profiles still declare
 `retainedCreation: false`.
 
 ## Existing owner, explicit new birth
@@ -67,3 +67,29 @@ guest/native effect fences, strict complete-cohort inventory and same-operation
 outcome reconciliation remain required before declaring retained support.
 An outstanding attempt stays unknown until its actual owner can reconcile it;
 it cannot be replayed as a fresh native conversation.
+
+## Exact execution retention prerequisite
+
+The payload-owned `scripts/runtime_profile.py` exposes internal
+`select_execution(root)` and `retain_execution(root, selection)` primitives.
+Selection reads the immutable slot's declaration; retention names that same
+slot rather than resolving the mutable selector again. It acquires canonical
+[`versioned-runtime` retention custody](../../../libs/versioned-runtime/README.md#candidate-and-rollback-retention-python-api),
+rechecks the completed payload hash and rereads the exact declaration under
+the lease. Missing, legacy, changed or conflicting evidence refuses without
+provisioning, activation or fallback.
+
+The context yields the unchanged selection and a **borrowed** kernel descriptor.
+Callers must not close it. Ordinary return and errors release the context's
+descriptor; a mere saved integer or file path is not continuing custody.
+Deliberately inherited POSIX descriptors keep the same kernel protection until
+their final close, including after the original context exits. Windows retention
+remains process-owned; this API does not promise inherited child protection
+there. No lease file is deleted and no second pin registry is introduced.
+
+These helpers live with their adjacent installer helper family, not as an
+ambient import available in an installed provider venv. No current Bridge,
+provider CLI or transport launch path calls them. They do not transfer
+responsibility to a wrapper, guest or native host, and do not change either
+profile's `retainedCreation: false` declaration. Actual launch integration and
+continuing responsibility through reconciliation remain open.

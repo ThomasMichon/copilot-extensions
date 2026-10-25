@@ -153,8 +153,10 @@ require their own review and qualification.
       integration stay open. Original provider native-handoff storage merged in
       #8935 as an internal prerequisite, not provider effect-owner mediation.
       The [provider boundary specialization](provider-custody.md) cleared review
-      in #8940; provider-first support and actual provider binding/admission and
-      guest/native integration remain unimplemented.
+      in #8940. Immutable provider declarations merged in #8958 and explicit
+      original binding storage in #8960; selected execution/retention, actual
+      provider/guest admission and native integration remain unimplemented.
+      Both profiles still declare retained creation unsupported.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -269,6 +271,39 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-25 - Exact selected-slot retention prerequisite
+
+- Add an internal payload-owned retention context around the existing immutable
+  execution selection and canonical versioned-runtime kernel owner. Name the
+  original slot, recheck its completion hash and declaration under retention,
+  and refuse changed or legacy evidence rather than resolving a newer runtime.
+- Exercise actual cleanup protection and release, overlapping shared holders,
+  exclusive cleanup contention, failure release and a POSIX child inheriting
+  the borrowed descriptor beyond the parent context. The fixture child is not
+  a provider, guest or native host.
+- This closes only the selected-slot primitive prerequisite. No launch path
+  uses it yet; provider/guest/native admission, same-operation reconciliation,
+  full-cohort coverage and platform qualification remain open. Both profiles
+  still declare retained creation unsupported; no live system changes.
+
+### 2026-10-25 - Original provider storage prerequisite merged
+
+- #8960 merged as `a494e913f8cc82fc524f6379026eba52244333db` after
+  independent approval `5642856702` of exact head
+  `b712481208546cb12e3001c24e3e880486df12c3`, with no open findings and
+  successful required checks. A base-modified merge race cleared on one
+  identical managed retry; no source, review or check requirement was relaxed.
+- Re-read the complete Plan and Validation Plan after merge. The original
+  provider association and storage-only serialization prerequisite closes
+  no full-cohort item. The complete selected-runtime, provider/guest/native,
+  compatibility, inventory, restoration and adoption gates remain open.
+- Continue at exact execution retention through the existing immutable
+  runtime-profile and canonical versioned-runtime custody owners. A selected
+  interpreter path or recorded runtime identity is not a held slot, and a
+  descriptor is not proof that a wrapper or guest accepted responsibility.
+- Reconciled only the clean merged source worktree, preserving the reviewed
+  backup ref. No runtime, provider, guest, lane or protected resource changed.
 
 ### 2026-10-25 - Provider-owned original binding storage prerequisite
 
