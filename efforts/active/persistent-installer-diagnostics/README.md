@@ -1140,3 +1140,12 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   execution/receipt inputs; another control proves other runtimes receive no
   diagnostics opt-in. Targeted Ruff, the touched-module cap and the complete
   admitted unit-source hash inventory pass.
+- CI `40184795269` passed eligible units but correctly refused the merged
+  tree's install contract: upstream enrolled Bridge as a ninth canonical
+  Python-engine consumer after this candidate's base. A preserved managed
+  pull-forward succeeded; canonical synchronization now includes Bridge's two
+  engine copies. Their diagnostics option remains false by default, and the
+  existing Bridge changefile entry already covers the shared-engine change.
+  All nine Python consumers synchronize and all admitted unit hashes verify.
+  The already-tested canonical engine and Worktrees source-step code did not
+  change in this pull-forward; no native success is inferred from regeneration.
