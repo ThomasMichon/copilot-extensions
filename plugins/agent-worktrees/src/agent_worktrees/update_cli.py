@@ -407,6 +407,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             list(engine_step.argv), plugin_dir, engine_step.deadline_s,
             engine_step.environment, runtime_root=engine_step.runtime_root,
             target_version=engine_step.target_version,
+            **({"source_step": engine_step} if engine_step.source is not None else {}),
         )
         if rc != 0:
             return rc

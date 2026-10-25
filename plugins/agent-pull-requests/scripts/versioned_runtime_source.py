@@ -18,6 +18,7 @@ from typing import Any
 
 SOURCE_FILE = "runtime-source.json"
 SOURCE_SCHEMA = "copilot-extensions.runtime-source"
+SOURCE_PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
 _OBJECT_ID = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _PACKAGE_VERSION = re.compile(
@@ -574,6 +575,11 @@ def main(argv: list[str] | None = None) -> int:
             and json.dumps(manifest_fields(identity), sort_keys=True) != args.expected_source_identity
         ):
             raise SourceIdentityError("Source identity changed after runtime selection")
+        selected_pin = os.environ.get(SOURCE_PIN_ENV)
+        if selected_pin is not None and json.dumps(
+            manifest_fields(identity), sort_keys=True,
+        ) != selected_pin:
+            raise SourceIdentityError("Source identity differs from the update transaction selection")
         if args.snapshot_root is not None:
             if identity is None or args.format != "version":
                 raise SourceIdentityError("Source snapshot publication requires a source receipt and path output")

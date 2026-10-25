@@ -542,17 +542,25 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     plugin.mkdir(parents=True)
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     (plugin / "pyproject.toml").write_text(
-        '[project.optional-dependencies]\ndev = ["fleet-manager'
+        f'[project]\nname = "{name}"\n[project.optional-dependencies]\ndev = ["fleet-manager'
         + (f"[{extra}]" if extra else "") + '>=0.1.0.dev1"]\n',
         encoding="utf-8",
     )
     fleet = tmp_path / "fleet-manager"
     fleet.mkdir()
     metadata = fleet / "pyproject.toml"
-    metadata.write_text('[project]\nversion = "0.1.0.dev1"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "fleet-manager"\nversion = "0.1.0.dev1"\n', encoding="utf-8")
+    for resource in runner.standalone_build_resources("fleet-manager", source_root=tmp_path):
+        resource.mkdir(parents=True)
+    if name == "agent-dispatch":
+        replay = tmp_path / "plugins" / "agent-pull-requests"
+        replay.mkdir()
+        (replay / "pyproject.toml").write_text(
+            '[project]\nname = "agent-pull-requests"\n', encoding="utf-8",
+        )
     (runner.VENV_ROOT / name).mkdir(parents=True)
     before = runner._dep_fingerprint(name)
-    metadata.write_text('[project]\nversion = "0.1.0.dev2"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "fleet-manager"\nversion = "0.1.0.dev2"\n', encoding="utf-8")
     assert runner._dep_fingerprint(name) != before
     calls = []
     monkeypatch.setattr(
@@ -586,9 +594,14 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
     monkeypatch.setattr(runner, "_plugin_dir", lambda name: tmp_path / "plugins" / name)
     metadata = tmp_path / "plugins" / "agent-pull-requests" / "pyproject.toml"
     metadata.parent.mkdir(parents=True)
-    metadata.write_text('[project]\nversion = "1.0"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "agent-pull-requests"\nversion = "1.0"\n', encoding="utf-8")
+    fleet = tmp_path / "fleet-manager"
+    fleet.mkdir()
+    (fleet / "pyproject.toml").write_text('[project]\nname = "fleet-manager"\n', encoding="utf-8")
+    for resource in runner.standalone_build_resources("fleet-manager", source_root=tmp_path):
+        resource.mkdir(parents=True)
     before = runner._dep_fingerprint("agent-dispatch")
-    metadata.write_text('[project]\nversion = "1.1"\n', encoding="utf-8")
+    metadata.write_text('[project]\nname = "agent-pull-requests"\nversion = "1.1"\n', encoding="utf-8")
     assert runner._dep_fingerprint("agent-dispatch") != before
 
 
@@ -722,6 +735,8 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     assert {path.name for path in native} == {
         "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
         "test_manager_updater_recovery.py",
+        "test_launch_attempts_native.py", "test_mux_discovery_native.py",
+        "test_psmux_home_directory.py", "test_warm_picker_lifetime.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native

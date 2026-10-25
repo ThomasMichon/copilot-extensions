@@ -7,6 +7,7 @@ import enum
 import functools
 import json
 import os
+import re
 import socket
 import subprocess
 import time
@@ -549,18 +550,43 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
     if step.status:
         return step.status
     output.header(f"Updating Runtime: {step.name}")
+    receipt = functools.partial(
+        reconcile.runtime_deployed_version, step.name, root=step.runtime_root,
+    )
+    if step.source is not None:
+        assert step.runtime_root is not None
+        assert step.project_root is not None
+        receipt = functools.partial(step.source.deployed_version, step.runtime_root, step.payload)
+
+    def execute(argv: tuple[str, ...]) -> str:
+        try:
+            command = list(argv)
+            if step.source is not None:
+                assert step.runtime_root is not None
+                assert step.project_root is not None
+                step.source.validate(step.name, step.payload, step.environment)
+                command = step.source.lifecycle_argv(
+                    step.payload, step.name, step.runtime_root, step.project_root, argv,
+                )
+        except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
+            return f"prepared source execution refused: {error}"
+        try:
+            return run(command).status
+        except (OSError, ValueError) as error:
+            if step.source is None:
+                raise
+            return f"source deployment receipt invalid: {error}"
+
     run = functools.partial(
         _run_human_installer, label=step.name, receipt_owned=True,
-        cwd=step.payload, env=step.environment, deadline_s=step.deadline_s,
+        cwd=step.artifact, env=step.environment, deadline_s=step.deadline_s,
         target_version=step.target_version,
-        receipt=functools.partial(
-            reconcile.runtime_deployed_version, step.name, root=step.runtime_root,
-        ),
+        receipt=receipt,
     )
-    status = run(list(step.argv)).status
+    status = execute(step.argv)
     if step.fallback_argv and status.startswith("installer exited"):
         output.info(f"Module '{step.name}' update failed (not installed?), trying install...")
-        status = run(list(step.fallback_argv)).status
+        status = execute(step.fallback_argv)
         return "OK (installed)" if status == "OK" else status.replace(
             "installer exited", "install exited", 1,
         )
@@ -571,6 +597,7 @@ def _run_engine_installer(
     argv: list[str], plugin_dir: Path, timeout: int, env: Mapping[str, str],
     runtime_root: Path | None = None,
     target_version: str | None = None,
+    source_step: update_runtime_plan.RuntimeUpdateStep | None = None,
 ) -> int:
     """Run agent-worktrees' own runtime installer and record its result.
 
@@ -580,17 +607,22 @@ def _run_engine_installer(
     """
     from . import reconcile
 
-    run = _run_human_installer(
-        argv, label="agent-worktrees", receipt_owned=True,
-        cwd=plugin_dir, env=env, deadline_s=timeout,
-        target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
-        receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
-    )
-    rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
-    if run.status.startswith("timed out"):
+    if source_step is not None:
+        status = _execute_runtime_step(source_step)
+        failed_exit = re.fullmatch(r"installer exited (-?\d+)", status)
+        rc = 0 if status == "OK" else (int(failed_exit[1]) if failed_exit else 1)
+    else:
+        run = _run_human_installer(
+            argv, label="agent-worktrees", receipt_owned=True,
+            cwd=plugin_dir, env=env, deadline_s=timeout,
+            target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
+            receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
+        )
+        rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
+    if status.startswith("timed out"):
         output.err("agent-worktrees installer timed out")
-    elif run.status != "OK":
-        output.err(f"agent-worktrees installer failed: {run.status}")
+    elif status != "OK":
+        output.err(f"agent-worktrees installer failed: {status}")
     update_events.record("engine_runtime", "agent-worktrees@copilot-extensions", status,
                          changed=status.startswith("OK"))
     return rc
