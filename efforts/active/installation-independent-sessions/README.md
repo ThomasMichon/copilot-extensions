@@ -507,3 +507,16 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   are committed locally but unpublished; the Windows synthetic-payload fixture
   timeout and revised native qualification remain unresolved. This update
   neither declares them passing nor authorizes host maintenance or rollout.
+
+### 2026-10-24 - Uninstall contract reviewed
+
+- #8871 merged after an exact-head Copilot approval with no open issues and
+  successful required CI. Managed completion used the live-confirmed
+  Maintainer exception for an additional CODEOWNER approval; no CI or reviewer
+  finding was bypassed.
+- Re-read the parent plan and prerequisite after merge. #8864 remains open:
+  the contract is reviewed, but implementation, actual Linux/Windows removal
+  and the parent installation-survival acceptance are still outstanding.
+- Next, inventory the concrete installer/ownership/lifecycle seams and
+  implement the smallest supported removal operation. No operator-host
+  uninstall, live-session intervention or rollout follows from plan approval.

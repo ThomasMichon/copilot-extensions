@@ -152,7 +152,8 @@ def candidate(
             yield ready
 
 
-def activate(root: Path, version: str, *, expected: str | None, after_publish=None) -> None:
+def activate(root: Path, version: str, *, expected: str | None, after_publish=None,
+             before_publish=None) -> None:
     """Publish or recover both selectors without releasing runtime custody."""
     root = root.resolve()
     publication = runtime._runtime_component("versioned_runtime_publication")
@@ -222,6 +223,8 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                             receipts.append(output)
 
                 try:
+                    if before_publish is not None:
+                        before_publish()
                     runtime._activate(root, version, link_free=True, ownership_receipt=forward)
                     if after_publish is not None:
                         after_publish()
@@ -298,9 +301,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--describe-recovery", action="store_true")
     parser.add_argument("--repair-update", action="store_true")
     parser.add_argument("--recover-for-repair", action="store_true")
+    parser.add_argument("--uninstall", action="store_true")
+    parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.uninstall:
+        if (
+            args.root is None or args.recover_adopted or args.describe_recovery
+            or args.repair_update or args.recover_for_repair or args.command
+            or args.payload.resolve() != SCRIPTS.parent
+        ):
+            parser.error("--uninstall requires --root and only accepts --apply and --json")
+        from runtime_uninstall import uninstall
+
+        return uninstall(args.root, apply=args.apply, as_json=args.json)
+    if args.apply:
+        parser.error("--apply requires --uninstall")
     if args.recover_for_repair:
         if args.recover_adopted or args.describe_recovery or args.repair_update or args.command:
             parser.error("Repair recovery cannot be combined with installation or application commands")

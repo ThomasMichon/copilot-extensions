@@ -1,6 +1,7 @@
 """Focused contract tests for repository test-runner admission."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -12,6 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -793,8 +795,10 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     assert {path.name for path in native} == {
         "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
         "test_manager_updater_recovery.py",
+        "test_manager_runtime_uninstall.py",
         "test_launch_attempts_native.py", "test_mux_discovery_native.py",
         "test_psmux_home_directory.py", "test_warm_picker_lifetime.py",
+        "test_companion_pane_native.py", "test_companion_pane_tmux.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
@@ -808,6 +812,29 @@ def test_manager_explicit_native_selection_remains_available():
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
+
+
+def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds():
+    source = SCRIPT.with_name("run-manager-runtime-acceptance.py").read_text(encoding="utf-8")
+    assignment = next(
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "groups" for target in node.targets)
+    )
+    expression = compile(ast.Expression(assignment.value), "native-groups", "eval")
+    for contract, count in (("runtime", 1), ("callbacks", 1), ("updater", 3), ("uninstall", 2)):
+        groups = eval(expression, {"str": str}, {
+            "args": SimpleNamespace(contract=contract), "prepare_command": ["prepare"],
+            "assertions": ["assert"], "python": "python", "native": "native", "sandbox": "sandbox",
+        })
+        assert len(groups) == count
+        assert groups[0][1][0] == ["prepare"]
+        assert groups[-1][1][-1] == ["assert"]
+        if contract == "uninstall":
+            assert groups[0][1] == [["prepare"]]
+            assert groups[1][1][0] == ["python", "-I", "-B", "native", "--exercise", "sandbox"]
+    assert "remaining = 300 - (time.monotonic() - started)" in source
+    assert "limits=Limits(wall_seconds=remaining)" in source
 
 
 @pytest.mark.parametrize("setting", [

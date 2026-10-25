@@ -32,6 +32,7 @@ on:
           - dispatch-binding
           - promotion-controls
           - pane-argv
+          - manager-uninstall
         default: context
 
 permissions:
@@ -306,6 +307,33 @@ jobs:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UV_PYTHON: "3.12"
     steps: *bridge-bootstrap-steps
+  manager-uninstall-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-uninstall'
+    name: Manager installed uninstall (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact native source
+        env:
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE']; print('Source:',actual); print('Python:',sys.version)"
+      - name: Qualify actual installed removal and reinstall
+        run: >-
+          python tools\run-manager-runtime-acceptance.py --root .validation --contract uninstall
+
   mux-companion-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mux-companion'
     name: Mux Companion native tmux 3.4 (isolated session)

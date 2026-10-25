@@ -3662,6 +3662,32 @@ Pytest items retain their 30-second limit.
 This proves the updater migration contract, not release qualification or a
 live-host rollout.
 
+Supported Manager removal has its own explicit native contract:
+
+```text
+python tools/run-manager-runtime-acceptance.py --root .validation --contract uninstall
+```
+
+It prepares a real standalone payload and canonical installed Manager in a
+redirected disposable home, then checks non-mutating preview, installed-self
+refusal, actual external removal, repeated absence and actual reinstall.
+Installed package/payload hashes and origin evidence must match; runtime slots,
+selectors and owned frontdoors/registration must disappear while durable-state
+bytes remain. No synthetic inventory, constructor mock or manual fixture
+deletion substitutes for removal. Initial installed preparation and the
+removal/reinstall exercise use separate existing 300-second native groups:
+each requires a real cold construction, with a 240-second command bound inside
+its group. Ordinary pytest items retain 30 seconds. Other native contracts,
+production deadlines and required PR CI are unchanged.
+This quiescent operation does not launch a service, mux or Copilot, qualify
+interactive session survival, or authorize a host uninstall/rollout.
+The ordinary Manager suite excludes this prepared lane.
+The manual `installation-context-full.yml` portfolio `manager-uninstall`
+executes the same owner on a fresh Windows runner with Python 3.12, read-only
+repository permissions, exact checked-out source verification and a 15-minute
+setup/job envelope. Its native groups retain their 300-second boundaries.
+It is not part of required PR CI or the default scheduled portfolio.
+
 Retained mux shell callbacks have a separate, independently contained contract:
 
 ```text

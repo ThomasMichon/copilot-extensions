@@ -1508,6 +1508,53 @@ ownership contracts; their remaining convergence is tracked
 under [#7758](https://github.com/ThomasMichon/copilot-extensions/issues/7758),
 not inferred complete from these migrated entry points.
 
+## Remove an owned installation
+
+The standalone installer provides **`worktree-manager.uninstall`, generation 1**.
+Select an extracted, supported Manager payload and a base Python **outside**
+the target installation. Read that payload's
+`references/uninstall-contract.json` before invoking its installer; support is
+not inferred from package-version equality or an ambient command on `PATH`.
+
+```powershell
+$python = '<external-base-python>'
+$installer = '<external-manager-payload>\scripts\runtime_install.py'
+& $python -I -S -B $installer --root '<manager-root>' --uninstall --json
+& $python -I -S -B $installer --root '<manager-root>' --uninstall --apply --json
+```
+
+The first invocation previews without construction, fetching, service requests
+or creating lock files. `--apply` removes validated runtime slots, their
+selectors and attributable generated frontdoors/registration. Configuration,
+source preferences, project registrations, mappings, routing/recovery history,
+unknown root files and persistent lease files remain. There is no data purge.
+Settle any running Manager infrastructure through its existing lifecycle owner
+first: removal never stops Copilot, its mux, another installation or a service.
+Settled routing history is preserved under the daemon's existing spawn lease,
+not mistaken for a running daemon or deleted to make removal succeed.
+
+Every present runtime slot must carry the construction-owned generation-1
+artifact inventory. Legacy, development, changed, unexpectedly linked, foreign, busy or
+otherwise unsupported targets refuse rather than being rebuilt or broadly
+deleted. Generic frontdoor bytes alone do not establish ownership: removing
+shared commands requires the matching current Manager registration.
+An interpreter or installer inside the target refuses apply before effects,
+including on Windows; use the external invocation above instead of delayed
+self-deletion. Missing capability metadata is unsupported uninstall, not
+permission to try a different removal mechanism. Install/update remain available
+under their existing contracts.
+
+JSON results use `worktree-manager.uninstall-result`, version 1, with contract
+identity/generation and status `planned`, `absent`, `removed`, `refused` or
+`incomplete`. Exit codes are 0 for the first three, 1 for refusal/incomplete
+removal and 2 for invalid syntax. An absent target is not constructed.
+Partial removal is never success; withdrawn selectors are not restored to
+partly removed slots, and unresolved artifacts/evidence remain for their owner.
+There is no installed convenience command or automatic caller migration in this
+provider-first expansion. Older providers and rollback targets without the
+declaration/inventory retain their previous operations but cannot perform this
+uninstall contract.
+
 ## Choose the update source (fork / canary branch)
 
 By default the self-updater pulls the Worktree Manager payload from the canonical

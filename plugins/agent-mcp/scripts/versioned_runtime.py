@@ -92,6 +92,7 @@ RetentionTimeout = _leases.RetentionTimeout
 _construction_owners = _leases._construction_owners
 _ownership_key = _leases._ownership_key
 construction_lease = _leases.construction_lease
+batch_removal_custody = _leases.batch_removal_custody
 _publication_lease = _leases._publication_lease
 _cleanup_lease = _leases._cleanup_lease
 _kernel_lease = _leases._kernel_lease

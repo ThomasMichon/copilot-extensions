@@ -744,19 +744,30 @@ def _complete_candidate(
 ) -> SelfInstallResult:
     slot = ready.slot
     version = payload_version(payload)
-    if before_publish is not None:
-        before_publish()
-    cleaned = tuple(clean_legacy_artifacts(root))
-    stubs = _deploy_binstubs()
-    _write_control_plane_provider_manifest(payload, root=root)
+    cleaned: tuple[str, ...] = ()
+    stubs: list[Path] = []
+
+    def publish_frontdoors() -> None:
+        nonlocal cleaned, stubs
+        publication = installer.runtime._runtime_component("versioned_runtime_publication")
+        targets = [*(local_bin() / name for name in _binstub_files()),
+                   _control_plane_provider_manifest_path(payload, root=root)]
+        with publication.target_leases(root, targets):
+            if before_publish is not None:
+                before_publish()
+            cleaned = tuple(clean_legacy_artifacts(root))
+            stubs = _deploy_binstubs()
+            _write_control_plane_provider_manifest(payload, root=root)
+
     installer = _runtime_installer()
     if transactional_activation:
         installer.activate(
             root, slot.name, expected=previous,
             after_publish=(lambda: after_activate(slot)) if after_activate is not None else None,
+            before_publish=publish_frontdoors,
         )
     else:
-        installer.activate(root, slot.name, expected=previous)
+        installer.activate(root, slot.name, expected=previous, before_publish=publish_frontdoors)
     if after_activate is not None and not transactional_activation:
         after_activate(slot)
     return SelfInstallResult(

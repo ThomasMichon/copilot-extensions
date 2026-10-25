@@ -2034,6 +2034,34 @@ or a source outside this reporter's supported shape produces an explicit notice
 and retains the existing Git authentication path, not a false auth refusal.
 Known failed credentials reported by a capable engine still block that fetch.
 
+### Supported standalone Manager removal
+
+The Manager's existing `scripts/runtime_install.py` owns optional
+`--root <target> --uninstall [--apply] [--json]`. It is a provider-first
+`worktree-manager.uninstall` generation-1 expansion, declared in the executing
+immutable payload's `references/uninstall-contract.json`; package versions and
+newer marketplace metadata are not capability negotiation. No ordinary caller
+emits new syntax against an older selected provider. Missing/invalid capability
+or unsupported legacy ownership gives explicit refusal without reconstruction;
+existing install/update behavior remains available.
+
+Construction seals an attributable per-slot inventory before completion.
+Removal validates all present generations and integrations, then revalidates
+under canonical construction, exclusive retention and publication custody.
+Manager frontdoor publication uses that same publication authority. The
+daemon's existing spawn lease prevents ordinary service startup during removal;
+live/unknown lifecycle custody refuses, while settled routing history and
+persistent control files remain intact. No parallel selector, service or
+force-cleared lock is introduced.
+
+Preview/absence do not provision or create lock files. Apply requires a base
+interpreter and installer outside the target, withdraws only owned artifacts,
+preserves durable/unknown state and reports partial failure as incomplete.
+It never retires application/mux processes or restores selectors into a partly
+removed slot. See the
+[Manager removal operation](../worktree-manager/README.md#remove-an-owned-installation)
+for invocation, supported-target limits, result statuses and rollback behavior.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is

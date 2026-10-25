@@ -2,7 +2,9 @@
 
 Back to the [canonical effort](README.md). Tracking issue: #8864.
 
-**Status:** proposed contract; no runtime support or host operation is asserted.
+**Status:** reviewed contract; implementation candidate under validation.
+Actual Linux removal is qualified; native Windows qualification remains open.
+No release or host operation is asserted by this document.
 
 ## Selected intent
 
@@ -84,7 +86,7 @@ Document supported legacy targets and rollback/refusal behavior.
 
 ## Plan
 
-1. Read the current Manager/standalone installer entrypoints, owned artifact
+1. [x] Read the current Manager/standalone installer entrypoints, owned artifact
    inventory, root authority, locks, retention and service lifecycle. Select
    the smallest compatible operation and record its actual interface.
 2. Implement safe preview/refusal and supported uninstall through those owners,
@@ -119,3 +121,42 @@ Completing #8864 only supplies the missing supported removal operation.
 The parent effort remains open until its own entire Plan and Validation Plan
 are resolved. No host uninstall, shared-service intervention, live-session
 termination, credential change or installed rollout is authorized by this plan.
+
+## Implementation journal
+
+- The contract merged in #8871. The provider candidate extends the existing
+  installer with external-base-Python `--uninstall`, explicit apply and JSON;
+  default preview/absence do not construct. Generation-1 capability and
+  construction-owned inventories are separate from package versions.
+- Integration review reproduced and fixed ambiguous shared-frontdoor removal
+  when the provider registration was missing. Current matching registration
+  is required before shared commands can be withdrawn.
+- Settled daemon routing history remains preserved. Removal takes the existing
+  daemon spawn lease and canonical runtime custody, rather than treating every
+  routing directory as a live daemon or deleting control evidence.
+- The complete affected ordinary installer/removal packet passed 115 tests
+  with two platform-gated skips. Existing daemon-lease/removal controls and
+  native portfolio-admission checks also pass.
+- The first native installed-removal flow has not passed: actual first
+  construction exceeded the local preparation limit before preview, removal or
+  reinstall. Bounded diagnostic stacks showed source fingerprinting, retained
+  UV preparation and then real dependency construction; they did not establish
+  an uninstall failure or a successful runtime removal.
+- Real installed preparation and removal/reinstall now use separate existing
+  300-second native groups. Ordinary item and production deadlines remain
+  unchanged. Reconcile current construction-owner changes and finish actual
+  Windows/Linux removal qualification before returning to the parent's
+  interactive baseline.
+- After current-base reconciliation, frozen candidate
+  `35dc0507cf3b59f7854255d9c415cfc7950c1161` passed the complete Linux
+  uninstall unit file: 33 tests, no skips. The unchanged native operation
+  completed in 74.48 seconds, including actual installed preview, installed-self
+  refusal, removal, repeated absence and reinstall. Source/payload/installed
+  hashes and durable-state bytes matched; the owned container was removed.
+- The local Windows diagnostic reached real UV construction: venv creation
+  completed in 2.047 seconds and dependency resolution in 906 milliseconds,
+  followed by first-party/helper wheel building. A deliberately shortened
+  diagnostic child deadline produced a normal failure receipt; this is not
+  acceptance or a production deadline change. All diagnostic instrumentation
+  was removed. A manual fresh-Windows lane now exercises the unchanged native
+  operation before this prerequisite can be considered complete.
