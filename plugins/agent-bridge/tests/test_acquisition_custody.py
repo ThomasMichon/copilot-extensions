@@ -179,15 +179,25 @@ def test_acquisition_store_stage_keeps_original_custody_and_inventory(launch) ->
     assert inventory["acknowledged"] is False
 
 
-@pytest.mark.parametrize("native", [None, "native-a"])
-def test_acquisition_launch_distinguishes_creation_from_resume(tmp_db: Database, native: str | None) -> None:
-    owner, _producer, admission = enrolled(tmp_db)
+@pytest.mark.parametrize("allocation,intent,native", [
+    ("created", "automatic", None),
+    ("created", "fresh", None),
+    ("reused", "fresh", None),
+    ("reused", "automatic", "native-a"),
+    ("reused", "continue", "native-a"),
+    ("targeted", "automatic", "native-a"),
+    ("targeted", "continue", "native-a"),
+])
+def test_acquisition_launch_distinguishes_creation_from_resume(
+    tmp_db: Database, allocation: str, intent: str, native: str | None,
+) -> None:
+    owner, producer, admission = enrolled(tmp_db)
     journal = AcquisitionJournal(tmp_db)
     original = request(
-        allocation="created" if native is None else "reused",
+        allocation=allocation, intent=intent,
         prior_session_id=None, prior_native_session_id=native,
     )
-    journal.claim(original, runtime_admission=admission)
+    claim = journal.claim(original, runtime_admission=admission)
     handoff = journal.prepare_launch(
         original, owner, admission, session_id="bridge-a",
         native_session_id=native, consumer_incarnation="executor-a",
@@ -196,15 +206,23 @@ def test_acquisition_launch_distinguishes_creation_from_resume(tmp_db: Database,
     with pytest.raises(RuntimeCustodyError, match="never reached"):
         journal.report_launch(original, handoff["id"], native_session_id="native-a", now=1.0)
     assert journal.begin_launch(original, owner, admission, handoff["id"], now=2.0)
+    close(tmp_db, owner, producer)
     assert journal.report_launch(
         original, handoff["id"], native_session_id="native-a", now=3.0,
     )["stage"] == "native_accepted"
+    completed = result(original, acquired="created" if native is None else "resumed")
+    journal.complete(original, claim.token, completed)
+    assert journal.claim(original, runtime_admission=admission).result == completed
 
 
 @pytest.mark.parametrize("changes,native", [
     ({"mode": "cli"}, "native-a"),
     ({"intent": "continue", "prior_native_session_id": None}, None),
     ({"conversation_retired": True}, "native-a"),
+    ({
+        "allocation": "created", "intent": "automatic",
+        "prior_session_id": None, "prior_native_session_id": None,
+    }, "native-a"),
 ])
 def test_acquisition_launch_refuses_unsupported_or_contradictory_intent(
     tmp_db: Database, changes: dict, native: str | None,
@@ -219,6 +237,10 @@ def test_acquisition_launch_refuses_unsupported_or_contradictory_intent(
             consumer_incarnation="executor-a",
         )
     assert tmp_db.execute_read("SELECT launch_handoff_json FROM acquisition_attempts")[0][0] is None
+    row = tmp_db.execute_read("SELECT * FROM acquisition_attempts")[0]
+    assert row["launch_started_at"] is None
+    assert row["state"] == "pending"
+    assert tmp_db.execute_read("SELECT stage FROM acquisition_effects")[0][0] == "prepared"
 
 
 def test_acquisition_completed_receipt_cannot_change_observed_launch_kind(launch) -> None:

@@ -140,7 +140,8 @@ class _AcquisitionCustodyMixin:
         if (
             native_session_id is None and request.intent == "continue"
             or native_session_id is not None and (
-                request.intent == "fresh" or request.conversation_retired is True
+                request.allocation == "created"
+                or request.intent == "fresh" or request.conversation_retired is True
             )
         ):
             raise RuntimeCustodyError("Acquisition launch contradicts original conversation intent")
