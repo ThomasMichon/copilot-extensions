@@ -6,7 +6,7 @@
 - **Created:** 2026-10-16
 - **Status:** Active
 - **Umbrella issue:** #6681
-- **Sub-issues:** #5861; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
+- **Sub-issues:** #5861, #8888; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
 
 ## Guiding Intent
 
@@ -33,6 +33,7 @@ resource acquisition and identity bindings remain external adapters.
 | Existing #5789 / #6443 / #6804 owners | Routing, authentication, enrollment and Gateway integration | Their existing issue threads |
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
+| `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
 
 ## Coordination
 
@@ -365,6 +366,21 @@ onboarded merely because its source is published.
 - [ ] Transfer any unavailable live lane to a named tracked objective; do not
   silently remove a declared machine/environment from acceptance.
 
+### Explicit peer enrollment approval
+
+The selected policy is **`explicit-peer-approval`**. The detailed decomposition
+in the [peer-approval plan](peer-approval.md) is agent-recommended realization,
+not installation, credential or live-adoption authority.
+
+- [ ] Review the #8888 vision/contract amendment before implementation.
+- [ ] Implement optional exact-fingerprint peer admission and separate explicit
+  bootstrap/recovery in the existing SSH service, preserving its automatic
+  configured-binding baseline when the policy is absent.
+- [ ] Qualify the actual client/Gateway/store contract, restart, original-request
+  recovery, stale/unauthorized decisions and mixed-version refusal.
+- [ ] Merge the bounded source and record its retained release/adoption boundary;
+  do not mark the broader setup or live mesh items complete.
+
 ## Validation Plan
 
 - [x] Pair/schema: explicit roles, matching legacy projection, malformed and
@@ -398,6 +414,11 @@ onboarded merely because its source is published.
 - [ ] Clean-room and available live lanes; mark synthetic versus real evidence
   explicitly, including unexercised suspend/logout and channel-close cases.
 - [ ] Verify private policy is not embedded in public examples, tests or docs.
+- [ ] Peer-approval selection: pending public identities never enter active
+  directory or native relay authorization before exact authenticated approval;
+  explicit recovery cannot become a missing-approver fallback.
+- [ ] Peer-approval compatibility: absent policy retains the old contract;
+  incapable or rolled-back providers refuse the required policy before effects.
 
 ## Proposal
 
