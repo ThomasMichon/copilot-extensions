@@ -291,6 +291,14 @@ probe qualification, CI authorization and lifecycle validation remain with
       exclusion and unchanged transaction-level reuse are qualified. This is
       explicit preparation, not default-marketplace authentication, persistent
       offline admission, enabled installation or activation-time revocation.
+- [x] Compose the explicit authenticated-source transaction with actual Manager
+      installation and persisted unchanged-generation admission (#8991).
+      Current source/policy/feed authentication, target, local selection and
+      constructor evidence gate reuse; integrity refuses rather than repairing.
+      A real fresh process reuses without package-feed access or reconstruction.
+      Default marketplace/bootstrap authentication, production dependency
+      qualification, dependency-unchanged updates, measured defaults and
+      installation savings remain open.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -561,6 +569,15 @@ verified answer against its actual repository or machine configuration:
       routing, and owned installation/update/rollback/stop. This is future
       implementation, not completed by accepting the documentation-only design.
 
+- [x] Qualify explicit Manager source installation and cross-invocation reuse.
+      #8991's final head passes required CI and all 17 selected hosted native
+      Linux/Windows/macOS jobs. A clean current-head owner-authored Comment
+      has no concrete findings or unresolved threads. Real Manager cases
+      cover absolute/no-PATH and command-selected UV, account/resolver changes,
+      source-profile version checks, provenance-corruption refusal and genuine
+      health repair. Controlled authentication changes invalidate the keyed
+      policy identity without persisting credentials. This does not qualify
+      default bootstrap, live production dependencies or measured speedup.
 - [x] Qualify explicit authenticated-source preparation and the composed
       source-profile owner. #8880's final head passes required CI and all 11
       selected native Linux/Windows/macOS jobs, with fresh/reused tools-target
