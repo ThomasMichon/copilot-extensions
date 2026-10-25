@@ -1064,7 +1064,9 @@ Their source, adapter and canonical import closure are hash-bound. Each case
 must contribute actual `pr_publish` call coverage under the unchanged effect
 observer and unit budget. The controls preserve fresh destination authority
 and lock coverage while rejecting redundant target enumeration and nested
-lock resolution. Real-Git missing-remote, repoint and lock-count counterparts
+lock resolution. Git and bounded-process modules load native spawn helpers
+only in their actual process callers, not when importing target policy.
+Real-Git missing-remote, repoint and lock-count counterparts
 in `test_pr_remote_evidence.py` remain outside the unit packet. This enrollment
 does not establish native latency or complete Windows qualification.
 

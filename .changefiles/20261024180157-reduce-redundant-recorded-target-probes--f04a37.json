@@ -1,5 +1,5 @@
 {
-  "comment": "Reduce redundant recorded-target probes while retaining fresh destination and publication-lock checks.",
+  "comment": "Reduce redundant recorded-target probes while retaining fresh destination and publication-lock checks; defer native spawn helpers until process execution.",
   "changes": [
     {
       "plugin": "agent-worktrees",
