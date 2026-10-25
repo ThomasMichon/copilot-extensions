@@ -51,7 +51,12 @@ def source_install_selection(
 
 
 @contextmanager
-def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
+def candidate(
+    payload: Path, root: Path, *, assemble, uv: Path | None = None,
+    python: Path | None = None,
+    wheel_inputs: engine.WheelInstallInputs | engine.WheelReuseInputs | None = None,
+    local_packages: tuple[str, ...] | None = None, validate_candidate=None,
+):
     """Retain a healthy target; never publish selectors during construction."""
     if os.name == "nt":
         uv = Path(engine._select_uv_executable(str(Path.cwd() / uv) if uv is not None else "uv"))
@@ -77,6 +82,14 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
         ):
             raise ValueError("Manager construction requires its attributed project name and version")
         identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
+        if wheel_inputs is not None:
+            if identity is None:
+                raise ValueError("Manager source wheels require an attributed source identity")
+            if not isinstance(wheel_inputs, (engine.WheelInstallInputs, engine.WheelReuseInputs)):
+                raise ValueError("Manager source wheels require inspected retained inputs")
+            wheel_inputs.verify()
+        elif local_packages is not None:
+            raise ValueError("Manager local-package selection requires closed source wheels")
         prepared = Path(temporary) / "payload"
         if identity is None:
             assemble(payload, prepared)
@@ -85,24 +98,35 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             if runtime_source.read_source_identity(prepared, version, plugin="worktree-manager") != identity:
                 raise RuntimeError("Manager source identity changed during assembly")
         generation = identity.runtime_version if identity is not None else version
+        if wheel_inputs is not None:
+            generation += ".profile." + wheel_inputs.receipt()["lock_id"][7:23]
+        reuse_only = isinstance(wheel_inputs, engine.WheelReuseInputs)
+        if reuse_only:
+            if re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", wheel_inputs.generation) is None:
+                raise ValueError("Manager reuse evidence differs from its source/profile generation")
+            generation = wheel_inputs.generation
         requested_generation = generation
         if generation == "dev":
             raise RuntimeError("Manager mutable dev installation requires an explicit owning lifecycle")
         arguments = dict(
-            plugin=prepared, uv=uv, base_python=base_python(),
+            plugin=prepared, uv=uv, base_python=python or base_python(),
             health_module="worktree_manager.runtime_candidate",
             health_callable="verify_runtime_candidate",
             construction_callable="worktree_manager.runtime_candidate:prepare_runtime_candidate",
             process_retention=True, reuse_generations=identity is None,
             expected_source_identity=runtime_source.manifest_fields(identity),
         )
+        if wheel_inputs is not None:
+            arguments.update(wheel_inputs=wheel_inputs, local_packages=local_packages)
+        if validate_candidate is not None:
+            arguments["validate_candidate"] = validate_candidate
         current = runtime.current_version(root)
         if (
-            identity is not None and current and current.startswith(generation + ".repair.")
+            not reuse_only and identity is not None and current and current.startswith(generation + ".repair.")
             and runtime.is_complete(root, current)
         ):
             generation = current
-        if runtime.version_dir(root, generation).exists() and not runtime.is_complete(root, generation):
+        if not reuse_only and runtime.version_dir(root, generation).exists() and not runtime.is_complete(root, generation):
             family = current and (
                 current == generation or current.startswith(generation + "+repair.")
                 or current.startswith(generation + ".repair.")
@@ -119,6 +143,8 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             try:
                 ready = custody.enter_context(engine.numbered_candidate(root, generation, **arguments))
             except engine.HealthRepairRequired:
+                if reuse_only:
+                    raise
                 separator = "." if "+" in requested_generation else "+"
                 repaired = f"{requested_generation}{separator}repair.{uuid.uuid4().hex}"
                 arguments["reuse_generations"] = False

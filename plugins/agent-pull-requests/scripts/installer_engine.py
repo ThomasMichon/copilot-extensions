@@ -28,7 +28,7 @@ from installer_dependency_policy import (
 )
 from installer_engine_process import ChildLaunchError, ChildTimeoutExpired, run_owned
 from installer_wheel_inputs import _check_deadline, _ordinary
-from installer_wheel_snapshot import WheelInstallInputs, _digest, _open, _unchanged
+from installer_wheel_snapshot import WheelInstallInputs, WheelReuseInputs, _digest, _open, _unchanged
 
 _GENERATED_DIRECTORIES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs",
@@ -45,7 +45,7 @@ class FrozenInputs:
     retained_hash: str | None = None
     extras: tuple[str, ...] = ()
     local_packages: tuple[str, ...] | None = None
-    wheel_inputs: WheelInstallInputs | None = None
+    wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ def _construction_hash(
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | None) -> str:
+def _wheel_construction_hash(source_hash: str, wheels: WheelInstallInputs | WheelReuseInputs | None) -> str:
     if wheels is None:
         return source_hash
     return hashlib.sha256(json.dumps({
@@ -313,6 +313,8 @@ def _procutil(inputs: FrozenInputs) -> ModuleType:
 
 @contextmanager
 def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: bool):
+    if isinstance(inputs.wheel_inputs, WheelReuseInputs):
+        raise ValueError("Existing wheel evidence cannot construct a runtime")
     if inputs.wheel_inputs is not None:
         if refresh:
             raise ValueError("Closed wheels require immutable numbered construction")
@@ -433,6 +435,8 @@ def _child(
 
 
 def _input_origins(inputs: FrozenInputs) -> dict[str, str]:
+    if isinstance(inputs.wheel_inputs, WheelReuseInputs):
+        return {}
     if inputs.wheel_inputs is not None:
         return {
             name: (
@@ -668,7 +672,7 @@ def numbered_candidate(
     expected_source_identity: dict | None = None,
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
-    wheel_inputs: WheelInstallInputs | None = None,
+    wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance."""
@@ -700,6 +704,13 @@ def _check_dev_owner(root: Path, owner: str) -> None:
             raise RuntimeError("Mutable runtime construction requires this owner's explicit dev claim")
 
 
+def _lease_timeout(inputs: FrozenInputs, timeout: float) -> float:
+    if inputs.wheel_inputs is None:
+        return timeout
+    _check_deadline(inputs.wheel_inputs.deadline)
+    return max(0, min(timeout, inputs.wheel_inputs.deadline - time.monotonic()))
+
+
 @contextmanager
 def _candidate(
     root: Path, version: str, *, plugin: Path, uv: Path, base_python: Path,
@@ -711,7 +722,7 @@ def _candidate(
     expected_source_identity: dict | None = None,
     extras: tuple[str, ...] = (),
     local_packages: tuple[str, ...] | None = None,
-    wheel_inputs: WheelInstallInputs | None = None,
+    wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
 ):
     root = root.resolve()
@@ -726,9 +737,13 @@ def _candidate(
     else:
         local_packages = _selected_local_packages(plugin, packages, local_packages)
     if wheel_inputs is not None:
-        if not isinstance(wheel_inputs, WheelInstallInputs):
+        if not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs)):
             raise ValueError("Closed construction requires inspected wheel inputs")
         wheel_inputs.verify()
+        if isinstance(wheel_inputs, WheelReuseInputs) and (
+            reuse_generations or wheel_inputs.generation != version
+        ):
+            raise ValueError("Existing wheel evidence requires its exact immutable generation")
         included = {_package_name(package) for package in packages}
         selected = set(local_packages) if local_packages is not None else included
         installed = {name for name, _version, _filename, _digest in wheel_inputs.distributions}
@@ -765,9 +780,12 @@ def _candidate(
             runtime.check_admission(root, version, payload_hash=inputs.payload_hash)
         )
         _refuse(decision, version)
+        if isinstance(wheel_inputs, WheelReuseInputs) and decision != runtime.ADMIT_REUSE:
+            raise HealthRepairRequired("Existing wheel evidence cannot construct a missing runtime")
         if decision == runtime.ADMIT_REUSE:
             with runtime.retention_custody(
-                root, version, payload_hash=inputs.payload_hash, timeout=wait_timeout,
+                root, version, payload_hash=inputs.payload_hash,
+                timeout=_lease_timeout(inputs, wait_timeout),
             ) as (slot, descriptor):
                 _assert_source_pin(plugin, expected_source_identity)
                 _verify_installed(
@@ -784,7 +802,9 @@ def _candidate(
                 )
             return
         with ExitStack() as construction:
-            with runtime.construction_lease(root, version, timeout=wait_timeout) as descriptor:
+            with runtime.construction_lease(
+                root, version, timeout=_lease_timeout(inputs, wait_timeout),
+            ) as descriptor:
                 _assert_source_pin(plugin, expected_source_identity)
                 if dev_owner is not None:
                     _check_dev_owner(root, dev_owner)
@@ -851,7 +871,8 @@ def _candidate(
                 # caller never joins cutover coordination holding construction.
                 slot, retention_descriptor = construction.enter_context(
                     runtime.retention_custody(
-                        root, version, payload_hash=inputs.payload_hash, timeout=wait_timeout,
+                        root, version, payload_hash=inputs.payload_hash,
+                        timeout=_lease_timeout(inputs, wait_timeout),
                     )
                 )
             if reused:

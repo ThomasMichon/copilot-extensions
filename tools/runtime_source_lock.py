@@ -67,6 +67,24 @@ class SourceLockCandidate:
         _check_deadline(deadline)
 
 
+@dataclass(frozen=True)
+class SourceConfiguration:
+    """Held native settings and source facts; no resolution or lock approval."""
+
+    canonical: bytes
+    payload: Path
+    transaction: object = field(repr=False, compare=False)
+    projections: tuple[str, ...] = field(repr=False, compare=False)
+    output: Path = field(repr=False, compare=False)
+    _verification: Callable[[], None] = field(repr=False, compare=False)
+
+    def record(self) -> dict:
+        return json.loads(self.canonical)
+
+    def verify(self) -> None:
+        self._verification()
+
+
 def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
     try:
         text = re.sub(r"\\\r?\n", " ", content.decode("utf-8"))
@@ -165,7 +183,8 @@ def _source(payload: Path, expected: SourceIdentity) -> dict:
     if read_source_identity(payload, expected.package_version, plugin=expected.plugin) != expected:
         raise ProfileError("source candidate differs from the independently selected source")
     project = dependencies._toml(payload / "pyproject.toml")["project"]
-    if (canonicalize_name(project["name"]) != canonicalize_name(expected.plugin)
+    if ((expected.plugin != "worktree-manager"
+         and canonicalize_name(project["name"]) != canonicalize_name(expected.plugin))
             or project["version"] != expected.package_version):
         raise ProfileError("source candidate project differs from its selected identity")
     return project
@@ -199,22 +218,20 @@ def _build_roots(payload: Path, deadline: float) -> list[str]:
 
 
 @contextmanager
-def _retain_source_lock(
+def retain_source_configuration(
     plan: InstallationProfilePlan, *, payload: Path, expected_source: SourceIdentity,
     target: dict, component: str, uv: str, python: Path,
-    max_lock_bytes: int, deadline: float, extras: tuple[str, ...] = (),
+    deadline: float, extras: tuple[str, ...] = (),
     env: dict[str, str] | None = None, wheel_witness: bool = False,
     include_build_tools: bool = False,
     installation: dict | None = None,
 ):
-    """Keep source/configuration custody through candidate consumption.
+    """Capture source/compiler settings without executing dependency resolution.
 
     The existing authority supplies the source selection and target facts.
     No installation, source discovery, alternate release or artifact is used.
     """
     _check_deadline(deadline)
-    if type(max_lock_bytes) is not int or max_lock_bytes <= 0:
-        raise ProfileError("source candidate needs a positive lock byte budget")
     if type(include_build_tools) is not bool or (include_build_tools and not wheel_witness):
         raise ProfileError("build tools require an exact native source wheel lock")
     if include_build_tools and installation is None:
@@ -284,60 +301,100 @@ def _retain_source_lock(
             _retained_source(transaction, payload, deadline)
             retained_roots = tuple(transaction.sources.values())
             retained_hash = runtime.fingerprint_source(_source_files(retained_roots))
+            configuration_policy = None
             if installation is not None:
                 from runtime_feed_configuration import validate_source_resolution_inputs
 
-                validate_source_resolution_inputs(
+                configuration_policy = validate_source_resolution_inputs(
                     plan, installation=installation, transaction=transaction,
                     projections=projection, deadline=deadline,
                 )
-            _check_deadline(deadline)
-            result = subprocess.run(
-                list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=deadline - time.monotonic(),
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
-            _check_deadline(deadline)
-            if result.returncode:
-                raise ProfileError("retained source candidate resolution failed")
-            with output.open("rb") as stream:
-                content = stream.read(max_lock_bytes + 1)
-            if len(content) > max_lock_bytes:
-                raise ProfileError("source candidate exceeds its lock byte budget")
-            _source(payload, expected_source)
-            if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
-                raise ProfileError("retained source changed during candidate resolution")
-            native_lock = content if wheel_witness else None
-            files = _wheel_pins(content, frozen_target, deadline) if wheel_witness else None
-            if files is not None:
-                content = "".join(
-                    f'{item["name"]}=={item["version"]} --hash={item["sha256"]}\n' for item in files
-                ).encode("ascii")
             record = {
-                "schema": "copilot-extensions.source-lock-candidate", "version": 1,
+                "schema": "copilot-extensions.source-configuration", "version": 1,
                 "mode": "source", "source": expected_source.document(),
                 "trigger": plan.source_trigger, "policy": policy, "target": frozen_target,
                 "component": component, "extras": list(extras),
                 "python": str(python.resolve(strict=True)),
                 "retained_source_sha256": "sha256:" + retained_hash,
-                "pins": _pins(content, frozen_target["environment"], deadline),
-                "requirements_sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
             }
-            if files is not None:
-                record["files"] = files
-                record["native_lock_sha256"] = "sha256:" + hashlib.sha256(native_lock).hexdigest()
+            if configuration_policy is not None:
+                record["configuration_policy"] = configuration_policy
             if build_roots is not None:
                 record["build_roots"] = build_roots
             canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-            _check_deadline(deadline)
-            yield SourceLockCandidate(
-                canonical, content, transaction.sources[payload], native_lock,
-                transaction if wheel_witness else None, tuple(projection) if wheel_witness else (),
+
+            def verify():
+                _check_deadline(deadline)
+                _source(payload, expected_source)
+                if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
+                    raise ProfileError("retained source changed during candidate consumption")
+                if installation is not None:
+                    observed = validate_source_resolution_inputs(
+                        plan, installation=installation, transaction=transaction,
+                        projections=projection, deadline=deadline,
+                    )
+                    if observed != configuration_policy:
+                        raise ProfileError("source configuration changed during consumption")
+                _check_deadline(deadline)
+
+            verify()
+            yield SourceConfiguration(
+                canonical, transaction.sources[payload], transaction, tuple(projection),
+                output, verify,
             )
-            _check_deadline(deadline)
-            if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
-                raise ProfileError("retained source changed during candidate consumption")
+            verify()
+
+
+@contextmanager
+def _retain_source_lock(
+    plan: InstallationProfilePlan, *, max_lock_bytes: int, deadline: float,
+    wheel_witness: bool = False, **options,
+):
+    """Resolve only after the actual source/settings owner has been captured."""
+    _check_deadline(deadline)
+    if type(max_lock_bytes) is not int or max_lock_bytes <= 0:
+        raise ProfileError("source candidate needs a positive lock byte budget")
+    with retain_source_configuration(
+        plan, deadline=deadline, wheel_witness=wheel_witness, **options,
+    ) as configuration:
+        transaction = configuration.transaction
+        result = subprocess.run(
+            list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=deadline - time.monotonic(),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        _check_deadline(deadline)
+        if result.returncode:
+            raise ProfileError("retained source candidate resolution failed")
+        with configuration.output.open("rb") as stream:
+            content = stream.read(max_lock_bytes + 1)
+        if len(content) > max_lock_bytes:
+            raise ProfileError("source candidate exceeds its lock byte budget")
+        configuration.verify()
+        record = configuration.record()
+        native_lock = content if wheel_witness else None
+        files = _wheel_pins(content, record["target"], deadline) if wheel_witness else None
+        if files is not None:
+            content = "".join(
+                f'{item["name"]}=={item["version"]} --hash={item["sha256"]}\n' for item in files
+            ).encode("ascii")
+        record.update({
+            "schema": "copilot-extensions.source-lock-candidate",
+            "pins": _pins(content, record["target"]["environment"], deadline),
+            "requirements_sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
+        })
+        if files is not None:
+            record["files"] = files
+            record["native_lock_sha256"] = "sha256:" + hashlib.sha256(native_lock).hexdigest()
+        canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        _check_deadline(deadline)
+        yield SourceLockCandidate(
+            canonical, content, configuration.payload, native_lock,
+            transaction if wheel_witness else None,
+            configuration.projections if wheel_witness else (),
+        )
+        _check_deadline(deadline)
 
 
 def retain_source_lock(plan: InstallationProfilePlan, **options):

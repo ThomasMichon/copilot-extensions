@@ -46,6 +46,7 @@ from runtime_source_lock import (
     _build_roots,
     _source,
     dependencies,
+    retain_source_configuration,
     retain_source_wheel_lock,
 )
 from runtime_source_wheels import retain_source_profile
@@ -149,6 +150,7 @@ def retain_source_runtime_inputs(
     python: Path, extras: tuple[str, ...] = (), env: dict[str, str] | None = None,
     acquisition_limits: AcquisitionLimits, wheel_limits: WheelLimits,
     max_lock_bytes: int, max_snapshot_bytes: int, deadline: float,
+    revoked_inputs: Callable[[], frozenset[str]] | None = None,
 ):
     """Retain authenticated source, admitted tools and built runtime wheels.
 
@@ -206,11 +208,20 @@ def retain_source_runtime_inputs(
             build_inputs = _inputs(
                 build_profile, build_snapshot, evidence=evidence, limits=wheel_limits, deadline=deadline,
             )
+
+            def verify_build():
+                authenticated.verify()
+                if revoked_inputs is not None:
+                    from runtime_source_reuse import verify_not_revoked
+
+                    verify_not_revoked(build_inputs.receipt(), revoked_inputs)
+
+            verify_build()
             build_root = Path(record["policy"]["owner"]["runtimeRoot"]) / ".source-build-tools"
             build_version = authenticated.identity.runtime_version + ".build." + build_inputs.receipt()["lock_id"][7:23]
 
             def validate_tools(slot):
-                authenticated.verify()
+                verify_build()
                 installed_python = engine.runtime.slot_python(build_root, slot.name)
                 if _query_marker_environment(installed_python, deadline=deadline) != record["target"]["environment"]:
                     raise ProfileError("installed build-tools interpreter differs from the selected target")
@@ -230,7 +241,7 @@ def retain_source_runtime_inputs(
                     **record, "source_authentication": evidence["source"],
                     "acquisition": evidence["acquisition"],
                 }, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(),
-                    _verification=authenticated.verify,
+                    _verification=verify_build,
                 )
                 authenticated.verify()
                 with retain_source_profile(
@@ -242,10 +253,113 @@ def retain_source_runtime_inputs(
                     construction_fd=tools.descriptor,
                     retained_runtime=(build_root, build_version, Path(engine.runtime.__file__)),
                 ) as completed:
+                    def verify_runtime():
+                        verify_build()
+                        if revoked_inputs is not None:
+                            from runtime_source_reuse import verify_not_revoked
+
+                            verify_not_revoked(completed.wheels.receipt(), revoked_inputs)
+
                     result = SourceRuntimeInputs(
                         locked.payload, authenticated.identity, completed.profile,
-                        completed.wheels, tools.slot, completed.local_packages, authenticated.verify,
+                        completed.wheels, tools.slot, completed.local_packages, verify_runtime,
                     )
                     result.verify()
                     yield result
                     result.verify()
+
+
+@contextmanager
+def _manager_source_inputs(plan, *, revoked_inputs, **options):
+    root = Path(plan.policy()["owner"]["runtimeRoot"])
+    current = engine.runtime.current_version(root)
+    if current and ".profile." in current:
+        from runtime_source_reuse import retain_source_runtime_reuse
+
+        with retain_authenticated_source(
+            plan, installation=options["installation"], deadline=options["deadline"],
+        ) as authenticated, retain_source_configuration(
+            plan, payload=authenticated.payload, expected_source=authenticated.identity,
+            target=options["target"], component=options["component"], uv=options["uv"],
+            python=options["python"], extras=options.get("extras", ()), env=options.get("env"),
+            deadline=options["deadline"], wheel_witness=True, include_build_tools=True,
+            installation=options["installation"],
+        ) as configuration, retain_source_runtime_reuse(
+            authenticated, configuration, max_receipt_bytes=options["max_snapshot_bytes"],
+            max_tags=options["wheel_limits"].max_tags, deadline=options["deadline"],
+            revoked_inputs=revoked_inputs,
+        ) as existing:
+            if existing is not None:
+                yield existing
+                return
+    with retain_source_runtime_inputs(
+        plan, **options, **({"revoked_inputs": revoked_inputs} if revoked_inputs is not None else {}),
+    ) as source:
+        yield source
+
+
+def install_manager_source_runtime(plan, *, revoked_inputs=None, **options):
+    """Enter the actual Manager lifecycle while its authenticated inputs live.
+
+    This explicit repository caller does not enable marketplace/bootstrap
+    consumers or turn retained constructor receipts into source approval.
+    """
+    from worktree_manager import self_install
+
+    owner = plan.policy()["owner"]
+    if owner["pluginId"] != "worktree-manager" or options.get("extras", ()):
+        raise ProfileError("Manager source installation requires its base installation owner")
+    if options.get("uv") is not None:
+        selected_uv = dependencies._select_uv_executable(options["uv"])
+        options["uv"] = str(Path(shutil.which(selected_uv) or selected_uv).resolve(strict=True))
+    root = Path(owner["runtimeRoot"]).resolve()
+    with _manager_source_inputs(plan, revoked_inputs=revoked_inputs, **options) as source:
+        try:
+            return _install_manager_inputs(
+                source, root, self_install, revoked_inputs, options.get("deadline"), options.get("python"),
+                options.get("uv"),
+            )
+        except engine.HealthRepairRequired:
+            if not isinstance(source.wheels, engine.WheelReuseInputs):
+                raise
+    # A stored receipt cannot build its own repair. Re-enter ordinary source
+    # admission with actual bytes before the existing adapter allocates one.
+    with retain_source_runtime_inputs(
+        plan, **options, **({"revoked_inputs": revoked_inputs} if revoked_inputs is not None else {}),
+    ) as source:
+        return _install_manager_inputs(
+            source, root, self_install, revoked_inputs, options.get("deadline"), options.get("python"),
+            options.get("uv"),
+        )
+
+
+def _install_manager_inputs(source, root, self_install, revoked_inputs, deadline, python, uv):
+    if source.identity.plugin != "worktree-manager":
+        raise ProfileError("Manager source installation has a foreign source identity")
+
+    def verify():
+        source.verify()
+        if revoked_inputs is not None:
+            from runtime_source_reuse import verify_not_revoked
+
+            verify_not_revoked(source.wheels.receipt(), revoked_inputs)
+
+    def validate(slot):
+        verify()
+        python = engine.runtime.slot_python(root, slot.name)
+        if python is None or _query_marker_environment(python, deadline=deadline) != (
+            source.profile.record()["target"]["environment"]
+        ):
+            raise ProfileError("installed Manager interpreter differs from the selected target")
+
+    verify()
+    result = self_install.self_install(
+        source.payload, root=root, dry_run=False,
+        _wheel_inputs=source.wheels, _local_packages=source.local_packages,
+        _validate_candidate=validate, _before_publish=verify,
+        _raise_candidate_errors=True,
+        **({"_base_python": python} if python is not None else {}),
+        **({"_uv": Path(uv)} if uv is not None else {}),
+    )
+    verify()
+    return result

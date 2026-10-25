@@ -454,6 +454,11 @@ def _capture(
         "owner_policy": policy["policyId"], "feeds": [feed.identity for feed in feeds],
         "transport": transport, "seasoning": _seasoning_identity(original_settings),
         "index_strategy": settings["index_strategy"],
+        "dependency_selection": {
+            key: original_settings.get(key) for key in (
+                "resolution", "prerelease", "fork_strategy", "dependency_mode",
+            )
+        },
         "profile_policy": profile_policy,
     }, sort_keys=True, separators=(",", ":")))
     proxies = {}
@@ -533,16 +538,16 @@ def _source_policy(plan: InstallationProfilePlan, installation: dict) -> dict:
 def validate_source_resolution_inputs(
     plan: InstallationProfilePlan, *, installation: dict, transaction, projections: list[str],
     deadline: float,
-) -> None:
+) -> str:
     """Validate the held native settings before the compiler can request packages."""
     _check_deadline(deadline)
     current = _source_policy(plan, installation)
     if len(projections) != 2:
         raise ProfileError("source resolution preflight needs paired native configurations")
-    _capture(
+    return _capture(
         transaction, projections[1], projections[0], None, current,
         transaction.argv[0], deadline, source_resolution=True,
-    )
+    ).policy_id
 
 
 @contextmanager

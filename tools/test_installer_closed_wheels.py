@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+from contextlib import contextmanager
 from dataclasses import replace
 import json
 import os
@@ -249,6 +250,20 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
     monkeypatch.setenv("UV_INDEX_URL", "http://127.0.0.1:1/unavailable")
     monkeypatch.setenv("UV_CONFIG_FILE", str(tmp_path / "missing-config"))
     monkeypatch.setenv("UV_CACHE_DIR", str(tmp_path / "poison-cache"))
+    leases = []
+
+    def bounded(lease):
+        @contextmanager
+        def acquire(*args, **kwargs):
+            remaining = wheels.deadline - time.monotonic()
+            assert 0 <= kwargs["timeout"] <= remaining + 0.05
+            leases.append((lease.__name__, kwargs["timeout"]))
+            with lease(*args, **kwargs) as held:
+                yield held
+        return acquire
+
+    monkeypatch.setattr(engine.runtime, "construction_lease", bounded(engine.runtime.construction_lease))
+    monkeypatch.setattr(engine.runtime, "retention_custody", bounded(engine.runtime.retention_custody))
     with snapshot(tmp_path, closure=True, version="1") as retained:
         wheels = inspected(retained)
         assert wheels.receipt()["distributions"]["demo-pkg"]["version"] == "1"
@@ -277,6 +292,29 @@ def test_native_existing_constructor_builds_and_reuses_exact_closed_wheels(
         with candidate(engine, tmp_path / "first-runtime", plugin, wheels) as reused:
             assert reused.reused
             assert reused.slot == slots[0]
+    assert [name for name, _timeout in leases] == [
+        "construction_lease", "retention_custody",
+        "construction_lease", "retention_custody", "retention_custody",
+    ]
+    assert leases[1][1] < leases[0][1]
+
+
+def test_closed_lease_timeout_preserves_wait_limit_and_rejects_expiry(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        inputs = engine.FrozenInputs(plugin, (plugin,), "fixture", wheel_inputs=wheels)
+        now = time.monotonic()
+        with monkeypatch.context() as clock:
+            clock.setattr(time, "monotonic", lambda: now)
+            assert engine._lease_timeout(inputs, 0) == 0
+            assert engine._lease_timeout(inputs, 0.1) == 0.1
+            assert engine._lease_timeout(inputs, 180) == wheels.deadline - now
+            clock.setattr(time, "monotonic", lambda: wheels.deadline)
+            with pytest.raises(WheelError, match="deadline"):
+                engine._lease_timeout(inputs, 180)
+            assert engine._lease_timeout(replace(inputs, wheel_inputs=None), 180) == 180
 
 
 def test_closed_constructor_retains_caller_relative_uv_as_absolute(

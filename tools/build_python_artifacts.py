@@ -688,8 +688,10 @@ def build_wheel(
         strip_package_source_env_vars(build_env, strip_credentials=True)
 
         def run(argv):
+            # UV receives its source explicitly; Windows cannot launch with a
+            # deeply retained source directory as the process working directory.
             return run_owned(
-                argv, cwd=source_dir, env=build_env, timeout=deadline - time.monotonic(),
+                argv, cwd=out_dir, env=build_env, timeout=deadline - time.monotonic(),
                 deadline=deadline, procutil=procutil, construction_fd=construction_fd,
                 runtime_root=retained_runtime[0], runtime_version=retained_runtime[1],
                 runtime_path=retained_runtime[2],

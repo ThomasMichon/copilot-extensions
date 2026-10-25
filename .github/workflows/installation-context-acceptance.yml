@@ -753,9 +753,18 @@ jobs:
 
   source-build-linux:
     if: ${{ inputs.dependency_compile }}
-    name: Admitted source build (Linux)
+    name: Admitted source build (Linux, ${{ matrix.suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: &source-build-matrix
+        suite: [profiles, refusals, manager]
+        include:
+          - suite: profiles
+            expression: not (unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy)
+          - suite: refusals
+            expression: unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy
     steps: &source-build-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -765,13 +774,29 @@ jobs:
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
       - name: Real authenticated source, admitted tools, offline build and health
-        run: python -m pytest -q tools/test_runtime_source_build.py
+        if: ${{ matrix.suite != 'manager' }}
+        run: >-
+          python -m pytest -q
+          tools/test_runtime_source_build.py
+          -k "${{ matrix.expression }}"
+      - name: Persisted Manager admission and fresh-process offline reuse
+        if: ${{ matrix.suite == 'manager' }}
+        run: >-
+          python -m pytest -q
+          tools/test_manager_source_install.py
+          tools/test_manager_source_native.py
+          tools/test_runtime_source_reuse.py
+          worktree-manager/tests/test_manager_update_check.py
+          libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
 
   source-build-windows:
     if: ${{ inputs.dependency_compile }}
-    name: Admitted source build (Windows)
+    name: Admitted source build (Windows, ${{ matrix.suite }})
     runs-on: windows-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: *source-build-matrix
     steps: *source-build-steps
 
   installer-latency-linux:

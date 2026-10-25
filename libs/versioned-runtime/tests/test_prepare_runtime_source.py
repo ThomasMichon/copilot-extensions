@@ -22,6 +22,52 @@ import prepare_runtime_source as source_runtime
 PLUGIN = "agent-fixture"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows transient rename locks")
+@pytest.mark.parametrize("failures", [1, 3, 4])
+def test_prepared_publication_retries_only_bounded_transient_locks(tmp_path, monkeypatch, failures):
+    payload, destination = tmp_path / "payload", tmp_path / "published"
+    payload.mkdir()
+    (payload / "selected.txt").write_text("selected")
+    actual = Path.rename
+    attempts, sleeps = [], []
+
+    def locked(path, target):
+        attempts.append((path, target))
+        if len(attempts) <= failures:
+            raise PermissionError("synthetic transient sharing lock")
+        return actual(path, target)
+
+    monkeypatch.setattr(Path, "rename", locked)
+    monkeypatch.setattr(source_runtime.time, "sleep", sleeps.append)
+    if failures < 4:
+        source_runtime._rename_prepared(payload, destination, deadline=time.monotonic() + 10)
+        assert (destination / "selected.txt").read_text() == "selected"
+        assert len(attempts) == failures + 1
+    else:
+        with pytest.raises(PermissionError):
+            source_runtime._rename_prepared(payload, destination, deadline=time.monotonic() + 10)
+        assert not destination.exists() and (payload / "selected.txt").is_file()
+        assert len(attempts) == 4
+    assert len(sleeps) == min(failures, 3)
+
+
+def test_prepared_publication_never_retries_permanent_or_expired_errors(tmp_path, monkeypatch):
+    attempts = []
+
+    def refuse(path, target):
+        attempts.append(path)
+        raise FileExistsError("foreign destination")
+
+    monkeypatch.setattr(Path, "rename", refuse)
+    monkeypatch.setattr(source_runtime.time, "sleep", lambda *args: pytest.fail("permanent error retried"))
+    with pytest.raises(FileExistsError):
+        source_runtime._rename_prepared(tmp_path / "input", tmp_path / "output", deadline=time.monotonic() + 10)
+    assert len(attempts) == 1
+    with pytest.raises(source_runtime.SourcePreparationError, match="deadline"):
+        source_runtime._rename_prepared(tmp_path / "input", tmp_path / "output", deadline=time.monotonic() - 1)
+    assert len(attempts) == 1
+
+
 def _git(root: Path, *arguments: str) -> str:
     environment = {
         key: value for key, value in os.environ.items()

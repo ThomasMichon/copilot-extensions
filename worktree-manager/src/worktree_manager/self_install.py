@@ -780,10 +780,10 @@ def self_install(
     *,
     root: Path | None = None,
     dry_run: bool = True,
-    _after_activate=None,
-    _before_publish=None,
-    _transactional_activation: bool = False,
-    _reconcile_instances: bool = True,
+    _after_activate=None, _before_publish=None,
+    _transactional_activation: bool = False, _reconcile_instances: bool = True,
+    _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
+    _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     r = (root or default_root()).resolve()
@@ -814,14 +814,21 @@ def self_install(
             from installer_instance_reconcile import reconcile_installer_instances
 
             reconcile_installer_instances(running_payload_dir() / "scripts")
-        with installer.candidate(pd, r, assemble=_copy_payload) as ready:
+        candidate_options = {key: value for key, value in (
+            ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
+            ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
+        ) if value is not None}
+        with installer.candidate(pd, r, assemble=_copy_payload, **candidate_options) as ready:
             slot = ready.slot
             return _complete_candidate(
-                ready, pd, r, previous=previous, was_current=was_current,
+                ready, pd, r, previous=previous,
+                was_current=was_current or (_wheel_inputs is not None and previous == slot.name),
                 before_publish=_before_publish, after_activate=_after_activate,
                 transactional_activation=_transactional_activation,
             )
     except (OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        if _raise_candidate_errors:
+            raise
         return SelfInstallResult(
             version=version, action="error", root=str(r), slot=str(slot), reason=str(error),
         )

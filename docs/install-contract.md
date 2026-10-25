@@ -3510,10 +3510,17 @@ frontend's `packaging` dependency. Its actual installation owner validates
 the held native indexes, credential/trust providers and supported configuration
 before the compiler can make package requests. The same retained transaction
 then resolves dependencies and supplies acquisition; no second resolver pass
-or artifact selection is introduced. Exact native wheel witnesses must be
+or artifact selection is introduced. `retain_source_configuration` exposes
+that existing pre-execution boundary without running the compiler; its native
+configuration identity is included in new source locks for later owner
+revalidation. It is not a source-lock candidate or an approval.
+Exact native wheel witnesses must be
 unambiguous; inspection precedes backend execution. A separate numbered
 build-tools environment runs the existing frontend offline, with owned
-deadline-bound children. Built runtime metadata must agree with authenticated
+deadline-bound children. The existing verified source-copy helper supplies a
+compact build workspace, avoiding Windows backend working-directory limits;
+both retained and compact source hashes remain checked around backend execution.
+Built runtime metadata must agree with authenticated
 static declarations. The final complete runtime profile contains only its
 reachable runtime closure, not build-only packages. Generation identity binds
 source, lock, build and actual acquisition facts through the existing receipt.
@@ -3536,6 +3543,69 @@ candidate verifier's nonserialized owner hook, not an approval map. This explici
 production consumer, persistent offline discovery, source-cache GC, activation
 or a live-feed exception. See [source preparation](../tools/prepare_runtime_source.md)
 and [validation coverage](../TESTING.md#wheel-input-inspection).
+
+### Explicit Manager source-install integration
+
+The repository caller `runtime_source_build.install_manager_source_runtime`
+composes that held transaction with the actual Manager `self_install` lifecycle.
+It accepts only the base Manager installation owner, passes the authenticated
+prepared payload and complete first-party/runtime wheel set, and rechecks source
+policy at candidate health and immediately before publication. Installed
+interpreter markers must match the selected target before completion; the
+selected interpreter and UV executable are forwarded through installation and
+repair rather than rediscovered from the caller's interpreter, PATH or SDK.
+Command-name UV inputs are resolved once before admission, and that absolute
+selection is retained through both installation attempts.
+
+The existing standalone candidate adapter accepts these optional closed inputs
+without importing repository tooling or `packaging` during bootstrap. It derives
+the source generation's `.profile.<lock-id-prefix>` before admission and retains
+the existing construction, health, repair, retention and selector-recovery
+owners. Matching selected profile generations retain `already-current` reporting.
+Update detection compares the package version after removing generated source,
+profile and repair identity suffixes; those suffixes do not invent a new release.
+Ordinary source installation remains unchanged.
+
+Across invocations, `runtime_source_reuse.retain_source_runtime_reuse` can
+borrow the selected completed generation under the existing retention lease.
+It reads bounded, ordinary constructor evidence, verifies its full receipt
+and installed payload against the completion identity, and compares the
+current authenticated source, owner, native configuration, target, component,
+extras, local package selection, build profile and final profile. Configuration
+identity includes native resolution, prerelease, fork and dependency modes.
+Obsolete selections are unavailable; missing receipts on completed generations,
+malformed or changed evidence are integrity refusals, not permission to rebuild
+around them.
+Present but malformed completion markers are also integrity refusals; only
+genuinely absent completion evidence permits cold admission. Reuse rechecks
+completion identity during consumption. Closed construction and reuse clamp
+each construction/retention lock wait to the held wheel-input deadline rather
+than restarting an independent wait budget.
+Nonordinary selected slot paths refuse rather than becoming apparent absence.
+
+`WheelReuseInputs` is read-only constructor evidence, not cached wheel bytes
+or approval. The same engine can health-check its exact existing generation,
+including installed distributions, versions and archive origins, but cannot
+construct a missing runtime or a repair from this type. A genuine installed
+health failure releases receipt custody before normal source admission
+reacquires actual bytes and enters the existing distinct-generation repair
+path. The Manager lifecycle still owns publication and selector recovery.
+
+The optional `revoked_inputs` callback supplies current, immutable digest
+denials; it cannot approve inputs. Source admission checks it before installing
+build tools and before each backend, and installation/reuse rechecks it at
+health and immediately before publication. It covers source, lock, profile,
+build and runtime wheel identities. This callback does not query a feed for
+fresh server-side revocations; a consumer requiring that evidence must obtain
+it through its current authority before proceeding.
+
+This is an explicit repository API, not a new CLI mode or default bootstrap
+selection. Its caller still owns source/feed authentication; constructor input
+objects and receipts are not approval. The settings-only warm path makes no
+package-feed requests, resolves no dependencies and rebuilds no runtime;
+configured-source authentication may still access its selected Git origin.
+Marketplace-source authentication, production dependency/native qualification
+and measured cold/warm speedup remain separate gates.
 
 ### Bounded wheel inspection
 

@@ -3,6 +3,41 @@
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+The opt-in `installation-context-acceptance.yml` admitted-source jobs also run
+`tools/test_manager_source_install.py` and `tools/test_manager_source_native.py`.
+Profiles, refusal controls and Manager reuse run in disjoint partitions on
+each host, retaining the existing six-minute job ceiling rather than combining
+every native source scenario into one growing serial job.
+The latter exercises the real standalone Manager adapter and immutable
+constructor with a complete synthetic Manager/process-owner wheel closure:
+offline construction, retained reuse, changed binding, missing first-party
+input and failed-candidate selector preservation. A configured synthetic Git
+source additionally traverses real native feed admission, source builds and
+Manager `self_install`; a fresh Python process reuses its completed generation
+with the feed unavailable and construction forbidden. The completion marker
+and receipt remain unchanged, and the feed observes no additional requests.
+Both invocations test an absolute selected UV with no UV on PATH, and a UV
+command selected from PATH. Changing the native resolver mode subsequently
+requires ordinary source admission instead of reuse; corrupt completion
+evidence still refuses before cold admission. The same hosted Manager jobs
+run package-version parsing and actual update-check regressions for source,
+source-profile and repaired generations.
+This does not qualify the production Manager dependency closure, default
+marketplace bootstrap or performance. Fast adapter and self-install
+contracts remain in the ordinary `worktree-manager` suite.
+
+`tools/test_runtime_source_reuse.py` covers bounded persisted evidence admission,
+changed current selections, missing completed receipts, source/receipt corruption, current digest denials
+and consume-time invalidation. Nonordinary selected slots, including dangling
+links, refuse rather than becoming cold-source availability. The same constructor must refuse to construct
+from a reuse-only receipt. Pure caller controls distinguish typed installed
+health repair (which releases custody and reacquires real source inputs) from
+integrity failures (which never trigger fallback). Prepared-source publication
+also tests bounded Windows transient-lock retries without retrying permanent
+errors or extending the original deadline.
+Expired source-lock consumption retains an active typed subprocess timeout
+and its diagnostics; successful consumption still checks the outer deadline.
+
 > This is the canonical testing guide. [`AGENTS.md`](AGENTS.md) links here and
 > keeps only a short inline summary; the per-plugin release/versioning rules live
 > in [`docs/pipelines.md`](docs/pipelines.md).
@@ -619,8 +654,12 @@ before the backend runs; ordinary promotion-toolchain controls remain intact.
 Fresh and reused tools slots validate their installed interpreter against the
 selected marker environment before any backend runs. Native regressions query
 real tools interpreters, inject a mismatched target result and require refusal;
-the success control still proves unchanged immutable reuse. Short synthetic
-directory labels keep these nested native executables within Windows path limits.
+the success control still proves unchanged immutable reuse. Offline source
+builds use the existing source-freezing helper to keep backend working paths
+compact on Windows while checking the original and compact source hashes.
+Native settings-only capture additionally proves stable configuration identity,
+changed seasoning identity, no lock creation and zero feed requests. A current
+build-wheel denial must refuse before tools installation or backend execution.
 Source-mode configuration refusals additionally forbid effectful compiler
 execution and require zero package requests for implicit public indexes and
 unsupported index, credential, TLS and proxy settings.

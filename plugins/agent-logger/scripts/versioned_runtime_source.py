@@ -325,7 +325,8 @@ def package_version(slot_name: str) -> str:
     """Separate generated source/repair identities from the package version."""
     ordinary = re.sub(r"[+.]repair\.[0-9a-f]{32}$", "", slot_name)
     return re.sub(
-        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}$", "", ordinary,
+        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+        r"(?:\.profile\.[0-9a-f]{16})?$", "", ordinary,
     )
 
 

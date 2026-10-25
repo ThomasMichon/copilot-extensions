@@ -206,6 +206,37 @@ published artifact set. Existing publication and source/candidate owners retain
 their scopes; source fallback does not wait for their artifact availability
 proof or take over their open work.
 
+## Actual Manager installer integration
+
+Continue through the existing Manager candidate and self-install lifecycle,
+not a second constructor or a bootstrap import of repository-only tooling.
+This is a bounded explicit-source caller; marketplace authentication, persisted
+offline admission and default enablement remain separate parent gates.
+
+1. Add optional inspected wheel inputs and explicit local-package selection to
+   the existing Manager candidate adapter. Its ordinary path stays unchanged.
+   The source-wheel path requires the existing source identity and the complete
+   first-party/runtime closure produced by `retain_source_runtime_inputs`, not
+   the compiler's third-party-only lock or its separate build-tool closure.
+2. Bind the wheel receipt into the generation before existing admission and
+   repair selection. Different locks or policies cannot occupy the ordinary
+   source generation. Retain the existing installed-health, distinct-generation
+   repair, retention and selector-recovery owners.
+3. Compose the authenticated source transaction with actual `self_install`.
+   Recheck the independently resolved owner, exact destination and source
+   before construction health and publication. Keep the source/input context
+   alive until the existing publication path settles. Neither an optional
+   constructor argument nor a serialized receipt grants approval.
+4. Exercise the real adapter and constructor with a complete synthetic Manager
+   wheel closure, unavailable network and poisoned ambient resolver settings.
+   Cover matching reuse, changed binding, missing first-party input, source
+   identity refusal and failed-health preservation. Separately test that the
+   authenticated caller reaches the existing self-install lifecycle.
+5. Do not describe these checks as offline admission across invocations, fresh
+   default bootstrap, production Manager dependency qualification or measured
+   installation speedup. Those require the remaining authenticated marketplace,
+   persisted-admission and native-consumer acceptance work.
+
 ## Validation and completion
 
 - [x] The bounded archive/file-inspection component and complete-profile byte

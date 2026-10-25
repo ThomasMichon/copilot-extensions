@@ -284,6 +284,13 @@ probe qualification, CI authorization and lifecycle validation remain with
       counters do not invalidate healthy same-input reuse. This explicit
       preparation API does not enable consumers, approve a live feed or
       complete source/revocation/provider/retention contracts.
+- [x] Compose independently authenticated configured source, native exact
+      runtime/build locking, governed wheel acquisition and separate immutable
+      build tools through the existing source-profile completion owner (#8880).
+      Actual built/runtime metadata, installed target and health, build-only
+      exclusion and unchanged transaction-level reuse are qualified. This is
+      explicit preparation, not default-marketplace authentication, persistent
+      offline admission, enabled installation or activation-time revocation.
 - [ ] Complete the reviewed [wheel-input admission slice](wheel-input-admission.md):
       authenticated approval/acquisition, supplied revocation and enabled real
       consumer contracts remain open after the bounded construction component.
@@ -554,6 +561,15 @@ verified answer against its actual repository or machine configuration:
       routing, and owned installation/update/rollback/stop. This is future
       implementation, not completed by accepting the documentation-only design.
 
+- [x] Qualify explicit authenticated-source preparation and the composed
+      source-profile owner. #8880's final head passes required CI and all 11
+      selected native Linux/Windows/macOS jobs, with fresh/reused tools-target
+      refusal, precompile feed-policy refusal, real build-only requirements,
+      backend descendant settlement and actual offline runtime health/reuse.
+      The 1,792-case admitted unit packet passes under the unchanged 300-second
+      whole-execution budget. Current-head review has no open issues and every
+      thread is resolved. This does not credit a live feed, default provider,
+      installation speedup, persistent offline admission or production caller.
 - [x] Qualify bounded exact-wheel preparation with real TLS/authentication,
       pre-request redirect refusal, independent count/byte/storage/deadline
       bounds, worker settlement, offline installed health and unchanged-input
@@ -756,6 +772,12 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-25 - Explicit source preparation merged; real installation next
+
+[Merged evidence and next slice](journal/2026/10.25%20source-preparation.md).
+The parent remains **Active**; the next work is the real shared-installer
+entry and persisted admission/reuse, not another standalone preparation owner.
 
 ### 2026-10-24 - Explicit source-fallback transaction design approved
 
