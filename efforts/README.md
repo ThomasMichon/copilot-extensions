@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Repository PR Fleet Sweep](active/repository-pr-fleet-sweep/README.md) | Draft; portable one-shot observation plan before implementation | #8802; existing provider, topology and claim owners retained; no service or rollout |
+| [Repository PR Fleet Sweep](active/repository-pr-fleet-sweep/README.md) | Active; plan approved and merged, one-shot observation implementation next | #8802; existing provider, topology and claim owners retained; no service or rollout |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
 | [Vault Service](active/vault-service/README.md) | Draft; initial architecture and complete phased acceptance proposal only, implementation admission pending | #8729; Vault credential/transaction authority, stateless Manager, central/local/federated deployment; existing custody retained, no rollout |
 | [Installation-Independent Sessions](active/installation-independent-sessions/README.md) | Active; Linux uninstall prerequisite validated and Manager uninstall contract reviewed; interactive survival open | #8669 / #8864; retains #5579 and installer/updater owners; no host rollout |

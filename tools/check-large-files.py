@@ -72,6 +72,7 @@ violates a cap or is an always-blocked extension.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import os
 import re
 import subprocess
@@ -182,6 +183,51 @@ def _rev_parse(ref: str) -> str | None:
     return out
 
 
+def _publication_commits(refs: list[str]) -> dict[str, str | None]:
+    requested = list(dict.fromkeys(refs))
+    if any(not ref or any(character.isspace() or character == "\0" for character in ref) for ref in requested):
+        raise GitEnumerationError("publication references contain invalid batch input")
+    pinned = [ref for ref in requested if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", ref)]
+    expressions = [(ref, ref) for ref in pinned] + [(ref + "^{commit}", ref) for ref in requested]
+    response = _git_bytes(
+        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize) %(rest)",
+        input="".join(expression + " " + ref + "\n" for expression, ref in expressions).encode("utf-8"),
+    )
+    if response.returncode:
+        raise GitEnumerationError("Git could not resolve publication commit references")
+    lines = _decode(response.stdout).splitlines()
+    if len(lines) != len(expressions):
+        raise GitEnumerationError("publication commit batch response is incomplete")
+    metadata: dict[str, tuple[str, str] | None] = {}
+    for (expression, ref), line in zip(expressions, lines):
+        if line == expression + " missing":
+            metadata[expression] = None
+            continue
+        fields = line.split(maxsplit=3)
+        if (
+            len(fields) != 4 or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", fields[0]) is None
+            or fields[1] not in ("commit", "tag", "tree", "blob")
+            or not fields[2].isdigit() or fields[3] != ref
+            or expression == ref and fields[0] != ref
+            or expression != ref and fields[1] != "commit"
+        ):
+            raise GitEnumerationError("publication commit batch response is malformed")
+        metadata[expression] = (fields[0], fields[1])
+    resolved = {}
+    for ref in requested:
+        peeled = metadata[ref + "^{commit}"]
+        if ref in pinned and peeled is not None:
+            original = metadata[ref]
+            # A tag's object identity differs legitimately from its commit.
+            if (
+                original is None or original[1] not in ("commit", "tag")
+                or original[1] == "commit" and original[0] != peeled[0]
+            ):
+                raise GitEnumerationError("publication object identity disagrees with commit peeling")
+        resolved[ref] = peeled[0] if peeled is not None else None
+    return resolved
+
+
 def _ext(path: str) -> str:
     return Path(path).suffix.lower()
 
@@ -276,24 +322,31 @@ def _new_blobs_in_range(
     base_ref: str, head_ref: str, published_refs: list[str] | None = None,
 ) -> list[tuple[str, int]]:
     """New blob objects relative to complete published histories, not merge-base paths."""
-    head = _rev_parse(head_ref)
+    baselines = ([base_ref] if base_ref not in ("0" * 40, "0" * 64) else []) + (published_refs or [])
+    resolved = _publication_commits([head_ref, *baselines])
+    head = resolved[head_ref]
     if head is None:
         raise GitEnumerationError("the selected publication head is unavailable")
     excluded = []
     if base_ref not in ("0" * 40, "0" * 64):
-        base = _rev_parse(base_ref)
+        base = resolved[base_ref]
         if base is None:
             raise GitEnumerationError("the publication base is unavailable; fetch it first")
         excluded.append(base)
     for ref in published_refs or []:
-        resolved = _rev_parse(ref)
-        if resolved is None:
+        published = resolved[ref]
+        if published is None:
             raise GitEnumerationError("an explicitly published baseline is unavailable; fetch it first")
-        excluded.append(resolved)
-    incoming = _git_or_raise("rev-list", "--objects", "--no-object-names", head).splitlines()
-    known = set(_git_or_raise(
-        "rev-list", "--objects", "--no-object-names", *dict.fromkeys(excluded),
-    ).splitlines()) if excluded else set()
+        excluded.append(published)
+    excluded = list(dict.fromkeys(excluded))
+    walk = ("rev-list", "--objects", "--no-object-names")
+    if excluded:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            incoming_read = workers.submit(_git_or_raise, *walk, head, "--not", *excluded)
+            known_read = workers.submit(_git_or_raise, *walk, *excluded)
+            incoming, known = incoming_read.result().splitlines(), set(known_read.result().splitlines())
+    else:
+        incoming, known = _git_or_raise(*walk, head).splitlines(), set()
     # Negative commit traversal can still report known blobs after a rebase or
     # deletion/reuse. Novelty is the difference of complete reachability sets.
     objects = [sha for sha in incoming if sha not in known]

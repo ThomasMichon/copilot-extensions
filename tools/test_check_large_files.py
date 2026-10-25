@@ -66,6 +66,69 @@ def test_new_blob_paths_refuses_failed_batch_or_missing_paths():
             module._new_blob_paths(["a" * 40], {"b" * 40: 1})
 
 
+def test_publication_commit_resolution_batches_and_binds_each_reference():
+    module = _load_module()
+    raw = f"{'a' * 40} commit 123 HEAD\n{'b' * 40} commit 456 origin/dev\n".encode()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw, b"",
+    )) as git:
+        assert module._publication_commits(["HEAD", "origin/dev", "HEAD"]) == {
+            "HEAD": "a" * 40, "origin/dev": "b" * 40,
+        }
+    assert git.call_count == 1
+    assert git.call_args.kwargs["input"] == b"HEAD^{commit} HEAD\norigin/dev^{commit} origin/dev\n"
+
+
+@pytest.mark.parametrize("raw", [
+    b"", b"not-a-sha commit 1 HEAD\n",
+    ("a" * 40 + " blob 1 HEAD\n").encode(),
+    ("a" * 40 + " commit invalid HEAD\n").encode(),
+    ("a" * 40 + " commit 1 another-ref\n").encode(),
+])
+def test_publication_commit_resolution_refuses_incomplete_or_mismatched_data(raw):
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess([], 0, raw, b"")):
+        with pytest.raises(module.GitEnumerationError):
+            module._publication_commits(["HEAD"])
+
+
+def test_publication_commit_resolution_retains_missing_ref_and_refuses_batch_injection():
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, b"absent^{commit} missing\n", b"",
+    )):
+        assert module._publication_commits(["absent"]) == {"absent": None}
+    with mock.patch.object(module, "_git_bytes") as git:
+        with pytest.raises(module.GitEnumerationError):
+            module._publication_commits(["HEAD\nother"])
+        git.assert_not_called()
+
+
+def test_pinned_annotated_tag_keeps_original_identity_separate_from_commit():
+    module = _load_module()
+    tag, commit = "a" * 40, "b" * 40
+    raw = f"{tag} tag 123 {tag}\n{commit} commit 456 {tag}\n".encode()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw, b"",
+    )) as git:
+        assert module._publication_commits([tag]) == {tag: commit}
+    assert git.call_args.kwargs["input"] == f"{tag} {tag}\n{tag}^{{commit}} {tag}\n".encode()
+
+
+@pytest.mark.parametrize("raw", [
+    f"{'b' * 40} tag 123 {'a' * 40}\n{'b' * 40} commit 456 {'a' * 40}\n",
+    f"{'a' * 40} commit 123 {'a' * 40}\n{'b' * 40} commit 456 {'a' * 40}\n",
+    f"{'a' * 40} missing\n{'b' * 40} commit 456 {'a' * 40}\n",
+])
+def test_pinned_publication_objects_refuse_identity_or_peeling_mismatch(raw):
+    module = _load_module()
+    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+        [], 0, raw.encode(), b"",
+    )):
+        with pytest.raises(module.GitEnumerationError):
+            module._publication_commits(["a" * 40])
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True, encoding="utf-8")
 
@@ -111,6 +174,26 @@ def repo(tmp_path: Path) -> Path:
 def _commit_all(repo: Path) -> None:
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "snapshot")
+
+
+@pytest.mark.parametrize("size,expected", [(1024, 0), (2 * 1024 * 1024, 1)])
+def test_annotated_tag_publication_checks_new_blobs_against_tagged_remote_tip(repo, monkeypatch, size, expected):
+    module = _load_module()
+    monkeypatch.setattr(module, "REPO", repo)
+    _write_bytes(repo, "src/existing.txt", 20)
+    _commit_all(repo)
+    _git(repo, "tag", "-a", "published", "-m", "published baseline")
+    published = module._rev_parse("refs/tags/published")
+    _write_bytes(repo, "src/introduced.json", size)
+    _commit_all(repo)
+    _git(repo, "tag", "-a", "candidate", "-m", "candidate")
+    candidate = module._rev_parse("refs/tags/candidate")
+    assert published and candidate
+    result = _run(repo, "--base", published, "--head", candidate, "--published", published)
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert "malformed" not in result.stdout
+    if expected:
+        assert "introduced.json" in result.stdout
 
 
 def test_a_small_file_passes(repo: Path):
@@ -608,7 +691,9 @@ def test_many_paths_to_one_new_blob_are_checked_once_per_mode(repo: Path):
         staged = module._staged_blobs([f"src/file-{index}.txt" for index in range(32)])
         _git(repo, "commit", "-qm", "introduce one blob under many paths")
         rows = module._new_blobs_in_range("base_marker", "HEAD")
-    assert sum(args[0] == "cat-file" for args in calls) == 2
+    assert sum(args == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)") for args in calls) == 2
+    assert sum(args == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize) %(rest)") for args in calls) == 1
+    assert len(calls) <= 8
     assert rows == [("src/file-0.txt", 17)]
     assert staged == [("src/file-0.txt", 17)]
 

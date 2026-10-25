@@ -5466,7 +5466,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
 _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | frozenset({
     "services", "repos", "accounts", "forks", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
-    "pr-watch", "pr-merge", "pr-research", "pr",
+    "pr-watch", "pr-merge", "pr-research", "pr", "pr-sweep",
     "activity", "activity-log", "activity-prune-worker", "register-launch", "stage-update",
     "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace", "identifiers",
@@ -6401,6 +6401,9 @@ def main(argv: list[str] | None = None) -> int:
             return _dispatch_lazy("record", args_list)
         return cmd_help_unrouted(requested=args_list[0])
 
+    if args_list[0] == "pr-sweep":
+        from .pr_sweep_cli import run_pr_sweep
+        return run_pr_sweep(args_list[1:])
     # --version / -V → print version + build info + boot provenance
     if args_list[0] in ("--version", "-V"):
         try:
@@ -6434,6 +6437,7 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] in ("--help", "-h"):
         parser = build_parser()
         parser.print_help()
+        print("One-shot: pr-sweep <repo> --fleet --json")
         return 0
 
     # Fast path (checked before manual-dispatch verbs + the blanket
@@ -6642,10 +6646,6 @@ def main(argv: list[str] | None = None) -> int:
             print("\nCancelled.")
             return 130
 
-    # lease/fleet/reconcile/delegates -- self-contained argparse verbs manually
-    # dispatched here (each owns its own module) rather than growing this
-    # already-at-ceiling tree. fleet/reconcile/delegates are Phase 1/2/3 of
-    # #2740 (aggregate list, out-of-band PR reconcile, delegate graph/sweep).
     _manual_verb_modules = {
         "lease": ("lease_cli", "run_lease"),
         "fleet": ("list_views_cli", "run_fleet"),

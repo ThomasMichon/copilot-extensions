@@ -276,7 +276,7 @@ _source_runtime_version() {
     "$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
         --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-containers "$@"
 }
-if [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]]; then
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_version --format json)" || exit 1
     source_python="$(_source_python)" || exit 1
     SRC_VERSION="$("$source_python" -I -c 'import json,sys; print(json.loads(sys.argv[1])["runtime_version"])' \

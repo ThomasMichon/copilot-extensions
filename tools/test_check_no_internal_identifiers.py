@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -221,7 +223,7 @@ def test_live_sweep_contributes_identifiers(repo: Path, monkeypatch: pytest.Monk
         })
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     result = module._load_live_sweep_identifiers()
     assert result == [
         ("swept-token", "swept reason"),
@@ -245,7 +247,7 @@ def test_live_sweep_treats_unknown_subcommand_as_benign_absence(
         stdout = "✗ Unknown subcommand: identifiers\n✗ Run 'agent-worktrees --help' for available commands.\n"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     assert module._load_live_sweep_identifiers() == []
 
 
@@ -265,7 +267,7 @@ def test_live_sweep_treats_unresolved_project_as_benign_absence(
         stdout = "Could not resolve a project for 'identifiers'. Context is discovered from the cwd.\n"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     assert module._load_live_sweep_identifiers() == []
 
 
@@ -282,7 +284,7 @@ def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: py
         })
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     identifiers, reasons, live_sweep_error = module._load_identifier_data()
     assert live_sweep_error is None
     assert "swept-token" in identifiers
@@ -299,7 +301,7 @@ def test_live_sweep_rejects_non_list_entries(repo: Path, monkeypatch: pytest.Mon
         stdout = json.dumps({"error": None, "entries": "not-a-list"})
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -314,7 +316,7 @@ def test_live_sweep_rejects_non_mapping_entry(repo: Path, monkeypatch: pytest.Mo
         stdout = json.dumps({"error": None, "entries": ["not-a-mapping"]})
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -336,7 +338,7 @@ def test_live_sweep_rejects_entry_with_missing_or_non_string_token(
         stdout = json.dumps({"error": None, "entries": [{}]})
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -351,7 +353,7 @@ def test_live_sweep_raises_on_nonzero_exit(repo: Path, monkeypatch: pytest.Monke
         stdout = json.dumps({"error": "boom", "entries": []})
         stderr = "boom"
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -371,7 +373,7 @@ def test_live_sweep_failure_preserves_partial_entries(repo: Path, monkeypatch: p
         })
         stderr = "one peer repo's blocklist failed to parse"
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure) as excinfo:
         module._load_live_sweep_identifiers()
     assert excinfo.value.pairs == [("still-valid", "a reason")]
@@ -392,7 +394,7 @@ def test_load_identifier_data_fails_loud_on_live_sweep_failure(
         })
         stderr = "boom"
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     identifiers, reasons, live_sweep_error = module._load_identifier_data()
     assert live_sweep_error is not None
     # Partial entries are still included, even though the overall result
@@ -424,8 +426,111 @@ def test_live_sweep_silently_ignores_timeout(repo: Path, monkeypatch: pytest.Mon
     def _raise(*a, **k):
         raise module.subprocess.TimeoutExpired(cmd="agent-worktrees", timeout=10)
 
-    monkeypatch.setattr(module.subprocess, "run", _raise)
+    monkeypatch.setattr(module, "_run_live_sweep", _raise)
     assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_unsafe_observation_is_not_benign_absence(repo, monkeypatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    def fail(_command):
+        raise RuntimeError("owned scope could not settle")
+
+    monkeypatch.setattr(module, "_run_live_sweep", fail)
+    with pytest.raises(module.LiveSweepFailure, match="observed safely"):
+        module._load_live_sweep_identifiers()
+
+
+@pytest.mark.parametrize("failure", ["output", "cleanup"])
+def test_live_sweep_concrete_owned_failures_block_publication(repo, monkeypatch, failure):
+    monkeypatch.syspath_prepend(str(SCRIPT.parent.parent / "libs" / "agent-procutil" / "src"))
+    from agent_procutil.owned_process import OutputLimitExceeded, OwnedCleanupError
+
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+    error = OutputLimitExceeded("stdout", 32 * 1024 * 1024) if failure == "output" else OwnedCleanupError(object())
+
+    def fail(_command):
+        raise error
+
+    monkeypatch.setattr(module, "_run_live_sweep", fail)
+    with pytest.raises(module.LiveSweepFailure, match="observed safely") as caught:
+        module._load_live_sweep_identifiers()
+    assert caught.value.__cause__ is error
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows pipe-inheriting descendant boundary")
+@pytest.mark.parametrize("root_exits", [False, True])
+def test_native_live_sweep_deadline_retires_pipe_holding_descendant(tmp_path, root_exits):
+    import ctypes
+    from ctypes import wintypes
+
+    module = _load_module(SCRIPT.parent.parent)
+    pid_file = tmp_path / "owned-child.pid"
+    script = (
+        "import os,pathlib,subprocess,sys,time;"
+        "assert os.environ['AGENT_WORKTREES_NO_SELFPROVISION']=='1';"
+        "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+        "pathlib.Path(sys.argv[1]).write_text(str(p.pid));"
+        + ("sys.exit(0)" if root_exits else "time.sleep(60)")
+    )
+    started = time.monotonic()
+    try:
+        module._run_live_sweep([sys.executable, "-c", script, str(pid_file)])
+    except subprocess.TimeoutExpired:
+        pass
+    assert time.monotonic() - started < 15
+    pid = int(pid_file.read_text())
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if handle:
+        try:
+            code = wintypes.DWORD()
+            assert kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+            assert code.value != 259
+        finally:
+            kernel.CloseHandle(handle)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows command-binstub boundary")
+def test_native_live_sweep_quotes_command_binstub_without_provisioning(tmp_path):
+    module = _load_module(SCRIPT.parent.parent)
+    command = tmp_path / "owner's & catalog.cmd"
+    command.write_text(
+        '@echo off\nif not "%AGENT_WORKTREES_NO_SELFPROVISION%"=="1" exit /b 9\n'
+        'echo {"error":null,"entries":[]}\nexit /b 0\n',
+    )
+    result = module._run_live_sweep([str(command), "identifiers", "sweep", "--format", "json"])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"error": None, "entries": []}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX command and finite-reader boundary")
+def test_native_posix_live_sweep_preserves_command_and_deadline(tmp_path):
+    module = _load_module(SCRIPT.parent.parent)
+    command = tmp_path / "owner's & catalog"
+    command.write_text(
+        "#!/bin/sh\n"
+        'test "$AGENT_WORKTREES_NO_SELFPROVISION" = 1 || exit 9\n'
+        'test "$1" = "literal argument" || exit 8\n'
+        "printf '%s\\n' '{\"error\":null,\"entries\":[]}'\n",
+    )
+    command.chmod(0o700)
+    result = module._run_live_sweep([str(command), "literal argument"])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"error": None, "entries": []}
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        module._run_live_sweep([sys.executable, "-c", "import time; time.sleep(60)"])
+    assert time.monotonic() - started < 15
 
 
 def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
@@ -446,7 +551,7 @@ def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
         stdout = "   \n"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -465,7 +570,7 @@ def test_live_sweep_fails_closed_on_malformed_json_with_exit_zero(
         stdout = "not actually json"
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 
@@ -493,7 +598,7 @@ def test_live_sweep_benign_absence_uses_exact_line_not_loose_substring(
         })
         stderr = ""
 
-    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(module, "_run_live_sweep", lambda *a, **k: _FakeResult())
     with pytest.raises(module.LiveSweepFailure):
         module._load_live_sweep_identifiers()
 

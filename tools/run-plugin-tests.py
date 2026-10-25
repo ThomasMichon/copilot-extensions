@@ -64,6 +64,7 @@ from pathlib import Path
 
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
+from plugin_test_cache import dependency_fingerprint, ordinary_cache_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import (
@@ -278,32 +279,11 @@ def _venv_python(name: str) -> Path:
 
 
 def _dep_fingerprint(name: str) -> str:
-    """Hash the plugin's ``pyproject.toml`` plus any vendored lib pyprojects, so
-    a dependency change forces a venv rebuild. Without this, ``_ensure_venv``
-    reuses a cached venv whose installed deps have drifted -- e.g. a path dep
-    added across a branch rebase is silently absent, masking/introducing
-    failures (a stale venv once produced 28 phantom ``ModuleNotFoundError``s)."""
-    import hashlib
-    pdir = _plugin_dir(name)
-    parts = [pdir / "pyproject.toml"]
-    if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"}:
-        parts.append(REPO / "fleet-manager" / "pyproject.toml")
-    if name == "agent-dispatch":
-        parts.append(REPO / "plugins" / "agent-pull-requests" / "pyproject.toml")
-    libs = pdir / "libs"
-    if libs.is_dir():
-        parts += sorted(libs.glob("*/pyproject.toml"))
-    h = hashlib.sha256()
-    if name == "agent-worktrees":
-        h.update(b"native-bootstrap-uv-cache-v1\n")
-    for dependency in (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())):
-        h.update(f"runner:{dependency}\n".encode())
-    for p in parts:
-        try:
-            h.update(p.read_bytes())
-        except OSError:
-            pass
-    return h.hexdigest()
+    """Bind cached installs to complete canonical/transitive local source bytes."""
+    return dependency_fingerprint(
+        name, _plugin_dir(name), REPO,
+        (*RUNNER_DEPENDENCIES, *EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
+    )
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
@@ -312,7 +292,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     The caller must establish the environment directory and hold its
     environment-scoped lease throughout preparation and subsequent test use.
     """
-    venv = VENV_ROOT / name
+    venv = ordinary_cache_root(VENV_ROOT / name)
     py = _venv_python(name)
     stamp = venv / ".dep-fingerprint"
     fingerprint = _dep_fingerprint(name)
@@ -371,7 +351,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
             if name == "agent-ssh":
                 cmd.extend(["-e", str(REPO / "fleet-manager")])
-            if reinstall:
+            if reinstall or drifted:
                 # A new venv can still consume uv's stale local-path wheels.
                 cmd.append("--reinstall")
             if spec == ".":
@@ -801,7 +781,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         lease: SingleInstance | None = None
         try:
-            environment_root = (VENV_ROOT / name).resolve()
+            environment_root = ordinary_cache_root(VENV_ROOT / name)
             environment_root.mkdir(parents=True, exist_ok=True)
             if args.admission_wait:
                 print(f"Waiting up to {args.admission_wait:g}s for {environment_root} ...")

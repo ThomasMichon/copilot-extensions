@@ -525,7 +525,7 @@ _source_runtime_identity() {
 
 _initialize_source_runtime() {
     SOURCE_RUNTIME_IDENTITY=""
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     local py
     py="$(_source_python)" || return 1

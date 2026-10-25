@@ -14,6 +14,7 @@ a manual child-by-child ``claims`` read.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 
 from . import config as cfg, output, tracking
 from .claims_rank import claim_url
@@ -45,6 +46,9 @@ def transitive_obligations(
     _path: tuple[str, ...] = (),
     _record: tracking.WorktreeRecord | None = None,
     _records: dict[tuple[str, str, str], tracking.WorktreeRecord] | None = None,
+    _platform: str | None = None,
+    _snapshot_only: bool = False,
+    _record_resolver: Callable[[str, str, str], tracking.WorktreeRecord | None] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Recursively collect every unsettled, non-``session``-kind resource
     claim anywhere in ``worktree_id``'s subtree (itself + every worktree it
@@ -94,6 +98,8 @@ def transitive_obligations(
     try:
         rec = _record or _records.get(key)
         if rec is None:
+            if _snapshot_only:
+                return [], [{"path": here, "ref": "", "reason": "record outside admitted snapshot"}]
             rec_path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
             if not rec_path.exists():
                 return [], [{"path": here, "ref": "", "reason": "record not found"}]
@@ -105,6 +111,9 @@ def transitive_obligations(
         # unresolvable project state root under a namespaced install. Either
         # way this is a degraded, reported edge, never a crash.
         return [], [{"path": here, "ref": "", "reason": f"unreadable: {exc}"}]
+
+    if _platform is not None and rec.platform != _platform:
+        return [], [{"path": here, "ref": "", "reason": "record belongs to another environment"}]
 
     found: list[dict] = []
     unresolved: list[dict] = []
@@ -156,7 +165,17 @@ def transitive_obligations(
                 "reason": "unsafe child ref (rejected, not resolved)",
             })
             continue
-        if parsed.machine != machine:
+        child_record = None
+        if _record_resolver is not None:
+            child_record = _record_resolver(
+                parsed.machine, parsed.project or project, parsed.worktree_id,
+            )
+            if child_record is None:
+                unresolved.append({
+                    "path": here, "ref": c.ref, "reason": "child outside admitted snapshot",
+                })
+                continue
+        elif parsed.machine != machine:
             unresolved.append({
                 "path": here, "ref": c.ref,
                 "reason": "cross-machine child (see lease mirror / claims sweep)",
@@ -164,7 +183,10 @@ def transitive_obligations(
             continue
         child_found, child_unresolved = transitive_obligations(
             parsed.worktree_id, parsed.project or project, config,
-            machine=machine, _visited=_visited, _path=here, _records=_records,
+            machine=child_record.execution_machine if child_record is not None else machine,
+            _visited=_visited, _path=here, _record=child_record, _records=_records,
+            _platform=_platform, _snapshot_only=_snapshot_only,
+            _record_resolver=_record_resolver,
         )
         found.extend(child_found)
         unresolved.extend(child_unresolved)

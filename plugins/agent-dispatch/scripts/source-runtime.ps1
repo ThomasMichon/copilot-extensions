@@ -21,8 +21,12 @@ function Initialize-SourceRuntime {
     $script:SourceRuntimeIdentity = $null
     $metadata = Join-Path $PluginDir 'runtime-source.json'
     try { [IO.File]::GetAttributes($metadata) | Out-Null }
-    catch [IO.FileNotFoundException] { return }
-    catch [IO.DirectoryNotFoundException] { return }
+    catch [IO.FileNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
+    catch [IO.DirectoryNotFoundException] {
+        if (-not (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)) { return }
+    }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
     $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion

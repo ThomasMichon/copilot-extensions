@@ -24,6 +24,33 @@ gh workflow run installation-context-full.yml --ref <published-branch> \
   -f portfolio=promotion-controls
 ```
 
+## Optional repository PR sweep qualification
+
+The manual `installation-context-full.yml` portfolio `pr-sweep` runs the
+focused provider, selection, original-root and native-process packet on Ubuntu
+with Python3.12. It adds no schedule or required PR matrix. Its ten-minute job
+and existing60-second item deadline contain only synthetic state and processes;
+no live forge, remote host, credentials, installation or rollout are needed.
+The recorded checkout SHA identifies the candidate actually exercised.
+
+```bash
+gh workflow run installation-context-full.yml --ref <published-candidate-branch> -f portfolio=pr-sweep
+```
+
+The same packet runs locally through `tools/run-plugin-tests.py agent-worktrees`
+with the six explicit test files named in that job. Native Windows and POSIX
+shell cases skip on the other OS; inspect actual outcomes instead of crediting
+skips as qualification. It exercises the real CLI in a synthetic registered
+context, known read-only claims adapter, exact quoted catalog paths,
+unsupported-old-client refusal and owned descendant timeout.
+The same manual job separately runs the publication blob/identifier guards
+through bounded pytest tooling, including native POSIX quoted-command
+and finite-reader timeout proof. Windows additionally qualifies pipe-holding
+descendant retirement and command-binstub quoting. These remain optional
+native checks, not an expansion of required CI.
+Live read/coverage evidence remains separate and never requires lifting a
+held route or installing the candidate into another owner's runtime.
+
 ## Optional Dispatch scoped-stamp binding
 
 The manual `installation-context-full.yml` portfolio `dispatch-binding` runs
@@ -3126,13 +3153,26 @@ within the existing per-run budget without extending any item deadline.
 Disposable Worktrees copies retain the complete runtime/dependency graph
 where consumed, but do not write bytecode that no later fixture reuses.
 
-> **A cached venv is not editable.** A vendored path dependency (e.g.
-> `agent-ssh-manager` under `plugins/<p>/libs/<lib>/`) installs into
-> `.test-venvs/<platform>/<p>` as a normal copy, not an editable link —
-> editing `libs/<lib>/src/...` does nothing to a suite you run against an
-> already-built venv until you pass `--reinstall`. That explicit option also
-> forwards reinstall to uv, so recreating the venv cannot silently reuse an old
-> same-version local-path wheel. Ordinary cached runs keep their existing policy.
+For an explicit clean/reprepare without running tests, use the existing runner:
+
+```bash
+python tools/run-plugin-tests.py <target> --reinstall --prepare-only
+```
+
+This cleans only that target's current-platform test environment in this
+checkout, after acquiring its normal lease. A busy environment refuses or waits
+under `--admission-wait`; linked cache roots refuse before cleanup. Other
+targets, platforms, checkouts, installed runtimes and the global UV cache are
+untouched. There is no need to delete `.test-venvs` or purge UV's cache.
+
+> **Cached local dependencies are source-bound, not editable.** Path dependencies
+> install as retained copies in `.test-venvs/<platform>/<target>`. The runner
+> fingerprints their complete canonical/transitive local source graph, explicit
+> companion projects and retained standalone build resources, not just package
+> versions or manifests. Changed, added or removed source files trigger a rebuild;
+> generated build/bytecode/cache files and unrelated projects do not.
+> Both automatic source drift and explicit `--reinstall` forward reinstall to UV,
+> so rebuilding cannot silently reuse an old same-version local-path wheel.
 > Rebuild cleanup preserves the leased environment directory and unlinks child
 > junctions without traversing their targets, including under Python 3.11.
 > Native GUI-parent probes capture child diagnostics even when `pythonw -I`

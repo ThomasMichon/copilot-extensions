@@ -203,6 +203,13 @@ copilot-extensions finalize          # clean up the worktree
   pinned head, base and published tips. Both must finish successfully; either
   refusal or an exception blocks publication. Live identifier sources and
   complete blob-history checks retain their existing scope and deadlines.
+  The optional live identifier reader uses the repository's standard-library
+  finite-process owner, including descendant cleanup inside its unchanged
+  ten-second bound; it never self-provisions a runtime. Captured stdout/stderr
+  are bounded at32 MiB/1 MiB. Unsafe cleanup, decoding or output-budget failure
+  refuses publication rather than becoming an empty identifier inventory.
+  A missing command or ordinary reader timeout retains the existing optional
+  source policy; malformed/failed responses remain blocking.
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): once
   the wait-for-a-verdict loop below is satisfied, squash-merge with
