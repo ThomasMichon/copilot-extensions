@@ -204,6 +204,11 @@ without re-reading SQLite or overwriting the current draft; already-expired
 entries cannot revive if the clock moves backward. A cached entry's deadline
 never restarts when the composer opens.
 
+Explicit maintenance calls the stores' expiry APIs: it erases expired private
+text while retaining journal metadata and events. There is no early per-attempt
+erasure or whole-store reset command. Deleting database files is not a supported
+repair procedure and must never be used to remove pending engine/daemon intent.
+
 ## Reproducible checks
 
 Run the ordinary storage and existing-history units through the repository's

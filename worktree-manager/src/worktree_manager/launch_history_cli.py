@@ -6,7 +6,7 @@ import argparse
 import json
 
 from . import engine_client
-from .launch_attempts import LaunchAttemptError, LaunchAttempts
+from .launch_attempts import MANAGER_OUTCOMES, LaunchAttemptError, LaunchAttempts
 
 _SCHEMA = "worktree-launch-attempt-inspection"
 
@@ -94,6 +94,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--after", type=float)
     for name in ("project", "action", "machine", "environment", "provider", "venue"):
         parser.add_argument("--" + name)
+    parser.add_argument(
+        "--outcome", choices=MANAGER_OUTCOMES,
+        help="Latest Manager boundary only; returned is not Copilot success or prompt acceptance",
+    )
     parser.add_argument("--event-limit", type=int, default=100)
     parser.add_argument("--after-sequence", type=int, default=0)
     parser.add_argument("--receipt-limit", type=int, default=100)
@@ -101,7 +105,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     filters = {
         key: getattr(args, key) for key in (
-            "before", "before_id", "after", "project", "action", "machine", "environment", "provider",
+            "before", "before_id", "after", "project", "action", "machine", "environment", "provider", "outcome",
         )
     }
     filters["venue_id"] = args.venue

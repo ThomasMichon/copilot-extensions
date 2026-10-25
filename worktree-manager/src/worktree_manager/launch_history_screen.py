@@ -14,7 +14,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Static
 
-from .launch_attempts import LaunchAttemptError, LaunchAttempts
+from .launch_attempts import MANAGER_OUTCOMES, LaunchAttemptError, LaunchAttempts
 from .launch_history_cli import read_detail
 from .production_picker.picker_tui.background import run_background
 from .production_picker.picker_tui.inbox import Inbox
@@ -50,7 +50,7 @@ class LaunchHistoryScreen(ModalScreen[None]):
         self._busy = False
         self._before: tuple[float, str] | None = None
         self._previous: list[tuple[float, str] | None] = []
-        self._filters: tuple[str | None, str | None] | None = None
+        self._filters: tuple[str | None, ...] | None = None
         self._rows: list[dict] = []
         self._has_more = False
         self._detail: dict | None = None
@@ -59,12 +59,16 @@ class LaunchHistoryScreen(ModalScreen[None]):
         yield Static(
             "Local launch history / read-only\n"
             "Metadata only by default. Detail queries the local project engine, not the selected remote venue. "
-            "Missing evidence never establishes prompt acceptance.",
+            "Manager outcomes are boundary observations, not Copilot success or prompt acceptance.",
             markup=False,
         )
         with Horizontal(id="history-filters"):
             yield Input(value=self.project, placeholder="Project (blank: all)", id="history-project")
             yield Input(placeholder="Action (blank: all)", id="history-action")
+            yield Input(
+                placeholder="Outcome: unknown/refused/failed/interrupted/returned",
+                id="history-outcome",
+            )
             yield Button("Filter / refresh", id="history-refresh")
         yield Static("Reading saved metadata...", id="history-status", markup=False)
         yield DataTable(id="history-list", cursor_type="row")
@@ -79,7 +83,7 @@ class LaunchHistoryScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self.query_one("#history-list", DataTable).add_columns(
-            "Confirmed (UTC)", "Action", "Project", "Target", "Attempt",
+            "Confirmed (UTC)", "Action", "Project", "Target", "Manager outcome", "Attempt",
         )
         self.query_one("#history-detail-scroll").display = False
         self._load_list()
@@ -133,13 +137,20 @@ class LaunchHistoryScreen(ModalScreen[None]):
     def _load_list(self) -> None:
         project = self.query_one("#history-project", Input).value.strip() or None
         action = self.query_one("#history-action", Input).value.strip() or None
-        if (project, action) != self._filters:
+        outcome = self.query_one("#history-outcome", Input).value.strip() or None
+        if (project, action, outcome) != self._filters:
             self._before, self._previous = None, []
-            self._filters = project, action
+            self._filters = project, action, outcome
         cursor = self._before
         self._rows, self._has_more = [], False
         self.query_one("#history-list", DataTable).clear()
         self.query_one("#history-status", Static).update("Reading saved metadata...")
+        if outcome is not None and outcome not in MANAGER_OUTCOMES:
+            self.query_one("#history-status", Static).update(
+                "Manager outcome must be blank or one of: " + ", ".join(MANAGER_OUTCOMES),
+            )
+            self._buttons()
+            return
 
         def loaded(rows):
             self._has_more = len(rows) > _PAGE_SIZE
@@ -159,7 +170,7 @@ class LaunchHistoryScreen(ModalScreen[None]):
                 table.add_row(
                     *(Text(value) for value in (
                         confirmed,
-                        row["action"], row["project"], target, row["attempt_id"],
+                        row["action"], row["project"], target, row["manager_outcome"], row["attempt_id"],
                     )),
                     key=row["attempt_id"],
                 )
@@ -171,7 +182,7 @@ class LaunchHistoryScreen(ModalScreen[None]):
 
         self._read(
             lambda: self._store.entries(
-                limit=_PAGE_SIZE + 1, project=project, action=action,
+                limit=_PAGE_SIZE + 1, project=project, action=action, outcome=outcome,
                 before=cursor[0] if cursor else None, before_id=cursor[1] if cursor else None,
             ),
             loaded,

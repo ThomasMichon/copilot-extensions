@@ -147,7 +147,7 @@ The following decomposition and detailed evidence rules are agent-recommended.
 - [ ] Add a read-only sweep over explicitly selected configured reachable
   machines through existing transports, preserving per-source errors,
   unavailable machines and source identity rather than reporting empty success.
-- [ ] Enforce 90-day prompt retention, including a documented policy for legacy
+- [x] Enforce 90-day prompt retention, including a documented policy for legacy
   seed-history copies, SQLite sidecars, expiry and explicit deletion. Do not
   silently leave a second indefinite full-prompt copy or delete pending intent.
 
@@ -199,6 +199,53 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+### 2026-10-25 -- Scoped Manager-outcome filter source
+
+- Local list and detail now project the latest durable Manager observation
+  independently of event-page cursors, retaining its sequence and exact
+  timestamp. Indexed latest-event lookup and a shared deterministic SQLite
+  function apply outcome filters before pagination without materializing
+  private input, querying engines or requiring SQLite's JSON extension.
+- CLI `--outcome` and both Pickers' shared history screen expose only this
+  explicitly named `manager-boundary` scope. Refusal, nonzero launcher return
+  and explicit interruption are distinguishable; a zero return is labeled
+  `returned`, never successful Copilot launch or prompt acceptance. Missing
+  events and ambiguous engine/transport failures remain unknown.
+- The focused Windows packet passes 145 cases with four platform-specific
+  skips, including actual Manager-to-engine subprocess detail, legacy reads,
+  outcome pagination, timestamp fidelity and real Textual navigation.
+  Frozen-source POSIX coverage passes 147 cases with two Windows-only skips
+  plus 16 engine-reader cases; the actual cross-runtime subprocess cases run
+  on both platforms. Rapid-click tests await Textual's real button-animation
+  completion rather than assuming idle means click-ready; Windows UI coverage
+  passes all 12 cases after that correction. No deadlines were widened.
+  Source qualification is not release, rollout or installed launch acceptance.
+- Whole-attempt provider/native evidence aggregation, selected-machine sweeps
+  and every remaining parent acceptance/cleanup gate stay open. This scoped
+  filter does not close the larger Phase 3 or Phase 4 inspection items.
+
+### 2026-10-25 -- Retention source merged; outcome classification next
+
+- #8999 merged as `1e3638ee4b257416e4d0f5eae6bb97f4f51247eb` after genuine
+  current-head approval, no open findings, all three review threads resolved
+  and required CI passing. Both parent trackers remain open.
+- The bounded 90-day retention implementation is now complete in source,
+  including legacy copies, crash-retry scrubbing, exact-deadline cached
+  navigation, malformed timestamp refusal and incomplete sidecar preservation.
+  Explicit expiry erases private text, not journal metadata or pending intent;
+  no early per-attempt erasure or whole-store reset command is introduced.
+- Current-source Windows failure/confirmation coverage passes 100 cases.
+  Frozen final-source POSIX coverage passes 156 cases with two Windows-only
+  skips, including native WAL/restart, composer expiry and maintenance-policy
+  controls. The isolated source/caches were removed. These results do not
+  establish rollout or installed prompt acceptance.
+- Re-read both canonical plans after merge. Next, classify whole-attempt
+  outcomes from the existing qualified owners and expose bounded outcome
+  filtering without treating a plan, launcher return or missing event as
+  accepted prompt delivery. Selected-machine sweeps, containing release,
+  authorized rollout, real local/SSH conversation proof and cleanup remain
+  open. This worktree must continue rather than finalize a completed slice.
 
 ### 2026-10-25 -- Retention and legacy history migration prepared
 

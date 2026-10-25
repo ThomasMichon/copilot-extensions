@@ -167,6 +167,14 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- #8999 merged 90-day private-input retention and legacy
+  prompt-history migration after current-head approval, resolved findings and
+  required CI. Final frozen POSIX checks include actual WAL/restart and
+  composer-cache expiry. Pending daemon seeds remain untouched. This closes
+  the bounded retention source slice, not target-owned SSH acceptance or
+  rollout. Outcome classification/filtering, selected-machine sweeps,
+  containing release, installed same-conversation New/cold Resume and owned
+  resource cleanup remain open.
 - **2026-10-25** -- #8994 merged interactive local launch-history inspection
   after current-head approval and required CI. Both Pickers expose protected
   metadata/detail without replay or inferred acceptance. Journal retention,

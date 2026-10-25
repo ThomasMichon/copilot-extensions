@@ -19,7 +19,10 @@ pytestmark = pytest.mark.contract("worktree_manager.launch_history_screen")
 
 async def _ready(pilot, screen):
     async with asyncio.timeout(10):
-        while screen._busy or not screen.is_mounted:
+        while (
+            screen._busy or not screen.is_mounted
+            or any(button.has_class("-active") for button in screen.query(Button))
+        ):
             await pilot.pause(0.01)
         await pilot.pause()
 
@@ -227,6 +230,43 @@ def test_changed_filters_reset_every_paging_cursor(journal, monkeypatch, directi
             assert screen._before is None and screen._previous == []
             assert [row["attempt_id"] for row in screen._rows] == [f"{6:032x}"]
             assert screen._has_more is False
+            screen.query_one("#history-outcome", Input).value = "refused"
+            await pilot.click("#history-refresh")
+            await _ready(pilot, screen)
+            assert screen._before is None and screen._previous == []
+            assert screen._rows == []
+            assert "No saved attempts" in str(screen.query_one("#history-status", Static).render())
+
+    asyncio.run(run())
+
+
+def test_outcome_column_and_filter_remain_local_and_do_not_claim_copilot_success(journal, monkeypatch):
+    journal.append(f"{3:032x}", owner="manager", phase="launcher-returned", exit_code=0)
+    journal.append(f"{2:032x}", owner="manager", phase="refused", code="unsupported")
+    monkeypatch.setattr(
+        launch_history_cli, "engine_evidence",
+        lambda *args, **kwargs: pytest.fail("outcome filter must not query engine"),
+    )
+
+    async def run():
+        app = App()
+        screen = LaunchHistoryScreen("demo")
+        async with app.run_test(size=(100, 40)) as pilot:
+            await app.push_screen(screen)
+            await _ready(pilot, screen)
+            assert [row["manager_outcome"] for row in screen._rows] == ["returned", "refused", "unknown"]
+            screen.query_one("#history-outcome", Input).value = "returned"
+            await pilot.click("#history-refresh")
+            await _ready(pilot, screen)
+            assert len(screen._rows) == 1
+            assert screen._rows[0]["attempt_id"] == f"{3:032x}"
+            assert screen._rows[0]["manager_outcome_scope"] == "manager-boundary"
+            assert "PRIVATE INPUT" not in app.export_screenshot()
+            screen.query_one("#history-outcome", Input).value = "success"
+            await pilot.click("#history-refresh")
+            await _ready(pilot, screen)
+            assert screen._rows == []
+            assert "must be blank or one of" in str(screen.query_one("#history-status", Static).render())
 
     asyncio.run(run())
 

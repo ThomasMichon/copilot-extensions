@@ -64,6 +64,7 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monk
         attempt, action="new", project="example", surface="native-reader",
         is_local=True, prompt=prompt, options={"no_mux": True},
     )
+    store.append(attempt, owner="manager", phase="launcher-returned", exit_code=0)
     before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     script = textwrap.dedent("""
         import json, sys
@@ -77,7 +78,8 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monk
     """)
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path / "manager"), raw,
-         "launch-attempts", attempt, "--json", *(["--include-input"] if include_input else [])],
+         "launch-attempts", attempt, "--json", "--event-limit", "1",
+         *(["--include-input"] if include_input else [])],
         cwd=anchor, env=environment, capture_output=True, text=True, timeout=150, **flags,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -86,6 +88,11 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monk
     assert report["engine"]["receipts"][0]["operation_id"] == operation
     assert report["engine"]["receipts"][0]["evidence"]["events"][0]["phase"] == "resolution-requested"
     assert report["prompt_acceptance"] == "unknown"
+    assert report["attempt"]["events"][0]["phase"] == "confirmed"
+    assert report["attempt"]["events_has_more"]
+    assert report["attempt"]["manager_outcome"] == "returned"
+    assert report["attempt"]["manager_outcome_scope"] == "manager-boundary"
+    assert report["attempt"]["last_manager_event"]["phase"] == "launcher-returned"
     if include_input:
         assert report["attempt"]["input"]["prompt"] == prompt
     else:

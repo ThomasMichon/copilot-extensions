@@ -1042,8 +1042,8 @@ the protected Manager journal, not in these engine metadata receipts.
 
 Press **Ctrl+Shift+H** in either interactive Picker to open local launch
 history. The production Picker's `?` legend and the compact Picker footer
-advertise the shortcut. Metadata pages contain at most 25 attempts; project
-and action filters and Newer/Older controls stay within the local protected
+advertise the shortcut. Metadata pages contain at most 25 attempts; project,
+action and Manager-outcome filters and Newer/Older controls stay within the local protected
 journal. Opening or refreshing this list never queries an engine.
 
 Select a row for bounded local detail (at most 20 Manager events and 10 engine
@@ -1058,10 +1058,25 @@ or contacts the selected remote venue.
 
 `worktree-manager launch-attempts --json` reads bounded, local saved-intent
 metadata without starting the engine. Filter with `--project`, `--action`,
-`--machine`, `--environment`, `--provider`, `--venue`, `--after` (inclusive Unix
+`--machine`, `--environment`, `--provider`, `--venue`, `--outcome`, `--after` (inclusive Unix
 seconds), and `--before` (exclusive). `--limit` is 1-100. When `has_more` is
 true, pass both returned `next_before` and `next_before_id` as `--before` and
 `--before-id`; the ID tie-breaker preserves equal-timestamp entries.
+
+`--outcome` filters the **latest durable Manager boundary**, not a whole-attempt
+or remote-engine verdict. Each row and detail declares
+`manager_outcome_scope: "manager-boundary"` and retains `last_manager_event`
+with its sequence, timestamp, phase and prompt-free details. This observation
+is independent of event pagination; filtering happens before the row limit.
+`refused` means the Manager refused a step, `failed` means its launcher returned
+nonzero, `interrupted` requires an explicit interruption observation, and
+`returned` means only that its launcher returned zero. **None establishes
+Copilot launch, prompt acceptance, current liveness or safe replay.** An
+incomplete step, absent event or ambiguous engine/transport error remains
+`unknown`; elapsed time alone never turns it into a proven crash. Later
+Manager observations supersede earlier ones in this boundary projection,
+while the event history retains the earlier evidence. Engine, daemon and
+native observations cannot override the Manager's own boundary.
 
 `worktree-manager launch-attempts <attempt-id> --json` reads one protected
 intent and its Manager events, then queries the installed engine once for that
