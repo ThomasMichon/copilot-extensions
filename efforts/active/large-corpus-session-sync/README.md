@@ -264,3 +264,11 @@ existing behavior or permission to change evidence semantics.
   The combined fresh-install/native/transfer packet passes 215 tests with
   fourteen platform skips in 744.97 seconds; install contracts and generator
   consistency also pass.
+- #8808 review found that the GUI root pinned process support to its original
+  runtime slot, which later provisioning could collect without refreshing the
+  Python launcher. Four native upgrade controls reproduce exit 1 after removing
+  that slot. The root now uses the installed canonical runtime resolver on each
+  invocation before loading selected support; it spawns no resolver subprocess
+  and duplicates no selector rules. All twelve native controls pass, including
+  both shell generations, slot collection between cycles and tree cleanup;
+  eleven POSIX cases skip on Windows. Install contracts and touched lint pass.

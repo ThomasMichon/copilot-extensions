@@ -546,7 +546,8 @@ catalogs do not replace it in this phase.
   (systemd user timer).
 
 The Windows GUI-root launcher loads process support from the selected installed
-runtime, starts the shell suspended inside a required kill-on-close Job, and
+runtime through the canonical installed resolver on each run, rather than pinning
+a collectible registration-time slot. It starts the shell suspended inside a required kill-on-close Job, and
 prohibits descendant breakaway. Cancellation closes that Job; ordinary completion
 also reaps remaining descendants. A 25-minute launcher guard reports exit 124 and
 retains diagnostics before the unchanged 30-minute Scheduler limit. It does not

@@ -1519,15 +1519,11 @@ function New-SyncTaskAction {
     $taskHost = if ($pwshCmd) { $pwshCmd.Source } else { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' }
     # A GUI root plus CREATE_NO_WINDOW avoids Default Terminal handoff without
     # conhost's loss of the child's exit code.
-    $runtimeInfoJson = & $VenvPython -I -c 'import json; from pathlib import Path; import agent_procutil; print(json.dumps(dict(pythonw=agent_procutil.windowless_python(require_windowless=True), support=str(Path(agent_procutil.__file__).resolve().parent.parent)), ensure_ascii=True))'
-    if ($LASTEXITCODE -ne 0 -or -not $runtimeInfoJson) {
+    $guiPythonJson = & $VenvPython -I -c 'import json; from agent_procutil import windowless_python; print(json.dumps(windowless_python(require_windowless=True), ensure_ascii=True))'
+    if ($LASTEXITCODE -ne 0 -or -not $guiPythonJson) {
         throw 'Cannot register headless sync task: windowless Python is unavailable'
     }
-    $runtimeInfo = $runtimeInfoJson | ConvertFrom-Json -ErrorAction Stop
-    if (-not $runtimeInfo.pythonw -or -not $runtimeInfo.support) {
-        throw 'Cannot register headless sync task: runtime support is unavailable'
-    }
-    $guiPython = $runtimeInfo.pythonw
+    $guiPython = $guiPythonJson | ConvertFrom-Json -ErrorAction Stop
     $headlessLauncher = [System.IO.Path]::ChangeExtension($TaskLauncher, '.py')
     $headlessBody = @'
 import os
@@ -1540,7 +1536,12 @@ log = Path(__file__).resolve().parent.parent / "logs" / "session-sync.log"
 log.parent.mkdir(parents=True, exist_ok=True)
 with log.open("w", encoding="utf-8") as output:
     try:
-        sys.path.insert(0, __SUPPORT_PATH_JSON__)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from versioned_runtime import resolve_python
+        runtime = resolve_python(log.parent.parent)
+        if runtime is None:
+            raise RuntimeError("Cannot resolve installed sync runtime")
+        sys.path.insert(0, str(runtime.parent.parent / "Lib" / "site-packages"))
         from agent_procutil import spawn_sync_in_kill_on_close_job
         process, job = spawn_sync_in_kill_on_close_job(
             [sys.argv[1], "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
@@ -1565,7 +1566,6 @@ with log.open("w", encoding="utf-8") as output:
         code = 1
 sys.exit(code)
 '@
-    $headlessBody = $headlessBody.Replace('__SUPPORT_PATH_JSON__', ($runtimeInfo.support | ConvertTo-Json -Compress))
     [System.IO.File]::WriteAllText($headlessLauncher, $headlessBody, [System.Text.UTF8Encoding]::new($false))
     return New-ScheduledTaskAction -Execute ("$guiPython").Trim() `
         -Argument ('-I "' + $headlessLauncher + '" "' + $taskHost + '" "' + $TaskLauncher + '"')
