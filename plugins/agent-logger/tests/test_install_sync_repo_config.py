@@ -13,6 +13,7 @@ installer text markers.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import re
@@ -20,11 +21,13 @@ import runpy
 import shutil
 import subprocess
 import sys
+import time
 import venv
 from pathlib import Path
 
 import pytest
 import yaml
+from agent_procutil import direct_python, no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 _INSTALL_SH = PLUGIN / "scripts" / "install.sh"
@@ -765,7 +768,9 @@ def test_sync_task_interpreter_probe_preserves_non_ascii_path(
     probe_venv = tmp_path / "probe-venv"
     venv.EnvBuilder(with_pip=False).create(probe_venv)
     expected_json = json.dumps(str(tmp_path / "python-\u96ea" / "pythonw.exe"), ensure_ascii=True)
-    (probe_venv / "Lib" / "site-packages" / "agent_procutil.py").write_text(
+    package = probe_venv / "Lib" / "site-packages" / "agent_procutil"
+    package.mkdir()
+    (package / "__init__.py").write_text(
         "def windowless_python(*, require_windowless):\n"
         "    assert require_windowless\n"
         f"    return {expected_json}\n",
@@ -890,6 +895,105 @@ function New-ScheduledTaskAction {
             assert "synthetic diagnostic" in (
                 tmp_path / "logs" / "session-sync.log"
             ).read_text(encoding="utf-8")
+    assert not observer.surfaced
+    assert not observer.focus_changes
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows scheduled-root ownership")
+@pytest.mark.parametrize("ending", ["cancel", "timeout"])
+def test_gui_task_root_reaps_shell_and_two_python_generations(tmp_path, ending):
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("PowerShell 7 is unavailable")
+    python = _venv_python_path(_resolve_test_venv_root())
+    base_python, _ = direct_python(str(python))
+    (tmp_path / "bin").mkdir()
+    launcher = tmp_path / "bin" / "task.ps1"
+    child = tmp_path / "child.py"
+    pids = tmp_path / "pids.json"
+    child.write_text(
+        "import json, os, subprocess, sys, time\n"
+        "from pathlib import Path\n"
+        "leaf = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'],\n"
+        "    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,\n"
+        "    creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "Path(sys.argv[1]).write_text(json.dumps([int(sys.argv[2]), os.getpid(), leaf.pid]))\n"
+        "leaf.wait()\n",
+        encoding="utf-8",
+    )
+    launcher.write_text(f"& '{base_python}' '{child}' '{pids}' $PID\nexit $LASTEXITCODE\n")
+    harness = tmp_path / "action.ps1"
+    harness.write_text(
+        _extract_ps1_function("New-SyncTaskAction")
+        + """
+function Write-SyncTaskLauncher {}
+function New-ScheduledTaskAction {
+    param($Execute, $Argument)
+    [pscustomobject]@{Execute=$Execute; Arguments=$Argument}
+}
+"""
+        + f"$TaskLauncher = '{launcher}'\n$VenvPython = '{python}'\n"
+        + "New-SyncTaskAction | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    generated = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        capture_output=True, text=True, check=True, timeout=20, **no_window_kwargs(),
+    )
+    action = json.loads(generated.stdout)
+    if ending == "timeout":
+        root_script = launcher.with_suffix(".py")
+        body = root_script.read_text(encoding="utf-8")
+        assert body.count("timeout=25 * 60") == 1
+        root_script.write_text(body.replace("timeout=25 * 60", "timeout=10"), encoding="utf-8")
+
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel.WaitForSingleObject.restype = wintypes.DWORD
+    kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    observer_api = runpy.run_path(str(
+        PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
+        / "test_spawn_daemon_windows_integration.py"
+    ))
+    observer_api["_SURFACED_PROCESS_NAMES"].add("pwsh.exe")
+    handles = []
+    with observer_api["_WindowObserver"](*observer_api["_configure_win32"]()) as observer:
+        process = subprocess.Popen(
+            f'"{action["Execute"]}" {action["Arguments"]}',
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
+        )
+        try:
+            deadline = time.monotonic() + 8
+            while not pids.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            assert pids.exists(), (tmp_path / "logs" / "session-sync.log").read_text()
+            for pid in json.loads(pids.read_text()):
+                handle = kernel.OpenProcess(0x100001, False, pid)
+                assert handle, ctypes.get_last_error()
+                handles.append(handle)
+            if ending == "cancel":
+                process.kill()
+                assert process.wait(timeout=5) != 0
+            else:
+                assert process.wait(timeout=15) == 124
+                assert "timed out" in (tmp_path / "logs" / "session-sync.log").read_text()
+            for handle in handles:
+                assert kernel.WaitForSingleObject(handle, 5000) == 0, "owned descendant survived"
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            for handle in handles:
+                if kernel.WaitForSingleObject(handle, 0) != 0:
+                    kernel.TerminateProcess(handle, 1)
+                    kernel.WaitForSingleObject(handle, 5000)
+                kernel.CloseHandle(handle)
     assert not observer.surfaced
     assert not observer.focus_changes
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Contain scheduled sync descendants and retain real timeout outcomes",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
