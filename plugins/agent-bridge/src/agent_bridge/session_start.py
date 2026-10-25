@@ -45,6 +45,7 @@ from .privileged_plugins import relay_agent, start_client
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
+    from .acquisition_launch_owner import AcquisitionLaunchOwner
 
 _CFG = ".agent-bridge/config.yaml"  # marketplace-isolation: allow deployed-runtime-diagnostics
 
@@ -89,6 +90,7 @@ class _SessionStartMixin:
         retain_container_lock_on_failure: bool = False,
         creation_session_id: str | None = None,
         creation_before_launch: Callable[[], Awaitable[None]] | None = None,
+        acquisition_launch: AcquisitionLaunchOwner | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -124,6 +126,8 @@ class _SessionStartMixin:
             raise ValueError(f"unsupported parity fault: {parity_fault}")
         if target.native_resume_id:
             raise ValueError("native resume authority cannot create a fresh conversation")
+        from .acquisition_launch_owner import require_start_owner
+        require_start_owner(self, target, creation_session_id, acquisition_launch)
         from .hosting_policy import require_target_hosting
 
         await require_target_hosting(target)
@@ -252,6 +256,7 @@ class _SessionStartMixin:
                 )
 
         session = Session(session_id, name, target, agent_name, caller_id=caller_id)
+        session.background_recovery_enabled = acquisition_launch is None
         session.caller_session_id = normalize_caller_session_id(caller_session_id)
         # Per-session model / reasoning-effort override (agent-bridge create
         # --model/--effort). Retained on the Session so within-daemon resume /
@@ -308,6 +313,8 @@ class _SessionStartMixin:
             now=now,
             target_json=target.to_json(),
             config_json=config_json,
+            runtime_admission=acquisition_launch.admission if acquisition_launch is not None else None,
+            background_recovery_enabled=session.background_recovery_enabled,
         )
 
         session.status = SessionStatus.STARTING
@@ -397,6 +404,7 @@ class _SessionStartMixin:
                     model=model,
                     effort=effort,
                     **({"prepared_local_launch": prepared_local_launch} if prepared_local_launch is not None else {}),
+                    **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                 )
             elif container_target is not None:
                 from .venue_plugins import prepare_venue_plugins, resolve_controller_cwd

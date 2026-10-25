@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Any
 
 from .session_preferences import PreferenceApplicationError, SOURCES, clean
@@ -80,7 +81,10 @@ class AcpPreferencesMixin:
         raise NotImplementedError
 
     @idle_operation
-    async def _apply_model_config(self, config_options: Any, *, resuming: bool = False) -> None:
+    async def _apply_model_config(
+        self, config_options: Any, *, resuming: bool = False,
+        before_effect: Callable[[], None] | None = None,
+    ) -> None:
         """Set the session's ``model`` / ``reasoning_effort`` via ACP.
 
         Copilot ignores ``--model`` / ``--reasoning-effort`` in ``--acp`` mode;
@@ -202,6 +206,8 @@ class AcpPreferencesMixin:
             if current == value:
                 applied[config_id] = current
                 continue
+            if before_effect is not None:
+                before_effect()
             try:
                 result = await self._connection.set_config_option(
                     config_id=config_id,

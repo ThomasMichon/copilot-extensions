@@ -604,7 +604,7 @@ async def test_controller_failure_never_spawns_plugin_provider(monkeypatch, cont
 @pytest.mark.asyncio
 @pytest.mark.parametrize("owned", [True, False])
 async def test_session_manager_callback_preserves_controller_context(
-    monkeypatch, session_manager, controller, owned,
+    monkeypatch, session_manager, controller, owned, permitted_provider_hosting,
 ):
     from types import SimpleNamespace
     from unittest.mock import MagicMock

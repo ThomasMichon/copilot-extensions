@@ -16,7 +16,9 @@ from agent_bridge.session_preferences import SOURCE_ENV
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["missing", "target", "purpose"])
-async def test_attested_refusal_rolls_back_before_session_creation(monkeypatch, tmp_path, failure):
+async def test_attested_refusal_rolls_back_before_session_creation(
+    monkeypatch, tmp_path, failure, permitted_provider_hosting,
+):
     db = Database(tmp_path / "sessions.db")
     manager = SessionManager(db, session_host_state_dir=str(tmp_path / "hosts"))
     target = SpawnTarget(
