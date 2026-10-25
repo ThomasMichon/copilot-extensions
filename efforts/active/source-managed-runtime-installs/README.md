@@ -485,7 +485,7 @@ transaction execution from the existing recurring-maintenance assignment.
   cell dispatch and refuse unsupported cold cells/custom roots. Explicit
   installers, compound actions, live sync/prune, macOS and rollout remain
   separate; review this proposal before implementation.
-- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Bridge's
+- [x] **Agent-recommended bounded next-adopter prerequisite:** qualify Bridge's
   existing legacy `stamp` and `provision` actions through the same native
   foundation, canonical queue and frozen-input owner before changing ordinary
   Bridge publishers. Admit only its canonical installed payload and default
@@ -500,6 +500,19 @@ transaction execution from the existing recurring-maintenance assignment.
   Snapshot acceptance, command/bootstrap/explicit-installer adoption, custom
   roots/cells, live service deployment and existing lifetime/publication/
   diagnostic custodians remain separate.
+- [ ] **Agent-recommended bounded semantic prerequisite:** qualify Bridge's
+  fixed legacy `install` action through the same foundation, canonical queue
+  and frozen-input owner before migrating its bootstrap drift path. Preserve
+  its direct required-context declaration, exact source/root/project,
+  own controls, immutable content admission and actual native registration/
+  start semantics. Windows prepared `provision` only reconciles its task;
+  do not substitute that action for bootstrap's `install`. The
+  [bounded plan](bridge-install-action.md) requires actual materialized
+  native Windows/Linux construction, installed consumers, healthy reuse,
+  content-mismatch refusal, failed-candidate preservation, caller loss and
+  isolated registration/start outcomes. Ordinary publishers, selected
+  snapshots, cells/custom roots, live service deployment and rollout remain
+  separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
