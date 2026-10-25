@@ -226,3 +226,49 @@ def test_real_git_push_without_runtime_still_honors_local_hook(tmp_path, local_e
     else:
         assert result.returncode == 0, result.stderr
         assert published.stdout.strip() == git_ops.git("rev-parse", "HEAD", cwd=anchor).stdout.strip()
+
+
+def test_install_preserves_repository_hook_without_recursive_chaining(tmp_path, monkeypatch):
+    shell, executable = _shell(), shutil.which("git")
+    anchor, remote = tmp_path / "source", tmp_path / "remote.git"
+    anchor.mkdir()
+    git_ops.git("init", "-b", "main", cwd=anchor)
+    git_ops.git("config", "user.email", "fixture@example.invalid", cwd=anchor)
+    git_ops.git("config", "user.name", "Fixture", cwd=anchor)
+    (anchor / "fixture.txt").write_text("fixture\n", encoding="utf-8")
+    git_ops.git("add", "fixture.txt", cwd=anchor)
+    git_ops.git("commit", "-m", "fixture", cwd=anchor)
+    git_ops.git("init", "--bare", str(remote), cwd=tmp_path)
+    git_ops.git("remote", "add", "origin", str(remote), cwd=anchor)
+    root = Path(__file__).resolve().parents[3]
+    resource = anchor / "plugins/agent-worktrees/src/agent_worktrees/pre_push.sh"
+    resource.parent.mkdir(parents=True)
+    shutil.copyfile(root / "plugins/agent-worktrees/src/agent_worktrees/pre_push.sh", resource)
+    seen = tmp_path / "repository-hook-seen"
+    original = (
+        '#!/bin/sh\n[ ! -e "$REPOSITORY_HOOK_SEEN" ] || exit 91\n'
+        ': > "$REPOSITORY_HOOK_SEEN"\n'
+        + (root / "tools/hooks/pre-push").read_text(encoding="utf-8")
+    )
+    hdir = hooks.hooks_dir_for(anchor)
+    hdir.mkdir(parents=True, exist_ok=True)
+    target = hdir / "pre-push"
+    target.write_text(original, encoding="utf-8", newline="\n")
+    target.chmod(0o755)
+    monkeypatch.setattr(hooks, "_pr_enabled", lambda cwd: True)
+    monkeypatch.setattr(hooks, "_protected_branches", lambda cwd: ["main", "dev"])
+    hooks.install_hooks(anchor)
+    assert (hdir / "pre-push.local").read_text(encoding="utf-8") == original
+    env = {
+        **os.environ, "PATH": os.pathsep.join((str(Path(shell).parent), str(Path(executable).parent))),
+        "AGENT_WORKTREES_HOOKS": "1", "AGENT_WORKTREES_PR_PUSH": "1",
+        "REPOSITORY_HOOK_SEEN": seen.as_posix(),
+    }
+    for key in ("BASH_ENV", "ENV"):
+        env.pop(key, None)
+    result = subprocess.run(
+        [executable, "push", "origin", "HEAD:refs/heads/fixture"], env=env, cwd=anchor,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert seen.exists()

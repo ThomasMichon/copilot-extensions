@@ -20,7 +20,6 @@ operations instead.
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -55,9 +54,8 @@ class AnchorReport:
 def _resolve_toplevel(repo_path: str | Path) -> Path:
     """Resolve the git toplevel from an arbitrary path inside a repo."""
     try:
-        r = subprocess.run(
-            ["git", "-C", str(repo_path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+        r = git_ops.git(
+            "rev-parse", "--show-toplevel", cwd=repo_path, check=False, timeout=5,
         )
         if r.returncode == 0 and r.stdout.strip():
             return Path(r.stdout.strip())

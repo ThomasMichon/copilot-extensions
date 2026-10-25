@@ -3,6 +3,8 @@
 aw_updates=
 aw_hook_dir=${0%/*}
 [ "$aw_hook_dir" != "$0" ] || aw_hook_dir=.
+aw_local_hook=$aw_hook_dir/pre-push.local
+case "${0##*/}" in pre-push.local) aw_local_hook= ;; esac
 aw_newline='
 '
 aw_linked=0
@@ -61,11 +63,11 @@ if [ "$AGENT_WORKTREES_HOOKS" = 1 ]; then
         aw_updates=$aw_updates$aw_line$aw_newline
         aw_check_update "$aw_line" || exit 1
     done
-    if [ -x "$aw_hook_dir/pre-push.local" ]; then
-        printf '%s' "$aw_updates" | "$aw_hook_dir/pre-push.local" "$@"
+    if [ -n "$aw_local_hook" ] && [ -x "$aw_local_hook" ]; then
+        printf '%s' "$aw_updates" | "$aw_local_hook" "$@"
         exit $?
     fi
-elif [ -x "$aw_hook_dir/pre-push.local" ]; then
-    exec "$aw_hook_dir/pre-push.local" "$@"
+elif [ -n "$aw_local_hook" ] && [ -x "$aw_local_hook" ]; then
+    exec "$aw_local_hook" "$@"
 fi
 exit 0
