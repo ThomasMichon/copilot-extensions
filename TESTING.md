@@ -1426,6 +1426,10 @@ python tools/run-plugin-tests.py agent-codespaces \
   --test-file tests/test_installer_test_support.py
 ```
 
+The devcontainer wrapper accepts the same profile and file selectors. It strips
+both only from dependency preparation and preserves both for the offline test
+pass; preparation still runs without importing tests.
+
 The first command is run against both canonical and normally materialized
 source for complete installer qualification. Keep the combined sequence,
 including materializer integration, preparation and cleanup, within a finite

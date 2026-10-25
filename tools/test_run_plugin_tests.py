@@ -32,6 +32,7 @@ try:
     import plugin_test_containment as containment
     import pytest_portfolio_guard as portfolio_guard
     import _admission_protocol as admission
+    import _devcontainer_network_scope as network_scope
 finally:
     sys.path[:] = _previous_path
 
@@ -1967,6 +1968,33 @@ def test_explicit_file_group_limit_must_remain_positive(size):
     with pytest.raises(SystemExit) as error:
         runner.main(["agent-pull-requests", "--max-files-per-sub-suite", str(size)])
     assert error.value.code == 2
+
+
+@pytest.mark.parametrize("profile_arguments", [
+    ["--test-profile", "busy-host-functional"],
+    ["--test-profile=busy-host-functional"],
+])
+def test_codespaces_functional_profile_preparation_strips_test_only_flags(
+    monkeypatch, profile_arguments,
+):
+    commands = []
+    monkeypatch.setattr(
+        network_scope.subprocess, "run",
+        lambda command: commands.append(command) or SimpleNamespace(returncode=0),
+    )
+    arguments = [
+        "agent-codespaces", *profile_arguments,
+        "--test-file", "tests/test_snapshot_copy_contract.py",
+    ]
+    original = arguments.copy()
+    with tempfile.TemporaryDirectory(prefix="profile-preparation-") as directory:
+        root = Path(directory)
+        network_scope.prepare_dependencies(
+            "devcontainer", root, "container", root / "devcontainer.json",
+            arguments, lambda flag: flag,
+        )
+    assert commands[0][-2:] == ["agent-codespaces", "--prepare-only"]
+    assert arguments == original
 
 
 @pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
