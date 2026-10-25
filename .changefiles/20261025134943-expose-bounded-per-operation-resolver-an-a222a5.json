@@ -1,5 +1,5 @@
 {
-  "comment": "Expose bounded per-operation resolver and execution terminal observations, keeping wrapper and child exits distinct.",
+  "comment": "Expose bounded per-operation terminal observations with recorded results, child exits and explicitly unknown final wrapper exits.",
   "changes": [
     {
       "plugin": "worktree-manager",

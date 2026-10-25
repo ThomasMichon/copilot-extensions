@@ -111,6 +111,45 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monk
                 }},
             ],
         }), encoding="utf-8")
+        fault_script = textwrap.dedent("""
+            import json, os, subprocess, sys
+            from pathlib import Path
+            from types import SimpleNamespace
+            from agent_worktrees import launch_execution as execution, launch_seed_state
+            directory, attempt, resolution = sys.argv[1:]
+            execution.tracking.load_record = lambda path: SimpleNamespace(
+                worktree_id="example-worktree", creation_nonce="nonce")
+            execution.uuid4 = lambda: SimpleNamespace(hex="e" * 32)
+            execution._epoch = lambda: None
+            def dispatch(verb, args, **kwargs):
+                assert verb == "launch_attempt_execution"
+                if args["phase"] == "seed-claimed":
+                    raise OSError("synthetic earlier receipt failure")
+                return execution._apply(args)
+            launch_seed_state._dispatch = dispatch
+            def work(owner):
+                owner.observed("seed-claimed", seed_id="1" * 32, handoff_id="2" * 32)
+                flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+                child = subprocess.Popen([sys.executable, "-c", "pass"], **flags)
+                try:
+                    owner.spawned(child.pid, invoke=True)
+                finally:
+                    owner.process_exit_code = child.wait(timeout=15)
+                return owner.process_exit_code
+            result = execution.run(Path(directory) / "example-worktree.json",
+                                   execution.Correlation(attempt, resolution), work)
+            print(json.dumps({"actual_wrapper_exit": result}))
+        """)
+        fault_result = subprocess.run(
+            [*engine[:1], "-c", fault_script, str(folder.parent.parent), attempt, resolution],
+            cwd=anchor, env=environment, capture_output=True, text=True,
+            check=True, timeout=30, **flags,
+        )
+        assert json.loads(fault_result.stdout) == {"actual_wrapper_exit": 3}
+        fault_receipt = json.loads((folder / ("e" * 32 + ".execution.json")).read_text(encoding="utf-8"))
+        assert fault_receipt["events"][-1]["details"] == {
+            "exit_code": 0, "process_exit_code": 0, "receipt_uncertain": True,
+        }
         # Derive the source identity with the actual selected engine, not a copied algorithm.
         identity_script = (
             "import json; from agent_worktrees import native_source_context as n; "
@@ -160,7 +199,7 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monk
     assert report["engine"]["status"] == "read"
     if summary:
         assert report["engine"]["pages_read"] == 2
-        assert report["engine"]["receipts_read"] == 104
+        assert report["engine"]["receipts_read"] == 105
         assert report["summary"]["boundaries"]["allocation"]["status"] == "unknown"
         assert report["summary"]["boundaries"]["backend_start"]["evidence"][0]["operation_id"] == operation
         assert report["summary"]["boundaries"]["native_session"]["evidence"][0]["native_session_id"] == session
@@ -169,17 +208,25 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monk
         owners = report["summary"]["owner_observations"]
         assert len(owners["resolution"]) == 101
         assert owners["resolution"][0]["terminal_phase"] == "unknown"
-        assert owners["resolution"][0]["wrapper_exit_code"] == 2
+        assert owners["resolution"][0]["recorded_exit_code"] == 2
+        assert owners["resolution"][0]["wrapper_exit_code"] is None
         assert owners["resolution"][-1]["terminal_phase"] is None
-        assert len(owners["execution"]) == 2
+        assert len(owners["execution"]) == 3
         assert owners["execution"][0]["parent_id"] == "f" * 32
-        assert owners["execution"][0]["wrapper_exit_code"] == 3
+        assert owners["execution"][0]["recorded_exit_code"] == 3
+        assert owners["execution"][0]["wrapper_exit_code"] is None
         assert owners["execution"][0]["process_exit_code"] == 0
         assert owners["execution"][0]["receipt_uncertain"] is False
-        assert owners["execution"][1]["wrapper_exit_code"] == 0
+        assert owners["execution"][1]["recorded_exit_code"] == 0
+        assert owners["execution"][1]["process_exit_code"] == 0
+        assert owners["execution"][1]["receipt_uncertain"] is True
+        assert owners["execution"][1]["wrapper_exit_code"] is None
         assert owners["execution"][1]["parent_id"] is None
+        assert owners["execution"][2]["recorded_exit_code"] == 0
+        assert owners["execution"][2]["receipt_uncertain"] is False
+        assert owners["execution"][2]["wrapper_exit_code"] is None
         assert owners["admission"] == []
-        print(f"summary source read: receipts=104 pages=2 elapsed_seconds={elapsed:.6f}")
+        print(f"summary source read: receipts=105 pages=2 elapsed_seconds={elapsed:.6f}")
     else:
         assert report["engine"]["receipts"][0]["operation_id"] == operation
         assert report["engine"]["receipts"][0]["evidence"]["events"][0]["phase"] == "resolution-requested"

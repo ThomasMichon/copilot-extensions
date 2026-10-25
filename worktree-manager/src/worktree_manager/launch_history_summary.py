@@ -86,7 +86,8 @@ def _owner_observation(row: dict, attempt_id: str) -> dict | None:
     result = {
         "operation_id": row["operation_id"], "last_phase": last["phase"], "at": last["at"],
         "terminal_phase": last["phase"] if last["phase"] in terminal else None,
-        "wrapper_exit_code": exit_code if last["phase"] in terminal else None,
+        "recorded_exit_code": exit_code if last["phase"] in terminal else None,
+        "wrapper_exit_code": None,
     }
     if execution:
         parent, nonce = value["parent_id"], value["creation_nonce"]

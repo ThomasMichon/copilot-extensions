@@ -205,8 +205,9 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 - **2026-10-25** -- The bounded local summary now projects existing resolver,
   execution and admission observations separately. Resolver uncertainty and
-  missing terminals remain distinct; execution wrapper and actual child exits,
-  receipt uncertainty and parent identities are retained per operation. No new
+  missing terminals remain distinct; recorded results and actual child exits,
+  receipt uncertainty and parent identities are retained per operation.
+  Final wrapper exits remain unknown without an external return observation. No new
   producer or engine invocation is required, and no admission refusal, crash,
   prompt acceptance or replay permission is inferred. Windows and frozen-source
   POSIX packets each pass 75 cases, including the real Manager-to-engine reader

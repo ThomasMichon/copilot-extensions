@@ -299,20 +299,24 @@ def test_manager_event_and_reference_caps_remain_visible(saved, monkeypatch):
     ]
 
 
-@pytest.mark.parametrize("wrapper,child,uncertain", [
+@pytest.mark.parametrize("recorded,child,uncertain", [
     (0, 0, False), (3, 0, False), (7, 7, False), (3, None, True), (-9, -9, False),
+    (0, 0, True),
 ])
-def test_execution_terminal_keeps_wrapper_and_child_exits_distinct(saved, wrapper, child, uncertain):
+def test_execution_terminal_keeps_recorded_child_and_unknown_wrapper_exits_distinct(
+    saved, recorded, child, uncertain,
+):
     row = execution()
     row["evidence"]["events"].append({
         "at": AT, "phase": "execution-returned", "details": {
-            "exit_code": wrapper, "process_exit_code": child, "receipt_uncertain": uncertain,
+            "exit_code": recorded, "process_exit_code": child, "receipt_uncertain": uncertain,
         },
     })
     result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: page(receipts=[row]))
     assert result["summary"]["owner_observations"]["execution"] == [{
         "operation_id": "c" * 32, "last_phase": "execution-returned", "at": AT,
-        "terminal_phase": "execution-returned", "wrapper_exit_code": wrapper,
+        "terminal_phase": "execution-returned", "recorded_exit_code": recorded,
+        "wrapper_exit_code": None,
         "resolution_id": "d" * 32, "parent_id": None, "worktree_id": "example-worktree",
         "creation_nonce": "nonce", "process_exit_code": child, "receipt_uncertain": uncertain,
     }]
@@ -351,7 +355,8 @@ def test_resolution_observations_do_not_become_allocation_or_acceptance(saved, p
     result = summary.read_summary(saved, ATTEMPT, read_page=lambda *a, **kw: page(receipts=[row]))
     assert result["summary"]["owner_observations"]["resolution"] == [{
         "operation_id": "d" * 32, "last_phase": phase, "at": AT,
-        "terminal_phase": phase if len(events) == 2 else None, "wrapper_exit_code": exit_code,
+        "terminal_phase": phase if len(events) == 2 else None,
+        "recorded_exit_code": exit_code, "wrapper_exit_code": None,
     }]
     assert all(value["status"] == "unknown" for value in result["summary"]["boundaries"].values())
     assert result["summary"]["errors"] == []
