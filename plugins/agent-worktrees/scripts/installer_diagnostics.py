@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import importlib.util
 import codecs
+import io
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,45 @@ _FILES = None
 _WARNED = False
 _ACTIVE = None
 _CHECKPOINT_BOUND = 4 * 1024 * 1024
+_NOTICE_LOCK = threading.Lock()
+_NOTICE = None
+
+
+def notice(message):
+    """Optional presentation never holds producer entry or a buffered stdio lock."""
+    global _NOTICE
+    sink = getattr(sys.stderr, "_installer_original", sys.stderr)
+    try:
+        if isinstance(sink, io.StringIO) or (
+            isinstance(sink, io.TextIOWrapper) and isinstance(sink.buffer, io.BytesIO)
+        ):
+            sink.write(message + "\n")
+            return
+        data = (message + "\n").encode("utf-8", errors="replace")[:4096]
+        with _NOTICE_LOCK:
+            if _NOTICE is not None and _NOTICE.is_alive():
+                return
+
+            def write():
+                descriptor = None
+                try:
+                    descriptor = os.dup(sink.fileno())
+                    os.write(descriptor, data)
+                except (OSError, ValueError, AttributeError):
+                    pass
+                finally:
+                    if descriptor is not None:
+                        os.close(descriptor)
+
+            thread = threading.Thread(target=write, name="installer-producer-notice", daemon=True)
+            try:
+                thread.start()
+            except RuntimeError:
+                return
+            _NOTICE = thread
+        thread.join(.05)
+    except (OSError, ValueError, AttributeError):
+        pass
 
 
 def files():
@@ -46,14 +86,7 @@ def warn():
     if _WARNED:
         return
     _WARNED = True
-    try:
-        sink = getattr(sys.stderr, "_installer_original", sys.stderr)
-        if sink is None:
-            return
-        print("WARNING: installer diagnostics unavailable; continuing with missing diagnostics.",
-              file=sink, flush=True)
-    except (OSError, ValueError):
-        pass
+    notice("WARNING: installer diagnostics unavailable; continuing with missing diagnostics.")
 
 
 def ordinary(path: Path):
@@ -260,12 +293,7 @@ def phase(name):
     text = f"Installer phase: {name}"
     if _ACTIVE is not None:
         _ACTIVE.feed("stderr", text + "\n")
-    try:
-        sink = getattr(sys.stderr, "_installer_original", sys.stderr)
-        if sink is not None:
-            print(text, file=sink, flush=True)
-    except (OSError, ValueError):
-        warn()
+    notice(text)
 
 
 def complete_launch(environment, outcome, native_exit=None):
@@ -593,7 +621,7 @@ def writer(*, announce=False):
         os.environ[names[1]] = identifier
         os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "0"
         if announce and original[1] is not None and os.environ.get("COPILOT_EXTENSIONS_HUMAN_UTF8") != "1":
-            print(f"Installer diagnostics: {directory}", file=original[1], flush=True)
+            notice(f"Installer diagnostics: {directory}")
     except (OSError, ValueError, ImportError, TypeError):
         warn()
     if producer is not None:
