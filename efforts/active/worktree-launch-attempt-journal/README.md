@@ -152,8 +152,10 @@ The following decomposition and detailed evidence rules are agent-recommended.
 - [x] Add a read-only metadata sweep over explicitly selected configured SSH
   machines through existing transports, preserving per-source errors,
   unavailable machines and source identity rather than reporting empty success.
-- [ ] Add explicit selected-machine exact detail and protected-input retrieval,
+- [x] Add explicit selected-machine exact detail and protected-input retrieval,
   retaining source identity and errors without implicitly revealing prompts.
+  #9017 supplies the bounded reader; installed target qualification remains in
+  Phase 5 and the Validation Plan.
 - [x] Enforce 90-day prompt retention, including a documented policy for legacy
   seed-history copies, SQLite sidecars, expiry and explicit deletion. Do not
   silently leave a second indefinite full-prompt copy or delete pending intent.
@@ -192,6 +194,23 @@ The following decomposition and detailed evidence rules are agent-recommended.
 - [ ] Run affected tests, lint and contracts, then record genuine installed
   local/remote proof separately from source and synthetic backend checks.
 
+## Current blockers
+
+- **Containing release:** #8983 tracks the trusted Main artifact builder's
+  rejection of candidate `setup.py`. Its finite compatibility fix already has
+  an owner. #9013 and #9017 remain source merges pending release; do not retry
+  promotion as repair or bypass executable/source/signing qualification.
+- **Installed acceptance:** the existing #6859 / #7833 Windows broker
+  qualification and runtime owner remain authoritative. Binding-free Bridge
+  startup #8961 is merged source, not installed readiness. Retain uncertain
+  updater outcomes without replay; containing release and authorized rollout
+  must precede any claim of repaired Open or installed prompt parity.
+- **Accepted-turn evidence:** the qualified native owner proves original
+  Linux/WSL session identity, not prompt acceptance. No authoritative
+  accepted-turn backend is available in the current integration. Preserve
+  `unknown` and the open Phase 3 / Phase 5 gates; do not invent a receipt or
+  infer acceptance from process, hook, UUID or wrapper observations.
+
 ## Proposal
 
 Use one machine-local append interface in the existing Manager private-state
@@ -206,6 +225,16 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+- **2026-10-25** -- #9017 merged as
+  `2f1ce1bc6e99683ed21b046b8c2f7acd23632742` after genuine current-head
+  approval with no findings, all required CI and a complete empty thread list.
+  Windows and frozen-source POSIX packets each pass 203 cases; publication
+  did not change the qualified Manager, engine or transport source bodies.
+  Both parent plans were re-read after merge. Phase 4's exact selected-source
+  reader is source-complete, not installed; accepted-turn correlation,
+  containing release, authorized rollout, installed original-conversation /
+  exactly-once proof and cleanup remain open. Neither effort is Done.
 
 - **2026-10-25** -- Prepared exact selected-machine detail under the existing
   read-only Phase 4 contract. One configured SSH source invokes its existing

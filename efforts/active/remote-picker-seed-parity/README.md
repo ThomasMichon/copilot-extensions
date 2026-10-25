@@ -144,6 +144,17 @@ equivalent-flow contract, not additional product features.
 - [ ] Confirm unchanged local New/Resume and live Open behavior; retire owned
   test sessions/worktrees and leave no untracked background work.
 
+## Current blockers
+
+The containing release is blocked by the already-owned #8983 artifact-build
+compatibility repair. Installed validation also retains the #6859 / #7833
+broker/runtime qualification owner and the unreplayed uncertain updater
+outcome. #8375's source inspection is available after #9013 / #9017, but neither
+those source merges nor #8961's binding-free Bridge startup prove installed
+New/cold Resume/Open behavior. Preserve authorized rollout, same-conversation,
+exactly-once and cleanup gates; do not take over the existing repair or waive
+its evidence.
+
 ## Proposal
 
 Use a pre-launch, non-interactive structured invocation of the remote engine to
@@ -166,6 +177,13 @@ Earlier checked implementation items remain historical source evidence; they
 do not establish that later transport fences preserve installed parity.
 
 ## Journal
+
+- **2026-10-25** -- #9017 merged exact selected-machine detail with explicit
+  protected-input retrieval after current-head approval, required CI and no
+  findings. Both parent plans were re-read; this completes #8375's source
+  inspection path, not installed parity. Preserve accepted-turn correlation,
+  containing release, authorized rollout and installed local/SSH New/cold
+  Resume conversation, exactly-once and cleanup gates. Both efforts stay Active.
 
 - **2026-10-25** -- #9013 merged per-owner launch observations after genuine
   current-head approval, required CI and a fixed receipt-result/final-wrapper
