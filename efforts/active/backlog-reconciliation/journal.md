@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-24 - Acquisition family: one complete consolidation and ten inflow admissions](<journal/2026/10.24 acquisition-family-96.md>)
 - [2026-10-24 - Serving and publication families: four direct consolidations, ten new arrivals](<journal/2026/10.24 serving-and-publication-family-95.md>)
 - [2026-10-24 - Repository intent and tracking integrity: eight complete consolidations](<journal/2026/10.24 repository-intent-and-tracking-integrity-94.md>)
 - [2026-10-24 - Succession family: six direct consolidations and four protected graph arrivals](<journal/2026/10.24 succession-family-93.md>)
