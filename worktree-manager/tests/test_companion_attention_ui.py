@@ -212,6 +212,46 @@ def test_changed_head_holds_polling_until_explicit_refresh(monkeypatch):
     asyncio.run(check())
 
 
+def test_refresh_replacement_remains_singleflight_across_another_poll(monkeypatch):
+    first, second, release = Event(), Event(), Event()
+    calls = []
+    monkeypatch.setattr(companion.cc, "cancellable_read_runner", lambda cancelled, **kw: cancelled)
+
+    def read(*a, runner, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            first.set()
+            assert runner.wait(5)
+            return {"attention": None, "error": "cancelled"}
+        second.set()
+        assert release.wait(5)
+        return {"attention": envelope("idle"), "error": None}
+
+    monkeypatch.setattr(companion.ca, "read_session_attention", read)
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        try:
+            async with app.run_test() as pilot:
+                assert await asyncio.to_thread(first.wait, 2)
+                app.action_refresh()
+                assert await asyncio.to_thread(second.wait, 2)
+                assert app._attention_busy
+                app._attention_next = 0
+                app._poll_attention()
+                await pilot.pause()
+                assert len(calls) == 2
+                release.set()
+                await app.workers.wait_for_complete()
+                assert app._data.attention["rest"] == "idle"
+                assert not app._attention_busy
+                assert app._attention_next > companion.time.monotonic()
+        finally:
+            release.set()
+
+    asyncio.run(check())
+
+
 def test_actual_companion_process_cancels_blocked_attention_child(tmp_path):
     import json
     import os

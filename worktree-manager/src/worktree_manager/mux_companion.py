@@ -559,6 +559,7 @@ class MuxCompanionApp(App):
     async def _load_attention(self, *, force=False) -> None:
         data, cancelled = self._data, Event()
         self._attention_cancel = cancelled
+        self._attention_busy = True
         try:
             if self._cli_pane and not force:
                 from .companion_lifecycle import observer_visible
