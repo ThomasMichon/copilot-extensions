@@ -88,7 +88,7 @@ def resolve_execution_machine(
             if configured:
                 literal = name.strip().casefold() == cfg.socket.gethostname().strip().casefold()
                 return name if literal or not split_machine_environment(name).environment else context.execution_machine
-            return context.machine
+            return context.execution_machine
     if guest and selected is None and any(
         entry.key.strip().casefold() == context.machine.casefold()
         for entry in entries.values()
@@ -141,6 +141,31 @@ def resolve_execution_context(
     if selection.entry is None:
         return MachineSelection(None, MachineEnvironment(name, environment), selection.exact)
     return selection
+
+
+def runtime_policy_physical_machine(
+    machine: str, repo_dir: str | Path, *, config: cfg.Config | None = None,
+) -> str:
+    """Keep current observations literal; retain strict non-local selection."""
+    try:
+        entries = load_execution_registry(repo_dir, config=config)
+    except FileNotFoundError:
+        entries = {}
+    binding = config.configured_machine if config is not None else None
+    context = resolve_local_execution_context(
+        entries, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+        configured_machine=binding,
+    )
+    local_names = {context.hostname.casefold(), context.execution_machine.casefold()}
+    selected = entries.get(context.customization_key) if context.customization_key else None
+    if selected is not None:
+        local_names.update((selected.key.strip().casefold(), machine_name(selected).casefold()))
+    if binding is not None:
+        local_names.add(binding.strip().casefold())
+        local_names.add(config.machine.casefold())
+    if machine.casefold() in local_names:
+        return context.machine
+    return resolve_machine_selection(entries, machine, cfg.detect_platform()).target.machine
 
 
 def repository_config(repo_dir: Path) -> cfg.Config | None:

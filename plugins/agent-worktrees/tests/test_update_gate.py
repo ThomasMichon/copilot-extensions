@@ -106,6 +106,67 @@ def test_update_gate_uses_local_naming_without_bypassing_runtime_policy(
     ) is (policy in ("absent", "matching"))
 
 
+@pytest.mark.parametrize("case", ["missing-guest", "literal-linux-hostname"])
+@pytest.mark.parametrize("selector", ["execution", "physical", "foreign"])
+def test_local_runtime_policy_does_not_reinterpret_local_name_as_target(
+    tmp_path, monkeypatch, case, selector,
+):
+    from agent_worktrees import front_door_cli
+
+    actual = "wsl" if case == "missing-guest" else "linux"
+    anchor = _configure(tmp_path, monkeypatch, actual, configured=False)
+    hostname = "stable-host" if case == "missing-guest" else "literal-host-win"
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: hostname)
+    machines = {"stable-host": {
+        "execution_platform": "windows", "physical_host": "stable-host",
+        "hostname": hostname,
+    }} if case == "missing-guest" else {}
+    (anchor / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": machines}), encoding="utf-8",
+    )
+    machine = "stable-host-wsl" if case == "missing-guest" else hostname
+    allowed = {"execution": machine, "physical": hostname, "foreign": "other-host"}[selector]
+    (anchor / "services.yaml").write_text(yaml.safe_dump({
+        "plugins": [{"name": "agent-example", "deploy_machines": [allowed]}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(reconcile, "GATE_ANCHOR", "")
+    monkeypatch.setattr(reconcile, "GATE_MANIFESTS", ("services.yaml",))
+    monkeypatch.setattr(front_door_cli, "_git_toplevel", lambda repo: anchor)
+    monkeypatch.setattr(front_door_cli, "_reverse_lookup_project", lambda repo: "project")
+    monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo: [])
+    assert cfg.detect_machine(anchor) == machine
+    assert update_gate._machine_gate_blocks(
+        "agent-example", "machine-gated", anchor,
+    ) is (selector == "foreign")
+    plan = reconcile.build_plan(anchor, cache={}, save=False)
+    assert plan["machine"] == machine
+    assert reconcile.runtime_allowed(
+        "machine-gated", "agent-example", plan["machine"], reconcile.load_runtime_gate(anchor),
+        repo_dir=anchor, config=cfg.load_config(),
+    ) is (selector != "foreign")
+
+
+def test_runtime_policy_keeps_nonlocal_target_and_platform_refusals(tmp_path, monkeypatch):
+    anchor = _configure(tmp_path, monkeypatch, "windows", configured=False)
+    source = anchor / "machines.yaml"
+    raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+    raw["machines"]["local-space"]["physical_host"] = "shared-host"
+    raw["machines"].update({
+        "peer-space": {"execution_platform": "windows", "physical_host": "peer-host"},
+        "guest-space": {"execution_platform": "wsl", "physical_host": "shared-host"},
+    })
+    source.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    config = cfg.load_config()
+    gate = {"agent-example": {"shared-host"}}
+    assert not reconcile.runtime_allowed(
+        "machine-gated", "agent-example", "peer-space", gate, repo_dir=anchor, config=config,
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        reconcile.runtime_allowed(
+            "machine-gated", "agent-example", "guest-space", gate, repo_dir=anchor, config=config,
+        )
+
+
 @pytest.mark.parametrize("override_source", ["project", "dropin"])
 def test_update_gate_honors_project_machine_precedence(tmp_path, monkeypatch, override_source):
     anchor = _configure(tmp_path, monkeypatch, "windows")

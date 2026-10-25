@@ -33,12 +33,9 @@ def runtime_allowed(
         if allowed is not None:
             physical_machine = machine
             if repo_dir is not None:
-                from .machine_identity import resolve_execution_context
+                from .machine_identity import runtime_policy_physical_machine
 
-                physical_machine = resolve_execution_context(
-                    machine, repo_dir, environment=cfg.detect_platform(),
-                    config=config,
-                ).target.machine
+                physical_machine = runtime_policy_physical_machine(machine, repo_dir, config=config)
             return machine in allowed or physical_machine in allowed
         return not gate_present
     return False

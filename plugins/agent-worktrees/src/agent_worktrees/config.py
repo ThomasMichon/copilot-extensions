@@ -1148,7 +1148,10 @@ def _load_config_uncached(
     )
     # Resolve after the config-source binding is available, without calling
     # load_machines_yaml's overlay fallback (which loads this config recursively).
-    repo = config.repos.get(config.repo_name)
+    try:
+        repo = config.default_repo
+    except KeyError:
+        repo = None
     identity_anchors = [repo.anchor] if repo is not None and repo.anchor else []
     if repo is not None and (repo.stateless or repo.requires_external_state_root):
         from . import state_root

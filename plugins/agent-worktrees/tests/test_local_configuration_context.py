@@ -201,3 +201,43 @@ def test_optional_map_errors_are_not_concealed_as_absence(
         with pytest.raises(ValueError, match="ambiguous|invalid"):
             operation()
     assert {item: item.read_bytes() for item in before} == before
+
+
+def test_sole_repository_fallback_keeps_local_customization(
+    local_config, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
+    monkeypatch.setattr(cfg, "_project_name_safe", lambda: "")
+    anchor, path, _ = local_config("wsl", {
+        "preferred-host": {"hostname": "Observed-Host"},
+    })
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document.pop("repo_name")
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    before = path.read_bytes()
+    loaded = cfg.load_config(
+        path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert loaded.repo_name == ""
+    assert loaded.default_repo.anchor == str(anchor)
+    assert loaded.machine == cfg.detect_machine(anchor) == "preferred-host-wsl"
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("environment", ["windows", "linux"])
+@pytest.mark.parametrize("physical", ["Rack/Computer", "Rack Computer", "Rack#Computer"])
+def test_missing_native_customization_returns_execution_token_not_physical_label(
+    local_config, monkeypatch: pytest.MonkeyPatch, environment: str, physical: str,
+) -> None:
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
+    anchor, path, before = local_config(environment, {
+        "guest-space": {
+            "hostname": "Observed-Host", "execution_platform": "wsl",
+            "physical_host": physical,
+        },
+    })
+    assert cfg.detect_machine(anchor) == "observed-host"
+    assert cfg.load_config(
+        path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    ).machine == "observed-host"
+    assert {item: item.read_bytes() for item in before} == before

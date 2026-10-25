@@ -224,6 +224,10 @@ ambiguous matches and explicitly selected platform conflicts still fail.
 Naming facts do not grant receiving-project, record or allocation authority.
 The existing execution-space mutation fences and configured-identity read
 provenance remain independent; this configuration adapter does not relax them.
+Update and launch runtime-policy evaluation retain the same current context
+for physical-name lookup, including missing guest customization and literal OS
+suffixes. Non-local target selection remains strict, and a present runtime
+manifest still refuses omitted or foreign deployment selectors.
 
 For legacy registries without execution-space declarations,
 `machine` resolves machine-local > global > OS hostname. Repository config
