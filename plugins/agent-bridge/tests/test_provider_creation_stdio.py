@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -47,7 +48,14 @@ for line in sys.stdin:
 
 
 @pytest.mark.asyncio
-async def test_provider_key_replays_one_real_stdio_native(session_manager, tmp_path):
+async def test_provider_key_replays_one_real_stdio_native(session_manager, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "agent_bridge.provider_hosting.query_provider_policy",
+        AsyncMock(return_value={
+            "version": 1, "allowed": True, "repository": str(tmp_path),
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }),
+    )
     program = tmp_path / "fixture_agent.py"
     ledger = tmp_path / "native-events.jsonl"
     program.write_text(_AGENT, encoding="utf-8")

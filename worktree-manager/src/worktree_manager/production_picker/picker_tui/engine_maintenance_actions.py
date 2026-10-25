@@ -2,6 +2,8 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+from ... import picker_review
+
 import threading
 
 from .engine_dialogs import ScopeDlgScreen
@@ -15,6 +17,8 @@ class PickerScreenMaintenanceActionsMixin:
     def _confirm_cleanup(self, dlg):
         """Confirmed Clean/Sync scope -> build (and, when armed, start) the
         per-worktree maintenance progress run (#88 F4)."""
+        if picker_review.refuse(self):
+            return
         picked = [o["label"] for o in dlg["opts"] if o["on"]]
         verb = dlg.get("verb", "Clean up")
         op = "sync" if verb.lower().startswith("sync") else "cleanup"
@@ -136,6 +140,8 @@ class PickerScreenMaintenanceActionsMixin:
         (not resolvable in the local tracking store) falls back to reloading its
         owning machine through the live loader. Best-effort; never raises on the
         UI thread."""
+        if picker_review.refuse(self):
+            return
         raw = rec.get("raw") or {}
         wt_id = raw.get("id")
         if not (getattr(self, "real_ops", False) and wt_id):
@@ -175,6 +181,7 @@ class PickerScreenMaintenanceActionsMixin:
         threading.Thread(target=work, name="wt-refresh", daemon=True).start()
     def _provider_runner(self):
         """Return the Picker-owned tracked runner for local provider commands."""
+        picker_review.require_writable()
         with self._provider_loader_lock:
             if self._provider_cancelled:
                 raise RuntimeError("picker provider runner is cancelled")
@@ -205,6 +212,8 @@ class PickerScreenMaintenanceActionsMixin:
         confirm gate (``armed=False``): the progress dialog asks before it
         executes. Only conversation-only / unused worktrees are targeted.
         """
+        if picker_review.refuse(self):
+            return
         recs = [recs] if isinstance(recs, dict) else list(recs)
         targets = [r for r in recs
                    if r.get("cleanup_bucket") in ("conversation", "unused")
@@ -217,6 +226,8 @@ class PickerScreenMaintenanceActionsMixin:
         """Build (and, when ``armed``, start) a maintenance progress run over
         ``recs`` for a single ``op`` (restart / finalize). An unarmed run shows
         the confirm gate first (see ``_key_progress`` / ``ProgressScreen``)."""
+        if picker_review.refuse(self):
+            return
         items = [{"key": self._row_key(r), "id4": r.get("id4"),
                   "title": r.get("title", ""),
                   "machine_env": r.get("machine_env", ""), "state": "pending"}
@@ -234,6 +245,8 @@ class PickerScreenMaintenanceActionsMixin:
         self._open_progress()
     def _start_progress(self):
         """Begin executing the armed progress run (real executor or mock walk)."""
+        if picker_review.refuse(self):
+            return
         p = self.progress
         if not self.real_ops:
             return  # mock walker advances via _advance_progress
@@ -279,6 +292,8 @@ class PickerScreenMaintenanceActionsMixin:
         concrete instruction the caller maps onto resume/create/remote paths.
         A deferred decision reports its reason and returns False without exit.
         """
+        if picker_review.refuse(self):
+            return False
         if decision.get("deferred"):
             self.debug = decision.get("reason") or "Locality is not ready; refresh and retry."
             if getattr(self, "real_ops", False) and not decision.get("attempt_id"):
@@ -389,6 +404,8 @@ class PickerScreenMaintenanceActionsMixin:
             self.sel = ("BTN", 0)
         elif zone == "BTN":
             btn = self.active_button()
+            if btn in {"N", "K", "SY", "PA"} and picker_review.refuse(self):
+                return
             if btn == "ConfigEdit":
                 self._activate_config_section()
             elif btn == "N":

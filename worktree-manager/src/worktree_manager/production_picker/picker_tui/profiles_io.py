@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 
 from ... import terminal_profiles as profiles_mod
+from ... import picker_review
 from . import data_ssh, roster
 
 TargetSel = profiles_mod.TargetSel
@@ -71,6 +72,8 @@ def load_column(machine, env, *, runner=_default_runner):
         sels = profiles_mod.load_selection(cfg_path)
         return set(profiles_mod.normalize_selection(sels, machine, env))
 
+    if picker_review.active():
+        return UNAVAILABLE
     argv = data_ssh.profiles_argv(machine, env, action="get")
     if not argv:
         # No SSH argv -> the host is not reachable/ready; we cannot read or write
@@ -112,6 +115,8 @@ def apply_column(machine, env, sels, *, mirror=True, runner=_default_runner):
     """
     from .. import project_config as cfg
 
+    if picker_review.active():
+        return False, picker_review.MESSAGE
     sels = list(sels)
     if (machine, env) == _local_key():
         profiles_mod.save_selection(

@@ -10,10 +10,11 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** source-only intent and implementation PRs to `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; selected adopters enforced; intrinsic launch-command correction in progress
-- **Vision:** extends [agent-worktrees](../../../visions/plugins/agent-worktrees/README.md)
+- **Status:** Done; released intrinsic enforcement and authorized installed acceptance verified
+- **Completed:** 2026-10-24
+- **Vision:** extends [agent-worktrees](../../../../visions/plugins/agent-worktrees/README.md)
   repository identity/contribution posture and
-  [agent-bridge](../../../visions/plugins/agent-bridge/README.md)
+  [agent-bridge](../../../../visions/plugins/agent-bridge/README.md)
   workspace allocation/session embodiment with a repository-owned hosting veto.
 - **Umbrella issue:** [#8332](https://github.com/ThomasMichon/copilot-extensions/issues/8332)
 - **Related work:** #5674 (machine identity/project enumeration), #7962 (native
@@ -63,7 +64,7 @@ hosting veto. The reviewed implementation and repository marker add that
 contract; release and running adopter enforcement remain separate gates.
 
 Use the existing repository configuration and resolution rules documented in
-[configuration](../../../docs/configuration.md#in-repo-committed), including
+[configuration](../../../../docs/configuration.md#in-repo-committed), including
 canonical `.copilot-extensions/agent-worktrees/config.yaml`, supported legacy
 paths and marketplace scope. Do not create a competing Bridge policy file or
 infer hosting permission from the presence of agent definitions.
@@ -165,21 +166,21 @@ _Agent-recommended follow-through; live changes require separate authorization._
 - [x] Add the source-only repository's explicit denial after generic enforcement
   and source-operation compatibility are qualified. Do not add an inert marker
   and claim that installed hosting is already prevented.
-- [ ] Complete the worktree-class, related-only posture with no advertised agent
+- [x] Complete the worktree-class, related-only posture with no advertised agent
   on authorized adopters. Preserve existing registrations and other state until
   necessary reconciliation is explicitly approved.
 - [x] Provide a supported preview/reconciliation path for conflicting existing
   project registrations. Preserve sessions, history, tracking and claims; no
   automatic termination, deletion or unregistration.
-- [ ] Update authoritative configuration, adoption and launch documentation;
+- [x] Update authoritative configuration, adoption and launch documentation;
   publish through the normal release flow and validate authorized adoption.
   Keep release, installation and actual enforced behavior distinct.
 
 The earlier coverage-packet release blocker (#8500/#8516) cleared through fix
 #8508 and its governed Main helper adoption. The original enforcement is
-released and selected installed negative checks pass. Final discovery
-acceptance and the corrected Worktrees launch interface remain open; a release
-of the earlier implementation does not close those gates.
+released and selected installed negative checks pass. Corrective release and
+authorized installed acceptance now also prove the intrinsic Worktrees launch
+interface and zero source-agent advertisements on both selected platforms.
 
 ### Phase 4 - Intrinsic Worktrees launch enforcement
 
@@ -190,7 +191,7 @@ _Operator-requested correction; no new hosting-policy option._
   launch/resume paths; source and inspection operations receive no launch flag.
 - [x] Prove unflagged launch denial, ordinary remote inspection and automatic
   selected-receiver compatibility checks without a user-controlled policy flag.
-- [ ] Land the correction through normal review/release and verify authorized
+- [x] Land the correction through normal review/release and verify authorized
   installed acceptance before declaring this effort complete.
 
 ## Validation Plan
@@ -221,13 +222,13 @@ _Agent-recommended proofs; record results as implementation proceeds._
 - [x] Run targeted bounded suites and the applicable clean-room/native
   Windows/Linux entry-point proofs before release/adoption; no production
   agent launch as an unapproved test.
-- [ ] Verify authorized installed policy enforcement and unchanged source/review
+- [x] Verify authorized installed policy enforcement and unchanged source/review
   flows before declaring implementation complete. Every Plan and Validation
   item must be resolved or explicitly transferred; a merged plan is not delivery.
 
 ## Proposal
 
-Merged repository configuration; **not yet released or installed**:
+Released repository configuration; authorized installed enforcement verified:
 
 ```yaml
 expose_agent: false
@@ -561,3 +562,38 @@ daemon or separately resolved Worktrees owner has upgraded.
   PowerShell receiver matrix covers allowed, unsupported, malformed and denied
   answers before a fake launch effect; all bounded jobs verify cleanup.
   Review, release and installed correction remain separate gates.
+
+### 2026-10-24 - Corrective release, installed acceptance and completion
+
+- Correction #8703 merged after the actual current-head provider review
+  reported no open findings and all required checks passed. Final interpreter
+  and native diagnostic corrections pass 69 Linux cases with four platform
+  skips and 16 native Windows cases with nine skips; bounded cleanup is
+  verified. These narrow final cohorts supplement, not replace, the broader
+  qualification recorded above.
+- Natural promotion run 40140804917 succeeded. Main release #8738 published
+  qualified Dev `278c2161f8854c8cd7a687e3a0fedb7578fc7c8f` as
+  `69b6b01647d7272c42c5142ad651e0dbed54978d`. Both actual pinned Worktrees
+  parser files omit the rejected option. The preceding successful promotion
+  selected an older snapshot and was not treated as corrective release proof.
+- Separately authorized normal updates completed through their owning durable
+  queues on selected Linux/WSL and native Windows environments, each with
+  terminal exit 0 and no error. Installed Worktrees 1.24.259-dev1 exposes no
+  hosting-policy option in project-scoped resolve/embody help. Ordinary,
+  unflagged source-anchor embodiment dry-runs refuse with exit 3 and the actual
+  repository-owned `expose_agent: false` reason on both platforms.
+- Both actual Bridge receivers run 0.9.152.dev1, report ready/not draining
+  with hosting capability version 1 and no topology errors, and advertise
+  zero source agents. The previously retained static advertisement disappeared
+  through the authorized normal cutover, not a restart or cache-edit workaround.
+- Source repository inventories remain unchanged; every previously inventoried
+  worktree identity, recorded session count and held claim asset is retained.
+  An independently progressing contributor's PR link changed normally; it was
+  not reset to an old inventory snapshot. Source state directories remain
+  present and removed project launchers were not recreated.
+- Installed generic source inventory and supported source-worktree
+  synchronization remain usable under the negative marker. The actual external
+  editing, bounded-test, publication, Code Review and merge proofs recorded
+  above remain valid; no authoring agent was hosted in this repository.
+  All Plan and Validation Plan items are resolved. Archive the completed effort;
+  unrelated identity, launch and lifecycle efforts retain their existing scope.

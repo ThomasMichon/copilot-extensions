@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK and original-turn DB source merged; explicit local native transport source implemented, full custody/qualification/restoration open
+- **Status:** Active; opt-in SDK, original-turn DB and explicit local native transport source merged; full custody/qualification/restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -135,11 +135,13 @@ require their own review and qualification.
 - [ ] Fence keyed creation, start/resume, queued/native sends, inbox/control
       handoffs, wake/redrive and host/lifecycle mutations at their effect owners.
       The [original-turn DB foundation](../../../plugins/agent-bridge/docs/native-turn-custody.md)
-      merged in #8713 and retains internal atomic handoffs and one-shot/outcome state; actual native
-      enrollment and transport effect-boundary wiring remain separate. The
-      bounded internal local process-owned ACP selection now gates original
-      turn insertion and the actual final send; full lifecycle/cohort and
-      installed qualification remain open.
+      merged in #8713 and retains internal atomic handoffs and one-shot/outcome
+      state. Explicit internal local process-owned ACP selection and final-send
+      wiring merged in #8732. Full lifecycle/cohort coverage and installed
+      qualification remain open. The
+      [original-acquisition DB foundation](../../../plugins/agent-bridge/docs/acquisition-custody.md)
+      adds internal epoch association and one-shot launch observations; actual
+      acquisition/create/start/resume and host effect-owner wiring remains next.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -254,6 +256,29 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Local native transport source merged; lifecycle custody next
+- #8732 merged as `92215b6e389b5e4981c9f6d7c7446b4b367aa2ab` at
+  16:15:25 PDT after exact-head approval `5640541999` on
+  `f95987d38808c80aad94f461f3356b403565c326` and passing required CI.
+  The reviewer corrections cover full-lifecycle enrollment exclusion and
+  Python 3.10-compatible timeout handling. The addressed remaining thread
+  was explicitly explained and resolved before normal managed completion.
+- The final bounded coupled lane passed 645 controls. The two implementation-only
+  source fingerprint classifications preserve all 814 fixture packets and
+  complete capture-time provenance. No new HTTP capture, schema, generation
+  or capability-floor change is claimed.
+- Reread the complete Plan and Validation Plan after merge. This closes only
+  the bounded internal local native-send source slice. Phase 1/1b, attributed
+  consumption, complete cohort coverage, target compatibility, restoration and
+  installed/native qualification remain open. Terminal observation settled the
+  PR claim; guarded reconciliation retained the reviewed source and advanced
+  only the owned source venue, with zero post-merge source commits.
+- Next follow the existing acquisition, creation/start/resume owners and retain
+  their original operation identities at actual effect boundaries, before
+  background/host/remote coverage, target compatibility and installer convergence.
+  This source merge authorizes no installed enrollment, model conversation,
+  protected-owner action, process stop or deployment.
 
 ### 2026-10-24 - Explicit local native transport source controls
 - Followed the actual SessionManager-to-AcpClient path through the prompt lock

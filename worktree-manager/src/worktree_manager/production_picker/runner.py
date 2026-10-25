@@ -6,7 +6,7 @@ import os
 import threading
 from collections.abc import Mapping
 
-from .. import engine_client, harness_state
+from .. import engine_client, harness_state, picker_review
 from . import context
 from . import engine_group_b
 from .picker_tui import run_tui_picker
@@ -30,7 +30,10 @@ def _prepare(project: str, *, heal: bool = True) -> bool:
 
     context.set_project(project)
     try:
-        payload = engine_group_b.picker_bootstrap(project)
+        payload = (
+            picker_review.bootstrap(project) if picker_review.active()
+            else engine_group_b.picker_bootstrap(project)
+        )
         bootstrap = context.bind_project_bootstrap(payload)
     except engine_client.EngineFeatureUnavailable as error:
         raise RuntimeError(
@@ -41,7 +44,7 @@ def _prepare(project: str, *, heal: bool = True) -> bool:
     if bootstrap.should_switch_cwd and bootstrap.cwd is not None:
         os.chdir(bootstrap.cwd)
     project_config.bind_bootstrap(bootstrap.project, payload.get("project_config"))
-    if heal:
+    if heal and not picker_review.active():
         _start_anchor_heal_check(bootstrap.project)
     return bootstrap.default_live
 
@@ -143,14 +146,17 @@ def run(
         else:
             selected = project if bootstrap_payload is not None or resolved_mock and project else _select_project(project)
             try:
-                payload = bootstrap_payload if bootstrap_payload is not None else engine_group_b.picker_bootstrap(selected)
+                payload = bootstrap_payload if bootstrap_payload is not None else (
+                    picker_review.bootstrap(selected) if picker_review.active()
+                    else engine_group_b.picker_bootstrap(selected)
+                )
             except engine_client.EngineFeatureUnavailable as error:
                 raise RuntimeError(
                     "the installed agent-worktrees engine predates "
                     "`picker-bootstrap --json`; update agent-worktrees"
                 ) from error
         bootstrap = context.ProjectBootstrap.from_payload(payload)
-        live = False if local else bootstrap.default_live
+        live = False if local or picker_review.active() else bootstrap.default_live
         if live:
             from .picker_tui import data_ssh as source
         else:
@@ -179,7 +185,7 @@ def run(
 
     def after_binding():
         nonlocal picker_root
-        if resolved_mock or finished.is_set():
+        if resolved_mock or picker_review.active() or finished.is_set():
             return
         from .. import resident_picker
 
@@ -208,7 +214,10 @@ def run(
             )
         return run_tui_picker(
             prepare=prepare,
-            project_label=project or "selecting project",
+            project_label=(
+                f"READ-ONLY {picker_review.current().candidate} · {project}"
+                if picker_review.active() else project or "selecting project"
+            ),
             mock_mode=resolved_mock,
             after_first_refresh=after_binding,
             **lifetime_kwargs,

@@ -71,6 +71,15 @@ Terminal status or a completed turn alone cannot establish native settlement.
 Ordinary unassociated writes/deletion remain unchanged while admission is open
 or the installation has never been bound.
 
+## Internal original-acquisition launch custody
+
+Schema 35 extends the original acquisition journal with optional epoch-bound
+admission, prospective launch handoffs, one-shot DB begin and original native
+acceptance observations. The [acquisition custody guide](acquisition-custody.md)
+owns its internal interfaces and limitations. Actual acquisition, keyed creation,
+start/resume and host effect-owner integration remain separate source work;
+the DB foundation does not qualify those cohorts.
+
 ## Internal original-turn native handoffs
 
 Schema 34 extends the existing turn owner with

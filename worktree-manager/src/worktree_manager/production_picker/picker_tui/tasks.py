@@ -36,8 +36,13 @@ from collections.abc import Mapping, Sequence
 
 from agent_procutil import no_window_flags
 
-from ...engine_client import _engine_environment
-from .command_transport import command_result, resolve_command as _resolve_command
+from ... import picker_review
+from .command_transport import (
+    _CHILD_ENV_UNSET as _CHILD_ENV_UNSET,
+    child_process_env as _child_process_env,
+    command_result,
+    resolve_command as _resolve_command,
+)
 from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload
 
@@ -64,31 +69,6 @@ STRICT_OPTIONS_COMMAND_TIMEOUT = 20.0
 SUBSCRIBE_MAX_RECONNECT_ATTEMPTS = 5
 SUBSCRIBE_RECONNECT_BACKOFF_SECS = 2.0
 
-#: Plugin-identity env vars that must never leak from the picker's own process
-#: into a *different* plugin's CLI. Mirrors ``reconcile._RUNTIME_ENV_UNSET``
-#: (the installer's own "clean child environment" list) -- kept as an
-#: independent, dependency-light copy here so this hot-path module doesn't pull
-#: in ``reconcile``'s (and its ``yaml``) import weight just for one tuple.
-_CHILD_ENV_UNSET = (
-    "COPILOT_EXTENSIONS_CONTEXT",
-    "COPILOT_PLUGIN_INSTALL_STAGED",
-    "COPILOT_PLUGIN_ROOT",
-    "COPILOT_PLUGIN_STAGED_FROM",
-    "PYTHONPATH",
-)
-
-
-def _child_process_env() -> dict[str, str]:
-    """A copy of the current environment with this plugin's own identity vars
-    removed, safe to hand to *any other* plugin's CLI. See the module
-    docstring for why this matters -- without it, a pivot action can fail with
-    a spurious cross-plugin "payload context mismatch"."""
-    env = _engine_environment()
-    for key in _CHILD_ENV_UNSET:
-        env.pop(key, None)
-    return env
-
-
 def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> list[str]:
     """Run a ``create_action`` field's ``options_command`` and return its
     JSON array of strings, or (by default) ``[]`` on failure (not found, non-zero exit,
@@ -103,6 +83,10 @@ def resolve_dynamic_options(argv: Sequence[str], *, strict: bool = False) -> lis
     if not argv:
         if strict:
             raise ValueError("empty options command")
+        return []
+    if picker_review.active():
+        if strict:
+            raise ValueError(picker_review.MESSAGE)
         return []
     try:
         argv = _resolve_command(argv)
@@ -431,6 +415,7 @@ class RegisteredPivotRuntime:
         rows surface as the provider flushes them). Registered in ``self._procs``
         so :meth:`close` tears it down. Mirrors
         :meth:`picker_tui.data_ssh.RemoteLoader._spawn_stream`."""
+        picker_review.require_writable()
         if self._closed.is_set():
             raise RuntimeError("closed")
         kwargs: dict = dict(
@@ -722,13 +707,21 @@ class RegisteredPivotRuntime:
         if not argv:
             return ("error", [], "empty list command", {})
         try:
-            argv = _resolve_command(argv)
-            proc = subprocess.run(
+            environment = _child_process_env()
+            if picker_review.active():
+                argv, binding = picker_review.list_command(self.pivot, argv)
+                environment.update(binding)
+            else:
+                argv = _resolve_command(argv)
+            execute = picker_review.run_read if picker_review.active() else subprocess.run
+            proc = execute(
                 argv, capture_output=True, text=True, timeout=LIST_TIMEOUT,
-                check=False, env=_child_process_env(), creationflags=no_window_flags(),
+                check=False, env=environment, creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return ("error", [], f"{argv[0]} not found on PATH", {})
+        except picker_review.ReadOnlyError as exc:
+            return ("error", [], str(exc), {})
         except (OSError, subprocess.SubprocessError) as exc:
             return ("error", [], str(exc)[:200], {})
         if proc.returncode != 0:
@@ -793,6 +786,8 @@ class RegisteredPivotRuntime:
         self, argv: Sequence[str], *, timeout: float, preserve_output: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
         argv = list(argv)
+        if picker_review.active():
+            return None, picker_review.MESSAGE
         if not argv:
             return None, "empty action command"
         try:
@@ -839,6 +834,8 @@ class RegisteredPivotRuntime:
         :meth:`close` also tears it down on picker exit. Falls back to treating a
         non-envelope exit as a plain sync result so a mis-declared ``progress``
         action still completes."""
+        if picker_review.active():
+            return False, picker_review.MESSAGE
         argv = format_template(action.run, ctx)
         if not argv:
             return (False, "empty action command")
@@ -944,6 +941,8 @@ def run_config_section(
     its status line. Mirrors :func:`run_worktree_action` -- a config section is
     the same run-on-Enter shape, but rides the ⚙ Configuration menu rather than
     a worktree row, and is global (not per-worktree) in scope."""
+    if picker_review.active():
+        return False, picker_review.MESSAGE
     if fields is None:
         argv = format_template(action.run, ctx)
     else:
@@ -975,6 +974,8 @@ def run_worktree_action(action, ctx: Mapping[str, object]) -> tuple[bool, str]:
     ``(ok, message)`` and never raises, so the picker can surface the outcome in
     its status line. Mirrors :meth:`RegisteredPivotRuntime.run_action` but is
     stand-alone: worktree actions are not bound to a pivot's runtime."""
+    if picker_review.active():
+        return False, picker_review.MESSAGE
     argv = format_template(action.run, ctx)
     if not argv:
         return (False, "empty action command")

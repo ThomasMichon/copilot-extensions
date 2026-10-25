@@ -447,10 +447,12 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         reason=(live.get("self_merge_note") or "") if isinstance(live_block, dict) else "",
         flow=flow,
     )
+    if result.get("reconciliation_pending"):
+        reminder = None
     if reminder is not None:
         result["reminder"] = reminder.as_dict()
     want_threads = getattr(args, "threads", False) or getattr(args, "resolve_threads", False)
-    if want_threads and result.get("has_pr"):
+    if want_threads and result.get("has_pr") and not result.get("error"):
         result["thread_report"] = pr_ops.pr_threads(
             worktree_id,
             resolve=getattr(args, "resolve_threads", False),
@@ -458,14 +460,14 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         )
     if use_json:
         output._json_output(result)
-        if result.get("live_error"):
+        if result.get("live_error") or result.get("error"):
             return 1
         return 0 if result.get("has_pr") or "error" not in result else 1
-    if result.get("live_error"):
-        output.err("PR live observation unavailable: " + result["live_error"])
-        return 1
     if result.get("error"):
         output.err(result["error"])
+        return 1
+    if result.get("live_error"):
+        output.err("PR live observation unavailable: " + result["live_error"])
         return 1
     flow_detail = flow.profile
     if actor_flow.resolution != "configured":

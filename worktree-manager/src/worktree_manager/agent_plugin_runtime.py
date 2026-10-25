@@ -503,13 +503,20 @@ def resolve_installed_plugin_slot(
     return None
 
 
-def resolve_installed_plugin_command(
+def resolve_installed_plugin_invocation(
     plugin_id: str, module: str | None = None, *, environment: dict[str, str] | None = None,
-) -> list[str] | None:
-    """The exact ``[python, -m, module]`` argv for ``plugin_id``'s installed
-    runtime, or ``None`` if no attributable, complete install was found."""
+) -> tuple[list[str], Path] | None:
+    """Resolve a complete runtime command and its state root in one selection."""
     slot = resolve_installed_plugin_slot(plugin_id, environment=environment)
     if slot is None:
         return None
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    return [str(python), "-m", module or plugin_id.replace("-", "_")]
+    return [str(python), "-m", module or plugin_id.replace("-", "_")], slot.parent.parent
+
+
+def resolve_installed_plugin_command(
+    plugin_id: str, module: str | None = None, *, environment: dict[str, str] | None = None,
+) -> list[str] | None:
+    """The exact installed ``[python, -m, module]`` command, without provisioning."""
+    invocation = resolve_installed_plugin_invocation(plugin_id, module, environment=environment)
+    return invocation[0] if invocation is not None else None

@@ -24,6 +24,19 @@ rig = _connected_rig
 pytestmark = pytest.mark.contract("agent_bridge.provider_creation")
 
 
+@pytest.fixture(autouse=True)
+def synthetic_provider_hosting(monkeypatch):
+    # This synthetic provider has no hosting-policy transport. Its independent
+    # prerequisite is supplied here; repository-hosting tests cover real refusal.
+    monkeypatch.setattr(
+        "agent_bridge.provider_hosting.query_provider_policy",
+        AsyncMock(return_value={
+            "version": 1, "allowed": True, "repository": "/workspace",
+            "expose_agent": None, "sources": [], "denied_by": [],
+        }),
+    )
+
+
 def _current_refresh_fixture():
     # Placement semantics are frozen independently of unrelated HTTP additions.
     path = Path(__file__).resolve().parents[1] / "contract" / "fixtures" / "http" / "current"
