@@ -45,10 +45,12 @@ ordinary tuple producers or changing existing identities. The
 [current journal](journal/2026/10.24%20progress.md) preserves the release and
 guest acceptance boundary. The additive shared local-context foundation merged
 in #8652 with its final selector regressions and passing required CI.
-Configuration adoption merged in #8786 after exact-head approval and passing
-required CI. Registration entry-point proof, producers, retained-allocation/
-receiving-side checks and installed acceptance remain open; the parent effort
-remains Active. These source merges do not establish release or installation.
+Configuration adoption merged in #8786. Prospective opt-in tuples and bounded
+receiving/registration compatibility merged in #8812 after exact-head approval
+and passing required CI. Next is retained-allocation compatibility after later
+customization; complete registration/Manager entry-point proof, qualified release
+and installed acceptance remain open. The parent effort remains Active.
+These source merges do not establish release, installation or default activation.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is

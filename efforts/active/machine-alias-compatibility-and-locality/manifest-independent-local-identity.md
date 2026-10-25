@@ -81,12 +81,26 @@ context rather than requiring optional map enrollment. Canonical explicit keys,
 actual platform, receiving project, snapshot and parent-owner checks remain
 independent gates. Completed creation-key replay retains its original result
 under unchanged customization and either supported producer mode.
+This bounded source slice merged in #8812 after exact-head approval and passing
+required CI. It also preserves explicit registration-binding provenance,
+record-proven ordinary legacy lifecycle paths, supported legacy platform/path
+overrides and actual-platform fallback refusals. An unsupported mixed
+legacy-parent spelling cannot admit a tuple child that its lifecycle rejects.
 
-Registration and Manager entry-point proof, retained-allocation compatibility
+Complete registration and Manager entry-point proof, retained-allocation compatibility
 after later customization, the remainder of steps 2-3 and the complete validation
 matrix below remain open. Observed naming facts are not receiving-project or
 allocation authority; existing admission receipts and identifiers must not be
 regenerated from a later optional customization.
+
+The completed creation-key sub-slice now distinguishes read-only journal replay
+from ordinary mutation. It retains the original OS/substrate observation inside
+new completed receipts, checks the actual receiving namespace and unchanged
+record/nonce/relationships, and returns the original allocation after optional
+customization. Older receipts remain unchanged; raw OS-derived owners can be
+reconstructed, while an unproven former custom owner still refuses rather than
+allocating a replacement. Complete launch admission and creation-tail repair
+remain open, as do the rest of the source and installed validation gates below.
 
 ## Validation Plan
 
