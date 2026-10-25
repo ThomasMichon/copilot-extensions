@@ -713,6 +713,33 @@ def test_creation_refuses_legacy_parent_receiving_conflicts_before_effects(
     assert launch_seed_state.peek(record.yaml_path) == creation.seed
 
 
+@pytest.mark.parametrize("tuple_identity", [False, True])
+def test_creation_repairs_native_child_with_nonce_less_legacy_parent(
+    tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity,
+):
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
+        tuple_identity=tuple_identity, observed_identity=True,
+    )
+    parent_checkout = creation.roots["harness"] / "parent"
+    parent_checkout.mkdir()
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(parent_checkout), "harness",
+        creation.record.execution_machine, cfg.detect_platform(),
+        creation.projects["harness"] / "worktrees",
+    )
+    parent.creation_nonce = None
+    tracking.save_record(parent)
+    record = tracking.load_record(creation.record.yaml_path)
+    record.owner_ref = tracking.format_claim_ref(parent.execution_machine, "harness", "parent")
+    tracking.save_record(record)
+    before = parent.yaml_path.read_bytes()
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and report["prepared"], report["error"]
+    assert parent.yaml_path.read_bytes() == before
+    assert launch_seed_state.peek(record.yaml_path) == creation.seed
+
+
 @pytest.mark.guard
 def test_creation_refuses_reciprocal_pair_to_a_different_original_child(creation, monkeypatch, capsys):
     parent = tracking.load_record(creation.record.yaml_path)

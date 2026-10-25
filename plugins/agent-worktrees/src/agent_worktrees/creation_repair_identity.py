@@ -106,10 +106,7 @@ def require_retained_record(record: tracking.WorktreeRecord, config: cfg.Config)
             or not _repair_namespace_matches(parent, parent_config)
         ):
             raise ValueError("retained creation parent conflicts with its receiving platform or namespace")
-        if _observed_original_owner(parent, parent_config):
-            if not parent.creation_nonce:
-                raise ValueError("retained creation parent has no receiving-project record proof")
-        else:
+        if not (_observed_original_owner(parent, parent_config) and parent.creation_nonce):
             if not execution_spaces.require_owner_identity(owner.machine, parent_config, canonical_ref=False):
                 raise ValueError("retained creation parent has a different receiving execution owner")
             resolved, _, error = execution_spaces.resolve_owner_record_path(record.owner_ref, receiving)
