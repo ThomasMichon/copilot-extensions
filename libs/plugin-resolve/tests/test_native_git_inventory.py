@@ -192,7 +192,9 @@ def test_native_git_cache_keeps_explicit_target_disable(native_inventory, monkey
     assert json.loads(path.read_text())["extraKnownMarketplaces"]["git-fixture"] == definition
 
 
-@pytest.mark.parametrize("selector", ["github", "sha", "path", "runtime-cache", "unrelated"])
+@pytest.mark.parametrize(
+    "selector", ["github", "sha", "path", "runtime-cache", "unrelated", "source-spelling"],
+)
 def test_native_git_cache_preserves_supported_source_selectors(
     native_inventory,
     monkeypatch,
@@ -217,6 +219,14 @@ def test_native_git_cache_preserves_supported_source_selectors(
         generated = clone / folder / "helper" / ".venv"
         generated.mkdir()
         (generated / "generated.txt").write_text("runtime cache is not source")
+    elif selector == "source-spelling":
+        path = clone / folder / "marketplace.json"
+        catalog = json.loads(path.read_text())
+        catalog["plugins"][0]["source"] = " ./helper "
+        atomic_json(path, catalog)
+        git(clone, "add", ".")
+        git(clone, "commit", "--quiet", "-m", "padded source fixture")
+        definition["source"]["ref"] = "HEAD"
     else:
         (clone / "catalog-b" / "helper" / "marker.txt").write_text("unrelated change")
     monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
@@ -378,10 +388,12 @@ def test_deleted_required_sibling_asset_prevents_native_cache_reuse(
 
 
 @pytest.mark.parametrize("component", ["source", "plugin-root"])
+@pytest.mark.parametrize("spelling", ["plain", "padded"])
 def test_linked_declared_source_cannot_redirect_native_cache_payload(
     native_inventory,
     monkeypatch,
     component,
+    spelling,
 ):
     target, _home, clone, definition, environment = native_inventory
     catalog_root = clone / "catalog-a"
@@ -404,6 +416,11 @@ def test_linked_declared_source_cannot_redirect_native_cache_payload(
         else redirected / "marker.txt"
     )
     marker.write_text("redirected payload")
+    if spelling == "padded":
+        path = catalog_root / "marketplace.json"
+        catalog = json.loads(path.read_text())
+        catalog["plugins"][0]["source"] = " ./helper "
+        atomic_json(path, catalog)
     git(clone, "add", ".")
     git(clone, "commit", "--quiet", "-m", "source redirection fixture")
     definition["source"]["ref"] = "HEAD"

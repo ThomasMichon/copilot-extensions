@@ -19,7 +19,7 @@ from .registration import _settings_document, strict_json
 from .settings import split_source
 
 
-def _require_unlinked_path(root: Path, path: Path) -> None:
+def _require_unlinked_path(root: Path, path: Path, *, allow_missing: bool = False) -> None:
     relative = path.relative_to(root)
     if ".." in relative.parts:
         raise ValueError("Native cache evidence requires a contained path")
@@ -29,7 +29,9 @@ def _require_unlinked_path(root: Path, path: Path) -> None:
         try:
             info = member.lstat()
         except FileNotFoundError:
-            break
+            if allow_missing:
+                break
+            raise
         if stat.S_ISLNK(info.st_mode) or _is_reparse(info):
             raise ValueError("Linked native cache evidence path")
 
@@ -270,11 +272,11 @@ def inventory_item(
             continue
         references: set[Path] = set()
         try:
-            declared = Path(catalog.plugin_root) / catalog.plugins[name].source
+            declared = Path(catalog.plugin_root) / catalog.plugins[name].source.strip()
             _require_unlinked_path(candidate, root / declared)
             content = subset(candidate, payload, referenced_paths=references)
             for member in references:
-                _require_unlinked_path(candidate, member)
+                _require_unlinked_path(candidate, member, allow_missing=True)
             metadata, entry = publication_metadata(root, source)
             catalog_metadata(source, plugin_manifest(payload), metadata, entry)
         except (OSError, ValueError):

@@ -270,7 +270,10 @@ an ineligible candidate and leaves ordinary acquisition available.
 Catalog plugin entries must be objects and owner/location metadata must be valid.
 Referenced sibling files and directories remain in the qualification path set
 even when missing from the current tree, so deleted required assets cannot
-disappear from the Git status check. Copy mode and conflicting global
+disappear from the Git status check. Declared source spellings use the same
+whitespace normalization as marketplace resolution, and every catalog/source
+component must exist; only referenced assets may retain a missing suffix.
+Copy mode and conflicting global
 registrations retain ordinary acquisition.
 This neither enables a plugin globally nor pins native startup to the cache's
 manifest version. The execution owner's existing startup-readiness barrier

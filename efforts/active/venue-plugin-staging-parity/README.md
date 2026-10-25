@@ -387,6 +387,16 @@ or a reason to create a daemon.
 - Full-suite validation, the current-head review and required CI still gate
   merge. No rollout or further original-task launch has occurred. Productive
   headed acceptance and the remaining venue gates stay open.
+- A further current-head review identified padded source spellings resolved
+  differently by the path guard and marketplace loader. A native junction
+  regression reproduces that bypass. Qualification now uses the loader's
+  source whitespace normalization and requires every catalog/source component
+  to exist; missing suffixes remain allowed only for referenced-asset status
+  evidence. All 12 targeted spelling, link and deletion controls pass.
+- The intermediate full suite exhausted its 900-second orchestration budget
+  before reporting a result. It is not a pass. The next full run receives a
+  larger bounded orchestration window with duration reporting, retaining the
+  per-test timeout, containment, host-state guards and production deadlines.
 
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 
