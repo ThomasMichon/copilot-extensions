@@ -107,6 +107,13 @@ def test_unattended_repair_refuses_before_elevation_or_task_mutation():
     assert "[Environment]::GetCommandLineArgs() -icontains '-NonInteractive'" in text[gate:refusal]
 
 
+def test_repair_executable_is_local_to_retained_native_installer():
+    body = _function_body("Get-ScheduledTaskRepairScript")
+    assert "Join-Path $PSScriptRoot 'repair-scheduled-task.ps1'" in body
+    assert "COPILOT_PLUGIN_STAGED_FROM" not in body
+    assert "System32\\WindowsPowerShell\\v1.0\\powershell.exe" in _function_body("Get-PwshPath")
+
+
 @pytest.mark.skipif(os.name != "nt", reason="actual unattended Windows PowerShell repair")
 def test_actual_unattended_repair_keeps_task_without_prompting(tmp_path):
     source = (_PLUGIN_ROOT / "scripts/repair-scheduled-task.ps1").read_text(encoding="utf-8")

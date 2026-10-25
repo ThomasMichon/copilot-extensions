@@ -1,5 +1,6 @@
 """Bridge's literal legacy recipes retain native service and construction owners."""
 
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 from packaging.version import Version
@@ -271,9 +273,83 @@ def assert_bridge_registration(installation, adapter):
     assert any(item["operation"] == "synthetic-health" for item in effects)
 
 
+@pytest.fixture
+def native_recipe_runner(area):
+    calls, owners, descriptors, roots = [], [], [], {}
+
+    def start(command, *, env, cwd, root, diagnostic):
+        path = area / f"native-recipe-{len(calls)}.log"
+        output = path.open("wb")
+        process = subprocess.Popen(
+            command, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
+            stdout=output, stderr=subprocess.STDOUT, **no_window_kwargs(),
+        )
+        calls.append((process, output, path))
+        roots[root] = diagnostic
+        prefix = "[installation-driver] launch acknowledgement: "
+
+        def acknowledgement():
+            return next((line.partition(prefix)[2]
+                         for line in path.read_text(errors="replace").splitlines(keepends=True)
+                         if line.startswith(prefix) and line.endswith("\n")), None)
+
+        observe(lambda: acknowledgement() is not None or process.poll() is not None, 120, diagnostic)
+        frame = acknowledgement()
+        assert frame is not None, path.read_text(errors="replace") + diagnostic()
+        if os.name == "nt":
+            from test_foundation_genesis_process import pinned_worker
+            owners.append(pinned_worker(json.loads(frame)))
+        else:
+            from agent_procutil._linux_pidfd import open_pidfd
+            descriptors.append(open_pidfd(int(frame.split()[0].partition(":")[2])))
+        return process, path
+
+    def run(command, **kwargs):
+        process, path = start(command, **kwargs)
+        code = process.wait(timeout=900)
+        return subprocess.CompletedProcess(command, code, path.read_text(errors="replace"), "")
+
+    try:
+        yield SimpleNamespace(start=start, run=run)
+    finally:
+        with ExitStack() as settlement:
+            for _process, output, _path in calls:
+                settlement.callback(output.close)
+            for owner in owners:
+                settlement.callback(owner.close)
+                settlement.callback(owner.wait, timeout=900)
+            if descriptors:
+                from agent_procutil._caller_owned import _pidfd_exited
+                for descriptor in descriptors:
+                    settlement.callback(os.close, descriptor)
+                    settlement.callback(
+                        observe, lambda descriptor=descriptor: _pidfd_exited(descriptor), 900,
+                        lambda: "native supervisor still running",
+                    )
+            for process, _output, _path in calls:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=30)
+            for root, diagnostic in roots.items():
+                observe(lambda: foundation_status(root=root) is None or
+                        foundation_status(root=root).state != "running", 900, diagnostic)
+                observe(lambda: all(item.state not in {"pending", "running"}
+                                    for item in status(root=root)), 900, diagnostic)
+                def custody_released():
+                    lock = provision.core.OperationLock(root / "execution.lock")
+                    try:
+                        lock.acquire()
+                    except provision.core.OperationLockedError:
+                        return False
+                    lock.release()
+                    return True
+
+                observe(custody_released, 900, diagnostic)
+
+
 @native_genesis
 def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutable_reuse(
-    materialized_bridge, area, native_window_observation,
+    materialized_bridge, area, native_window_observation, native_recipe_runner,
 ):
     import agent_procutil
 
@@ -368,18 +444,12 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
                 finally:
                     os.close(descriptor)
 
-    callers = [subprocess.Popen(command("provision"), env=env, cwd=project, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs())
+    callers = [native_recipe_runner.start(
+        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+    )
                for _ in range(2)]
-    try:
-        for process in callers:
-            out, err = process.communicate(timeout=900)
-            assert process.returncode == 0, out.decode() + err.decode() + diagnostic()
-    finally:
-        for process in callers:
-            if process.poll() is None:
-                process.kill()
-                process.communicate(timeout=30)
+    for process, path in callers:
+        assert process.wait(timeout=900) == 0, path.read_text(errors="replace") + diagnostic()
     assert_bridge_registration(installation, adapter)
     selected = (installation / "current-version").read_text().strip()
     slot = installation / "versions" / selected
@@ -387,8 +457,9 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
     complete = completion.read_bytes()
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     effects = registration_effects(adapter)
-    repeated = subprocess.run(command("provision"), env=env, cwd=project, stdin=subprocess.DEVNULL,
-                              capture_output=True, text=True, timeout=900, **no_window_kwargs())
+    repeated = native_recipe_runner.run(
+        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+    )
     assert repeated.returncode == 0, repeated.stdout + repeated.stderr + diagnostic()
     assert (installation / "current-version").read_text().strip() == selected
     assert completion.read_bytes() == complete
@@ -402,16 +473,50 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
         stale["Actions"][0]["Arguments"] = "fixture stale registration"
         task_path.write_text(json.dumps(stale), encoding="utf-8")
         (adapter / "mode").write_text("registration-denied", encoding="utf-8")
-        denied = subprocess.run(command("provision"), env=env, cwd=project, stdin=subprocess.DEVNULL,
-                                capture_output=True, text=True, timeout=900, **no_window_kwargs())
+        denied = native_recipe_runner.run(
+            command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        )
         assert denied.returncode == 0, denied.stdout + denied.stderr + diagnostic()
         assert json.loads(task_path.read_text(encoding="utf-8-sig")) == stale
         assert "fixture registration denied" in status(root=root)[-1].log_path.read_text(encoding="utf-8")
         (adapter / "mode").unlink()
-        repaired = subprocess.run(command("provision"), env=env, cwd=project, stdin=subprocess.DEVNULL,
-                                  capture_output=True, text=True, timeout=900, **no_window_kwargs())
+        repaired = native_recipe_runner.run(
+            command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+        )
         assert repaired.returncode == 0, repaired.stdout + repaired.stderr + diagnostic()
         assert registration_effects(adapter)[-1]["operation"] == "set"
+        interactive = json.loads(task_path.read_text(encoding="utf-8-sig"))
+        repair_path = payload / "scripts/repair-scheduled-task.ps1"
+        canonical_repair = repair_path.read_bytes()
+        repair_effect = installation / "frozen-repair.txt"
+        try:
+            for mode, exit_code in (("repair-source-replaced", 37), ("repair-source-removed", 0)):
+                repair_path.write_text(
+                    "$ErrorActionPreference='Stop'\n"
+                    "if ([Environment]::GetCommandLineArgs() -inotcontains '-NonInteractive') { exit 99 }\n"
+                    "[IO.File]::WriteAllText((Join-Path $env:AGENT_BRIDGE_CONFIG_DIR 'frozen-repair.txt'), $PSScriptRoot)\n"
+                    f"exit {exit_code}\n", encoding="utf-8",
+                )
+                task = json.loads(json.dumps(interactive))
+                task["Principal"]["LogonType"] = "S4U"
+                task_path.write_text(json.dumps(task), encoding="utf-8")
+                (adapter / "mode").write_text(mode, encoding="utf-8")
+                (adapter / "source-tampered").unlink(missing_ok=True)
+                repair_effect.unlink(missing_ok=True)
+                repaired = native_recipe_runner.run(
+                    command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+                )
+                assert repaired.returncode == exit_code, repaired.stdout + repaired.stderr + diagnostic()
+                assert (adapter / "source-tampered").read_text() == mode
+                assert Path(repair_effect.read_text()).is_relative_to(installation / ".install-stage")
+                result = status(root=root)[-1]
+                assert result.state == "completed" and result.exit_code == exit_code
+                assert "mutable original repair executed" not in result.log_path.read_text(encoding="utf-8")
+                assert completion.read_bytes() == complete
+        finally:
+            repair_path.write_bytes(canonical_repair)
+            task_path.write_text(json.dumps(interactive), encoding="utf-8")
+            (adapter / "mode").unlink(missing_ok=True)
     manifest = json.loads((installation / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     assert manifest["source"]["kind"] == "marketplace"
     project_file = payload / "pyproject.toml"
@@ -420,13 +525,16 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_provision_and_immutabl
     (payload / "src/agent_bridge/__init__.py").write_text(
         'raise RuntimeError("fixture failed Bridge candidate")\n', encoding="utf-8",
     )
-    # Windows prepared-runtime provision deliberately does not reconstruct a new
-    # candidate. Exercise that native contract, not Logger's install semantics.
-    failed = subprocess.run(command("provision"), env=env, cwd=project, stdin=subprocess.DEVNULL,
-                            capture_output=True, text=True, timeout=900, **no_window_kwargs())
-    assert failed.returncode == (0 if os.name == "nt" else 1), failed.stdout + failed.stderr + diagnostic()
+    # A new version has no prepared target slot on either native installer.
+    failed = native_recipe_runner.run(
+        command("provision"), env=env, cwd=project, root=root, diagnostic=diagnostic,
+    )
+    assert failed.returncode != 0, failed.stdout + failed.stderr + diagnostic()
+    failed_request = status(root=root)[-1]
+    assert failed_request.state == "completed" and failed_request.exit_code != 0
     assert (installation / "current-version").read_text().strip() == selected
     assert completion.read_bytes() == complete
+    assert not (installation / "versions/99.0.0/.install-complete.json").exists()
     payload.rename(payload.with_name("unavailable-bridge"))
     inputs.rename(area / "unavailable-foundation-source")
     identity = subprocess.run(

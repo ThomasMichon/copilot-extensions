@@ -38,6 +38,19 @@ function Get-ScheduledTask {
     [CmdletBinding()]
     param([string]$TaskName)
     Write-Effect 'get' $TaskName
+    $modePath = Join-Path $PSScriptRoot 'mode'
+    $mode = if (Test-Path -LiteralPath $modePath) { Get-Content -LiteralPath $modePath -Raw } else { '' }
+    $tampered = Join-Path $PSScriptRoot 'source-tampered'
+    if ($mode -in @('repair-source-replaced', 'repair-source-removed') -and
+        -not (Test-Path -LiteralPath $tampered)) {
+        $original = Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'scripts\repair-scheduled-task.ps1'
+        if ($mode -eq 'repair-source-replaced') {
+            [IO.File]::WriteAllText($original, "throw 'mutable original repair executed'")
+        } else {
+            Remove-Item -LiteralPath $original
+        }
+        [IO.File]::WriteAllText($tampered, $mode)
+    }
     $path = Join-Path $PSScriptRoot 'task.json'
     if (Test-Path -LiteralPath $path) { Get-Content -LiteralPath $path -Raw | ConvertFrom-Json }
 }
@@ -45,7 +58,9 @@ function Get-ScheduledTask {
 function Get-ScheduledTaskInfo {
     [CmdletBinding()]
     param([string]$TaskName)
-    [pscustomobject]@{ LastTaskResult = 0 }
+    $modePath = Join-Path $PSScriptRoot 'mode'
+    $mode = if (Test-Path -LiteralPath $modePath) { Get-Content -LiteralPath $modePath -Raw } else { '' }
+    [pscustomobject]@{ LastTaskResult = $(if ($mode -like 'repair-source-*') { 267011 } else { 0 }) }
 }
 
 function Write-Task {
