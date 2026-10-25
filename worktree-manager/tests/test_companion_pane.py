@@ -212,6 +212,58 @@ def test_registry_storage_failure_is_visible(mux, monkeypatch):
     assert not state.calls
 
 
+@pytest.mark.parametrize("caller_kind", ["other-project", "neutral"])
+def test_explicit_cwd_scopes_real_engine_read_without_changing_caller(tmp_path, monkeypatch, caller_kind):
+    target = tmp_path / "selected worktree"
+    caller = tmp_path / caller_kind
+    target.mkdir()
+    caller.mkdir()
+    (target / "identity.json").write_text(json.dumps({
+        "repo": "selected-project", "id": "selected", "path": str(target),
+    }), encoding="utf-8")
+    if caller_kind == "other-project":
+        (caller / "identity.json").write_text(json.dumps({
+            "repo": "other-project", "id": "wrong", "path": str(caller),
+        }), encoding="utf-8")
+    script = tmp_path / "fixture engine.py"
+    script.write_text(
+        "import json\nfrom pathlib import Path\n"
+        "p=Path.cwd()/'identity.json'\n"
+        "print(p.read_text() if p.exists() else json.dumps({'error':'untracked'}))\n",
+        encoding="utf-8",
+    )
+    mapping = {
+        "project": "selected-project", "worktree_id": "selected", "live": True,
+        "mux_bin": "fixture-mux", "mux_session": "selected", "session_incarnation": "$7:100",
+        "worktree_path": str(target),
+        "panes": [{"pane_id": "%42", "role": "cli", "live": True}],
+    }
+    lookups = []
+
+    def get_mapping(project, worktree_id):
+        lookups.append((project, worktree_id))
+        return mapping if (project, worktree_id) == ("selected-project", "selected") else None
+
+    def native(mapping, *args, **kwargs):
+        if args[0] == "list-panes":
+            return f"%42\t@7\t0\tselected\t$7:100\t{target}"
+        if args[0] == "display-message":
+            return "1"
+        return ""
+
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(pane, "get_mapping", get_mapping)
+    monkeypatch.setattr(pane, "_call", native)
+    monkeypatch.setattr(pane, "default_root", lambda: tmp_path / "manager")
+    pane.ec.set_engine_command([sys.executable, str(script)])
+    try:
+        assert pane.run("return", str(target)) == 0
+        assert set(lookups) == {("selected-project", "selected")}
+        assert Path.cwd() == caller
+    finally:
+        pane.ec.set_engine_command(None)
+
+
 def test_concurrent_processes_publish_only_one_observer(tmp_path):
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"splits": 0, "observer": None, "panes": []}), encoding="utf-8")

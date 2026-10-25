@@ -348,7 +348,7 @@ def test_reconnect_preserves_only_proven_incumbent_cli(monkeypatch, case):
 
     monkeypatch.setattr(mux_daemon_cli, "run_mux_child", native)
     assert mux_daemon_cli._reconnect_cli_panes(payload) == (
-        incumbent["panes"] if case == "same" else []
+        incumbent["panes"] if case in {"same", "unavailable", "duplicate"} else []
     )
     if calls:
         command, kwargs = calls[0]

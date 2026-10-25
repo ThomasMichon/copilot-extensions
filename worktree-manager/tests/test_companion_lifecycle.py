@@ -52,7 +52,8 @@ def test_exact_live_cli_is_read_only_and_uses_only_native_inventory(owner):
 
 
 @pytest.mark.parametrize("case", [
-    "missing-cli", "dead-cli", "dead-cli-without-path", "empty-native", "native-successor",
+    "missing-cli", "missing-cli-observer-without-path", "dead-cli",
+    "dead-cli-without-path", "empty-native", "native-successor",
     "registry-successor", "registry-dead-cli", "registry-tombstone",
 ])
 def test_positive_owner_end_is_terminal_even_if_pane_id_is_recycled(owner, case):
@@ -60,6 +61,8 @@ def test_positive_owner_end_is_terminal_even_if_pane_id_is_recycled(owner, case)
     original_mapping, original_raw = deepcopy(owner.mapping), owner.raw
     if case == "missing-cli":
         owner.raw = owner.raw.replace("%42", "%99")
+    elif case == "missing-cli-observer-without-path":
+        owner.raw = owner.raw.replace("%42", "%99").rsplit("\t", 1)[0] + "\t"
     elif case == "dead-cli":
         owner.raw = owner.raw.replace("\t0\t", "\t1\t")
     elif case == "dead-cli-without-path":
@@ -157,6 +160,60 @@ def test_malformed_expected_incarnation_is_unknown_before_binding_or_probe(owner
     assert lifecycle.cli_alive("example", "one", "%42", session_incarnation=expected) is None
     assert lifecycle._bindings == {}
     assert owner.calls == []
+
+
+@pytest.mark.parametrize("metadata", ["empty-panes", "no-panes", "missing-registry"])
+def test_bound_owner_still_polls_native_after_cli_metadata_is_lost(owner, metadata, monkeypatch):
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is True
+    if metadata == "empty-panes":
+        owner.mapping["panes"] = []
+    elif metadata == "no-panes":
+        owner.mapping.pop("panes")
+    else:
+        owner.mapping = None
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is True
+    native = lifecycle._call
+
+    def unavailable(*args):
+        raise subprocess.TimeoutExpired("owned-mux", 5)
+
+    monkeypatch.setattr(lifecycle, "_call", unavailable)
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is None
+    monkeypatch.setattr(lifecycle, "_call", native)
+    owner.raw = owner.raw.replace("%42", "%99")
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is False
+
+
+def test_timeout_empty_reconnect_then_cli_exit_cannot_adopt_a_relaunch(owner, tmp_path, monkeypatch):
+    from worktree_manager import mux_daemon, mux_daemon_cli, mux_mapping_registry as registry
+
+    monkeypatch.setattr(registry, "default_root", lambda: tmp_path)
+    monkeypatch.setattr(lifecycle, "get_mapping", registry.get_mapping)
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *args, **kwargs: True)
+    monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *args, **kwargs: {"applied": True})
+    payload = deepcopy(owner.mapping)
+    payload.pop("mapping_revision")
+    registry.register_next_mapping(payload)
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is True
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired("owned-mux", 2)
+
+    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", timeout)
+    assert mux_daemon_cli._register_reconnect(payload)["applied"]
+    assert registry.get_mapping("example", "one")["panes"] == payload["panes"]
+    # An already-issued older callback may have persisted empty CLI metadata.
+    registry.register_next_mapping(dict(payload, panes=[]))
+    native = lifecycle._call
+    monkeypatch.setattr(lifecycle, "_call", timeout)
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is None
+    monkeypatch.setattr(lifecycle, "_call", native)
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is True
+    owner.raw = owner.raw.replace("%42", "%99")
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is False
+    registry.register_next_mapping(dict(payload, session_incarnation="$8:200"))
+    owner.raw = owner.raw.replace("%99", "%42").replace("$7:100", "$8:200")
+    assert lifecycle.cli_alive("example", "one", "%42", session_incarnation="$7:100") is False
 
 
 def test_owned_observer_process_exits_after_cli_process_exits(tmp_path):

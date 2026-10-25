@@ -9,9 +9,11 @@ import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from threading import Event
 from pathlib import Path
 
 from . import engine_client as ec
+from .companion_client import cancellable_read_runner
 from .mux_child_process import run as run_mux_child
 from .mux_mapping_registry import get_mapping, _try_lock_file_once, _unlock_file
 from .self_install import default_root
@@ -149,6 +151,8 @@ def switch(
     if action not in {"show", "return"}:
         raise PaneError("Unknown Companion pane action.")
     target_path = str(Path(cwd or os.getcwd()).resolve())
+    if runner is None:
+        runner = cancellable_read_runner(cancelled or Event(), cwd=target_path)
     original, cli, _window, _panes = _target(target_path, cli_pane, runner, cancelled)
     if session_incarnation is not None and original.get("session_incarnation") != session_incarnation:
         raise PaneError("The observer's original CLI session has ended.")

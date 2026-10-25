@@ -11,16 +11,19 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from .mux_child_process import run as run_mux_child
-from .mux_mapping_registry import get_mapping
+from .mux_mapping_registry import get_mapping, register_next_mapping
+
+_LOOKUP = object()
 
 
-def _reconnect_cli_panes(payload: dict) -> list[dict]:
-    """Retain only a same-incarnation CLI identity confirmed by native inventory."""
+def _reconnect_cli_panes(payload: dict, incumbent: object = _LOOKUP) -> list[dict]:
+    """Preserve a same-owner CLI unless native evidence confirms its loss."""
     identity = ("project", "worktree_id", "worktree_path", "mux_bin",
                 "mux_session", "session_incarnation")
     if any(not isinstance(payload.get(key), str) or not payload[key] for key in identity):
         return []
-    incumbent = get_mapping(payload["project"], payload["worktree_id"])
+    if incumbent is _LOOKUP:
+        incumbent = get_mapping(payload["project"], payload["worktree_id"])
     if not incumbent or incumbent.get("live") is not True:
         return []
     if any(incumbent.get(key) != payload[key] for key in identity if key != "worktree_path"):
@@ -36,6 +39,7 @@ def _reconnect_cli_panes(payload: dict) -> list[dict]:
     ]
     if len(cli) != 1 or not re.fullmatch(r"\$[0-9]+:[0-9]+", payload["session_incarnation"]):
         return []
+    retained = [{"pane_id": cli[0]["pane_id"], "role": "cli", "live": True}]
     try:
         probe = run_mux_child(
             [payload["mux_bin"], "list-panes", "-s", "-t", "=" + payload["mux_session"], "-F",
@@ -43,16 +47,48 @@ def _reconnect_cli_panes(payload: dict) -> list[dict]:
             capture_output=True, text=True, timeout=2, **no_window_kwargs(),
         )
     except (OSError, RuntimeError, subprocess.SubprocessError):
-        return []
+        return retained
     if probe.returncode or not isinstance(probe.stdout, str):
-        return []
+        return retained
     rows = [line.split("\t") for line in probe.stdout.splitlines() if line.strip()]
-    if any(len(row) != 4 for row in rows):
-        return []
+    if any(
+        len(row) != 4 or not re.fullmatch(r"%[0-9]+", row[0])
+        or row[1] not in {"0", "1"} or not row[2] or not re.fullmatch(r"\$[0-9]+:[0-9]+", row[3])
+        for row in rows
+    ) or len({row[0] for row in rows}) != len(rows):
+        return retained
     matches = [row for row in rows if row[0] == cli[0]["pane_id"]]
     if matches != [[cli[0]["pane_id"], "0", payload["mux_session"], payload["session_incarnation"]]]:
         return []
-    return [{"pane_id": cli[0]["pane_id"], "role": "cli", "live": True}]
+    return retained
+
+
+def _register_reconnect(payload: dict) -> dict:
+    from . import mux_daemon
+
+    mux_daemon.ensure_daemon_running()
+    for attempt in range(3):
+        try:
+            incumbent = get_mapping(payload.get("project"), payload.get("worktree_id"))
+        except (OSError, ValueError, RuntimeError):
+            return {"applied": False, "reason": "registry-unavailable"}
+        if attempt and (
+            not incumbent or incumbent.get("live") is not True
+            or any(incumbent.get(field) != payload.get(field) for field in (
+                "project", "worktree_id", "mux_bin", "mux_session", "session_incarnation", "worktree_path",
+            ))
+        ):
+            return {"applied": False, "reason": "mapping-changed"}
+        reconciled = dict(payload, panes=_reconnect_cli_panes(payload, incumbent))
+        result = register_next_mapping(reconciled, expected=incumbent)
+        if result.get("reason") == "mapping-changed":
+            continue
+        if result.get("applied"):
+            entry = get_mapping(payload["project"], payload["worktree_id"])
+            if entry is not None:
+                mux_daemon.publish_live_observation(entry, ensure_monitor=True)
+        return result
+    return {"applied": False, "reason": "mapping-changed"}
 
 
 def cmd_mux_daemon(rest: list[str]) -> int:
@@ -137,8 +173,6 @@ def cmd_mux_daemon(rest: list[str]) -> int:
                 print("error: --cli-pane must be a native pane ID")
                 return 2
             payload["panes"] = [{"pane_id": cli_pane, "role": "cli", "live": True}]
-        else:
-            payload["panes"] = _reconnect_cli_panes(payload)
         for int_field in ("mapping_revision", "attached_clients"):
             if int_field in payload:
                 try:
@@ -149,7 +183,10 @@ def cmd_mux_daemon(rest: list[str]) -> int:
         if "live" in payload:
             payload["live"] = payload["live"].strip().lower() not in ("0", "false", "no")
         try:
-            result = mux_daemon.register_managed_mapping(payload)
+            result = (
+                mux_daemon.register_managed_mapping(payload) if cli_pane is not None
+                else _register_reconnect(payload)
+            )
         except ValueError as exc:
             print(f"error: {exc}")
             return 2

@@ -32,6 +32,7 @@ def cli_alive(
     that owner ends or is displaced, a recycled native pane ID cannot revive
     this observer; a newly launched observer has its own fresh binding.
     Supplying the launch incarnation also fences replacement before first poll.
+    Missing metadata never replaces a binding: its pinned native owner is polled.
     """
     if (
         not isinstance(project, str) or not project
@@ -46,12 +47,16 @@ def cli_alive(
     with _lock:
         if key in _ended:
             return False
+        original = _bindings.get(key)
     try:
         mapping = get_mapping(project, worktree_id)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        return None
+        mapping = None
     if not isinstance(mapping, dict):
-        return None
+        if original is None:
+            return None
+        mapping = dict(zip(("mux_bin", "mux_session", "session_incarnation", "worktree_path"), original))
+        mapping.update(project=project, worktree_id=worktree_id, live=True, panes=[])
     if mapping.get("project") != project or mapping.get("worktree_id") != worktree_id:
         return None
     fields = ("mux_bin", "mux_session", "session_incarnation", "worktree_path")
@@ -77,9 +82,13 @@ def cli_alive(
     if original is not None and original != identity:
         return _finished(key)
     panes = mapping.get("panes")
+    if panes is None and original is not None:
+        panes = []
     if not isinstance(panes, list) or any(not isinstance(pane, dict) for pane in panes):
         return None
     candidates = [pane for pane in panes if pane.get("role") == "cli"]
+    if not candidates and original is not None:
+        candidates = [{"pane_id": cli_pane, "role": "cli", "live": True}]
     if len(candidates) != 1:
         return None
     registered = candidates[0]
@@ -108,7 +117,6 @@ def cli_alive(
     if any(
         len(row) != 5 or not _PANE.fullmatch(row[0]) or row[1] not in {"0", "1"}
         or row[2] != mapping["mux_session"] or not _INCARNATION.fullmatch(row[3])
-        or (row[1] == "0" and not row[4])
         for row in rows
     ):
         return None
@@ -119,6 +127,8 @@ def cli_alive(
     matches = [row for row in rows if row[0] == cli_pane]
     if not matches or matches[0][1] == "1":
         return _finished(key)
+    if not matches[0][4]:
+        return None
     try:
         if os.path.normcase(os.path.realpath(matches[0][4])) != path:
             return None

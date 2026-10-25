@@ -40,13 +40,17 @@ Pane actions require an installed Manager runtime and an unambiguous,
 launcher-registered CLI pane. They verify the native session incarnation,
 pane directory and window before switching; older sessions without that
 identity refuse rather than guessing pane zero. Reattachment preserves a
-recorded CLI only when the same native session and live pane are confirmed.
+recorded same-owner CLI while native evidence is unavailable, and removes it
+only when native inventory confirms its loss. Snapshot-fenced registration
+cannot overwrite a concurrently created CLI identity.
 The observer uses the constructed runtime's bootstrap, not source or `uv`.
 Concurrent callers serialize lookup and creation for that native CLI
 incarnation. While open, the observer checks only its registered CLI's native
 presence once per second off the UI loop and exits when that owner is
 confirmed ended; unavailable evidence never means death. It cannot keep an
 otherwise-ended CLI session alive indefinitely or adopt a successor pane.
+An already-bound observer continues checking its pinned native owner if
+registry or CLI metadata disappears.
 
 Topology/statistics, attention indicators and two-line clickable mux chrome
 remain tracked by [#8811](https://github.com/ThomasMichon/copilot-extensions/issues/8811).
