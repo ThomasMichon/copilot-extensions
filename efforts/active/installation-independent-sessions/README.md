@@ -119,7 +119,7 @@ verbatim operator requirements.
   same real-removal baseline.
 - [ ] Reproduce current behavior with real installed A, an interactive owned
   session, actual uninstallation of both systems, installed B and final exit.
-- [ ] Resolve or coordinate #8410 only as the required Linux uninstall
+- [x] Resolve or coordinate #8410 only as the required Linux uninstall
   prerequisite; do not substitute deleting a prototype fixture for uninstall.
 - [ ] Record baseline process identities, terminal interactivity, installed
   file removal and locks, and current failure without altering host installs.
@@ -384,3 +384,28 @@ Keeping a version directory alive is not an acceptable substitute.
   container was removed and the shared Docker service left running.
   Resolve that product contract before claiming a real two-product survival
   baseline; the copied-wrapper/current-handler implementation is still open.
+
+### 2026-10-25 - Prerequisites merged and implementation resumed
+
+- #8763 merged as `cf5bfdea83164a21e717591f6e2055bbce8ebbb6` after
+  exact-head approval, green required CI and final changed-dependency
+  qualification at `f00b06be11bb1e3f639be5db35cbc3573337e235`.
+  The real Linux regression passed without skips; both actual installs
+  passed, Worktrees uninstall returned zero and labelled durable-state hashes
+  were unchanged. Both owned disposable containers were removed.
+- This closes the bounded #8410 prerequisite, not complete Worktrees-root
+  erasure or same-process installation survival. Shared selectors, resolvers
+  and cross-platform shims remain inventoried rather than claimed removed.
+- #8871 merged the supported Manager uninstall contract. Implementation now
+  targets the existing installer with read-only preview, attributable artifact
+  removal, existing publication/retention custody and an external interpreter
+  boundary. Older layouts without sufficient ownership evidence must refuse;
+  the installer must not rebuild a target merely to remove it.
+- The scoped native argument-delivery candidate passed its local eight-case
+  packet and the fresh Windows lane at `5470775c0ec8f940d50e3b6e82b08252790eb424`.
+  Those results supersede the earlier unresolved diagnostic for that narrow
+  candidate, not interactive Copilot or installation-removal acceptance.
+- Next: qualify and land the native argument-delivery prerequisite, implement
+  and qualify supported Manager removal, then resume the same real interactive
+  two-product baseline and production copied-wrapper/current-handler work.
+  The parent effort, release and approved installed validation remain open.
