@@ -71,12 +71,8 @@ check_ref() {
         resolved="$(git -C "$ROOT" rev-parse --verify --quiet "$candidate^{commit}")" || continue
         blob_published+=(--published "$resolved")
     done
-    local failed=0
-    "${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py" \
-        --base "$base" --git-ref "$head" </dev/null || failed=1
-    "${PY[@]}" "$ROOT/tools/check-large-files.py" \
-        --base "$base" --head "$head" "${blob_published[@]}" </dev/null || failed=1
-    return "$failed"
+    "${PY[@]}" "$ROOT/tools/check-publication.py" \
+        --base "$base" --head "$head" "${blob_published[@]}" </dev/null
 }
 
 # Git supplies both sides of every update. Do not let nested guards consume

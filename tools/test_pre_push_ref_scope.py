@@ -40,7 +40,8 @@ class Repository:
         self.env.pop("BASH_ENV", None)
         self.env.pop("COPILOT_EXTENSIONS_GUARD_BASE", None)
         (root / "tools" / "hooks").mkdir(parents=True)
-        for name in ("check-no-internal-identifiers.py", "check-large-files.py", "hooks/pre-push"):
+        for name in ("check-no-internal-identifiers.py", "check-large-files.py",
+                     "check-publication.py", "hooks/pre-push"):
             shutil.copyfile(ROOT / "tools" / name, root / "tools" / name)
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "Fixture")
@@ -80,7 +81,8 @@ class Repository:
         result = subprocess.run(
             [native_bash(), str(self.root / "tools" / "hooks" / "pre-push")],
             cwd=self.root, env=self.env, input=records.encode("utf-8"), capture_output=True,
-            timeout=20,
+            # Include all ref updates under the actual managed publication deadline.
+            timeout=30,
         )
         return subprocess.CompletedProcess(
             result.args, result.returncode, result.stdout.decode("utf-8", "replace"),

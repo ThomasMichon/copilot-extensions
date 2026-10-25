@@ -16,9 +16,13 @@ HOOKS = (ROOT / "tools" / "hooks" / "pre-commit", ROOT / "tools" / "hooks" / "pr
 def test_pre_push_keeps_only_publication_safety_checks():
     hook = HOOKS[1].read_text(encoding="utf-8")
     invoked = set(re.findall(r'"\$ROOT/tools/([^"]+\.py)"', hook))
-    assert invoked == {"check-no-internal-identifiers.py", "check-large-files.py"}
+    assert invoked == {"check-publication.py"}
+    runner = (ROOT / "tools" / "check-publication.py").read_text(encoding="utf-8")
+    assert set(re.findall(r'_guard\("([^"]+)"\)', runner)) == {
+        "check-no-internal-identifiers", "check-large-files",
+    }
     assert '--head "$head"' in hook
-    assert '--git-ref "$head"' in hook
+    assert '["--base", args.base, "--git-ref", args.head]' in runner
     assert 'check_ref "$local_sha" "$remote_sha"' in hook
 
 

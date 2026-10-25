@@ -199,6 +199,10 @@ copilot-extensions finalize          # clean up the worktree
   validity, effort/vision structure, and staged file size checks already run
   at pre-commit. No hook automatically rewrites or restages partially staged
   files; run the suggested lint autofix explicitly before committing.
+  The two independent publication checks run concurrently against the same
+  pinned head, base and published tips. Both must finish successfully; either
+  refusal or an exception blocks publication. Live identifier sources and
+  complete blob-history checks retain their existing scope and deadlines.
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): once
   the wait-for-a-verdict loop below is satisfied, squash-merge with

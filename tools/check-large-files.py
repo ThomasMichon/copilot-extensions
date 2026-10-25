@@ -425,7 +425,7 @@ def check(blobs: list[tuple[str, int]]) -> list[str]:
     return violations
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths", nargs="*", metavar="FILE",
@@ -452,7 +452,7 @@ def main() -> int:
         "--all", action="store_true",
         help="Full-tree sweep at --head, ignoring --base/FILE.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
         if args.all:
