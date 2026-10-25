@@ -550,7 +550,7 @@ def _create_worktree_core(
     require_current_execution_space(config)
     validate_mode(identity_mode)
     if creation_key is not None:
-        from . import creation_requests
+        from . import creation_replay, creation_requests
 
         options = {
             "profile": profile, "profile_is_explicit": profile_is_explicit,
@@ -570,6 +570,9 @@ def _create_worktree_core(
             config, creation_key, creation_requests.allocation_facts(config, **options),
             lambda reserve: _create_worktree_core(config, **options, creation_intent=reserve),
             validate_record=lambda record: require_record_mutation(record, config),
+            validate_replay=lambda record, receipt: creation_replay.require_completed_record(
+                record, config, receipt,
+            ),
         )
     if admitted_allocation is not None:
         if allocation is not None or kind != "session":

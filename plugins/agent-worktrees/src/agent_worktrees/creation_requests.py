@@ -10,7 +10,7 @@ from pathlib import Path
 import sqlite3
 import stat
 
-from . import config as cfg, creation_allocation, tracking
+from . import config as cfg, creation_allocation, creation_replay, tracking
 
 SCHEMA_VERSION = 1
 
@@ -97,6 +97,8 @@ def _owner_record(worktree: dict, records: Path, project: str) -> tracking.Workt
     ):
         raise CreationRequestFailure("conflict", "Invalid owner-returned allocation identity", worktree)
     record_path = records / f"{worktree['id']}.yaml"
+    if record_path.is_symlink() or record_path.resolve().parent != records.resolve():
+        raise CreationRequestFailure("conflict", "The original allocation's ledger is redirected", worktree)
     try:
         record = tracking.load_record(record_path)
     except FileNotFoundError:
@@ -130,6 +132,7 @@ def _owner_record(worktree: dict, records: Path, project: str) -> tracking.Workt
 def _replay(
     row: tuple, facts: str, records: Path, project: str,
     validate_record: Callable[[tracking.WorktreeRecord], None] | None = None,
+    validate_replay: Callable[[tracking.WorktreeRecord, dict], None] | None = None,
 ) -> dict:
     version, saved_facts, status, saved_worktree = row
     if version != SCHEMA_VERSION:
@@ -160,7 +163,9 @@ def _replay(
             creation_allocation.require_record_evidence(record, receipt["record_identity"])
         except ValueError as exc:
             raise CreationRequestFailure("conflict", str(exc), worktree) from exc
-    if validate_record is not None:
+    if validate_replay is not None:
+        validate_replay(record, receipt)
+    elif validate_record is not None:
         validate_record(record)
     return {
         "worktree": worktree,
@@ -175,6 +180,7 @@ def create(
     allocate: Callable[[Callable[[dict], None]], dict],
     *,
     validate_record: Callable[[tracking.WorktreeRecord], None] | None = None,
+    validate_replay: Callable[[tracking.WorktreeRecord, dict], None] | None = None,
 ) -> dict:
     """Persist intent before effects; only the insert winner may allocate."""
     if not isinstance(key, str) or not key.strip() or len(key) > 1024:
@@ -197,7 +203,9 @@ def create(
             )
             if row is not None and not retry_refused:
                 try:
-                    return _replay(row, encoded_facts, records, config.repo_name, validate_record)
+                    return _replay(
+                        row, encoded_facts, records, config.repo_name, validate_record, validate_replay,
+                    )
                 except CreationRequestFailure as exc:
                     if exc.status == "terminal":
                         connection.execute(
@@ -257,6 +265,8 @@ def create(
                 (json.dumps({
                     "worktree": worktree, "creation_nonce": record.creation_nonce,
                     "record_identity": creation_allocation.record_evidence(record),
+                    **({"execution_origin": creation_replay.execution_origin(config)}
+                       if validate_replay is not None else {}),
                 }, sort_keys=True), digest),
             ).rowcount
             if changed != 1:

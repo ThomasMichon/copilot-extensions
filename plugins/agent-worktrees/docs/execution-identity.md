@@ -163,9 +163,25 @@ checks without being rewritten. Explicit creation-tail repair uses the retained
 tuple and exact pair stub, not a fresh allocation. A proven compatible legacy
 registry alias keeps its original record and reciprocal-reference spelling.
 Replacement of the retained nonce or owner during repair refuses.
-Later customization that changes the current tuple still refuses explicitly;
-it cannot reformat an already admitted allocation. Compatibility for that
-retained case remains separate from prospective derivation.
+Completed creation-key replay has a separate read-only compatibility check.
+New keyed receipts retain the originating OS hostname, actual environment and
+configured binding alongside the original record evidence. Later optional
+customization can change prospective naming without changing that completed
+allocation's returned row, record bytes, nonce, relationships or journal.
+The completed journal must still prove the original intent, checkout and exact
+record; the receiving project/root, actual environment and original configured
+binding must agree. A foreign host, sibling environment, changed binding,
+redirected ledger or changed owner/pair evidence refuses without carving.
+Supported legacy platform/path overrides remain compatible with replay of the
+proven actual-platform record. Tuple records and explicit non-legacy execution
+keys still require the configured platform to agree with actual execution.
+Older receipts are not backfilled: a literal original OS-derived identity can
+be reconstructed, but a former customized identity with no retained observation
+must still satisfy ordinary ownership checks or refuse. Refusal never permits
+a replacement allocation. Ordinary record mutation, arbitrary allocation
+objects, launch admissions and interrupted creation-tail repair do not gain
+authority from this read-only completed-key path; their remaining retained
+customization compatibility is separate.
 
 `load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
 internal opt-in for genuinely new records. The existing if-absent record lock
