@@ -221,6 +221,8 @@ def retain_packaging_seed(
     uv = Path(dependencies._select_uv_executable(str(uv)))
     if transaction.argv[:3] != (str(uv), "pip", "compile"):
         raise WheelError("tooling seed differs from its owner's native compiler")
+    declared_python = python
+    python = python.resolve(strict=True)
     frozen_policy = _canonical(policy)
     root = Path(policy["owner"]["runtimeRoot"])
     if not root.is_absolute():
@@ -246,6 +248,7 @@ def retain_packaging_seed(
             _canonical(policy) != frozen_policy
             or _canonical(current_policy) != frozen_policy
             or _canonical(owner_transaction.environment) != retained_environment
+            or declared_python.resolve(strict=True) != python
             or _file_identity(python, limits.max_interpreter_bytes, deadline) != python_digest
             or _tooling_identity(limits.max_tooling_bytes, deadline) != tooling_digest
             or _target(python, environment, deadline) != target
@@ -346,8 +349,14 @@ def retain_packaging_seed(
                     if capture([selected], "packaging-seed-lock:" + native_digest).policy_id != feed.policy_id:
                         raise WheelError("tooling seed feed policy changed during construction")
                     installed = engine.runtime.slot_python(root, slot.name)
-                    if installed is None or _target(installed, environment, deadline) != target:
-                        raise WheelError("tooling seed installed interpreter differs from selection")
+                    if installed is None:
+                        raise WheelError("tooling seed installed interpreter is missing")
+                    observed = _target(installed, environment, deadline)
+                    changed = sorted(key for key in target if target[key] != observed[key])
+                    if changed:
+                        raise WheelError(
+                            "tooling seed installed interpreter differs from selection: " + ", ".join(changed),
+                        )
 
                 verify()
                 with engine.numbered_candidate(

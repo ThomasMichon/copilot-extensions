@@ -169,6 +169,24 @@ def test_public_native_feed_is_refused_before_resolution_or_any_http(
         assert state["requests"] == []
 
 
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX interpreter-link contract")
+def test_interpreter_link_is_resolved_and_cannot_retarget_during_custody(
+    adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch,
+):
+    with selected_seed(adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch) as (
+        _state, options, _checks, _rejected,
+    ):
+        link = tmp_path / "selected-python"
+        link.symlink_to(options["python"])
+        options["python"] = link
+        with pytest.raises(ValueError, match="interpreter or selected policy changed"):
+            with seed.retain_packaging_seed(**options):
+                replacement = tmp_path / "not-an-interpreter"
+                replacement.write_bytes(b"never executed")
+                link.unlink()
+                link.symlink_to(replacement)
+
+
 def test_first_touch_uses_only_shipped_stdlib_helpers_without_ambient_packaging(tmp_path):
     root = Path(__file__).resolve().parents[1]
     shipped = tmp_path / "standalone"
