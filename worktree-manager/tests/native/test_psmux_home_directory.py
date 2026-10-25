@@ -73,13 +73,13 @@ function Stop-OwnedTestMux {
             $targetId=[int]$entry.Key
             $p=Get-Process -Id $targetId -ErrorAction SilentlyContinue
             if(-not $p){continue}
+            $held[$targetId]=$p
             $null=$p.Handle
             if([Math]::Abs(($p.StartTime.ToUniversalTime() -
                 $entry.Value.CreationDate.ToUniversalTime()).TotalMilliseconds) -gt 1){
                 throw 'Test process identity changed'
             }
             if($prior.ContainsKey($targetId)){throw 'Refusing a pre-existing process'}
-            $held[$targetId]=$p
             $null=$owned.Add($targetId)
         }
         # Stop the owned servers first so their spare pools cannot refill.

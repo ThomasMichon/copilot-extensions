@@ -28,6 +28,15 @@ def _creation_source():
     return helper, source[start + len("                try {\n"):end]
 
 
+def _native_driver_source():
+    native = SOURCE.parents[1] / "tests" / "native" / "test_psmux_home_directory.py"
+    tree = ast.parse(native.read_text("utf-8"))
+    driver = next(node.value for node in tree.body if isinstance(node, ast.Assign)
+                  and any(isinstance(target, ast.Name) and target.id == "DRIVER"
+                          for target in node.targets))
+    return ast.literal_eval(driver)
+
+
 @pytest.mark.skipif(os.name != "nt" or not PWSH, reason="Native Windows PowerShell")
 @pytest.mark.parametrize("exit_code", [0, 17])
 def test_native_creation_uses_home_and_restores_caller(tmp_path, exit_code):
@@ -135,12 +144,7 @@ def test_cleanup_refuses_older_children_of_reused_parent_pids(tmp_path, selector
         end = source.index("\n        foreach ($pidValue in @(", start)
         selected = "$depth.Keys"
     else:
-        native = SOURCE.parents[1] / "tests" / "native" / "test_psmux_home_directory.py"
-        tree = ast.parse(native.read_text("utf-8"))
-        driver = next(node.value for node in tree.body if isinstance(node, ast.Assign)
-                      and any(isinstance(target, ast.Name) and target.id == "DRIVER"
-                              for target in node.targets))
-        source = ast.literal_eval(driver)
+        source = _native_driver_source()
         start = source.index("    $selected=@{}")
         end = source.index("    $held=@{}", start)
         selected = "$selected.Keys"
@@ -178,3 +182,99 @@ def test_cleanup_refuses_older_children_of_reused_parent_pids(tmp_path, selector
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert set(json.loads(result.stdout)) == {100, 201, 202, 205}
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is required")
+@pytest.mark.parametrize("scenario", [
+    "qualified", "birth-mismatch", "pre-existing", "foreign-namespace", "already-exited",
+])
+def test_native_cleanup_verifies_targets_before_signaling(tmp_path, scenario):
+    source = _native_driver_source()
+    start = source.index("function Stop-OwnedTestMux {")
+    end = source.index("\n}\n", start) + 3
+    function = source[start:end]
+    script = tmp_path / "termination.ps1"
+    script.write_text(
+        r"""
+$ErrorActionPreference='Stop'
+$scenario=$args[0]
+$namespace='owned-fixture'
+$binary='C:\fixture\psmux.exe'
+$began=[DateTime]::Parse('2025-01-01T00:00:00Z').ToUniversalTime()
+$born=$began.AddMinutes(1)
+$script:Rows=@(
+    [pscustomobject]@{ProcessId=100;ParentProcessId=0;Name='psmux.exe';
+        ExecutablePath=$binary;CreationDate=$born;
+        CommandLine='psmux.exe server -s fixture -L owned-fixture'},
+    [pscustomobject]@{ProcessId=201;ParentProcessId=100;Name='cmd.exe';
+        CreationDate=$born.AddSeconds(1)}
+)
+if($scenario -eq 'foreign-namespace'){
+    $script:Rows[0].CommandLine='psmux.exe server -s fixture -L unrelated'
+}
+$script:Signals=@()
+$script:Disposals=@()
+$script:Queried=@()
+$script:Objects=@{}
+foreach($row in $script:Rows){
+    $p=[pscustomobject]@{Id=$row.ProcessId;Handle=1;
+        StartTime=$row.CreationDate;HasExited=$false}
+    $p | Add-Member ScriptMethod WaitForExit {param($Timeout) $this.HasExited}
+    $p | Add-Member ScriptMethod Dispose {$script:Disposals += $this.Id}
+    $script:Objects[$row.ProcessId]=$p
+}
+if($scenario -eq 'birth-mismatch'){
+    $script:Objects[201].StartTime=$born.AddSeconds(3)
+}
+if($scenario -eq 'already-exited'){$script:Objects[201].HasExited=$true}
+$prior=@{}
+if($scenario -eq 'pre-existing'){$prior[201]=1}
+$owned=[Collections.Generic.HashSet[int]]::new()
+function Get-CimInstance {
+    [CmdletBinding()]param([string]$ClassName)
+    $script:Rows
+}
+function Get-Process {
+    [CmdletBinding()]param([int]$Id)
+    $script:Queried += $Id
+    $script:Objects[$Id]
+}
+function Stop-Process {
+    [CmdletBinding()]param([int]$Id,[switch]$Force)
+    $script:Signals += $Id
+    $script:Objects[$Id].HasExited=$true
+}
+""" + function + r"""
+$refused=$false
+$reason=''
+try {Stop-OwnedTestMux} catch {$refused=$true;$reason=$_.Exception.Message}
+ConvertTo-Json -Compress @{signals=@($script:Signals);
+    disposed=@($script:Disposals);queried=@($script:Queried);
+    refused=$refused;reason=$reason}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script), scenario],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    if scenario == "qualified":
+        assert set(observed["signals"]) == {100, 201}
+        assert observed["refused"] is False
+    elif scenario == "already-exited":
+        assert observed["signals"] == [100]
+        assert observed["refused"] is False
+    else:
+        assert observed["signals"] == []
+        assert observed["refused"] is (scenario != "foreign-namespace")
+    if scenario == "birth-mismatch":
+        assert "identity changed" in observed["reason"]
+    if scenario == "pre-existing":
+        assert "pre-existing" in observed["reason"]
+    if scenario == "foreign-namespace":
+        assert observed["queried"] == []
+    else:
+        assert set(observed["disposed"]) == set(observed["queried"])
