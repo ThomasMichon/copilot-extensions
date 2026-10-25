@@ -30,7 +30,7 @@ def inventory(tmp_path, monkeypatch):
     ))
     from plugin_resolve import inventory as plugin_inventory
     monkeypatch.setattr(plugin_inventory, "installed_item", lambda *a: {"reference": {}})
-    monkeypatch.setattr(ui, "_operations", lambda: {})
+    monkeypatch.setattr(ui, "_operations", lambda **kwargs: {})
     owner_row = {
         "id": "guide", "title": "Guide", "kind": "none", "enabled": "active", "installed": True,
         "payload": "2", "selected": "not applicable", "running": "not applicable",
@@ -71,7 +71,7 @@ def test_malformed_owner_keeps_manager_and_unknown_components_inspectable(invent
 
 
 def test_history_failure_is_unknown_not_idle_or_success(inventory, monkeypatch):
-    monkeypatch.setattr(ui, "_operations", lambda: (_ for _ in ()).throw(ValueError("unreadable journal")))
+    monkeypatch.setattr(ui, "_operations", lambda **kwargs: (_ for _ in ()).throw(ValueError("unreadable journal")))
     rows = ui.inventory()["entries"]
     assert all(row["activity"] == "unknown" for row in rows)
     assert "unreadable journal" in rows[0]["card"]["body"]
@@ -155,6 +155,26 @@ def test_known_roster_uses_both_canonical_marketplace_result_shapes(inventory, m
     monkeypatch.setattr(plugin_resolve, "load_marketplace", lambda path: SimpleNamespace(plugins={"catalog-only": object()}))
     rows = {row["id"]: row for row in ui.inventory()["entries"]}
     assert "catalog-only" in rows and not rows["catalog-only"]["updatable"]
+
+
+def test_engine_history_is_attributed_only_to_selected_execution_source(inventory, tmp_path, monkeypatch):
+    import update_driver
+
+    monkeypatch.setattr(ui, "_operations", READ_OPERATIONS)
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "manager-source")
+    request = SimpleNamespace(
+        spec=SimpleNamespace(backend="engine", source="/selected/engine", argv=("--target=guide",)),
+        id="engine-operation", state="running", exit_code=None, error=None, log_path=tmp_path / "log",
+    )
+    monkeypatch.setattr(update_driver, "status", lambda: (request,))
+    monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {
+        "contract": 1, "execution_source": "/selected/engine", "entries": [dict(inventory)],
+    })
+    assert ui.inventory()["entries"][1]["activity"] == "running"
+    request.state, request.exit_code = "completed", 1
+    assert ui.inventory()["entries"][1]["activity"] == "failed"
+    request.spec.source = "/other/engine"
+    assert ui.inventory()["entries"][1]["activity"] == "idle"
 
 
 def test_durable_submission_uses_existing_owner_not_an_observer_queue(inventory, monkeypatch, tmp_path, capsys):

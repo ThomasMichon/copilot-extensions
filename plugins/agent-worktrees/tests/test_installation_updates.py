@@ -199,6 +199,16 @@ def test_payload_only_scope_change_cannot_install_disabled_runtime(installed, mo
     assert owner.update_target("guide") == 1
 
 
+def test_target_executes_under_engine_custody_without_legacy_manager_handoff(monkeypatch):
+    from agent_worktrees import __main__ as core
+
+    monkeypatch.setattr(update_cli, "_usable_worktree_manager", lambda: pytest.fail("target probed legacy Manager"))
+    calls = []
+    monkeypatch.setattr(core, "_cmd_update_in_plugin", lambda args: calls.append(args.target) or 0)
+    assert update_cli.cmd_update(argparse.Namespace(target="guide")) == 0
+    assert calls == ["guide"]
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
 def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
     name = "agent-example"

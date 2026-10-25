@@ -12,6 +12,7 @@ from update_telemetry import redact
 from . import __version__, engine_client
 
 PIVOT_NAME = "manager-installation-updates"
+ENGINE_INVENTORY_TIMEOUT = 8
 
 
 def _stored_target(arguments):
@@ -85,7 +86,7 @@ def run_targeted_update(rest: list[str]) -> int:
         raise
 
 
-def _operations():
+def _operations(*, engine_source=None):
     import update_driver
     from .update_driver_cli import _source_key
 
@@ -93,7 +94,10 @@ def _operations():
     source = _source_key()
     for request in update_driver.status():
         argv = request.spec.argv
-        if request.spec.backend != "manager" or request.spec.source != source:
+        expected_source = source if request.spec.backend == "manager" else (
+            engine_source if request.spec.backend == "engine" else None
+        )
+        if expected_source is None or request.spec.source != expected_source:
             continue
         target = _stored_target(argv)
         if target is None:
@@ -135,6 +139,7 @@ def inventory():
     known.update({item.name: item.description for item in discovery.plugins})
     findings = []
     engine_error = None
+    engine_source = None
     try:
         from pathlib import Path
         from plugin_resolve import load_marketplace
@@ -154,8 +159,12 @@ def inventory():
     except (OSError, ValueError) as error:
         findings.append(f"Known catalog unavailable: {error}; retry after repairing marketplace metadata")
     try:
-        payload = engine_client.run_json(None, ["update", "--inventory", "--json"], timeout=60)
-        rows.extend(_engine_rows(payload))
+        payload = engine_client.run_json(None, ["update", "--inventory", "--json"], timeout=ENGINE_INVENTORY_TIMEOUT)
+        owner_rows = _engine_rows(payload)
+        engine_source = payload.get("execution_source")
+        if engine_source is not None and not isinstance(engine_source, str):
+            raise ValueError("Selected engine returned invalid execution-source identity")
+        rows.extend(owner_rows)
     except (engine_client.EngineError, OSError, ValueError) as error:
         engine_error = f"Engine inventory unavailable: {error}. Retry after updating the suite through its existing command."
         findings.append(engine_error)
@@ -169,7 +178,7 @@ def inventory():
         })
     history_error = None
     try:
-        operations = _operations()
+        operations = _operations(engine_source=engine_source)
     except (OSError, ValueError, RuntimeError) as error:
         operations = {}
         history_error = f"Durable update history unavailable: {error}; retry refresh"
@@ -190,7 +199,8 @@ def inventory():
         row["source"] = redact(row["source"])
         row["limitation"] = redact(row.get("limitation") or "")
         operation = operations.get(row["id"])
-        row["activity"] = operation["state"] if operation else "unknown" if history_error else "idle"
+        unavailable = history_error or (engine_error and row["id"] != "worktree-manager")
+        row["activity"] = operation["state"] if operation else "unknown" if unavailable else "idle"
         detail = [
             f"{key}: {row[key]}" for key in (
                 "kind", "installed", "enabled", "payload", "selected", "running", "source",

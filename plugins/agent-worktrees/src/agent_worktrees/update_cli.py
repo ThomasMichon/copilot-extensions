@@ -232,6 +232,8 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def manager_handoff(args: argparse.Namespace) -> int | None:
     """Preserve the existing Manager seam without executing a fallback install."""
+    if getattr(args, "target", None) is not None:
+        return None
     if not getattr(args, "no_manager", False):
         mgr = _usable_worktree_manager()
         if mgr:

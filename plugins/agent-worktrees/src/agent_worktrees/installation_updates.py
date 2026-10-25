@@ -94,7 +94,10 @@ def inventory():
             except (OSError, ValueError) as error:
                 row["limitation"] = str(error)
         rows.append(row)
-    return {"contract": TARGET_CONTRACT, "entries": rows}
+    return {
+        "contract": TARGET_CONTRACT, "entries": rows,
+        "execution_source": str(config.install_dir().resolve()),
+    }
 
 
 def print_inventory():

@@ -1332,7 +1332,9 @@ warning.
 contract of the **executing engine**, independent of its package version. It
 returns `{contract: 1, entries: [...]}` with installed/enabled distinctions,
 payload, selected-runtime and observed-running versions, installation provenance,
-update readiness and actionable limitations. It does not enqueue work, acquire
+update readiness and actionable limitations. `execution_source` identifies the
+executing engine installation for attribution of its durable requests.
+It does not enqueue work, acquire
 payloads, start services or request credentials. Missing running evidence is
 unknown, not the on-disk package version.
 
@@ -1349,6 +1351,9 @@ prerequisite instead of widening the request.
 Force, forced runtimes, venv recreation and module selection cannot combine
 with `--target`. Missing/disabled or policy-gated targets report setup/enablement
 or policy readiness rather than implicitly provisioning dependencies. The
+targeted engine command retains its own durable custody instead of delegating
+through a potentially older Manager; Manager is not a targeting prerequisite.
+The
 existing source, activation-preservation, credential, publication, runtime
 retention and durable execution/recovery owners remain authoritative.
 Untargeted updates retain their existing full-suite semantics.

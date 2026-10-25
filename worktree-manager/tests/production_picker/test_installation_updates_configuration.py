@@ -1,7 +1,9 @@
 """Real Configuration navigation, contextual consent, durable receipt and refresh."""
 
 import asyncio
+import dataclasses
 import json
+import sys
 import threading
 
 import pytest
@@ -107,3 +109,32 @@ def test_native_pivot_uses_existing_contract_and_exact_row_target():
     assert update.confirm
     assert pivots.format_template(update.run, {"id": "guide"})[-2:] == ["update", "guide"]
     assert not pivots.entry_matches(update.when, {"updatable": False})
+
+
+def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_path, monkeypatch):
+    import time
+
+    engine = tmp_path / "slow_engine.py"
+    engine.write_text("import time; time.sleep(10)\n")
+    command = tmp_path / "inventory.py"
+    command.write_text(
+        "from worktree_manager import installation_updates as ui\n"
+        "ui.ENGINE_INVENTORY_TIMEOUT = 0.2\n"
+        "raise SystemExit(ui.main())\n"
+    )
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    reg = dataclasses.replace(ui.configuration_pivot(), list_cmd=(
+        sys.executable, str(command), "--engine-argv",
+        json.dumps([sys.executable, str(engine)]), "list",
+    ))
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    started = time.monotonic()
+    state, rows, error, summary = runtime._exec_list({})
+    assert state == "ready", error
+    assert any(row["id"] == "worktree-manager" for row in rows)
+    assert any("Engine inventory unavailable" in message for message in summary["errors"])
+    assert time.monotonic() - started < tasks.LIST_TIMEOUT
+    assert ui.ENGINE_INVENTORY_TIMEOUT < tasks.LIST_TIMEOUT
