@@ -8,7 +8,7 @@ import threading
 
 import pytest
 from textual.app import App
-from textual.widgets import Button, DataTable, Static
+from textual.widgets import Button, DataTable, Input, Static
 
 from worktree_manager import launch_attempts, launch_history_cli, launch_history_screen
 from worktree_manager.launch_attempts import LaunchAttempts
@@ -192,6 +192,41 @@ def test_close_during_slow_metadata_read_drops_late_result(journal, monkeypatch)
                 assert screen._detail is None and screen._rows == []
             finally:
                 release.set()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("direction", ["older", "newer"])
+def test_changed_filters_reset_every_paging_cursor(journal, monkeypatch, direction):
+    monkeypatch.setattr(launch_history_screen, "_PAGE_SIZE", 1)
+    for index in range(3, 6):
+        journal.record_intent(
+            f"{index + 1:032x}", action="resume" if index == 5 else "open",
+            project="other", surface="test", is_local=True,
+        )
+
+    async def run():
+        app = App()
+        screen = LaunchHistoryScreen("demo")
+        async with app.run_test(size=(100, 40)) as pilot:
+            await app.push_screen(screen)
+            await _ready(pilot, screen)
+            if direction == "newer":
+                for _ in range(2):
+                    await pilot.click("#history-older")
+                    await _ready(pilot, screen)
+                assert len(screen._previous) == 2
+            screen.query_one("#history-project", Input).value = "other"
+            await pilot.click("#history-" + direction)
+            await _ready(pilot, screen)
+            assert screen._before is None and screen._previous == []
+            assert [row["attempt_id"] for row in screen._rows] == [f"{6:032x}"]
+            screen.query_one("#history-action", Input).value = "resume"
+            await pilot.click("#history-older")
+            await _ready(pilot, screen)
+            assert screen._before is None and screen._previous == []
+            assert [row["attempt_id"] for row in screen._rows] == [f"{6:032x}"]
+            assert screen._has_more is False
 
     asyncio.run(run())
 

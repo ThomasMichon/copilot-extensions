@@ -50,6 +50,7 @@ class LaunchHistoryScreen(ModalScreen[None]):
         self._busy = False
         self._before: tuple[float, str] | None = None
         self._previous: list[tuple[float, str] | None] = []
+        self._filters: tuple[str | None, str | None] | None = None
         self._rows: list[dict] = []
         self._has_more = False
         self._detail: dict | None = None
@@ -132,6 +133,9 @@ class LaunchHistoryScreen(ModalScreen[None]):
     def _load_list(self) -> None:
         project = self.query_one("#history-project", Input).value.strip() or None
         action = self.query_one("#history-action", Input).value.strip() or None
+        if (project, action) != self._filters:
+            self._before, self._previous = None, []
+            self._filters = project, action
         cursor = self._before
         self._rows, self._has_more = [], False
         self.query_one("#history-list", DataTable).clear()
