@@ -1039,6 +1039,46 @@ launcher/child identity. Repair that Python installation before retrying.
 Existing launcher/child pairs are not rewritten or stopped by this change;
 their identity must be classified before automated retirement.
 
+## Independent runtime source acquisition
+
+`runtime-source` manages a separate `[runtime_source]` policy in the same
+Manager config. It does not change `[source]` (Manager self-update), Copilot's
+marketplace selection, installation roots, or existing runtime data.
+The default is `marketplace`, preserving ordinary update behavior.
+
+```bash
+worktree-manager runtime-source show
+worktree-manager runtime-source set main
+worktree-manager runtime-source set stable --ref v1.0.0
+worktree-manager runtime-source set exact --ref <full-main-commit>
+worktree-manager runtime-source set dev --allow-dev
+worktree-manager runtime-source resolve
+worktree-manager runtime-source reset
+```
+
+`set` replaces the complete runtime-source policy; `--repo` optionally selects
+a different credential-free Git locator (local paths must be absolute).
+`dev` requires explicit consent, `stable` names a release tag, and `exact`
+requires a full commit object ID merged into fetched `main`. Moving branch
+choices resolve once per acquisition; the returned commit and tree remain
+fixed even if the upstream branch advances.
+
+`resolve` is an acquisition diagnostic, **not installation or activation**.
+It maintains a separately owned standalone clone below
+`<manager-root>/runtime-sources/`, holds the existing construction lease,
+fetches the selected branch/tag and returns its exact source identity as JSON.
+Reuse never moves the clone's checked-out files. Dirty, linked, worktree-backed,
+unowned, unavailable, substituted or unmerged input fails explicitly; neither
+an ambient developer checkout nor a marketplace payload is a fallback. Fetched
+code is never executed during acquisition.
+
+**Source-backed suite execution is not connected yet.** With a non-marketplace
+policy, `update` fails before Manager self-update or runtime installation rather
+than silently ignoring the selection. `reset` explicitly restores ordinary
+marketplace runtime delivery. Canonical source preparation, immutable runtime
+planning and the existing installation driver remain the next integration
+boundary; this command adds no alternate installer or recurring worker.
+
 ## Restart evidence and notification transport
 
 The existing active mux daemon maintains a private, bounded recovery-evidence

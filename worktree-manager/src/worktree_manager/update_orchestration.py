@@ -23,7 +23,22 @@ def run_update_steps(
     environment: dict[str, str] | None = None,
 ) -> int:
     from . import engine_client as ec
+    from .runtime_source_config import configured_source
     from .self_install import SelfUpdateResult, self_update
+
+    try:
+        runtime_source = configured_source()
+        if runtime_source.channel != "marketplace":
+            raise ValueError(
+                f"Runtime source {runtime_source.channel!r} is configured, but source-backed "
+                "suite execution is not yet available. No update was run. "
+                "Use runtime-source resolve to inspect acquisition, or runtime-source reset "
+                "to explicitly restore marketplace runtime delivery."
+            )
+    except (OSError, ValueError) as error:
+        run.say(str(error), state="failed")
+        run.record_engine_error(str(error))
+        return 1
 
     with run.self_update_phase():
         su = (
