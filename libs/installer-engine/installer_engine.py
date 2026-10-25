@@ -22,7 +22,7 @@ import tomllib
 import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 from installer_dependency_policy import (
-    DependencyPolicyError, RetainedUVInstall, _bundled_dbus_next, _contained, _native_retained_path,
+    DependencyPolicyError, RetainedUVInstall, _bounded_content_map, _bundled_dbus_next, _contained, _native_retained_path,
     _private_retained_root, _select_uv_executable, _temporary_inputs,
     retain_closed_wheel_install, retain_uv_install,
 )
@@ -358,10 +358,10 @@ def _retained_inputs(inputs: FrozenInputs, uv: Path, python: Path, *, refresh: b
             raise RuntimeError("Runtime inputs changed while retaining UV inputs")
         if not set(files) <= set(transaction.source_hashes):
             raise RuntimeError("Retained UV inputs do not cover the runtime source files")
-        changed = [
-            path for path in files
-            if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path]
-        ]
+        def changed_content(path):
+            return path if hashlib.sha256(path.read_bytes()).hexdigest() != transaction.source_hashes[path] else None
+
+        changed = [path for path in _bounded_content_map(changed_content, files) if path is not None]
         if changed:
             raise RuntimeError(
                 "Retained UV inputs differ from the admitted source content: "
