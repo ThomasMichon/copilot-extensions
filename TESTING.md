@@ -851,6 +851,17 @@ The Windows lane remains control-plane-only and explicitly skips Linux-native
 cases. These tests do not qualify a built native container image, normal Fleet
 placement, provider/Vault admission or a preserving production migration.
 
+The same suite covers optional explicit peer approval: fresh/restarted pending
+state, exact public fingerprints, authenticated active approvers, self/stale/
+unauthorized refusal, distinct confirmed recovery and original-decision retries.
+Its real TLS/JWT/DPoP test starts the installed CLI with three synthetic caller
+identities, proves that pending enrollment cannot notify/admit, and restarts
+that owner against retained state. The Gateway fixture follows real time for
+that native restart instead of weakening proof freshness around a frozen unit
+clock. SDK tests additionally prove old/missing support and policy rollback
+refuse before a required-policy request can admit anything. These remain
+contained standalone/explicit-lane tests, not additions to required unit CI.
+
 ## Optional diagnostic telemetry
 
 Manager's `tests/test_launch_update_requests.py` native lane checks the user-local

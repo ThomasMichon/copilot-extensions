@@ -47,7 +47,7 @@ class ServiceConfig:
             "revision", "data_dir", "fleet", "gateway", "slot", "controller",
             "gateway_origin", "gateway_ca", "proof_key_file", "access_token_file",
             "policy", "bindings",
-        } | ({"relay"} if "relay" in value else set()))
+        }, optional={"relay", "enrollment_policy"})
         integer(value["revision"], "SSH configuration revision", minimum=1)
         for name in ("fleet", "gateway", "slot", "controller"):
             identifier(value[name], "SSH service identity")
@@ -115,6 +115,18 @@ class ServiceConfig:
             targets.add(target)
             principals.add(row["principal"])
             aliases.add(row["alias"].casefold())
+        if "enrollment_policy" in value:
+            admission = value["enrollment_policy"]
+            check(isinstance(admission, dict) and set(admission) == {
+                "mode", "recovery_principals",
+            } and admission["mode"] == "peer-approval", "invalid-enrollment-policy")
+            recovery = admission["recovery_principals"]
+            check(isinstance(recovery, list) and len(recovery) <= MAX_MACHINES,
+                  "invalid-recovery-principals")
+            for principal in recovery:
+                identifier(principal, "SSH recovery principal")
+            check(len(set(recovery)) == len(recovery)
+                  and not principals.intersection(recovery), "recovery-principal-not-distinct")
         return cls(canonical(value))
 
     @classmethod
@@ -132,9 +144,21 @@ class ServiceConfig:
         return matches[0]
 
     @property
+    def enrollment_mode(self) -> str:
+        return self.to_dict().get("enrollment_policy", {}).get("mode", "configured-bindings")
+
+    @property
+    def recovery_principals(self) -> list[str]:
+        return self.to_dict().get("enrollment_policy", {}).get("recovery_principals", [])
+
+    def authorize_caller(self, principal: str) -> None:
+        if principal not in self.recovery_principals:
+            self.binding(principal)
+
+    @property
     def authority(self) -> dict:
         value = self.to_dict()
         fields = (
             "revision", "fleet", "gateway", "slot", "controller", "policy", "bindings",
-        ) + (("relay",) if "relay" in value else ())
+        ) + tuple(name for name in ("relay", "enrollment_policy") if name in value)
         return {name: value[name] for name in fields}

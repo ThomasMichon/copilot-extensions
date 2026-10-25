@@ -49,7 +49,9 @@ place or activate a fleet workload. Native PR operation remains independent.
 The standalone [SSH service](../services/ssh/README.md) registers an explicit
 enrollment/public-directory control plane through the existing Gateway service
 channel. Declared principal/generation bindings gate automatic public-key
-admission; durable revisions and bounded notifications let the existing machine
+admission; an optional explicit peer policy instead retains a pending public
+candidate until exact authenticated approval, with separately selected recovery.
+Durable revisions and bounded notifications let the existing machine
 Fleet owner converge agent-ssh profiles and native login authorization.
 Its offline container recipe is independent of Copilot or a source checkout.
 An optional owned, non-root Linux OpenSSH child provides the native relay with

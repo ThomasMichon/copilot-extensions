@@ -383,8 +383,9 @@ The selected policy is **`explicit-peer-approval`**. The detailed decomposition
 in the [peer-approval plan](peer-approval.md) is agent-recommended realization,
 not installation, credential or live-adoption authority.
 
-- [ ] Review the #8888 vision/contract amendment before implementation.
-- [ ] Implement optional exact-fingerprint peer admission and separate explicit
+- [x] Review the #8888 vision/contract amendment before implementation:
+  #8894 merged at `1fcf4f5f16926762e3a85ef799f55eaf02aeb81a`.
+- [x] Implement optional exact-fingerprint peer admission and separate explicit
   bootstrap/recovery in the existing SSH service, preserving its automatic
   configured-binding baseline when the policy is absent.
 - [ ] Qualify the actual client/Gateway/store contract, restart, original-request
@@ -459,6 +460,24 @@ takeover or implementation completion is asserted.
   acquire/rotate keys, renew a provider, change sshd, deploy or retire a
   predecessor. General node hosting and the broader Plan/Validation items stay
   open; release/artifact selection and actual adoption require their owners.
+
+### 2026-10-25 - Explicit peer-approval source
+
+- #8894 merged the scoped intent and plan after approval and required checks.
+  The selected policy extends the existing service; automatic configured-binding
+  admission remains the absent-policy baseline.
+- Implemented durable pending public candidates, exact authenticated peer
+  decisions, separately configured confirmed recovery, and the supported
+  runtime-selected client contract. The original store owns activation,
+  historical decisions, generation checks and original-request recovery.
+- The native Windows contained suite passed 116 tests with six explicit
+  Linux-only skips. Real TLS/JWT/DPoP and the installed CLI's retained-state
+  restart are exercised with synthetic identities. All five installed changed
+  source bodies match the candidate. Linux native/disposable
+  qualification and implementation review/publication remain outstanding.
+- No live installation, credential access, provider/setup takeover or
+  production migration is included. Broader integration and live adoption
+  remain with #6681 and its retained owners.
 
 ### 2026-10-16 - Intake and current boundary
 
