@@ -130,6 +130,7 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
     "invalid-installer", "invalid-fragment",
     "metadata-project", "metadata-tool", "metadata-uv", "metadata-sources", "dependency-project",
     "unseasoned-artifact",
+    "symlink-loop",
 ])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
@@ -170,6 +171,14 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
         (payload / "scripts/install.ps1").write_text("exit 99\n", encoding="utf-8")
     elif change == "unavailable":
         payload.rename(payload.with_name("unavailable"))
+    elif change == "symlink-loop":
+        payload.rename(payload.with_name("retained-before-loop"))
+        try:
+            payload.symlink_to(payload.name, target_is_directory=True)
+        except OSError as error:
+            if os.name == "nt" and error.winerror == 1314:
+                pytest.skip("native directory symlink privilege unavailable")
+            raise
     elif change == "missing-import":
         (payload / "scripts/versioned_runtime.py").unlink()
     elif change in {"manifest-array", "identity-array"}:

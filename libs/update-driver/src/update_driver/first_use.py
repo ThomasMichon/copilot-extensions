@@ -69,7 +69,13 @@ class ProvisionError(core.DriverError):
 
 def _path(path: Path, *, exists: bool = False) -> Path:
     path = Path(path)
-    if not path.is_absolute() or path.resolve() != path:
+    if not path.is_absolute():
+        raise ProvisionError("provision paths must be absolute and unlinked")
+    try:
+        resolved = path.resolve()
+    except RuntimeError as error:
+        raise ProvisionError(f"provision path resolution failed: {error}") from error
+    if resolved != path:
         raise ProvisionError("provision paths must be absolute and unlinked")
     if exists and not path.is_dir():
         raise ProvisionError("provision source or project directory is unavailable")
