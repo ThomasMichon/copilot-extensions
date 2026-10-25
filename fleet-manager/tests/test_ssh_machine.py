@@ -92,6 +92,23 @@ def test_config_does_not_adopt_unknown_fields_or_missing_scope(tmp_path):
         SSHMachineConfig.from_dict(value)
 
 
+@pytest.mark.parametrize("field", ["config_d", "ssh_config", "authorization_dir"])
+@pytest.mark.parametrize("suffix", ["", "nested/output", "nested/../output"])
+def test_output_scope_cannot_populate_the_lease_only_state_tree(tmp_path, field, suffix):
+    value, _, _ = configured(tmp_path)
+    value[field] = str(tmp_path / "state" / suffix)
+    with pytest.raises(PlanError, match="dedicated state directory"):
+        SSHMachineConfig.from_dict(value)
+    assert not (tmp_path / "state").exists()
+
+
+def test_output_scope_allows_a_distinct_sibling_with_the_same_prefix(tmp_path):
+    value, _, _ = configured(tmp_path)
+    value["authorization_dir"] = str(tmp_path / "state-authorization")
+    SSHMachineConfig.from_dict(value)
+    assert not (tmp_path / "state").exists()
+
+
 @pytest.mark.parametrize("change", ["policy", "controller", "authorization"])
 def test_local_policy_is_checked_before_state_or_credentials(tmp_path, monkeypatch, change):
     value, _, _ = configured(tmp_path)

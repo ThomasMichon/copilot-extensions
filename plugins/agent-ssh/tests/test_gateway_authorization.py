@@ -37,6 +37,19 @@ def test_foreign_file_owner_is_not_a_privileged_native_default():
         )
 
 
+def test_private_descriptor_failure_reports_shape_without_account_identifiers():
+    sid = "S-1-5-21-123-456-789-1001"
+    foreign = "S-1-5-21-987-654-321-1001"
+    with pytest.raises(PermissionError) as caught:
+        authorization._validate_windows_descriptor(
+            f"O:{foreign}D:AI(A;ID;FA;;;{sid})(A;ID;FA;;;SY)", sid, directory=True,
+        )
+    message = str(caught.value)
+    assert "directory descriptor=O:OTHERD:AI" in message
+    assert "(A;ID;FA;;;CURRENT)" in message
+    assert sid not in message and foreign not in message
+
+
 def arguments(root: Path, **changes):
     _, directory = fixture_files(root, **changes)
     return [

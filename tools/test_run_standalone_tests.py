@@ -162,7 +162,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             assert wheel.read(f"{package}/{name}") == data
 
 
-def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+def test_fleet_manager_preparation_selects_ssh_and_lease_sources_without_hosting(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
         [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
     ))
@@ -181,7 +181,10 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
     python.parent.parent.mkdir(parents=True)
     runner.prepare("fleet-manager", python)
     assert calls[-1] == [
-        "uv", "pip", "install", "--python", str(python), str(tmp_path / "fleet-manager") + "[dev]",
+        "uv", "pip", "install", "--python", str(python),
+        str(tmp_path / "plugins" / "agent-ssh"),
+        str(tmp_path / "libs" / "single-instance-lease"),
+        str(tmp_path / "fleet-manager") + "[dev]",
     ]
     assert "fleet-manager" in runner.STANDALONE_CONSUMERS
 

@@ -126,7 +126,14 @@ def _validate_windows_descriptor(value: str, sid: str, *, directory: bool) -> No
     )
     match = re.fullmatch(r"O:" + owners + r"D:([PAI]*)(.+)", value)
     if not match or (directory and "P" not in match[1]):
-        raise PermissionError("Authorization location must be owner-private")
+        shape = re.sub(
+            r"S-\d+(?:-\d+)+",
+            lambda found: "CURRENT" if found[0] == sid else "OTHER", value,
+        )
+        kind = "directory" if directory else "file"
+        raise PermissionError(
+            f"Authorization location must be owner-private ({kind} descriptor={shape[:256]})",
+        )
     allowed = re.compile(
         r"\(A;[OICID]*;FA;;;(?:" + re.escape(sid) + r"|SY)\)"
     )

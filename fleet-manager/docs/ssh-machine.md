@@ -36,6 +36,10 @@ local policy refuse. The selected target must have a configured direct Gateway
 policy; offline, blocked, other-transport and host-mediated paths are not silently
 turned into a direct caller. An inbound target requires its explicit local
 authorization owner.
+All output destinations must be outside the entire lease-only `state_dir`
+tree, including normalized path aliases. Equality or nesting refuses before
+credentials or state creation, so a successful first write cannot make the
+same configuration invalid on restart.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an

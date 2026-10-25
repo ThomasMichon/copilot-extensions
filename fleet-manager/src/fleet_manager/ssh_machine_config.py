@@ -52,9 +52,11 @@ class SSHMachineConfig:
         for name in ("gateway_ca", "authorization_dir"):
             if value[name] is not None:
                 absolute(value[name])
-        root = absolute(value["state_dir"])
-        if root == root.parent or str(root) in (
-            value["config_d"], value["ssh_config"], value["authorization_dir"],
+        root = absolute(value["state_dir"]).resolve()
+        if root == root.parent or any(
+            absolute(value[name]).resolve().is_relative_to(root)
+            for name in ("config_d", "ssh_config", "authorization_dir")
+            if value[name] is not None
         ):
             raise PlanError("SSH client requires a dedicated state directory")
         origin(value["gateway_origin"])

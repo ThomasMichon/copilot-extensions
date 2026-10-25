@@ -49,6 +49,33 @@ def proof_file(path, key):
     return str(path)
 
 
+@pytest.mark.parametrize("destination", ["config_d", "ssh_config", "authorization_dir"])
+def test_installed_cli_rejects_lease_tree_outputs_before_credentials(tmp_path, destination):
+    value = {
+        "schema": "fleet-manager.ssh-client", "version": 1,
+        "gateway_origin": "https://gateway.example.test", "gateway_ca": None,
+        "namespace": "/ssh", "machine": "worker-a", "environment": "linux",
+        "gateway": "selected-gateway", "controller": "gateway-a",
+        **{name: str(tmp_path / name) for name in (
+            "state_dir", "proof_key_file", "access_token_file", "policy_path",
+            "identity_file", "public_key_file", "authorization_dir", "config_d", "ssh_config",
+        )},
+    }
+    value[destination] = str(Path(value["state_dir"]) / "nested" / "output")
+    selected = tmp_path / "client.json"
+    selected.write_text(json.dumps(value), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-I", "-m", "fleet_manager", "serve",
+         "--role", "ssh-client", "--config", str(selected)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 1
+    assert "requires a dedicated state directory" in result.stderr
+    assert not Path(value["state_dir"]).exists()
+    assert not Path(value["proof_key_file"]).exists()
+
+
 def machine_config(root, service, rig, index):
     root.mkdir()
     name = "worker-a" if index == 0 else "worker-b"

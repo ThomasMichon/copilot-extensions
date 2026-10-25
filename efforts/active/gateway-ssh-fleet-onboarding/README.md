@@ -724,3 +724,18 @@ takeover or implementation completion is asserted.
   32 MiB/1 MiB stream limits. This branch adds canonical-source verification,
   explicit missing-helper refusal and exact cleanup-error custody, plus the
   birth-pinned inherited-pipe control; it does not replace those upstream fixes.
+- Review follow-through reproduced the stale Fleet-only preparation assertion
+  and corrected it to the explicit SSH/lease source contract. Reject all three
+  output destinations inside the normalized lease-state tree before effects;
+  unit controls cover equality, nesting, normalized aliases and sibling names,
+  and installed CLI controls prove refusal before credentials/state creation.
+  The complete preparation/scope/authorization packet passed 126 cases with
+  six native-platform skips; the installed connected/restart/refusal file
+  passed all six cases locally.
+- Exact-head native run40185328158 passed Linux's 78 service cases (seven
+  platform skips) and two real StrictModes/login cases, but both new Windows
+  connected/restart cases still refuse an authorization descriptor. The earlier
+  privileged-file-owner correction is not a qualified Windows fix. Added bounded
+  descriptor-shape diagnostics that redact every account SID; the owner/grant
+  policy is unchanged while this failure is diagnosed. No blind retry, ACL
+  relaxation or production repair is authorized by that observation.
