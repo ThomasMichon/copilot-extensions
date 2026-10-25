@@ -39,6 +39,7 @@ from worktree_manager.production_picker.picker_tui.engine_runtime import (
 from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
     PickerScreenWorktreeActionsMixin,
 )
+from worktree_manager.production_picker.picker_tui.source_identity import machine_ssh_id
 
 
 def _fixture_source():
@@ -1053,6 +1054,189 @@ def test_apply_setup_payload_cancels_replaced_loader():
 
     assert disposed.is_set()
     assert screen.loader is payload.loader
+
+
+class _ReplacementLoader:
+    def __init__(self):
+        self.rows = []
+        self.committed = set()
+        self.cancelled = False
+
+    def records(self):
+        return list(self.rows)
+
+    def authoritative_source_ids(self):
+        return set(self.committed)
+
+    def state_for_source(self, source_id):
+        return "ready" if source_id in self.committed else "loading"
+
+    def state(self, machine, env):
+        return self.state_for_source(machine_ssh_id(machine, env))
+
+    def counts(self):
+        return (1, 0, 0) if self.committed else (0, 1, 0)
+
+    def cancel(self):
+        self.cancelled = True
+
+
+def test_live_setup_replacement_keeps_rows_until_source_commits():
+    screen = PickerScreen(_fixture_source(), live=True)
+    previous = _ReplacementLoader()
+    replacement = _ReplacementLoader()
+    old = _payload("retained").data[0]
+    screen.loader = previous
+    screen.data = [old]
+    screen.wt_sel.replace({screen._row_key(old)})
+    payload = replace(_payload("replacement"), loader=replacement, data=[])
+
+    screen._apply_setup_payload(payload)
+
+    assert previous.cancelled
+    assert screen.loader is replacement
+    assert screen.data == [old]
+    assert screen.wt_sel.ids == {screen._row_key(old)}
+    assert screen.machine_state(screen.local_index()) == "loading"
+    assert screen.list_records() == [old]
+
+    fresh = {**old, "title": "fresh"}
+    replacement.rows = [fresh]
+    replacement.committed = {old["source_id"]}
+    screen._apply_loader_records()
+    assert screen.data == [fresh]
+    assert screen.wt_sel.ids == {screen._row_key(fresh)}
+
+    replacement.rows = []
+    screen._apply_loader_records()
+    assert screen.data == []
+
+
+@pytest.mark.parametrize("explicit_source_id", [True, False])
+def test_live_setup_replacement_drops_only_removed_sources(explicit_source_id):
+    screen = PickerScreen(_fixture_source(), live=True)
+    replacement = _ReplacementLoader()
+    old = _payload("retained").data[0]
+    removed = derive.norm({"id": "removed", "title": "removed"}, "gone", "Win")
+    other_provider = {
+        **old,
+        "source_kind": "provider-exec",
+        "source_id": "provider-exec:runner:old",
+        "selection_id": "provider-exec:runner:old\x1fretained-id",
+    }
+    screen.data = [old, removed, other_provider]
+    screen.wt_sel.replace({screen._row_key(rec) for rec in screen.data})
+    payload = replace(_payload("replacement"), loader=replacement, data=[])
+    if not explicit_source_id:
+        payload.source_tabs[1]["source_id"] = None
+
+    screen._apply_setup_payload(payload)
+
+    assert screen.data == [old]
+    assert screen.wt_sel.ids == {screen._row_key(old)}
+
+
+def test_live_setup_replacement_merges_latest_prefix_not_collected_snapshot():
+    screen = PickerScreen(_fixture_source(), live=True)
+    replacement = _ReplacementLoader()
+    old = _payload("retained").data[0]
+    survivor = _payload("survivor").data[0]
+    screen.data = [old, survivor]
+    payload = replace(_payload("replacement"), loader=replacement, data=[])
+    fresh = {**old, "title": "fresh", "prunable": False}
+    replacement.rows = [fresh]
+
+    screen._apply_setup_payload(payload)
+
+    assert screen.data == [fresh, survivor]
+    assert screen.data[0]["prunable"] is False
+    assert screen.machine_state(screen.local_index()) == "loading"
+    replacement.committed = {old["source_id"]}
+    screen._apply_loader_records()
+    assert screen.data == [fresh]
+
+
+def test_live_setup_replacement_honors_already_committed_empty_source():
+    screen = PickerScreen(_fixture_source(), live=True)
+    replacement = _ReplacementLoader()
+    old = _payload("retained").data[0]
+    screen.data = [old]
+    payload = replace(_payload("replacement"), loader=replacement, data=[old])
+    replacement.committed = {old["source_id"]}
+
+    screen._apply_setup_payload(payload)
+
+    assert screen.data == []
+    assert screen.machine_state(screen.local_index()) == "ready"
+
+
+def test_reload_key_keeps_rendered_row_and_reverifies_actions(
+    monkeypatch, wait_for_current_setup_epoch_applied,
+):
+    from worktree_manager.production_picker import context
+    from worktree_manager.production_picker.picker_tui.engine_dialogs import SubMenuScreen
+
+    monkeypatch.setattr(context, "project", lambda: "example")
+    old = _payload("retained").data[0]
+    source = _fixture_source()
+    monkeypatch.setattr(source, "load", lambda: [old])
+
+    async def run():
+        app = PickerApp(source, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            screen = app.query_one(PickerScreen)
+            await wait_for_current_setup_epoch_applied(pilot, screen)
+            previous_epoch = screen._setup_epoch
+            previous = _ReplacementLoader()
+            previous.rows = [old]
+            previous.committed = {old["source_id"]}
+            screen.loader = previous
+            screen.live = True
+            replacement = _ReplacementLoader()
+            payload = replace(
+                _payload("replacement"), loader=replacement, data=[],
+                pivot_payload=(
+                    [], [{"label": "Worktrees", "kind": "worktrees", "pivot": None}],
+                    [], [],
+                ),
+            )
+            monkeypatch.setattr(screen, "_collect_setup_payload", lambda: payload)
+            screen.wt_sel.replace({screen._row_key(old)})
+            screen.sel = ("L", 0)
+
+            await pilot.press("r")
+            await wait_for_current_setup_epoch_applied(pilot, screen)
+            await pilot.pause()
+
+            assert screen._setup_applied_epoch == previous_epoch + 1
+            assert previous.cancelled
+            assert screen.machine_state(screen.local_index()) == "loading"
+            body = screen.query_one("#nf-body-data")
+            row_index = body._l_rows[screen._row_key(old)][0]
+            assert old["id4"] in body.get_option_at_index(row_index).prompt.plain
+            assert "retained" in body.get_option_at_index(row_index + 1).prompt.plain
+            assert screen.wt_sel.ids == {screen._row_key(old)}
+
+            requests = []
+            screen.real_ops = True
+            monkeypatch.setattr(
+                screen, "_run_bg",
+                lambda label, work, done, **kwargs: requests.append((label, work, done)),
+            )
+            screen.sel = ("L", 0)
+            screen._sync_focus_to_sel()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert isinstance(app.screen, SubMenuScreen)
+            assert app.screen._loading
+            assert [label for label, _work, _done in requests] == ["Actions"]
+            assert screen.data == [old]
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, SubMenuScreen)
+            assert app.query_one(PickerScreen) is screen
+
+    asyncio.run(run())
 
 
 def test_setup_reload_supersession_discards_stale_success(
