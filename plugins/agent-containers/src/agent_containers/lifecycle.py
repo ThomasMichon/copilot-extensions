@@ -225,14 +225,16 @@ def list_containers(
     fleet members are visible. Filters to fleet members per
     :func:`_is_fleet_member`.
     """
-    _check_docker()
     args = ["ps", "--no-trunc", "--format", _PS_FORMAT]
     if all_containers:
         args.insert(1, "-a")
 
     res = _docker(args)
     if res.returncode != 0:
-        raise RuntimeError(f"docker ps failed: {res.stderr.strip()}")
+        raise RuntimeError(
+            f"docker ps failed: {res.stderr.strip()} "
+            "Check that the Docker daemon is running and accessible."
+        )
 
     containers: list[DockerContainerInfo] = []
     for line in res.stdout.splitlines():

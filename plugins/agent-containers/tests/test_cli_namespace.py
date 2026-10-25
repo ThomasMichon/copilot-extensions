@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import types
 from unittest.mock import patch
 
@@ -10,6 +11,31 @@ import pytest
 from ssh_manager import SSHConfig
 
 from agent_containers.__main__ import main
+from agent_containers.config import ContainersConfig
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_namespace_list_empty_inventory_is_not_a_failed_query(capsys, available):
+    with (
+        patch("agent_containers.resolver.load_config", return_value=ContainersConfig()),
+        patch(
+            "agent_containers.lifecycle._docker",
+            return_value=subprocess.CompletedProcess(
+                ["docker", "ps"], 0 if available else 1, "", "" if available else "access denied"
+            ),
+        ) as docker,
+    ):
+        assert main(["namespace-list"]) == (0 if available else 1)
+    captured = capsys.readouterr()
+    assert docker.call_count == 1
+    assert docker.call_args.args[0][0] == "ps"
+    if available:
+        assert json.loads(captured.out) == []
+        assert captured.err == ""
+    else:
+        assert captured.out == ""
+        assert "docker ps failed: access denied" in captured.err
+        assert "daemon is running and accessible" in captured.err
 
 
 def test_namespace_list_json(capsys):
