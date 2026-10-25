@@ -17,14 +17,18 @@ from functools import lru_cache
 SANDBOX_ENV = "COPILOT_EXTENSIONS_TEST_SANDBOX"
 _MUX = {"tmux", "psmux"}
 _SHELLS = {"sh", "bash", "dash", "zsh", "cmd", "powershell", "pwsh"}
+_EXEC_VECTOR = {"execv", "execve", "execvp", "execvpe", "posix_spawn", "posix_spawnp"}
+_EXEC_LIST = {"execl", "execle", "execlp", "execlpe"}
+_SPAWN_VECTOR = {"spawnv", "spawnve", "spawnvp", "spawnvpe"}
+_SPAWN_LIST = {"spawnl", "spawnle", "spawnlp", "spawnlpe"}
 _SINKS = {
     "run", "Popen", "call", "check_call", "check_output", "system",
     "create_subprocess_exec", "create_subprocess_shell", "command", "mux", "_mux",
     "kill", "killpg",
-}
+} | _EXEC_VECTOR | _EXEC_LIST | _SPAWN_VECTOR | _SPAWN_LIST
 _SOURCE_MARKERS = re.compile(
-    r"kill|stop|restart|shutdown|terminate|\bwsl\b|\bdocker\b|\bpodman\b|"
-    r"\bsystemctl\b|\bsc\b|\bnet\b|\bservice\b|\b(?:pwsh|powershell)\b|\\(?:[xuUN]|[0-7])",
+    r"\b(?:pkill|killall|taskkill|kill|stop|restart|shutdown|terminate)|\bwsl\b|\bdocker\b|\bpodman\b|"
+    r"\bsystemctl\b|\bsc\b|\bnet\b|\bservice\b|\b(?:pwsh|powershell|spps|spsv)\b|\\(?:[xuUN]|[0-7])",
     re.IGNORECASE,
 )
 _ADJACENT_LITERALS = re.compile(r"""['"][^'"\r\n]+['"]\s*[bruBRU]?['"][^'"\r\n]+['"]""")
@@ -142,12 +146,25 @@ def _global_problem(parts: list[str]) -> str | None:
     return None
 
 
+def _command_lookup(parts: list[str]) -> bool:
+    if not parts or _name(parts[0]) != "command":
+        return False
+    for flag in parts[1:]:
+        if not flag.startswith("-") or not flag[1:] or set(flag[1:]) - set("pvV"):
+            break
+        if "v" in flag or "V" in flag:
+            return True
+    return False
+
+
 def _launcher_problem(
     parts: list[str], *, cwd: str | Path | None,
     environment: Mapping[str, str] | None, sandbox: Path | None,
     check_mux_scope: bool,
 ) -> str | None:
     name = _name(parts[0])
+    if _command_lookup(parts):
+        return None
     effective = dict(os.environ if environment is None else environment)
     nested = parts[1:]
     if name == "ssh":
@@ -245,6 +262,12 @@ def _shell_problem(
 ) -> str | None:
     # Shell strings include PowerShell pipelines and command substitution. A
     # conservative refusal is preferable to executing an ambiguous cleanup.
+    if not re.search(r"[\r\n;|&`$()<>]", text):
+        try:
+            if _command_lookup(shlex.split(text)):
+                return None
+        except ValueError:
+            pass
     patterns = (
         (r"\b(?:psmux|tmux)(?:\.exe)?\b[^\r\n;|]*\bkill-server\b", "server-wide mux cleanup"),
         (r"\b(?:pkill|killall)\b", "name/pattern-based process termination"),
@@ -267,9 +290,9 @@ def _shell_problem(
         ):
             if not re.search(r"-(?:id|inputobject)\b", match[1], re.IGNORECASE):
                 return "PowerShell termination requires explicit owned -Id/-InputObject targets"
-    if not check_mux_scope and not re.search(r"\b(?:pwsh|powershell)(?:\.exe)?\b", text, re.IGNORECASE):
-        return None
     for segment in re.split(r"[\r\n;|&]+", text):
+        if not check_mux_scope and not _SOURCE_MARKERS.search(segment):
+            continue
         try:
             parts = _tokens(segment.strip())
         except UnsafeTestCommand:
@@ -425,6 +448,45 @@ def validate_private_mux_args(
     return arguments
 
 
+def _literal(node: ast.AST | None) -> object:
+    try:
+        return ast.literal_eval(node) if node is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _source_invocation(node: ast.Call, function: str) -> tuple[object, ast.AST | None]:
+    argument = node.args[0] if node.args else next(
+        (keyword.value for keyword in node.keywords if keyword.arg == "args"), None,
+    )
+    value = _literal(argument)
+    if function in _EXEC_VECTOR | _EXEC_LIST | _SPAWN_VECTOR | _SPAWN_LIST:
+        index = 1 if function in _SPAWN_VECTOR | _SPAWN_LIST else 0
+        executable = _literal(node.args[index]) if len(node.args) > index else None
+        if function in _EXEC_LIST | _SPAWN_LIST:
+            arguments = node.args[index + 1:]
+            if function.endswith("e"):
+                arguments = arguments[:-1]
+            argument = ast.List(elts=arguments, ctx=ast.Load())
+            argv = [_literal(part) for part in arguments]
+        else:
+            argument = node.args[index + 1] if len(node.args) > index + 1 else None
+            argv = _literal(argument)
+    else:
+        executable = next(
+            (_literal(keyword.value) for keyword in node.keywords if keyword.arg == "executable"),
+            None,
+        )
+        argv = value
+    if isinstance(executable, (str, bytes)):
+        if isinstance(argv, (list, tuple)) and all(isinstance(part, (str, bytes)) for part in argv):
+            return [executable, *argv[1:]], argument
+        return [executable], argument
+    if function in _EXEC_VECTOR | _EXEC_LIST | _SPAWN_VECTOR | _SPAWN_LIST:
+        return argv, argument
+    return value, argument
+
+
 def source_problems(path: Path) -> list[str]:
     """Catch literal destructive cleanup in child scripts before test collection."""
     try:
@@ -447,16 +509,12 @@ def source_problems(path: Path) -> list[str]:
                 script = node.value.value
                 if "\n" in script and (reason := _shell_problem(script, check_mux_scope=False)):
                     problems.append(f"{path}:{node.lineno}: {reason}")
-        if not isinstance(node, ast.Call) or not node.args:
+        if not isinstance(node, ast.Call):
             continue
         function = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
         if function not in _SINKS:
             continue
-        argument = node.args[0]
-        try:
-            value = ast.literal_eval(argument)
-        except (ValueError, TypeError):
-            value = None
+        value, argument = _source_invocation(node, function)
         if function in {"kill", "killpg"} and isinstance(value, int) and value <= 0:
             reason = "implicit/global process termination is forbidden"
         elif value in ("kill-server", b"kill-server"):
@@ -469,12 +527,12 @@ def source_problems(path: Path) -> list[str]:
             )
         else:
             reason = None
-            if isinstance(argument, (ast.List, ast.Tuple)):
-                if any(
-                    isinstance(part, ast.Constant) and part.value in ("kill-server", b"kill-server")
-                    for part in argument.elts
-                ):
-                    reason = "server-wide mux cleanup is forbidden"
+        if reason is None and isinstance(argument, (ast.List, ast.Tuple)) and _literal(argument) is None:
+            if any(
+                isinstance(part, ast.Constant) and part.value in ("kill-server", b"kill-server")
+                for part in argument.elts
+            ):
+                reason = "server-wide mux cleanup is forbidden"
         if reason:
             problems.append(f"{path}:{node.lineno}: {reason}")
     return problems

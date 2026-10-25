@@ -14,7 +14,7 @@ import pytest
 import plugin_test_command_safety as safety
 
 
-@pytest.mark.parametrize("command", [
+_GLOBAL_COMMANDS = [
     ["psmux", "kill-server"],
     ["tmux", "-S", "/private/mux.sock", "kill-server"],
     ["C:\\Program Files\\PSMux\\PSMUX.EXE", "kill-server"],
@@ -35,10 +35,20 @@ import plugin_test_command_safety as safety
     ["docker", "stop", "$(docker ps -aq)"],
     ["ssh", "fixture-host", "pkill -f copilot"],
     ["sudo", "systemctl", "stop", "example"],
-])
+]
+
+
+@pytest.mark.parametrize("command", _GLOBAL_COMMANDS)
 def test_global_cleanup_is_refused_even_with_host_state_opt_in(monkeypatch, tmp_path, command):
     monkeypatch.setenv("COPILOT_EXTENSIONS_ALLOW_HOST_STATE", "1")
     assert safety.command_problem(command, sandbox=tmp_path)
+
+
+@pytest.mark.parametrize("command", _GLOBAL_COMMANDS)
+def test_source_filter_retains_every_known_global_command_family(tmp_path, command):
+    source = tmp_path / "child.py"
+    source.write_text(f"subprocess.run({command!r})")
+    assert safety.source_problems(source)
 
 
 @pytest.mark.parametrize("command", [
@@ -244,6 +254,24 @@ def test_wrapped_cleanup_is_refused_at_a_synthetic_audit_boundary(command):
         sys.audit("subprocess.Popen", command[0], command, None, {})
 
 
+@pytest.mark.parametrize("command", [
+    ["command", "-v", "agent-worktrees"],
+    ["command", "-V", "pkill"],
+    ["command", "-pv", "tmux"],
+    ["sh", "-c", "command -v agent-worktrees"],
+    ["bash", "-lc", "command -V pkill"],
+])
+def test_executable_lookups_are_not_cleanup_or_mux_invocations(command, tmp_path):
+    assert safety.command_problem(command, sandbox=tmp_path, environment={}) is None
+    sys.audit("subprocess.Popen", command[0], command, None, {})
+
+
+def test_lookup_does_not_hide_a_following_cleanup_command(tmp_path):
+    assert safety.command_problem(
+        ["sh", "-c", "command -v git; pkill -f fixture"], sandbox=tmp_path,
+    )
+
+
 @pytest.mark.parametrize("flag", ["-EncodedCommand", "-enc", "-ec", "-e"])
 def test_encoded_powershell_cleanup_is_inspected(tmp_path, flag):
     encoded = base64.b64encode("psmux kill-server".encode("utf-16-le")).decode("ascii")
@@ -284,11 +312,59 @@ def test_source_preflight_rejects_child_cleanup_without_importing_it(tmp_path, b
     ("child.sh", "#!/bin/sh\npkill -f copilot\n"),
     ("child.cmd", "taskkill /IM python.exe /F\n"),
     ("child.py", "SCRIPT = '''\npsmux kill-server\n'''\n"),
+    ("child.ps1", "spps fixture -Force\n"),
+    ("child.ps1", "spsv fixture\n"),
+    ("child.py", "os.system('kill -TERM -1')\n"),
+    ("child.sh", "#!/bin/sh\nkill -TERM -1\n"),
+    ("child.sh", "#!/bin/sh\nkill -TERM 0\n"),
 ])
 def test_shell_helpers_and_generated_script_literals_are_checked(tmp_path, name, body):
     (tmp_path / name).write_text(body)
     with pytest.raises(safety.UnsafeTestCommand):
         safety.check_test_sources(tmp_path)
+
+
+@pytest.mark.parametrize("body", [
+    "os.execv('pkill', ['pkill', '-f', 'fixture'])",
+    "os.execve('pkill', ['pkill', '-f', 'fixture'], {})",
+    "os.execvp('pkill', ['pkill', '-f', 'fixture'])",
+    "os.execvpe('pkill', ['pkill', '-f', 'fixture'], {})",
+    "os.execl('pkill', 'other-argv-zero', '-f', 'fixture')",
+    "os.execle('pkill', 'other-argv-zero', '-f', 'fixture', {})",
+    "os.execlp('pkill', 'other-argv-zero', '-f', 'fixture')",
+    "os.execlpe('pkill', 'other-argv-zero', '-f', 'fixture', {})",
+    "os.posix_spawn('pkill', ['pkill', '-f', 'fixture'], {})",
+    "os.posix_spawnp('pkill', ['pkill', '-f', 'fixture'], {})",
+    "os.spawnv(0, 'pkill', ['pkill', '-f', 'fixture'])",
+    "os.spawnve(0, 'pkill', ['pkill', '-f', 'fixture'], {})",
+    "os.spawnvp(0, 'pkill', ['pkill', '-f', 'fixture'])",
+    "os.spawnvpe(0, 'pkill', ['pkill', '-f', 'fixture'], {})",
+    "os.spawnl(0, 'pkill', 'other-argv-zero', '-f', 'fixture')",
+    "os.spawnle(0, 'pkill', 'other-argv-zero', '-f', 'fixture', {})",
+    "os.spawnlp(0, 'pkill', 'other-argv-zero', '-f', 'fixture')",
+    "os.spawnlpe(0, 'pkill', 'other-argv-zero', '-f', 'fixture', {})",
+    "subprocess.run(args=['pkill', '-f', 'fixture'])",
+    "subprocess.Popen(['different-argv-zero', '-f', 'fixture'], executable='pkill')",
+    "os.execv('psmux', [argv_zero, 'kill-server'])",
+    "os.spawnl(0, 'psmux', argv_zero, 'kill-server')",
+])
+def test_source_exec_and_spawn_signatures_use_the_actual_executable(tmp_path, body):
+    source = tmp_path / "child.py"
+    source.write_text(body)
+    assert safety.source_problems(source)
+
+
+@pytest.mark.parametrize("body", [
+    "os.execv('python', ['python', '-c', 'print(1)'])",
+    "os.spawnvp(0, 'python', ['python', '-c', 'print(1)'])",
+    "os.execl('python', 'python', '-c', 'print(1)')",
+    "os.spawnlpe(0, 'python', 'python', '-c', 'print(1)', {})",
+    "subprocess.run(args=['sh', '-c', 'command -v agent-worktrees'])",
+])
+def test_source_exec_spawn_and_lookup_controls_are_not_globally_banned(tmp_path, body):
+    source = tmp_path / "child.py"
+    source.write_text("# pkill is forbidden; these calls are harmless.\n" + body)
+    assert safety.source_problems(source) == []
 
 
 def test_comments_mock_expectations_and_owned_process_handles_are_not_calls(tmp_path):

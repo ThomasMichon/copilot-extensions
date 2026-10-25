@@ -1541,6 +1541,9 @@ split-string and directory options. Privilege launchers cannot use inherited
 `TMUX` as scope proof, and local scope does not authorize remote mux commands.
 Shell inspection covers combined command flags such as `bash -lc`, literal
 shell argv bodies and encoded PowerShell bodies in both runtime and source checks.
+Source checks also recognize literal exec/spawn signatures and PowerShell
+termination aliases. Executable lookups (`command -v`/`-V`) remain harmless
+inspection, not commands to execute.
 
 For real mux fixtures, use
 `plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact
