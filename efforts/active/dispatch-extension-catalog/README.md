@@ -130,6 +130,10 @@ implementation and validation choices remain proposed means.
 
 ### Phase 3 - Shared configuration and extension contracts
 
+- [x] Add source-owned human display titles and friendly built-in descriptions
+  without changing registration identity, execution parameters or runtime
+  behavior (#8841). Structured operator controls and independent client
+  adoption remain separate acceptance.
 - [x] Expose sufficient machine-readable inputs and prerequisites for clients
   to instantiate offered emitter, evaluator and pool templates; retain an
   advanced declaration path where appropriate. PR #8363 supplies the bounded
@@ -196,6 +200,10 @@ implementation and validation choices remain proposed means.
 
 All items below are **agent-recommended acceptance checks** for execution.
 
+- [x] Prove display-title validation, inheritance/runtime isolation, stable
+  toggle targets, published-versus-draft labels and native Configuration
+  snapshot compatibility through contained CLI and compositor checks (#8841).
+  This is source-level evidence, not a rollout or full graphical journey.
 - [x] Prove the bounded provider-fragment catalog-to-Save boundary with selected
   closure binding, immutable sources, opaque output arguments, static dependency
   inspection, independent named execution admission and ordinary pointer
@@ -1525,3 +1533,35 @@ authorized installed proof remain distinct obligations.
   Validation Plan after merge. The parent remains Active; next is provenance-safe
   template instantiation through the existing instance/save lifecycle, with
   explicit refusal for unsupported dependencies. No new registry or producer.
+
+### 2026-10-25 - Source-owned registration display metadata merged
+
+- PR #8841 merged at 05:08:55Z as
+  `4e0e7615f711f88e2cb509e62e026ec47b1106f4`, from reviewed head
+  `63385f78706b560aae2c2fa1dbb71e13cd2b1f16`. Current-head approval,
+  required CI and all resolved review threads were checked before normal
+  managed Maintainer self-merge. No CI exception was used.
+- Optional document titles and friendly built-in template copy retain immutable
+  names, template fragments/revisions, toggle targets, canonical registrations
+  and supervisor arguments. Published instance copy stays with the published
+  snapshot rather than a newer Save-only draft. Legacy documents retain exact
+  name fallback; older owners still reject the optional new field until upgraded.
+- Display titles cannot become implicit execution parameters, including across
+  recipe inheritance. Explicit `params.title` remains an execution input.
+  All three loop families reject nested pool titles as derived metadata.
+  The existing description export remains a derived compatibility projection.
+- The broad contained packet passed 544 tests with four skips; the final
+  inheritance/materialization/catalog/Save packet passed 483 with four skips.
+  The actual native Configuration compositor passed 27 with one skip, covering
+  all 13 illustrated scenarios with explicit refusal of real provider startup.
+  Its fixture now handles the existing streaming path without a production
+  loader or visual-layout change. Lint, install contract and unchanged module
+  ceilings passed; exact-head required CI passed independently.
+- Re-read the Plan and Validation Plan after merge and closed only this bounded
+  metadata source acceptance. Structured human-facing inputs, full independent
+  graphical configuration, source/history parity, mapped production, reversible
+  adoption, promotion and authorized installed proof remain open. No live task,
+  provider, service, activation, machine provisioning or installed/fleet rollout
+  was performed; no such behavior changed or operational authority was granted.
+  The effort remains Active. Next is safe template-owned configuration through
+  the existing Save lifecycle, not a raw instruction editor or second registry.

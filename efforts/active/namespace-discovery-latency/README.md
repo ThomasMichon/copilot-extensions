@@ -146,6 +146,14 @@ Existing installer-selection behavior, SDK validation algorithms,
 Manager/lifetime work and installed rollout remain excluded. Coordinate any
 newly overlapping consumer PR rather than modifying its still-open change.
 
+Subsequent operator direction, captured verbatim:
+
+> Help drive to adoption
+
+**Direction summary:** Drive the existing dependency, source merge, qualified
+release and already-authorized normal adoption flow. This does not waive review,
+CI, installation ownership or live-control gates.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -251,6 +259,100 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Integrated regression gates pass; native tail still fails
+
+- The integrated lifecycle, namespace, resolver and external-ownership packet
+  passes 130 tests with one platform skip. The five earlier fixture failures
+  are resolved by the original owner's merged changes, not waived or duplicated.
+- The canonical packet first hit its unchanged 300-second supervisor limit
+  while normal fixture construction ran concurrently. That incomplete run is
+  retained as failed evidence. With those builds finished, the same exact
+  source passed all 1,702 nodes, with coverage and zero effects, in 227.610
+  seconds under the same bound. No timeout, hash, coverage or effect rule changed.
+- Fresh normal Worktrees/Containers construction completed with no stderr.
+  Executing config/lifecycle/resolver and Worktrees module hashes/origins match
+  the integrated source; complete bound state-root JSON and actual global
+  legacy peer identity remain verified.
+- The new complete-provider cohort returned actual complete empty inventories,
+  exit 0 and no stderr in 7.799/5.632/5.502/6.752/**8.821** seconds. The fifth
+  invocation fails the unchanged eight-second requirement. The cohort stopped;
+  no integrated Bridge cohort, average-based pass, installed rollout or
+  comfortable-headroom claim follows.
+- The independent one-query work reduction remains the source change, not a
+  complete latency repair. Source review/CI may assess that component while
+  the parent native and adoption gates remain open. The next performance work
+  must diagnose the combined source's residual/variability; do not retry this
+  unchanged cohort or substitute the earlier source's passing measurements.
+
+### 2026-10-24 - Original-owner dependency merged and integration resumed
+
+- The original owner reported #8805 merged; provider state independently
+  confirms `c7b1cfca8624103272ba0ee4f846c922c42549c0` at
+  `2026-10-25T05:32:38Z`. Its owner retained the corrections, current-head
+  review, required CI, merge and child finalization; no competing patch or
+  takeover was used.
+- Backed up the clean owned source and used the managed sync to integrate
+  that actual merge. The resulting branch contains its hosting-policy fixture
+  repairs and namespace/lifecycle ownership guards while retaining only this
+  effort's independent inventory optimization.
+- Updated the canonical inventory source hash to the actual integrated
+  lifecycle bytes. The broader regression packet and exact-source unit gate
+  must pass before advancing the source PR. Earlier native results remain
+  attributed to their measured bytes; they do not automatically qualify the
+  new combined source, a containing release or installed consumption.
+
+### 2026-10-24 - Changed Docker candidate passes native reader cohorts
+
+- Normal isolated construction used the current source. Only the baseline
+  materialization restored the earlier lifecycle file before installation;
+  no installed runtime was patched. Executing module hashes/origins and the
+  actual global legacy Worktrees command were checked. Complete bound state-root
+  JSON matches the host control; installed host selectors remain unchanged.
+- Three alternating fresh installed-function pairs retained complete inventory
+  parity and removed exactly one Docker query, saving 0.204/0.202/0.234 seconds.
+  This supports the component change, not attribution of every subsequent
+  whole-command difference to that removal.
+- The changed actual provider command passed five fresh reads in
+  6.840/5.079/5.244/5.371/5.664 seconds. Five fresh real Bridge readers then
+  discovered an owned stopped member in 7.844/6.234/5.812/5.500/6.328 seconds
+  at the unchanged eight-second reader boundary. Each reader retained five
+  warm cached reads, settled native/CPU futures and CPU observations.
+  The first reader's thin 0.156-second slack remains a headroom concern.
+  The first outer test-process time was 9.480 seconds, including Bridge
+  interpreter/import startup outside that existing reader boundary.
+- Real missing-CLI and unavailable-daemon controls both exited 1 with no
+  stdout and explicit diagnostics. Six checks of the exact production bytes
+  passed on Linux 3.12.3 in a read-only networkless disposable container.
+  No Python package or image was pulled for that Linux smoke. This is
+  compatibility smoke, not the full Linux plugin suite.
+- The canonical source unit packet passed all 1,702 cases in 222.531 seconds
+  with coverage and zero effects, below its unchanged 300-second limit.
+  Touched Python lint and all 13 install contracts passed.
+- The broader five hosting-policy fixture failures still belong to #8805,
+  whose owner has their exact cases. They are neither fixed here nor waived.
+  No competing fixture repair, source-merge acceptance, containing release,
+  control adoption or installed readiness is claimed. All owned disposable
+  Docker fixtures were removed; the source effort and parent remain open.
+
+### 2026-10-24 - Single-query plan merged; implementation qualification started
+
+- #8837 actually merged as `4c67a5596f081595b2a0b0fed3167f3aab890f83`
+  after exact-head Copilot approval `5641369105`, complete clean feedback/thread
+  reads and passing required CI. The parent was re-read after merge; the source
+  worktree was backed up and advanced onto that merged plan before code.
+- The bounded implementation removes only the inventory version preflight and
+  retains query diagnostics with a daemon-access hint. Six effect-free tests
+  exercise the actual production inventory function, including full fields,
+  command count, empty success and missing-CLI/query/timeout failures.
+- The broader contained lifecycle/namespace/resolver packet found five
+  hosting-policy fixture failures. Their fixes already belong to open #8805;
+  the exact cases were reported there rather than duplicated. Its actual
+  lifecycle mutation implementation remains untouched. The broader result is
+  not green or waived; that original-owner fix is a qualification dependency.
+- Matched native component benefit, complete discovery, first-touch behavior,
+  source review/CI, containing release and authorized running consumption
+  remain open. No installed/runtime/service state changed.
 
 ### 2026-10-24 - Actual peer attribution and bounded Docker proposal
 

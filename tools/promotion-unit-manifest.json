@@ -1,6 +1,12 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_container_inventory.py::test_inventory_uses_one_query_and_preserves_fields[True]",
+        "tools/promotion_unit_tests/test_container_inventory.py::test_inventory_uses_one_query_and_preserves_fields[False]",
+        "tools/promotion_unit_tests/test_container_inventory.py::test_empty_inventory_is_success",
+        "tools/promotion_unit_tests/test_container_inventory.py::test_inventory_failures_are_not_empty_results[missing-cli]",
+        "tools/promotion_unit_tests/test_container_inventory.py::test_inventory_failures_are_not_empty_results[query]",
+        "tools/promotion_unit_tests/test_container_inventory.py::test_inventory_failures_are_not_empty_results[timeout]",
         "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[manifest]",
         "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[ancestor]",
         "tools/promotion_unit_tests/test_library_versions.py::test_linked_library_targets_refuse_before_any_version_write[source-directory]",
@@ -1949,9 +1955,12 @@
         "fleet-manager/tests/test_host_profile.py": "37448c7b4dc138a8234556cee32872b4d4ddbb123ab5ef4dba6cc47b497eb298",
         "fleet-manager/tests/test_trusted_systemd_profile.py": "f5e02393ac409efd446073d68c36bc56930f9522fb14d0d7d40c975987609354",
         "tools/promotion_unit_tests/test_mcp_home.py": "979e26f5099c3d582fe7567318887a37ecd0c36f45cb4cc8836ea84a7d6bc634",
-        "plugins/agent-mcp/src/agent_mcp/home.py": "c27b390c5771eb2b876596a973d1dbe387fa96ad7d5f75fcf51d7d0f726b7ade"
+        "plugins/agent-mcp/src/agent_mcp/home.py": "c27b390c5771eb2b876596a973d1dbe387fa96ad7d5f75fcf51d7d0f726b7ade",
+        "tools/promotion_unit_tests/test_container_inventory.py": "de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
+        "plugins/agent-containers/src/agent_containers/lifecycle.py": "10e0108feed7e4f44c2ad27d1aec29863e1868aa26e614db8bcca552847f020c"
     },
     "coverage_targets": [
+        "plugins/agent-containers/src/agent_containers/lifecycle.py",
         "libs/installer-engine/installer_dependency_policy.py",
         "libs/installer-engine/installer_dependency_config.py",
         "tools/accumulate_bumps.py",
