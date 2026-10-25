@@ -289,3 +289,185 @@ def test_coordinator_scheduler_uses_real_transport_and_recovers_shutdown(
                 await owner.drain(timeout=3)
 
     asyncio.run(scenario())
+
+
+def test_real_watch_service_replays_original_waits_without_unchanged_wakes(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
+    from gateway_service_transport_fixtures import eventually, running
+    from agent_pull_requests.watch_observer import NativeObservationBinding
+    from agent_pull_requests.watch_replay_client import ReplayClientError
+    from agent_pull_requests.watch_service import WatchService
+
+    async def scenario():
+        store, _ = service_owner(tmp_path)
+        database = tmp_path / "tasks.db"
+        queue = TaskQueue(database)
+        tasks = [task(queue), task(queue)]
+        snapshot_path, reads = tmp_path / "snapshot.json", tmp_path / "reads"
+        snapshot = {
+            "schema": "agent-worktrees.pr-snapshot", "version": 1,
+            "repo": "example/project", "pr": 7, "provider": "github",
+            "pr_state": "open", "merged": False, "head_sha": "unchanged-head",
+            "base_ref": "main", "mergeable": True, "checks_state": "success",
+            "title": "Synthetic provider observation", "draft": False,
+        }
+        snapshot_path.write_text(json.dumps(snapshot))
+        native = (
+            "import json,pathlib,sys;"
+            "assert sys.argv[1:6]==['pr-watch','snapshot','example/project','7','--json'];"
+            "assert sys.argv[6]=='--credential-command';"
+            f"data=pathlib.Path({str(snapshot_path)!r}).read_text();"
+            f"pathlib.Path({str(reads)!r}).open('a').write('read\\n');"
+            "print(data)"
+        )
+
+        def read_count():
+            return len(reads.read_text().splitlines()) if reads.exists() else 0
+
+        async def completed_cycle(consumer):
+            for _ in range(100):
+                result = await consumer.cycle()
+                if not result["blocked"]:
+                    return result
+                await asyncio.sleep(0.05)
+            raise AssertionError("service replay cycle remained blocked")
+
+        async with running(tmp_path) as rig:
+            async def service_access():
+                return rig.access("service-a", 1)
+
+            def service():
+                return WatchService(
+                    store, fleet="fleet-a", gateway="gateway-a", slot="service-a",
+                    bindings=(WatchScopeBinding(
+                        "caller-a", "project",
+                        ConsumerScope("caller-a", "dispatch", "example/project"),
+                    ),),
+                    observations=(NativeObservationBinding(
+                        "dispatch", "example/project", sys.executable,
+                        prefix=(sys.executable, "-I", "-c", native),
+                        credential_command=(sys.executable, "-I", "-m", "fleet_manager"),
+                    ),),
+                    gateway_origin=rig.origin, gateway_ca=rig.ca,
+                    access_token_callback=service_access,
+                    proof_key=rig.h.keys[1].get_op_key("sign"),
+                    authority=lambda: int(time.time()) + 60, checkpoint=lambda: None,
+                    interval=0.1,
+                )
+
+            owner = service()
+            await owner.start()
+            try:
+                await eventually(lambda: owner.status()["ready"], timeout=10)
+                consumer, caller = new_consumer(queue, rig)
+                request, last_response = caller.request, []
+
+                async def observed_request(method, target, **kwargs):
+                    response = await request(method, target, **kwargs)
+                    last_response[:] = [(response.status, response.body)]
+                    return response
+
+                monkeypatch.setattr(caller, "request", observed_request)
+                originals = {}
+                for index, task_id in enumerate(tasks):
+                    spec = identity(queue, suffix=str(index))
+                    issued_at = time.time()
+                    spec.update(until=["merged"], replay={
+                        "binding": consumer.binding, "request_id": f"request-{index}",
+                        "issued_at": issued_at, "deadline_at": issued_at + spec["timeout"],
+                    })
+                    prepared = None
+                    for _ in range(100):
+                        try:
+                            prepared = await consumer.prepare(
+                                task_id, delegation=spec, worker_id="worker", resume_worktree="host/wt",
+                                host="host", reason="waiting",
+                            )
+                            break
+                        except ReplayClientError as error:
+                            if error.http_status != 503 or error.outcome_unknown:
+                                raise
+                            assert queue.get_active_run_waiter(task_id) is None
+                            await asyncio.sleep(0.05)
+                    assert prepared is not None and prepared["state"] == "preparing", (
+                        last_response, owner.status(),
+                        [str(unit.exception()) for unit in owner._tasks if unit.done()],
+                    )
+                    originals[task_id] = spec["replay"]
+                for _ in range(60):
+                    await consumer.cycle()
+                    if all(
+                        (queue.get_active_run_waiter(task_id) or {}).get("state") == "active"
+                        for task_id in tasks
+                    ):
+                        break
+                    await asyncio.sleep(0.05)
+                assert all(queue.get_active_run_waiter(task_id)["state"] == "active" for task_id in tasks)
+                before = read_count()
+                await eventually(lambda: read_count() >= before + 3, timeout=10)
+                for _ in range(3):
+                    await completed_cycle(consumer)
+                    assert all(not queue.list_run_waiter_wakes(task_id) for task_id in tasks)
+                await eventually(
+                    lambda: owner._last_cycle is not None and owner._last_cycle["observed"] == 1,
+                    timeout=10,
+                )  # Two waits share one native target after a completed cycle.
+                registration_ids = {
+                    task_id: queue.get_active_run_waiter(task_id)["delegation"]["registration_id"]
+                    for task_id in tasks
+                }
+            finally:
+                await owner.close(timeout=5)
+
+            assert (await consumer.cycle())["blocked"]
+            assert all(not queue.list_run_waiter_wakes(task_id) for task_id in tasks)
+            queue = TaskQueue(database)
+            successor = service()
+            await successor.start()
+            try:
+                await eventually(lambda: successor.status()["ready"], timeout=10)
+                consumer, caller = new_consumer(queue, rig)
+                await completed_cycle(consumer)
+                for task_id in tasks:
+                    waiter = queue.get_active_run_waiter(task_id)
+                    assert waiter["delegation"]["replay"] == originals[task_id]
+                    assert waiter["delegation"]["registration_id"] == registration_ids[task_id]
+                    assert not queue.list_run_waiter_wakes(task_id)
+                replacement = snapshot_path.with_suffix(".pending")
+                replacement.write_text(json.dumps(snapshot | {"pr_state": "closed", "merged": True}))
+                replacement.replace(snapshot_path)
+                original_request, lost = caller.request, []
+
+                async def lose_ack(method, target, **kwargs):
+                    response = await original_request(method, target, **kwargs)
+                    if target.endswith("/acknowledge") and response.status == 200 and not lost:
+                        lost.append(True)
+                        raise TransportError("outcome-unknown", 502)
+                    return response
+
+                monkeypatch.setattr(caller, "request", lose_ack)
+                for _ in range(100):
+                    await consumer.cycle()
+                    if lost:
+                        break
+                    await asyncio.sleep(0.05)
+                assert lost
+                restored = TaskQueue(database)
+                recovered, _ = new_consumer(restored, rig)
+                for _ in range(100):
+                    await recovered.cycle()
+                    if not restored.list_replay_waiters(recovered.binding):
+                        break
+                    await asyncio.sleep(0.05)
+                assert not restored.list_replay_waiters(recovered.binding)
+                for task_id in tasks:
+                    wakes = restored.list_run_waiter_wakes(task_id)
+                    assert len(wakes) == 1
+                for _ in range(3):
+                    assert (await completed_cycle(recovered))["events"] == 0
+                assert all(len(restored.list_run_waiter_wakes(task_id)) == 1 for task_id in tasks)
+                assert rig.backends[0].requests == []
+            finally:
+                await successor.close(timeout=5)
+
+    asyncio.run(scenario())
