@@ -58,7 +58,8 @@ def _prospective_configs(
             if not isinstance(machine_repo, dict):
                 machine_repo = {}
             anchor = machine_repo.get("anchor") or (
-                str(repo_dir) if key == project else cfg._resolve_anchor_from_registry(key, platform)
+                str(repo_dir) if key == project and platform == cfg.detect_platform()
+                else cfg._resolve_anchor_from_registry(key, platform)
             )
             if not anchor:
                 continue
