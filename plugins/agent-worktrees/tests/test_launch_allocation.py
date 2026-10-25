@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import creation_allocation, launch_request, tracking
+from agent_worktrees import config as cfg, creation_allocation, launch_request, launch_seed_state, tracking
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 from test_launch_request import _intent
 from test_launch_request import admission_config as admission_config, authority as authority
@@ -67,6 +67,191 @@ def test_complete_daemon_admission_replays_original_representation(
     assert launch_request.execute(config, intent, identity_mode=first_mode) == result
     assert record.yaml_path.read_bytes() == before
     assert launch_request._admission_path(tmp_path / "tracking", intent["request_id"]).read_bytes() == receipt_before
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("first_mode", ["legacy", "tuple-v1"])
+@pytest.mark.parametrize("scoped", [False, True])
+@pytest.mark.parametrize("historical_receipt", [False, True])
+@pytest.mark.parametrize("initial_customization", [False, True])
+def test_completed_daemon_admission_replays_after_optional_customization(
+    tmp_path, monkeypatch, authority, platform, first_mode, scoped,
+    historical_receipt, initial_customization,
+):
+    load_config = cfg.load_config
+    initial = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    topology = Path(initial.default_repo.anchor) / "machines.yaml"
+    topology.write_text(yaml.safe_dump({"machines": {
+        "original-space": {
+            "hostname": "raw-host", "physical_host": "original-host",
+            **({"execution_platform": platform} if scoped else {}),
+        },
+    } if initial_customization else {}}))
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir(name) / "worktrees")
+    cfg.project_dir().mkdir()
+    config_path = cfg.project_dir() / "config.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "repo_name": initial.repo_name, "repos": {initial.repo_name: {
+            "anchor": initial.default_repo.anchor,
+            "worktree_root": initial.default_repo.worktree_root,
+        }},
+    }))
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+
+    def receiving_config():
+        return load_config(
+            config_path, project=initial.repo_name, include_control_plane_related_pr=False,
+            include_knowledge_preferences=False,
+        )
+
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: receiving_config())
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: receiving_config())
+    intent = _intent("new")
+    first = launch_request.execute(receiving_config(), intent, identity_mode=first_mode)
+    record_path = cfg.tracking_dir() / f"{first['worktree_id']}.yaml"
+    receipt_path = launch_request._admission_path(cfg.tracking_dir(), intent["request_id"])
+    seed_path = launch_seed_state.state_path(record_path)
+    if historical_receipt:
+        receipt = json.loads(receipt_path.read_text())
+        del receipt["execution_origin"]
+        receipt_path.write_text(json.dumps(receipt))
+    before = {path: path.read_bytes() for path in (record_path, receipt_path, seed_path)}
+    entry = {"hostname": "raw-host", "physical_host": "friendly-host"}
+    if scoped:
+        entry["execution_platform"] = platform
+    topology.write_text(yaml.safe_dump({"machines": {"local-space": entry}}))
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: pytest.fail("must not carve again"))
+    if historical_receipt and initial_customization and (
+        first_mode == "tuple-v1" or scoped or platform == "wsl"
+    ):
+        with pytest.raises((ValueError, RuntimeError)):
+            launch_request.execute(receiving_config(), intent, identity_mode=first_mode)
+        with pytest.raises((ValueError, RuntimeError)):
+            launch_request.inspect(intent["request_id"])
+    else:
+        replayed = launch_request.execute(receiving_config(), intent, identity_mode=first_mode)
+        assert replayed == first
+        assert launch_request.inspect(intent["request_id"])["ready"] is True
+        receipt = launch_request._read_admission(cfg.tracking_dir(), intent["request_id"])
+        assert launch_request._dispatch("launch_request_creation_finish", {
+            "tracking_dir": str(cfg.tracking_dir()), "request_id": intent["request_id"],
+            "fingerprint": receipt["fingerprint"],
+        }) == {"created": True}
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+
+
+@pytest.mark.parametrize("first_mode", ["legacy", "tuple-v1"])
+@pytest.mark.parametrize("changed", [
+    "root", "anchor", "project", "binding", "hostname", "actual-platform", "tuple-platform",
+])
+def test_completed_admission_still_requires_original_receiving_namespace(
+    tmp_path, monkeypatch, authority, first_mode, changed,
+):
+    config = _setup(tmp_path, monkeypatch)
+    intent = _intent("new")
+    result = launch_request.execute(config, intent, identity_mode=first_mode)
+    directory = cfg.tracking_dir()
+    record_path = directory / f"{result['worktree_id']}.yaml"
+    receipt_path = launch_request._admission_path(directory, intent["request_id"])
+    seed_path = launch_seed_state.state_path(record_path)
+    before = {path: path.read_bytes() for path in (record_path, receipt_path, seed_path)}
+    if changed in ("root", "anchor"):
+        config = replace(config, repos={config.repo_name: replace(config.default_repo, **{
+            "worktree_root" if changed == "root" else "anchor": str(tmp_path / "elsewhere"),
+        })})
+    elif changed == "project":
+        config = replace(config, repo_name="other", repos={"other": config.default_repo})
+    elif changed == "binding":
+        config = replace(config, machine="elsewhere", configured_machine="elsewhere")
+    elif changed == "hostname":
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "foreign-host")
+    elif changed == "actual-platform":
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
+    else:
+        config = replace(config, platform="windows")
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: pytest.fail("must not carve"))
+    with pytest.raises((ValueError, RuntimeError)):
+        launch_request.execute(config, intent)
+    with pytest.raises((ValueError, RuntimeError)):
+        launch_request.inspect(intent["request_id"])
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+
+
+@pytest.mark.parametrize("field,value", [
+    ("version", 2), ("hostname", "foreign-host"), ("machine", "foreign-host"),
+    ("environment", "windows"), ("execution_machine", "foreign-space"),
+    ("configured_machine", "foreign-space"), ("unexpected", True),
+])
+def test_completed_admission_rejects_changed_execution_origin(
+    tmp_path, monkeypatch, authority, field, value,
+):
+    config = _setup(tmp_path, monkeypatch)
+    intent = _intent("new")
+    result = launch_request.execute(config, intent, identity_mode="tuple-v1")
+    directory = cfg.tracking_dir()
+    receipt_path = launch_request._admission_path(directory, intent["request_id"])
+    receipt = json.loads(receipt_path.read_text())
+    receipt["execution_origin"][field] = value
+    receipt_path.write_text(json.dumps(receipt))
+    record_path = directory / f"{result['worktree_id']}.yaml"
+    seed_path = launch_seed_state.state_path(record_path)
+    before = {path: path.read_bytes() for path in (record_path, receipt_path, seed_path)}
+    with pytest.raises((ValueError, RuntimeError), match="origin"):
+        launch_request.execute(config, intent)
+    with pytest.raises((ValueError, RuntimeError), match="origin"):
+        launch_request.inspect(intent["request_id"])
+    assert all(path.read_bytes() == contents for path, contents in before.items())
+
+
+@pytest.mark.parametrize("change", ["consumed", "superseded", "new-seed", "changed-seed"])
+def test_completed_replay_cannot_restore_or_replace_launch_intent(
+    tmp_path, monkeypatch, authority, change,
+):
+    config = _setup(tmp_path, monkeypatch)
+    intent = _intent("new")
+    result = launch_request.execute(config, intent, identity_mode="tuple-v1")
+    directory = cfg.tracking_dir()
+    record_path = directory / f"{result['worktree_id']}.yaml"
+    receipt_path = launch_request._admission_path(directory, intent["request_id"])
+    receipt = json.loads(receipt_path.read_text())
+    if change == "consumed":
+        taken = launch_seed_state.take(record_path, seed_id=intent["request_id"])
+        assert launch_seed_state.finish(record_path, taken)["finished"]
+    elif change == "changed-seed":
+        path = launch_seed_state.state_path(record_path)
+        seed = json.loads(path.read_text())
+        seed["text"] = "different intent"
+        path.write_text(json.dumps(seed))
+    else:
+        launch_seed_state.stage(
+            record_path, seed_id="b" * 32, kind="resume", text="replacement",
+        )
+        if change == "new-seed":
+            receipt.pop("accepted")
+            receipt["prior_revision"] = tracking.load_record(record_path).pending_seed_revision
+            receipt_path.write_text(json.dumps(receipt))
+    seed_path = launch_seed_state.state_path(record_path)
+    before = {
+        path: path.read_bytes() if path.exists() else None
+        for path in (record_path, receipt_path, seed_path)
+    }
+    from agent_worktrees import execution_spaces
+
+    def refuse_mutation(*_a, **_k):
+        raise execution_spaces.ExecutionSpaceError("ordinary mutation denied")
+
+    monkeypatch.setattr(launch_request, "require_project_record_mutation", refuse_mutation)
+    with pytest.raises((ValueError, RuntimeError), match="superseded|mutation denied|different intent"):
+        launch_request.execute(config, intent)
+    assert all(
+        (path.read_bytes() if path.exists() else None) == contents
+        for path, contents in before.items()
+    )
 
 
 @pytest.mark.parametrize("field", ["worktree_id", "branch", "path", "project", "machine", "platform",
