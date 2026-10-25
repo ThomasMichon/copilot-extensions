@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve completed creation-key allocations across optional local naming customization without granting fresh allocation or mutation authority.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

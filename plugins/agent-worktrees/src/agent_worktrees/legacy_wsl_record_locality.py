@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING
 import yaml
 from machine_transport import (
     MachineEntry, MachineEnvironment, MachineSelection,
-    resolve_machine_selection, is_observed_local_name,
+    resolve_machine_selection, is_observed_local_name, resolve_local_execution_context,
 )
-from machine_transport.registry import PhysicalMachineError
+from machine_transport.registry import MissingExecutionSpaceError, PhysicalMachineError
 
 from . import config as cfg
 from .execution_spaces import ExecutionSpaceError
@@ -59,19 +59,22 @@ def record_namespace_matches(record: "WorktreeRecord", config: cfg.Config) -> bo
 def _local_record_selection(
     config: cfg.Config, entries: dict[str, MachineEntry],
 ) -> tuple[MachineSelection[MachineEntry], bool]:
-    """Keep a literal observed binding local only within the record proof."""
+    """Keep actual observed/derived bindings local only within the record proof."""
     actual = cfg.detect_platform()
-    if (
-        getattr(config, "platform", actual) != actual
-        or config.machine.casefold() != cfg.socket.gethostname().casefold()
-    ):
+    if getattr(config, "platform", actual) != actual:
         return resolve_machine_selection(entries, config.machine, actual), False
     from .execution_spaces import _current_execution_context
 
     context = _current_execution_context(config, entries)
     observed = (
         context.customization_key is None
-        and config.machine.casefold() == context.hostname.casefold()
+        and config.machine.casefold() in {
+            context.hostname.casefold(), context.execution_machine.casefold(),
+        }
+        and context == resolve_local_execution_context(
+            entries, hostname=context.hostname, environment=actual,
+            configured_machine=getattr(config, "configured_machine", None),
+        )
     )
     if observed:
         return MachineSelection(
@@ -110,6 +113,10 @@ def resolve_legacy_wsl_owner_ref(ref: "ClaimRef", config: cfg.Config) -> Path | 
         try:
             direct = resolve_machine_selection(caller_entries, ref.machine)
         except PhysicalMachineError:
+            direct = None
+        except MissingExecutionSpaceError:
+            if not observed_ref:
+                raise
             direct = None
         if direct is not None and direct.entry is not None and direct.exact:
             declared = direct.entry.execution_platform
