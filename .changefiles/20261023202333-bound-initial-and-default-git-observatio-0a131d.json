@@ -1,5 +1,5 @@
 {
-  "comment": "Bound Windows Git observations by one cleanup-inclusive deadline and retain cleanup custody across resident callbacks; keep ordinary POSIX and legacy foreground behavior unchanged.",
+  "comment": "Add an opt-in atomic Windows observation deadline and stream-custody primitive; preserve ordinary POSIX and legacy foreground behavior.",
   "changes": [
     {
       "plugin": "agent-worktrees",
