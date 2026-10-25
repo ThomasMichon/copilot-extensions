@@ -56,6 +56,10 @@ Certificate verification is never disabled.
 
 ## Explicit non-secret configuration/discovery
 
+Foreground hosting opens the same lexical absolute configuration selection
+whose parent is checked by instance admission. Parent components are normalized
+once; surviving filesystem indirection is not hidden by resolving an alias.
+
 `GatewayConfig.load()` consumes strict bounded JSON:
 
 - `schema: fleet-manager.gateway`, `version: 1`, `role: gateway`;

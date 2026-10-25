@@ -663,6 +663,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from work_coalescing_singleton import CoalescingServer
 
     from .watch_daemon import WatchDaemon, rendezvous_fields, state_dir, write_lock_data
+    from .watch_retirement import WatchRetirement
 
     lease = SingleInstance(state_dir(), service="agent-pull-requests-watch")
     try:
@@ -671,30 +672,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         print(f"agent-pull-requests: watch daemon already running (pid {exc.holder_pid})")
         return 0
 
-    daemon = WatchDaemon(
-        fetch=_watch_github_snapshot, native_fetch=_watch_native_snapshot,
-        poll_interval=args.poll_interval,
-    )
-    server = CoalescingServer(daemon.compute, on_idle=None)
-    server.start()
-    write_lock_data(rendezvous_fields(server))
-    print(f"agent-pull-requests: watch daemon listening ({server.rendezvous()['endpoint']})")
-    try:
-        daemon.wait_for_shutdown()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.close_admission(reason="shutdown")
-        server.close()
-        deadline = time.monotonic() + _WATCH_HANDLER_DRAIN_TIMEOUT_S
+    with WatchRetirement(timeout=_WATCH_HANDLER_DRAIN_TIMEOUT_S) as retirement:
+        retirement.release = lease.release
+        daemon = WatchDaemon(
+            fetch=_watch_github_snapshot, native_fetch=_watch_native_snapshot,
+            poll_interval=args.poll_interval,
+        )
+        retirement.close_owner = daemon.close
+        server = CoalescingServer(daemon.compute, on_idle=None)
+        retirement.server = server
+        server.start()
+        write_lock_data(rendezvous_fields(server))
+        print(f"agent-pull-requests: watch daemon listening ({server.rendezvous()['endpoint']})")
         try:
-            while server.active_handler_count():
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("PR watch request handlers did not drain")
-                time.sleep(0.02)
-        finally:
-            daemon.close()
-        lease.release()
+            daemon.wait_for_shutdown()
+        except KeyboardInterrupt:
+            pass
     return 0
 
 

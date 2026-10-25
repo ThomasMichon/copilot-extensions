@@ -510,6 +510,7 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
                     identity_provider: IdentityProvider | None = None,
                     local_handlers: tuple[LocalHandlerBinding, ...] = ()) -> web.Application:
     """Build without binding; the policy file is the sole explicit runtime source."""
+    policy_path = Path(os.path.abspath(policy_path))
     listener.tls()
     authority = ServiceAuthority(
         fleet=listener.fleet, gateway=listener.gateway,
@@ -531,7 +532,7 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
     async def lifetime(application: web.Application) -> AsyncIterator[None]:
         with admit_daemon_instance(
             "fleet-manager-service-gateway", source=__file__, purpose="production",
-            runtime_root=Path(os.path.abspath(policy_path)).parent,
+            runtime_root=policy_path.parent,
         ):
             task = asyncio.create_task(state.reload_loop())
 
@@ -625,6 +626,7 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
 )
 def serve(policy_path: Path, tls_path: Path) -> int:
     """Foreground runner; the external service manager owns process lifetime."""
+    policy_path = Path(os.path.abspath(policy_path))
     try:
         listener = Listener.load(tls_path)
         check(listener.port != 0, "ephemeral-listener-sdk-only")

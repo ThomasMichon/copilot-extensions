@@ -688,3 +688,53 @@ caller coverage, not one launcher or one platform passing.
   removed. Strict protocol and install-contract checks passed.
 - Source publication, a passing current review and current-head CI remain
   open. The effort is still Active and no runtime rollout is authorized.
+
+### 2026-10-25 - Selected-path coherence and remaining entrypoint review
+
+- Current upstream adds four admitted unit cases. The complete 1,800-unit
+  source packet passed required CI in 41.294 seconds under the unchanged
+  300-second ceiling; no retained cases, bindings or effect guards were
+  removed. A subsequent review still blocks source completion.
+- Reproduced a selected-path mismatch: Gateway admission normalized the
+  config parent but the reader opened the original link-plus-parent spelling.
+  The same defect affected both service-policy construction and embedded
+  startup. Readers, reloads and admission now use one lexical selection.
+- Vault startup no longer replaces a selected linked home with its target.
+  Linked homes or parents refuse before runtime-directory or launch-log
+  creation, preserving the selected spelling for custody checks.
+- Five real Linux counterexamples fail against the old source: a redirected
+  Gateway installation, two redirected service-policy reads and two Vault
+  launch attempts. The corrected combined packet passes 39 on Windows and
+  39 on isolated Linux, including existing TLS/native-reload cleanup cases.
+  Linux verified all 451 snapshot files and 28 installed shared-process Python
+  files; its test-owned container was removed. Lint, module ceilings and all
+  1,800 current source bindings remain valid.
+- The remaining legacy/passive PR-watch cleanup findings still require actual
+  handler/worker/writer settlement and qualification. The effort remains
+  Active, with source review/merge and completion archival still open.
+  No runtime rollout is authorized.
+
+### 2026-10-25 - Remaining PR-watch entrypoint retirement
+
+- Reproduced both legacy and passive entrypoint failures with a real native
+  handler still running, the original lease still held and the instance
+  incorrectly marked finished. Retirement now retains the original server,
+  daemon/writer and admission until intake, handlers, pollers and deliveries
+  actually settle, including partial startup and repeated interruption.
+- Bounded lower cleanup APIs and existing acknowledgement/election/recovery
+  authority remain unchanged. Their timeout or error does not release
+  admission; the original error resurfaces after settlement. Failed intake
+  close remains unknown even with zero counted handlers.
+- Native poller/delivery/handler references survive removal from application
+  dictionaries and interrupted `Thread.join` bookkeeping. Actual native-child
+  regressions retain both instance custody and the original lease until work
+  finishes, without replaying callbacks.
+- The full independent Windows packet passed all 84 tests. Four physical-slot
+  fixtures initially exceeded the Windows executable-path limit; replay under
+  a shorter, atomically owner-only test root passed them without exclusions,
+  machine-policy changes or runtime installation. Isolated Linux passed 83
+  with one Windows-only skip, verifying 484 source files and all 28 installed
+  shared-process Python files; its test-owned container was removed.
+- The four review corrections are implemented and qualified, but publication,
+  a passing fresh review, current-head CI and completion archival remain open.
+  The effort stays Active; no runtime rollout is authorized.

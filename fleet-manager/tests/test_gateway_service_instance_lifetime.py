@@ -55,6 +55,51 @@ async def challenge(serving, rig):
             assert set(await response.json()) == {"nonce"}
 
 
+@pytest.mark.parametrize("embedding", ["build", "start"])
+def test_policy_reader_uses_its_admitted_lexical_selection(tmp_path, monkeypatch, embedding):
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    rig = bootstrap(launch / "state")
+    redirected = tmp_path / "redirected"
+    (redirected / "child").mkdir(parents=True)
+    (redirected / "state").mkdir()
+    (redirected / "state" / rig.policy.name).write_text("{}")
+    alias = launch / "link"
+    try:
+        alias.symlink_to(redirected / "child", target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    original_read = server.read_bounded
+    expected = original_read(rig.policy)
+    reads = []
+
+    def read(path):
+        value = original_read(path)
+        reads.append((path, value))
+        return value
+
+    monkeypatch.setattr(server, "read_bounded", read)
+
+    async def scenario():
+        serving = None
+        try:
+            selected = alias / ".." / "state" / rig.policy.name
+            if embedding == "start":
+                serving = await server.start(
+                    rig.listener, selected, reload_interval=60, clock=rig.h.clock,
+                )
+                await challenge(serving, rig)
+            else:
+                await server.build_app(rig.listener, selected, clock=rig.h.clock)
+            assert reads
+            assert all(path == rig.policy and value == expected for path, value in reads)
+        finally:
+            if serving is not None:
+                await serving.close()
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("ending", ["startup", "shutdown", "repeated-reload-cancel"])
 def test_native_policy_reload_settles_before_admission(tmp_path, monkeypatch, ending):
     async def scenario():

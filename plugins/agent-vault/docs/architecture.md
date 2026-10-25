@@ -70,6 +70,10 @@ On startup the daemon writes a rendezvous file at `~/.agent-vault/run/endpoint.j
 
 This matches the discovery/transport patterns while preserving the legacy fixed port for backward compatibility.
 
+Detached startup retains the lexical absolute home selection for custody
+checks. A linked home or parent is refused before creating the runtime directory
+or launch log; it is never rewritten to the linked target and inherited as safe.
+
 Direct async `run_server` callers retain daemon admission through accepted
 requests, including Windows named-pipe requests. Shutdown rejects new work,
 closes idle connections, and settles already-started native calls and response

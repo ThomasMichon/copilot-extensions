@@ -67,6 +67,10 @@ registration retires an agent lease or authorizes replacing an incumbent release
 
 ## Bootstrap and coherent live policy
 
+CLI and embedded startup bind the policy to its lexical absolute selection.
+Initial loading, later reloads and instance admission use that same path;
+normalizing parent components cannot make the reader follow a different tree.
+
 Listener configuration is strict bounded JSON with schema
 `fleet-manager.gateway-service-listener`, version `1`, stable `fleet`/`gateway`
 identifiers, `host`, `port`, `origin`, `certificate`, `key` and `remote`.

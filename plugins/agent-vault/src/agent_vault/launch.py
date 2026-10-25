@@ -34,8 +34,10 @@ _PATH_OVERRIDES = (
 
 
 def service_root() -> Path:
-    """The vault runtime root a detached service runs from, created if absent."""
-    root = config.home_dir().resolve()
+    """Create the lexical runtime selection without hiding redirected custody."""
+    root = Path(os.path.abspath(config.home_dir()))
+    if root.resolve() != root:
+        raise OSError("vault runtime root is redirected")
     root.mkdir(parents=True, exist_ok=True)
     return root
 

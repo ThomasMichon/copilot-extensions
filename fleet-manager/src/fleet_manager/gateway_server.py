@@ -226,7 +226,11 @@ def build_server(config: GatewayConfig, signer: Signer) -> _Server:
     runtime_root=lambda config_path: Path(os.path.abspath(config_path)).parent,
 )
 def serve(config_path: Path) -> int:
-    """Foreground hosting only. No deployment, background spawn or discovered-state writes."""
+    """Host from the same lexical config selection checked by admission.
+
+    No deployment, background spawn or discovered-state writes.
+    """
+    config_path = Path(os.path.abspath(config_path))
     try:
         with config_path.open("rb") as stream:
             config = GatewayConfig.load(parse(stream.read(MAX_WIRE + 1)))

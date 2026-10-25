@@ -8,7 +8,6 @@ from pathlib import Path
 import os
 import socket
 import sys
-import time
 from uuid import uuid4
 
 from agent_procutil import spawn_daemon
@@ -22,6 +21,7 @@ from .watch_driver import WatchDriver
 from .watch_invocation import WatchInvocation
 from .watch_journal import WatchJournal, _regular_bytes, _target_selection, read_known_owner
 from .watch_runtime import WatchInstance
+from .watch_retirement import WatchRetirement
 
 
 def _client(invocation: WatchInvocation, document: dict, role: str) -> WatchControlClient:
@@ -235,18 +235,11 @@ def serve_passive(invocation: WatchInvocation, args, *, fetch, native_fetch=None
         instance_id=args.passive_instance,
         native_fetch=native_fetch,
     )
-    server = WatchControlServer(owner.compute, on_idle=None, bind_port=args.port)
-    try:
+    writer = owner.writer
+    with WatchRetirement(close_owner=lambda: writer.close(timeout=5.0)) as retirement:
+        server = WatchControlServer(owner.compute, on_idle=None, bind_port=args.port)
+        retirement.server = server
         server.start()
         owner.publish_launch(server)
         owner.wait_for_shutdown()
-    finally:
-        server.close_admission(reason="shutdown")
-        server.close()
-        deadline = time.monotonic() + 5.0
-        while server.active_handler_count():
-            if time.monotonic() >= deadline:
-                raise TimeoutError("watch passive handlers did not drain")
-            time.sleep(0.02)
-        owner.writer.close(timeout=5.0)
     return 0

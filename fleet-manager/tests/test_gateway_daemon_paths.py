@@ -56,3 +56,48 @@ def test_gateway_cli_linked_config_parent_refuses_before_body(tmp_path, monkeypa
     )
     with pytest.raises((OSError, ValueError, RuntimeError)):
         main(["serve", "--role", "gateway", "--config", "linked/gateway.json"])
+
+
+def test_gateway_opens_the_same_lexical_selection_as_admission(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    selected = launch / "state"
+    fixture = Fixtures(selected)
+    (selected / "gateway.json").write_text(json.dumps(fixture.value))
+    redirected = tmp_path / "redirected"
+    (redirected / "child").mkdir(parents=True)
+    (redirected / "state").mkdir()
+    (redirected / "state" / "gateway.json").write_text(json.dumps(
+        fixture.value | {"installation": "redirected-install"},
+    ))
+    alias = launch / "link"
+    try:
+        alias.symlink_to(redirected / "child", target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    opened, installations = [], []
+    original_open = Path.open
+
+    def open_path(path, *args, **kwargs):
+        if path.name == "gateway.json":
+            opened.append(path)
+        return original_open(path, *args, **kwargs)
+
+    class Server:
+        def serve_forever(self, **kwargs):
+            pass
+
+        def server_close(self):
+            pass
+
+    def build(config, _signer):
+        installations.append(config.installation)
+        return Server()
+
+    monkeypatch.setattr(Path, "open", open_path)
+    monkeypatch.setattr(gateway_server, "build_server", build)
+    assert gateway_server.serve(alias / ".." / "state" / "gateway.json") == 0
+    assert installations == ["gateway-install"]
+    assert opened == [selected / "gateway.json"]
