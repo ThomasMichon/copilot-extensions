@@ -1,5 +1,6 @@
 """Execute the shipped creation boundary without starting a real mux."""
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -121,3 +122,59 @@ def test_creation_refusal_restores_caller_without_a_fallback(tmp_path, failure):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == {"cwd": str(caller), "refused": True}
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is required")
+@pytest.mark.parametrize("selector", ["launcher", "native"])
+def test_cleanup_refuses_older_children_of_reused_parent_pids(tmp_path, selector):
+    if selector == "launcher":
+        source = SOURCE.read_text("utf-8")
+        start = source.index("        $depth = @{}", source.index(
+            "function Stop-AwOwnedPsmuxSession",
+        ))
+        end = source.index("\n        foreach ($pidValue in @(", start)
+        selected = "$depth.Keys"
+    else:
+        native = SOURCE.parents[1] / "tests" / "native" / "test_psmux_home_directory.py"
+        tree = ast.parse(native.read_text("utf-8"))
+        driver = next(node.value for node in tree.body if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "DRIVER"
+                              for target in node.targets))
+        source = ast.literal_eval(driver)
+        start = source.index("    $selected=@{}")
+        end = source.index("    $held=@{}", start)
+        selected = "$selected.Keys"
+    rows = [
+        (100, 0, "00:01:00"),
+        (101, 100, "00:00:50"),
+        (102, 101, "00:02:00"),
+        (201, 100, "00:01:01"),
+        (202, 201, "00:01:02"),
+        (203, 201, "00:01:00.500"),
+        (204, 201, None),
+        (205, 100, "00:01:00"),
+    ]
+    payload = tmp_path / "processes.json"
+    payload.write_text(json.dumps([
+        {"ProcessId": pid, "ParentProcessId": parent,
+         "CreationDate": "2025-01-01T" + born + "Z" if born else None}
+        for pid, parent, born in rows
+    ]), encoding="utf-8")
+    script = tmp_path / "select.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "$all=@(Get-Content -Raw -LiteralPath $args[0] | ConvertFrom-Json)\n"
+        "foreach($row in $all){if($null -ne $row.CreationDate){"
+        "$row.CreationDate=[DateTime]::Parse([string]$row.CreationDate).ToUniversalTime()}}\n"
+        "$roots=@($all | Where-Object {$_.ProcessId -eq 100})\n"
+        + source[start:end]
+        + "\nConvertTo-Json -Compress -InputObject @(" + selected + " | Sort-Object)\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script), str(payload)],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert set(json.loads(result.stdout)) == {100, 201, 202, 205}

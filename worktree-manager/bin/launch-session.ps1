@@ -1469,8 +1469,12 @@ function Stop-AwOwnedPsmuxSession {
         while ($frontier.Count -gt 0) {
             $next = @()
             foreach ($parentPid in $frontier) {
+                # Older children belong to a previous use of this parent PID.
                 foreach ($child in @($all | Where-Object {
-                    [int]$_.ParentProcessId -eq $parentPid
+                    [int]$_.ParentProcessId -eq $parentPid -and
+                    $null -ne $_.CreationDate -and
+                    $null -ne $identity[$parentPid].CreationDate -and
+                    $_.CreationDate.ToUniversalTime() -ge $identity[$parentPid].CreationDate.ToUniversalTime()
                 })) {
                     $childPid = [int]$child.ProcessId
                     if (-not $depth.ContainsKey($childPid)) {

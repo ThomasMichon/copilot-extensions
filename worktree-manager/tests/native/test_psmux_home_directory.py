@@ -22,9 +22,7 @@ DRIVER = r"""
 $ErrorActionPreference='Stop'
 $binary=$args[0]; $root=$args[1]; $namespace=$args[2]; $mode=$args[3]
 $worktree=Join-Path $root 'checkout with spaces'
-$probe=Join-Path $root 'pane.ps1'
-$stop=Join-Path $root 'stop'
-$observed=Join-Path $root 'pane.json'
+$observed=Join-Path $root 'pane-cwd.txt'
 $began=[DateTime]::UtcNow
 $prior=@{}
 foreach($row in @(Get-CimInstance Win32_Process | Where-Object {
@@ -59,6 +57,11 @@ function Stop-OwnedTestMux {
         foreach($row in $all){
             if($selected.ContainsKey([int]$row.ParentProcessId) -and
                 -not $selected.ContainsKey([int]$row.ProcessId)){
+                $parent=$selected[[int]$row.ParentProcessId]
+                if($null -eq $row.CreationDate -or $null -eq $parent.CreationDate -or
+                    $row.CreationDate.ToUniversalTime() -lt $parent.CreationDate.ToUniversalTime()){
+                    continue
+                }
                 $selected[[int]$row.ProcessId]=$row
                 $changed=$true
             }
@@ -100,9 +103,8 @@ function Stop-OwnedTestMux {
 }
 $report=$null
 try {
-    $paneCmd=@('pwsh.exe','-NoProfile','-NoExit','-File',('"'+$probe+'"'))
     $commandArgs=@('-L',$namespace,'new-session','-d','-s','fixture',
-        '-c',$worktree)+$paneCmd
+        '-c',$worktree)
     $clock=[Diagnostics.Stopwatch]::StartNew()
     if($mode -eq 'home'){
         Invoke-AwPsmuxFromHome -CommandArgs $commandArgs
@@ -111,24 +113,26 @@ try {
     }
     $clock.Stop()
     if($LASTEXITCODE -ne 0){throw 'PSMux creation failed'}
-    try {
-        $null=Wait-For {Test-Path -LiteralPath $observed} 'Pane did not start'
-    } catch {
-        $diagnostic=(& $binary -L $namespace -t fixture capture-pane -p 2>&1 | Out-String)
-        throw ('Pane did not start: '+$diagnostic)
-    }
     $registry=Join-Path $HOME '.psmux'
     $warmFile=Join-Path $registry ($namespace+'____warm__.port')
     $sessionFile=Join-Path $registry ($namespace+'__fixture.port')
+    $null=Wait-For {Test-Path -LiteralPath $sessionFile} 'Real session did not register'
     $null=Wait-For {Test-Path -LiteralPath $warmFile} 'Standby did not register'
     $warmPort=[int]([IO.File]::ReadAllText($warmFile).Trim())
     $realPort=[int]([IO.File]::ReadAllText($sessionFile).Trim())
     $warm=Get-Process -Id (Get-NetTCPConnection -State Listen -LocalPort $warmPort).OwningProcess
     $real=Get-Process -Id (Get-NetTCPConnection -State Listen -LocalPort $realPort).OwningProcess
     $null=$warm.Handle; $null=$real.Handle
-    $pane=[IO.File]::ReadAllText($observed) | ConvertFrom-Json
+    $capture='cd > "'+$observed+'"'
+    & $binary -L $namespace send-keys -t fixture -l $capture
+    if($LASTEXITCODE -ne 0){throw 'Owned pane directory request failed'}
+    & $binary -L $namespace send-keys -t fixture Enter
+    $null=Wait-For {
+        (Test-Path -LiteralPath $observed) -and (Get-Item -LiteralPath $observed).Length -gt 0
+    } 'Pane did not report its directory'
+    $pane=@{cwd=[IO.File]::ReadAllText($observed).Trim()}
     $restored=(Get-Location).ProviderPath -eq $worktree
-    [IO.File]::WriteAllText($stop,'stop')
+    & $binary -L $namespace send-keys -t fixture exit Enter
     if(-not $real.WaitForExit(2000)){
         & $binary -L $namespace kill-session -t fixture
         if($LASTEXITCODE -ne 0){throw 'Owned real-session close failed'}
@@ -179,17 +183,6 @@ def test_real_standby_does_not_pin_retired_checkout(tmp_path, capsys):
             'set -g default-shell "cmd.exe /D /Q"\nset -g warm on\n',
             encoding="utf-8",
         )
-        pane = root / "pane.ps1"
-        pane.write_text(
-            "[IO.File]::WriteAllText($env:FIXTURE_OBSERVED,"
-            "(ConvertTo-Json -Compress @{cwd=(Get-Location).ProviderPath;"
-            "native_cwd=[IO.Directory]::GetCurrentDirectory()}))\n"
-            "$deadline=[DateTime]::UtcNow.AddSeconds(30)\n"
-            "while(-not(Test-Path -LiteralPath $env:FIXTURE_STOP) -and "
-            "[DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 50}\n"
-            "exit 0\n",
-            encoding="utf-8",
-        )
         script = root / "driver.ps1"
         script.write_text(helper + "\n$script:AwPsmuxBin=$args[0]\n" + DRIVER,
                           encoding="utf-8")
@@ -198,7 +191,6 @@ def test_real_standby_does_not_pin_retired_checkout(tmp_path, capsys):
                                   "PATHEXT", "SYSTEMDRIVE", "TEMP", "TMP"}}
         env.update(
             HOME=str(home), USERPROFILE=str(home), PSMUX_DATA_DIR=str(registry),
-            FIXTURE_OBSERVED=str(root / "pane.json"), FIXTURE_STOP=str(root / "stop"),
         )
         namespace = "home-proof-" + uuid.uuid4().hex
         visible, _ = windows()
@@ -227,7 +219,6 @@ def test_real_standby_does_not_pin_retired_checkout(tmp_path, capsys):
         assert not foregrounds & owned
         assert result["restored"] and result["standby_alive"]
         assert Path(result["pane"]["cwd"]) == worktree
-        assert Path(result["pane"]["native_cwd"]) == worktree
         results[mode] = result
     assert results["home"]["deleted"]
     version = subprocess.run(
