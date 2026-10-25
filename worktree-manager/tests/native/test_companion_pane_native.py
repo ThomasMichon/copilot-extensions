@@ -11,7 +11,7 @@ import uuid
 
 import pytest
 
-from worktree_manager import companion_pane, mux_mapping_registry
+from worktree_manager import companion_pane, mux_daemon, mux_daemon_cli, mux_mapping_registry
 from _manager_process_fixture import synthetic_runtime
 
 
@@ -67,6 +67,9 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         return original_run(command, env=selected_environment, **kwargs)
 
     monkeypatch.setattr(companion_pane, "run_mux_child", clean_child)
+    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", clean_child)
+    monkeypatch.setattr(mux_daemon, "ensure_daemon_running", lambda *a, **kw: True)
+    monkeypatch.setattr(mux_daemon, "publish_live_observation", lambda *a, **kw: {"applied": True})
     try:
         mux("new-session", "-d", "-s", session, "-c", str(cwd))
         cli, incarnation, pid = mux(
@@ -137,7 +140,15 @@ def test_native_same_window_preserves_cli_identity(tmp_path, monkeypatch):
         assert gone.returncode, "Summary kept the CLI-only session alive"
         mux("new-session", "-d", "-s", session, "-c", str(cwd))
         assert len(mux("list-panes", "-s", "-t", session, "-F", "#{pane_id}").splitlines()) == 1
-        assert mux("display-message", "-p", "-t", session, "#{session_id}:#{session_created}") != incarnation
+        new_cli, new_incarnation = mux(
+            "display-message", "-p", "-t", session, "#{pane_id}\t#{session_id}:#{session_created}",
+        ).split("\t")
+        assert new_incarnation != incarnation
+        relaunched = dict(mapping, session_incarnation=new_incarnation,
+                          panes=[{"pane_id": new_cli, "role": "cli", "live": True}])
+        relaunched.pop("mapping_revision")
+        assert mux_daemon_cli._register_reconnect(relaunched, creation=True)["applied"]
+        assert mux_mapping_registry.get_mapping("example", "fixture")["panes"] == relaunched["panes"]
     finally:
         # Only this uniquely named test session; never the user's server.
         subprocess.run(

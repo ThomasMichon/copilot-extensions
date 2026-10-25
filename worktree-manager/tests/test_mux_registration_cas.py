@@ -156,11 +156,14 @@ def test_initial_lookup_conflict_requires_native_proof_before_replacement(
             raise RuntimeError("native inventory unavailable")
         incarnation = "$8:200" if native == "successor" else owner["session_incarnation"]
         path = owner["worktree_path"] if native != "wrong-path" else owner["worktree_path"] + "-other"
+        if command[1] == "list-panes":
+            return SimpleNamespace(returncode=0, stdout=f"%42\t0\tmanaged\t{incarnation}\t{path}\n")
         return SimpleNamespace(returncode=0, stdout=f"managed\t1\t{incarnation}\t{path}\n")
 
     monkeypatch.setattr(mux_discovery, "run_mux_child", inventory)
+    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", inventory)
     result = mux_daemon_cli._register_reconnect(dict(owner, panes=_cli()), creation=creation)
-    assert probes and probes[0][1] == "list-sessions"
+    assert probes and probes[0][1] == ("list-panes" if creation else "list-sessions")
     if native == "requested":
         assert result["applied"]
         current = registry.get_mapping("example", "one")
@@ -169,3 +172,21 @@ def test_initial_lookup_conflict_requires_native_proof_before_replacement(
     else:
         assert not result["applied"]
         assert registry.get_mapping("example", "one") == before
+
+
+def test_creation_uses_registered_pane_path_not_session_home(owner, monkeypatch):
+    registry.register_next_mapping(dict(owner, session_incarnation="$8:200", panes=_cli("%99")))
+    commands = []
+
+    def native(command, **kwargs):
+        commands.append(command)
+        assert command[1] == "list-panes", "session_path is not the launch pane's cwd"
+        assert "pane_current_path" in command[-1]
+        return SimpleNamespace(
+            returncode=0,
+            stdout=f"%42\t0\tmanaged\t$7:100\t{owner['worktree_path']}\n",
+        )
+
+    monkeypatch.setattr(mux_daemon_cli, "run_mux_child", native)
+    assert mux_daemon_cli._register_reconnect(dict(owner, panes=_cli()), creation=True)["applied"]
+    assert len(commands) == 1
