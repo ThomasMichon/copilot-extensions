@@ -111,7 +111,8 @@ def _git(path: Path, *args: str) -> str:
 def _tracked(path: Path, relative: str) -> Path:
     if (
         not isinstance(relative, str) or not relative or "\\" in relative
-        or ":" in relative or "\x00" in relative or relative.startswith("/")
+        or ":" in relative or relative.startswith("/")
+        or any(ord(c) < 32 or ord(c) == 127 for c in relative)
         or any(part in ("", ".", "..") for part in relative.split("/"))
         or PurePosixPath(relative).is_absolute()
     ):
@@ -232,7 +233,11 @@ def _terminal() -> bool:
 
 
 def _stdio_kwargs() -> dict:
-    return {} if _terminal() else no_window_kwargs()
+    options = {} if _terminal() else no_window_kwargs()
+    if os.name == "nt":
+        # Headless Windows children otherwise receive new console handles, not caller pipes.
+        options.update(stdin=0, stdout=1, stderr=2)
+    return options
 
 
 def _call(setup: Setup, mode: str) -> Outcome:

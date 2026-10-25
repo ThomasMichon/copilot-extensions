@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import runpy
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -62,7 +63,8 @@ def test_core_then_fresh_readiness_then_repository(monkeypatch, tmp_path) -> Non
     events = providers(monkeypatch)
     calls = []
 
-    def passthrough(project, argv):
+    def passthrough(project, argv, **kwargs):
+        assert kwargs == {"terminal_aware": True}
         events.append("repository")
         calls.append((project, argv))
         return 0
@@ -113,7 +115,7 @@ def test_no_repository_preserves_existing_setup(monkeypatch) -> None:
 @pytest.mark.parametrize("status", [1, 7, 130])
 def test_repository_failure_is_preserved_without_repeating_core(monkeypatch, status) -> None:
     events = providers(monkeypatch)
-    monkeypatch.setattr(repository, "run_engine_passthrough", lambda *a: status)
+    monkeypatch.setattr(repository, "run_engine_passthrough", lambda *a, **k: status)
     assert cli.cmd_setup(["--apply", "--repository", URL], banner="Example") == status
     assert events.count("core") == 1
 
@@ -123,7 +125,7 @@ def test_old_engine_refuses_only_optional_stage(monkeypatch, capsys) -> None:
 
     events = providers(monkeypatch)
 
-    def unavailable(*_):
+    def unavailable(*_, **kwargs):
         raise EngineError("repos setup is unsupported")
 
     monkeypatch.setattr(repository, "run_engine_passthrough", unavailable)
@@ -165,3 +167,44 @@ raise SystemExit(repository.run(repository.parse([
         "input": "caller-owned-stdin\n",
     }
     assert dict(os.environ) == before
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native windowless Manager boundary")
+def test_native_windowless_manager_does_not_surface_engine(tmp_path: Path) -> None:
+    pythonw = Path(getattr(sys, "_base_executable", sys.executable)).with_name("pythonw.exe")
+    assert pythonw.is_file()
+    engine = tmp_path / "engine.py"
+    engine.write_text("raise SystemExit(7)\n", encoding="utf-8")
+    paths = tmp_path / "paths.json"
+    paths.write_text(json.dumps(sys.path), encoding="utf-8")
+    result = tmp_path / "result.json"
+    driver = tmp_path / "manager.py"
+    driver.write_text("""
+import ctypes,json,pathlib,subprocess,sys
+sys.path[:0] = json.loads(pathlib.Path(sys.argv[1]).read_text())
+from worktree_manager import engine_client, repository_bootstrap as repository
+engine_client.set_engine_command([str(pathlib.Path(sys.executable).with_name('python.exe')), sys.argv[2]])
+assert ctypes.windll.kernel32.GetConsoleCP() == 0
+original = subprocess.run
+def run(argv, **kwargs):
+    assert kwargs.get('creationflags', 0) & subprocess.CREATE_NO_WINDOW
+    return original(argv, **kwargs)
+engine_client.subprocess.run = run
+status = repository.run(repository.parse([
+    '--apply', '--repository', 'https://example.invalid/team/sample.git'
+]))
+pathlib.Path(sys.argv[3]).write_text(json.dumps({'status': status}))
+""", encoding="utf-8")
+    observer = runpy.run_path(str(
+        Path(__file__).resolve().parents[2] / "libs" / "agent-procutil" / "tests"
+        / "test_spawn_daemon_windows_integration.py"
+    ))
+    with observer["_WindowObserver"](*observer["_configure_win32"]()) as windows:
+        process = subprocess.run(
+            [str(pythonw), str(driver), str(paths), str(engine), str(result)],
+            capture_output=True, text=True, timeout=120, **no_window_kwargs(),
+        )
+    assert process.returncode == 0, process.stdout + process.stderr
+    assert result.is_file(), process.stdout + process.stderr
+    assert json.loads(result.read_text()) == {"status": 7}
+    assert windows.surfaced == {} and windows.focus_changes == {}

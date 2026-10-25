@@ -163,6 +163,13 @@ def test_tracked_glob_characters_are_literal_entries(source: Path) -> None:
     assert setup._tracked(source, "setu[p].ps1") == source / "setu[p].ps1"
 
 
+@pytest.mark.parametrize("control", ["\x00", "\x1b", "\t", "\n", "\r", "\x7f"])
+def test_control_characters_refuse_before_path_lookup(tmp_path, monkeypatch, control) -> None:
+    monkeypatch.setattr(setup, "_git", lambda *a: pytest.fail("untrusted control path inspected"))
+    with pytest.raises(setup.SetupError, match="repository-relative regular file"):
+        setup._tracked(tmp_path, f"setup{control}.sh")
+
+
 def consumer(source: Path, body: str) -> setup.Setup:
     """Native Windows coverage; POSIX uses the equivalent argv/file consumer."""
     if sys.platform == "win32":
@@ -237,6 +244,8 @@ from agent_worktrees import repository_bootstrap as bootstrap, repository_setup 
 root, result = map(pathlib.Path, sys.argv[2:])
 sys.stdin = open('CONIN$', 'r')
 sys.stdout = open('CONOUT$', 'w')
+os.dup2(sys.stdin.fileno(), 0)
+os.dup2(sys.stdout.fileno(), 1)
 set_handle = ctypes.windll.kernel32.SetStdHandle
 set_handle.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
 assert set_handle(-10, msvcrt.get_osfhandle(sys.stdin.fileno()))
@@ -255,7 +264,7 @@ assert os.getpid() not in json.loads(control.stdout)
 clone_result = result.with_suffix('.clone')
 def run(argv, **kwargs):
     if 'clone' in argv:
-        assert 'stdin' not in kwargs and 'stdout' not in kwargs
+        assert kwargs['stdin'] == 0 and kwargs['stdout'] == 1
         assert not kwargs.get('creationflags', 0) & subprocess.CREATE_NO_WINDOW
         argv = [native_python, '-I', '-S', '-c', probe +
                 '; import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('
@@ -297,7 +306,10 @@ result.write_text(json.dumps({'console': cp, 'clone': True, 'setup': True}))
 
 def test_redirected_launch_remains_headless(monkeypatch) -> None:
     monkeypatch.setattr(setup, "_terminal", lambda: False)
-    assert setup._stdio_kwargs() == no_window_kwargs()
+    expected = no_window_kwargs()
+    if os.name == "nt":
+        expected.update(stdin=0, stdout=1, stderr=2)
+    assert setup._stdio_kwargs() == expected
 
 
 @pytest.mark.parametrize("status", ["waiting", "refused", "failed", "ready"])

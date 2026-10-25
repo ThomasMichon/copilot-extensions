@@ -59,13 +59,18 @@ def _registration(registry: repos.ReposRegistry, name: str, path: Path, url: str
         if same_path:
             if key != name:
                 raise protocol.SetupError("Target is registered under another repository name.")
+        if key == name or same_path:
             if entry.repo_class != "reference" or entry.agent:
                 raise protocol.SetupError(
                     "Target is already managed; reconcile setup through its existing owner.",
                 )
 
 
-def _account(registry: repos.ReposRegistry, url: str) -> str:
+def _account(registry: repos.ReposRegistry, name: str, url: str) -> str:
+    selected = registry.repos.get(name)
+    if selected is not None and selected.account:
+        return selected.account
+    accounts: set[str] = set()
     for entry in registry.repos.values():
         if entry.remote and entry.account:
             try:
@@ -73,7 +78,11 @@ def _account(registry: repos.ReposRegistry, url: str) -> str:
             except protocol.SetupError:
                 matching = False
             if matching:
-                return entry.account
+                accounts.add(entry.account)
+    if len(accounts) > 1:
+        raise protocol.SetupError("Repository account is ambiguous; select its registry account.")
+    if accounts:
+        return accounts.pop()
     if urlsplit(url).hostname != "github.com":
         return ""
     owner = urlsplit(url).path.strip("/").split("/")[0].casefold()
@@ -171,14 +180,14 @@ def acquire(name: str, path: Path, url: str) -> protocol.Source:
             raise protocol.SetupError("Repository target cannot be nested inside another checkout.")
         if enclosing.returncode != 128:
             raise protocol.SetupError("Repository target ownership could not be qualified.")
-        account = _account(registry, canonical)
+        account = _account(registry, name, canonical)
         credential_args = _credential_args(url, account, cwd=parent)
         _clone(url, path, credential_args)
         source = protocol.qualify(path, canonical)
     with registry_lock(repos._repos_yaml_path()):
         current = repos.read_registry(strict=True)
         _registration(current, name, path, canonical)
-        if _account(current, canonical) != _account(registry, canonical):
+        if _account(current, name, canonical) != _account(registry, name, canonical):
             raise protocol.SetupError("Repository account changed during acquisition; reconcile first.")
         if protocol.qualify(path, canonical) != source:
             raise protocol.SetupError("Repository revision changed during acquisition; reconcile first.")

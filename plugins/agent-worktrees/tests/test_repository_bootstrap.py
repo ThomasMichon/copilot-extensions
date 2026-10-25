@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import shlex
+import shutil
 
 from agent_procutil import no_window_kwargs
 import pytest
@@ -48,6 +49,73 @@ def test_existing_source_registers_without_reclassifying_other_repos(source: Pat
     raw = registry.read_bytes()
     assert bootstrap.acquire("sample", source, URL) == selected
     assert registry.read_bytes() == raw
+
+
+@pytest.mark.parametrize(("repo_class", "agent"), [("worktree", False), ("reference", True)])
+def test_managed_name_without_local_path_refuses_before_acquisition(
+    tmp_path, registry, monkeypatch, repo_class, agent,
+) -> None:
+    state = repos.read_registry(strict=True)
+    state.repos["sample"] = repos.RepoEntry(
+        name="sample", remote=URL, repo_class=repo_class, agent=agent,
+        paths={"linux": "/preserved/remote-platform"},
+    )
+    repos.write_registry(state)
+    before = registry.read_bytes()
+    monkeypatch.setattr(bootstrap, "_clone", lambda *a: pytest.fail("managed name acquired"))
+    assert bootstrap.command([URL, "--target", str(tmp_path / "sample"), "--apply"]) == 1
+    assert registry.read_bytes() == before
+    assert not (tmp_path / "sample").exists()
+
+
+@pytest.mark.parametrize("remote", ["", URL])
+def test_acquisition_prioritizes_selected_registry_account(
+    source, registry, tmp_path, monkeypatch, remote,
+) -> None:
+    state = repos.read_registry(strict=True)
+    state.repos["first-alias"] = repos.RepoEntry(name="first-alias", remote=URL, account="other")
+    state.repos["sample"] = repos.RepoEntry(name="sample", remote=remote, account="selected")
+    repos.write_registry(state)
+    observed = []
+    monkeypatch.setattr(
+        bootstrap, "_credential_args",
+        lambda url, account, **kwargs: observed.append(account) or [],
+    )
+    monkeypatch.setattr(bootstrap, "_clone", lambda url, target, args: shutil.copytree(source, target))
+    target = tmp_path / "acquired"
+    bootstrap.acquire("sample", target, URL)
+    assert observed == ["selected"]
+    assert repos.read_registry(strict=True).repos["sample"].account == "selected"
+
+
+def test_selected_account_change_after_acquisition_refuses_registration(
+    source, registry, tmp_path, monkeypatch,
+) -> None:
+    state = repos.read_registry(strict=True)
+    state.repos["sample"] = repos.RepoEntry(name="sample", account="selected")
+    repos.write_registry(state)
+    monkeypatch.setattr(bootstrap, "_credential_args", lambda *a, **k: [])
+
+    def clone(url, target, args):
+        shutil.copytree(source, target)
+        current = repos.read_registry(strict=True)
+        current.repos["sample"].account = "changed"
+        repos.write_registry(current)
+
+    monkeypatch.setattr(bootstrap, "_clone", clone)
+    target = tmp_path / "acquired"
+    with pytest.raises(protocol.SetupError, match="account changed"):
+        bootstrap.acquire("sample", target, URL)
+    assert target.is_dir()
+    assert repos.read_registry(strict=True).repos["sample"].local_path() is None
+
+
+def test_conflicting_alias_accounts_require_selected_account(registry) -> None:
+    state = repos.read_registry(strict=True)
+    for name in ("first", "second"):
+        state.repos[name] = repos.RepoEntry(name=name, remote=URL, account=name)
+    with pytest.raises(protocol.SetupError, match="account is ambiguous"):
+        bootstrap._account(state, "sample", URL)
 
 
 @pytest.mark.parametrize("kind", ["dirty", "foreign", "registered-elsewhere", "managed", "alias"])
@@ -203,7 +271,11 @@ def test_clone_failure_preserves_partial_target_and_does_not_register(tmp_path, 
     assert (target / "partial").read_text() == "preserve"
     assert "timeout" not in calls[-1]
     assert not calls[-1].get("capture_output", False)
-    assert "stdin" not in calls[-1]
+    if os.name == "nt":
+        assert calls[-1]["stdin"] == 0
+        assert calls[-1]["stdout"] == 1
+    else:
+        assert "stdin" not in calls[-1]
 
 
 def test_rewrite_refused_before_any_clone(tmp_path, registry, monkeypatch) -> None:

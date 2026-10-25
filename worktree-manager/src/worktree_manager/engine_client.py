@@ -21,6 +21,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -295,9 +296,31 @@ def run_json(project: str | None, args: list[str], *,
     return obj
 
 
+def _terminal_aware_launch_options() -> dict[str, object]:
+    if os.name != "nt":
+        return {}
+    # Explicit descriptors preserve caller pipes across a headless Windows launch.
+    options: dict[str, object] = {
+        "stdin": 0, "stdout": 1, "stderr": 2,
+    }
+    if (
+        sys.stdin is not None and sys.stdin.isatty()
+        and sys.stdout is not None and sys.stdout.isatty()
+    ):
+        import ctypes
+
+        if ctypes.windll.kernel32.GetConsoleCP():
+            return options
+    from agent_procutil import no_window_kwargs
+
+    options.update(no_window_kwargs())
+    return options
+
+
 def run_engine_passthrough(project: str | None, args: list[str], *,
                            timeout: int | None = None,
-                           environment: dict[str, str] | None = None) -> int:
+                           environment: dict[str, str] | None = None,
+                           terminal_aware: bool = False) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -321,10 +344,13 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
 
     handoff = handoff_environment(args)
     child_environment = _engine_environment() if environment is None else _engine_environment(environment)
+    options = handoff_launch_options(child_environment, handoff)
+    if terminal_aware:
+        options.update(_terminal_aware_launch_options())
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            **handoff_launch_options(child_environment, handoff),
+            **options,
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

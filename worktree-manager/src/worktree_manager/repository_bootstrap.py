@@ -57,7 +57,7 @@ def run(args: argparse.Namespace) -> int:
     if args.trust_repository_setup:
         command.append("--trust-repository-setup")
     try:
-        return run_engine_passthrough(None, command)
+        return run_engine_passthrough(None, command, terminal_aware=True)
     except EngineError as error:
         print(f"    ! repository stage unavailable: {error}")
         print("      core is retained; this stage requires the engine's shared repository setup seam.")

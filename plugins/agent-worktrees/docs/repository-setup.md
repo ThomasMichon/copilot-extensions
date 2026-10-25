@@ -27,6 +27,8 @@ symlink/reparse traversal and linked/bare checkouts are refused. Git URL rewrite
 to a different remote are refused before acquisition. Existing managed
 registrations must reconcile through their owner; this command does not convert
 an anchor, steal a live worktree or change an editing/agent preference.
+The selected registry name's ownership applies even without a local-platform
+path; a managed entry on another platform is not a free reference slot.
 New registrations are reference-class and no-agent; repository-owned setup may
 perform its separately authorized adoption work, but selecting a URL does not
 itself adopt a project.
@@ -40,6 +42,9 @@ headers for the selected URL without changing persisted Git configuration;
 unsupported explicit-account routes refuse rather than fall back
 to an ambient identity. Other credential-owner routes with no configured
 explicit account retain Git's own authentication behavior.
+The selected registry name's explicit account takes precedence over URL aliases.
+Without that selection, conflicting alias accounts refuse rather than choosing
+the first entry. Account selection is checked again before registration.
 
 Failed acquisition preserves a partial target and does not register it.
 Successful acquisition/registration is retained if subsequent repository setup
@@ -86,6 +91,8 @@ Execution uses the selected checkout as cwd with inherited stdio. No command
 string evaluation, arbitrary extra arguments or interpreter installation occurs.
 Native Windows attended calls retain their actual console for Git, the setup
 entry and its descendants; redirected/background calls remain windowless.
+Both paths explicitly inherit native standard descriptors so a headless child
+does not silently replace redirected caller pipes with another console's handles.
 Each invocation gets fresh caller-owned temporary communication files:
 
 ```json
