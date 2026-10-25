@@ -5,8 +5,8 @@
 [ -n "${COPILOT_EXTENSIONS_HOOK_BASH:-}" ] ||
     COPILOT_EXTENSIONS_HOOK_BASH=1 exec bash "$0" "$@"
 # pre-push is a short publication-safety boundary, not a repository CI run.
-# Keep private identifier and pushed-blob checks here. Staged lint/structure
-# checks run at pre-commit; all repository guards remain in required CI.
+# Check configured private identifiers only. Discovery and file-size enforcement
+# stay outside the push path; CI checks the final file diff before squash merge.
 # Enable with:  git config core.hooksPath tools/hooks
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,7 +33,6 @@ valid_oid() {
 
 check_ref() {
     local head="$1" published="$2" base="" candidate resolved status
-    local -a blob_published=()
     if ! git -C "$ROOT" cat-file -e "$head^{commit}" 2>/dev/null; then
         echo "pre-push: pushed commit is unavailable; refusing unchecked publication" >&2
         return 1
@@ -43,7 +42,6 @@ check_ref() {
             echo "pre-push: published tip is unavailable; fetch it before publishing" >&2
             return 1
         fi
-        blob_published+=(--published "$published")
         if git -C "$ROOT" merge-base --is-ancestor "$published" "$head"; then
             base="$published"
         else
@@ -67,12 +65,8 @@ check_ref() {
         echo "pre-push: no related publication base; fetch the contribution/release branch" >&2
         return 1
     fi
-    for candidate in "${COPILOT_EXTENSIONS_GUARD_BASE:-origin/dev}" origin/main; do
-        resolved="$(git -C "$ROOT" rev-parse --verify --quiet "$candidate^{commit}")" || continue
-        blob_published+=(--published "$resolved")
-    done
-    "${PY[@]}" "$ROOT/tools/check-publication.py" \
-        --base "$base" --head "$head" "${blob_published[@]}" </dev/null
+    "${PY[@]}" "$ROOT/tools/check-no-internal-identifiers.py" \
+        --base "$base" --git-ref "$head" --no-live-sweep </dev/null
 }
 
 # Git supplies both sides of every update. Do not let nested guards consume

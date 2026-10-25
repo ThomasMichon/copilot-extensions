@@ -28,7 +28,9 @@ A denylist that *named* those strings would itself leak them, so the list is
      for the mechanism and ``docs/identifier-blocklist.md`` for the
      convention. This source is silently absent wherever ``agent-worktrees``
      isn't installed or this repo isn't registered (a fresh clone, CI) --
-     never required, only additive on a machine that has it. Opt out with
+     never required, only additive on a machine that has it. Local pre-push
+     passes ``--no-live-sweep`` and uses only configured inputs 1/2/3; discovery
+     remains available for explicit manual audits. Opt out of it globally with
      ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``.
 
 CI entries (sources 3 and 4 share this grammar) are case-insensitive literal
@@ -53,10 +55,9 @@ Source 4 never has this gotcha: it only ever reads its own generated
 With none of these configured (a fresh clone with no local ``agent-worktrees``
 registration, or CI with no secret) there is nothing to enforce and the check
 is a no-op (exit 0) -- so it is safe to ship in the public repo. On your own
-machine, populate one of sources 1/2/3 by hand, or simply register this repo
-with ``agent-worktrees`` (source 4) and let the live sweep do the work; wire
-this up as a git ``pre-push`` hook either way, and it blocks a push that would
-leak any of your identifiers.
+machine, populate one of sources 1/2/3 for pre-push. A manual audit can also
+register this repo with ``agent-worktrees`` and request source 4's live sweep.
+The local pre-push hook always uses configured-only inputs.
 
 Scope: by default the guard only scans the files your push actually **changes**
 (``git diff --name-only <base>...HEAD``, base ``origin/main`` -- override via
@@ -353,7 +354,9 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     return pairs
 
 
-def _load_identifier_data() -> tuple[list[str], dict[str, str | None], str | None]:
+def _load_identifier_data(
+    *, include_live_sweep: bool = True,
+) -> tuple[list[str], dict[str, str | None], str | None]:
     """Returns ``(identifiers, reasons, live_sweep_error)``.
 
     ``live_sweep_error`` is ``None`` on success or benign absence of source
@@ -377,11 +380,13 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None], str | Non
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
     live_sweep_error: str | None = None
-    try:
-        sweep_pairs = _load_live_sweep_identifiers()
-    except LiveSweepFailure as exc:
-        sweep_pairs = exc.pairs
-        live_sweep_error = str(exc)
+    sweep_pairs = []
+    if include_live_sweep:
+        try:
+            sweep_pairs = _load_live_sweep_identifiers()
+        except LiveSweepFailure as exc:
+            sweep_pairs = exc.pairs
+            live_sweep_error = str(exc)
     for ident, reason in sweep_pairs:
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
@@ -710,11 +715,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Suppress per-finding stdout and print only a count summary.",
     )
+    parser.add_argument(
+        "--no-live-sweep", action="store_true",
+        help="Use configured environment/local denylist inputs without cross-repo discovery.",
+    )
     args = parser.parse_args(argv)
     if sum(bool(value) for value in (args.all, args.paths_file, args.paths_jsonl)) > 1:
         parser.error("--all, --paths-file and --paths-jsonl are mutually exclusive")
 
-    identifiers, reasons, live_sweep_error = _load_identifier_data()
+    identifiers, reasons, live_sweep_error = (
+        _load_identifier_data(include_live_sweep=False)
+        if args.no_live_sweep else _load_identifier_data()
+    )
     if live_sweep_error:
         # A configured live sweep (source 4) ran but failed -- a genuinely
         # broken local configuration (e.g. another registered repo's

@@ -46,7 +46,7 @@ def _repos_usage() -> None:
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
     print("  setup <https-url> [--target PATH]  Plan or acquire/register and run explicit repo setup")
-    print("     [--apply] [--trust-repository-setup]")
+    print("     [--commit FULL_COMMIT_ID] [--apply] [--trust-repository-setup]")
     print("  srcroot [--set PATH]                Show or set the source root")
     print("     [--platform windows|wsl|linux]")
     print("  migrate [--default-class C]         Import legacy ~/.git-repos")

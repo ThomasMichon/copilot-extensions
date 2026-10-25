@@ -16,13 +16,9 @@ HOOKS = (ROOT / "tools" / "hooks" / "pre-commit", ROOT / "tools" / "hooks" / "pr
 def test_pre_push_keeps_only_publication_safety_checks():
     hook = HOOKS[1].read_text(encoding="utf-8")
     invoked = set(re.findall(r'"\$ROOT/tools/([^"]+\.py)"', hook))
-    assert invoked == {"check-publication.py"}
-    runner = (ROOT / "tools" / "check-publication.py").read_text(encoding="utf-8")
-    assert set(re.findall(r'_guard\("([^"]+)"\)', runner)) == {
-        "check-no-internal-identifiers", "check-large-files",
-    }
-    assert '--head "$head"' in hook
-    assert '["--base", args.base, "--git-ref", args.head]' in runner
+    assert invoked == {"check-no-internal-identifiers.py"}
+    assert '--git-ref "$head" --no-live-sweep' in hook
+    assert '--base "$base"' in hook
     assert 'check_ref "$local_sha" "$remote_sha"' in hook
 
 
@@ -44,17 +40,21 @@ def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
         assert guard in covered, f"{guard} must retain a CI validation lane"
     pre_commit = HOOKS[0].read_text(encoding="utf-8")
     assert "check --select F,E9" in pre_commit
-    for guard in ("check-skills.py", "check-effort-vision-structure.py", "check-large-files.py"):
+    for guard in ("check-skills.py", "check-effort-vision-structure.py"):
         assert f'"$ROOT/tools/{guard}"' in pre_commit
+    assert "check-large-files.py" not in pre_commit
 
 
-def test_large_file_publication_ci_is_new_blob_scoped_and_full_audit_is_explicit():
+def test_large_file_ci_checks_final_event_diff_and_full_audit_is_explicit():
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
     steps = [
         step for step in workflow["jobs"]["checks"]["steps"]
         if "check-large-files.py" in step.get("run", "")
     ]
     assert len(steps) == 3
+    pr = next(step for step in steps if step["if"] == "github.event_name == 'pull_request'")
+    assert "--base ${{ github.event.pull_request.base.sha }}" in pr["run"]
+    assert "--head ${{ github.event.pull_request.head.sha }}" in pr["run"]
     push = next(step for step in steps if step["if"] == "github.event_name == 'push'")
     assert push["env"] == {"BASE": "${{ github.event.before }}", "HEAD": "${{ github.sha }}"}
     assert '--base "$BASE" --head "$HEAD"' in push["run"]

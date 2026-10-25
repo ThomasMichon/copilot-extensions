@@ -34,36 +34,41 @@ def _load_module():
     return module
 
 
-def test_new_blob_paths_reads_all_commits_in_one_lossless_batch():
+def test_final_diff_uses_one_lossless_diff_and_one_metadata_batch():
     module = _load_module()
-    commits = ["a" * 40, "b" * 40]
     blob = "c" * 40
     names = ["line\nbreak.txt", "line\tbreak.map"]
     raw = b"".join(
         f":000000 100644 {'0' * 40} {blob} A\0{name}\0".encode()
         for name in names
     )
-    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+    with mock.patch.object(module, "_publication_commits", side_effect=lambda refs: {ref: ref for ref in refs}), \
+            mock.patch.object(module, "_blob_sizes", return_value={blob: 1}) as metadata, \
+            mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
         [], 0, raw, b"",
     )) as git:
-        assert module._new_blob_paths(commits, {blob: 1}) == [(names[1], 1)]
+        assert module._blobs_in_diff("base", "head") == [(names[1], 1)]
     assert git.call_count == 1
-    assert "--stdin" in git.call_args.args
-    assert git.call_args.kwargs["input"] == ("\n".join(commits) + "\n").encode()
+    assert git.call_args.args[0] == "diff"
+    assert git.call_args.args[-3:] == ("base", "head", "--")
+    assert "--no-renames" in git.call_args.args
+    metadata.assert_called_once_with([blob])
 
 
-def test_new_blob_paths_refuses_failed_batch_or_missing_paths():
+def test_final_diff_refuses_failed_or_incomplete_metadata():
     module = _load_module()
-    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
-        [], 1, b"", b"unavailable commit",
-    )):
-        with pytest.raises(module.GitEnumerationError, match="diff-tree --stdin"):
-            module._new_blob_paths(["a" * 40], {"b" * 40: 1})
-    with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
-        [], 0, b"", b"",
-    )):
-        with pytest.raises(module.GitEnumerationError, match="every new blob"):
-            module._new_blob_paths(["a" * 40], {"b" * 40: 1})
+    with mock.patch.object(module, "_publication_commits", side_effect=lambda refs: {ref: ref for ref in refs}):
+        with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+            [], 1, b"", b"unavailable diff",
+        )):
+            with pytest.raises(module.GitEnumerationError, match="diff --raw"):
+                module._blobs_in_diff("base", "head")
+        for raw in (b"truncated", b"metadata\0", b"metadata\0path\0"):
+            with mock.patch.object(module, "_git_bytes", return_value=subprocess.CompletedProcess(
+                [], 0, raw, b"",
+            )):
+                with pytest.raises(module.GitEnumerationError, match="diff metadata"):
+                    module._blobs_in_diff("base", "head")
 
 
 def test_publication_commit_resolution_batches_and_binds_each_reference():
@@ -177,7 +182,7 @@ def _commit_all(repo: Path) -> None:
 
 
 @pytest.mark.parametrize("size,expected", [(1024, 0), (2 * 1024 * 1024, 1)])
-def test_annotated_tag_publication_checks_new_blobs_against_tagged_remote_tip(repo, monkeypatch, size, expected):
+def test_annotated_tag_final_diff_checks_destination_blobs(repo, monkeypatch, size, expected):
     module = _load_module()
     monkeypatch.setattr(module, "REPO", repo)
     _write_bytes(repo, "src/existing.txt", 20)
@@ -189,7 +194,7 @@ def test_annotated_tag_publication_checks_new_blobs_against_tagged_remote_tip(re
     _git(repo, "tag", "-a", "candidate", "-m", "candidate")
     candidate = module._rev_parse("refs/tags/candidate")
     assert published and candidate
-    result = _run(repo, "--base", published, "--head", candidate, "--published", published)
+    result = _run(repo, "--base", published, "--head", candidate)
     assert result.returncode == expected, result.stdout + result.stderr
     assert "malformed" not in result.stdout
     if expected:
@@ -277,8 +282,8 @@ def test_diff_scoped_mode_catches_a_newly_added_oversized_file(repo: Path):
     assert "new-big.json" in result.stdout
 
 
-def test_object_scope_handles_unrelated_published_histories(repo: Path):
-    """Object reachability works without a commit merge-base."""
+def test_final_diff_handles_unrelated_base_and_head_snapshots(repo: Path):
+    """Endpoint comparison does not require a shared commit history."""
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     original_branch = subprocess.run(
@@ -326,7 +331,7 @@ def test_deleted_file_in_diff_is_skipped(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_renaming_an_existing_blob_does_not_reintroduce_it(repo: Path):
+def test_rename_checks_the_destination_file_cap(repo: Path):
     _write_bytes(repo, "docs/assets/picture.png", 2 * 1024 * 1024)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -336,11 +341,11 @@ def test_renaming_an_existing_blob_does_not_reintroduce_it(repo: Path):
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "0 newly-introduced blob(s)" in result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "picture.json" in result.stdout
 
 
-def test_existing_blob_renamed_to_blocked_extension_is_not_a_blob_introduction(repo: Path):
+def test_rename_to_blocked_destination_extension_is_rejected(repo: Path):
     _write_bytes(repo, "notes/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -350,7 +355,8 @@ def test_existing_blob_renamed_to_blocked_extension_is_not_a_blob_introduction(r
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "small.patch" in result.stdout
 
 
 def test_a_filename_with_special_characters_is_still_checked(repo: Path):
@@ -393,10 +399,7 @@ def test_staged_mode_does_not_false_positive_on_working_tree_growth(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_diff_scoped_mode_catches_an_oversized_file_added_then_deleted_in_range(repo: Path):
-    # The oversized blob is still permanently in the pushed history the
-    # instant the add commit lands, even though HEAD's own tree no longer
-    # references it -- a naive tree-to-tree diff would miss this entirely.
+def test_final_diff_ignores_oversized_file_removed_before_squash(repo: Path):
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -409,12 +412,12 @@ def test_diff_scoped_mode_catches_an_oversized_file_added_then_deleted_in_range(
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
-    assert "transient-big.json" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "transient-big.json" not in result.stdout
 
 
 @pytest.mark.parametrize("new_content", [True, False])
-def test_transient_blocked_path_checks_only_new_blob_objects(repo: Path, new_content):
+def test_final_diff_ignores_blocked_path_removed_before_squash(repo: Path, new_content):
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -427,17 +430,11 @@ def test_transient_blocked_path_checks_only_new_blob_objects(repo: Path, new_con
 
     result = _run(repo, "--base", "base_marker")
 
-    assert (result.returncode == 1) is new_content, result.stdout + result.stderr
-    if new_content:
-        assert "transient.patch" in result.stdout
-    else:
-        assert "0 newly-introduced blob(s)" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "transient.patch" not in result.stdout
 
 
-def test_diff_scoped_mode_catches_a_file_oversized_in_an_earlier_commit_then_shrunk(repo: Path):
-    # Same shape as the add-then-delete case, but shrunk back under cap
-    # rather than deleted outright -- the earlier, oversized blob is still
-    # what got pushed and must still be reported.
+def test_final_diff_accepts_file_shrunk_before_squash(repo: Path):
     _write_bytes(repo, "src/small.txt", 10)
     _commit_all(repo)
     _git(repo, "branch", "-f", "base_marker", "HEAD")
@@ -449,8 +446,7 @@ def test_diff_scoped_mode_catches_a_file_oversized_in_an_earlier_commit_then_shr
 
     result = _run(repo, "--base", "base_marker")
 
-    assert result.returncode == 1
-    assert "shrinks.json" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_all_mode_respects_an_explicit_head_other_than_the_checkout(repo: Path):
@@ -578,13 +574,14 @@ def test_diff_scoped_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp
     sub = tmp_path.parent / f"{tmp_path.name}-sub"
     sub.mkdir()
     _git(sub, "init", "-q")
-    _git(sub, "config", "user.email", "test@example.com")
-    _git(sub, "config", "user.name", "Test")
     (sub / "f.txt").write_text("hi")
     _git(sub, "add", "-A")
-    _git(sub, "commit", "-q", "-m", "sub commit")
-
-    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "vendor/sub")
+    _git(sub, "-c", "user.email=test@example.com", "-c", "user.name=Test",
+         "commit", "-q", "-m", "sub commit")
+    foreign_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{foreign_head},vendor/sub")
     _git(repo, "commit", "-q", "-m", "add submodule")
 
     result = _run(repo, "--base", "base_marker")
@@ -599,13 +596,14 @@ def test_staged_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp_path
     sub = tmp_path.parent / f"{tmp_path.name}-sub2"
     sub.mkdir()
     _git(sub, "init", "-q")
-    _git(sub, "config", "user.email", "test@example.com")
-    _git(sub, "config", "user.name", "Test")
     (sub / "f.txt").write_text("hi")
     _git(sub, "add", "-A")
-    _git(sub, "commit", "-q", "-m", "sub commit")
-
-    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "vendor/sub")
+    _git(sub, "-c", "user.email=test@example.com", "-c", "user.name=Test",
+         "commit", "-q", "-m", "sub commit")
+    foreign_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=sub, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    _git(repo, "update-index", "--add", "--cacheinfo", f"160000,{foreign_head},vendor/sub")
 
     result = _run(repo, "--", "vendor/sub")
 
@@ -622,13 +620,13 @@ def test_new_blob_metadata_failure_raises_instead_of_skipping(repo: Path):
     real_run = subprocess.run
 
     def _failing_cat_file(args, **kwargs):
-        if "cat-file" in args:
+        if "--batch-check=%(objectname) %(objecttype) %(objectsize)" in args:
             return subprocess.CompletedProcess(args, 1, b"", b"fatal: simulated failure")
         return real_run(args, **kwargs)
 
     with mock.patch.object(module, "REPO", repo), mock.patch("subprocess.run", side_effect=_failing_cat_file):
         with pytest.raises(module.GitEnumerationError):
-            module._new_blobs_in_range("base_marker", "HEAD")
+            module._blobs_in_diff("base_marker", "HEAD")
 
 
 def test_staged_mode_handles_a_dot_slash_prefixed_path(repo: Path):
@@ -690,7 +688,7 @@ def test_many_paths_to_one_new_blob_are_checked_once_per_mode(repo: Path):
     with mock.patch.object(module, "REPO", repo), mock.patch.object(module, "_git_bytes", observed):
         staged = module._staged_blobs([f"src/file-{index}.txt" for index in range(32)])
         _git(repo, "commit", "-qm", "introduce one blob under many paths")
-        rows = module._new_blobs_in_range("base_marker", "HEAD")
+        rows = module._blobs_in_diff("base_marker", "HEAD")
     assert sum(args == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)") for args in calls) == 2
     assert sum(args == ("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize) %(rest)") for args in calls) == 1
     assert len(calls) <= 8
@@ -735,14 +733,14 @@ def test_empty_or_invalid_object_batch_never_spawns_git():
             module._blob_sizes(["a" * 40 + "\nHEAD"])
 
 
-def test_staged_existing_blob_is_not_a_new_introduction(repo: Path):
+def test_manual_staged_selection_checks_copied_file_content(repo: Path):
     _write_bytes(repo, "existing.json", 2 * 1024 * 1024)
     _commit_all(repo)
     (repo / "copied.json").write_bytes((repo / "existing.json").read_bytes())
     _git(repo, "add", "copied.json")
     result = _run(repo, "--", "existing.json", "copied.json")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "0 new staged blob(s)" in result.stdout
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "copied.json" in result.stdout
 
 
 def test_unpublished_local_branch_does_not_exempt_a_new_blob(repo: Path):
@@ -758,7 +756,7 @@ def test_unpublished_local_branch_does_not_exempt_a_new_blob(repo: Path):
     assert result.returncode == 1 and "large.json" in result.stdout
 
 
-def test_rebased_candidate_does_not_reintroduce_published_blobs(repo: Path):
+def test_final_diff_does_not_exempt_content_from_another_branch(repo: Path):
     _commit_all(repo)
     _git(repo, "branch", "base_marker")
     _write_bytes(repo, "published-large.json", 2 * 1024 * 1024)
@@ -771,9 +769,9 @@ def test_rebased_candidate_does_not_reintroduce_published_blobs(repo: Path):
     _write_bytes(repo, "published-large.json", 2 * 1024 * 1024)
     (repo / "new.txt").write_text("genuinely new blob")
     _commit_all(repo)
-    result = _run(repo, "--base", "base_marker", "--published", "published-tip")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "1 newly-introduced blob(s)" in result.stdout
+    result = _run(repo, "--base", "base_marker")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "published-large.json" in result.stdout
 
 
 def test_new_blob_at_multiple_paths_still_checks_a_disallowed_name(repo: Path):
@@ -786,10 +784,10 @@ def test_new_blob_at_multiple_paths_still_checks_a_disallowed_name(repo: Path):
     assert result.returncode == 1 and "new.patch" in result.stdout
 
 
-def test_unavailable_explicit_published_tip_fails_closed(repo: Path):
+def test_history_exemption_option_is_no_longer_supported(repo: Path):
     _commit_all(repo)
     result = _run(repo, "--base", "HEAD", "--published", "unavailable-tip")
-    assert result.returncode == 1 and "published baseline is unavailable" in result.stdout
+    assert result.returncode == 2 and "unrecognized arguments" in result.stderr
 
 
 def test_first_publication_with_zero_old_tip_checks_all_introduced_blobs(repo: Path):

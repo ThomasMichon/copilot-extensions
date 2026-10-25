@@ -61,6 +61,7 @@ The Manager command is:
 worktree-manager setup [--apply]
   [--repository <https-git-url>]
   [--repository-target <absolute-path>]
+  [--repository-commit <full-commit-id>]
   [--trust-repository-setup]
 ```
 
@@ -68,8 +69,8 @@ The bounded caller exists in source; do not copy it into an adopter README as
 a working onboarding command before the remaining qualifications pass.
 The existing bootstrap forwards the equivalent `setup` argument array; it needs
 no second installer, environment-variable repository selector or change to
-`source set`. `--repository-target` and `--trust-repository-setup` without a
-repository are argument errors, detected before provisioning.
+`source set`. Target, commit and trust options without a repository are
+argument errors, detected before provisioning.
 
 The optional Windows bootstrap mode `--system-python` precedes that argument
 array and is consumed by bootstrap, not forwarded to Manager. Prefer a qualified
@@ -85,6 +86,21 @@ Version 1 accepts only an HTTPS Git repository URL without credentials, query
 or fragment. Reject local paths, arbitrary transport helpers, SSH and malformed
 URLs explicitly; they remain possible future owner extensions, not silent
 fallbacks. Selection never creates a hosted repository or fork.
+
+An optional `--repository-commit` selects a full immutable 40- or 64-hex commit
+ID through the owner's `repos setup --commit` capability. It never accepts
+symbolic refs or abbreviated revisions. Only a newly acquired target may be
+checked out to that commit; an existing source must already match and is never
+rewritten or refetched. A new clone starts without checkout, resolves the exact
+commit and checks it out detached with hooks disabled. An unavailable commit
+leaves the partial clone intact and unregistered, without a fallback fetch.
+Ordinary no-pin behavior stays unchanged.
+
+An older selected engine's strict parser refuses the explicit capability before
+repository effects. The Manager preserves that failure and completed core work;
+neither upgrade/rollback nor an unsupported-option error licenses an unpinned
+retry. This is an in-band optional requirement on the actual executing provider,
+not a package-version assumption or an added prerequisite service.
 
 Without `--apply`, plan core work and the requested repository stage without
 network acquisition, registration or executing repository code. An unavailable
@@ -273,3 +289,38 @@ production imports. Native Windows tests used the existing contained runner;
 Linux-only devcontainer isolation, native POSIX execution, a fresh managed
 device and a real attended provider lane were not available in this slice.
 No installed runtime or target machine was updated.
+
+### Immutable source selection qualification
+
+The optional caller now carries an approved full commit ID into the existing
+acquisition owner. Native Windows qualification passed 57 acquisition controls
+and 64 Manager/ordering/compatibility controls across focused contained runs.
+The actual older-commit case traversed Manager, engine, loopback HTTPS Git,
+synthetic credential ownership, detached source selection, registration and
+PowerShell check/apply/final-check. Existing matching/mismatching sources,
+unknown and blob objects, peeled-object mismatch and checkout failure retain
+their required preservation/refusal behavior.
+
+The initial broad run exceeded its 300-second group budget; the acquisition
+file itself subsequently passed 51 cases in 866.93 seconds, leaving too little
+of a shared 900-second budget for HTTPS. Qualification was split by the
+remaining cases, not silently skipped. A nested captured-pipe timeout also
+obscured progress while descendants retained handles; the fixture now records
+consumer output to its owned file. The pinned end-to-end case passed in
+108.87 seconds with the original 180-second child/240-second item bounds.
+The remaining five controls passed in 141.24 seconds. Production/authentication
+deadlines were unchanged.
+
+These are fresh-source and synthetic-provider controls on Windows, not real
+GCM/browser authentication, tool-less provisioning, native POSIX or external
+machine qualification. The unchecked full-entry and attended acceptance items
+above remain open. Merge/release/rollout are separate and no rollout was made.
+
+Shared source qualification and every revalidation read unreplaced objects;
+clone and explicit checkout also disable replacement objects without changing
+or deleting user refs. An approved HEAD paired with a clean virtual replacement
+tree cannot authorize setup bytes from another commit. Three real Git controls
+cover plan, apply and revalidation; normal source inspection/setup and the native
+pinned HTTPS consumer cover the corresponding accepted paths. Acquisition
+argument controls require replacement-object suppression for both clone and
+explicit checkout.

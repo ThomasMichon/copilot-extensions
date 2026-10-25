@@ -150,15 +150,23 @@ and core stages:
 
 ```text
 worktree-manager setup --apply --repository <https-git-url>
-  [--repository-target <absolute-path>] [--trust-repository-setup]
+  [--repository-target <absolute-path>] [--repository-commit <full-commit-id>]
+  [--trust-repository-setup]
 ```
 
-Without `--apply`, this remains a plan. The target and trust options require a
+Without `--apply`, this remains a plan. The target, commit and trust options require a
 repository and are validated before provisioning. Apply requires fresh actual
 core readiness, then invokes the engine's
 [`repos setup` contract](../plugins/agent-worktrees/docs/repository-setup.md)
 with inherited stdio. An older/absent engine refuses this optional stage, not
 the completed core installation. Repository failure never uninstalls core.
+
+`--repository-commit` requires a full 40- or 64-hex commit ID. It is forwarded
+as the engine's explicit `immutable-commit` capability request, never replaced
+with remote HEAD if that selected engine refuses it. Existing targets must
+already match; only a new checkout may select the requested commit. Unavailable
+commits and unsupported older receivers retain completed core work and refuse
+the repository stage without an unpinned retry.
 
 The existing bootstrap forwards the same `setup` argument array. Selecting a
 repository does not change the Manager's installation/update source, enroll

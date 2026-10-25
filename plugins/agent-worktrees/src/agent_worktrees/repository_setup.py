@@ -99,7 +99,8 @@ def _plain(path: Path) -> None:
 
 def _git(path: Path, *args: str) -> str:
     result = subprocess.run(
-        ["git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-C", str(path), *args],
+        ["git", "--no-replace-objects", "--no-optional-locks",
+         "-c", "core.fsmonitor=false", "-C", str(path), *args],
         capture_output=True, text=True, encoding="utf-8", timeout=30,
         env=repository_identity_env(), **no_window_kwargs(),
     )
