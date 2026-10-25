@@ -13,6 +13,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,17 @@ from agent_machines.reconcile import plan
 from agent_machines.resources import ResourceContext, apply_resources, resolve_resources
 
 from ._helpers import base_package, write_package
+from ._manager_compatibility_helpers import unit_guarded_manager_update
+from ._scheduler_safety_helpers import fixture_unit_properties
+
+
+@pytest.fixture(autouse=True)
+def _real_transaction_lock_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zdd import cutover_lock
+
+    monkeypatch.setattr(cutover_lock, "sys", SimpleNamespace(platform=sys.platform))
+    monkeypatch.setattr(fleet_update, "run_compatible_manager_update", unit_guarded_manager_update)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 def _pkg(
@@ -79,6 +91,7 @@ def _task_snapshot(
     present: bool,
     matching: bool = True,
     enabled: bool | None = True,
+    home: Path | None = None,
 ):
     return fleet_update.ScheduledTaskSnapshot(
         task_name=fleet_update_state.TIER_SPECS[tier].task_name,
@@ -87,9 +100,13 @@ def _task_snapshot(
         logon_type="Interactive" if present else None,
         description=fleet_update.task_description(tier) if present else None,
         execute="conhost.exe" if present else None,
-        arguments=fleet_update_tasks.task_action_arguments(tier),
-        working_directory=fleet_update_tasks.task_working_directory(),
+        arguments=fleet_update_tasks.task_action_arguments(tier, home=home),
+        working_directory=fleet_update_tasks.task_working_directory(home),
         matching=matching,
+        state="Ready" if present else None,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
+        trigger_kind=fleet_update.TIER_SPECS[tier].schedule_kind,
+        trigger_value=fleet_update.TIER_SPECS[tier].schedule_value,
     )
 
 
@@ -188,7 +205,9 @@ def test_run_tier_invokes_worktree_manager_update_and_records_success(tmp_path):
     result = fleet_update.run_tier("sweep", opted_in=True, runner=runner, home=tmp_path)
     assert result.ok is True
     assert result.status == "ok"
-    assert calls == [["worktree-manager", "update"]]
+    assert calls == [[
+        "worktree-manager", "update", "--automatic-trigger", "legacy-agent-machines",
+    ]]
     assert result.success_at is not None
     status = fleet_update_state.tier_status(tmp_path, "sweep")
     assert status.last_success == result.success_at
@@ -461,7 +480,9 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
 
     def fake_runner(argv, *, timeout=300):
         captured["argv"] = argv
-        return fleet_update.CommandResult(argv, 0, "", "")
+        return fleet_update.CommandResult(
+            argv, 0, json.dumps({"present": False}) if "ConvertTo-Json" in argv[-1] else "",
+        )
 
     fleet_update_tasks.register_scheduled_task(
         "sweep",
@@ -474,14 +495,15 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
     assert "-RepetitionInterval" not in script
 
 
-def test_task_action_arguments_uses_worktree_manager_binstub(monkeypatch):
+def test_task_action_arguments_uses_guarded_agent_machines_binstub(monkeypatch):
     monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
     args = fleet_update_tasks.task_action_arguments("sweep", home=Path(r"C:\Users\operator"))
     assert args.startswith("--headless cmd.exe /c ")
-    assert r"C:\Users\operator\.local\bin\worktree-manager.cmd" in args
-    assert " update" in args
+    assert r"C:\Users\operator\.local\bin\agent-machines.cmd" in args
+    assert " fleet-update run --tier sweep" in args
     assert "self-update" not in args
-    assert "agent-machines" not in args
+    assert "worktree-manager.cmd" not in args
+    assert "--automatic-trigger" not in args
 
 
 def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
@@ -499,6 +521,7 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
         working_directory=fleet_update_tasks.task_working_directory(home),
         trigger_kind="daily",
         trigger_value=1,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
     )
     assert fleet_update_tasks.task_definition_matches(snapshot, "sweep", home=home)
 
@@ -535,11 +558,13 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
     monkeypatch.setattr(
         fleet_update_tasks,
         "query_scheduled_task",
-        lambda tier, **kwargs: _task_snapshot(tier, present=True, matching=True, enabled=True),
+        lambda tier, **kwargs: _task_snapshot(
+            tier, present=True, matching=True, enabled=True, home=kwargs.get("home"),
+        ),
     )
     calls: list[str] = []
 
-    def unregister(tier, *, runner=None, resolve_binary=None):
+    def unregister(tier, *, runner=None, resolve_binary=None, home=None):
         calls.append(tier)
         return fleet_update.CommandResult(["pwsh"], 0, "", "")
 
@@ -691,7 +716,8 @@ def test_render_linux_service_unit_includes_workdir(tmp_path):
     unit = fleet_update_tasks.render_linux_service_unit("sweep", home=tmp_path)
     assert "Type=oneshot" in unit
     assert str(tmp_path / ".agent-machines") in unit
-    assert "worktree-manager" in unit
+    assert "agent-machines" in unit
+    assert "fleet-update run --tier sweep" in unit
 
 
 def test_render_linux_service_unit_sets_path_environment_for_local_bin(tmp_path):
@@ -732,6 +758,11 @@ def test_query_systemd_timer_matches_after_register(tmp_path, monkeypatch):
     monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
 
     def runner(argv, **kwargs):
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], fleet_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-system-running" in argv:
             return _fake_command_result(argv, 0, "running\n")
         if "is-enabled" in argv:
@@ -753,15 +784,21 @@ def test_query_systemd_timer_matches_after_register(tmp_path, monkeypatch):
     assert snapshot.enabled is True
     assert snapshot.state == "active"
     assert snapshot.matching is True
-    assert snapshot.execute == str(tmp_path / ".local" / "bin" / "worktree-manager")
+    assert snapshot.execute == str(tmp_path / ".local" / "bin" / "agent-machines")
 
 
 def test_unregister_systemd_timer_removes_units_and_disables(tmp_path, monkeypatch):
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     monkeypatch.setattr(fleet_update_tasks.sys, "platform", "linux")
     calls = []
 
     def runner(argv, **kwargs):
         calls.append(argv)
+        if argv[2] == "show":
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], fleet_update_tasks._linux_unit_dir(tmp_path)),
+            )
         return _fake_command_result(argv, 0)
 
     fleet_update_tasks.register_systemd_timer(
@@ -781,6 +818,11 @@ def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(
     monkeypatch.setattr(fleet_update, "shutil_which", lambda _b: "/usr/bin/systemctl")
 
     def runner(argv, **kwargs):
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], fleet_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-system-running" in argv:
             return _fake_command_result(argv, 0, "running\n")
         if "is-enabled" in argv:

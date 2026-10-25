@@ -4,8 +4,8 @@ A single scheduled tier -- ``sweep`` -- that runs ``worktree-manager update``
 on a daily cadence, so the fleet's plugin install/update orchestration
 happens asynchronously on a schedule rather than inline during a session.
 Deliberately much simpler than ``self_update.py``'s tiers: the actual work
-here is a single subprocess call to a binstub the Worktree Manager already
-owns end-to-end -- this module only adds the opt-in/locking/scheduling
+here remains the Worktree Manager's updater, preceded by read-only capability
+negotiation -- this module adds the opt-in/locking/scheduling
 envelope around that one call, the same envelope ``self_update.py`` uses for
 its own tiers.
 """
@@ -22,8 +22,10 @@ from pathlib import Path
 from typing import Any
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from zdd.cutover_lock import CutoverLockedError
 
 from . import fleet_update_tasks as _tasks
+from .automatic_update_ownership import read_update_ownership, suite_update_transaction
 from .fleet_update_lock import TierLock, _iso_utc, _utc_now
 from .fleet_update_state import (
     SWEEP_TIER,
@@ -46,6 +48,7 @@ from .fleet_update_tasks import (
 from .fleet_update_tasks import (
     scheduled_task_status as _scheduled_task_status,
 )
+from .manager_compatibility import run_compatible_manager_update
 
 log = logging.getLogger("agent-machines.fleet-update")
 
@@ -175,14 +178,43 @@ def reconcile_scheduled_task(
     runner: Callable[..., CommandResult] | None = None,
     home: Path | None = None,
 ) -> ScheduledTaskReconcileResult:
-    return _reconcile_scheduled_task(
-        tier,
-        desired_present=desired_present,
-        runner=runner or default_command_runner,
-        resolve_binary=shutil_which,
-        record_task_config=record_task_config,
-        home=home,
-    )
+    def reconcile() -> ScheduledTaskReconcileResult:
+        return _reconcile_scheduled_task(
+            tier,
+            desired_present=desired_present,
+            runner=runner or default_command_runner,
+            resolve_binary=shutil_which,
+            record_task_config=record_task_config,
+            home=home,
+        )
+
+    desired_state = "present" if desired_present else "absent"
+    try:
+        with suite_update_transaction(home):
+            ownership = read_update_ownership(home)
+            if desired_present and ownership.blocks_legacy_schedule:
+                return ScheduledTaskReconcileResult(
+                    tier=tier,
+                    desired_state="present",
+                    status="error" if ownership.state == "refused" else "deferred",
+                    changed=False,
+                    detail=(
+                        f"{ownership.detail}; legacy fleet scheduling is refused. "
+                        "Inspect legacy update inventory and explicitly retire any existing "
+                        "trigger before adopting an automatic owner; nothing was changed."
+                    ),
+                )
+            return reconcile()
+    except CutoverLockedError as exc:
+        return ScheduledTaskReconcileResult(
+            tier=tier, desired_state=desired_state, status="deferred", changed=False,
+            detail=f"automatic update transaction held; no legacy scheduler mutation: {exc}",
+        )
+    except (OSError, RuntimeError) as exc:
+        return ScheduledTaskReconcileResult(
+            tier=tier, desired_state=desired_state, status="error", changed=False,
+            detail=f"legacy scheduler reconciliation refused: {exc}",
+        )
 
 
 def scheduled_task_status(
@@ -289,6 +321,15 @@ def run_tier(
 ) -> RunResult:
     if tier not in TIER_SPECS:
         raise ValueError(f"unknown fleet-update tier: {tier}")
+    ownership = read_update_ownership(home)
+    refusal = ownership.refusal(automatic=True)
+    if refusal:
+        return RunResult(
+            tier=tier,
+            status="error" if ownership.state == "refused" else "deferred",
+            opted_in=opted_in,
+            detail=refusal,
+        )
     if not opted_in:
         return RunResult(
             tier=tier,
@@ -322,21 +363,21 @@ def run_tier(
         # the branch is spelled out for symmetry with self_update.run_tier's
         # per-tier shape, so a second tier can be added the same way later.
         if tier == SWEEP_TIER:
-            update_result = runner(["worktree-manager", "update"], timeout=3600)
+            update_result = run_compatible_manager_update(runner=runner, home=home)
             steps = [
                 StepResult(
                     "update",
-                    "changed" if update_result.returncode == 0 else "error",
-                    update_result.output or "ran worktree-manager update",
-                    command=update_result.argv,
+                    "changed" if update_result.status == "ok" else update_result.status,
+                    update_result.detail,
+                    command=update_result.command,
                 )
             ]
-            if update_result.returncode != 0:
+            if update_result.status != "ok":
                 return RunResult(
                     tier=tier,
-                    status="error",
+                    status=update_result.status,
                     opted_in=True,
-                    detail=update_result.output or "worktree-manager update failed",
+                    detail=update_result.detail,
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
                     steps=steps,

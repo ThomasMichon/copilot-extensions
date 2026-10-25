@@ -55,7 +55,7 @@ def _engine_rows(payload):
     return rows
 
 
-def run_targeted_update(rest: list[str]) -> int:
+def run_targeted_update(rest: list[str], *, trigger: str = "manual") -> int:
     from .update_driver_cli import parse_options
     from .update_events import UpdateRun
 
@@ -65,7 +65,7 @@ def run_targeted_update(rest: list[str]) -> int:
     parser.add_argument("--project")
     parser.add_argument("--no-manager", action="store_true")
     args = parser.parse_args(forwarded)
-    run = UpdateRun()
+    run = UpdateRun(trigger=trigger)
     try:
         if args.target == "worktree-manager":
             from .self_install import self_update

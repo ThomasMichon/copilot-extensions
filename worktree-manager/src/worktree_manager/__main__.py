@@ -1466,10 +1466,16 @@ def _cmd_update(rest: list[str]) -> int:
     The run is recorded through ``update_events``; the exit code follows the
     shared update table (0 success, non-zero failure classes).
     """
+    from .automatic_updates_cli import guarded_update
+
+    return guarded_update(rest, _cmd_update_recorded)
+
+
+def _cmd_update_recorded(rest: list[str], trigger: str = "manual") -> int:
     if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
         from .installation_updates import run_targeted_update
 
-        return run_targeted_update(rest)
+        return run_targeted_update(rest, trigger=trigger)
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source
@@ -1487,7 +1493,7 @@ def _cmd_update(rest: list[str]) -> int:
             prepared = prepare_update(rest, **source_arguments)
             if prepared.exit_code:
                 return prepared.exit_code
-            run = UpdateRun()
+            run = UpdateRun(trigger=trigger)
             rc = _cmd_update_steps(
                 prepared.arguments, run, fresh_manager=prepared.fresh_manager,
                 environment=prepared.environment, **source_arguments,
@@ -1550,6 +1556,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  update --recovery-status|--recover-after-restart [--json]  inspect/settle interrupted work")
         print("  update --recover-for-repair [--json]  authorize queue release without cleanup proof; no install")
         print("  runtime-source show|set|reset|resolve  independent runtime source policy/acquisition; no install")
+
+        print("  automatic-updates      explicit enrollment, ownership, startup and worker status")
         print("  plugins                list the plugins the installer knows about")
         print("  plugins <name>         show one plugin's prereqs / config / steps")
         print("  plugins --prereqs      the de-duplicated union of all prerequisites")
@@ -1634,6 +1642,9 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "update":
         from .update_driver_cli import cmd_update_request
         return cmd_update_request(args[1:])
+    if args and args[0] == "automatic-updates":
+        from .automatic_updates_cli import main as automatic_updates_main
+        return automatic_updates_main(args[1:])
     if args and args[0] == "--project":
         if len(args) != 2 or not args[1]:
             print("error: --project needs exactly one project name")

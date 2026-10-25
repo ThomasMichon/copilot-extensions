@@ -29,6 +29,28 @@ def test_default_wait_preserves_canonical_update_arguments():
     assert options.request_status is None
 
 
+@pytest.mark.parametrize("trigger", [
+    ["--automatic-trigger", "manager"],
+    ["--automatic-trigger", "legacy-agent-machines"],
+    ["--automatic-trigger", "external", "--controller", "example"],
+])
+def test_automatic_trigger_is_retained_in_durable_request(queued, trigger):
+    seen, _request = queued
+    flags = [*trigger, "--project", "example"]
+    assert driver.cmd_update_request(flags) == 6
+    assert seen["spec"].argv == tuple(flags)
+    assert seen["runner"].argv[-len(flags) - 1:] == ("update", *flags)
+
+
+def test_unattended_authentication_context_survives_durable_execution(monkeypatch):
+    monkeypatch.setenv("CE_UPDATE_UNATTENDED", "1")
+    context = driver.request_context()
+    monkeypatch.delenv("CE_UPDATE_UNATTENDED")
+    with driver._request_environment(context):
+        assert driver.os.environ["CE_UPDATE_UNATTENDED"] == "1"
+    assert "CE_UPDATE_UNATTENDED" not in driver.os.environ
+
+
 @pytest.mark.parametrize("observer", [[], ["--detach"], ["--supervised-debug"]])
 def test_bootstrap_repair_prefix_survives_durable_observer_normalization(observer):
     arguments = ["--repair-engine", "/fresh/source with spaces", "--project", "example"]
@@ -91,6 +113,11 @@ def test_explicit_operator_recovery_reports_authority_not_native_proof(queued, m
     ["--request-status", "one", "--engine-acquisition-timeout", "600"],
     ["--recovery-status", "--engine-acquisition-timeout", "600"],
     ["--auth-report", "--engine-acquisition-timeout", "600"],
+    ["--automatic-trigger", "unknown"],
+    ["--automatic-trigger", "external"],
+    ["--controller", "example"],
+    ["--automatic-trigger", "manager", "--controller", "example"],
+    ["--automatic-trigger", "manager", "--auth-report"],
 ])
 def test_invalid_observer_combinations_refuse(flags):
     with pytest.raises(SystemExit) as error:

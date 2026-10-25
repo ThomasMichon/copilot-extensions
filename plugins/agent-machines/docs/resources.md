@@ -331,12 +331,10 @@ independent of and in parallel with any `self-update` tiers. Declaring the
 resource controls both `agent-machines fleet-update run` and the machine-local
 scheduler presence reconciled by `agent-machines fleet-update install` (Windows
 Scheduled Tasks; Linux/WSL `systemd --user` timers). The registered command
-targets the stable `worktree-manager` binstub (`~/.local/bin/worktree-manager`
-on POSIX, `worktree-manager.cmd` on Windows) -- not the `agent-machines`
-binstub self-update uses -- so the fleet-wide plugin install/update
-orchestration the Worktree Manager already owns runs asynchronously on a
-schedule, rather than only inline during an interactive `worktree-manager
-update` invocation:
+targets the stable `agent-machines` binstub and runs
+`fleet-update run --tier sweep`. This wrapper rechecks opt-in, local ownership
+and the installed Manager's capability on each firing. Manager remains the
+installer/update orchestrator; the wrapper introduces no resident or new owner:
 
 - `run` resolves the selected tier first and is a clean no-op when it is
   opted out.
@@ -346,6 +344,139 @@ update` invocation:
 
 The created Windows tasks run only when the user is logged on, matching the
 interactive credential/token needs of the dtssh watchdog and restore sweep.
+
+### Automatic-update ownership
+
+Agent Machines reads Manager's inert `automatic-updates.json` contract without
+importing or launching Manager. `WORKTREE_MANAGER_ROOT` selects its directory;
+otherwise it is under `USERPROFILE/.worktree-manager` (or the current home).
+An absent file preserves standalone behavior. An unreadable, malformed,
+duplicate-field or unknown-field policy is refused visibly, never treated as
+absent. Version 1 requires exactly:
+
+```json
+{
+  "schema": "copilot-extensions.automatic-updates",
+  "version": 1,
+  "owner": "disabled",
+  "provenance": "explicit-user",
+  "user_disabled": true,
+  "interval_seconds": 3600,
+  "project": null,
+  "external_controller": null
+}
+```
+
+`owner` is `disabled`, `manager` or `external`. Provenance must be a nonempty
+string, `user_disabled` a boolean, interval an integer from 300 through 86400,
+and project null or a nonempty string. Manager ownership requires a non-null
+project. External ownership requires a nonempty controller string; non-external
+owners require a null controller. A true `user_disabled` requires
+the disabled owner; conflicting declarations are refused. Strings must be
+single-line and contain no control characters. Manager owns policy enrollment and writes;
+Agent Machines only reads it.
+
+| Effective policy | Self sweep | Manual `fleet-update run` | Legacy fleet registration |
+| --- | --- | --- | --- |
+| Absent | Existing sync/update/restore behavior | Existing opt-in applies | Existing opt-in applies |
+| Manager or external | Sync and restore, no suite update | Refused: use the selected owner's canonical path | Blocked, including stale `present` resources |
+| Disabled | Sync and restore, no suite update | Refused: this is a legacy automatic request | Blocked |
+| Invalid/unreadable | No suite update; maintenance runs but result is an error | Error | Error, including dry-run |
+
+Watchdog/SSH maintenance is unchanged. Maintenance-safe restore still applies
+its normal resource/module consent filters. Neither a policy refusal nor a
+handoff disables general dependency convergence. Manual retirement remains a
+separate explicitly authorized operation; neither owner detection nor dry-run
+stops a task, deletes a unit, starts Manager or rewrites policy.
+
+Every fleet run, even an explicitly invoked `fleet-update run`, requests the
+legacy automatic path rather than a foreground update. With any explicit policy
+file (including disabled/default provenance), it is refused. Explicit foreground
+updates remain available through `worktree-manager update`.
+
+New fleet definitions call the guarded AM wrapper, not Manager directly.
+The wrapper uses only the complete installed Manager selection under the
+standard user-local root. It validates the versioned binstub, completion marker,
+payload version and unchanged selector/key-file identity, then probes global
+`--version` and well-formed `--help`. A guarded Manager must additionally return
+validated `automatic-updates ownership --json` for that same root. It receives
+`update --automatic-trigger legacy-agent-machines` and owns the canonical lock.
+
+A positively identified legacy help/version protocol instead takes the shared
+update transaction, rechecks policy **absence**, revalidates generation and
+capability, then calls unflagged `worktree-manager update` while holding custody.
+Explicit disabled/default-provenance policy is not absence. Unknown, failed,
+corrupt or mismatched probes refuse; a generation change defers. No failed
+update is retried unflagged, and a newly guarded process refusing the held lock
+with exit 5 remains deferred. The wrapper never probes `update --help`, because
+old Manager versions can self-update before forwarding that option.
+
+Manager is required only for the opted-in fleet path, as before. Other AM
+maintenance has no Manager runtime dependency. This adapter does not select a
+new project or source: the existing standalone update context still applies.
+
+An already-installed pre-flag definition cannot be intercepted by the AM run
+wrapper because it invokes Manager directly. An explicit disable therefore
+does not prove that such a remaining job is suppressed. All existing fleet triggers need
+explicit retirement before adoption, and any active old self/fleet update must
+finish before handover.
+
+Use `agent-machines fleet-update inventory --json` for read-only
+policy, exact legacy identities, pre-flag detection, retirement requirements
+and in-flight evidence independent of requirement package discovery/validation.
+The result carries schema `copilot-extensions.legacy-update-inventory`, version
+1, `ok` for complete successful inspection, and a separate `adoption_ready`.
+Each `legacy_artifacts` entry includes `identity`, `present`, `enabled`,
+`in_flight`, `preflag_trigger`, `retirement_required`, `blocks_adoption`,
+`lock_owner_pid`, `execute`, `arguments`, `trigger_kind` and `detail`. Trigger
+classification distinguishes `am-wrapper`, `direct-manager-preflag` and
+`direct-manager-marked`; lack of a marker alone never identifies a pre-flag job.
+The library equivalent is
+`legacy_update_inventory.inventory_legacy_updates()`. Unknown scheduler/service
+state is a blocker, not proof of inactivity. Linux inspection reads both unit
+files and service activity; a user manager unavailable for inspection leaves
+in-flight state unknown. Windows inspection reports the named task's state.
+Live AM sweep lock owners are also reported, including manual invocations
+outside a scheduled task/service; unreadable lock evidence blocks adoption.
+This evidence is a snapshot, not a lock or race-free handover certificate.
+The self sweep holds Manager's shared
+`automatic-updates/update-transaction/zdd-cutover.lock` across its suite phase,
+checking policy only after acquiring that lock. Enrollment and canonical updates
+therefore cannot race the standalone policy check. Repository sync and restore
+remain outside this transaction; contention defers only suite updating and
+reports the run as deferred after maintenance.
+The lock comes from the shared `agent-zdd` library, not a Manager runtime import.
+Legacy fleet registration takes the same transaction and rechecks consent before
+creating a trigger, so enrollment cannot race a stale standalone admission.
+Registration, definition refresh and re-enabling also apply the shared exact
+ownership/inactivity proof before mutation, including at the native register or
+rewrite boundary. Known inactive historical definitions may migrate to the AM
+wrapper; foreign/edited, running/queued or unverifiable artifacts are preserved.
+Genuine absence is allowed: a consistent Linux `LoadState=not-found` needs no
+fragment path. Windows rechecks ownership and idle state in the mutating
+PowerShell invocation before force-registration.
+
+`inspection_complete: false` means an observation was unavailable or refused,
+even when a live lock already proves an update is active. Missing/malformed
+unit output is not inactivity evidence: Linux inspection requires explicit
+LoadState/ActiveState/SubState/Job/FragmentPath/DropInPaths and service MainPID.
+Only a consistent `LoadState=not-found` can establish a missing unit. Existing
+task writers use the legacy home-relative unit directory; if XDG_CONFIG_HOME
+selects another directory, inventory and retirement report that path gap as a
+blocker rather than hiding possible triggers.
+
+Explicit uninstall validates exact supported ownership at the destructive
+boundary, including the pre-flag fleet definition. Same-name foreign actions,
+extra actions/triggers, unit overrides/drop-ins, symbolic links, unknown state,
+active/queued tasks/services and live lock owners refuse retirement without
+stopping or deleting anything. A current Manager/external policy does not block
+explicit retirement of an inactive, owned old trigger.
+
+Windows uninstall never calls Stop-ScheduledTask: it rechecks the definition and
+idle state before unregistering. Linux checks both service activity and timer
+dispatch state before disabling/deleting owned units; failed disable retains
+the files and fails retirement. These observations are not a substitute for
+the canonical transaction and post-retirement in-flight verification.
 
 ### `copilot-cli-update`
 
