@@ -33,8 +33,6 @@ import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 
-import ctypes
-
 try:
     import fcntl
 except ImportError:  # pragma: no cover - exercised only on Windows
@@ -76,6 +74,7 @@ def _system_directory() -> Path:
     redirect.
 
     Raises `ArtifactBuildError` if the OS API call itself fails."""
+    import ctypes
     buf = ctypes.create_unicode_buffer(260)
     length = ctypes.windll.kernel32.GetSystemDirectoryW(buf, len(buf))
     if not length:
@@ -184,6 +183,7 @@ def _well_known_sid_display_name(sid_string: str) -> str:
     wrongly rejecting a correctly hardened ACL there.
 
     Raises `ArtifactBuildError` if either OS API call fails."""
+    import ctypes
     advapi32 = ctypes.windll.advapi32
     kernel32 = ctypes.windll.kernel32
     psid = ctypes.c_void_p()
@@ -503,6 +503,7 @@ def _provenance_key_lock():
 
     Bounded by `_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS`; raises
     `ArtifactBuildError` if the lock cannot be acquired within it."""
+    import ctypes
     lock_path = _provenance_key_dir() / "provenance-key.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(ctypes, "windll"):

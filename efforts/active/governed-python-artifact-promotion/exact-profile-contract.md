@@ -10,8 +10,19 @@ Release approval adapter implemented in #8568; installation-owned policy intent
 in #8494; repository-only policy/release planning composition in #8586.
 Explicit retained source-graph candidate export merged in #8600.
 Independent selected-source/native-target/candidate-lock binding merged in #8705.
-Governed admission, real profile publication, consumer
-admission, deployed engine selection and production rollout remain open.
+Governed acquisition/admission, real profile
+publication, deployed engine selection and production rollout remain open.
+
+`tools/runtime_source_wheels.py` completes a retained source-lock candidate with
+source-built first-party wheels and caller-acquired third-party bytes matching
+its exact pins. It inspects the complete closure and extras before passing it to
+the existing offline immutable constructor. The construction receipt binds the
+source-lock record, actual profile and locked build tools; construction derives
+its root, interpreter and source generation from that selection and never
+activates a runtime. This repository-only source consumer does not supply network
+acquisition, private-feed approval, persistent reuse admission, released engine
+application or rollout. Its caller is the already-invoked installation owner,
+not an approval inferred from reading configuration.
 
 ## Reconciliation and existing boundaries
 

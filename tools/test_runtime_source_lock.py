@@ -225,6 +225,14 @@ def test_missing_retained_source_coverage_refuses(adopter, source, target, tmp_p
             pytest.fail("incomplete retained inventory reached compilation")
 
 
+def test_retained_source_mutation_during_consumption_refuses(adopter, source, target, tmp_path):
+    with pytest.raises(ProfileError, match="during candidate consumption"):
+        with candidate(adopter, source, target, tmp_path) as selected:
+            retained = selected.payload
+            (retained / "fixture_backend.py").write_text("changed", encoding="utf-8")
+    assert not retained.exists()
+
+
 @pytest.mark.parametrize("override", ["environment", "configuration", "universal"])
 def test_native_platform_override_cannot_hide_an_applicable_dependency(
     adopter, source, target, tmp_path, override,

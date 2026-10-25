@@ -114,6 +114,39 @@ def snapshot(tmp_path, *, closure=False, version="1.0"):
     )
 
 
+def test_owner_validation_precedes_completion_and_rechecks_read_only_reuse(
+    tmp_path, engine, plugin, monkeypatch,
+):
+    root = tmp_path / "runtime"
+    observed = []
+
+    def validate(slot):
+        observed.append((slot, engine.runtime.marker_path(root, slot.name).exists()))
+
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        with candidate(engine, root, plugin, wheels, validate_candidate=validate) as ready:
+            assert observed == [(ready.slot, False)]
+            assert engine.runtime.is_complete(root, ready.slot.name, expect_hash=ready.payload_hash)
+            marker = engine.runtime.marker_path(root, ready.slot.name)
+            completed = marker.read_bytes()
+
+    monkeypatch.setattr(engine, "_construct", lambda *_a, **_k: pytest.fail("reuse invoked writers"))
+
+    def reject(slot):
+        validate(slot)
+        raise ValueError("owner rejected reused candidate")
+
+    with snapshot(tmp_path) as retained:
+        wheels = inspected(retained)
+        with pytest.raises(ValueError, match="owner rejected"):
+            with candidate(engine, root, plugin, wheels, validate_candidate=reject):
+                pytest.fail("rejected reuse was exposed")
+        assert observed[-1] == (ready.slot, True)
+        assert marker.read_bytes() == completed
+        assert engine.runtime.is_complete(root, ready.slot.name, expect_hash=ready.payload_hash)
+
+
 @pytest.mark.parametrize("executable", ["path", "command"])
 def test_closed_transaction_is_canonical_and_cleans_owned_inputs(tmp_path, executable):
     uv = shutil.which("uv")

@@ -1,6 +1,7 @@
 """Python-owned runtime construction, shared by independently shipped installers."""
 
 from __future__ import annotations
+from collections.abc import Callable
 
 import importlib.util
 import hashlib
@@ -660,6 +661,7 @@ def _assert_source_pin(plugin: Path, expected: dict | None) -> None:
 def numbered_candidate(
     root: Path, version: str, *, plugin: Path, uv: Path, base_python: Path,
     health_module: str, health_callable: str | None = None,
+    validate_candidate: Callable[[Path], None] | None = None,
     construction_callable: str | None = None, construction_data: dict | None = None,
     process_retention: bool = False,
     reuse_generations: bool = False,
@@ -675,6 +677,7 @@ def numbered_candidate(
     return _candidate(
         root, version, plugin=plugin, uv=uv, base_python=base_python,
         health_module=health_module, health_callable=health_callable,
+        validate_candidate=validate_candidate,
         construction_callable=construction_callable, construction_data=construction_data,
         process_retention=process_retention, reuse_generations=reuse_generations,
         expected_source_identity=expected_source_identity,
@@ -701,6 +704,7 @@ def _check_dev_owner(root: Path, owner: str) -> None:
 def _candidate(
     root: Path, version: str, *, plugin: Path, uv: Path, base_python: Path,
     health_module: str, health_callable: str | None = None,
+    validate_candidate: Callable[[Path], None] | None = None,
     construction_callable: str | None = None, construction_data: dict | None = None,
     process_retention: bool = False, dev_owner: str | None = None,
     reuse_generations: bool = False,
@@ -767,6 +771,8 @@ def _candidate(
                     descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
+                if validate_candidate is not None:
+                    validate_candidate(slot)
                 _assert_source_pin(plugin, expected_source_identity)
                 yield ReadyCandidate(
                     slot, inputs.payload_hash, True, descriptor, inputs.plugin, inputs.extras,
@@ -831,6 +837,8 @@ def _candidate(
                     )
                     if inputs.wheel_inputs is not None:
                         inputs.wheel_inputs.verify()
+                    if validate_candidate is not None:
+                        validate_candidate(slot)
                     _assert_source_pin(plugin, expected_source_identity)
                     if dev_owner is not None:
                         _check_dev_owner(root, dev_owner)
@@ -848,6 +856,8 @@ def _candidate(
                     retention_descriptor, child_timeout, health_callable=health_callable,
                     require_frozen_origin=False,
                 )
+                if validate_candidate is not None:
+                    validate_candidate(slot)
             _assert_source_pin(plugin, expected_source_identity)
             yield ReadyCandidate(
                 slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,

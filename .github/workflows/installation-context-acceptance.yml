@@ -780,3 +780,33 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 6
     steps: *wheel-inputs-steps
+
+  source-profiles-linux:
+    if: ${{ inputs.wheel_inputs }}
+    name: Complete source profile (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &source-profiles-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml
+      - name: Retained source to complete profile and actual offline construction
+        run: python -m pytest -q tools/test_runtime_source_wheels.py
+
+  source-profiles-windows:
+    if: ${{ inputs.wheel_inputs }}
+    name: Complete source profile (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *source-profiles-steps
+
+  source-profiles-macos:
+    if: ${{ inputs.wheel_inputs }}
+    name: Complete source profile (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 6
+    steps: *source-profiles-steps

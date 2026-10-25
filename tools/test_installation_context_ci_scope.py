@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shlex
 import shutil
@@ -293,6 +294,24 @@ def test_codespaces_bootstrap_remains_an_explicit_bounded_native_portfolio() -> 
         ]
 
 
+def test_source_profile_acceptance_uses_existing_opt_in_and_unchanged_native_budget() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for platform, runner in (
+        ("linux", "ubuntu-latest"), ("windows", "windows-latest"), ("macos", "macos-latest"),
+    ):
+        job = workflow["jobs"][f"source-profiles-{platform}"]
+        assert job["if"] == "${{ inputs.wheel_inputs }}"
+        assert job["runs-on"] == runner
+        assert job["timeout-minutes"] == 6
+        commands = [step["run"] for step in job["steps"] if "run" in step]
+        assert commands == [
+            "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging pyyaml",
+            "python -m pytest -q tools/test_runtime_source_wheels.py",
+        ]
+
+
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
@@ -326,6 +345,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "chat-construction-linux", "chat-construction-windows",
         "ssh-snapshot-native-linux", "ssh-snapshot-native-windows",
         "wheel-inputs-linux", "wheel-inputs-windows",
+        "source-profiles-linux", "source-profiles-windows",
+        "source-profiles-macos",
         "guardian-followthrough-macos",
         "runtime-profile-policy-linux", "runtime-profile-policy-windows",
         "immutable-runtime-linux", "immutable-runtime-macos",
@@ -760,10 +781,45 @@ def test_required_foundation_checks_generation_without_running_native_test_corpu
     assert "plugins/agent-index/tests/test_command_catalog.py" not in commands
 
 
+@pytest.fixture(scope="module")
+def native_partition_collections() -> dict[str, list[str]]:
+    # Reuse only interpreter imports, not collection results or selector logic.
+    script = """
+import contextlib, io, json, sys, pytest
+class Collected:
+    def pytest_collection_finish(self, session):
+        self.nodeids = [item.nodeid for item in session.items]
+results = {}
+for pointer in ("pointer_absent", "pointer_retained"):
+    for mode in ("mode_legacy", "mode_active"):
+        collected = Collected()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            status = pytest.main([
+                "--collect-only", "-q", "--color=no", "-p", "no:cacheprovider",
+                "libs/payload-invocation/tests/test_derived_diagnostic_cli.py",
+                "-k", mode + " and " + pointer,
+            ], plugins=[collected])
+        if status:
+            print(output.getvalue(), file=sys.stderr)
+            raise SystemExit(status)
+        results[pointer + ":" + mode] = collected.nodeids
+print(json.dumps(results))
+"""
+    environment = {**os.environ, "PYTEST_ADDOPTS": "", "PYTHONDONTWRITEBYTECODE": "1"}
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=HERE.parent, env=environment, capture_output=True, text=True, check=False,
+        timeout=20, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout)
+
+
 @pytest.mark.parametrize("mode", ["mode_legacy", "mode_active"])
 @pytest.mark.parametrize("pointer", ["pointer_absent", "pointer_retained"])
 def test_full_native_matrix_collects_exact_inventory_partition(
-    mode: str, pointer: str,
+    mode: str, pointer: str, native_partition_collections: dict[str, list[str]],
 ) -> None:
     root = HERE.parent
     spec = importlib.util.spec_from_file_location(
@@ -778,24 +834,12 @@ def test_full_native_matrix_collects_exact_inventory_partition(
         for source, destination in inventory.vendor_pairs()
         if source.name == script
     }
-    environment = {**os.environ, "PYTEST_ADDOPTS": "", "PYTHONDONTWRITEBYTECODE": "1"}
-    result = subprocess.run(
-        [
-            sys.executable, "-m", "pytest", "--collect-only", "-q", "--color=no",
-            "-p", "no:cacheprovider",
-            "libs/payload-invocation/tests/test_derived_diagnostic_cli.py",
-            "-k", f"{mode} and {pointer}",
-        ],
-        cwd=root, env=environment, capture_output=True, text=True, check=False,
-        timeout=20, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
     selected = [
-        line for line in result.stdout.splitlines()
+        line for line in native_partition_collections[f"{pointer}:{mode}"]
         if "::test_derived_native_diagnostic_cli_read_only[" in line
     ]
-    assert len(selected) == len(expected), result.stdout
+    assert len(selected) == len(expected), selected
     assert {
         line.split(f"[{pointer}-{mode}-", 1)[1].removesuffix("]")
         for line in selected
-    } == expected, result.stdout
+    } == expected, selected
