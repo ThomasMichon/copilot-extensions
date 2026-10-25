@@ -522,3 +522,24 @@ caller coverage, not one launcher or one platform passing.
   Process-library/native bytes and the 300-second unit budget are unchanged.
 - Source publication, a subsequent passing review and current-head CI remain
   open. The effort stays Active and no runtime rollout is authorized.
+
+### 2026-10-24 - Reproduced summary-only custody findings
+
+- The subsequent review reported no open inline issues but named two P2
+  defects in its summary. Reproduced both with failing tests rather than
+  treating the contradictory formatting as a passing review.
+- Keeper children now inherit the home belonging to the selected store, not
+  a relative or replaced ambient override evaluated after cwd changes.
+  Regression fixtures use the production `home/forward-keepers` layout and
+  compare the child configuration with the actual reserved store.
+- MCP CLI validation remains outside admission for malformed passive
+  invocations. The admitted serving helper now captures the actual selected
+  socket-state root before home/cwd/pool work, so nested serving cannot borrow
+  an unrelated code-directory admission and skip that root's custody check.
+  Updated the complete census to name the admitted helper.
+- Three initial regression cases failed on the old behavior. The corrected
+  packets passed 11 Containers cases and 50 MCP cases with five existing
+  platform skips. Existing Windows async/proactor cleanup diagnostics remain
+  disclosed; a reused-PID cleanup hold retained evidence rather than touching
+  the replacement process. Core safety, native bytes and unit budget remain
+  unchanged. Four source guards, module ceilings and changed-file lint passed.

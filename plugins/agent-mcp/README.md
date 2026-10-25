@@ -33,6 +33,9 @@ relative home a second time. Explicit socket paths keep their launch-directory
 meaning and may intentionally put socket-associated routing and lease files
 outside the home. This compatibility behavior neither activates installation
 cells nor migrates existing state.
+After argument validation, resident CLI admission checks the selected socket's
+state directory before changing cwd or constructing the server. A nested server
+borrows that admission rather than inheriting an unrelated code-directory root.
 
 ## Standalone quick start
 

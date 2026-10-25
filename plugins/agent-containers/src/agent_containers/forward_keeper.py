@@ -261,9 +261,11 @@ def ensure_running(
                 "--host-relay-port",
                 str(int(host_relay_port)),
             ]
-        env = {**os.environ, **windowless_python_env()}
-        if env.get("AGENT_CONTAINERS_HOME"):
-            env["AGENT_CONTAINERS_HOME"] = os.path.abspath(os.path.expanduser(env["AGENT_CONTAINERS_HOME"]))
+        state_root = Path(os.path.abspath(_STORE.state_dir))
+        env = {
+            **os.environ, **windowless_python_env(),
+            "AGENT_CONTAINERS_HOME": str(state_root.parent),
+        }
         state = spawn_keeper(
             argv,
             env,
@@ -279,7 +281,7 @@ def ensure_running(
             popen=partial(
                 spawn_instance, popen=popen,
                 instance=DaemonInstanceSpec(
-                    "agent-containers-forward-keeper", Path(os.path.abspath(state_path(name))).parent, Path(__file__).resolve(),
+                    "agent-containers-forward-keeper", state_root, Path(__file__).resolve(),
                 ),
             ),
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),

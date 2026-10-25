@@ -1113,6 +1113,8 @@ Runtime-home and broker-endpoint paths are normalized lexically against the
 selecting process's cwd before instance reservation or admission. Broker child
 arguments remain absolute when its cwd changes to HOME. This does not resolve
 filesystem links: redirected runtime roots still fail custody checks.
+Keeper children inherit the home belonging to their selected store, even if
+the launcher's cwd or ambient home override changes afterward.
 
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
   lock file and kept backward-compatible across runtime versions;

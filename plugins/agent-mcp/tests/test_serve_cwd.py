@@ -188,3 +188,68 @@ def test_actual_server_linked_runtime_parent_refuses_before_lease(tmp_path, monk
     with pytest.raises((OSError, ValueError, RuntimeError)):
         asyncio.run(server.serve_forever())
     assert list(target.iterdir()) == []
+
+
+def test_cli_record_uses_selected_socket_root_before_cwd_and_server(tmp_path, monkeypatch):
+    from agent_procutil import daemon_instances as instances
+    from agent_mcp import serve
+
+    home = tmp_path / "home"
+    socket_root = tmp_path / "socket-state"
+    socket_root.mkdir()
+    monkeypatch.setenv("AGENT_MCP_HOME", str(home))
+    acquired = []
+    real = instances.admit_daemon_instance
+
+    def admit(*args, **kwargs):
+        guard = real(*args, **kwargs)
+        acquired.append(guard)
+        return guard
+
+    class ObservedServer:
+        def __init__(self, *args, **kwargs):
+            assert len(acquired) == 1
+            row = next(row for row in instances.inspect_instances(acquired[0].receipt.registry_root)
+                       if row["instance_id"] == acquired[0].receipt.instance_id)
+            assert row["runtime_root"] == str(socket_root)
+
+        async def serve_forever(self):
+            pass
+
+    monkeypatch.setattr(instances, "admit_daemon_instance", admit)
+    monkeypatch.setattr(serve, "Server", ObservedServer)
+    original = Path.cwd()
+    try:
+        assert _cmd_serve(argparse.Namespace(
+            passive=False, socket=str(socket_root / "serve.sock"),
+            idle_timeout=300.0, control_port=None,
+        )) == 0
+    finally:
+        os.chdir(original)
+    assert acquired[0]._closed
+
+
+def test_cli_linked_socket_root_refuses_before_home_or_server(tmp_path, monkeypatch):
+    from agent_mcp import serve
+
+    socket_root = tmp_path / "socket-state"
+    socket_root.mkdir()
+    alias = tmp_path / "linked-socket-state"
+    try:
+        alias.symlink_to(socket_root, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    home = tmp_path / "home"
+    monkeypatch.setenv("AGENT_MCP_HOME", str(home))
+    server = []
+    monkeypatch.setattr(serve, "Server", lambda *args, **kwargs: server.append(True))
+    original = Path.cwd()
+    try:
+        with pytest.raises((OSError, ValueError)):
+            _cmd_serve(argparse.Namespace(
+                passive=False, socket=str(alias / "serve.sock"),
+                idle_timeout=300.0, control_port=None,
+            ))
+    finally:
+        os.chdir(original)
+    assert server == [] and not home.exists()
