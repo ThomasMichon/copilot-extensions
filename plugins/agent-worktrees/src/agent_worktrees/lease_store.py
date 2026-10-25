@@ -12,6 +12,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from . import git_ops
 from .lease_config import LeaseSettings
 from .lease_protocol import (
@@ -768,6 +770,7 @@ class GitLeaseStore:
                     env=env,
                     timeout=45,
                     check=False,
+                    **no_window_kwargs(),
                 )
         except FileNotFoundError as exc:
             raise GitError("git executable was not found") from exc

@@ -192,6 +192,23 @@ def test_prune_lookup_refuses_before_provider_request(registry, monkeypatch, cap
     assert "selected-writer" in capfd.readouterr().out
 
 
+def test_lease_git_transport_uses_shared_headless_launch(registry, monkeypatch):
+    from agent_worktrees import lease_store
+    from agent_worktrees.lease_config import LeaseSettings
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(args, 0, "synthetic output", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    store = lease_store.GitLeaseStore(LeaseSettings(origin="synthetic-origin"))
+    assert store._git(["--version"]).stdout == "synthetic output"
+    if sys.platform == "win32":
+        assert calls[0]["creationflags"] & subprocess.CREATE_NO_WINDOW
+
+
 def test_same_active_git_and_provider_paths_are_preserved(registry, monkeypatch):
     pin(registry, "repo")
     monkeypatch.setattr(git_ops, "_active_gh_account", lambda: "SELECTED-WRITER")

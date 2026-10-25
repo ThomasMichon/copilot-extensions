@@ -45,11 +45,12 @@ def test_account_token_lookup_from_windowless_parent(tmp_path):
         "from pathlib import Path\n"
         "spec = json.loads(sys.argv[1])\n"
         "sys.path[:0] = spec['paths']\n"
-        "from agent_worktrees import git_ops\n"
+        "from agent_worktrees import git_ops, lease_store\n"
+        "from agent_worktrees.lease_config import LeaseSettings\n"
         "assert not ctypes.windll.kernel32.GetConsoleWindow()\n"
         "real_run = subprocess.run\n"
         "def run(args, **kwargs):\n"
-        "    assert args[:3] == ['gh', 'auth', 'token']\n"
+        "    assert args[:3] == ['gh', 'auth', 'token'] or args[:1] == ['git']\n"
         "    return real_run([spec['console'], '-I', '-c',\n"
         "        \"import time; time.sleep(0.5); print('synthetic-credential')\"],\n"
         "        **kwargs)\n"
@@ -58,7 +59,9 @@ def test_account_token_lookup_from_windowless_parent(tmp_path):
         "for cycle in range(2):\n"
         "    git_ops._gh_token_for_owner.cache_clear()\n"
         "    assert git_ops._gh_token_for_owner('selected-writer') == 'synthetic-credential'\n"
-        "Path(spec['result']).write_text('2', encoding='ascii')\n",
+        "    store = lease_store.GitLeaseStore(LeaseSettings(origin='synthetic-origin'))\n"
+        "    assert store._git(['--version']).stdout.strip() == 'synthetic-credential'\n"
+        "Path(spec['result']).write_text('4', encoding='ascii')\n",
         encoding="utf-8",
     )
     result = tmp_path / "result"
@@ -83,6 +86,6 @@ def test_account_token_lookup_from_windowless_parent(tmp_path):
             finally:
                 job.terminate_and_wait(10)
                 process.wait(timeout=10)
-    assert result.read_text(encoding="ascii") == "2"
+    assert result.read_text(encoding="ascii") == "4"
     assert observer.surfaced == {}, f"visible windows: {observer.surfaced}"
     assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
