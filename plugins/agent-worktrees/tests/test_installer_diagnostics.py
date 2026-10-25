@@ -519,6 +519,8 @@ exit $rc
     assert presented == b"e" * 100000 + "failure café\n".encode("utf-8")
 
 
+
+
 @pytest.mark.parametrize("host", POWERSHELLS)
 def test_completed_retention_never_prunes_incomplete(tmp_path, host):
     result = ps_run(tmp_path, host, """

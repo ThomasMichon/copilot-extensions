@@ -957,3 +957,73 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   fallback, deadline increase, native acceptance dispatch or rollout was used.
   Operation-tagged native diagnosis must distinguish normal write backpressure
   from a mode/query/restoration failure before further implementation.
+- The tagged proof located 231 specifically at setting NOWAIT after queued
+  data; the mode remained positively unchanged, and the same handle became
+  writable after the reader drained. The next draft defers only that exact
+  unchanged-mode case and performs a bounded batch per mode transition.
+  Query, write and restoration failures still degrade presentation explicitly.
+- Combined native validation then passed **27 tests, failed 1, deselected 26
+  in 96.93 seconds; 100.39 seconds including preparation and cleanup**.
+  Existing live acknowledgement, exact output, storage-failure,
+  retained-descendant, CP1252 and native-failure controls passed. The remaining
+  PS7 stress failure saturated the 256KiB stdout queue even while the parent
+  was reading that channel: 32,768 of 300,000 live bytes were forwarded.
+  There were no native API failures; exit 0, complete private capture and
+  mode restoration survived. This is not qualification or permission to
+  weaken the actively-reading-channel assertion. Further implementation is
+  paused for an explicit bounded-backlog policy choice, rather than larger
+  queues, longer deadlines or another timing retry.
+- The operator selected **replay from the existing private raw capture within
+  the original deadline, keeping memory bounded**, rather than accepting
+  avoidable loss on an actively reading channel. This does not guarantee
+  delivery to indefinitely slow readers or authorize another raw spool,
+  a larger memory queue, a longer deadline, source completion, merge or rollout.
+  Replay must preserve channel ordering and the existing storage-failure
+  presentation behavior, and must not turn a fixed capture snapshot into a
+  descendant-held EOF wait.
+- The first replay implementation exhausted its unchanged 300-second group
+  limit (301.23 seconds total), after progress showed 11 passes and 5 failures.
+  No complete failure summary survived that limit, so it was not treated as
+  qualification. A single-case diagnosis subsequently observed an actual
+  10-second child timeout with 278,528 stdout bytes captured and no stderr yet;
+  the replay implementation was doing an avoidable disk readback of every
+  just-captured buffer.
+- The current buffer now enters the bounded queue directly only when it is the
+  next recorded range and fits; earlier backlog still replays from the existing
+  raw file. Native counters distinguish those paths. The PS7 reading-stdout/
+  blocked-stderr control then retained 300,000 bytes on each raw channel and
+  all 300,000 live stdout bytes, with zero native failures, restored modes and
+  7,748ms wait time. Five PS7 buffer/order/cutoff/append-failure/remaining-budget/
+  retained-snapshot controls passed in **23.66 seconds; 30.75 seconds total**.
+  These results precede the later writer-lifecycle corrections below.
+- Fixture result publication now uses a completed temporary file plus rename:
+  the observer had raced `WriteAllText` and read an empty JSON file.
+  The remaining-budget fixture positively establishes a tiny real child's exit
+  before testing the one-second replay budget, retaining a 100,000-byte private
+  backlog; it no longer assumes a large blocking child write already finished.
+  Neither fix extends the asserted budget or removes reading-channel exactness.
+- Native coverage remains incomplete. A local PS5 fixture timed out at 20s
+  before raw capture appeared; the broader PS7 compatibility selection stopped
+  on the real invalid-bootstrap entrypoint's unchanged 20s limit. Another
+  PS7 parent-pipe case stopped before its capture-ready phase. These observations
+  do not establish a compiler, pipe or filesystem cause and are not waived as
+  passes or retried as a timing loop. Fresh hosted acceptance is still required.
+- Independent review of the native replay diff found two additional defects:
+  storage warnings could cache pre-UTF-8 writers, and one child's terminal
+  presentation loss could suppress every later child. The receiving human-output
+  seam and each new capture now settle/persist the preceding presentation before
+  binding fresh output state. Private loss history survives rearming.
+  The four production-order/next-child controls passed on PS5 and PS7 in
+  **46.03 seconds; 137.98 seconds including preparation and cleanup**.
+- The original eight native presentation functions and decorators were moved
+  AST-identically into `test_installer_presentation.py`, separating that
+  behavioral contract from the diagnostic foundation. The manual lane selects
+  both files one per existing bounded sub-suite; no time budget grows.
+  Windows now pins the previously verified seasoned UV 0.13.1 release, while
+  Linux keeps its existing canonical profile pin.
+- Static contract checks caught an overbroad change to the byte-identical shared
+  staging catch and an insertion inside the canonical human-output prologue.
+  The shared catch retains its original renderer; rebinding is outside the
+  unchanged prologue. The 13-plugin install contract, synchronization and
+  targeted Ruff pass. Bounded claims apply to diagnostic forwarding, not a new
+  global output owner. No source merge, native-lane result or rollout is claimed.

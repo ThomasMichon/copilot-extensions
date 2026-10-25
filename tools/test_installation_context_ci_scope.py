@@ -718,10 +718,12 @@ def test_installer_diagnostics_is_manual_exact_head_and_preserves_test_budgets()
         if platform == "linux":
             assert commands.pop(0) == ["python", "tools/setup_test_devcontainer_cli.py"]
         else:
-            assert any(step.get("uses") == "astral-sh/setup-uv@v9.0.0" for step in job["steps"])
+            uv = next(step for step in job["steps"] if step.get("uses") == "astral-sh/setup-uv@v9.0.0")
+            assert uv["with"] == {"version": "0.13.1"}
         assert commands == [
             ["python", wrapper, "agent-worktrees",
              "--test-file", "tests/test_installer_diagnostics.py",
+             "--test-file", "tests/test_installer_presentation.py",
              "--test-file", "tests/test_installer_bash_diagnostics.py",
              "--test-file", "tests/test_installer_python_producer.py",
              "--test-file", "tests/test_installer_guardian.py",

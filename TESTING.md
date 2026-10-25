@@ -859,6 +859,8 @@ and retained guardian controls, followed by both real-UV construction variants
 (capture disabled/enabled). Linux uses the canonical hardened, network-isolated
 test-container wrapper; hosted Windows uses the existing native contained runner.
 Both check out the dispatch's immutable source SHA without persisted credentials.
+Windows pins the seasoned UV 0.13.1 release; Linux retains the canonical
+container profile's independently pinned UV.
 The existing locked, seasoned Dev Containers CLI preparation is shared with the
 periodic Linux portfolio through `tools/setup_test_devcontainer_cli.py`.
 
@@ -868,6 +870,14 @@ not run the larger installer/monitor case, increase item/group/aggregate test
 budgets, or opt into desktop observation. Platform/prerequisite skips are not
 passes. The default derived-copy matrix and disabled Windows rotation remain
 unchanged when the selector is absent.
+
+The native controls include open-but-unread parent pipes, a reading channel
+alongside a blocked peer, bounded replay from the existing private capture,
+recorded-range ordering, storage fallback, original-budget enforcement and
+mode restoration. No-redundant-read controls distinguish the current in-memory
+capture buffer from a real disk backlog. Bash controls retain Python reservation
+whitespace and composed lease/diagnostic exit handling. These are assertions
+to execute, not a claim that every native host has qualified them.
 
 ## Optional diagnostic telemetry
 

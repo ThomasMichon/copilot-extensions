@@ -69,13 +69,21 @@ function New-InstallerDiagnosticCapture { return $null }
 function Save-InstallerDiagnosticCapture { param($Capture) }
 function Wait-InstallerDiagnosticChild { param($Process, $Capture, $Seconds) return $Process.WaitForExit($Seconds * 1000) }
 function Receive-InstallerDiagnosticCapture { param($Process, $Capture, [switch]$Final) return 0 }
+function Reset-InstallerDiagnosticPresentationOutputs { return $false }
+function Write-InstallerDiagnosticPresentation {
+    param([string]$Message, [switch]$ErrorChannel)
+    $env:COPILOT_EXTENSIONS_DIAGNOSTICS_PRESENTATION_MISSING = '1'
+    if ($ErrorChannel -and -not [Console]::IsErrorRedirected) {
+        try { [Console]::Error.Write($Message) } catch {}
+    }
+}
 $script:InstallerDiagnosticPipeReady = $false
 try {
     . (Join-Path $PSScriptRoot 'installer-diagnostics.ps1')
     Initialize-InstallerDiagnostics 'agent-worktrees'
 } catch {
     $env:COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING = '1'
-    try { [Console]::Error.WriteLine('WARNING: installer diagnostics unavailable; continuing with missing diagnostics.') } catch {}
+    Write-InstallerDiagnosticPresentation ('WARNING: installer diagnostics unavailable; continuing with missing diagnostics.' + [Environment]::NewLine) -ErrorChannel
 }
 trap {
     Write-InstallerDiagnostic $_.Exception.Message
@@ -92,9 +100,13 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
+    [void](Reset-InstallerDiagnosticPresentationOutputs)
+}
+
 if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1' -and
     $env:COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING -eq '0') {
-    try { [Console]::Error.WriteLine("Installer diagnostics: $env:COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY") } catch {}
+    Write-InstallerDiagnosticPresentation ("Installer diagnostics: $env:COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY" + [Environment]::NewLine) -ErrorChannel
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -416,7 +428,7 @@ if ($ContextualInstall) {
         }
         $nativeError = ''
         $document = Invoke-Hidden -FilePath $BootstrapPython -ArgList $nativeArguments -ErrorOutput ([ref]$nativeError)
-        if ($nativeError) { [Console]::Error.Write($nativeError) }
+        if ($nativeError) { Write-InstallerDiagnosticPresentation $nativeError -ErrorChannel }
         if (-not [string]::IsNullOrEmpty($document)) { return $document }
     }
     $contextDurableHome = $contextPath
@@ -757,10 +769,10 @@ if ($ContextualInstall) {
         $null = Receive-InstallerDiagnosticCapture $contextChild $contextCapture -Final
         Save-InstallerDiagnosticCapture $contextCapture
         if ($contextFallbackStdout -and $contextFallbackStdout.IsCompleted) {
-            try { [Console]::Out.Write($contextFallbackStdout.GetAwaiter().GetResult()) } catch {}
+            try { Write-InstallerDiagnosticPresentation ($contextFallbackStdout.GetAwaiter().GetResult()) } catch {}
         }
         if ($contextFallbackStderr -and $contextFallbackStderr.IsCompleted) {
-            try { [Console]::Error.Write($contextFallbackStderr.GetAwaiter().GetResult()) } catch {}
+            try { Write-InstallerDiagnosticPresentation ($contextFallbackStderr.GetAwaiter().GetResult()) -ErrorChannel } catch {}
         }
         Complete-InstallerDiagnostics $contextExitCode
         Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
@@ -2973,8 +2985,8 @@ function Deploy-PythonRuntime {
             '--result', $resultPath, '--expected-source-identity', $sourcePin) + $modeArgs
         $nativeError = ''
         $detail = Invoke-Hidden -FilePath $base -ArgList $arguments -ErrorOutput ([ref]$nativeError)
-        if ($detail) { Write-Host $detail }
-        if ($nativeError) { [Console]::Error.Write($nativeError) }
+        if ($detail) { Write-InstallerDiagnosticPresentation ($detail + [Environment]::NewLine) }
+        if ($nativeError) { Write-InstallerDiagnosticPresentation $nativeError -ErrorChannel }
         if ($LASTEXITCODE -eq 2) { exit 2 }
         if ($LASTEXITCODE -ne 0) { throw "Python runtime lifecycle failed (exit $LASTEXITCODE)." }
         $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json

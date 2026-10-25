@@ -3050,6 +3050,30 @@ does not depend on successful raw capture or sanitized archive publication;
 storage warnings are deferred until a final stream boundary rather than
 inserted into a split character. Native capture setup remains independent of
 whether diagnostic storage initialized successfully.
+Diagnostic forwarding to parent pipes uses checked, scoped nonblocking native writes,
+restoring the original mode shared by aliases before returning to installer
+execution. Each channel has a 256KiB queue and a bounded 16-by-1KiB native write
+batch. Bytes already present in the capture buffer are enqueued directly when
+next in order and within capacity; earlier backlog is replayed in bounded 8KiB
+ranges from the existing private raw file, without a second spool or whole-file
+backlog copy. Replay never reads beyond the recorded range or refreshes the
+single final native-byte snapshot. It uses only the original remaining child
+budget, and cannot turn an already-exited child's success into a timeout.
+Storage failure retains the original direct-presentation path where possible;
+a lost range is reported rather than overtaken by later output.
+Indefinitely blocked or slow parents can still lose optional live presentation.
+`presentation-loss.json` and
+`COPILOT_EXTENSIONS_DIAGNOSTICS_PRESENTATION_MISSING=1` distinguish that loss
+from capture failure and preserve the primary native result. These records do
+not confer cleanup or installation authority.
+Changing the declared human-output writers rebinds diagnostic presentation
+before subsequent output. A new captured child also receives fresh presentation
+state after the previous state settles within its remaining budget; a transient
+cutoff cannot permanently suppress a later child's healthy channel. Prior loss
+snapshots remain in the private `presentation-loss.history.jsonl`, rather than
+being erased by that reset. Canonical shared staging/error-rendering blocks
+retain their existing behavior; this is not a replacement for every installer
+output owner.
 Retained Python-publication children receive explicit separate regular-file
 destinations. Sanitization reads a fixed written-byte snapshot, never descendant
 EOF. Python archival records over
@@ -3059,6 +3083,11 @@ sets `COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING=1`, warns on stderr when possible,
 and preserves the primary native result. It is not a reason to block installation.
 Native host parse/signature/policy failures before entry execution still
 require caller-owned launch diagnostics.
+
+Bash accepts whitespace in caller-reserved JSON correlation without requiring
+bootstrap Python. One early EXIT handler composes available lease release and
+native diagnostic completion, retaining the original exit code and explicitly
+warning about a secondary cleanup failure.
 
 Header redaction consumes folded credential values before replacing their
 `Authorization:` or `http.extraheader=` prefixes. Erasing a scheme on one line
