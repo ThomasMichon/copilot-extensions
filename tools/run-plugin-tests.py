@@ -495,6 +495,12 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
 
 
 _CODESPACES_NATIVE_FILE = Path("tests") / "test_installer_engine_adoption.py"
+_CODESPACES_FUNCTIONAL_FILES = {
+    _CODESPACES_NATIVE_FILE,
+    Path("tests") / "test_snapshot_copy_contract.py",
+    Path("tests") / "test_installer_test_support.py",
+}
+_CODESPACES_PROFILE_ENV = "CODESPACES_INSTALLER_TEST_PROFILE"
 _CODESPACES_ADMISSION = (
     "codespaces_library_install_order_retry_and_errors or "
     "codespaces_real_admission_replays_captured_source"
@@ -551,6 +557,7 @@ def run_plugin(
     allow_host_state: bool = False,
     test_files: tuple[str, ...] = (),
     selection_file: Path | None = None,
+    test_profile: str = "standard",
 ) -> int:
     selection: TestSelection | None = None
     if selection_file is not None:
@@ -615,6 +622,10 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
+        # Ambient profile state must never silently relax an ordinary run.
+        env.pop(_CODESPACES_PROFILE_ENV, None)
+        if test_profile != "standard":
+            env[_CODESPACES_PROFILE_ENV] = test_profile
         if selection is not None:
             env.pop("PYTEST_ADDOPTS", None)
             snapshot = sandbox / "selection.json"
@@ -783,6 +794,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="timeout for each individual pytest item (default: 30, higher "
                          "for certain plugins -- see _TEST_TIMEOUT_OVERRIDES; an "
                          "explicit value here always wins)")
+    ap.add_argument(
+        "--test-profile", choices=("standard", "busy-host-functional"), default="standard",
+        help="explicit Codespaces installer functional qualification profile; "
+             "busy-host-functional is not original-budget or performance evidence",
+    )
     ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
                     metavar="COUNT",
                     help="maximum test files per sequential sub-suite "
@@ -796,6 +812,26 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--allow-explicit-tiers", action="store_true",
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    if args.test_profile == "busy-host-functional":
+        selected = {Path(path.replace("\\", "/")) for path in args.test_file}
+        if (
+            args.plugins != ["agent-codespaces"] or not selected
+            or not selected <= _CODESPACES_FUNCTIONAL_FILES
+            or args.all or args.changed or args.prepare_only or args.selection_file
+            or args.guards or args.kexpr or args.collect_only or args.list_only
+            or args.exclude or args.pre_push or args.allow_host_state
+            or args.allow_explicit_tiers
+        ):
+            ap.error("busy-host-functional requires agent-codespaces --test-file "
+                     "with only installer adoption, snapshot-copy or installer-support files")
+        if (
+            any(value is not None for value in (
+                args.subsuite_timeout, args.plugin_timeout, args.test_timeout,
+                args.max_files_per_sub_suite,
+            ))
+            or (args.max_processes, args.max_memory_mb, args.max_temp_mb) != (128, 4096, 2048)
+        ):
+            ap.error("busy-host-functional cannot be combined with limit overrides")
     if args.selection_file is not None and (
         len(args.plugins) != 1 or args.all or args.changed or args.prepare_only
         or args.test_file or args.guards or args.kexpr or args.collect_only
@@ -895,6 +931,14 @@ def main(argv: list[str] | None = None) -> int:
                     if args.test_timeout is not None
                     else _TEST_TIMEOUT_OVERRIDES.get(name, 30.0)
                 )
+                if args.test_profile == "busy-host-functional":
+                    effective_subsuite_timeout = 900.0
+                    effective_plugin_timeout = 2700.0
+                    print(
+                        "[PROFILE] busy-host-functional: native=135s module-item=180s "
+                        "default-item=30s group=900s plugin=2700s; "
+                        "functional evidence only, not original-budget/performance PASS"
+                    )
                 plugin_limits = Limits(
                     wall_seconds=effective_subsuite_timeout,
                     max_processes=limits.max_processes,
@@ -922,6 +966,7 @@ def main(argv: list[str] | None = None) -> int:
                     allow_host_state=args.allow_host_state,
                     test_files=tuple(args.test_file),
                     selection_file=args.selection_file,
+                    test_profile=args.test_profile,
                 )
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)

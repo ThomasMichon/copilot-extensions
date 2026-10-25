@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify canonical native snapshot copying and bounded Windows installer acceptance; reduce redundant materialization and manifest path work while retaining live refusal and complete-content checks",
+  "comment": "Qualify canonical native snapshot copying and bounded Windows installer acceptance; reduce redundant path work and add an explicit busy-host functional test profile while retaining default deadlines, resource caps and complete refusal/content checks",
   "changes": [
     {
       "plugin": "agent-bridge",

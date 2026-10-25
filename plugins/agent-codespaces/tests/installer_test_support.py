@@ -9,6 +9,13 @@ import stat
 from pathlib import Path
 
 
+def installer_functional_timeout(seconds: int) -> int:
+    profile = os.environ.get("CODESPACES_INSTALLER_TEST_PROFILE", "standard")
+    if profile not in ("standard", "busy-host-functional"):
+        raise ValueError(f"Unknown Codespaces installer test profile: {profile}")
+    return seconds * 3 if profile == "busy-host-functional" else seconds
+
+
 def snapshot_tree_manifest(root: Path) -> dict[str, tuple[str, str]]:
     """Record complete contents without following a link or junction."""
     entries: dict[str, tuple[str, str]] = {}

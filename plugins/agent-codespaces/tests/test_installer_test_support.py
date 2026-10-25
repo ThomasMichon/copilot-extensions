@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import stat
 import tempfile
 from pathlib import Path
@@ -10,7 +11,46 @@ from types import SimpleNamespace
 
 import pytest
 
-from .installer_test_support import snapshot_tree_manifest
+from .installer_test_support import installer_functional_timeout, snapshot_tree_manifest
+
+
+@pytest.mark.parametrize("profile,multiplier", [(None, 1), ("standard", 1), ("busy-host-functional", 3)])
+@pytest.mark.parametrize("seconds", [45, 60])
+def test_installer_functional_profile_is_explicit(monkeypatch, profile, multiplier, seconds):
+    monkeypatch.delenv("CODESPACES_INSTALLER_TEST_PROFILE", raising=False)
+    if profile is not None:
+        monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
+    assert installer_functional_timeout(seconds) == seconds * multiplier
+
+
+@pytest.mark.parametrize("profile", ["", "busy", "STANDARD"])
+def test_installer_functional_profile_refuses_unknown_values(monkeypatch, profile):
+    monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
+    with pytest.raises(ValueError, match="Unknown Codespaces installer test profile"):
+        installer_functional_timeout(45)
+
+
+@pytest.mark.parametrize("profile,multiplier", [("standard", 1), ("busy-host-functional", 3)])
+def test_installer_functional_profile_reaches_module_and_native_harness(
+    monkeypatch, tmp_path, profile, multiplier,
+):
+    monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
+    spec = importlib.util.spec_from_file_location(
+        f"{__package__}.profile_adoption_control",
+        Path(__file__).with_name("test_installer_engine_adoption.py"),
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.pytestmark.args == (60 * multiplier,)
+    observed = []
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda command, **kwargs: observed.append((command, kwargs)) or "completed",
+    )
+    assert module._run("sh", "exit 0", tmp_path, {}) == "completed"
+    assert observed[0][1]["timeout"] == 45 * multiplier
+    assert observed[0][1]["check"] is False
 
 
 @pytest.fixture

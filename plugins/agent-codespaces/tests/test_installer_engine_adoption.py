@@ -34,6 +34,7 @@ import pytest
 from .installer_test_support import (
     assert_installer_isolated,
     guard_installer_payload,
+    installer_functional_timeout,
     isolate_installer_environment,
     snapshot_tree_manifest,
 )
@@ -82,7 +83,7 @@ PS_VARIABLES = (
     "RemoteLoginShellDir",
     "PluginDir",
 )
-pytestmark = pytest.mark.timeout(60)
+pytestmark = pytest.mark.timeout(installer_functional_timeout(60))
 
 
 def _env(tmp_path: Path) -> dict[str, str]:
@@ -140,7 +141,7 @@ def _run(ext: str, script: str, tmp_path: Path, env: dict[str, str]):
     try:
         return subprocess.run(
             command, env=env, cwd=tmp_path, capture_output=True, text=True,
-            timeout=45, check=False,
+            timeout=installer_functional_timeout(45), check=False,
         )
     except subprocess.TimeoutExpired as exc:
         log = tmp_path / "uv.jsonl"
@@ -1378,7 +1379,7 @@ def codespaces_stamped_snapshot(tmp_path_factory, request):
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=installer_functional_timeout(45),
         check=False,
     )
     assert stamp.returncode == 0, stamp.stdout + stamp.stderr
@@ -1486,7 +1487,7 @@ def test_codespaces_stamp_snapshot_is_standalone(codespaces_stamped_snapshot):
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=45,
+        timeout=installer_functional_timeout(45),
         check=False,
     )
     assert first_use.returncode != 0

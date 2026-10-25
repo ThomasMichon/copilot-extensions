@@ -1969,6 +1969,101 @@ def test_explicit_file_group_limit_must_remain_positive(size):
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
+def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, profile):
+    class Lease:
+        def release(self):
+            pass
+
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
+    observed = []
+    monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: observed.append(kw) or 0)
+    files = [str(runner._CODESPACES_NATIVE_FILE)]
+    arguments = ["agent-codespaces", "--test-file", files[0]]
+    if profile is not None:
+        arguments += ["--test-profile", profile]
+    assert runner.main(arguments) == 0
+    options = observed[0]
+    busy = profile == "busy-host-functional"
+    assert options["limits"].wall_seconds == (900 if busy else 300)
+    assert options["plugin_timeout"] == (2700 if busy else 900)
+    assert options["test_timeout"] == 30
+    assert options["test_files"] == tuple(files)
+    assert options["kexpr"] is None and options["selection_file"] is None
+    assert options["test_profile"] == (profile or "standard")
+    assert (
+        options["limits"].max_processes, options["limits"].max_memory_mb,
+        options["limits"].max_temp_mb,
+    ) == (128, 4096, 2048)
+    output = capsys.readouterr().out
+    assert ("functional evidence only, not original-budget/performance PASS" in output) == busy
+
+
+@pytest.mark.parametrize("arguments", [
+    ["agent-codespaces"],
+    ["agent-bridge", "--test-file", "tests/test_installer_engine_adoption.py"],
+    ["agent-codespaces", "--test-file", "tests/test_install_ps1_recovery.py"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "-k", "healthy"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--timeout", "900"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--plugin-timeout", "2700"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--test-timeout", "180"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-processes", "129"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-memory-mb", "4097"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-temp-mb", "2049"],
+    ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--collect-only"],
+])
+def test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides(monkeypatch, arguments):
+    monkeypatch.setattr(
+        runner, "_acquire_admission",
+        lambda *_args: pytest.fail("Invalid profile must fail before admission"),
+    )
+    with pytest.raises(SystemExit) as error:
+        runner.main([*arguments, "--test-profile", "busy-host-functional"])
+    assert error.value.code == 2
+
+
+def test_codespaces_functional_profile_refuses_unknown_name():
+    with pytest.raises(SystemExit) as error:
+        runner.main(["agent-codespaces", "--test-profile", "busy"])
+    assert error.value.code == 2
+
+
+@pytest.mark.parametrize("profile", ["standard", "busy-host-functional"])
+def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
+    codespaces_native_plan, monkeypatch, profile,
+):
+    plugin, _, _ = codespaces_native_plan
+    monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "unrequested-ambient-profile")
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"].get(runner._CODESPACES_PROFILE_ENV) == (
+            None if profile == "standard" else profile
+        )
+        assert (
+            kwargs["limits"].max_processes, kwargs["limits"].max_memory_mb,
+            kwargs["limits"].max_temp_mb,
+        ) == (128, 4096, 2048)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "agent-codespaces", "unused", reinstall=False, kexpr=None,
+        test_files=(str(runner._CODESPACES_NATIVE_FILE),),
+        limits=containment.Limits(wall_seconds=900 if profile != "standard" else 300),
+        plugin_timeout=2700 if profile != "standard" else 900,
+        test_timeout=30, max_files_per_subsuite=25, test_profile=profile,
+    ) == 0
+    assert len(calls) == 6
+    assert [command[command.index("-k") + 1] for command in calls] == list(
+        runner._CODESPACES_WINDOWS_PARTITIONS
+    )
+    assert all(str(runner._CODESPACES_NATIVE_FILE) in command for command in calls)
+    assert plugin.is_dir()
+
+
 def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
     # Like --guards/--collect-only, --prepare-only is NOT exempt: it can
     # rebuild/delete the SHARED on-disk venv a concurrent bare admitted

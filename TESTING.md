@@ -75,6 +75,46 @@ mux process identities. Cleanup targets only the test's own namespace and
 birth-checked processes; no default-namespace shutdown or installed update is
 performed. This is an explicit native lane, not additional required PR CI.
 
+## Optional busy-host Codespaces functional qualification
+
+For sustained host contention, explicitly select the test-only
+`busy-host-functional` profile on the existing isolated runner:
+
+```bash
+python tools/run-plugin-tests.py agent-codespaces \
+  --test-profile busy-host-functional \
+  --test-file tests/test_installer_engine_adoption.py
+python tools/run-plugin-tests.py agent-codespaces \
+  --test-profile busy-host-functional \
+  --test-file tests/test_snapshot_copy_contract.py \
+  --test-file tests/test_installer_test_support.py
+```
+
+The first command is run against both canonical and normally materialized
+source for complete installer qualification. Keep the combined sequence,
+including materializer integration, preparation and cleanup, within a finite
+7200-second caller-owned containment envelope. The profile is opt-in and logged:
+the adoption module's item hang guard is 180 seconds instead of 60; its three
+45-second native subprocess hang guards become 135 seconds; group and plugin
+aggregate guards become 900 and 2700 seconds instead of 300 and 900.
+The runner's unmarked-item default remains 30 seconds. All other fixture
+deadlines remain unchanged.
+
+This profile accepts only the three named test files, without keyword/portfolio
+filters, host-state opt-ins or limit overrides. It preserves the complete
+selected inventory, assertions, admission/refusal and immutable-input checks,
+six Windows partitions, and 128-process/4096-MiB-memory/2048-MiB-temp caps.
+No repository hash or load probe is a prerequisite. The runner passes a
+test-only profile value to these fixtures and clears inherited profile state
+for ordinary runs.
+
+A profile PASS is **functional evidence only**. It is not a PASS under the
+original wall-time budgets, a performance or baseline qualification, or a
+replacement for required CI. Record the profile, source commit, actual selected
+outcomes/skips, elapsed times and cleanup result; retain failed standard-budget
+runs separately. Default CI, production deadlines, unrelated test suites and
+actual performance assertions are unchanged.
+
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
