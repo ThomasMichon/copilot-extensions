@@ -20,8 +20,9 @@ Both invocations test an absolute selected UV with no UV on PATH, and a UV
 command selected from PATH. Changing the native resolver mode subsequently
 requires ordinary source admission instead of reuse; corrupt completion
 evidence still refuses before cold admission. The same hosted Manager jobs
-also change an origins-receipt URL without changing the wheel digest and
-require an integrity refusal, not cold repair or another feed request. They
+also alter a receipt URL, an installed archive digest and installed origin
+JSON; each requires an integrity refusal, not cold repair or another feed
+request. A real installed-module health failure still requests source repair. They
 run package-version parsing and actual update-check regressions for source,
 source-profile and repaired generations.
 This does not qualify the production Manager dependency closure, default

@@ -180,17 +180,47 @@ print(json.dumps(asdict(result)))
     corrupted = json.loads(receipt)
     name = next(iter(corrupted["packages"]))
     corrupted["packages"][name] = "file:///altered/" + corrupted["packages"][name].rsplit("/", 1)[-1]
-    proof.write_text(json.dumps(corrupted))
+    site = slot / ("Lib/site-packages" if os.name == "nt" else (
+        f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    ))
+    origin = next(site.glob("*.dist-info/direct_url.json"))
+    installed_origin = origin.read_bytes()
+    changed_digest = json.loads(installed_origin)
+    changed_digest["archive_info"] = {"hashes": {"sha256": "0" * 64}}
     with monkeypatch.context() as integrity:
         integrity.setattr(builds, "retain_source_runtime_inputs", lambda *args, **kwargs: pytest.fail(
-            "corrupt origin receipt reached cold source admission",
+            "corrupt input evidence reached cold source admission",
         ))
-        with pytest.raises(builds.dependencies.DependencyPolicyError, match="origin evidence"):
-            builds.install_manager_source_runtime(plan(adopter), **arguments)
+        for path, content in (
+            (proof, json.dumps(corrupted)), (origin, json.dumps(changed_digest)), (origin, "{"),
+        ):
+            original = path.read_bytes()
+            path.write_text(content)
+            try:
+                with pytest.raises(builds.dependencies.DependencyPolicyError, match="input evidence"):
+                    builds.install_manager_source_runtime(plan(adopter), **arguments)
+                assert builds.engine.runtime.current_version(root) == slot.name
+                assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
+                assert len(state["requests"]) == requests
+            finally:
+                path.write_bytes(original)
+    installed_module = site / "worktree_manager" / "__init__.py"
+    original_module = installed_module.read_bytes()
+    with monkeypatch.context() as health:
+        def needs_source(*args, **kwargs):
+            raise RuntimeError("genuine installed health needs source admission")
+
+        health.setattr(builds, "retain_source_runtime_inputs", needs_source)
+        installed_module.write_text("raise RuntimeError('synthetic installed health failure')")
+        try:
+            with pytest.raises(RuntimeError, match="genuine installed health needs source admission"):
+                builds.install_manager_source_runtime(plan(adopter), **arguments)
+        finally:
+            installed_module.write_bytes(original_module)
     assert builds.engine.runtime.current_version(root) == slot.name
     assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
     assert len(state["requests"]) == requests
-    proof.write_bytes(receipt)
+    assert proof.read_bytes() == receipt and origin.read_bytes() == installed_origin
     environment(adopter, state, tmp_path, resolution="lowest")
 
     def requires_source(*args, **kwargs):

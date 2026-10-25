@@ -545,9 +545,6 @@ for name, expected in expected_origins.items():
     if sys.argv[5] == "fresh":
         assert origin.get("url") == expected, f"{name} was not installed from frozen input"
     elif recorded_origins is not None:
-        if sys.argv[5] == "receipt-reuse" and origin.get("url") != recorded_origins[name]:
-            print(f"{name} differs from its recorded frozen installation origin", file=sys.stderr)
-            raise SystemExit(74)
         assert origin.get("url") == recorded_origins[name], \
             f"{name} differs from its recorded frozen installation origin"
     else:
@@ -560,6 +557,14 @@ for name in excluded_packages:
     except importlib.metadata.PackageNotFoundError:
         continue
     raise AssertionError(f"excluded local package is installed: {name}")
+"""
+    probe = "import sys\ntry:\n" + "".join(
+        "    " + line + "\n" for line in probe.splitlines()
+    ) + """except Exception:
+    if sys.argv[5] == "receipt-reuse":
+        print("Published runtime input evidence differs from installed inputs", file=sys.stderr)
+        raise SystemExit(74)
+    raise
 module = importlib.import_module(sys.argv[2])
 assert module.__file__ and pathlib.Path(module.__file__).resolve().is_relative_to(slot), \
     "health module is outside the candidate runtime"
@@ -578,7 +583,7 @@ if sys.argv[4]:
         )
     except (subprocess.CalledProcessError, ChildLaunchError, ChildTimeoutExpired) as error:
         if isinstance(inputs.wheel_inputs, WheelReuseInputs) and getattr(error, "returncode", None) == 74:
-            raise DependencyPolicyError("Published runtime origin evidence differs from installed inputs") from error
+            raise DependencyPolicyError("Published runtime input evidence differs from installed inputs") from error
         if require_frozen_origin:
             raise
         raise HealthRepairRequired(
