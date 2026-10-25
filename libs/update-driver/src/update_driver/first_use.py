@@ -164,17 +164,22 @@ def _inspect(
     if plugin in ("agent-codespaces", "agent-logger") and (
         prefix + "_INSTALLATION_ID" in os.environ
         or runtime_root != Path.home() / ("." + plugin)
-        or payload.parent.parent != Path.home() / ".copilot" / "installed-plugins"
-        or payload.name != plugin
+        or not (
+            payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
+            and payload.name == plugin
+            or plugin == "agent-logger" and installer_action == "provision"
+            and payload.parent == runtime_root / "snapshots"
+        )
     ):
         raise ProvisionError(
             f"{label} first use requires its canonical installed payload and default legacy root"
         )
-    if plugin in ("agent-pull-requests", "agent-ssh"):
-        label = "SSH" if plugin == "agent-ssh" else "Pull Requests"
+    if plugin in ("agent-pull-requests", "agent-ssh", "agent-logger"):
+        label = {"agent-ssh": "SSH", "agent-logger": "Logger",
+                 "agent-pull-requests": "Pull Requests"}[plugin]
         installed = (
             payload.parent.parent == Path.home() / ".copilot" / "installed-plugins"
-            and (plugin != "agent-ssh" or payload.name == plugin)
+            and (plugin == "agent-pull-requests" or payload.name == plugin)
         )
         snapshot = payload.parent == runtime_root / "snapshots"
         if runtime_root != Path.home() / ("." + plugin) or not (installed or snapshot):
@@ -329,33 +334,41 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
             installer_action != "provision" or admission["plugin"] != "agent-vault"
         ):
             raise ProvisionError("client-only selection requires the Vault provision action")
-        current = _inspect(
-            payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
-        )
-        if current != admission:
-            raise ProvisionError("owning provision source or installation changed after acceptance")
-        custody.assert_owned()
-        import installer_engine as engine
+        try:
+            current = _inspect(
+                payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
+            )
+            if current != admission:
+                raise ProvisionError("owning provision source or installation changed after acceptance")
+            custody.assert_owned()
+            import installer_engine as engine
 
-        # Reuse the canonical complete-input copier under this request's custody.
-        # Keep these files: native publication may retain a source path into them.
-        legacy_stage = admission["plugin"] in {
-            "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
-        }
-        inputs = _path(
-            runtime_root / ".install-stage" if legacy_stage
-            else root / "provision-inputs"
-        )
-        inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
-        destination = inputs / custody.request_id
-        if legacy_stage:
-            # Keep legacy staging reapers off this live, queue-owned native tree.
-            destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
-        frozen = engine.freeze_inputs(payload, destination)
-        if frozen.payload_hash != admission["input_hash"] or _inspect(
-            payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
-        ) != admission:
-            raise ProvisionError("owning source or installation changed while freezing provision inputs")
+            # Reuse the canonical complete-input copier under this request's custody.
+            # Keep these files: native publication may retain a source path into them.
+            legacy_stage = admission["plugin"] in {
+                "agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-logger",
+            }
+            inputs = _path(
+                runtime_root / ".install-stage" if legacy_stage
+                else root / "provision-inputs"
+            )
+            inputs.mkdir(mode=0o700, parents=True, exist_ok=True)
+            destination = inputs / custody.request_id
+            if legacy_stage:
+                # Keep legacy staging reapers off this live, queue-owned native tree.
+                destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
+            frozen = engine.freeze_inputs(payload, destination)
+            if frozen.payload_hash != admission["input_hash"] or _inspect(
+                payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
+            ) != admission:
+                raise ProvisionError("owning source or installation changed while freezing provision inputs")
+        except (ProvisionError, OSError, ValueError) as error:
+            if admission["plugin"] != "agent-logger" or payload.parent != runtime_root / "snapshots":
+                raise
+            # No installer has started; this new recipe can certify a settled refusal.
+            custody.assert_owned()
+            print(f"Selected Logger source refused before installer execution: {error}", file=sys.stderr)
+            return 1
         custody.assert_owned()
         environment = _environment(payload)
         # This trusted adapter, not ambient caller hints, attests the copied
