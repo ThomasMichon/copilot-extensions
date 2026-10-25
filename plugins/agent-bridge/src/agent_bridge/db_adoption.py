@@ -10,6 +10,7 @@ from .inbox_custody import validate_schema as validate_inbox_schema
 from .inbox_consumer_schema import validate_schema as validate_consumer_schema
 from .turn_custody_schema import validate_schema as validate_turn_schema
 from .acquisition_custody_schema import validate_schema as validate_acquisition_schema
+from .creation_custody_schema import validate_schema as validate_creation_schema
 
 
 def open_existing_writable(source: Database) -> Database:
@@ -51,6 +52,7 @@ def open_existing_writable(source: Database) -> Database:
         validate_consumer_schema(conn)
         validate_turn_schema(conn)
         validate_acquisition_schema(conn)
+        validate_creation_schema(conn)
         if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
             raise ValueError("Writable adoption requires an existing WAL database")
         conn.rollback()
