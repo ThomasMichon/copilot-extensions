@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import agent_procutil
 
 from agent_worktrees import push_timeout
 
@@ -40,9 +41,9 @@ def test_captured_tree_launch_and_cleanup(monkeypatch, windows, outcome, binary)
         return proc, job if windows else None
 
     monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows" if windows else "Linux")
-    monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", spawn)
-    monkeypatch.setattr(push_timeout, "no_window_kwargs", lambda: {"headless": True})
-    monkeypatch.setattr(push_timeout, "detached_kwargs", lambda: {"own_group": True})
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(agent_procutil, "no_window_kwargs", lambda: {"headless": True})
+    monkeypatch.setattr(agent_procutil, "detached_kwargs", lambda: {"own_group": True})
     monkeypatch.setattr(push_timeout, "_kill_tree", lambda child: events.append("group-kill"))
     env = {"fixture": "value"}
     if outcome == "success":
@@ -97,7 +98,7 @@ def test_required_job_admission_failure_is_not_retried(monkeypatch):
         raise RuntimeError("Windows descendant Job assignment failed before child resume")
 
     monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", refuse)
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", refuse)
     with pytest.raises(RuntimeError, match="before child resume"):
         push_timeout.run_bounded(["fixture"], cwd=None, env={}, timeout=0.5)
     assert len(calls) == 1 and calls[0]["require_job"] is True
@@ -124,8 +125,8 @@ def test_inherited_process_group_never_signals_its_caller(monkeypatch, failure):
     proc.communicate = communicate
     proc.kill = lambda: events.append("child-kill")
     monkeypatch.setattr(push_timeout.platform, "system", lambda: "Linux")
-    monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
-    monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", spawn)
     monkeypatch.setattr(push_timeout.os, "getpgid", lambda pid: 42, raising=False)
     monkeypatch.setattr(push_timeout.os, "getpgrp", lambda: 42, raising=False)
     monkeypatch.setattr(

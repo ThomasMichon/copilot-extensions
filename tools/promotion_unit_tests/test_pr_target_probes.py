@@ -12,7 +12,6 @@ _path = sys.path.copy()
 try:
     sys.path[:0] = [
         str(WORKTREES / "src"),
-        str(ROOT / "libs/agent-procutil/src"),
     ]
     _spec = importlib.util.spec_from_file_location(
         "promotion_original_pr_target_probes",

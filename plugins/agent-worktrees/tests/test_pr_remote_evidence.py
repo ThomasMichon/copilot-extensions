@@ -1,6 +1,8 @@
 """Fresh URL authority and exact, batched transport configuration."""
 
 import subprocess
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +11,39 @@ from agent_worktrees import git_ops, pr_publish, tracking
 from agent_worktrees.config import PRConfig
 from agent_worktrees.git_push_transport import REMOTE_TRANSPORT_SETTINGS
 from pr_test_helpers import _stub_remote_target
+
+
+def test_cold_target_import_does_not_load_native_process_helpers():
+    from agent_procutil import no_window_kwargs
+
+    script = """
+import sys
+assert "agent_procutil" not in sys.modules and "ctypes" not in sys.modules
+class RefuseNative:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in ("agent_procutil", "ctypes"):
+            raise AssertionError("target import loaded native process helpers")
+sys.meta_path.insert(0, RefuseNative())
+sys.path.insert(0, sys.argv[1])
+print("before-policy-import", flush=True)
+from agent_worktrees import git_ops
+print("git-policy-imported", flush=True)
+import faulthandler
+faulthandler.dump_traceback_later(10)
+from agent_worktrees import pr_publish, publication_deadline
+faulthandler.cancel_dump_traceback_later()
+print("target-policy-imported", flush=True)
+assert callable(git_ops.git) and callable(pr_publish.head_branch_gone)
+assert publication_deadline.validate(30) == 30
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(Path(__file__).resolve().parents[1] / "src")],
+            capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(f"cold target import timed out: {exc.stdout!r} {exc.stderr!r}")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.fixture

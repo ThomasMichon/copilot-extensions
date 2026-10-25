@@ -7,6 +7,7 @@ import typing
 from pathlib import Path
 
 import pytest
+import agent_procutil
 
 from agent_worktrees.git_ops import (
     GitError,
@@ -434,7 +435,7 @@ class TestPushTimeoutTreeKill:
         )
         cmd = [sys.executable, str(outer_script)]
 
-        original_spawn = push_timeout.spawn_sync_in_kill_on_close_job
+        original_spawn = agent_procutil.spawn_sync_in_kill_on_close_job
 
         def ready_spawn(*args, **kwargs):
             proc, job = original_spawn(*args, **kwargs)
@@ -455,7 +456,7 @@ class TestPushTimeoutTreeKill:
                 proc.wait(timeout=5)
                 raise
 
-        monkeypatch.setattr(push_timeout, "spawn_sync_in_kill_on_close_job", ready_spawn)
+        monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", ready_spawn)
         grandchild_pid: int | None = None
         grandchild_start_time: str | None = None
         try:
@@ -523,7 +524,7 @@ class TestPushTimeoutTreeKill:
         fake_proc = types.SimpleNamespace(
             pid=999999, poll=lambda: None, kill=lambda: calls.append("kill"),
         )
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: True)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: True)
         push_timeout._kill_tree(fake_proc)
         assert calls == ["kill"], "root must be killed via its own Popen handle"
 
@@ -539,7 +540,7 @@ class TestPushTimeoutTreeKill:
         harmless no-op)."""
         from agent_worktrees import push_timeout
 
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
         sweep_called = []
         monkeypatch.setattr(
             push_timeout.subprocess, "run",
@@ -555,7 +556,7 @@ class TestPushTimeoutTreeKill:
         handle guarantees that exact PID hasn't been reused."""
         from agent_worktrees import push_timeout
 
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: False)
         monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows")
         sweep_called = []
         monkeypatch.setattr(
@@ -577,7 +578,7 @@ class TestPushTimeoutTreeKill:
         performed)."""
         from agent_worktrees import push_timeout
 
-        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: True)
+        monkeypatch.setattr(agent_procutil, "contained_test_mode", lambda: True)
         sweep_called = []
         monkeypatch.setattr(
             push_timeout.subprocess, "run",
