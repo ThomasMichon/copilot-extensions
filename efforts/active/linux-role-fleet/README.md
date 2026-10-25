@@ -37,6 +37,7 @@ placement is an explicit requirement; no option is a mandatory core dependency.
 | Runner loadout participant | Vision-first #7192 template, placement and declaration-to-managed-owner flow; existing release/lifecycle/authentication owners retained | Existing #7192 coordination and separate managed upstream worktree |
 | Trusted base-image participant | Bounded #8352 image recipe, contract, docs and tests; no controller or credential ownership | Separate managed upstream worktree; campaign owner integrates |
 | Diagnostic logging contributor | Bounded #8377 shared Bridge/Dispatch application logging, discovery and retention source; no installer/native capture or deployment ownership | Managed source worktree `spinning-sprocket` |
+| Telemetry attribution planner | Bounded #8377 public intent and source-backed attribution proposal; no implementation, collector or deployment ownership | Managed source worktree `gleaming-gasket` |
 | Adopter | Capacity, inventory, trust and live activation approval | Provider-specific downstream flow |
 
 ## Coordination
@@ -262,6 +263,11 @@ mutation follows from this amendment.
   and container-owned logging; preserve explicit incomplete-attempt protection.
 - [ ] Validate concurrent writers, native Windows/POSIX handles, protocol
   output/privacy and truthful failed/rolled-back/committed outcomes.
+- [ ] Review and realize the [keyed attribution continuation](telemetry-attribution.md)
+  through the [existing logging sub-plan](logging-conventions.md), preserving
+  internal diagnostics, truthful subject identities and user-held-key self-lookup.
+  Plan publication precedes separately admitted implementation; shared deployment
+  remains blocked on the complete ingestion/query identity-separation review.
 
 ### Mission amendment - Setup, refresh and first useful services
 
