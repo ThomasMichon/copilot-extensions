@@ -78,6 +78,7 @@ class FrozenInputs:
     wheel_inputs: WheelInstallInputs | WheelReuseInputs | None = None
     source_wheels: SourceWheelInputs | None = None
     application: Path | None = None
+    diagnostics: bool = False
 
 
 @dataclass(frozen=True)
@@ -385,7 +386,7 @@ def _retained_input_graph(inputs: FrozenInputs, uv: Path, python: Path, *, refre
         inputs, uv, python, refresh=refresh, on_progress=on_progress,
         engine=sys.modules[__name__],
     ) as frozen:
-        yield frozen
+        yield replace(frozen, diagnostics=inputs.diagnostics)
 
 
 def _child(
@@ -435,6 +436,9 @@ def _child(
                 on_output=relay if on_progress is not None or not output_fds else None,
                 output_fds=output_fds,
                 allow_breakaway=allow_breakaway,
+                **({
+                    "diagnostics_path": inputs.plugin / "scripts" / "installer_diagnostics.py",
+                } if getattr(inputs, "diagnostics", False) else {}),
                 **cast(dict[str, Any], {
                     "runtime_root": candidate.parent.parent, "runtime_version": candidate.name,
                     "runtime_path": Path(runtime.__file__),
@@ -700,6 +704,8 @@ def numbered_candidate(
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
+    progress: Callable[[str], None] | None = None,
+    diagnostics: bool = False,
 ) -> AbstractContextManager[ReadyCandidate]:
     """Construct or reuse an immutable identity; lifecycle owns cutover/governance.
 
@@ -722,7 +728,9 @@ def numbered_candidate(
         nested_environment=nested_environment,
         source_wheel_cache_root=source_wheel_cache_root,
         expected_payload_hash=expected_payload_hash,
+        diagnostics=diagnostics,
         wait_timeout=wait_timeout, child_timeout=child_timeout,
+        progress=progress,
     )
 
 
@@ -759,9 +767,17 @@ def _candidate(
     source_wheel_cache_root: Path | None = None,
     expected_payload_hash: str | None = None,
     wait_timeout: float = 180, child_timeout: float = 180,
+    progress: Callable[[str], None] | None = None,
+    diagnostics: bool = False,
 ) -> Iterator[ReadyCandidate]:
     if expected_payload_hash is not None and not re.fullmatch(r"[0-9a-f]{64}", expected_payload_hash):
         raise ValueError("Expected runtime payload hash must be a full source SHA256")
+
+    def report(phase: str) -> None:
+        if progress is not None:
+            progress(phase)
+
+    report("source-admission")
     root = root.resolve()
     if type(nested_environment) is not bool or (nested_environment and (
         application is not None or not isinstance(wheel_inputs, (WheelInstallInputs, WheelReuseInputs))
@@ -803,10 +819,11 @@ def _candidate(
             raise ValueError("Inspected wheels differ from the selected local dependency graph")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     (root / ".installer-inputs").mkdir(parents=True, exist_ok=True)
-    with _source_phase("source-selection", child_timeout, {}) as progress:
+    report("source-fingerprint")
+    with _source_phase("source-selection", child_timeout, {}) as source_progress:
         def selected() -> None:
-            _source_deadline(progress)
-            progress.renew()
+            _source_deadline(source_progress)
+            source_progress.renew()
 
         inputs = FrozenInputs(
             plugin.resolve(strict=True), packages,
@@ -818,7 +835,9 @@ def _candidate(
             ),
             extras=extras, local_packages=local_packages, wheel_inputs=wheel_inputs,
             application=application,
+            diagnostics=diagnostics,
         )
+    report("source-fingerprint-ready")
     with ExitStack() as retained:
         if dev_owner is not None:
             _check_dev_owner(root, dev_owner)
@@ -843,6 +862,7 @@ def _candidate(
         if isinstance(wheel_inputs, WheelReuseInputs) and decision != runtime.ADMIT_REUSE:
             raise HealthRepairRequired("Existing wheel evidence cannot construct a missing runtime")
         if decision == runtime.ADMIT_REUSE:
+            report("reuse-retention")
             with runtime.retention_custody(
                 root, version, payload_hash=inputs.payload_hash,
                 timeout=_lease_timeout(inputs, wait_timeout),
@@ -850,6 +870,7 @@ def _candidate(
                 if expected_payload_hash is not None:
                     _revalidate_input_content(inputs)
                 _assert_source_pin(plugin, expected_source_identity)
+                report("reuse-health")
                 _verify_installed(
                     inputs, slot, installed_python(slot), health_module,
                     descriptor, child_timeout, health_callable=health_callable,
@@ -866,9 +887,11 @@ def _candidate(
                 )
             return
         with ExitStack() as construction:
+            report("construction-lease")
             with runtime.construction_lease(
                 root, version, timeout=_lease_timeout(inputs, wait_timeout),
             ) as descriptor:
+                report("construction-lease-acquired")
                 _assert_source_pin(plugin, expected_source_identity)
                 if dev_owner is not None:
                     _check_dev_owner(root, dev_owner)
@@ -883,20 +906,22 @@ def _candidate(
                         # UV's non-editable metadata projection is a build input,
                         # not the selected source payload copied by preparation.
                         temporary = retained.enter_context(_temporary_inputs(None))
-                        with _source_phase("payload-snapshot", child_timeout, {}) as progress:
-                            deadline = _source_deadline(progress)
+                        with _source_phase("payload-snapshot", child_timeout, {}) as source_progress:
+                            deadline = _source_deadline(source_progress)
                             if inputs.wheel_inputs is not None:
                                 deadline = min(deadline, inputs.wheel_inputs.deadline)
                             frozen = freeze_inputs(
                                 inputs.plugin, _private_retained_root(Path(temporary)) / "source",
-                                deadline=deadline, on_progress=progress.renew,
+                                deadline=deadline, on_progress=source_progress.renew,
                             )
                         payload = replace(inputs, plugin=frozen.plugin, packages=frozen.packages)
                         _revalidate_input_content(payload)
                         _assert_source_pin(payload.plugin, expected_source_identity)
+                    report("retain-uv-inputs")
                     inputs = retained.enter_context(_retained_inputs(
                         inputs, uv, python, refresh=False, timeout=child_timeout,
                     ))
+                    report("retained-uv-inputs-ready")
                     if wheel_inputs is None:
                         def run_source_build(argv: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
                             return _child(
@@ -910,10 +935,12 @@ def _candidate(
                             inputs, cache_root, uv, base_python,
                             run=run_source_build, timeout=child_timeout,
                         ))
+                    report("construct-runtime")
                     python = _construct(
                         inputs, slot, uv, base_python, descriptor, child_timeout,
                         **({"nested_environment": True} if nested_environment else {}),
                     )
+                    report("constructed-runtime")
                     origin_proof = Path(_native_retained_path(slot / ".runtime-input-origins.json"))
                     if origin_proof.is_symlink():
                         raise RuntimeError("Frozen installation origin evidence cannot be a symlink")
@@ -950,12 +977,14 @@ def _candidate(
                     if construction_callable is not None:
                         _revalidate_input_content(payload)
                         _assert_source_pin(payload.plugin, expected_source_identity)
+                        report("prepare-installed-runtime")
                         _prepare_installed(
                             inputs, slot, python, construction_callable,
                             construction_data or {}, descriptor, child_timeout, payload,
                         )
                         _revalidate_input_content(payload)
                         _assert_source_pin(payload.plugin, expected_source_identity)
+                    report("verify-installed-runtime")
                     _verify_installed(
                         inputs, slot, python, health_module, descriptor, child_timeout,
                         health_callable=health_callable,
@@ -973,6 +1002,7 @@ def _candidate(
                     runtime.mark_complete(
                         root, version, payload_hash=inputs.payload_hash, dev_owner=dev_owner,
                     )
+                    report("runtime-complete")
                 # Transfer to retention while construction is still owned. The
                 # caller never joins cutover coordination holding construction.
                 slot, retention_descriptor = construction.enter_context(
@@ -994,6 +1024,7 @@ def _candidate(
             _assert_source_pin(plugin, expected_source_identity)
             if dev_owner is not None:
                 _check_dev_owner(root, dev_owner)
+            report("candidate-retained")
             yield ReadyCandidate(
                 slot, inputs.payload_hash, reused, retention_descriptor, inputs.plugin, inputs.extras,
                 inputs.local_packages,

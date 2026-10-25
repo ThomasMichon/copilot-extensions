@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from types import TracebackType
-from typing import Any, TypedDict, cast
+from typing import IO, Any, TypedDict, cast
 
 
 class VerifierIdentity(TypedDict):
@@ -300,16 +300,18 @@ def close_clients() -> None:
 
 def wait_for_settlement(
     argv: list[str], environment: dict[str, str], *, verifier: LiveInputVerifier | None = None,
+    stdout: IO[bytes] | None = None, stderr: IO[bytes] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     with (verifier.child_launch(environment) if verifier is not None
           else nullcontext(LaunchOptions(env=environment))) as launch:
         process = subprocess.Popen(
             argv, **launch, stdin=subprocess.DEVNULL,
+            stdout=stdout, stderr=stderr,
             executable=argv[0] if os.name == "nt" else None,
             text=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
         )
     try:
-        stdout, stderr = verifier.wait(process) if verifier is not None else process.communicate()
+        child_stdout, child_stderr = verifier.wait(process) if verifier is not None else process.communicate()
     except BaseException:
         # An interrupted caller still owns the child's actual publication outcome.
         if verifier is not None:
@@ -317,4 +319,4 @@ def wait_for_settlement(
         else:
             process.communicate()
         raise
-    return subprocess.CompletedProcess(argv, cast(int, process.returncode), stdout, stderr)
+    return subprocess.CompletedProcess(argv, cast(int, process.returncode), child_stdout, child_stderr)

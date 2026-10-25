@@ -599,23 +599,28 @@ def _execute_runtime_step(step: update_runtime_plan.RuntimeUpdateStep) -> str:
         except (OSError, ValueError, SyntaxError, subprocess.SubprocessError) as error:
             return f"prepared source execution refused: {error}"
         try:
-            status = run(command).status
+            result = run(command)
             if (
-                status == "OK" and step.source is not None and step.source.application is None
+                result.status == "OK" and step.source is not None and step.source.application is None
                 and not update_runtime_plan._runtime_footprint_current(step)
             ):
                 return "source deployment receipt invalid: selected runtime footprint changed"
-            return status
         except (OSError, ValueError) as error:
             if step.source is None:
                 raise
             return f"source deployment receipt invalid: {error}"
+        if step.name == "agent-worktrees":
+            update_events.installer_diagnostics(
+                "agent-worktrees@copilot-extensions", result.diagnostics,
+            )
+        return result.status
 
     run = functools.partial(
         _run_human_installer, label=step.name, receipt_owned=True,
         cwd=step.artifact, env=step.environment, deadline_s=step.deadline_s,
         target_version=step.target_version,
         receipt=receipt,
+        **({"diagnostics": True} if step.name == "agent-worktrees" else {}),
     )
     status = execute(step.argv)
     if step.source is None and step.fallback_argv and status.startswith("installer exited"):
@@ -649,10 +654,14 @@ def _run_engine_installer(
         run = _run_human_installer(
             argv, label="agent-worktrees", receipt_owned=True,
             cwd=_invocation_update_context() or plugin_dir, env=env, deadline_s=timeout,
+            diagnostics=True,
             target_version=(target_version or reconcile.payload_version(plugin_dir)) if runtime_root else None,
             receipt=lambda: reconcile.runtime_deployed_version("agent-worktrees", root=runtime_root),
         )
         rc, status = (0 if run.status == "OK" else (run.rc or 1)), run.status
+        update_events.installer_diagnostics(
+            "agent-worktrees@copilot-extensions", run.diagnostics,
+        )
     if status.startswith("timed out"):
         output.err("agent-worktrees installer timed out")
     elif status != "OK":

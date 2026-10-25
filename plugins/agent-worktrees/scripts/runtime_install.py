@@ -2,6 +2,25 @@
 
 from __future__ import annotations
 
+if __name__ == "__main__":
+    # Enter diagnostics before implementation imports and argparse can fail.
+    # Re-enter this same trusted source in-process, not through another child.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import installer_diagnostics as _entry_diagnostics
+
+    with _entry_diagnostics.writer(announce=True):
+        import runpy
+
+        _entry_diagnostics.ordinary(Path(__file__))
+        _implementation = runpy.run_path(__file__, run_name="__installer_source__")
+        try:
+            raise SystemExit(_implementation["main"]())
+        finally:
+            _implementation["verification"].close_clients()
+
 import argparse
 import hashlib
 import importlib.util
@@ -28,6 +47,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import installer_engine as _engine
 engine = _engine
+import installer_diagnostics as diagnostics
 import versioned_runtime as runtime
 import versioned_runtime_source as _runtime_source
 runtime_source = _runtime_source
@@ -403,6 +423,40 @@ def _installed_identity(slot: Path) -> dict[str, Any]:
     return install_driver.installed_identity(slot, runtime, InstallationRefused)
 
 
+def _associate_diagnostics(governance: Governance, slot: Path, identity: dict, manifest: bytes) -> None:
+    """Called only inside existing publication and retained-slot custody."""
+    try:
+        from agent_worktrees import runtime_deployment as deployment
+
+        governance.recheck()
+        if (
+            slot.parent != governance.root / "versions"
+            or runtime.current_version(governance.root) != slot.name
+            or deployment.read_manifest(governance.root) != manifest
+        ):
+            raise InstallationRefused("Diagnostic association requires the validated publication")
+        published = json.loads(manifest)
+        if (
+            published["service"] != "agent-worktrees"
+            or published["runtime_slot"] != slot.name
+            or Path(published["venv"]) != slot
+            or published["source"]["version"] != identity["package_version"]
+            or published["runtime_generation"] != identity["build_info"].get("runtime_generation")
+            or published["payload_hash"] != runtime.read_marker(
+                governance.root, slot.name,
+            )["payload_hash"]
+        ):
+            raise InstallationRefused("Diagnostic association differs from installed identity")
+        diagnostics.associate_installed({
+            "runtime_root": str(governance.root), "runtime_slot": slot.name,
+            "package_version": identity["package_version"],
+            "runtime_generation": identity["build_info"].get("runtime_generation"),
+            "deployment_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        })
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError):
+        diagnostics.warn()
+
+
 @install_driver.owned
 def install(
     root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
@@ -483,9 +537,13 @@ def install(
         if previous is not None:
             custody.enter_context(runtime.retention_lease(root, previous, timeout=wait_timeout))
         try:
+            diagnostics.phase("governance-wait")
             with governance.held(timeout=wait_timeout):
+                diagnostics.phase("governance-acquired")
                 if source_identity is not None:
+                    diagnostics.phase("publish-source-snapshot")
                     plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
+                    diagnostics.phase("source-snapshot-ready")
                 if source_identity is not None or native_wheel_inputs is not None:
                     version = install_driver.selected_repair(root, version, previous, source_identity, governance)
                 candidate = custody.enter_context(engine.numbered_candidate(
@@ -497,6 +555,8 @@ def install(
                     reuse_generations=source_identity is None and not wheel_options,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
+                    progress=diagnostics.phase,
+                    diagnostics=True,
                     **cast(install_driver.ValidationOptions, {"validate_candidate": lambda _slot: governance.recheck()}
                            if policy is not None else {}),
                     **wheel_options,
@@ -551,7 +611,10 @@ def install(
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            completed = verification.wait_for_settlement(argv, environment, verifier=input_verifier)
+            with diagnostics.capture() as destinations:
+                completed = verification.wait_for_settlement(
+                    argv, environment, verifier=input_verifier, **destinations,
+                )
             stdout, stderr = completed.stdout, completed.stderr
             if stdout:
                 print(stdout, end="", flush=True)
@@ -790,12 +853,15 @@ def settle_candidate(
                         helpers.keep()
                     else:
                         helpers.rollback()
+                if committed:
+                    _associate_diagnostics(governance, candidate_slot, identity, manifest)
                 if isinstance(failure, InstallationRefused):
                     return install_driver.refusal_result(version, failure, committed=committed)
                 raise
             else:
                 if helpers is not None:
                     helpers.keep()
+                _associate_diagnostics(governance, candidate_slot, identity, manifest)
         return {
             "runtime_version": version,
             "package_version": identity["build_info"]["version"],

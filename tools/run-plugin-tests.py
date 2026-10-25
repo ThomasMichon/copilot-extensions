@@ -67,6 +67,7 @@ from plugin_test_containment import (
     Limits,
     TestSandbox as _TestSandbox,
     UnreapedProcessError as UnreapedProcessError,
+    cleanup_reaped_directory,
     isolated_environment,
     partition,
     run_contained,
@@ -708,7 +709,7 @@ def run_plugin(
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
-                _TestSandbox._rmtree, group_temp,
+                cleanup_reaped_directory, group_temp,
             ))
             passed_group |= returncode == 0
             if returncode == 1 and partition_selector is not None:

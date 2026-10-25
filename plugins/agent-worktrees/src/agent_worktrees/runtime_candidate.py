@@ -25,6 +25,7 @@ MODE_OWNER_ABI = 1
 INPUT_VERIFIER_ABI = 1
 
 _LIFECYCLE_FILES = (
+    "installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py",
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py", "installer_engine_health.py",
     "runtime_install_driver.py",

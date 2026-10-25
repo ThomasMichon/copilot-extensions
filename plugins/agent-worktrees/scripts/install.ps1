@@ -76,6 +76,25 @@ param(
     [string]$WheelUv
 )
 
+function Write-InstallerDiagnostic { param($Message) }
+function Complete-InstallerDiagnostics { param($ExitCode) }
+function New-InstallerDiagnosticCapture { return $null }
+function Save-InstallerDiagnosticCapture { param($Capture) }
+function Wait-InstallerDiagnosticChild { param($Process, $Capture, $Seconds) return $Process.WaitForExit($Seconds * 1000) }
+function Receive-InstallerDiagnosticCapture { param($Process, $Capture, [switch]$Final) return 0 }
+$script:InstallerDiagnosticPipeReady = $false
+try {
+    . (Join-Path $PSScriptRoot 'installer-diagnostics.ps1')
+    Initialize-InstallerDiagnostics 'agent-worktrees'
+} catch {
+    $env:COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING = '1'
+    try { [Console]::Error.WriteLine('WARNING: installer diagnostics unavailable; continuing with missing diagnostics.') } catch {}
+}
+trap {
+    Write-InstallerDiagnostic $_.Exception.Message
+    break
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -130,6 +149,11 @@ function Resolve-InstallerProjectName {
         }
     }
     return $Name
+}
+
+if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1' -and
+    $env:COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING -eq '0') {
+    try { [Console]::Error.WriteLine("Installer diagnostics: $env:COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY") } catch {}
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -452,7 +476,10 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         } finally {
             $ErrorActionPreference = $driverPreviousErrorAction
         }
-        if (-not $driverParticipant -or $driverExitCode -ne 0) { exit $driverExitCode }
+        if (-not $driverParticipant -or $driverExitCode -ne 0) {
+            Complete-InstallerDiagnostics $driverExitCode
+            exit $driverExitCode
+        }
     }
     if (-not $ContextualInstall) {
         $admissionArgs = @(
@@ -466,7 +493,11 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) {
             & $invokeAdmissionPython -Candidate $admissionPython -StreamOutput -Arguments (
                 $admissionArgs + @('--check-lifecycle', '--lifecycle-operation', $admissionOperation))
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($LASTEXITCODE -ne 0) {
+                $admissionExit = $LASTEXITCODE
+                Complete-InstallerDiagnostics $admissionExit
+                exit $admissionExit
+            }
         } else {
             $admissionForward = @()
             foreach ($key in $PSBoundParameters.Keys) {
@@ -494,6 +525,7 @@ print(json.dumps(sys.executable, ensure_ascii=True))
             } finally {
                 $ErrorActionPreference = $admissionPreviousErrorAction
             }
+            Complete-InstallerDiagnostics $admissionExitCode
             exit $admissionExitCode
         }
     }
@@ -838,6 +870,7 @@ if ($ContextualInstall) {
             '-File',
             $contextStagedEntry
         ) + $contextForward
+        $contextCapture = New-InstallerDiagnosticCapture -Piped
         $contextStart = [Diagnostics.ProcessStartInfo]::new()
         $contextStart.FileName = $hostExe
         if ($contextStart.PSObject.Properties.Name -contains 'ArgumentList') {
@@ -859,11 +892,20 @@ if ($ContextualInstall) {
             Write-Error 'Context installer child could not be started.'
             exit 1
         }
-        $contextStdout = $contextChild.StandardOutput.ReadToEndAsync()
-        $contextStderr = $contextChild.StandardError.ReadToEndAsync()
+        $null = $contextChild.Handle
+        $contextFallbackStdout = $null
+        $contextFallbackStderr = $null
+        if (-not $script:InstallerDiagnosticPipeReady) {
+            # Preserve the existing producer contract when logging is unavailable.
+            # Start both drains together, but never await descendant EOF.
+            $contextFallbackStdout = $contextChild.StandardOutput.ReadToEndAsync()
+            $contextFallbackStderr = $contextChild.StandardError.ReadToEndAsync()
+        }
+        $contextWaitSeconds = if ($contextDeadline -gt 0) { $contextDeadline } else { 10 }
+        $contextExited = Wait-InstallerDiagnosticChild $contextChild $contextCapture $contextWaitSeconds
         if (
             $contextDeadline -gt 0 -and
-            -not $contextChild.WaitForExit($contextDeadline * 1000)
+            -not $contextExited
         ) {
             try {
                 & taskkill.exe /PID $contextChild.Id /T /F 2>&1 | Out-Null
@@ -889,20 +931,22 @@ if ($ContextualInstall) {
             $contextExitCode = 124
         } else {
             if ($contextDeadline -le 0) {
-                if (-not $contextChild.WaitForExit(10000)) {
+                if (-not $contextExited) {
                     throw "Context installer child teardown is unsettled; retaining stage: $contextStage"
-                }
-                if (-not [Threading.Tasks.Task]::WaitAll(
-                    [Threading.Tasks.Task[]]@($contextStdout, $contextStderr), 10000
-                )) {
-                    throw "Context installer output is unsettled; retaining stage: $contextStage"
                 }
             }
             $contextExitCode = $contextChild.ExitCode
         }
         $contextChild.WaitForExit()
-        [Console]::Out.Write($contextStdout.GetAwaiter().GetResult())
-        [Console]::Error.Write($contextStderr.GetAwaiter().GetResult())
+        $null = Receive-InstallerDiagnosticCapture $contextChild $contextCapture -Final
+        Save-InstallerDiagnosticCapture $contextCapture
+        if ($contextFallbackStdout -and $contextFallbackStdout.IsCompleted) {
+            try { [Console]::Out.Write($contextFallbackStdout.GetAwaiter().GetResult()) } catch {}
+        }
+        if ($contextFallbackStderr -and $contextFallbackStderr.IsCompleted) {
+            try { [Console]::Error.Write($contextFallbackStderr.GetAwaiter().GetResult()) } catch {}
+        }
+        Complete-InstallerDiagnostics $contextExitCode
         Remove-Item -LiteralPath $contextStage -Recurse -Force -ErrorAction SilentlyContinue
         exit $contextExitCode
     }
@@ -5058,3 +5102,5 @@ switch ($Action) {
         Stop-RuntimeConstruction
     }
 }
+
+Complete-InstallerDiagnostics 0

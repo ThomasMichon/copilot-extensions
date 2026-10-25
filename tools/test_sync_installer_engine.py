@@ -190,6 +190,14 @@ write_deploy_manifest svc plugin "$2" "$3" "$4" '"preserved":"value"' '' 1.2.3
     assert built["preserved"] == "value"
 
 
+def test_diagnostics_assets_are_self_contained_canonical_projections():
+    pairs = sync_installer_engine.ier.diagnostics_pairs(REPO)
+    assert len(pairs) == 5
+    for source, destination in pairs:
+        assert destination.read_bytes() == source.read_bytes()
+        assert destination.parent.name == "scripts"
+
+
 @pytest.mark.parametrize("shell", ["bash", "pwsh", "powershell"])
 def test_installer_action_identity_uses_existing_progress_helpers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str,
