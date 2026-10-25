@@ -41,7 +41,7 @@ def _package(root: Path, name: str, sources: str = "") -> Path:
     return root
 
 
-def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, monkeypatch):
+def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, monkeypatch, tmp_path):
     import io
 
     failure = subprocess.CalledProcessError(1, ["uv"], output="", stderr="\u2502 build failed")
@@ -55,7 +55,7 @@ def test_child_failure_preserves_unicode_diagnostic_and_original_error(engine, m
 
     monkeypatch.setattr(engine, "run_owned", fail)
     with pytest.raises(subprocess.CalledProcessError) as caught:
-        engine._child(["uv"], inputs=None, descriptor=0, timeout=1)
+        engine._child(["uv"], inputs=engine.FrozenInputs(tmp_path, (), "unused"), descriptor=0, timeout=1)
     assert caught.value is failure
     stderr.flush()
     assert b"\\u2502 build failed" in stream.getvalue()
@@ -108,7 +108,7 @@ def test_candidate_failure_survives_retained_cleanup(
     assert "injected retained cleanup failure" in diagnostic
 
 
-def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys):
+def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch, capsys, tmp_path):
     failure = subprocess.TimeoutExpired(
         ["uv"], 1, output="building example\n", stderr="backend stalled\n",
     )
@@ -119,7 +119,7 @@ def test_child_timeout_surfaces_captured_backend_diagnostic(engine, monkeypatch,
 
     monkeypatch.setattr(engine, "run_owned", fail)
     with pytest.raises(subprocess.TimeoutExpired) as caught:
-        engine._child(["uv"], inputs=None, descriptor=0, timeout=1)
+        engine._child(["uv"], inputs=engine.FrozenInputs(tmp_path, (), "unused"), descriptor=0, timeout=1)
     assert caught.value is failure
     diagnostic = capsys.readouterr().err
     assert "building example" in diagnostic and "backend stalled" in diagnostic
@@ -136,7 +136,7 @@ def test_child_preserves_canonical_transaction_environment_and_cwd(engine, monke
 
     monkeypatch.setattr(engine, "run_owned", run)
     engine._child(
-        [sys.executable], inputs=None, descriptor=0, timeout=1,
+        [sys.executable], inputs=engine.FrozenInputs(tmp_path, (), "unused"), descriptor=0, timeout=1,
         environment=environment, cwd=tmp_path,
     )
 

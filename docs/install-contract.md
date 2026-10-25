@@ -3634,6 +3634,11 @@ package roots share verification only for the same original/retained file pair;
 every distinct pair still compares both content hashes and contributes its
 original-source hash. Neither result survives the transaction or replaces the
 construction owner's source-identity and fingerprint checks.
+Content comparisons overlap in batches of at most four, with at most four
+pending readers. Results and failures retain input order, and every submitted
+reader settles before return, refusal, cancellation or snapshot cleanup.
+Copying, resolver admission and publication remain sequential; no content check
+or installer deadline is removed.
 The bootstrap requires Python 3.11 or newer.
 The POSIX guardian observes its direct child without reaping it until the
 owned process group is settled. Python 3.11/3.12 on macOS lack `os.waitid`;

@@ -574,6 +574,7 @@ exec(compile(_configuration_path.read_bytes(), str(_configuration_path), "exec")
 RetainedInputCleanupError = _configuration.RetainedInputCleanupError
 _report_cleanup_error = _configuration.report_cleanup_error
 _native_retained_path = _configuration.native_retained_path
+_bounded_content_map = _configuration.bounded_content_map
 _temporary_inputs = _configuration.temporary_inputs
 tempfile = _configuration.tempfile
 _write_toml = partial(_configuration.write_toml, error_type=DependencyPolicyError)
@@ -773,23 +774,10 @@ def _retain_uv_install(
             check_time()
             shutil.copytree(_native_retained_path(resource), _native_retained_path(mirror(resource)), dirs_exist_ok=True,
                             copy_function=copy)
-        source_hashes = {}
-        verified_pairs = set()
-        for project in projects:
-            destination = Path(_native_retained_path(mirror(project)))
-            for path in destination.rglob("*"):
-                check_time()
-                if path.is_file():
-                    original_path = project / path.relative_to(destination)
-                    # Preserve exact names even where Path equality folds case.
-                    pair = (str(original_path), str(path))
-                    if pair in verified_pairs:
-                        continue
-                    retained_hash = hashlib.sha256(path.read_bytes()).hexdigest()
-                    if hashlib.sha256(Path(_native_retained_path(original_path)).read_bytes()).hexdigest() != retained_hash:
-                        raise DependencyPolicyError("source content changed while retaining UV inputs")
-                    source_hashes[original_path] = retained_hash
-                    verified_pairs.add(pair)
+        source_hashes = _configuration.retained_source_hashes(
+            projects, mirror, native_path=_native_retained_path, check_time=check_time,
+            error_type=DependencyPolicyError, content_map=_bounded_content_map,
+        )
         for project in projects:
             check_time()
             manifest = mirror(project) / "pyproject.toml"
