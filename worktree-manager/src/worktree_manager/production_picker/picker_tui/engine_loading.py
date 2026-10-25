@@ -16,7 +16,7 @@ from textual.widgets import Static
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .inbox import Inbox, ensure_inbox
 from .selection import ListSelection
-from .source_identity import local_key
+from .source_identity import local_key, machine_ssh_id
 from .. import project_config as cfg
 
 #: Supplies a unique suffix for ``_apply_from_worker``'s inbox slot name,
@@ -556,10 +556,22 @@ class PickerScreenLoadingMixin:
                 resident_picker.settle_local()
 
         self.call_after_refresh(release)
-    def _apply_loader_records(self):
+    def _apply_loader_records(self, *, source_tabs=None):
         """Merge incomplete stream prefixes over cached rows."""
         if self.loader is None:
             return
+        if source_tabs is not None:
+            source_ids = {
+                tab.get("source_id") or machine_ssh_id(tab["machine"], tab["env"])
+                for tab in source_tabs
+                if tab.get("source_id") or (
+                    tab.get("source_kind", "machine-ssh") == "machine-ssh"
+                    and tab.get("machine") and tab.get("env")
+                )
+            }
+            self.data = [
+                rec for rec in self.data if rec.get("source_id") in source_ids
+            ]
         records = self.loader.records()
         authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
         if not callable(authoritative_fn):

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .inbox import ensure_inbox
 from .selection import ListSelection
-from .source_identity import local_key, machine_ssh_id
+from .source_identity import local_key
 from .. import update_stage
 from ... import picker_review
 
@@ -738,20 +738,9 @@ class PickerScreenRuntimeMixin:
                 except Exception:
                     pass
         if self.live and self.loader is not None:
-            source_ids = {
-                tab.get("source_id") or machine_ssh_id(tab["machine"], tab["env"])
-                for tab in self.source_tabs[1:]
-                if tab.get("source_id") or (
-                    tab.get("source_kind", "machine-ssh") == "machine-ssh"
-                    and tab.get("machine") and tab.get("env")
-                )
-            }
             # A new loader starts empty. Keep only surviving sources' rows until
             # its stream commits, using the same prefix merge as ordinary polls.
-            self.data = [
-                rec for rec in self.data if rec.get("source_id") in source_ids
-            ]
-            self._apply_loader_records()
+            self._apply_loader_records(source_tabs=self.source_tabs[1:])
         else:
             self.data = payload.data
         if self.live:
