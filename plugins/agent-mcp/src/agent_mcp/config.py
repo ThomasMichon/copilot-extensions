@@ -28,6 +28,7 @@ import yaml
 
 from ._predicate import validate_predicate
 from .config_routing import RoutingSpec as RoutingSpec, _deep_merge, _parse_routing
+from .home import default_home_dir
 
 # Transport kinds (mirror MCP server-launch ``type`` values, plus ``cli`` --
 # the local CLI->MCP responder that has no upstream MCP at all).
@@ -72,7 +73,7 @@ PARSE_MODES = ("keyvalue", "raw")
 DECORATOR_TYPES = ("filter", "rename", "defer", "code-mode", "storage", "transform",
                     "gate", "input_gate")
 
-BRIDGES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "bridges"
+BRIDGES_DIR = default_home_dir() / "bridges"
 
 
 def _marketplace_roots() -> list[Path]:
@@ -139,7 +140,7 @@ def _live_marketplace_roots() -> list[Path]:
 # name, headers) on one machine without editing the shared config or exporting
 # an environment variable. Mappings merge recursively; scalars and lists in the
 # overlay replace the base.
-OVERRIDES_DIR = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp")) / "overrides"
+OVERRIDES_DIR = default_home_dir() / "overrides"
 
 
 class ConfigError(ValueError):

@@ -648,6 +648,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     # there) and is never a directory anything else deletes.
     home_dir = ipc.default_home_dir()
     home_dir.mkdir(parents=True, exist_ok=True)
+    # Keep lazily imported consumers and child processes on the launch-time
+    # selection rather than resolving a relative override again after chdir.
+    os.environ["AGENT_MCP_HOME"] = str(home_dir)
     os.chdir(home_dir)
 
     server = _serve.Server(

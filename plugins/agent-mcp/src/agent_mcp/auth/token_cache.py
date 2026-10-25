@@ -37,14 +37,13 @@ import tempfile
 import time
 from pathlib import Path
 
+from ..home import default_home_dir
+
 log = logging.getLogger("agent-mcp.auth.cache")
 
 
 def _root() -> Path:
-    base = os.environ.get("AGENT_MCP_HOME")
-    _legacy = ".agent-mcp"  # marketplace-isolation: allow legacy compatibility root
-    root = Path(base) if base else Path.home() / _legacy
-    return root / "token-cache"
+    return default_home_dir() / "token-cache"
 
 
 def default_key(
