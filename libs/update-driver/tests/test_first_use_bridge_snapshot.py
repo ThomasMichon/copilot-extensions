@@ -12,7 +12,7 @@ import pytest
 from packaging.version import Version
 
 from agent_procutil import no_window_kwargs
-from update_driver import drain, status
+from update_driver import drain, foundation_status, status
 from update_driver import first_use as provision
 
 from test_first_use import primitive
@@ -23,6 +23,7 @@ from test_first_use_bridge import (
 from test_first_use_native import native_command
 from test_first_use_genesis import observe
 from test_first_use_vault import cold_environment, native_genesis
+from test_first_use_vault_bootstrap import receipt_completed_count
 
 
 pytestmark = pytest.mark.skipif(
@@ -376,7 +377,16 @@ def test_actual_bridge_source_selected_snapshot_caller_loss_generations_and_fail
         command(snapshot), env=env, cwd=project, root=root, diagnostic=diagnostic, contain_caller=True,
     )
     native_recipe_runner.lose_caller(caller)
-    observe(lambda: len(status(root=root)) == 1 and status(root=root)[0].state == "completed", 900, diagnostic)
+
+    def original_request_completed():
+        operation = foundation_status(root=root)
+        if operation is not None:
+            assert operation.state in {"running", "completed"}, diagnostic()
+        logs = list(root.glob("first-use-*.log"))
+        assert len(logs) <= 1, diagnostic()
+        return bool(logs) and receipt_completed_count(root, 1, logs[0])
+
+    observe(original_request_completed, 900, diagnostic)
     accepted = status(root=root)
     assert len(accepted) == 1
     assert all(item.state == "completed" and item.exit_code == 0
