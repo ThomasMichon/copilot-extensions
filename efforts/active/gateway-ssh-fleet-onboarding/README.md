@@ -34,7 +34,8 @@ resource acquisition and identity bindings remain external adapters.
 | Existing #6241 owner | Operation admission and receipt authority | Existing Fleet Control V2 coordination |
 | `wobbly-contraption` | Retained construction/admission/lifecycle and setup-consumer integration, not generic artifact publication | Existing #6030 / #6240 / #6424 source custody |
 | `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
-| `squeaky-buckle` | Bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | #6681 source reservation6394061625 |
+| `squeaky-buckle` | Completed bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | Merged #8910; bounded source reservation settled |
+| `restless-actuator` | Non-editable installed SSH runtime and source-denying native consumer qualification | #6681 source reservation6397956631 |
 
 ## Coordination
 
@@ -57,6 +58,10 @@ resource acquisition and identity bindings remain external adapters.
   This is an explicit source slice, not takeover of retained worktrees,
   construction/admission or operational authority. Existing shared lifecycle,
   provider, credential and deployment gates remain with their owners.
+- `restless-actuator` owns only the existing standalone SSH preparer's
+  non-editable dependency selection, focused preparation tests and a new
+  source-denying installed consumer witness. It does not select a release,
+  approve an artifact/feed, add an installer or wire normal role lifecycle.
 - The construction owner accepted two exclusive new source leaves:
   `fleet-manager/src/fleet_manager/gateway_ssh_policy.py` and its matching
   `test_gateway_ssh_policy.py` belong to `ticking-wrench`; the separate
@@ -765,3 +770,30 @@ takeover or implementation completion is asserted.
   The 69-case Fleet/authorization/adapter packet and nine rebuilt installed
   consumer cases pass locally. Final-head native/CI/review remain pending;
   earlier native success is not substituted for the newer source.
+
+### 2026-10-25 - Non-editable installed runtime qualification
+
+- The preceding foreground source is delivered by merged #8910 at
+  `6254e0f9eb49231db76f23da54fe7dc5223f753e`. Final-head native
+  run40189515793 passed Windows85/6 platform skips, Linux84/7 platform skips
+  and both real Linux StrictModes/login cases before merge. Its review and
+  required checks passed; that settles only the preceding bounded source.
+- Follow-through found a narrower qualification gap: the standalone SSH
+  preparer still allowed editable shared-library dependencies, while its
+  installed-origin assertion covered only Fleet and agent-ssh. Selecting
+  `--no-editable` in that existing guarded preparer keeps the disposable
+  runtime's entire dependency graph installed, without a new resolver policy.
+- The new witness starts the actual foreground CLI without site startup or
+  `.pth` processing, admits only the selected environment's package locations,
+  checks every installed distribution's file inventory and non-editable
+  metadata, and refuses source-checkout reads outside that exact environment.
+  An intentional source import is refused by the same guard. The existing
+  connected/later-join and disconnected/restart scenarios exercise real
+  authenticated transport and native local writers; native OS identity/ACL
+  helpers remain allowed.
+- Local Windows qualification passed all 88 service cases with six native
+  platform skips, including the three new cases. The affected preparation
+  packet passed 73 cases with six platform skips. Hosted exact-head Windows
+  and Linux, current-head review and required CI remain publication gates.
+  This is installed-runtime evidence, not authenticated release-artifact
+  admission, managed setup, live fleet adoption or predecessor retirement.

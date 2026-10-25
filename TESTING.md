@@ -863,7 +863,14 @@ cross-host writer fence or completed update/rollback lifecycle.
 The independent `ssh_service=true` selector runs the contained standalone
 `services/ssh` suite on Linux and Windows. It covers installed foreground
 Gateway registration, later-machine enrollment/notifications, original-request
-recovery and writer drain. The Linux lane additionally selects native
+recovery and writer drain. Its disposable environment installs the complete
+dependency graph non-editably through the existing guarded preparer. The
+source-free consumer witness uses isolated Python without startup `.pth` files,
+checks installed distribution custody, refuses checkout reads and external
+source imports, and reuses the real connected/restart convergence scenario. An
+intentional checkout import must fail under the same guard. This qualifies an
+installed runtime, not release-artifact provenance, a selected image or managed
+installation/adoption. The Linux lane additionally selects native
 acceptance in its disposable runner account: real OpenSSH listener custody,
 two distinct relay keys, a loopback reverse forward, a peer's permitted local
 forward and an unauthorized reverse-bind refusal. It never invokes a remote
