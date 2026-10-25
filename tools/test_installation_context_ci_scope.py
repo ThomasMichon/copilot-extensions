@@ -225,26 +225,33 @@ def test_candidate_profiles_remain_focused_opt_in_native_acceptance(platform, ru
     assert name not in required["jobs"]
 
 
-def test_bridge_binding_remains_an_explicit_bounded_native_portfolio() -> None:
+@pytest.mark.parametrize(("plugin", "test_file", "selector"), [
+    ("bridge", "test_bridge_first_use_publication.py",
+     ["-k", "test_bridge_cell_stamp_preserves_global_ownership"]),
+    ("dispatch", "test_dispatch_scoped_publication.py", []),
+])
+def test_scoped_binding_remains_an_explicit_bounded_native_portfolio(
+    plugin: str, test_file: str, selector: list[str],
+) -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
     )
     trigger = workflow.get("on", workflow.get(True))
-    assert "bridge-binding" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    portfolio = f"{plugin}-binding"
+    assert portfolio in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
     required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
     for platform, runner in (("linux", "ubuntu-latest"), ("windows", "windows-latest")):
-        name = f"bridge-binding-{platform}"
+        name = f"{portfolio}-{platform}"
         job = workflow["jobs"][name]
         assert job["if"] == (
-            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'"
+            f"github.event_name == 'workflow_dispatch' && inputs.portfolio == '{portfolio}'"
         )
         assert job["runs-on"] == runner and job["timeout-minutes"] == 10
         assert "strategy" not in job
         executions = [step["run"].split() for step in job["steps"] if "run" in step]
         assert executions == [[
             "python", "tools/run-plugin-tests.py", "payload-invocation",
-            "--test-file", "tests/test_bridge_first_use_publication.py",
-            "-k", "test_bridge_cell_stamp_preserves_global_ownership",
+            "--test-file", f"tests/{test_file}", *selector,
             "--allow-explicit-tiers", "--test-timeout", "60", "--timeout", "540",
         ]]
         assert name not in required["jobs"]

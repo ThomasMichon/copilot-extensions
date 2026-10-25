@@ -1572,6 +1572,11 @@ function Deploy-SelfProvisioningBinstub {
             -Destination (Join-Path $contextDir $r) -Force
     }
 
+    if (-not $publishLegacyNames) {
+        Write-Ok 'Scoped install keeps the global compatibility binstubs unchanged'
+        return
+    }
+
     $ps1Path = Join-Path $LocalBin 'agent-dispatch.ps1'
     $ps1Content = @'
 $env:PYTHONUTF8 = '1'
