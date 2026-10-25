@@ -318,6 +318,17 @@ def test_acquired_runtime_policy_block_is_failure_not_success(installed, monkeyp
     assert owner.update_target("guide") == 1
 
 
+@pytest.mark.parametrize("document", ["[]", "null", '"not-an-object"', "{invalid"])
+def test_malformed_manifest_cannot_hide_valid_peer_inventory(installed, monkeypatch, document):
+    (installed["guide"] / "plugin.json").write_text(document)
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("malformed payload acquired"))
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert rows["agent-example"]["payload"] == "2"
+    assert rows["guide"]["installed"] and rows["guide"]["payload"] == "unknown"
+    assert not rows["guide"]["updatable"] and rows["guide"]["limitation"]
+    assert owner.update_target("guide") == 1
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
 def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
     name = "agent-example"

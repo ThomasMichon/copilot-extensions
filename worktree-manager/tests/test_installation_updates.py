@@ -110,10 +110,10 @@ def test_manager_plugin_submission_uses_engine_identity_not_manager_queue(invent
     calls = []
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
     monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("plugin used Manager source identity"))
-    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args:
-        calls.append((project, args)) or 0)
+    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args, **kwargs:
+        calls.append((project, args, kwargs)) or 0)
     assert ui.submit("guide") == 0
-    assert calls == [(None, ["update", "--no-manager", "--target", "guide", "--detach", "--json"])]
+    assert calls == [(None, ["update", "--no-manager", "--target", "guide", "--detach", "--json"], {"headless": True})]
 
 
 def test_public_manager_plugin_target_refuses_unsupported_source_before_submission(
@@ -134,6 +134,20 @@ def test_public_manager_plugin_target_refuses_unsupported_source_before_submissi
     assert receipt["state"] == "unavailable"
     assert "source-backed suite execution is not yet available" in receipt["error"]
     assert (root / "config.toml").read_bytes() == baseline
+
+
+def test_explicit_headless_engine_submission_uses_canonical_no_window_flags(monkeypatch):
+    import agent_procutil
+
+    seen = {}
+    monkeypatch.setattr(ui.engine_client, "engine_base_command", lambda: ["synthetic-engine"])
+    monkeypatch.setattr(agent_procutil, "no_window_kwargs", lambda: {"creationflags": 0x08000000})
+    monkeypatch.setattr(ui.engine_client.subprocess, "run", lambda argv, **kwargs:
+        seen.update(argv=argv, **kwargs) or SimpleNamespace(returncode=0))
+    assert ui.engine_client.run_engine_passthrough(
+        None, ["update", "--target", "guide", "--detach"], headless=True,
+    ) == 0
+    assert seen["creationflags"] == 0x08000000
 
 
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])

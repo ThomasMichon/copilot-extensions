@@ -273,6 +273,7 @@ def cmd_update_request(rest: list[str]) -> int:
             ]
             return engine_client.run_engine_passthrough(
                 project, ["update", "--no-manager", *arguments, *observer],
+                **({"headless": True} if options.detach else {}),
             )
         project, _args = extract_project(forwarded)
         cwd = Path.cwd().resolve()

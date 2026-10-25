@@ -13,10 +13,15 @@ from . import config, output, reconcile, update_acquisition, update_events, upda
 TARGET_CONTRACT = 1
 
 
-def _target_scope(payload):
+def _target_manifest(payload):
     manifest = json.loads((payload / "plugin.json").read_text("utf-8"))
     if not isinstance(manifest, dict):
         raise ValueError("Plugin manifest must be an object")
+    return manifest
+
+
+def _target_scope(payload, *, manifest=None):
+    manifest = _target_manifest(payload) if manifest is None else manifest
     scope = manifest.get("runtimeScope", "none")
     if not isinstance(scope, str) or scope not in reconcile.VALID_SCOPES:
         raise ValueError("Invalid runtimeScope; repair the selected payload")
@@ -82,9 +87,12 @@ def inventory():
         if payload is None:
             row["limitation"] = "Payload missing; use setup/enablement before updating"
         else:
-            row["payload"] = reconcile.payload_version(payload) or "unknown"
+            row["payload"] = "unknown"
             try:
-                scope = _target_scope(payload)
+                manifest = _target_manifest(payload)
+                version = manifest.get("version")
+                row["payload"] = version if isinstance(version, str) and version else "unknown"
+                scope = _target_scope(payload, manifest=manifest)
                 row["kind"] = scope
                 if scope == "none":
                     row.update(selected="not applicable", running="not applicable")

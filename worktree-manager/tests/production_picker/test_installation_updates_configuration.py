@@ -215,3 +215,24 @@ def test_catalog_failure_uses_production_warning_banner(monkeypatch):
     summary = ui.inventory()["summary"]
     banner = TasksView(None)._banner_line(summary, 118)
     assert banner is not None and "Known catalog unavailable" in banner.plain
+
+
+def test_read_only_candidate_never_launches_native_inventory_or_update(tmp_path, monkeypatch):
+    import update_driver
+    from worktree_manager import picker_review
+
+    monkeypatch.setattr(picker_review, "_review", picker_review.Review(
+        tmp_path, tmp_path, "fixture-candidate", ("synthetic-owner",),
+    ))
+    monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: pytest.fail("preview read live inventory"))
+    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("preview enqueued update"))
+    runtime = tasks.RegisteredPivotRuntime(ui.configuration_pivot())
+    runtime._run_list("")
+    state, rows, message = runtime.get("")
+    assert state == "error" and not rows
+    assert "Read-only candidate" in message
+    ok, message = runtime.run_resolved(
+        [*ui.configuration_pivot().list_cmd[:-1], "update", "worktree-manager"],
+        preserve_output=True,
+    )
+    assert not ok and "Read-only candidate" in message
