@@ -63,7 +63,8 @@ def _reconnect_cli_panes(payload: dict, incumbent: object = _LOOKUP) -> list[dic
     return retained
 
 
-def _register_reconnect(payload: dict) -> dict:
+def _register_reconnect(payload: dict, *, creation: bool = False) -> dict:
+    """Fence both detached creation callbacks and reconnect reconciliation."""
     from . import mux_daemon
 
     mux_daemon.ensure_daemon_running()
@@ -93,7 +94,9 @@ def _register_reconnect(payload: dict) -> dict:
                 return {"applied": False, "reason": "enumeration-unavailable"}
             if not confirmed.get("applied"):
                 return confirmed
-        reconciled = dict(payload, panes=_reconnect_cli_panes(payload, incumbent))
+        reconciled = dict(
+            payload, panes=payload["panes"] if creation else _reconnect_cli_panes(payload, incumbent),
+        )
         result = register_next_mapping(reconciled, expected=incumbent)
         if result.get("reason") == "mapping-changed":
             continue
@@ -197,10 +200,7 @@ def cmd_mux_daemon(rest: list[str]) -> int:
         if "live" in payload:
             payload["live"] = payload["live"].strip().lower() not in ("0", "false", "no")
         try:
-            result = (
-                mux_daemon.register_managed_mapping(payload) if cli_pane is not None
-                else _register_reconnect(payload)
-            )
+            result = _register_reconnect(payload, creation=cli_pane is not None)
         except ValueError as exc:
             print(f"error: {exc}")
             return 2

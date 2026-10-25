@@ -138,8 +138,11 @@ def test_unknown_reconnect_probe_preserves_same_incarnation_cli(owner, monkeypat
     assert registry.get_mapping("example", "one")["panes"] == _cli()
 
 
+@pytest.mark.parametrize("creation", [False, True])
 @pytest.mark.parametrize("native", ["successor", "requested", "unknown", "wrong-path"])
-def test_initial_lookup_conflict_requires_native_proof_before_replacement(owner, monkeypatch, native):
+def test_initial_lookup_conflict_requires_native_proof_before_replacement(
+    owner, monkeypatch, native, creation,
+):
     from worktree_manager import mux_discovery
 
     successor = dict(owner, session_incarnation="$8:200", panes=_cli("%99"))
@@ -156,13 +159,13 @@ def test_initial_lookup_conflict_requires_native_proof_before_replacement(owner,
         return SimpleNamespace(returncode=0, stdout=f"managed\t1\t{incarnation}\t{path}\n")
 
     monkeypatch.setattr(mux_discovery, "run_mux_child", inventory)
-    result = mux_daemon_cli._register_reconnect(owner)
+    result = mux_daemon_cli._register_reconnect(dict(owner, panes=_cli()), creation=creation)
     assert probes and probes[0][1] == "list-sessions"
     if native == "requested":
         assert result["applied"]
         current = registry.get_mapping("example", "one")
         assert current["session_incarnation"] == owner["session_incarnation"]
-        assert current["panes"] == []
+        assert current["panes"] == (_cli() if creation else [])
     else:
         assert not result["applied"]
         assert registry.get_mapping("example", "one") == before
