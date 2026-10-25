@@ -31,7 +31,10 @@ from wheel_input_fixture import wheel_bytes
 
 
 @contextmanager
-def selected_seed(adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch):
+def selected_seed(
+    adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch, *,
+    owner_options=(), dropped_option=None,
+):
     source_with_process_owner(configured_source, build_only=True)
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
@@ -42,6 +45,19 @@ def selected_seed(adopter, configured_source, target, feeds, tmp_path, engine, m
     monkeypatch.setattr(
         configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest(),
     )
+    if owner_options:
+        native_compile = seed.dependencies.retain_uv_source_compile
+
+        def retained_compile(uv, arguments, **options):
+            if "installer-packaging-seed" not in Path(arguments[0]).read_text():
+                arguments = [*arguments, *owner_options]
+            elif dropped_option is not None:
+                arguments = list(arguments)
+                position = arguments.index(dropped_option)
+                del arguments[position:position + 2]
+            return native_compile(uv, arguments, **options)
+
+        monkeypatch.setattr(seed.dependencies, "retain_uv_source_compile", retained_compile)
     with builds.retain_authenticated_source(
         selected, installation=adopter[1], deadline=deadline,
     ) as authenticated, retain_source_configuration(
@@ -167,6 +183,35 @@ def test_public_native_feed_is_refused_before_resolution_or_any_http(
             with seed.retain_packaging_seed(**options):
                 pytest.fail("public native feed admitted")
         assert state["requests"] == []
+
+
+@pytest.mark.parametrize("dropped", [None, "--resolution", "--exclude-newer"])
+def test_owner_cli_selection_and_frozen_cutoffs_cannot_be_dropped(
+    adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch, dropped,
+):
+    with selected_seed(
+        adopter, configured_source, target, feeds, tmp_path, engine, monkeypatch,
+        owner_options=("--resolution", "lowest"), dropped_option=dropped,
+    ) as (state, options, _checks, _rejected):
+        original = seed.run_owned
+        commands = []
+
+        def resolved(argv, **settings):
+            assert dropped is None, "changed owner settings reached resolution"
+            position = argv.index("--resolution")
+            assert argv[position + 1] == "lowest"
+            commands.append(argv)
+            return original(argv, **settings)
+
+        monkeypatch.setattr(seed, "run_owned", resolved)
+        if dropped is None:
+            with seed.retain_packaging_seed(**options):
+                assert len(commands) == 1
+        else:
+            with pytest.raises(ValueError, match="differ from the held installation owner"):
+                with seed.retain_packaging_seed(**options):
+                    pytest.fail("changed owner settings were admitted")
+            assert not commands and not state["requests"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX interpreter-link contract")

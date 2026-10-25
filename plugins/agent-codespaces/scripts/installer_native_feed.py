@@ -439,7 +439,7 @@ def capture_native_feed_inputs(
         "transport": transport, "seasoning": _seasoning_identity(original_settings),
         "index_strategy": settings["index_strategy"],
         "dependency_selection": {
-            key: original_settings.get(key) for key in (
+            key: settings.get(key) for key in (
                 "resolution", "prerelease", "fork_strategy", "dependency_mode",
             )
         },

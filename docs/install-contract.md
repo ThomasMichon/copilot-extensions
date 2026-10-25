@@ -3515,7 +3515,8 @@ adopter. Their presence does not enable artifact/profile consumption.
 
 The inert shared `installer_packaging_seed.retain_packaging_seed` supplies the
 admission toolkit's restricted `packaging>=23` bootstrap. It inherits the actual
-owner's held native compiler settings and frozen seasoning cutoffs, rather than
+owner's held native compiler settings, applicable CLI resolution options and
+frozen seasoning cutoffs, rather than
 reading ambient configuration again. A fixed metadata-only project lets that
 same native UV compiler select one exact governed-feed wheel without running a
 source backend. The bounded stdlib inspector refuses dependencies, extras,

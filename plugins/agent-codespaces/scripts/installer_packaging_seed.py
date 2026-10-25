@@ -111,6 +111,15 @@ def _target(python: Path, environment: dict, deadline: float) -> dict:
             or target["version"][:2] < [3, 11]
         ):
             raise ValueError
+        # Windows venvs can spell the same base prefix differently. Bind its
+        # physical directory, not case or extended-path syntax.
+        base = Path(target["base_prefix"])
+        if not base.is_absolute() or not base.is_dir():
+            raise ValueError
+        identity = base.stat()
+        if not identity.st_ino:
+            raise ValueError
+        target["base_prefix"] = {"device": identity.st_dev, "inode": identity.st_ino}
         return target
     except (OSError, ValueError, subprocess.TimeoutExpired):
         raise WheelError("tooling seed target probe failed or returned unsupported facts") from None
@@ -221,8 +230,7 @@ def retain_packaging_seed(
     uv = Path(dependencies._select_uv_executable(str(uv)))
     if transaction.argv[:3] != (str(uv), "pip", "compile"):
         raise WheelError("tooling seed differs from its owner's native compiler")
-    declared_python = python
-    python = python.resolve(strict=True)
+    python_identity = python.resolve(strict=True)
     frozen_policy = _canonical(policy)
     root = Path(policy["owner"]["runtimeRoot"])
     if not root.is_absolute():
@@ -235,7 +243,7 @@ def retain_packaging_seed(
     environment = dependencies._captured_environment(transaction.environment)
     retained_environment = _canonical(environment)
     target = _target(python, environment, deadline)
-    python_digest = _file_identity(python, limits.max_interpreter_bytes, deadline)
+    python_digest = _file_identity(python_identity, limits.max_interpreter_bytes, deadline)
     tooling_digest = _tooling_identity(limits.max_tooling_bytes, deadline)
     expected_source = engine.runtime_source.manifest_fields(source)
     selected_inputs = ()
@@ -248,8 +256,8 @@ def retain_packaging_seed(
             _canonical(policy) != frozen_policy
             or _canonical(current_policy) != frozen_policy
             or _canonical(owner_transaction.environment) != retained_environment
-            or declared_python.resolve(strict=True) != python
-            or _file_identity(python, limits.max_interpreter_bytes, deadline) != python_digest
+            or python.resolve(strict=True) != python_identity
+            or _file_identity(python_identity, limits.max_interpreter_bytes, deadline) != python_digest
             or _tooling_identity(limits.max_tooling_bytes, deadline) != tooling_digest
             or _target(python, environment, deadline) != target
         ):
@@ -262,11 +270,17 @@ def retain_packaging_seed(
         str(uv), deadline, wheels=None, profile_policy="packaging-seed-resolution",
         opaque_identity=opaque_identity,
     )
-    cutoffs = [
+    owner_arguments = [
         argument
         for option, value in dependencies._argument_pairs(owner_transaction.argv[3:])
-        if option in ("--exclude-newer", "--exclude-newer-package")
-        for argument in (option, value)
+        if option in (
+            "--exclude-newer", "--exclude-newer-package", "--resolution",
+            "--prerelease", "--fork-strategy", "--index-strategy",
+            "--keyring-provider", "--cert", "--system-certs",
+            "--index", "--default-index", "--index-url", "--extra-index-url", "-i",
+            "--no-sources",
+        )
+        for argument in ((option, value) if value else (option,))
     ]
     with dependencies._temporary_inputs(None) as temporary:
         temporary = dependencies._private_retained_root(Path(temporary)).resolve()
@@ -279,13 +293,21 @@ def retain_packaging_seed(
                 str(project), "--python", str(python), "--python-version",
                 ".".join(str(value) for value in target["version"][:3]),
                 "--only-binary", ":all:", "--no-python-downloads",
-                *cutoffs,
+                *owner_arguments,
                 "--output-file", str(output), "--format", "pylock.toml",
             ], env=environment, cwd=temporary, trusted_source_roots=(temporary,),
             _projection=seed_projections, deadline=deadline, native_target=True,
         ) as transaction:
             if len(seed_projections) != 2:
                 raise WheelError("tooling seed lacks paired retained native settings")
+            def frozen_cutoffs(held):
+                return sorted(
+                    (option, value) for option, value in dependencies._argument_pairs(held.argv[3:])
+                    if option in ("--exclude-newer", "--exclude-newer-package")
+                )
+
+            if frozen_cutoffs(transaction) != frozen_cutoffs(owner_transaction):
+                raise WheelError("tooling seed cutoffs differ from the held installation owner")
 
             def capture(wheels, profile_policy):
                 return capture_native_feed_inputs(
@@ -332,6 +354,7 @@ def retain_packaging_seed(
                     "schema": "copilot-extensions.packaging-seed", "version": 1,
                     "source": source.document(), "policy": json.loads(frozen_policy),
                     "python": str(python), "python_sha256": python_digest, "target": target,
+                    "python_identity": str(python_identity),
                     "tooling_sha256": tooling_digest, "requirement": REQUIREMENT,
                     "native_lock_sha256": native_digest, "configuration_policy": preflight,
                     "feed_policy": feed.policy_id, "wheel": selected,
