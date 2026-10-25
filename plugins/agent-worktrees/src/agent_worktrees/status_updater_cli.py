@@ -282,7 +282,8 @@ _BACKGROUND_AUTH_ENV_KEYS = {
 def _background_environment() -> dict[str, str]:
     """Environment for resident helpers, excluding session credentials."""
     return {
-        key: value for key, value in os.environ.items()
+        key: os.path.abspath(value.strip()) if key.upper() == "AGENT_HOME" and value.strip()
+        else value for key, value in os.environ.items()
         if key.upper() not in _BACKGROUND_AUTH_ENV_KEYS
     }
 
@@ -345,7 +346,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         if path:
             argv += ["--path", path]
 
-        root = cfg.install_dir().absolute()
+        root = Path(os.path.abspath(cfg.install_dir()))
         spawn_daemon(
             argv, cwd=os.path.expanduser("~"), env=_background_environment(),
             log_path=root / "logs" / "status-updater.log", console_children=True,

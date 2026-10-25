@@ -42,9 +42,9 @@ log = logging.getLogger("agent-containers")
 def _runtime_home() -> Path:
     override = os.environ.get("AGENT_CONTAINERS_HOME", "").strip()
     if override:
-        return Path(override).expanduser()
+        return Path(os.path.abspath(Path(override).expanduser()))
     _legacy = ".agent-containers"  # marketplace-isolation: allow legacy compatibility root
-    return Path.home() / _legacy
+    return Path(os.path.abspath(Path.home() / _legacy))
 
 
 # Canonical runtime paths.

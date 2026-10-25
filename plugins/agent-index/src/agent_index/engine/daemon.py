@@ -37,11 +37,11 @@ from .generation import current_engine_generation
 
 
 def engine_home() -> Path:
-    """Durable engine root (holds the heavy venv), outside the versioned runtime."""
+    """Lexical absolute durable engine root, never a dereferenced filesystem alias."""
     _default = "~/.agent-index/engine"  # marketplace-isolation: allow legacy-compatibility
-    return Path(
+    return Path(os.path.abspath(Path(
         os.environ.get("AGENT_INDEX_ENGINE_HOME", _default)
-    ).expanduser()
+    ).expanduser()))
 
 
 def engine_venv_python(home: Path | None = None) -> Path:
@@ -193,6 +193,7 @@ def _spawn(
     root = Path(os.path.abspath(home))
     root.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    env["AGENT_INDEX_ENGINE_HOME"] = str(root)
     env.update(windowless_python_env(python))
     env.setdefault(ENGINE_LOG_LEVEL_ENV, "warning")
     return spawn_daemon(
@@ -353,7 +354,7 @@ def run_foreground() -> int:
         os.execv(str(py), cmd)  # replace this process; never returns  # noqa: S606
     proc = spawn_instance(
         cmd, instance=DaemonInstanceSpec(
-            "agent-index-engine", engine_home().absolute(), Path(__file__).resolve(),
+            "agent-index-engine", engine_home(), Path(__file__).resolve(),
         ),
     )
     return proc.wait()

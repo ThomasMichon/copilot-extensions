@@ -493,3 +493,32 @@ caller coverage, not one launcher or one platform passing.
 - Added the SSH standalone's own changefile. Core source/native bytes remain
   unchanged. All four source guards, module ceilings, installer contracts,
   documentation and high-signal lint passed; owned test containers are gone.
+
+### 2026-10-24 - Complete startup-root normalization class
+
+- The next review confirmed the prior fixes and identified four further
+  parent-component regressions. Audited every changed instance specification
+  and admission/decorator root, including direct owners and native bindings,
+  rather than correcting only those four lines. The source inventory contains
+  37 decorators, 12 admissions, 29 specifications and two direct reservations,
+  with no hidden import aliases or unpacked startup keywords.
+- Codespaces owner, Containers keeper/proxy, Index foreground/passive/shim,
+  Worktrees updater/monitor, Bridge Session Host, Dispatch registration and SSH
+  keeper roots now use coherent lexical selections before admission. Child
+  home/cwd/endpoint values retain that same selection. Existing filesystem
+  aliases are not silently dereferenced to bypass the runtime-root guard.
+- Independent focused integration passed 31 cases, including real reservation
+  records, direct admission, actual Session Host startup, caller-cwd binding
+  and linked-root refusal before provider/process work. Worker packets passed
+  Codespaces 127 with two existing skips, Containers 161, Index 69 and
+  Worktrees 200. Effectful cases remain outside required pure-unit CI.
+- Traced remaining root variables to existing lexical anchoring, a validated
+  runtime/completion owner, or a fixed private fixture root. Native APIs retain
+  their strict normalized-absolute contract; no core safety check was relaxed.
+- All four source guards, module ceilings, install contracts, documentation
+  and changed-file Ruff checks passed. Refreshed only two current Bridge
+  source hashes; strict validation retained both contracts and all 814
+  fixtures. Every one of the 1,704 unit-source bindings remains exact.
+  Process-library/native bytes and the 300-second unit budget are unchanged.
+- Source publication, a subsequent passing review and current-head CI remain
+  open. The effort stays Active and no runtime rollout is authorized.

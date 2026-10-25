@@ -51,6 +51,7 @@ import os
 import platform
 import time
 import uuid
+from pathlib import Path
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
@@ -894,7 +895,10 @@ def _bridge_forwards_of(owner: Any) -> dict[str, int]:
     return method() if callable(method) else {}
 
 
-@daemon_entrypoint("agent-codespaces-owner", source=__file__, purpose="production")
+@daemon_entrypoint(
+    "agent-codespaces-owner", source=__file__, purpose="production",
+    runtime_root=lambda owner, **kwargs: Path(os.path.abspath(RUNTIME_DIR)),
+)
 async def run_owner_daemon(
     owner: ConnectionOwner,
     *,

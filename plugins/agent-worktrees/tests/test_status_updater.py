@@ -435,6 +435,48 @@ def test_spawn_status_updater_noop_on_empty_id():
     assert m._spawn_status_updater("", "/w/x") is False
 
 
+@pytest.mark.parametrize("linked", (False, True))
+def test_parent_agent_home_reaches_real_reservation_before_spawn(tmp_path, monkeypatch, linked):
+    from dataclasses import replace
+    from agent_procutil.daemon_instances import cancel_instance_reservation, reserve_instance
+
+    launch = tmp_path / "launch"
+    home = tmp_path / "selected-home"
+    launch.mkdir()
+    root = home / ".agent-worktrees"
+    root.mkdir(parents=True)
+    selected = home
+    if linked:
+        selected = tmp_path / "linked-home"
+        try:
+            selected.symlink_to(home, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"native directory symlink unavailable: {error}")
+    monkeypatch.chdir(launch)
+    monkeypatch.setenv("AGENT_HOME", "../" + selected.name)
+    monkeypatch.setattr("shutil.which", lambda name: "/private/tmux" if name == "tmux" else None)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess(a, 0, "", ""),
+    )
+    reached = []
+
+    def before_spawn(command, **kwargs):
+        spec = replace(kwargs["instance"], purpose="production", registry_root=tmp_path / "registry")
+        receipt = reserve_instance(spec)
+        try:
+            assert receipt.record_path.is_file()
+            assert spec.runtime_root == selected / ".agent-worktrees"
+            assert kwargs["env"]["AGENT_HOME"] == str(selected)
+            reached.append(True)
+        finally:
+            cancel_instance_reservation(receipt, creation_refused=True)
+        return object()
+
+    monkeypatch.setattr(updater, "spawn_daemon", before_spawn)
+    assert updater._spawn_status_updater("private", None) is (not linked)
+    assert reached == ([] if linked else [True])
+
+
 def test_spawn_status_updater_noop_without_mux(monkeypatch):
     import shutil
 

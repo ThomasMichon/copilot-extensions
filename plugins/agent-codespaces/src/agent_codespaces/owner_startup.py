@@ -20,7 +20,7 @@ def spawn_owner_process(root: Path, *, source: str) -> tuple[Popen[bytes], Path]
     from agent_procutil import spawn_daemon
     from agent_procutil.daemon_instances import DaemonInstanceSpec
 
-    root = root.absolute()
+    root = Path(os.path.abspath(root))
     root.mkdir(parents=True, exist_ok=True)
     log_path = root / "logs" / "owner-stdio.log"
     child = spawn_daemon(
@@ -30,6 +30,7 @@ def spawn_owner_process(root: Path, *, source: str) -> tuple[Popen[bytes], Path]
         log_path=log_path,
         console_children=True,
         display="agent_codespaces owner",
+        env_overrides={"AGENT_CODESPACES_HOME": str(root)},
     )
     return child, log_path
 

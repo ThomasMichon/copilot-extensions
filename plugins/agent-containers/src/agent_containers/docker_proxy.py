@@ -144,9 +144,10 @@ def _serve_control(listener: socket.socket) -> None:
 
 @daemon_entrypoint(
     "agent-containers-docker-proxy", source=__file__, purpose="production",
-    runtime_root=lambda container, container_id, endpoint_file: endpoint_file.absolute().parent,
+    runtime_root=lambda container, container_id, endpoint_file: Path(os.path.abspath(endpoint_file)).parent,
 )
 def serve(container: str, container_id: str, endpoint_file: Path) -> int:
+    endpoint_file = Path(os.path.abspath(endpoint_file))
     data_listener = socket.socket()
     control_listener = socket.socket()
     for listener in (data_listener, control_listener):
@@ -250,6 +251,7 @@ def ensure_broker(
     *,
     timeout: float = 10.0,
 ) -> int:
+    endpoint_file = Path(os.path.abspath(endpoint_file))
     try:
         current = json.loads(endpoint_file.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
@@ -268,9 +270,9 @@ def ensure_broker(
             str(endpoint_file),
         ],
         instance=DaemonInstanceSpec(
-            "agent-containers-docker-proxy", endpoint_file.absolute().parent, Path(__file__).resolve(),
+            "agent-containers-docker-proxy", endpoint_file.parent, Path(__file__).resolve(),
         ),
-        log_path=endpoint_file.absolute().parent / "docker-proxy.log",
+        log_path=endpoint_file.parent / "docker-proxy.log",
         # Never the caller's ambient cwd: this is a long-lived detached
         # proxy daemon that may outlive whatever repo/worktree checkout the
         # caller happened to be running from (service-lifecycle-

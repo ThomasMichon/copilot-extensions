@@ -2862,15 +2862,24 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_launch_session_host_process_owns_child(tmp_path, hosted_workspace):
+@pytest.mark.parametrize("state_selection", ["absolute", "parent"])
+async def test_launch_session_host_process_owns_child(
+    tmp_path, hosted_workspace, monkeypatch, state_selection,
+):
     import signal
     import sys
 
     from agent_bridge.session_host.launcher import launch_session_host
 
+    state_dir = str(tmp_path)
+    if state_selection == "parent":
+        launch = tmp_path / "launch"
+        launch.mkdir()
+        monkeypatch.chdir(launch)
+        state_dir = "../state"
     handle = await asyncio.to_thread(
         launch_session_host, [sys.executable, "-c", _STREAMER],
-        state_dir=str(tmp_path), cwd=str(hosted_workspace),
+        state_dir=state_dir, cwd=str(hosted_workspace),
     )
     try:
         assert handle.child_pid > 0 and handle.port > 0
@@ -2897,6 +2906,32 @@ async def test_launch_session_host_process_owns_child(tmp_path, hosted_workspace
             import os as _os
             with contextlib.suppress(Exception):
                 _os.kill(handle.child_pid, signal.SIGKILL)
+
+
+def test_launch_session_host_linked_state_root_refuses_before_spawn(tmp_path, monkeypatch):
+    import sys
+
+    from agent_bridge.session_host import launcher
+
+    state = tmp_path / "state"
+    state.mkdir()
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(state, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    spawned = []
+
+    def forbidden(*args, **kwargs):
+        spawned.append(args)
+        raise AssertionError("linked state root reached process creation")
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", forbidden)
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        launcher.launch_session_host(
+            [sys.executable, "-c", "pass"], state_dir=str(linked),
+        )
+    assert spawned == []
 
 
 @pytest.mark.asyncio

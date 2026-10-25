@@ -507,7 +507,8 @@ def ensure_keeper(
             popen=partial(
                 spawn_instance,
                 instance=DaemonInstanceSpec(
-                    "agent-ssh-forward-keeper", _STORE.state_path(_state_key(target)).absolute().parent,
+                    "agent-ssh-forward-keeper",
+                    Path(os.path.abspath(_STORE.state_path(_state_key(target)))).parent,
                     Path(__file__).resolve(),
                 ),
             ),

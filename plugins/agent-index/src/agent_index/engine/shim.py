@@ -137,7 +137,7 @@ class WorkerSupervisor:
                 self._proc = spawn_instance(
                     cmd, env=self._spawn_env(),
                     instance=DaemonInstanceSpec(
-                        "agent-index-engine", Path(__file__).resolve().parent, Path(__file__).resolve(),
+                        "agent-index-engine", Path(os.path.abspath(__file__)).parent, Path(__file__).resolve(),
                     ),
                 )
             except OSError as exc:

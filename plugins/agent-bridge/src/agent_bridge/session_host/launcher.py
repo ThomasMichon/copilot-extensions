@@ -231,6 +231,8 @@ def launch_session_host(
     reattach endpoint and writes a ``pid``/``child_pid``/``port`` state file,
     which this call waits for. The child inherits ``env`` (so worktree/plan env
     vars reach copilot). Raises ``TimeoutError`` if the host never reports ready.
+    ``state_dir`` is lexically anchored to the frontend's cwd before the host
+    changes cwd; filesystem links are not dereferenced.
 
     ``nonce`` (optional) is the connect-auth token: it is handed to the host
     process **via its environment** (not the command line, so it does not leak
@@ -251,7 +253,10 @@ def launch_session_host(
     (``_detach_stdio_from_frontend``), so output after that point is never
     coupled to this frontend process's lifetime.
     """
-    sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
+    sd = (
+        Path(os.path.abspath(state_dir))
+        if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
+    )
     sd.mkdir(parents=True, exist_ok=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
 
@@ -293,7 +298,7 @@ def launch_session_host(
     proc = spawn_instance(
         host_argv,
         instance=DaemonInstanceSpec(
-            "agent-bridge-session-host", sd.absolute(), Path(__file__).resolve(),
+            "agent-bridge-session-host", sd, Path(__file__).resolve(),
         ),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,

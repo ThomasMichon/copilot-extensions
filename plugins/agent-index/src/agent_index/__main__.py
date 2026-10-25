@@ -1381,7 +1381,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             windowless_python(python), "-I", "-X", "utf8", "-m", "agent_index",
             start_command, "--host", cfg.host, "--port", str(port), "--passive",
         ]
-        root = install_dir().resolve()
+        root = Path(os.path.abspath(install_dir()))
         root.mkdir(parents=True, exist_ok=True)
         env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "PYTHONHOME"}}
         overrides = dict(windowless_python_env(python))

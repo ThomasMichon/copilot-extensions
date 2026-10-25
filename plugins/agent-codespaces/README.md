@@ -194,6 +194,12 @@ snapshots, explicit installers or namespaced/custom-root bootstrap publication.
 
 ## Configuration
 
+Runtime-home overrides are anchored to the selecting process's cwd and
+normalized lexically, including `..`, before daemon reservation or admission.
+The owner child receives that same canonical home even when launched from
+HOME. Filesystem links are not resolved away; instance custody checks still
+refuse redirected runtime roots.
+
 **Most repos need no config at all.** agent-codespaces works out of the box on
 standard GitHub CodeSpaces by **convention**:
 

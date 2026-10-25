@@ -262,6 +262,8 @@ def ensure_running(
                 str(int(host_relay_port)),
             ]
         env = {**os.environ, **windowless_python_env()}
+        if env.get("AGENT_CONTAINERS_HOME"):
+            env["AGENT_CONTAINERS_HOME"] = os.path.abspath(os.path.expanduser(env["AGENT_CONTAINERS_HOME"]))
         state = spawn_keeper(
             argv,
             env,
@@ -277,7 +279,7 @@ def ensure_running(
             popen=partial(
                 spawn_instance, popen=popen,
                 instance=DaemonInstanceSpec(
-                    "agent-containers-forward-keeper", state_path(name).absolute().parent, Path(__file__).resolve(),
+                    "agent-containers-forward-keeper", Path(os.path.abspath(state_path(name))).parent, Path(__file__).resolve(),
                 ),
             ),
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),
@@ -428,6 +430,9 @@ def add_subparser(sub) -> None:
     p.set_defaults(func=cmd_forward_keeper)
 
 
-@daemon_entrypoint("agent-containers-forward-keeper", source=__file__, purpose="production")
+@daemon_entrypoint(
+    "agent-containers-forward-keeper", source=__file__, purpose="production",
+    runtime_root=lambda args: Path(os.path.abspath(_STORE.state_dir)),
+)
 def cmd_forward_keeper(args: argparse.Namespace) -> int:
     return asyncio.run(_run(args))

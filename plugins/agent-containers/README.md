@@ -1109,6 +1109,11 @@ not for stamping the binstub.
 
 ## Runtime state
 
+Runtime-home and broker-endpoint paths are normalized lexically against the
+selecting process's cwd before instance reservation or admission. Broker child
+arguments remain absolute when its cwd changes to HOME. This does not resolve
+filesystem links: redirected runtime roots still fail custody checks.
+
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
   lock file and kept backward-compatible across runtime versions;
   corrupt/unreadable state is treated as empty.

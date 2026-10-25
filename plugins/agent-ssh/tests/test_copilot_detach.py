@@ -552,6 +552,54 @@ def real_keeper(seams, monkeypatch):
     return store
 
 
+@pytest.mark.parametrize("selection", ["parent", "linked"])
+def test_keeper_runtime_root_uses_real_admission(seams, tmp_path, monkeypatch, selection):
+    from agent_procutil.daemon_instances import (
+        cancel_instance_reservation, inspect_instances, reserve_instance,
+    )
+
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    state = tmp_path / "state"
+    state.mkdir()
+    root = launch / ".." / "state"
+    if selection == "linked":
+        root = launch / "linked"
+        try:
+            root.symlink_to(state, target_is_directory=True)
+        except OSError as error:
+            pytest.skip(f"native directory symlink unavailable: {error}")
+    store = detach.KeeperStore(root)
+    if selection == "parent":
+        assert ".." in store.state_path("devbox").parts
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(detach, "read_keeper_state", lambda target: store.read(target))
+    monkeypatch.setattr(store, "alive", lambda key: store.read(key) is not None)
+    monkeypatch.setattr(store, "stop", lambda key: store.remove(key) or False)
+    admitted = []
+
+    def spawn(argv, environment, payload, *, popen, **kwargs):
+        instance = popen.keywords["instance"]
+        receipt = reserve_instance(instance, environment=environment)
+        try:
+            row = next(row for row in inspect_instances(receipt.registry_root)
+                       if row["instance_id"] == receipt.instance_id)
+            assert row["runtime_root"] == str(state) and row["state"] == "reserved"
+            admitted.append(instance.runtime_root)
+        finally:
+            cancel_instance_reservation(receipt, creation_refused=True)
+        return {**payload, "pid": 99999, "pid_identity": "synthetic-99999"}
+
+    monkeypatch.setattr(detach, "spawn_keeper", spawn)
+    if selection == "linked":
+        with pytest.raises((OSError, ValueError, RuntimeError)):
+            real_ensure_keeper("devbox", venue_port=41234, mux="fixture", probe=lambda _: True)
+        assert admitted == []
+    else:
+        result = real_ensure_keeper("devbox", venue_port=41234, mux="fixture", probe=lambda _: True)
+        assert result["started"] and admitted == [state]
+
+
 @pytest.mark.parametrize("other_hold", [False, True])
 def test_attached_recovery_reuses_and_releases_original_hold(
     real_keeper, monkeypatch, other_hold,
