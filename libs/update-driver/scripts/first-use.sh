@@ -82,6 +82,11 @@ if [[ "$plugin" == agent-logger ]]; then
     done
 fi
 if [[ "$plugin" == agent-bridge ]]; then
+    for tool in xargs seq; do
+        command -v "$tool" >/dev/null || {
+            printf 'Bridge first use requires native tool: %s\n' "$tool" >&2; exit 1;
+        }
+    done
     for helper in installer_engine.py installer_engine_process.py runtime_launcher.py \
         installer_wheel_inputs.py installer_wheel_snapshot.py installer_wheel_acquisition.py \
         installer_dependency_policy.py installer_dependency_config.py installation-context/installation_context.py \

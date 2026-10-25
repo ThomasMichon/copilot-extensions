@@ -164,6 +164,27 @@ def test_bridge_never_substitutes_accepted_source(owning_bridge, area, change):
     assert not installation.exists()
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason="native GNU installer tool admission")
+@pytest.mark.parametrize("native", [False, True])
+def test_bridge_missing_fingerprint_tool_refuses_before_acquisition(
+    owning_bridge, area, monkeypatch, native,
+):
+    payload, installation, project = owning_bridge
+    root = area / "cold"
+    env = cold_environment(installation, project, area)
+    assert not (Path(env["PATH"]) / "xargs").exists()
+    command = native_command(root, payload, installation, project)
+    if native:
+        result = subprocess.run(command, env=env, cwd=project, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=30, **no_window_kwargs())
+        assert result.returncode != 0 and "Bridge first use requires native tool: xargs" in result.stderr
+    else:
+        monkeypatch.setenv("PATH", env["PATH"])
+        with pytest.raises(provision.ProvisionError, match="Bridge first use requires native tool: xargs"):
+            provision.enqueue(payload, installation, project, root=root)
+    assert not root.exists() and not installation.exists()
+
+
 @pytest.fixture
 def materialized_bridge(owning_bridge, area):
     payload, installation, project = owning_bridge
@@ -214,9 +235,10 @@ def bridge_service_adapter(env):
         env["USERNAME"] = "fixture-user"
     else:
         adapter = Path(env["PATH"])
-        seq = shutil.which("seq")
-        assert seq, "native service loop requires seq"
-        (adapter / "seq").symlink_to(seq)
+        for name in ("seq", "xargs"):
+            executable = shutil.which(name)
+            assert executable, f"native installer requires {name}"
+            (adapter / name).symlink_to(executable)
         real_curl = (adapter / "curl").resolve()
         (adapter / "curl").unlink()
         (adapter / "curl").write_text(

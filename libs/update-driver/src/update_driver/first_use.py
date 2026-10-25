@@ -153,6 +153,10 @@ def _inspect(
     prefix = RECIPES[plugin]
     if plugin == "agent-bridge" and any(not (scripts / name).is_file() for name in BRIDGE_HELPERS):
         raise ProvisionError("Bridge first use requires its complete materialized installation helpers")
+    if plugin == "agent-bridge" and sys.platform.startswith("linux"):
+        for tool in ("xargs", "seq"):
+            if shutil.which(tool) is None:
+                raise ProvisionError(f"Bridge first use requires native tool: {tool}")
     no_self = prefix + "_NO_SELFPROVISION"
     if (
         manifest.get("schema") != "copilot-extensions.payload-invocation"

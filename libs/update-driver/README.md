@@ -690,7 +690,9 @@ installed payload and default legacy root, required direct command/module
 declaration and native runtime gates. Its canonical Python engine helpers
 provide the existing complete-input freezer; Bridge's native installers still
 own construction, immutable completion/activation, publication and service
-lifecycle. The queue supplies no service override: Windows cold provision
+lifecycle. Linux admission also requires the owning installer's `xargs` content
+fingerprinting and `seq` service-loop tools before acquisition or queue writes.
+The queue supplies no service override: Windows cold provision
 performs the full native install, whereas prepared-runtime provision only
 reconciles the task (including its explicit never-ran S4U repair). POSIX
 provision preserves its install path and healthy immutable reuse. An unattended
