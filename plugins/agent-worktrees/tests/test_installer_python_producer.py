@@ -70,6 +70,88 @@ def test_real_entry_early_parser_failure_is_durable(tmp_path, absent):
         os.close(fd)
 
 
+@pytest.mark.parametrize("damage", ["missing", "syntax", "import", "runtime"])
+@pytest.mark.parametrize("entrypoint", [True, False])
+@pytest.mark.parametrize("option,code", [("--help", 0), ("--unknown-diagnostic-fixture-option", 2)])
+def test_unavailable_helper_does_not_replace_parser_result(tmp_path, damage, entrypoint, option, code):
+    scripts = tmp_path / "scripts"
+    shutil.copytree(SCRIPTS, scripts)
+    helper = scripts / "installer_diagnostics.py"
+    if damage == "missing":
+        helper.unlink()
+    else:
+        helper.write_text({
+            "syntax": "def invalid(\n",
+            "import": "import unavailable_diagnostics_fixture_dependency\n",
+            "runtime": "raise RuntimeError('optional diagnostics import failed')\n",
+        }[damage], encoding="utf-8")
+    entry = scripts / "runtime_install.py"
+    program = (
+        "import runpy,sys; sys.path.insert(0,sys.argv[1]); "
+        "module=runpy.run_path(sys.argv[2]); "
+        "sys.argv=[sys.argv[2],sys.argv[3]]; "
+        "raise SystemExit(module['main']())"
+    )
+    argv = ([str(entry), option] if entrypoint else
+            ["-c", program, str(scripts), str(entry), option])
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", *argv],
+        env=native_environment(USERPROFILE=str(tmp_path), HOME=str(tmp_path)),
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == code, result.stderr
+    if code:
+        assert b"unrecognized arguments" in result.stderr
+        assert result.stdout == b""
+    else:
+        assert b"usage:" in result.stdout
+    assert result.stderr.count(b"continuing with missing diagnostics") == 1
+    assert b"Traceback" not in result.stderr
+
+
+def test_missing_helper_preserves_implementation_import_failure(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    shutil.copyfile(SCRIPTS / "runtime_install.py", scripts / "runtime_install.py")
+    (scripts / "installer_engine.py").write_text(
+        "raise RuntimeError('native implementation import failure')\n", encoding="utf-8",
+    )
+    result = invoke(tmp_path, entry=scripts / "runtime_install.py")
+    assert result.returncode == 1
+    assert b"native implementation import failure" in result.stderr
+    assert result.stderr.count(b"continuing with missing diagnostics") == 1
+    assert b"No module named 'installer_diagnostics'" not in result.stderr
+
+
+def test_missing_helper_warning_cannot_hold_entrypoint(tmp_path):
+    scripts = tmp_path / "scripts"
+    shutil.copytree(SCRIPTS, scripts)
+    (scripts / "installer_diagnostics.py").unlink()
+    program = """
+import runpy,sys,threading
+class Blocked:
+    def fileno(self):
+        threading.Event().wait(60)
+        raise OSError('fixture released')
+    def write(self,text):
+        raise AssertionError('optional warning used blocking text presentation')
+    def flush(self):
+        pass
+sys.stderr=Blocked()
+sys.argv=[sys.argv[1],'--help']
+runpy.run_path(sys.argv[0],run_name='__main__')
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", "-c", program, str(scripts / "runtime_install.py")],
+        env=native_environment(USERPROFILE=str(tmp_path), HOME=str(tmp_path)),
+        stdin=subprocess.DEVNULL, capture_output=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert b"usage:" in result.stdout
+
+
 def test_uncaught_python_exception_preserves_class_and_useful_text(tmp_path):
     result = invoke(tmp_path, """
 with diagnostics.writer():
