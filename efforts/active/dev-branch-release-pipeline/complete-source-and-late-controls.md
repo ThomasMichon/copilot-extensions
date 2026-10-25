@@ -4,6 +4,8 @@ Parent: [Dev/Main Release Pipeline](README.md), Phase 9d. Tracker: #8736.
 
 **Status:** Active; agent-recommended plan reviewed in #8745 before execution.
 The parent Request retains the operator's exact direction and execution consent.
+The source-publication implementation merged in #8790. Control reconciliation,
+independent Main activation and live release acceptance remain open.
 
 ## Goal and non-goals
 
@@ -48,29 +50,38 @@ shared interface requires coordination, not a competing implementation.
 ### 1. Review and isolate the extension
 
 - [x] Land the parent vision/plan amendment before production changes: #8745.
-- [ ] Inventory existing source-archive, release-index, unit-packet and
+- [x] Inventory existing source-archive, release-index, unit-packet and
       Main-control interfaces; coordinate the exact shared seams.
-- [ ] Keep new helpers small and independently testable rather than expanding
+- [x] Keep new helpers small and independently testable rather than expanding
       the near-cap producer or forking its canonical source representation.
 
 ### 2. Retain complete final source through the existing publisher
 
-- [ ] Finalize source transformations before freezing build inputs.
-- [ ] Produce a self-contained source archive that reconstructs the complete
+Source-level delivery: #8790. These completed implementation items do not claim
+Main activation or actual release-asset qualification; section 4 and the live
+validation items retain those gates.
+
+- [x] Finalize source transformations before freezing build inputs.
+- [x] Produce a self-contained source archive that reconstructs the complete
       candidate tree, including tracked metadata, file modes, admitted
       controls and materialized first-party source. An incremental Git bundle
       or the Dev tag's automatic source archive is not this proof.
-- [ ] Preserve applicable archive/path/type and size limits. Any required
+- [x] Preserve applicable archive/path/type and size limits. Any required
       limit change needs its own justified review; never prune source to
       make an archive fit or substitute third-party dependency bytes.
-- [ ] Keep the source/archive manifest external to the tree/archive whose
+- [x] Keep the source/archive manifest external to the tree/archive whose
       digest it records, avoiding self-referential identities.
-- [ ] Extend the existing publication inventory, signing/admission and
+- [x] Extend the existing publication inventory, signing/admission and
       immutable raw readback before final PR publication. Missing, extra,
       changed or wrong-generation content within this generation's inventory
       refuses readiness; unrelated immutable generations are not overwritten.
 
 ### 3. Reconcile advancing Main without changing release ownership
+
+The next in-flight source slice provides authenticated, bounded deletion
+tombstones and a strict full-tree transition classifier. It does not yet
+connect equivalent build reuse or activate refreshed landing generations.
+Validation and merge evidence are recorded in the parent Journal.
 
 - [ ] Read the latest Main and classify changes against the trusted explicit
       Main-owned contract before final candidate push. Never infer ownership
@@ -117,7 +128,7 @@ shared interface requires coordination, not a competing implementation.
 
 ## Validation plan
 
-- [ ] Eligible in-process units prove complete archive reconstruction,
+- [x] Eligible in-process units prove complete archive reconstruction,
       canonical producer/verifier agreement, deterministic inventory and
       file-mode/path handling; omissions, traversal, wrong source and
       wrong-generation bytes refuse readiness.
