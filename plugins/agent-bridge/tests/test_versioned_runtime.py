@@ -1122,6 +1122,98 @@ def test_windows_gc_reclaims_junction_slot_under_nonzero_min_age(tmp_path):
 # fingerprint_source / check_admission (phase-3-runtime-admission, #5472/#5788)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.parametrize("count", [4, 9])
+def test_fingerprint_reads_overlap_with_bounded_ordered_framing(tmp_path, monkeypatch, count):
+    import hashlib
+    import threading
+    from collections import Counter
+
+    files = []
+    expected = hashlib.sha256()
+    for number in range(count):
+        path = tmp_path / f"{number:02}.py"
+        content = bytes([number]) + b"\0framed\n"
+        path.write_bytes(content)
+        files.append(path)
+        for value in (f"{path.name}/.".encode(), b"file", content):
+            expected.update(len(value).to_bytes(8, "big") + value)
+    first_batch = threading.Barrier(4)
+    lock = threading.Lock()
+    reads = []
+    workers = set()
+    active = maximum = 0
+    read_bytes = Path.read_bytes
+
+    def observed_read(path):
+        nonlocal active, maximum
+        if path not in files:
+            return read_bytes(path)
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+            reads.append(path)
+            workers.add(threading.current_thread())
+        try:
+            if path in files[:4]:
+                first_batch.wait(timeout=3)
+            return read_bytes(path)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(Path, "read_bytes", observed_read)
+    assert vr.fingerprint_source(reversed(files)) == expected.hexdigest()
+    assert Counter(reads) == Counter(files)
+    assert maximum == 4
+    assert active == 0
+    assert all(not worker.is_alive() for worker in workers)
+
+
+def test_fingerprint_read_failure_keeps_label_order_and_settles_workers(tmp_path, monkeypatch):
+    import threading
+
+    files = []
+    for number in range(9):
+        path = tmp_path / f"{number:02}.py"
+        path.write_bytes(b"source")
+        files.append(path)
+    later_failed = threading.Event()
+    lock = threading.Lock()
+    reads = []
+    workers = set()
+    active = 0
+    read_bytes = Path.read_bytes
+
+    def failing_read(path):
+        nonlocal active
+        if path not in files:
+            return read_bytes(path)
+        with lock:
+            active += 1
+            reads.append(path)
+            workers.add(threading.current_thread())
+        try:
+            if path == files[0]:
+                assert later_failed.wait(3)
+                raise PermissionError("first label refused")
+            if path == files[1]:
+                later_failed.set()
+                raise PermissionError("later label refused")
+            return read_bytes(path)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(Path, "read_bytes", failing_read)
+    with pytest.raises(OSError) as caught:
+        vr.fingerprint_source(files)
+    assert str(files[0]) in str(caught.value)
+    assert str(caught.value.__cause__) == "first label refused"
+    assert set(reads) <= set(files[:4])
+    assert active == 0
+    assert all(not worker.is_alive() for worker in workers)
+
+
 def test_fingerprint_explicit_files_label_linearly_without_changing_digest(tmp_path, monkeypatch):
     import hashlib
 

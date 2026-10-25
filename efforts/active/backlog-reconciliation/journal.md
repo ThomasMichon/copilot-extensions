@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-24 - Mesh, venue input and supervisor control: five complete consolidations](<journal/2026/10.24 mesh-venue-supervisor-family-99.md>)
 - [2026-10-24 - Deliberate-reap family: three complete consolidations and four protected arrivals](<journal/2026/10.24 deliberate-reap-family-98.md>)
 - [2026-10-24 - Lifecycle and relay families: eight complete consolidations](<journal/2026/10.24 lifecycle-and-relay-family-97.md>)
 - [2026-10-24 - Acquisition family: one complete consolidation and ten inflow admissions](<journal/2026/10.24 acquisition-family-96.md>)
