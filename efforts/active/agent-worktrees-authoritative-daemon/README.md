@@ -112,6 +112,17 @@ singleton transitions, central fleet exporter, or other pivots.
 
 ## Coordination
 
+The complete direct #2558/#2706/#7097 finite cases continue through the SAME Active
+ROOT's existing guarded transaction, explicit catalog/inspection and repair
+responsibilities, actual global Validation and full Journal under the current #3761
+integration/source owners. Preserve EVERY incumbent row, completed phase, #4120 intake,
+#229/#1919/#3751 coordination acceptance, #5664 lifecycle/enrollment, #6086
+exact-selection enrichment, #6832 client and current exporter/native/resource claims.
+#3585 remains independently OPEN in its existing dedicated head-succession Phase2; its
+full ambient/root-discovery contract below is REFERENCE ONLY, not received custody. No
+second daemon/registry, new generic ACK, implementation assignment, operational
+permission or parent-completion waiver is created.
+
 The direct retained #4120 acceptance continues through this SAME existing Active ROOT's
 Plan, own and actual global Validation, and Journal under the incumbent domain, source,
 native and resource custodians. Every prior phase, alternative, hold and responsibility
@@ -1064,7 +1075,291 @@ https://github.com/ThomasMichon/copilot-extensions/pull/3170 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/6448 ;
 https://github.com/ThomasMichon/copilot-extensions/pull/6595 .
 
+### Direct finite tracking-integrity cases - existing transaction/catalog interfaces
+
+*The following contribution was assisted using Copilot.*
+
+These complete retained source cases extend the SAME Active ROOT, not a new umbrella or
+writer. Existing Phases3/6 interfaces and ordinary schema-bounded current/advisory read
+guarantees apply. No implementation or operational work is performed by this intake.
+
+#### #2558 - Unreadable record is UNKNOWN, not absent
+
+<!-- backlog-reconciliation:7556:transfer:2558:to:efforts/active/agent-worktrees-authoritative-daemon/README.md -->
+
+Source: https://github.com/ThomasMichon/copilot-extensions/issues/2558. Full original
+and eligible refinements remain binding; administrative tracking intake is not
+implementation completion.
+
+Credit/qualification: 2521 positively absent allocation handling and current
+resolver-error None are credited; supplier unreadability is explicitly excluded from
+that delivery.
+
+##### Plan
+
+- [ ] **2558-P1** Expose optional skipped-record signal/count OR an equivalent honest
+  exact-ID unreadable/unknown result through list_records -> actual listing/resolver ->
+  affected Dispatch presence, live-worktree/orphan and cleanup consumers. Distinguish
+  genuine empty/absent from malformed/partial/permission-denied exact record; no silent
+  skip into absence.
+- [ ] **2558-P2** Unknown never retires a reservation, releases an exclusive key,
+  abandons responsibility or authorizes replacement embodiment. Preserve exact
+  installation/machine/project/worktree scope and ordinary current/advisory read
+  boundaries; a parser-only helper is not end-to-end safety.
+- [ ] **2558-P3** Keep assigned1918 attempts and its explicit ground-reader dependency
+  separate; the supplier implementation is not taken over by that assignment. Draft
+  terminal-reclamation, context-budget5896 and generic settings/plugin-registry absence
+  work are not a substitute canonical for this exact contract.
+
+##### Validation
+
+- [ ] **2558-V1** Malformed/partial/unreadable/permission/concurrent record state,
+  exact-ID and neutral-CWD/cross-platform filtering preserve attributable UNKNOWN versus
+  confirmed absence through actual owning consumers.
+- [ ] **2558-V2** Actual downstream typed unknown/hold versus positive absence controls
+  leave live/unknown body/task/claim capacity intact without a live probe or destructive
+  fixture.
+- [ ] **2558-V3** Finite source/read consumer evidence can qualify independently while
+  ROOT all-mutator/native/cutover and assigned allocator completion stay separate. No
+  damaged-record, presence, claim or process experiment occurs during intake.
+
+##### Continuing coordination
+
+- [ ] Preserve existing source/consumer authorities, claims and obligations; the
+  receiving tracker does not reassign implementation/native/resource custody. Complete
+  direct receiving acceptance and current readback precede any administrative
+  supersession; unresolved fit or custody keeps #2558 OPEN.
+- [ ] Retain this case's literal alternatives, qualifications and finite evidence tier.
+  This is not a new blanket ACK, all-host/native gate, whole-parent veto or operational
+  permission.
+
+#### #2706 - Complete cross-project protective path coverage
+
+<!-- backlog-reconciliation:7556:transfer:2706:to:efforts/active/agent-worktrees-authoritative-daemon/README.md -->
+
+Source: https://github.com/ThomasMichon/copilot-extensions/issues/2706. Full original
+and eligible refinements remain binding; administrative tracking intake is not
+implementation completion.
+
+Credit/qualification: 2697 same-cell invocation and fail-closed Logger hub protection,
+plus6595 bounded per-project current feeds are delivered foundations, not whole-machine
+coverage.
+
+##### Plan
+
+- [ ] **2706-P1** Support an explicit complete machine-wide cross-project query OR a
+  considered Logger caller-side project enumeration/resolution contract from neutral
+  scheduled CWD, with installation/machine/project attribution. A single active/default
+  project, status/platform inclusion or correct peer executable cannot substitute for
+  all relevant adopted projects.
+- [ ] **2706-P2** Aggregate scope/results honestly and keep hub compaction skipping
+  unresolved protection. Empty one-project list, unavailable peer or unreadable store
+  cannot prove untracked everywhere or enable archive. Do not borrow arbitrary project
+  CWD or conflate service-context2701 and semantic-archive5942 work.
+- [ ] **2706-P3** Make the multi-project protective inventory an EXPLICIT named consumer
+  operation with bounded per-row authority and honest completeness, not hidden
+  fleet/graph/history work in ordinary point/advisory status. Preserve
+  current-role/project boundaries and existing owning query/Logger interfaces; no
+  automatic cross-host registry or new store.
+
+##### Validation
+
+- [ ] **2706-V1** Neutral-CWD legacy and same-cell compaction paths, more than one
+  relevant project, explicit scope and missing/unknown/unreadable/partial project
+  coverage versus genuine complete results.
+- [ ] **2706-V2** Complete protected tracked paths versus confirmed untracked, partial
+  coverage/unreadable stores and legitimate no-peer/unavailable results retain correct
+  skip/hold and no archive permission.
+- [ ] **2706-V3** Actual chosen query OR enumeration consumer shape, source/installation
+  isolation and unknown propagation at original finite tier; no full parent
+  installation/rollout/native programme becomes its prerequisite.
+
+##### Continuing coordination
+
+- [ ] Preserve existing source/consumer authorities, claims and obligations; the
+  receiving tracker does not reassign implementation/native/resource custody. Complete
+  direct receiving acceptance and current readback precede any administrative
+  supersession; unresolved fit or custody keeps #2706 OPEN.
+- [ ] Retain this case's literal alternatives, qualifications and finite evidence tier.
+  This is not a new blanket ACK, all-host/native gate, whole-parent veto or operational
+  permission.
+
+#### #7097 - Approved exact misplaced-store integrity repair
+
+<!-- backlog-reconciliation:7556:transfer:7097:to:efforts/active/agent-worktrees-authoritative-daemon/README.md -->
+
+Source: https://github.com/ThomasMichon/copilot-extensions/issues/7097. Full original
+and eligible refinements remain binding; administrative tracking intake is not
+implementation completion.
+
+Credit/qualification: 7068 label repair's receiving-project refusal and existing
+uniquely recoverable pair copy retaining legacy record are valid partials, not duplicate
+quarantine or orphan disposition.
+
+##### Plan
+
+- [ ] **7097-P1** Report-first select exact source receiving store and record ID;
+  resolve actual repository via canonical registration and report duplicate versus
+  orphan, authority, references, conflicting metadata and minimum missing provenance
+  before any effect.
+- [ ] **7097-P2** Only for PROVEN duplicate offer an explicit authoritative
+  METADATA-ONLY quarantine/retirement plan with ORIGINAL-BYTE backup and audit. Preserve
+  canonical counterpart, checkout, branches, sessions, head, claims/lifecycle and all
+  divergent/unsettled responsibility.
+- [ ] **7097-P3** Orphan/removed-checkout/missing-parent cases report exact missing
+  provenance and minimum reconciliation obligation; never silently
+  relocate/delete/fabricate parent or weaken project/platform/valid historical alias
+  fences. No broad doctor-fix, lifecycle cleanup or manual YAML removal is
+  deduplication.
+- [ ] **7097-P4** Bind approval to observed exact inputs, then revalidate under normal
+  locks/publication authority; reject changed/ambiguous state. Provide JSON and public
+  CURRENT-state readback/invalidation so stale duplicate leaves the correct receiving
+  roster, not a runtime patch or service destruction.
+- [ ] **7097-P5** Use existing explicit owner-controlled repair/transaction path;
+  ordinary O(schema) reads do not gain historical scans or write authority. Keep
+  machine-label7057 and paired-copy/handoff owners separate; no second owner-migration
+  API or permission for live repair is created.
+
+##### Validation
+
+- [ ] **7097-V1** Proven duplicate, divergent duplicate, removed checkout, missing
+  parent and wrong/ambiguous canonical binding remain distinct.
+- [ ] **7097-V2** Exact approved duplicate plan, unchanged canonical/physical/source
+  state, protected divergent/held records and backup/audit refusal on failure.
+- [ ] **7097-V3** Unknown/orphan and foreign receiving-project cases remain
+  held/actionable; legitimate verified same-machine aliases and label-repair refusal
+  preserved.
+- [ ] **7097-V4** Concurrent change, idempotency, approved versus altered plan, exact
+  readback/roster invalidation and untouched unrelated records.
+- [ ] **7097-V5** Contained exact-record source/consumer regression at original tier; no
+  deployment, live record mutation, source/resource handoff or whole-parent/all-host
+  gate is introduced by this intake.
+
+##### Continuing coordination
+
+- [ ] Preserve existing source/consumer authorities, claims and obligations; the
+  receiving tracker does not reassign implementation/native/resource custody. Complete
+  direct receiving acceptance and current readback precede any administrative
+  supersession; unresolved fit or custody keeps #7097 OPEN.
+- [ ] Retain this case's literal alternatives, qualifications and finite evidence tier.
+  This is not a new blanket ACK, all-host/native gate, whole-parent veto or operational
+  permission.
+
+#### Retained independent dependency #3585 - NOT received custody
+
+FULL directly required current waypoint names3585 as the existing dedicated
+head-succession Phase2, with its own driving participant/coordination and validation.
+The chosen authoritative-daemon ROOT is a data supplier, not established acceptance of
+the ENTIRE proactive ambient/root-discovery scope. No exact administrative rehoming
+authority is evidenced. Retain3585; this is a concrete scope/owner boundary, not a new
+universal ACK. 3688 typed direct local holders, bounded ancestry helpers, manual tracing
+and same-repo exact effort/slice duplicate checks remain partials. No dependency row
+below is a new daemon completion gate. Existing source-specific coupled authority/read
+contracts remain.
+
+- **3585-D1 - retained under3585:** Keep3585 responsible for routine cheap pre-work
+  duplicate-effort/objective checking in worktree instructions before substantial
+  requests, not just an on-demand lookup; refer to existing driver without suppressing
+  legitimate concurrently declared slices. **Existing-owner qualification:** Actual
+  ambient workflow and existing-driver discovery, not mere command presence.
+- **3585-D2 - retained under3585:** Report the actual CURRENT root responsibility rather
+  than nearest/recent leaf or historical creator after accepted transfer.
+  **Existing-owner qualification:** Current responsibility and root-versus-direct
+  distinction through admitted scope.
+- **3585-D3 - retained under3585:** Typed kind/ref or supported equivalent finds ALL
+  qualified matching direct holders; report direct and root separately. **Existing-owner
+  qualification:** Positive direct-owner and multiple matching-holder cases.
+- **3585-D4 - retained under3585:** Bounded inspectable creator/responsibility chain
+  with machine/repo/worktree/session qualification, current held/transferred
+  claim/effort evidence; ancestry alone is not current custody. **Existing-owner
+  qualification:** Multi-hop and transferred responsibility, source/identity boundaries.
+- **3585-D5 - retained under3585:**
+  Multiple/cycle/depth/conflicting/unreadable/skipped/remote-unavailable/out-of-band
+  cases remain incomplete/ambiguous; empty local lookup is not global owner absence and
+  recency/bare-ID cannot fabricate root. **Existing-owner qualification:** Unknown
+  record, cycle, same-ID/different-scope and bounded incomplete cases.
+- **3585-D6 - retained under3585:** Reuse actual registry/provider/claimant-graph scope
+  with coverage named; inspection does not impersonate remote authorization or bypass
+  cell/project/source restrictions. **Existing-owner qualification:** Scope and actual
+  public-interface boundaries, not another ledger.
+- **3585-D7 - retained under3585:** Surface root, chain/evidence and coordination route.
+  Root/leaf liveness is separate observation, not a grant; no age expiry, reclaim,
+  release or #912 reservation change. **Existing-owner qualification:** Readable
+  qualified report without ownership/liveness conflation.
+- **3585-D8 - retained under3585:** Keep original
+  direct/root/multi-hop/multiple/transferred/unknown/cycle/same-ID consumer regressions
+  under3585's existing owner when authorized. Daemon may supply data but no receiving or
+  implementation custody is transferred here. **Existing-owner qualification:** Original
+  finite report/guidance test tier and explicit graph inspection, never reconstruction
+  hidden in ordinary row status or a new universal native trial.
+
+#### Continuing coordination for these finite interfaces
+
+- Retain the SAME #3761 driver, current guarded-writer/catalog/inspection/repair and
+  affected Dispatch/Logger consumers. Preserve schema-bounded ordinary reads,
+  source/project/installation authority, durable-before-ACK, same-handler
+  confirmed-pre-send fallback and no replay after ambiguous execution.
+- Keep ALL incumbent ROOT bytes, 29 checked and32 unchecked rows,
+  Participants/Coordination/Plan/ACTUAL level-two global Validation, full inline and
+  linked historical Journal, #4120 direct intake and current #3761 inherited
+  durable-state/catalog/CPU acceptance. Existing source/native/adopter/producer/exporter
+  reservations retain exact scope.
+- Before any accepted-source supersession obtain NEW normal reviewed ACTUAL merge of the
+  COMPLETE direct local Plan/local Validation/continuing Coordination, EACH actual ROOT
+  global entry and dated Journal. Then fully read back the WHOLE immutable/current ROOT,
+  ALL linked history, exact source and #3761 current
+  author/state/lock/assignees/eligible discussion/actual holds. Old
+  creation/title/link/child-only text or this proposal is not receipt.
+- If current Active fit, exact repair/read boundary, any unique clause/tier or actual
+  custody cannot survive complete receiving acceptance, RETAIN the source. Finite case
+  qualification does not wait for unrelated all-mutator/native/whole-parent completion;
+  the parent still keeps its own entire completion gate.
+
+
 ## Validation Plan
+
+### Direct finite tracking-integrity acceptance
+
+- [ ] **GLOBAL-2558** Qualify ALL direct #2558 Plan/local Validation/continuing
+  Coordination clauses above through their actual owning interfaces:
+  Malformed/partial/unreadable/permission/concurrent record state, exact-ID and
+  neutral-CWD/cross-platform filtering preserve attributable UNKNOWN versus confirmed
+  absence through actual owning consumers. Actual downstream typed unknown/hold versus
+  positive absence controls leave live/unknown body/task/claim capacity intact without a
+  live probe or destructive fixture. Finite source/read consumer evidence can qualify
+  independently while ROOT all-mutator/native/cutover and assigned allocator completion
+  stay separate. No damaged-record, presence, claim or process experiment occurs during
+  intake. Preserve literal alternatives, current source/custody and finite evidence
+  tiers; no unrelated whole-parent/native prerequisite. Partial fixtures/source or
+  historical provider credits are not whole completion.
+- [ ] **GLOBAL-2706** Qualify ALL direct #2706 Plan/local Validation/continuing
+  Coordination clauses above through their actual owning interfaces: Neutral-CWD legacy
+  and same-cell compaction paths, more than one relevant project, explicit scope and
+  missing/unknown/unreadable/partial project coverage versus genuine complete results.
+  Complete protected tracked paths versus confirmed untracked, partial
+  coverage/unreadable stores and legitimate no-peer/unavailable results retain correct
+  skip/hold and no archive permission. Actual chosen query OR enumeration consumer
+  shape, source/installation isolation and unknown propagation at original finite tier;
+  no full parent installation/rollout/native programme becomes its prerequisite.
+  Preserve literal alternatives, current source/custody and finite evidence tiers; no
+  unrelated whole-parent/native prerequisite. Partial fixtures/source or historical
+  provider credits are not whole completion.
+- [ ] **GLOBAL-7097** Qualify ALL direct #7097 Plan/local Validation/continuing
+  Coordination clauses above through their actual owning interfaces: Proven duplicate,
+  divergent duplicate, removed checkout, missing parent and wrong/ambiguous canonical
+  binding remain distinct. Exact approved duplicate plan, unchanged
+  canonical/physical/source state, protected divergent/held records and backup/audit
+  refusal on failure. Unknown/orphan and foreign receiving-project cases remain
+  held/actionable; legitimate verified same-machine aliases and label-repair refusal
+  preserved. Concurrent change, idempotency, approved versus altered plan, exact
+  readback/roster invalidation and untouched unrelated records. Contained exact-record
+  source/consumer regression at original tier; no deployment, live record mutation,
+  source/resource handoff or whole-parent/all-host gate is introduced by this intake.
+  Preserve literal alternatives, current source/custody and finite evidence tiers; no
+  unrelated whole-parent/native prerequisite. Partial fixtures/source or historical
+  provider credits are not whole completion.
+
+#3585 remains an independently OPEN existing discovery/guidance responsibility, not an accepted-source or new daemon completion gate. All incumbent global Validation rows remain unchanged.
 
 - [ ] Complete EVERY directly retained #4120 P1-P6, V1-V6 and C1-C3 clause above at its
   original finite scope/evidence tiers, preserving incumbent Plan/Validation/Journal,
@@ -1115,6 +1410,24 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-10-24 - Direct finite tracking-integrity intake
+
+- Plan the COMPLETE #2558 unreadable-versus-absence, #2706 cross-project
+  protective-query and #7097 exact-record integrity cases directly in this SAME ROOT
+  Plan, local Validation/continuing Coordination and its ACTUAL global Validation.
+  Preserve every incumbent byte, checkbox state, historical result, #4120 family,
+  current #3761 inheritances and actual owner/claim.
+- #3585 and ALL inherited #3558 ambient/direct-to-root discovery remain independently
+  OPEN in the existing dedicated head-succession Phase2. Their complete dependency
+  reference does not rehome custody or satisfy receiving acceptance.
+- This is proposed administrative tracking intake, not implementation, native/product
+  completion or permission to query/repair operator state. NEW normal review, ACTUAL
+  merge and FULL CURRENT ROOT/history/source coordination readback precede any
+  accepted-source supersession; record the real receipt only after it exists.
+- Existing domain/source/native/resource custodians continue the next unfinished
+  admitted Plan item. The ROOT remains Active; no unrelated whole-parent prerequisite or
+  waiver is introduced.
 
 - [2026-10-24 - Direct retained acceptance from #4120](<journal/2026/10.24 backlog-intake-85-86.md>)
 
