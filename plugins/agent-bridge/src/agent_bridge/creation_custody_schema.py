@@ -18,6 +18,13 @@ def schema_triggers() -> dict[str, tuple[str, str]]:
             f"BEFORE INSERT ON {table} WHEN EXISTS (SELECT 1 FROM {table} "
             "WHERE key_digest=NEW.key_digest AND runtime_custody_json IS NOT NULL) "
             "BEGIN SELECT RAISE(ABORT,'bridge_creation_row_retained'); END")
+        triggers[f"{table}_original_destination_retained"] = (table,
+            f"CREATE TRIGGER IF NOT EXISTS {table}_original_destination_retained "
+            f"BEFORE UPDATE OF key_digest ON {table} "
+            "WHEN NEW.key_digest IS NOT OLD.key_digest AND EXISTS ("
+            f"SELECT 1 FROM {table} WHERE key_digest=NEW.key_digest "
+            "AND runtime_custody_json IS NOT NULL) "
+            "BEGIN SELECT RAISE(ABORT,'bridge_creation_row_retained'); END")
         triggers[f"{table}_original_input_retained"] = (table,
             f"CREATE TRIGGER IF NOT EXISTS {table}_original_input_retained "
             f"BEFORE UPDATE OF key_digest,facts_digest,session_id,creation_facts_json ON {table} "

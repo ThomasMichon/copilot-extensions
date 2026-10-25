@@ -153,6 +153,23 @@ def test_replace_cannot_erase_associated_creation_history(creation) -> None:
     assert journal.read(original) == row
 
 
+@pytest.mark.parametrize("recursive", [False, True])
+def test_replacement_update_cannot_erase_original_destination(creation, recursive: bool) -> None:
+    db, _owner, _producer, _admission, journal, original, row = creation
+    table = creation_table(original.kind)
+    legacy = legacy_creation(db, original.kind, "f" * 64, original.facts_digest)
+    db._get_conn().execute(f"PRAGMA recursive_triggers={'ON' if recursive else 'OFF'}")
+    with pytest.raises(sqlite3.IntegrityError, match="row_retained"):
+        db.execute_write(
+            f"UPDATE OR REPLACE {table} SET key_digest=? WHERE key_digest=?",
+            (original.key_digest, legacy["key_digest"]),
+        )
+    assert journal.read(original) == row
+    assert dict(db.execute_read(
+        f"SELECT * FROM {table} WHERE key_digest=?", (legacy["key_digest"],),
+    )[0]) == legacy
+
+
 @pytest.mark.parametrize("column,value", [
     ("key_digest", "replacement"), ("facts_digest", "replacement"),
     ("session_id", "replacement"), ("runtime_custody_json", None), ("creation_facts_json", None),

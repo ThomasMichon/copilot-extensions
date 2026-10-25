@@ -31,7 +31,9 @@ inputs/producer/epoch refuse. Existing legacy attempts cannot acquire an
 association retrospectively.
 
 Original key, facts, association and session identity cannot be overwritten or
-discarded, including by `INSERT OR REPLACE`. State changes participate in the
+discarded, including by `INSERT OR REPLACE` or a replacement update of a legacy
+row into an associated destination key when recursive triggers are off.
+State changes participate in the
 existing inventory revision. Inventory reads every row, including allocating,
 preparing, launching, complete and terminal attempts; associated facts are
 validated against their original digest and producer association. Native
