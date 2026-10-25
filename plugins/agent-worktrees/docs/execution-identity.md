@@ -112,6 +112,12 @@ claim that the receiving project cannot later settle refuses before writing.
 Session-registration authority preserves explicit machine bindings from project,
 global and drop-in configuration, so an explicit key can disambiguate entries
 sharing the observed hostname; observation alone still cannot select among them.
+The authority-only registration loader uses the same naming adapter as ordinary
+configuration. Legacy native records retaining the literal observed hostname
+remain usable when only the sibling environment is customized. This is a
+record-scoped compatibility proof: actual platform, receiving project,
+checkout namespace and the existing ledger still have to agree. It does not
+make a foreign execution key or hostname-only target globally local.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names

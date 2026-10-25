@@ -80,6 +80,94 @@ def test_ordinary_producer_stays_legacy(tmp_path: Path, monkeypatch: pytest.Monk
     assert "machine_identity_version" not in row and "execution_machine" not in row
 
 
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("owned", [False, True])
+def test_ordinary_sibling_only_creation_remains_mutable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, owned: bool,
+) -> None:
+    from agent_worktrees import config_authority, obligations, tracking_session_registration_write
+
+    load_config = cfg.load_config
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    sibling = "windows" if platform == "wsl" else "wsl"
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n  sibling-space:\n    hostname: raw-host\n"
+        f"    physical_host: friendly-host\n    execution_platform: {sibling}\n",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({
+        "repo_name": config.repo_name, "repos": {config.repo_name: {
+            "anchor": config.default_repo.anchor,
+            "worktree_root": config.default_repo.worktree_root,
+        }},
+    }))
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+    config = load_config(
+        path, project=config.repo_name, include_control_plane_related_pr=False,
+        include_knowledge_preferences=False,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir() / "worktrees")
+    cfg.project_dir().mkdir()
+    (cfg.project_dir() / "config.yaml").write_text(path.read_text())
+    monkeypatch.setattr(config_authority, "_load_state_root_authority", lambda *_a: ({}, ""))
+    owner_ref = None
+    if owned:
+        parent_checkout = Path(config.default_repo.worktree_root) / "parent"
+        parent_checkout.mkdir(parents=True)
+        parent = tracking.create_new_record(
+            "parent", "worktree/parent", str(parent_checkout), config.repo_name,
+            config.machine, platform, cfg.tracking_dir(),
+        )
+        owner_ref = f"{config.machine}/{config.repo_name}/parent"
+        monkeypatch.setattr(
+            m, "_coordination_readiness_for_owner_ref", lambda *_a: SimpleNamespace(ready=True),
+        )
+    row = m._create_worktree_core(
+        config, creation_key="ordinary-request", owner_ref=owner_ref,
+    )["worktree"]
+    record = tracking.load_record(cfg.tracking_dir() / f"{row['id']}.yaml")
+    assert record.machine_identity is None
+    assert record.machine == config.machine
+    before = record.yaml_path.read_bytes()
+    execution_spaces.require_record_mutation(record, config)
+    replayed = m._create_worktree_core(
+        config, creation_key="ordinary-request", owner_ref=owner_ref,
+    )
+    assert replayed["worktree"] == row
+    assert record.yaml_path.read_bytes() == before
+    registered = tracking_session_registration_write.apply_session_register({
+        "worktree_id": record.worktree_id, "yaml_path": str(record.yaml_path),
+        "session_id": "ordinary-session",
+    })
+    assert registered == {"ok": True, "linked_handoff": None}
+    assert tracking.load_record(record.yaml_path).session_entry("ordinary-session") is not None
+    before = record.yaml_path.read_bytes()
+    for changes in (
+        {"machine": "sibling-space"}, {"platform": sibling},
+        {"repo": "foreign-project"}, {"worktree_path": str(tmp_path / "unproven")},
+    ):
+        try:
+            execution_spaces.require_record_mutation(replace(record, **changes), config)
+        except execution_spaces.ExecutionSpaceError:
+            pass
+        else:
+            pytest.fail(f"accepted foreign record changes: {changes!r}")
+        assert record.yaml_path.read_bytes() == before
+    if owned:
+        warnings = []
+        execution_spaces.settle_parent_obligation(
+            tracking.load_record(record.yaml_path), config, record.worktree_id,
+            output=SimpleNamespace(ok=lambda _message: None, warn=warnings.append),
+        )
+        assert warnings == []
+        assert tracking.load_record(parent.yaml_path).resources[0].state == obligations.AT_REST
+
+
 @pytest.mark.parametrize("defect", ["invalid-map", "foreign-platform", "config-platform", "unknown-mode"])
 def test_tuple_refusal_precedes_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -239,9 +240,14 @@ def load_project_authority_config(
             ),
         },
     )
-    from .execution_spaces import canonicalize_legacy_config
+    from .machine_identity import resolve_execution_machine
 
-    return canonicalize_legacy_config(config)
+    return replace(config, machine=resolve_execution_machine(
+        configured_machine or cfg.socket.gethostname(),
+        guest=cfg.detect_platform() == "wsl", configured=bool(configured_machine),
+        load_entries=lambda: cfg.load_machines_yaml(str(anchor), config=config),
+        preserve_native_hostname=True,
+    ))
 
 
 def registration_record_config(record) -> Config:

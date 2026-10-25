@@ -627,8 +627,12 @@ def _create_worktree_core(
                 f"--owner-ref must be qualified as machine/project/worktree_id (got {owner_ref!r})"
             )
         from .execution_spaces import require_owner_identity
+        from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
-        if not require_owner_identity(parsed_owner.machine, config):
+        if (
+            resolve_legacy_wsl_owner_ref(parsed_owner, config) is None
+            and not require_owner_identity(parsed_owner.machine, config)
+        ):
             raise RuntimeError(
                 f"cross-space owner {owner_ref} cannot synchronously accept "
                 "this worktree obligation; use a dispatch/lease flow that "

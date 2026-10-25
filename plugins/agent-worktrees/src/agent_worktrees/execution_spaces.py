@@ -358,6 +358,16 @@ def require_record_mutation(record: Any, config: Any) -> None:
         return
     if not _requires_scoped_identity(entries, config.machine, record.machine):
         return
+    if getattr(record, "repo", None) and record.repo != config.repo_name:
+        raise ExecutionSpaceError("record does not belong to the receiving project")
+    if (
+        getattr(record, "worktree_path", None)
+        and _current_execution_context(config, entries).customization_key is None
+    ):
+        from .legacy_wsl_record_locality import record_namespace_matches
+
+        if not record_namespace_matches(record, config):
+            raise ExecutionSpaceError("record does not belong to the receiving worktree namespace")
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} belongs to a different execution space"
