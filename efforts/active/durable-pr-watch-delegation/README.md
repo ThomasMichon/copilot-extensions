@@ -191,6 +191,14 @@ of third-party bytes. The
 [construction proposal](artifact-construction.md) separates first-party release
 artifacts from governed, target-specific offline image inputs.
 
+Continuation selection after offline-input source delivery, verbatim:
+
+> watcher-integration
+
+Continue watcher/client integration while actual image validation remains
+pending an approved builder, pinned base and runtime closure. This does not
+waive image acceptance or authorize unrelated runtime repair.
+
 ## Plan
 
 ### Governed watch-owner cutover prerequisite
@@ -355,10 +363,21 @@ _Delegation driver source slice; agent-recommended implementation under the
 reviewed artifact-construction plan. The planning worktree retains its broader
 fleet-service binding._
 
-- [ ] Land the repository-only offline-context consumer and exact retained-wheel
+- [x] Land the repository-only offline-context consumer and exact retained-wheel
   and fresh offline-install controls through normal review and Linux/Windows
-  source validation. This does not close profile/feed/base approval, actual
+  source validation (confirmed by #8885). This does not close profile/feed/base approval, actual
   image construction, container lifecycle or fleet acceptance above.
+
+### PR-service watcher/client integration
+
+_Delegation driver source validation slice; agent-recommended under the
+existing serving/consumer contract, not a second watcher or evaluator._
+
+- [ ] Qualify actual watch-service observation through the real Gateway and
+  Dispatch replay/queue consumers: shared targets, unchanged nonevents,
+  original identities across restart and one wake per event after lost ACK.
+  This finite source proof does not close live provider credentials, the
+  independent evaluator route, image or installed/fleet acceptance.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -704,6 +723,47 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Merge offline PR image inputs and retain real image acceptance
+
+- #8885 merged as `f541c831e939e31ba0ef419c1ae9fb24ceca71fe` from
+  approved head `9e112793999ab860309c69d07e12c5ad83d3e8c7`.
+  Copilot review `5641852096` approved without findings; complete reviews and
+  review/issue comments were read. Required CI `40169117492` passed.
+  Exact-head native acceptance `40169147365` passed all 180 selected core
+  cases and 44 standalone cases on each of Linux and Windows.
+- Re-read the current parent intent, coordination, Plan, Validation and latest
+  journal after merge. Close only the finite offline-input source slice.
+  Managed pull-forward retained the reviewed tip and advanced this continuing
+  worktree to the confirmed merge without discarding unpublished work.
+- The helper and native synthetic installation do not approve a real runtime
+  profile, base or feed, build an image, or prove a deployed watcher. Continue
+  real offline image construction and packaged process acceptance through the
+  existing shared owners; all provider, credential, writer transfer,
+  update/rollback, installed and fleet gates remain open. No SSH work resumes.
+
+### 2026-10-25 - Exercise the actual watcher-to-Dispatch consumer chain
+
+- Following the operator's `watcher-integration` selection, compose the
+  existing `WatchService`, connector, native observation child and both disk
+  owners with the real TLS/PoP Gateway and finite Dispatch replay consumer.
+  Two waits for the same authorized PR share a native observation target.
+  Repeated identical snapshots produce no wake; service/queue restart retains
+  original request, deadline and registration identities. A subsequent
+  matching state change completes one wake per task, including recovery after
+  a committed ACK response is lost.
+- The native child supplies synthetic provider snapshots, not real forge or
+  credential-provider qualification. The independent periodic evaluator,
+  actual image construction, installed adoption, live providers and fleet
+  gates remain open. No production polling, retry, deadline or activation
+  behavior changes.
+- The focused integrated case passes. Its surrounding replay, real-transport
+  and coordinator-maintenance packet passes 72 tests under existing runner
+  bounds. Initial test assumptions were corrected to distinguish a prepared
+  waiter from an active one and a completed observation cycle from transient
+  store contention. Read-only capability negotiation may retry before any
+  waiter exists; no uncertain mutation is retried with a new identity.
+  Hosted current-head Windows/Linux qualification remains required.
 
 ### 2026-10-24 - Resume PR-service construction on the shared profile owner
 

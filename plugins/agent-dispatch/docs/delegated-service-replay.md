@@ -170,6 +170,13 @@ asserts one cycle for a forty-waiter roster, backoff, native-recovery progress
 under slow remote IO, active/drain fencing and coordinator-owned shutdown.
 The transport suite also drives actual coordinator lifespans through the real
 TLS path, including shutdown during a held service commit and successor recovery.
+It also composes the real `WatchService` observation loop with two Dispatch
+waits for one authorized PR target. Repeated identical native-child
+observations produce no wake, service/consumer restart preserves the original
+request/deadline/registration identities, and a later matching state change
+settles one wake per wait even when an actual committed ACK response is lost.
+The native child supplies synthetic provider snapshots; this is not live forge
+credential validation or acceptance of an independent periodic evaluator.
 These are isolated source tests,
 not installed service, production credential or representative fleet latency/CPU
 qualification. The scheduler adds no process, network call or tree/history
