@@ -53,7 +53,7 @@ _ADD_PARSERS_MODULES = [
     "installation_cli", "update_cli", "update_launch_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "session_observations_cli", "record_cli", "worktree_status_audit",
-    "picker_reconcile_cli", "launch_registry",
+    "picker_reconcile_cli", "launch_registry", "launch_attempt_inspection",
 ]
 
 
@@ -154,7 +154,7 @@ def test_non_fast_tracked_command_still_calls_build_parser(monkeypatch):
     assert calls == [1], "a non-fast-tracked command must still build the full parser"
 
 
-@pytest.mark.parametrize("command", ["get", "status", "list", "history-digest"])
+@pytest.mark.parametrize("command", ["get", "status", "list", "history-digest", "launch-attempts"])
 def test_fast_path_help_matches_full_parser_help(command, capsys):
     """A fast-tracked subcommand's own --help text must be byte-identical
     whether produced via the minimal single-command parser or the full
@@ -253,6 +253,7 @@ def _deferred_only_global_names() -> frozenset[str]:
         (["state-root", "--pair", "--json"], 3),
         (["coordination-readiness"], 0),
         (["config-root", "--json"], 0),
+        (["launch-attempts", "a" * 32, "--json"], 0),
         (["knowledge", "control-plane"], 0),
         (["--project", "demo", "knowledge", "compose-plugins", "--json"], 0),
     ],

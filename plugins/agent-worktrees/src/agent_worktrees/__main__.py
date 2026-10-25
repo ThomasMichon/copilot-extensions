@@ -6025,11 +6025,13 @@ def _load_full_command_surface() -> None:
             args, json_output=output._json_output, json_error=output._json_error
         )
     from .record_cli import cmd_record
+    from .launch_attempt_inspection import cmd_launch_attempts
 
     from . import update_launch_cli
 
     from .session_observations_cli import cmd_session_attention, cmd_session_observations
     COMMAND_MAP = {
+        "launch-attempts": cmd_launch_attempts,
         "resolve": cmd_resolve,
         "execution-leg": cmd_execution_leg,
         "post-exit": cmd_post_exit,
