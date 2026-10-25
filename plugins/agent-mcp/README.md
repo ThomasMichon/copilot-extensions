@@ -36,6 +36,9 @@ cells nor migrates existing state.
 After argument validation, resident CLI admission checks the selected socket's
 state directory before changing cwd or constructing the server. A nested server
 borrows that admission rather than inheriting an unrelated code-directory root.
+Forwarding and passive cutover reserve that same socket-state directory before
+creating the child, including when an explicit socket lives outside the home.
+Socket/log spellings stay lexical so linked parents cannot be hidden by resolution.
 
 ## Standalone quick start
 

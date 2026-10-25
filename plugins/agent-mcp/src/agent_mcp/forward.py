@@ -142,7 +142,9 @@ def _spawn_serve_host(handle: str) -> None:
     # the forwarder's lifetime still beats losing the multiplexer entirely.
     # That host does NOT outlive the Job; spawn_daemon logs the fallback.
     spawn_daemon(cmd, cwd=home, log_path=home / "serve.log",
-                 instance=DaemonInstanceSpec("agent-mcp", home, Path(__file__).resolve()),
+                 instance=DaemonInstanceSpec(
+                     "agent-mcp", Path(handle).parent, Path(__file__).resolve(),
+                 ),
                  env_overrides=env_overrides,
                  contained_fallback=True, display="agent_mcp serve")
 

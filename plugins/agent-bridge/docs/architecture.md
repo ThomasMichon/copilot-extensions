@@ -1012,6 +1012,13 @@ because the receiver was updated. Source publication and rollout remain separate
 
 ## Persistence
 
+The ASGI admission lifecycle retains its instance through event-writer and
+database-close settlement, including startup failure and shutdown cancellation.
+A bounded writer-stop timeout keeps admission live until the actual writer
+thread retires and close is retried; cancellation of an asyncio facade is not
+native completion evidence. An already-retired writer's historical write error
+is logged once without creating a permanent admission hold.
+
 - **Sessions:** SQLite database at `~/.agent-bridge/sessions.db` (WAL mode)
 - **Config:** YAML at `~/.agent-bridge/config.yaml`
 - **Auth:** Bearer token at `~/.agent-bridge/auth.yaml`

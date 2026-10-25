@@ -543,3 +543,45 @@ caller coverage, not one launcher or one platform passing.
   disclosed; a reused-PID cleanup hold retained evidence rather than touching
   the replacement process. Core safety, native bytes and unit budget remain
   unchanged. Four source guards, module ceilings and changed-file lint passed.
+
+### 2026-10-25 - Actual retirement before admission settlement
+
+- Reproduced the next MCP launcher finding with four failing actual-reservation
+  regressions. Forwarding and passive cutover now reserve the selected socket
+  parent before creating a child; inherited admission can no longer bypass that
+  parent's custody checks. Home, cwd and child environment retain their existing
+  meaning. The corrected packet passed 68 tests with eight platform skips.
+- PR hosting retains its original WatchService and admission after a bounded
+  drain fails. It retries that same service to actual writer/disk/connector
+  settlement, surviving repeated cancellation rather than treating owner-task
+  completion as proof of native retirement.
+- Diagnosed two Windows Python 3.11 failures with controlled cancellation and
+  lock-acquisition traces. `asyncio.wait_for` swallowed cancellation racing a
+  successful acquisition. Timed `asyncio.wait` now preserves cancellation;
+  cleanup joins the exact acquisition and releases only its acquired mutex.
+  All 71 WatchService/host/settlement tests passed on Windows 3.11 and Linux
+  3.13. Independent Windows replay also passed all 71.
+- Audited the cleanup class beyond the reviewed PR host. Dispatch now retains
+  hosting admission until both its federation thread and assignment intake
+  settle; bounded retries do not repeat directory resignation. Partial startup,
+  cleanup errors and repeated interruption retain custody. Its independent
+  Windows packet passed 126 tests, including 15 new regressions.
+- The corresponding Linux Dispatch packet could not collect without Uvicorn.
+  Existing offline wheelhouses lacked it; the canonical seasoned, hash-locked
+  dependency acquisition failed verified TLS at the package host after its
+  bounded retries. No TLS bypass, global install or Linux-pass claim was made.
+  This does not replace the actual Linux native/shared-core qualifications.
+- Bridge admission now outlives actual native event-writer and database-close
+  retirement, including startup failure, bounded stop and cancellation of an
+  async facade. Dead-writer historical errors do not create permanent holds.
+  The native-state observation remains in the hosting wrapper: database source
+  bytes and immutable HTTP execution evidence are unchanged. Independent
+  final lifecycle/database replay passed 65 tests.
+- Chat's close already joins its store and server workers before release.
+  Index already awaits its owned loops and monitors; independently owned
+  detached workers are not incorrectly absorbed into the host's cleanup.
+- Strict contract validation retained both contracts and all 814 fixtures;
+  only the two active Bridge hosting bindings changed. All 1,782 positive-unit
+  source bindings remain exact. Native/shared-process bytes are unchanged.
+  Source publication, passing review and current-head CI remain open. The
+  effort stays Active and no runtime rollout is authorized.

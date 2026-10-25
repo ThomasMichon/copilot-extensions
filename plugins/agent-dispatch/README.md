@@ -3129,6 +3129,12 @@ or changing/removing its shared URL or credential retires the subscription
 and waits for an in-flight intake before closing its client; replacement is
 deferred rather than racing two intakes. Credential-command resolution runs
 only on the owning federation tick, never in the per-event reader predicate.
+`FederationRunner.stop()` remains bounded and returns `False` while its tick
+thread or assignment intake is retiring. Coordinator hosting retains its daemon
+admission until a later bounded stop confirms both have settled; retries do not
+repeat directory resignation. Cleanup interruptions/errors propagate only after
+local settlement, and a partial federation startup settles its retained work
+before falling back to serving without federation. Production gains no expiry.
 Route ownership is refreshed on owner ticks and actual reconciliation
 admission, not per frame; the reader only checks the cached snapshot.
 Actual intake rechecks the live route inside the counted drain boundary;

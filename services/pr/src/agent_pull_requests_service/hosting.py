@@ -6,6 +6,7 @@ from agent_procutil.daemon_instances import daemon_entrypoint
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import threading
@@ -18,6 +19,36 @@ from fleet_manager.credential_references import load_service_credentials
 from fleet_manager.gateway_service_handler import RequestDisconnected
 
 from .config import HostConfig
+
+
+class UnsettledService:
+    """Retain this exact writer and its recoverable work until close succeeds."""
+
+    def __init__(self, service: WatchService, timeout: float) -> None:
+        self.service, self.timeout = service, timeout
+
+    async def settle(self) -> None:
+        while self.service.status()["writer_held"]:
+            try:
+                await self.service.close(timeout=self.timeout)
+            except (Exception, asyncio.CancelledError):
+                # A failed bounded close is not evidence that disk work stopped.
+                logging.getLogger(__name__).warning(
+                    "PR service cleanup unconfirmed; original writer custody retained",
+                )
+                await asyncio.sleep(min(1, self.timeout))
+
+
+async def _join_settlement(task: asyncio.Task) -> None:
+    interrupted = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            interrupted = True
+    await task
+    if interrupted:
+        raise asyncio.CancelledError
 
 
 class LaunchScope:
@@ -148,15 +179,20 @@ async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None)
         done, _ = await asyncio.wait({owner, observer}, return_when=asyncio.FIRST_COMPLETED)
         if observer in done:
             await observer
-        await owner
+        await asyncio.shield(owner)
     finally:
         scope.stopping.set()
         stop.set()
-        # Never cancel the owner's bounded drain or release its custody early.
-        try:
-            await asyncio.shield(owner)
-        finally:
-            observer.cancel()
-            await asyncio.gather(observer, return_exceptions=True)
-            for selected, handler in previous.items():
-                signal.signal(selected, handler)
+
+        async def settle() -> None:
+            try:
+                await asyncio.gather(owner, return_exceptions=True)
+                await UnsettledService(service, config.drain_timeout).settle()
+            finally:
+                observer.cancel()
+                await asyncio.gather(observer, return_exceptions=True)
+                for selected, handler in previous.items():
+                    signal.signal(selected, handler)
+
+        # Task completion can be a bounded-drain failure, not writer settlement.
+        await _join_settlement(asyncio.create_task(settle()))
