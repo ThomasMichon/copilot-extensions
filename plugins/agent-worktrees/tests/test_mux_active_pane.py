@@ -79,8 +79,10 @@ def test_native_owned_pane_hands_off_seed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_panes: dict[str, str], kind: str,
     tmp_tracking_dir: Path, monkeypatch_config: None,
 ) -> None:
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
     record = tracking.create_new_record(
-        "example", "worktree/example", str(tmp_path / "checkout"), "demo", "test",
+        "example", "worktree/example", str(checkout), "demo", "test",
         "linux", tmp_tracking_dir,
     )
     seed = launch_seed_state.stage(record.yaml_path, kind=kind, text="first line\n'quoted' second line")

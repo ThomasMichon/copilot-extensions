@@ -288,3 +288,33 @@ def test_guard_is_active_during_conftest_import_before_sessionstart(tmp_path):
     assert result.returncode != 0
     assert "UnsafeTestCommand" in result.stdout + result.stderr
     assert not sentinel.exists()
+
+
+def test_native_startup_failure_keeps_bounded_diagnostics_without_native_execution(tmp_path):
+    import ast
+    import json
+    import re
+
+    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "tests" / "native" / "test_warm_picker_lifetime.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in {"_read", "_startup_diagnostics"}
+    ]
+    namespace = {"json": json, "re": re, "subprocess": subprocess}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
+    (tmp_path / "owner.log").write_text("l" * 16000)
+    session = "picker-" + "a" * 24
+    (tmp_path / "owner-debug.json").write_text(json.dumps({
+        "states": [{"slots": [{"session": session}, {"session": "foreign-session"}]}],
+    }))
+    calls = []
+
+    def command(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, "p" * 16000, "")
+
+    report = json.loads(namespace["_startup_diagnostics"](tmp_path, command))
+    assert report["owner_log_tail"] == "l" * 4096
+    assert report["panes"][0]["tail"] == "p" * 4096
+    assert calls == [(("capture-pane", "-p", "-t", session), {"timeout": 0.5})]

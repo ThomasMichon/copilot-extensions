@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -31,7 +32,36 @@ def _wait(predicate, message, timeout=20):
         if result:
             return result
         time.sleep(.05)
-    raise AssertionError(message)
+    raise AssertionError(message() if callable(message) else message)
+
+
+def _startup_diagnostics(root, command):
+    state = _read(root / "owner-debug.json") or {}
+    try:
+        path = root / "owner.log"
+        with path.open("rb") as stream:
+            stream.seek(max(0, path.stat().st_size - 4096))
+            log_tail = stream.read(4096).decode("utf-8", errors="replace")
+    except OSError:
+        log_tail = ""
+    slots = next(
+        (entry["slots"] for entry in reversed(state.get("states", [])) if entry.get("slots")),
+        [],
+    )
+    panes = []
+    for slot in slots[:2]:
+        session = slot.get("session", "")
+        if not isinstance(session, str) or re.fullmatch(r"picker-[a-f0-9]{24}", session) is None:
+            continue
+        try:
+            captured = command("capture-pane", "-p", "-t", session, timeout=0.5)
+            panes.append({
+                "session": session, "returncode": captured.returncode,
+                "tail": captured.stdout[-4096:],
+            })
+        except (OSError, subprocess.TimeoutExpired) as error:
+            panes.append({"session": session, "error": type(error).__name__})
+    return json.dumps({"startup": state, "owner_log_tail": log_tail, "panes": panes}, indent=2)
 
 
 def _live(identity):
@@ -144,13 +174,37 @@ def _owner(root, namespace):
     from worktree_manager import demo
     from worktree_manager.warm_picker_pool import WarmPickerPool, runtime_identity
     from worktree_manager.warm_picker_worker import publish
+    from worktree_manager.warm_picker_contract import CONTEXT_KEYS
 
     publish(root / "owner.json", {"pid": os.getpid(), "start": process_start_time(os.getpid())})
     pool = WarmPickerPool(root / "manager")
     pool.mux_args = namespace
     claimed = False
+    history = []
+    last_state = None
     try:
         while True:
+            snapshots = []
+            for slot in pool._slots:
+                ready = _read(slot.directory / "ready.json")
+                startup = _read(slot.directory / "startup.json") or {}
+                context = (ready or {}).get("context") or {}
+                snapshots.append({
+                    "session": slot.session,
+                    "phase": startup.get("phase"),
+                    "ready": ready is not None,
+                    "ready_live": _live(ready) if ready is not None else False,
+                    "context_mismatch_keys": [
+                        key for key in CONTEXT_KEYS
+                        if ready is not None and context.get(key) != (pool.context or {}).get(key)
+                    ],
+                })
+            state = {"engine_available": pool.engine is not None, "slots": snapshots}
+            if state != last_state:
+                history.append(state)
+                history = history[-12:]
+                publish(root / "owner-debug.json", {"states": history})
+                last_state = state
             if not (root / "slot.json").exists():
                 pool.pump()
             for slot in pool._slots:
@@ -259,11 +313,11 @@ def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, pha
         if any(identity["start"] is None for identity in prior_muxes):
             pytest.skip("pre-existing mux process birth could not be verified")
 
-    def command(*args):
+    def command(*args, timeout=5):
         return subprocess.run(
             [mux, *namespace, *args], env=env, cwd=tmp_path,
             stdin=subprocess.DEVNULL, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=5, **no_window_kwargs(),
+            encoding="utf-8", errors="replace", timeout=timeout, **no_window_kwargs(),
         )
 
     owner = None
@@ -278,10 +332,13 @@ def test_abrupt_owner_death_stops_real_tty_worker_and_retires_slot(tmp_path, pha
             stdout=log, stderr=log, **no_window_kwargs(),
         )
         try:
-            owner = _wait(lambda: _read(tmp_path / "owner.json"), "owner did not start")
+            owner = _wait(
+                lambda: _read(tmp_path / "owner.json"),
+                lambda: "owner did not start:\n" + _startup_diagnostics(tmp_path, command),
+            )
             slot = _wait(
                 lambda: _read(tmp_path / "slot.json"),
-                "unmodified worker did not preload: " + str(tmp_path / "owner.log"),
+                lambda: "unmodified worker did not preload:\n" + _startup_diagnostics(tmp_path, command),
             )
             directory = Path(slot["directory"])
             assert directory.is_relative_to(tmp_path / "manager" / "picker-sessions")
