@@ -250,7 +250,7 @@ if [[ "$run_owner" == 0 ]]; then
         printf '[installation-driver] launch acknowledgement: launched:%s log:%s\n' \
             "$__native_daemon_pid" "$log" >&2
         code=0
-        wait "$__native_daemon_pid" || code=$?
+        wait "$__native_daemon_wait_pid" || code=$?
         cat -- "$log" >&2
         exit "$code"
     fi

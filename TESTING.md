@@ -350,6 +350,8 @@ Separate bounded runner roots cover admission/freeze refusal matrices, native
 construction, installed-source recipe regressions, shared Logger behavior and
 canonical-installed-only bootstrap publication. A native launch acknowledgement
 is not durable request acceptance.
+The portfolio also runs canonical source-preparation regressions and native
+daemon wait-status controls, preserving the same job and per-run resource bounds.
 
 Linux fixtures explicitly construct the disposable-daemon native support with
 its canonical build helper before cold admission. The synthetic source commit

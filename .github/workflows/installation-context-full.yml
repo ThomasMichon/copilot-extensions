@@ -65,6 +65,16 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_bridge_snapshot.py
           -k "actual and not actual_stamp" --test-timeout 900 --timeout 1080
+      - name: Preserve canonical source archive and immutable preparation
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_prepare_runtime_source.py
+          --test-timeout 120 --timeout 600
+      - name: Preserve native waitable owner exit status
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_daemon_shell.py
+          -k waitable --test-timeout 90 --timeout 180
       - name: Qualify source-qualified native stamp in its own storage boundary
         run: >-
           python tools/run-plugin-tests.py update-driver

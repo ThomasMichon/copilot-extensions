@@ -266,12 +266,18 @@ helpers reserve FDs 5-8 and require non-interactive Bash with job control off.
 `native_daemon.sh` provides `start_native_daemon <script> <working-directory>
 <log> <arguments...>`, the Python-free Linux counterpart of the canonical
 POSIX daemon launch. It uses a new session with redirected stdio, closes
-unrelated inherited descriptors and acknowledges the direct child's actual
-session identity before executing the selected script. With
+unrelated inherited descriptors and acknowledges the admitted application's
+actual process identity before executing the selected script. With
 `COPILOT_EXTENSIONS_TEST_CONTAINED=1`, it preserves the caller's group instead.
 `__native_daemon_pid` is only a live launch observation, never persisted
 application custody or a completion receipt. Neither helper supplies cgroup
 escape, an installation queue or macOS admission.
+`__native_daemon_wait_pid` separately identifies the launcher's direct,
+waitable child. A synchronous observer waits that child for the native exit
+status; the admitted application can instead be a grandchild of the disposable
+lifecycle supervisor. Waiting the application PID with Bash `wait` is not valid
+in that case. Installation callers still own their durable receipt/result and
+must not interpret either PID as request acceptance.
 
 ## Caller-owned interactive completion
 

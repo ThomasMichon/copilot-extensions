@@ -31,7 +31,8 @@ start_native_daemon() {
         setsid -- "$BASH" "$__native_daemon_source" --child "$script" "$working" "$@" \
             </dev/null >>"$log" 2>&1 &
     fi
-    __native_daemon_pid=$!
+    __native_daemon_wait_pid=$!
+    __native_daemon_pid="$__native_daemon_wait_pid"
     if ! IFS= read -r -t 15 -u 7 frame || [[ ! "$frame" =~ ^ready:([1-9][0-9]*)$ ]]; then
         printf '%s\n' 'Native daemon admission failed; consult its diagnostic log.' >&2
         code=1
