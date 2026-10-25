@@ -210,6 +210,10 @@ space. Automatic discovery considers all same-platform host-family candidates,
 even when one registered key exactly matches the observed hostname. A host
 registered only for another platform remains remote-only, including when
 adopted profiles list native and guest spaces separately.
+Scoped discovery never uses SSH/selection aliases as OS-hostname evidence, and
+an explicit different hostname is not overridden by a matching key or group label.
+Scoped remote-only selections retain no loopback route during same-platform
+runtime handoff, including legacy-projected spaces.
 
 An optional `local_execution_space` in the Bridge service configuration selects
 a canonical registered key explicitly, for example when several same-platform

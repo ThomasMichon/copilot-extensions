@@ -226,6 +226,60 @@ def test_other_platform_hostname_remains_remote_only(platform, foreign):
             agent_registry._detect_local_machine(machines, "foreign")
 
 
+@pytest.mark.parametrize("alias_kind", ["ssh", "machine", "compatibility", "key", "physical"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_target_names_do_not_override_an_explicit_remote_hostname(alias_kind, legacy):
+    machine = MachineConfig(
+        key="remote", display_name="Remote", hostname="remote-host",
+        physical_host="remote-host", execution_platform="linux",
+        ssh_environments=[SshEnvironment("linux", "remote-ssh", shell="bash")],
+    )
+    if alias_kind == "ssh":
+        machine.ssh_environments[0].alias = "workstation"
+    elif alias_kind == "machine":
+        machine.alias = "workstation"
+    elif alias_kind == "compatibility":
+        machine.compatibility_aliases = ("workstation",)
+    elif alias_kind == "key":
+        machine.key = "workstation"
+    else:
+        machine.physical_host = "workstation"
+    machine.legacy_key = machine.key if legacy else ""
+    with patch.object(agent_registry, "_detect_platform", return_value="linux"), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, _ = agent_registry._detect_local_machine({machine.key: machine})
+        resolver = AgentResolver({}, {machine.key: machine})
+    assert current is None
+    assert not resolver.is_local_transport("workstation", execution_space_key=machine.key)
+    assert not resolver.is_local_transport("workstation")
+
+
+def test_other_platform_sibling_cannot_override_a_remote_hostname():
+    machines = {
+        key: MachineConfig(
+            key=key, display_name=key, hostname=hostname,
+            physical_host="shared-host", execution_platform=platform,
+        )
+        for key, hostname, platform in (
+            ("native", "workstation", "windows"), ("remote", "another-host", "linux"),
+        )
+    }
+    with patch.object(agent_registry, "_detect_platform", return_value="linux"), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, _ = agent_registry._detect_local_machine(machines)
+    assert current is None
+
+
+def test_implicit_physical_hostname_selects_the_current_platform():
+    machines = _spaces()
+    for machine in machines.values():
+        machine.hostname = ""
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, _ = agent_registry._detect_local_machine(machines)
+    assert current.key == "workstation-windows"
+
+
 @pytest.mark.parametrize("exact_key", ["workstation", "WORKSTATION"])
 def test_exact_key_does_not_hide_same_platform_hostname_collision(exact_key):
     machines = {

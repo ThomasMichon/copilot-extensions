@@ -196,7 +196,7 @@ def _detect_local_machine(
 
     from machine_transport import (
         AmbiguousMachineError, entry_physical_host, find_machine_entry,
-        is_local_machine, machine_identity_names,
+        is_local_machine,
     )
 
     hostname = socket.gethostname()
@@ -216,15 +216,13 @@ def _detect_local_machine(
         families = {
             entry_physical_host(entry).casefold()
             for entry in machines.values()
-            if observed in {
-                entry.hostname.casefold(), entry_physical_host(entry).casefold(),
-                *(name.casefold() for name in machine_identity_names(entry, include_metadata=False)),
-            }
+            if observed == (entry.hostname or entry_physical_host(entry)).casefold()
         }
         candidates = [
             entry for entry in machines.values()
             if entry.execution_platform == platform
             and entry_physical_host(entry).casefold() in families
+            and (not entry.hostname or entry.hostname.casefold() == observed)
         ]
         if len(candidates) > 1:
             raise AmbiguousMachineError(
@@ -233,7 +231,12 @@ def _detect_local_machine(
             )
         if candidates:
             return candidates[0], platform
-        machines = {key: entry for key, entry in machines.items() if not entry.execution_platform}
+        machines = {
+            key: entry for key, entry in machines.items()
+            if not entry.execution_platform
+            and entry_physical_host(entry).casefold() in families
+            and (not entry.hostname or entry.hostname.casefold() == observed)
+        }
 
     try:
         machine_config = find_machine_entry(machines, hostname, reject_ambiguous=True)

@@ -122,7 +122,6 @@ class AgentResolver(_ProviderDiscoveryMixin):
             if (
                 local_execution_space is not None
                 or platform != compat._detect_platform()
-                or (key is None and any(machine.execution_platform for machine in machines.values()))
                 or (key is not None and key not in machines)
                 or (key is not None and machines[key].execution_platform
                     and machines[key].execution_platform != platform)
@@ -150,7 +149,8 @@ class AgentResolver(_ProviderDiscoveryMixin):
         """Match a transport to the selected execution space, not its physical host."""
         machine, platform = self._local_machine, self._local_platform
         if (machine and machine.execution_platform) or any(
-            entry.execution_platform and not entry.legacy_key for entry in self.machines.values()
+            entry.execution_platform and (machine is None or not entry.legacy_key)
+            for entry in self.machines.values()
         ):
             return bool(
                 machine and execution_space_key == machine.key
