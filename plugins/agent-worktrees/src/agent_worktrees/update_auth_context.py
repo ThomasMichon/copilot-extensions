@@ -269,7 +269,7 @@ def _marketplace_context() -> Path | None:
 
 def run_update(args: argparse.Namespace, steps) -> int:
     with session() as value:
-        if value is not None:
+        if value is not None and getattr(args, "target", None) is None:
             value.prepare(
                 _marketplace_context(), include_anchors=not (
                     getattr(args, "target", None) or getattr(args, "no_anchor_sync", False)

@@ -1,6 +1,7 @@
 """One-plugin update admission, exact effects and read-only observed inventory."""
 
 import argparse
+import contextlib
 import json
 import os
 import shlex
@@ -207,6 +208,30 @@ def test_target_executes_under_engine_custody_without_legacy_manager_handoff(mon
     monkeypatch.setattr(core, "_cmd_update_in_plugin", lambda args: calls.append(args.target) or 0)
     assert update_cli.cmd_update(argparse.Namespace(target="guide")) == 0
     assert calls == ["guide"]
+
+
+def test_target_authentication_prepares_only_its_owning_context(monkeypatch):
+    from agent_worktrees import update_auth_context as auth
+
+    prepared = []
+    value = SimpleNamespace(
+        prepare=lambda context, **kwargs: prepared.append(context),
+        anchor_failed=False, unresolved=False,
+    )
+
+    @contextlib.contextmanager
+    def session():
+        yield value
+
+    monkeypatch.setattr(auth, "session", session)
+    monkeypatch.setattr(auth, "_marketplace_context", lambda: "unrelated-default")
+
+    def steps(args):
+        value.prepare("selected-target")
+        return 0
+
+    assert auth.run_update(argparse.Namespace(target="guide"), steps) == 0
+    assert prepared == ["selected-target"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")

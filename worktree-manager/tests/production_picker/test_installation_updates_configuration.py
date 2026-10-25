@@ -138,3 +138,80 @@ def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_
     assert any("Engine inventory unavailable" in message for message in summary["errors"])
     assert time.monotonic() - started < tasks.LIST_TIMEOUT
     assert ui.ENGINE_INVENTORY_TIMEOUT < tasks.LIST_TIMEOUT
+
+
+def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch):
+    from _installation_context_fixtures import namespaced_fixture, write_json
+    from worktree_manager import engine_client
+
+    home = tmp_path / "home"
+    home.mkdir()
+    install, _python = namespaced_fixture(home, windows=False)
+    write_json(home / ".copilot-extensions" / "installation-mode.json", {
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True},
+    })
+    legacy = home / ".agent-worktrees" / "registry.json"
+    cell = install.parent / "registry.json"
+    write_json(legacy, {"version": "legacy", "enabled": "inactive"})
+    write_json(cell, {"version": "cell", "enabled": "active"})
+    engine = tmp_path / "engine.py"
+    engine.write_text(
+        "import json,os,pathlib,sys\n"
+        "pointer=os.environ.get('COPILOT_EXTENSIONS_CONTEXT')\n"
+        f"root=pathlib.Path(pointer).parent if pointer else pathlib.Path({str(legacy.parent)!r})\n"
+        "state=json.loads((root/'registry.json').read_text())\n"
+        "if '--inventory' in sys.argv:\n"
+        " print(json.dumps({'contract':1,'execution_source':str(root),'entries':["
+        "{'id':'guide','title':'Guide','kind':'none','enabled':state['enabled'],'installed':True,"
+        "'payload':state['version'],'selected':'not applicable','running':'not applicable',"
+        "'source':str(root),'updatable':True,'limitation':''}]}))\n"
+        "else:\n"
+        " assert '--target' in sys.argv and pointer\n"
+        " print(json.dumps({'request_id':'cell-request','state':'pending','exit_code':None,'context':pointer}))\n"
+    )
+    wrapper = tmp_path / "inventory.py"
+    wrapper.write_text(
+        "from pathlib import Path\n"
+        "from worktree_manager import agent_plugin_runtime as apr,installation_updates as ui\n"
+        f"apr._canonical_os_profile=lambda environment:Path({str(home)!r})\n"
+        f"apr._durable_home=lambda ic,environment:Path({str(home / '.copilot-extensions')!r})\n"
+        "raise SystemExit(ui.main())\n"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.setattr(engine_client, "_INHERITED_ENGINE_COMMAND", [sys.executable, str(engine)])
+    reg = ui.configuration_pivot()
+    assert "--engine-context" in reg.list_cmd
+    assert "COPILOT_EXTENSIONS_CONTEXT" not in tasks._child_process_env()
+    reg = dataclasses.replace(reg, list_cmd=(sys.executable, str(wrapper), *reg.list_cmd[3:]))
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    state, rows, error, summary = runtime._exec_list({})
+    assert state == "ready", error
+    row = next(row for row in rows if row["id"] == "guide")
+    assert row["payload"] == "cell" and row["enabled"] == "active"
+    assert str(install.parent) in row["source"]
+    update = next(action for action in reg.actions if action.key == "update")
+    argv = list(pivots.format_template(update.run, {"id": "guide"}))
+    argv = [sys.executable, str(wrapper), *argv[3:]]
+    ok, message = runtime.run_resolved(argv, preserve_output=True)
+    assert ok, message
+    assert "cell-request" in message and str(install) in message
+    assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+
+
+def test_catalog_failure_uses_production_warning_banner(monkeypatch):
+    from plugin_resolve import inventory as plugin_inventory
+    from worktree_manager.production_picker.picker_tui.engine_views import TasksView
+
+    def fail(*args, **kwargs):
+        raise ValueError("catalog metadata is unavailable")
+
+    monkeypatch.setattr(plugin_inventory, "installed_item", fail)
+    monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {"contract": 1, "entries": []})
+    monkeypatch.setattr(ui, "_operations", lambda **kwargs: {})
+    summary = ui.inventory()["summary"]
+    banner = TasksView(None)._banner_line(summary, 118)
+    assert banner is not None and "Known catalog unavailable" in banner.plain

@@ -25,6 +25,16 @@ def _stored_target(arguments):
     return parsed.target
 
 
+def _restore_engine_context(pointer):
+    from . import agent_plugin_runtime
+
+    environment = {**os.environ, "COPILOT_EXTENSIONS_CONTEXT": pointer}
+    resolved = agent_plugin_runtime._namespaced_resolution("agent-worktrees", environment=environment)
+    if not resolved or resolved.get("actualMode") != "namespaced":
+        raise ValueError("Selected engine installation context is invalid or inactive; refresh from its owning engine")
+    os.environ["COPILOT_EXTENSIONS_CONTEXT"] = pointer
+
+
 def _engine_rows(payload):
     fields = {"id", "title", "kind", "enabled", "installed", "payload", "selected", "running", "source", "updatable", "limitation"}
     if not isinstance(payload, dict) or type(payload.get("contract")) is not int or payload["contract"] != 1:
@@ -94,13 +104,13 @@ def _operations(*, engine_source=None):
     source = _source_key()
     for request in update_driver.status():
         argv = request.spec.argv
+        target = _stored_target(argv)
+        if target is None or (request.spec.backend == "manager" and target != "worktree-manager"):
+            continue
         expected_source = source if request.spec.backend == "manager" else (
             engine_source if request.spec.backend == "engine" else None
         )
         if expected_source is None or request.spec.source != expected_source:
-            continue
-        target = _stored_target(argv)
-        if target is None:
             continue
         state = request.state
         if state == "completed":
@@ -214,7 +224,10 @@ def inventory():
             detail.append("Update unavailable: " + row["limitation"])
         detail.append("Refresh reads actual state. Dismissal does not cancel durable installation. Background maintenance is not enabled by this page.")
         row["card"] = {"title": row["title"], "status": row["activity"], "body": redact("\n\n".join(detail))}
-    return {"entries": rows, "summary": {"errors": [redact(finding) for finding in findings]}}
+    warnings = [redact(finding) for finding in findings]
+    return {"entries": rows, "summary": {
+        "errors": warnings, "banner_text": "\n".join(warnings), "banner_level": "warn",
+    }}
 
 
 def request_result_screen(label):
@@ -242,6 +255,7 @@ def submit(target: str) -> int:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--engine-argv", help=argparse.SUPPRESS)
+    parser.add_argument("--engine-context", help=argparse.SUPPRESS)
     parser.add_argument("command", choices=("list", "update"))
     parser.add_argument("target", nargs="?")
     args = parser.parse_args(argv)
@@ -250,6 +264,11 @@ def main(argv=None):
     warning = engine_client.accept_inherited_engine_command()
     if warning:
         parser.error(warning)
+    if args.engine_context:
+        try:
+            _restore_engine_context(args.engine_context)
+        except ValueError as error:
+            parser.error(str(error))
     if args.command == "list":
         if args.target:
             parser.error("list does not accept a target")
@@ -267,6 +286,9 @@ def configuration_pivot():
     inherited = engine_client.inherited_engine_command()
     if inherited:
         command += ["--engine-argv", json.dumps(inherited)]
+    pointer = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+    if pointer:
+        command += ["--engine-context", pointer]
     return parse_manifest({
         "label": "Installation & Updates", "placement": "config", "scope": "global",
         "list": [*command, "list"], "id_field": "id", "title_field": "title",

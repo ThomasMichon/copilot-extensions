@@ -88,6 +88,18 @@ def test_submit_revalidates_and_forwards_only_selected_target(inventory, monkeyp
     assert len(calls) == 1
 
 
+def test_manager_plugin_submission_uses_engine_identity_not_manager_queue(inventory, monkeypatch):
+    import update_driver
+
+    calls = []
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("plugin used Manager source identity"))
+    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args:
+        calls.append((project, args)) or 0)
+    assert ui.submit("guide") == 0
+    assert calls == [(None, ["update", "--no-manager", "--target", "guide", "--detach", "--json"])]
+
+
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])
 def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatch, target):
     from worktree_manager import update_bootstrap
@@ -125,24 +137,27 @@ def test_durable_history_distinguishes_acceptance_running_failure_and_completion
 
     monkeypatch.setattr(ui, "_operations", READ_OPERATIONS)
     monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "selected-source")
-    spec = SimpleNamespace(backend="manager", source="selected-source", argv=("--target", "guide"))
+    spec = SimpleNamespace(backend="engine", source="selected-source", argv=("--target", "guide"))
     log = tmp_path / "operation.log"
     log.write_text("Building selected guide payload")
     request = SimpleNamespace(spec=spec, id="fixture-operation", state="pending", exit_code=None, error=None, log_path=log)
     monkeypatch.setattr(update_driver, "status", lambda: (request,))
-    assert ui._operations()["guide"]["state"] == "queued"
+    def read():
+        return ui._operations(engine_source="selected-source")
+
+    assert read()["guide"]["state"] == "queued"
     request.state = "running"
-    assert "Building selected" in ui._operations()["guide"]["progress"]
+    assert "Building selected" in read()["guide"]["progress"]
     spec.argv = ("--target=other", "--target=guide")
-    assert ui._operations()["guide"]["state"] == "running"
+    assert read()["guide"]["state"] == "running"
     spec.argv = ("--target=other", "--target", "guide")
-    assert ui._operations()["guide"]["state"] == "running"
+    assert read()["guide"]["state"] == "running"
     request.state, request.exit_code = "completed", 1
-    assert ui._operations()["guide"]["state"] == "failed"
+    assert read()["guide"]["state"] == "failed"
     request.exit_code = 0
-    assert ui._operations()["guide"]["state"] == "succeeded"
+    assert read()["guide"]["state"] == "succeeded"
     spec.source = "other-installation"
-    assert ui._operations() == {}
+    assert read() == {}
 
 
 @pytest.mark.parametrize("shape", ["reference", "inventory"])
@@ -188,8 +203,8 @@ def test_durable_submission_uses_existing_owner_not_an_observer_queue(inventory,
     monkeypatch.setattr(update_driver, "enqueue", lambda spec, **k: seen.update(spec=spec) or request)
     monkeypatch.setattr(update_driver, "ensure_worker", lambda *a, **k: seen.update(worker=True))
     monkeypatch.setattr(update_driver, "wait", lambda *a, **k: pytest.fail("detached UI waited or cancelled owner"))
-    assert ui.submit("guide") == 0
-    assert seen["spec"].argv == ("--target", "guide")
+    assert ui.submit("worktree-manager") == 0
+    assert seen["spec"].argv == ("--target", "worktree-manager")
     assert seen["worker"]
     assert json.loads(capsys.readouterr().out)["state"] == "pending"
 
@@ -212,16 +227,16 @@ def test_real_detached_target_request_survives_submitter_exit_and_retains_failur
     monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
     result = subprocess.run(
-        [sys.executable, str(fixture), "submit", "--detach", "--json", "--target", "guide"],
+        [sys.executable, str(fixture), "submit", "--detach", "--json", "--target", "worktree-manager"],
         timeout=20, capture_output=True, text=True, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout)
     request = update_driver.wait(receipt["request_id"], timeout=20)
     assert request.state == "completed" and request.exit_code == 6
-    assert request.spec.argv == ("--target", "guide")
+    assert request.spec.argv == ("--target", "worktree-manager")
     records = [json.loads(line) for line in events.read_text().splitlines()]
-    assert records[0]["arguments"] == ["--target", "guide"]
+    assert records[0]["arguments"] == ["--target", "worktree-manager"]
     assert records[-1]["phase"] == "end"
     assert records[0]["pid"] != os.getpid()
 

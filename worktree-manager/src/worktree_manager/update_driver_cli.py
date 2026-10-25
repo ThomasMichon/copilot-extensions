@@ -86,6 +86,7 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--auth-non-repository", action="store_true")
     canonical.add_argument("--auth-environment", action="store_true")
     parsed = canonical.parse_args(forwarded)
+    options.target = parsed.target
     if parsed.target is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parsed.target):
         parser.error("--target requires a nonempty component identifier")
     if parsed.target is not None and any((
@@ -257,6 +258,18 @@ def cmd_update_request(rest: list[str]) -> int:
                     from . import __main__ as manager
 
                     return manager._cmd_update(forwarded)
+        if options.target is not None and options.target != "worktree-manager":
+            from . import engine_client
+
+            project, arguments = extract_project(forwarded)
+            observer = [
+                "--" + name.replace("_", "-")
+                for name in ("detach", "wait", "supervised_debug", "json")
+                if getattr(options, name)
+            ]
+            return engine_client.run_engine_passthrough(
+                project, ["update", "--no-manager", *arguments, *observer],
+            )
         project, _args = extract_project(forwarded)
         cwd = Path.cwd().resolve()
         arguments = list(forwarded)

@@ -33,6 +33,14 @@ accepted request; inspect its receipt before retrying. The same queue retains
 exclusive execution, deduplication and recovery; the page adds no queue or
 scheduler. A busy owner queues through that same driver.
 
+Plugin requests enter the selected engine's backend and retain its installation
+identity, even through the Manager CLI; Manager self-update uses the separate
+Manager backend. The workspace transports the selected engine's validated
+installation-cell receipt as well as its exact command. Contributed-command
+environment isolation therefore cannot silently redirect these reads or updates
+to legacy registries. Catalog failures appear in the standing warning banner
+while available rows remain inspectable.
+
 The public update seam is `worktree-manager update --target <plugin>` or
 `--target worktree-manager` for Manager alone. Add `--detach --json` for an
 acceptance receipt and use `update --request-status <id> --json` for owner state.

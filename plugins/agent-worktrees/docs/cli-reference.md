@@ -1353,8 +1353,7 @@ with `--target`. Missing/disabled or policy-gated targets report setup/enablemen
 or policy readiness rather than implicitly provisioning dependencies. The
 targeted engine command retains its own durable custody instead of delegating
 through a potentially older Manager; Manager is not a targeting prerequisite.
-The
-existing source, activation-preservation, credential, publication, runtime
+The existing source, activation-preservation, credential, publication, runtime
 retention and durable execution/recovery owners remain authoritative.
 Untargeted updates retain their existing full-suite semantics.
 
