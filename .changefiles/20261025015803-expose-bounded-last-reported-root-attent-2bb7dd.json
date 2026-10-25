@@ -1,0 +1,9 @@
+{
+  "comment": "Expose bounded last-reported root attention as optional versioned single-session metadata",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -123,6 +123,9 @@ CLI process in an isolated socket. It is not a required PR lane or a production
 runtime rollout. The Windows counterpart is
 `tests/native/test_companion_pane_native.py`, run through the same explicit
 plugin runner with `--allow-explicit-tiers --test-file <path>`.
+The same optional portfolio also runs the bounded root-attention provider and
+actual fresh-home CLI subprocess contract on Linux. This does not qualify a
+live pending question, human input, native status chrome or a deployed runtime.
 
 ## Optional native PSMux launch-directory control
 
