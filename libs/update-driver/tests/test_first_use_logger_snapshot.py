@@ -124,7 +124,10 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == source
 
 
-@pytest.mark.parametrize("change", ["reselected", "substituted", "unavailable", "after-freeze", "during-copy"])
+@pytest.mark.parametrize("change", [
+    "reselected", "substituted", "unavailable", "after-freeze", "during-copy",
+    "missing-import", "manifest-array", "identity-array",
+])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
     root = area / "queue"
@@ -155,6 +158,12 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
         (payload / "scripts/install.ps1").write_text("exit 99\n", encoding="utf-8")
     elif change == "unavailable":
         payload.rename(payload.with_name("unavailable"))
+    elif change == "missing-import":
+        (payload / "scripts/versioned_runtime.py").unlink()
+    elif change in {"manifest-array", "identity-array"}:
+        (payload / ("payload-invocation.json" if change == "manifest-array" else "plugin.json")).write_text(
+            "[]", encoding="utf-8",
+        )
     drain(root=root)
     result = status(request.id, root=root)
     assert result.spec == request.spec and result.state == "completed" and result.exit_code == 1

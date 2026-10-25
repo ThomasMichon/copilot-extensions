@@ -87,6 +87,8 @@ Native `stamp`, `provision`, `install` and `update` admit publication before
 creating or reclaiming staging directories. An available bootstrap Python uses
 the [shared source-qualified lifecycle](../../libs/payload-invocation/README.md#source-qualified-command-binding),
 including live management-purpose custody and revalidation by the staged child.
+POSIX legacy deploy-manifest refreshes also use its canonical manifest writer,
+preserving and completing the original source's command reservation and binding.
 PowerShell accepts `-BootstrapPython` to select an existing absolute interpreter.
 Absent Python, the canonical native deployment probe preserves missing-policy
 and explicit standalone stamping and refuses managed or invalid policy without

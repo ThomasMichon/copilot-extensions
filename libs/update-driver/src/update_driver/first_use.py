@@ -113,7 +113,10 @@ def _inspect(
     if not helper.is_file() or not (scripts / "installer_engine.py").is_file():
         raise ProvisionError("owning payload requires complete materialized installation helpers")
     manifest = json.loads((payload / "payload-invocation.json").read_text(encoding="utf-8"))
-    plugin = json.loads((payload / "plugin.json").read_text(encoding="utf-8")).get("name")
+    identity = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or not isinstance(identity, dict):
+        raise ProvisionError("owning payload requires object-shaped installation declarations")
+    plugin = identity.get("name")
     if not isinstance(plugin, str) or plugin not in RECIPES:
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
@@ -368,7 +371,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
                 payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
             ) != admission:
                 raise ProvisionError("owning source or installation changed while freezing provision inputs")
-        except (ProvisionError, OSError, ValueError) as error:
+        except (ProvisionError, OSError, ValueError, ImportError) as error:
             if not logger_snapshot:
                 raise
             # No installer has started; this new recipe can certify a settled refusal.
