@@ -124,6 +124,10 @@ Execution names are normalized before checking every colliding entry; trimming
 or presentation conversion cannot bypass that check. The scan includes other
 entries' projected execution keys, not just their original presentation labels.
 Registry-key whitespace does not change a literal OS observation.
+Configured native bindings also match trimmed legacy keys while retaining the
+original customization key. Contextual legacy display selection does not change
+when unrelated scoped entries are present, and a selected physical family
+constrains guest candidates even when another key resembles its shorthand.
 An unnamed legacy SSH
 profile does not assert a contradictory environment. Legacy null profile names
 and aliases remain absent metadata, not fabricated identity labels or foreign

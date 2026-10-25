@@ -199,6 +199,10 @@ def resolve_local_execution_context(
         target_registry = {
             key: replace(
                 entry,
+                compatibility_aliases=(
+                    (*entry.compatibility_aliases, entry.key.strip())
+                    if entry.key != entry.key.strip() else entry.compatibility_aliases
+                ),
                 hostname="" if entry.hostname.strip().casefold() == observed.casefold() else entry.hostname,
                 display_name=entry.display_name if (
                     legacy_display_selector or entry.display_name.casefold() in local_displays

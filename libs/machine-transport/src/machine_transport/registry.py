@@ -496,6 +496,10 @@ def _find_machine_entry(
             _find_machine_entry(entries, name, reject_ambiguous=reject_ambiguous)
             if not any(getattr(entry, "execution_platform", "") for entry in entries.values()) or any(
                 name.casefold() in {value.casefold() for value in machine_identity_names(entry)}
+                or (
+                    not getattr(entry, "execution_platform", "")
+                    and entry.display_name.casefold() == name.casefold()
+                )
                 for entry in entries.values()
             ) else None
         )
@@ -512,7 +516,10 @@ def _find_machine_entry(
                 entries, split_machine_environment(selected.key, "wsl").logical_machine,
                 reject_ambiguous=reject_ambiguous,
             )
-            if guest is not None and split_machine_environment(guest.key).environment == "wsl":
+            if (
+                guest is not None and split_machine_environment(guest.key).environment == "wsl"
+                and entry_physical_host(guest).casefold() == entry_physical_host(selected).casefold()
+            ):
                 return guest
         def physical_host(entry: MachineIdentity) -> str:
             return entry_physical_host(entry)
@@ -550,7 +557,7 @@ def _find_machine_entry(
             if not getattr(entry, "execution_platform", "")
             and split_machine_environment(entry.key).environment == execution_platform
             and (
-                physical_host(entry).casefold() == name.casefold()
+                (selected is None and physical_host(entry).casefold() == name.casefold())
                 or (physical and physical_host(entry).casefold() == physical.casefold())
             )
         ]

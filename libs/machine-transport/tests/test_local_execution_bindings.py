@@ -279,3 +279,66 @@ def test_exact_unscoped_display_binding_is_not_an_inferred_qualifier(binding: st
     assert (context.machine, context.execution_machine, context.customization_key) == (
         "desk", "desk-wsl", None,
     )
+
+
+@pytest.mark.parametrize("environment", ["windows", "linux"])
+@pytest.mark.parametrize("binding", [" desk ", "desk", "DESK"])
+def test_normalized_native_key_binding_keeps_original_customization_key(
+    environment: str, binding: str,
+) -> None:
+    entry = MachineEntry(" desk ", "", hostname="raw-host")
+    entries = {entry.key: entry}
+    before = dict(entries)
+    context = resolve_local_execution_context(
+        entries, hostname="raw-host", environment=environment, configured_machine=binding,
+    )
+    assert context == resolve_local_execution_context(entries, hostname="raw-host", environment=environment)
+    assert (context.machine, context.execution_machine, context.customization_key) == ("desk", "desk", " desk ")
+    assert entries == before
+
+
+@pytest.mark.parametrize("scoped_neighbor", [False, True])
+@pytest.mark.parametrize("matching_family", [False, True])
+@pytest.mark.parametrize("binding", ["friendly", "Friendly computer", "native-alias"])
+def test_guest_candidate_cannot_override_an_already_selected_physical_family(
+    scoped_neighbor: bool, matching_family: bool, binding: str,
+) -> None:
+    native = MachineEntry(
+        "friendly", "Friendly computer", hostname="raw-host",
+        physical_host="physical-a", alias="native-alias",
+    )
+    guest = MachineEntry(
+        "friendly-wsl", "", physical_host="physical-a" if matching_family else "",
+    )
+    entries = {entry.key: entry for entry in (native, guest)}
+    if scoped_neighbor:
+        entries["other"] = MachineEntry("other", "", execution_platform="linux")
+    selection = resolve_machine_selection(entries, binding, "wsl")
+    assert selection.target.machine == "physical-a"
+    assert selection.entry == (guest if matching_family else None)
+    context = resolve_local_execution_context(
+        entries, hostname="raw-host", environment="wsl", configured_machine=binding,
+    )
+    assert context == resolve_local_execution_context(entries, hostname="raw-host", environment="wsl")
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "physical-a", "friendly-wsl" if matching_family else "physical-a-wsl",
+        guest.key if matching_family else None,
+    )
+
+
+@pytest.mark.parametrize("environment", ["windows", "linux"])
+@pytest.mark.parametrize("binding", ["friendly", "Friendly computer"])
+def test_unrelated_scoped_entry_does_not_remove_native_display_customization(
+    environment: str, binding: str,
+) -> None:
+    native = MachineEntry("friendly", "Friendly computer", hostname="raw-host")
+    entries = {
+        native.key: native, "other": MachineEntry("other", "", execution_platform="wsl"),
+    }
+    assert resolve_machine_selection(entries, binding, environment).entry == native
+    context = resolve_local_execution_context(
+        entries, hostname="raw-host", environment=environment, configured_machine=binding,
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "friendly", "friendly", "friendly",
+    )
