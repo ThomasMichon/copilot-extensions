@@ -384,7 +384,8 @@ def test_registration_matches_retained_binding_precedence(
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("command", ["register", "install"])
 @pytest.mark.parametrize("case", [
-    "fresh", "retained", "aliased-foreign", "missing-receipt", "foreign-receipt",
+    "fresh", "retained", "aliased-foreign", "aliased-map", "aliased-map-valid",
+    "aliased-map-shadowed", "missing-receipt", "foreign-receipt",
 ])
 def test_namespaced_registration_checks_prospective_owned_state_before_writes(
     registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -420,11 +421,11 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
 
     fixture.overrides["_prepare_namespaced_project_state"] = prepare
     if case != "fresh":
-        previous = "previous-label" if case == "aliased-foreign" else "registered"
+        previous = "previous-label" if case.startswith("aliased") else "registered"
         _register_repo(previous, remote)
         state = project_state.ensure_project_state(previous)
         (state / "config.yaml").write_text(yaml.safe_dump({
-            "machine": "foreign-space" if case == "aliased-foreign" else "local-space",
+            "machine": "foreign-space" if case in ("aliased-foreign", "aliased-map") else "local-space",
             "repos": {"registered": {"anchor": str(fixture.repo)}},
         }))
         identity_path = state.parent / "identity.json"
@@ -435,23 +436,30 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
             value["repositoryId"] = "repo-foreign"
             identity_path.write_text(json.dumps(value))
     other = "windows" if platform == "wsl" else "wsl"
-    (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {
+    map_root = state / cfg.INREPO_CONFIG_DIRNAME if case.startswith("aliased-map") else fixture.repo
+    map_root.mkdir(parents=True, exist_ok=True)
+    (map_root / "machines.yaml").write_text(yaml.safe_dump({"machines": {
         "local-space": {
-            "hostname": "raw-host", "physical_host": "friendly-host", "execution_platform": platform,
+            "hostname": "raw-host", "physical_host": "friendly-host",
+            "execution_platform": other if case == "aliased-map-shadowed" else platform,
         },
         "foreign-space": {
             "hostname": "other-host", "physical_host": "other-host", "execution_platform": other,
         },
     }}))
+    if case == "aliased-map-shadowed":
+        (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": {"local-space": {
+            "hostname": "raw-host", "physical_host": "friendly-host", "execution_platform": platform,
+        }}}))
     before = {str(p.relative_to(tmp_path)): p.read_bytes()
               for p in tmp_path.rglob("*") if p.is_file()}
-    refused = case in ("aliased-foreign", "missing-receipt", "foreign-receipt")
+    refused = case in ("aliased-foreign", "aliased-map", "missing-receipt", "foreign-receipt")
     assert getattr(installation_cli, f"cmd_{command}")(fixture.args) == (1 if refused else 0)
     if refused:
         assert fixture.effects == []
         assert {str(p.relative_to(tmp_path)): p.read_bytes()
                 for p in tmp_path.rglob("*") if p.is_file()} == before
-        if case == "aliased-foreign":
+        if case in ("aliased-foreign", "aliased-map"):
             assert "registered" not in repos.read_registry(strict=True).repos
     else:
         config = cfg.load_config(

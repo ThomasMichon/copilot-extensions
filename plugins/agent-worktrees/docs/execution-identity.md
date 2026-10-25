@@ -66,6 +66,8 @@ Neither path changes existing user-owned global configuration. In a scoped
 installation, retained project configuration is read only through the existing
 repository identity and receipt, including a different label for the same remote;
 fresh adoption needs no premature registry or receipt publication.
+Retained machine-local maps use that same proven prospective root, even before
+the new project label is registered. Checkout-local maps keep their precedence.
 Machine-map fallback uses the prospective target configuration and its retained
 knowledge binding, not the ambient project's map. Force drops only settings
 that the project scaffold will actually replace; retained global and drop-in
