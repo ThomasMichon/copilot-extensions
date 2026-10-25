@@ -44,13 +44,19 @@ def main():
         update_driver.runtime_command = command
         update_driver.ensure_worker = lambda *args, **kwargs: SimpleNamespace()
         bypass = [] if os.environ.get("UPDATE_DRIVER_TEST_MANAGER") == "1" else ["--no-manager"]
-        return engine.main(["--project", "example", "update", *bypass, "--detach"])
+        sources = os.environ.get("UPDATE_DRIVER_TEST_SOURCES")
+        return engine.main([
+            "--project", "example", "update", *bypass, "--detach",
+            *(["--runtime-sources", sources] if sources is not None else []),
+        ])
 
     def execute(args):
+        sources = getattr(args, "runtime_sources", None)
         (scope / "result.json").write_text(json.dumps({
             "anchor": str(Path.cwd()),
             "invocation": str(engine._INVOCATION_CWD),
             "update_context": str(update_cli._invocation_update_context()),
+            **({"runtime_sources": sources} if sources is not None else {}),
         }), encoding="utf-8")
         return 0
 

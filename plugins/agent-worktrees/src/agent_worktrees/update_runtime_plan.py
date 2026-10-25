@@ -234,6 +234,7 @@ def plan_modules(
     plugin_dir: Path, platform_name: str, skip_modules: list[str] | None,
     *, force: bool = False, targets: Mapping[str, _RegisteredPluginTarget] | None = None,
     force_runtimes: Collection[str] = (),
+    sources: Mapping[str, PreparedRuntimeSource] | None = None,
 ) -> tuple[RuntimeUpdateStep, ...]:
     manifest = plugin_dir / "modules.json"
     if not manifest.exists():
@@ -268,6 +269,7 @@ def plan_modules(
             step = plan_module(
                 name, pdir, platform_name, force=force or name in force_runtimes,
                 gate_context=target.context if target else None,
+                **({"source": sources.get(name)} if sources is not None else {}),
             )
         steps.append(step)
     return tuple(steps)

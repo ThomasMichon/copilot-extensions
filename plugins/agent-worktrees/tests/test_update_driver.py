@@ -73,6 +73,53 @@ def test_no_manager_does_not_bypass_the_queue(queued):
     assert seen["runner"].argv[-2:] == ("update", "--no-manager")
 
 
+def test_prepared_source_packet_is_durable_request_input_not_ambient_state(queued):
+    seen, _request = queued
+    raw = '{"schema":"copilot-extensions.prepared-runtime-sources","version":1,"sources":{}}'
+    assert boundary.cmd_update_request(_args(no_manager=True, runtime_sources=raw)) == 4
+    assert seen["spec"].argv == ("--no-manager", "--runtime-sources", raw)
+    assert seen["runner"].argv[-4:] == ("update", "--no-manager", "--runtime-sources", raw)
+
+
+def test_actual_queue_retains_sources_after_submitting_environment_disappears(tmp_path, monkeypatch):
+    import json
+    import os
+    import sqlite3
+    import sys
+    from pathlib import Path
+
+    from agent_procutil.owned_process import run_owned
+    from test_update_runtime_sources import packet
+
+    home, scope = tmp_path / "home", tmp_path / "scope"
+    home.mkdir()
+    for name in ("anchor", "invocation"):
+        settings = scope / name / ".github" / "copilot" / "settings.json"
+        settings.parent.mkdir(parents=True)
+        settings.write_text("{}")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for key in boundary._CONTEXT_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("UPDATE_DRIVER_TEST_MANAGER", raising=False)
+    monkeypatch.setenv("AGENT_HOME", str(scope))
+    raw = json.dumps(packet(tmp_path))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_SOURCES", raw)
+    monkeypatch.chdir(scope / "invocation")
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_context.py"
+    submitted = run_owned([sys.executable, str(fixture), "submit"], timeout=20)
+    assert submitted.returncode == 0, submitted.stdout + submitted.stderr
+    database = home / ".copilot-extensions" / "update-driver" / "queue.sqlite3"
+    with sqlite3.connect(database) as connection:
+        document = json.loads(connection.execute("select spec from requests").fetchone()[0])
+    assert document["argv"] == ["--no-manager", "--runtime-sources", raw]
+    monkeypatch.delenv("UPDATE_DRIVER_TEST_SOURCES")
+    result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((scope / "result.json").read_text())["runtime_sources"] == raw
+    assert "UPDATE_DRIVER_TEST_SOURCES" not in os.environ
+
+
 def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_path, monkeypatch):
     from agent_worktrees import __main__ as core
 

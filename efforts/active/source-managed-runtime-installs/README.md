@@ -71,9 +71,13 @@ that prepares plugin and standalone Manager payloads. Source-backed suite execut
 is not yet connected. A selected non-marketplace policy refuses updates rather than
 silently deploying marketplace code. Plugin bootstrap paths still need complete
 publication-boundary qualification.
-Worktrees now retains its original global command owner through native prepared-source
-publication and installed source-unavailable restoration. That bounded prerequisite
-does not connect updater execution or qualify an adopter's actual data/service cutover.
+Worktrees now retains its original global command owner through collected
+prepared-source updater execution, native publication and installed source-unavailable
+restoration. That bounded provider does not connect Manager's whole-suite source
+orchestration or qualify an adopter's actual data/service cutover. The engine now
+advertises and accepts a complete prepared-source suite packet through its
+existing inventory and durable update process boundary; Manager's caller
+remains unconnected and refuses non-marketplace execution.
 
 Promotion composes versions and expands development vendor pointers into a
 self-contained `main` tree. Raw-dev non-editable installs have an existing
@@ -256,7 +260,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Land Manager's independent default-off source policy and owned exact-commit acquisition diagnostics, refusing unconnected source-backed updates rather than silently installing from marketplace.
 - [x] Ship the trusted canonical preparation toolkit inside Manager's own payload and qualify standalone Manager preparation, exact retained assets and fetched-tools-as-data isolation before connecting source-backed execution.
 - [x] **Agent-recommended integration prerequisite:** preserve Worktrees' canonical command-binding receipt at Python-owned manifest publication and qualify a separately prepared source artifact through the real native global installer, retaining its existing owner, data root and global command.
-- [ ] **Agent-recommended updater provider slice:** qualify collected prepared-source runtime steps against the installed owner, exact source pin, actual selected/completed slot and original global data, preserving native execution, module fallback, machine gates and explicit older-helper refusal before connecting Manager's whole-suite source orchestration.
+- [x] **Agent-recommended updater provider slice:** qualify collected prepared-source runtime steps against the installed owner, exact source pin, actual selected/completed slot and original global data, preserving native execution, module fallback, machine gates and explicit older-helper refusal before connecting Manager's whole-suite source orchestration.
+- [ ] **Agent-recommended process-boundary slice:** qualify the executing engine's advertised prepared-source suite contract, durable exact input and complete eligible-portfolio admission before enabling Manager's capability-aware caller.
 - [ ] Keep service-source selection independent of Manager self-update and Copilot plugin-content selection.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.

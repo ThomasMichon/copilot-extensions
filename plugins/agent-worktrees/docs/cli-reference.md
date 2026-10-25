@@ -1373,6 +1373,40 @@ leave that optional action unavailable with an explicit suite-upgrade path.
 Upgraded engines continue accepting old update syntax. No prior syntax is
 retired, and rollback never authorizes replay as a broader suite update.
 
+#### Prepared-source suite input
+
+The executing engine's inventory additionally advertises
+`runtime_sources: {schema: "copilot-extensions.prepared-runtime-sources", version: 1}`
+when it supports a complete prepared-source portfolio. This declaration belongs
+to that exact provider, not to the currently installed marketplace payload.
+Older inventory readers may ignore the additive field. A caller must establish
+this support before sending `update --no-manager --runtime-sources <JSON>`;
+missing, malformed or unsupported declarations require an explicit provider
+upgrade, never a marketplace fallback or an effectful trial/replay.
+
+The JSON packet has exactly `schema`, integer `version: 1` and a nonempty
+`sources` object keyed by plugin identifier. Each record contains an absolute
+prepared `payload` directory and `identity`, the canonical
+`{runtime_source: <complete source document>, runtime_version: <slot>}` selection
+from source preparation. All records must identify the same full source commit
+and tree. Duplicate fields, unknown request fields and relative/missing inputs
+are refused. Keep prepared generations available through queued execution and
+retry; the packet is stored in the existing durable request argv, not read from
+a mutable pointer or inherited environment.
+
+Marketplace payload acquisition remains independent. After refreshing payloads,
+the normal engine/module/registered planners retain the installed command owner
+and installation root, but consume the matching prepared artifact. Every
+eligible runtime must have exactly one source record; missing, unexpected,
+inactive or now-gated selections block the whole runtime portfolio before any
+installer or local integration runs. Owner validation, exact source pinning,
+selected/completed-slot currentness, native lifecycle, retry and outcome handling
+are unchanged. Omitting the option retains ordinary marketplace runtime delivery.
+This suite-only input cannot combine with target/authentication/inspection or
+recovery operations and never delegates to an older Manager. It does not enable
+Manager's source-backed caller, alter its independent self-source policy or
+authorize a rollout.
+
 ### Repo-adopted plugin reconciliation (`reconcile-plugins`)
 
 `--apply` submits its canonical work to that same durable execution owner,
