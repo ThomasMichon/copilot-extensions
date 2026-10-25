@@ -4,10 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial, independently reviewed slices targeting `dev`
 - **Created:** 2026-10-24
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
 - **Umbrella issue:** #8669
-- **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff)
+- **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall)
 
 ## Guiding Intent
 
@@ -81,6 +81,15 @@ The full literal inception request is preserved in
 
 The operator confirmed the slug `installation-independent-sessions`.
 
+**2026-10-24 prerequisite decision:** the operator selected
+`supported-uninstaller-first`:
+
+> Add a supported product uninstaller first (larger scope)
+
+The selected contract and its explicitly agent-recommended refinements are in
+[manager-uninstall.md](manager-uninstall.md). This adds a prerequisite, not a
+replacement for the continuing installation-survival objective.
+
 The detailed fencing, negative controls and rollout admission below are
 **agent-recommended implementation/validation refinements**, not additional
 verbatim operator requirements.
@@ -95,13 +104,16 @@ verbatim operator requirements.
   acceptance, and open the bounded tracking issue.
 - [ ] Coordinate the shared contract and edit boundary with #5579's existing
   owner; preserve separately owned installer/updater repairs.
-- [ ] Land this proposal and standing-intent amendment through normal review
+- [x] Land this proposal and standing-intent amendment through normal review
   before production implementation.
 - [ ] Inventory current mux/no-mux, direct/new-window, resume and remote
   launch consumers; record the smallest compatible boundary and migration.
 
 ### Phase 2 - Literal disposable-installation reproduction
 
+- [ ] Review and implement the supported Manager uninstall prerequisite
+  (#8864) in [manager-uninstall.md](manager-uninstall.md), then return to this
+  same real-removal baseline.
 - [ ] Reproduce current behavior with real installed A, an interactive owned
   session, actual uninstallation of both systems, installed B and final exit.
 - [ ] Resolve or coordinate #8410 only as the required Linux uninstall
@@ -209,3 +221,17 @@ Keeping a version directory alive is not an acceptable substitute.
 - Opened #8669 after deduplication. Retained #5579, #8410 and #8312 ownership.
 - Prior Linux prototype evidence is feasibility only. No production changes,
   host uninstall, installed update or new lifecycle service were performed.
+
+### 2026-10-24 - Supported Manager uninstall selected
+
+- The original proposal merged in #8675; the installation-survival effort
+  remains active.
+- A later real-installation preflight could not establish a supported Manager
+  uninstall entrypoint. It stopped before interactive launch or removal and
+  cleaned its owned container; no manual deletion was reported as uninstall.
+- The operator chose a supported product uninstaller first rather than the
+  test-only removal alternative. Opened #8864 after deduplication and retained
+  this as a prerequisite of the same canonical effort.
+- This change proposes the bounded removal/compatibility/validation contract
+  for review before implementation. No uninstaller, runtime capability,
+  process-survival acceptance or host rollout has been implemented by it.
