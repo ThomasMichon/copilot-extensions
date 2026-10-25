@@ -152,8 +152,9 @@ require their own review and qualification.
       actual native/platform qualification, provider and remaining effect-owner
       integration stay open. Original provider native-handoff storage merged in
       #8935 as an internal prerequisite, not provider effect-owner mediation.
-      Review the [provider boundary specialization](provider-custody.md) before
-      extending the existing provider binding/admission and guest/native owners.
+      The [provider boundary specialization](provider-custody.md) cleared review
+      in #8940; provider-first support and actual provider binding/admission and
+      guest/native integration remain unimplemented.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -268,6 +269,22 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-25 - Provider boundary proposal merged; provider-first source next
+
+- #8940 merged as `1017ab87c66640b36a41850a9e2ec5bc9d808d18` after
+  independent approval of exact head `bb77d38c3f3c871d889f5922d45878fe58bd8281`,
+  with no open findings and required checks successful.
+- Re-read the full Plan and Validation Plan after the merge. This closes the
+  proposal-review prerequisite only; no full-cohort item or native/platform,
+  compatibility, restoration or adoption gate closes.
+- Begin the first bounded provider-first source prerequisite at the existing
+  attributed resolver/selected-runtime boundary. Keep unsupported custody
+  explicit until the actual binding/admission and guest/native owners enforce
+  it; do not infer support from readiness, physical pinning or payload version.
+- Reconciled only the owned source worktree past its provider-confirmed squash,
+  retaining the reviewed tip. The effort stays Active; no runtime activation,
+  provider execution or deployment was performed.
 
 ### 2026-10-25 - Select the actual provider custody boundary
 
