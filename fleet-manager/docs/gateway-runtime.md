@@ -59,6 +59,10 @@ Certificate verification is never disabled.
 Foreground hosting opens the same lexical absolute configuration selection
 whose parent is checked by instance admission. Parent components are normalized
 once; surviving filesystem indirection is not hidden by resolving an alias.
+Shutdown keeps that admission until accepted HTTP handlers have retired.
+Repeated Ctrl+C cannot interrupt their dedicated close/join worker or release
+the disposable lifetime early; an uncertain close start is held, not replayed.
+Close failures are reported only after the captured request threads retire.
 
 `GatewayConfig.load()` consumes strict bounded JSON:
 

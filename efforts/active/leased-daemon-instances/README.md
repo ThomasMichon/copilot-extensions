@@ -787,3 +787,43 @@ caller coverage, not one launcher or one platform passing.
   platform skip. No shared native/process bytes or protocol fixtures changed.
 - Publication, a passing current review/CI and completion archival remain open.
   No runtime rollout is authorized.
+
+### 2026-10-25 - Interrupted Gateway request retirement
+
+- A fresh review reproduced a second-interrupt escape from the foreground
+  Gateway's blocking HTTP close. Normal return, an initial Ctrl+C and a serving
+  error each marked admission finished while a real TLS handler was still
+  blocked. All three counterexamples failed before the correction.
+- Shutdown now retains the original server and captured request threads while
+  one dedicated close worker joins them. Repeated interruption cannot poison
+  their joins, lose the captured list or release admission. A close failure
+  propagates only after the captured handlers retire; uncertain close startup
+  retains the original attempt rather than replaying it. An idle listener
+  still closes normally without an initialized request-thread list.
+- The final Windows packet passed 90 tests, including nine actual TLS/admission
+  regressions, existing Gateway runtime/fence controls and lexical startup
+  checks. Four isolated Linux probes executed the exact source close function:
+  idle listener, normal close, close error and close BaseException. Each active
+  case retained real HTTP-handler admission through five delivered SIGINTs.
+  These are native HTTP/control checks, not a full Linux Gateway TLS pass:
+  the retained QA image lacks cryptography/JWT/jwcrypto, and no new dependencies
+  were acquired. The test-owned container was removed.
+- The separate POSIX session-host fixture detached its workload into another
+  session, beyond host-lease enforcement. Its workload now inherits the detached
+  host's own process group; an unowned group refuses before workload creation.
+  Explicit TERMINATE retires the host-owned group without reconstructing
+  custody from a possibly reaped child PID. The existing protocol requires no
+  final response to that message.
+- The Linux counterexample failed two cases before the fix, including actual
+  runner loss during active workload progress. The frozen packet passed six
+  tests on Windows and six on isolated offline Linux; independent integration
+  replay passed the same six on each platform. Tests prove work outlives a
+  disconnected front while its runner renews, then prove both host and child
+  retire after runner loss or explicit termination. Exact birth identities
+  drive fallback cleanup; test-owned processes, containers and sandboxes were
+  removed. macOS execution remains unavailable.
+- The caller census, two immutable Bridge contracts with all 814 fixtures,
+  module ceilings and all 13 install contracts pass. The current 1,800-unit
+  packet's bindings are unaffected by these two corrections. Publication,
+  a passing current-head review/CI and completion archival remain open.
+  The effort stays Active; no runtime rollout is authorized.
