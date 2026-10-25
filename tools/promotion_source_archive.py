@@ -126,6 +126,15 @@ def _regular(path: Path, *, limit: int) -> bytes:
 
 def read_source_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
     validate_identity(identity)
+    return _read_source_assets(
+        directory, identity=identity, name_for=source_asset_name, verify=verify_source_archive,
+        archive_kind="complete-source", manifest_kind="source-manifest",
+    )
+
+
+def _read_source_assets(
+    directory: Path, *, identity: dict, name_for, verify, archive_kind: str, manifest_kind: str,
+) -> dict[str, bytes]:
     info = directory.lstat()
     if (
         directory.is_symlink() or not stat.S_ISDIR(info.st_mode)
@@ -142,11 +151,11 @@ def read_source_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
     archive_raw = _regular(archives[0], limit=MAX_SOURCE_BYTES)
     if (
         manifest_raw != canonical_bytes(manifest)
-        or manifests[0].name != source_asset_name("source-manifest", identity, hashlib.sha256(manifest_raw).hexdigest())
-        or archives[0].name != source_asset_name("complete-source", identity, hashlib.sha256(archive_raw).hexdigest())
+        or manifests[0].name != name_for(manifest_kind, identity, hashlib.sha256(manifest_raw).hexdigest())
+        or archives[0].name != name_for(archive_kind, identity, hashlib.sha256(archive_raw).hexdigest())
     ):
         raise ValueError("complete-source subjects have a noncanonical identity")
-    verify_source_archive(archive_raw, manifest, identity=identity)
+    verify(archive_raw, manifest, identity=identity)
     return {manifests[0].name: manifest_raw, archives[0].name: archive_raw}
 
 
@@ -170,13 +179,58 @@ def prepare_source(directory: Path, *, repo: Path, index_raw: bytes, receipt: di
     return manifest
 
 
+def read_build_assets(directory: Path, *, identity: dict) -> dict[str, bytes]:
+    from promotion_build_source import asset_name, validate_identity, verify_build_archive
+
+    validate_identity(identity)
+    return _read_source_assets(
+        directory, identity=identity, name_for=asset_name, verify=verify_build_archive,
+        archive_kind="build-source", manifest_kind="build-manifest",
+    )
+
+
+def prepare_build_source(
+    directory: Path, *, repo: Path, index_raw: bytes, candidate_sha: str,
+) -> dict:
+    import promote_release as promotion
+    from promotion_build_source import asset_name, build_archive, build_identity
+
+    if not isinstance(candidate_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
+        raise ValueError("invalid original build candidate")
+    tree = _git(repo, ["rev-parse", f"{candidate_sha}^{{tree}}"]).decode().strip()
+    identity = build_identity(index_raw, candidate_sha=candidate_sha, tree=tree)
+    if promotion._tree_excluding_state(tree, repo=repo) != identity["content_tree"]:
+        raise ValueError("original build tree differs from the signed source index")
+    raw, manifest = build_archive(
+        read_tree(repo, candidate_sha=candidate_sha, main_before=identity["main_before"], tree=tree),
+        identity=identity,
+    )
+    manifest_raw = canonical_bytes(manifest)
+    subjects = {
+        asset_name("build-source", identity, hashlib.sha256(raw).hexdigest()): raw,
+        asset_name("build-manifest", identity, hashlib.sha256(manifest_raw).hexdigest()): manifest_raw,
+    }
+    directory.mkdir(parents=True, exist_ok=False)
+    for name, content in subjects.items():
+        (directory / name).write_bytes(content)
+    return manifest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--directory", type=Path, required=True)
     parser.add_argument("--source-index", type=Path, required=True)
-    parser.add_argument("--qualification-receipt", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--qualification-receipt", type=Path)
+    mode.add_argument("--build-candidate")
     args = parser.parse_args()
+    if args.build_candidate is not None:
+        prepare_build_source(
+            args.directory, repo=args.repo, index_raw=_regular(args.source_index, limit=1 << 20),
+            candidate_sha=args.build_candidate,
+        )
+        return
     prepare_source(
         args.directory, repo=args.repo, index_raw=_regular(args.source_index, limit=1 << 20),
         receipt=decode_json(_regular(args.qualification_receipt, limit=MAX_PACKET_FILE_BYTES)),
