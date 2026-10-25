@@ -262,6 +262,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         "plugins/agent-index": "agent-index",
         "plugins/agent-dispatch": "agent-dispatch",
         "plugins/agent-pull-requests": "agent-pull-requests",
+        "plugins/agent-ssh": "agent-ssh",
         "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
         "libs/zdd": "agent-zdd",
         "libs/agent-procutil": "agent-procutil",

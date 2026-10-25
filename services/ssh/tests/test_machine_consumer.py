@@ -1,12 +1,14 @@
 """Installed Fleet role, real authenticated Gateway and both native local writers."""
 
 import asyncio
+import importlib.util
 import json
 import os
 from pathlib import Path
 import signal
 import subprocess
 import sys
+import sysconfig
 
 from cryptography.hazmat.primitives import serialization
 from joserfc.jwk import ECKey
@@ -21,6 +23,22 @@ from fleet_manager.ssh_machine_config import SSHMachineConfig
 
 from conftest import document, enrollment, key
 from test_gateway_integration import Rig, eventually
+
+
+def test_consumer_packages_are_installed_not_loaded_from_source():
+    runtime = Path(sysconfig.get_path("purelib")).resolve()
+    for name in ("fleet_manager", "agent_ssh"):
+        selected = importlib.util.find_spec(name)
+        assert selected is not None and selected.origin is not None
+        assert Path(selected.origin).resolve().is_relative_to(runtime)
+
+
+def published_text(path):
+    try:
+        return path.read_text("utf-8")
+    except (FileNotFoundError, PermissionError):
+        # A Windows atomic replacement can briefly refuse the observer's open.
+        return None
 
 
 def proof_file(path, key):
@@ -126,8 +144,8 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
                 diagnostic.seek(0)
                 pytest.fail("Installed Fleet SSH role exited: "
                             + diagnostic.read(4096).decode("utf-8", errors="replace"))
-            return authorized.exists() and (
-                peer_key is None or peer_key in authorized.read_text("utf-8"))
+            content = published_text(authorized)
+            return content is not None and (peer_key is None or peer_key in content)
 
         await eventually(lambda: converged(None), timeout=30)
         assert key(2) not in authorized.read_text("utf-8")
@@ -146,8 +164,14 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
             SSHMachineConfig.from_dict(second_config), stop=machine_stop,
         ))
         second_keys = tmp_path / "machine-b" / "authorization" / "authorized_keys.gateway"
-        await eventually(lambda: second_keys.exists() and key(1) in second_keys.read_text("utf-8"),
-                         timeout=30)
+        def second_converged():
+            if second_owner.done():
+                second_owner.result()
+                pytest.fail("Second Fleet consumer stopped before convergence")
+            content = published_text(second_keys)
+            return content is not None and key(1) in content
+
+        await eventually(second_converged, timeout=30)
         before = authorized.read_bytes(), authorized.stat().st_mtime_ns
         assert (await second.enroll(enrollment(1))).revision == 3
         assert (authorized.read_bytes(), authorized.stat().st_mtime_ns) == before

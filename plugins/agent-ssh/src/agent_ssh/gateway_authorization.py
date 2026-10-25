@@ -116,7 +116,15 @@ def _windows_private(path: Path, *, directory: bool) -> None:
         value = text.value
     finally:
         kernel.LocalFree(text)
-    match = re.fullmatch(r"O:" + re.escape(sid) + r"D:([PAI]*)(.+)", value)
+    _validate_windows_descriptor(value, sid, directory=directory)
+
+
+def _validate_windows_descriptor(value: str, sid: str, *, directory: bool) -> None:
+    # Elevated tokens may select the OS's privileged default owner for new files.
+    owners = re.escape(sid) if directory else (
+        "(?:" + re.escape(sid) + r"|BA|SY|S-1-5-32-544|S-1-5-18)"
+    )
+    match = re.fullmatch(r"O:" + owners + r"D:([PAI]*)(.+)", value)
     if not match or (directory and "P" not in match[1]):
         raise PermissionError("Authorization location must be owner-private")
     allowed = re.compile(

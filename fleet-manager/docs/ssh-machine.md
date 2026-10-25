@@ -55,6 +55,9 @@ One native single-instance lease owns this configured state directory.
 An incumbent is never displaced. Windows creation uses the shared protected
 current-account ACL before publication, including under an elevated token;
 retained private state is validated, not repaired or adopted.
+The target-login writer separately retains its protected user/SYSTEM access
+grants; native privileged ownership of a newly created Windows file does not
+turn those closed grants into a shared authorization directory.
 
 The existing `SSHDirectoryClient.watch` first reads the current authenticated
 snapshot, then waits for revision changes. Transport availability retries and
@@ -126,10 +129,15 @@ runner prepares the declared dependency closure.
 outside the checkout against the real disposable TLS/JWT/DPoP Gateway and
 registered SSH service. A later join updates a connected machine; an offline
 consumer catches up after restart, and a second configured consumer receives
-the admitted peer key. POSIX uses real graceful SIGTERM; Windows deliberately
+the admitted peer key. It explicitly checks that Fleet and agent-ssh resolve
+from the selected runtime's installed packages, not their source trees.
+The normal development preparer may still use canonical shared-library source
+references, so this is not a source-free complete production-artifact proof.
+POSIX uses real graceful SIGTERM; Windows deliberately
 uses abrupt process termination to exercise kernel-lease recovery, not to claim
 graceful Windows signal delivery.
 
 These fixtures use synthetic credentials and isolated local destinations.
-They are not an adopted installation, live rollout, provider interoperability
-or preserving migration/retirement witness.
+They are not a complete source-free artifact closure, adopted installation,
+live rollout, provider interoperability or preserving migration/retirement
+witness.

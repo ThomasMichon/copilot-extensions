@@ -5,10 +5,6 @@ build-backend = "setuptools.build_meta"
 [tool.uv]
 exclude-newer = "7 days"
 
-[tool.uv.sources]
-agent-ssh = { path = "../plugins/agent-ssh", editable = true }
-agent-single-instance-lease = { path = "../libs/single-instance-lease", editable = true }
-
 [project]
 name = "fleet-manager"
 version = "0.1.0-dev1"

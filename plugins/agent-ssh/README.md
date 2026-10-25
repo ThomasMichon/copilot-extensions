@@ -123,6 +123,10 @@ selected by the same public directory and policy; forwarding remains disabled.
 It does not edit the user's ordinary key file, enroll a Gateway, fetch a secret,
 start a listener, or create a reconciliation loop. See the
 [native authorization contract](docs/gateway-transport.md#target-local-login-authorization).
+On Windows the directory remains current-account-owned with its protected
+user/SYSTEM DACL. Files may retain the OS's privileged default owner under an
+elevated token, but their closed user/SYSTEM grants are unchanged and still
+verified; foreign owners or extra grants are not adopted or repaired.
 
 The installed `agent_ssh.gateway_sshd` module is the native foreground listener
 entrypoint for an existing target-local lifecycle owner. It verifies the real

@@ -13,6 +13,30 @@ from agent_ssh.__main__ import main
 from test_gateway_provider import fixture_files, key
 
 
+@pytest.mark.parametrize("owner", ["S-1-5-21-123-456-789-1001", "BA", "SY"])
+def test_native_privileged_file_owner_keeps_the_same_closed_access_grants(owner):
+    sid = "S-1-5-21-123-456-789-1001"
+    grants = f"(A;ID;FA;;;{sid})(A;ID;FA;;;SY)"
+    authorization._validate_windows_descriptor(f"O:{owner}D:AI{grants}", sid, directory=False)
+    if owner != sid:
+        with pytest.raises(PermissionError, match="owner-private"):
+            authorization._validate_windows_descriptor(
+                f"O:{owner}D:P{grants}", sid, directory=True,
+            )
+    with pytest.raises(PermissionError, match="unexpected access grant"):
+        authorization._validate_windows_descriptor(
+            f"O:{owner}D:AI{grants}(A;;FA;;;BA)", sid, directory=False,
+        )
+
+
+def test_foreign_file_owner_is_not_a_privileged_native_default():
+    sid = "S-1-5-21-123-456-789-1001"
+    with pytest.raises(PermissionError, match="owner-private"):
+        authorization._validate_windows_descriptor(
+            f"O:S-1-5-21-987-654-321-1001D:AI(A;ID;FA;;;{sid})", sid, directory=False,
+        )
+
+
 def arguments(root: Path, **changes):
     _, directory = fixture_files(root, **changes)
     return [
