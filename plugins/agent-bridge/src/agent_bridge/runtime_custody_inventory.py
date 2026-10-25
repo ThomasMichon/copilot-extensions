@@ -9,6 +9,7 @@ from .runtime_custody import RuntimeCustodyError
 from .inbox_custody import decode_handoff
 from .turn_custody import original_handoff as original_turn_handoff
 from .acquisition_custody import launch_observation
+from .creation_custody import original_creation
 
 
 COHORTS = {
@@ -16,8 +17,10 @@ COHORTS = {
     "turns": ("session_id", "turn_index", "acquisition_delivery_id", "completed_at",
               "runtime_custody_json", "native_handoff_json", "native_handoff_started_at",
               "native_accepted_at", "native_consumed_at", "native_outcome"),
-    "workspace_embodiments": ("key_digest", "state", "session_id", "native_session_id", "turn_index"),
-    "provider_embodiments": ("key_digest", "state", "session_id", "native_session_id"),
+    "workspace_embodiments": ("key_digest", "state", "session_id", "native_session_id", "turn_index",
+                              "facts_digest", "worktree_json", "runtime_custody_json", "creation_facts_json"),
+    "provider_embodiments": ("key_digest", "state", "session_id", "native_session_id",
+                             "facts_digest", "runtime_custody_json", "creation_facts_json"),
     "acquisition_attempts": ("delivery_id", "target", "worktree_id", "state", "request_digest",
                              "runtime_custody_json", "launch_handoff_json", "launch_started_at",
                              "launch_result_json"),
@@ -88,9 +91,14 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
             f"SELECT {','.join(columns)} FROM {table} ORDER BY {','.join(columns[:2])}"
         )]
         rows_by_table[table] = rows
-        if table in ("sessions", "turns", "live_messages", "acquisition_attempts"):
+        if table in (
+            "sessions", "turns", "live_messages", "acquisition_attempts",
+            "workspace_embodiments", "provider_embodiments",
+        ):
             for row in rows:
                 association = row["runtime_custody_json"]
+                if table in ("workspace_embodiments", "provider_embodiments"):
+                    original_creation(row, "workspace" if table == "workspace_embodiments" else "provider")
                 if table == "turns" and row["native_handoff_json"] is not None:
                     original_turn_handoff(row)
                 if table == "acquisition_attempts" and row["launch_handoff_json"] is not None:
@@ -131,7 +139,8 @@ def read_inventory(conn: sqlite3.Connection, identity: str) -> dict[str, object]
         "version": 1, "coverage": "bridge-db-session-turn-inbox-foundation-v1",
         "epoch": epoch, "producers": producers, "rows": rows_by_table,
         "revision_coverage": ["sessions", "turns", "live_messages", "producer-enrollment",
-                              "consumer-enrollment", "acquisition_attempts", "acquisition_effects", "epoch"],
+                              "consumer-enrollment", "acquisition_attempts", "acquisition_effects",
+                              "workspace_embodiments", "provider_embodiments", "epoch"],
         "storage_inventory_complete": not missing and not unknown,
         "unmediated_cohorts": list(UNMEDIATED), "blockers": blockers,
         "restore_qualified": False, "acknowledged": False,

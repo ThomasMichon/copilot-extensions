@@ -80,6 +80,14 @@ owns its internal interfaces and limitations. Actual acquisition, keyed creation
 start/resume and host effect-owner integration remain separate source work;
 the DB foundation does not qualify those cohorts.
 
+## Internal original keyed-creation custody
+
+Schema 36 extends the existing workspace/provider embodiment rows with atomic
+original inputs and epoch association. The [creation custody guide](creation-custody.md)
+owns the internal journal, immutable-history guards, strict inventory and
+ordinary-path exclusion. Actual allocation/native effect-owner integration and
+complete runtime closure remain separate gates.
+
 ## Internal original-turn native handoffs
 
 Schema 34 extends the existing turn owner with

@@ -1,6 +1,7 @@
 """Prepared provider creation never fabricates a workspace or a second native."""
 
 import asyncio
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +23,29 @@ from test_acquisition_runtime import rig as _connected_rig
 
 rig = _connected_rig
 pytestmark = pytest.mark.contract("agent_bridge.provider_creation")
+
+
+@pytest.mark.asyncio
+async def test_original_provider_creation_custody_refuses_ordinary_launch(provider_rig, monkeypatch):
+    from agent_bridge.creation_custody import CreationJournal, CreationRequest
+    from agent_bridge.provider_creation import _placement
+    from test_runtime_custody import enrolled
+
+    rig = provider_rig
+    owner, _producer, admission = enrolled(rig.db)
+    digest = hashlib.sha256(json.dumps("logical-work").encode()).hexdigest()
+    request = CreationRequest.capture(
+        "provider", digest, {"target": _placement(rig.target), "options": {}},
+    )
+    row = CreationJournal(rig.db).claim(request, owner, admission)
+    monkeypatch.setattr(
+        rig.manager, "start_session", lambda *_a, **_k: pytest.fail("must not launch"),
+    )
+    with pytest.raises(AcquisitionRefused) as refused:
+        await create(rig.manager, rig.target, key="logical-work")
+    assert refused.value.code == "creation_custody_required"
+    assert not rig.manager.list_sessions()
+    assert CreationJournal(rig.db).read(request) == row
 
 
 @pytest.fixture(autouse=True)
@@ -424,7 +448,7 @@ def test_http_keyed_provider_creation_has_no_fabricated_worktree(provider_rig):
 def test_current_refresh_fixture_matches_real_http_producer_and_consumer(
     provider_rig, monkeypatch,
 ):
-    from agent_bridge import protocol, provider_creation, session_start
+    from agent_bridge import creation_custody, protocol, session_start
     from agent_bridge.models import StartSessionRequest, StartSessionResponse
 
     fixture = _current_refresh_fixture()
@@ -433,7 +457,7 @@ def test_current_refresh_fixture_matches_real_http_producer_and_consumer(
     rig.target = replace(rig.target, venue=json.loads(json.dumps(expected["creation"]["venue"])))
     rig.client.acp_session_id = expected["creation"]["native_session_id"]
     rig.client.new_session.return_value = expected["creation"]["native_session_id"]
-    monkeypatch.setattr(provider_creation, "uuid", SimpleNamespace(uuid4=lambda: expected["session_id"]))
+    monkeypatch.setattr(creation_custody, "uuid", SimpleNamespace(uuid4=lambda: expected["session_id"]))
     monkeypatch.setattr(session_start, "_generate_name", lambda: expected["name"])
     app = FastAPI()
     app.state.session_manager = rig.manager

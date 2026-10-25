@@ -144,7 +144,10 @@ require their own review and qualification.
       Explicit internal local acquisition, Host/child/new/load and prompt
       custody merged in #8783, including no-downgrade lifecycle and recovery
       exclusions. Other creation/background/host/remote cohorts and full
-      installed qualification remain open.
+      installed qualification remain open. The internal
+      [keyed-creation DB foundation](../../../plugins/agent-bridge/docs/creation-custody.md)
+      is under source validation; actual allocation/native effect-owner
+      integration remains open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -259,6 +262,19 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original keyed-creation DB foundation under validation
+
+- Extend the existing workspace/provider embodiment rows with their original
+  full creation facts and epoch/producer association, retained atomically before
+  any future selected effect. Exact replay observes the same original ID;
+  legacy history cannot be retrospectively enrolled or erase retained inputs.
+- Current-schema validation, passive existing-only adoption and strict inventory
+  include both creation owners. Ordinary effect paths refuse associated rows
+  instead of downgrading; no public selection or default enrollment is added.
+- Source/storage controls do not close Phase 1. Actual allocation, native launch,
+  provider execution and delivery fences remain the next source integration;
+  compatibility, installer and native/platform qualification stay open.
 
 ### 2026-10-24 - Local acquisition source merged; keyed creation custody next
 

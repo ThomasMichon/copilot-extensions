@@ -7,7 +7,6 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +17,7 @@ from .acquisition_authority import read_worktree_record, worktree_command
 from .acquisition_contract import AcquisitionRefused
 from .acquisition_executor import executor
 from .acquisition_store import AcquisitionStore
+from .creation_custody import legacy_creation
 from .models import SessionStatus, StartSessionRequest, StartSessionResponse
 from .preference_models import PreferenceSource
 from .routes.worktrees import _fresh_start_locks
@@ -158,14 +158,7 @@ async def start(
     }
     facts_digest = hashlib.sha256(json.dumps(facts, sort_keys=True).encode()).hexdigest()
     with executor(db, f"creation:{digest}"):
-        db.execute_write(
-            "INSERT OR IGNORE INTO workspace_embodiments "
-            "(key_digest,facts_digest,state,session_id) VALUES (?,?,'allocating',?)",
-            (digest, facts_digest, str(uuid.uuid4())[:12]),
-        )
-        operation = dict(db.execute_read(
-            "SELECT * FROM workspace_embodiments WHERE key_digest=?", (digest,),
-        )[0])
+        operation = legacy_creation(db, "workspace", digest, facts_digest)
         if operation["facts_digest"] != facts_digest:
             raise AcquisitionRefused("creation_conflict", "creation key is bound to different embodiment facts")
         saved = json.loads(operation["worktree_json"]) if operation["worktree_json"] else None

@@ -1,6 +1,8 @@
 """Standalone creation retains one allocation, native session and first turn."""
 
 import asyncio
+import hashlib
+import json
 import os
 import sys
 import subprocess
@@ -24,6 +26,31 @@ from test_acquisition_runtime import rig as _connected_rig
 rig = _connected_rig
 
 pytestmark = pytest.mark.contract("agent_bridge.workspace_creation")
+
+
+@pytest.mark.asyncio
+async def test_original_creation_custody_refuses_ordinary_allocation(creation_rig, monkeypatch):
+    from agent_bridge.creation_custody import CreationJournal, CreationRequest
+    from test_runtime_custody import enrolled
+
+    rig = creation_rig
+    owner, _producer, admission = enrolled(rig.db)
+    digest = hashlib.sha256(json.dumps([rig.target.project, "logical-work"]).encode()).hexdigest()
+    request = CreationRequest.capture("workspace", digest, {
+        "target": json.loads(rig.target.to_json()), "options": {}, "prompt": "Original work",
+    })
+    row = CreationJournal(rig.db).claim(request, owner, admission)
+    monkeypatch.setattr(
+        rig.manager, "start_session", lambda *_a, **_k: pytest.fail("must not launch"),
+    )
+    with pytest.raises(AcquisitionRefused) as refused:
+        await workspace_creation.start(
+            rig.manager, rig.target, key="logical-work", prompt="Original work",
+        )
+    assert refused.value.code == "creation_custody_required"
+    assert not rig.calls
+    assert not rig.manager.list_sessions()
+    assert CreationJournal(rig.db).read(request) == row
 
 
 @pytest.fixture
