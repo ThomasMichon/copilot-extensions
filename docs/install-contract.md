@@ -2691,7 +2691,10 @@ not a package-version inference or a declaration from a different payload.
 The installed owner's existing read-only source CLI first validates the full
 pin and assembly. The receiving source CLI then enforces the transaction pin
 independently of any frontend-local `--expected-source-identity` sample; neither
-can override the other. Revalidation precedes each installer attempt.
+can override the other. Revalidation precedes each installer attempt. Native
+initialization must invoke that validation whenever the transaction pin is
+present, even if `runtime-source.json` disappeared since planning; absence
+cannot downgrade the transaction to a package-only build.
 Old callers without the entry retain the existing CLI contract; an older
 prepared helper without that declaration refuses before installer execution
 rather than silently ignoring a required pin. Nothing retires the existing
@@ -2699,7 +2702,9 @@ explicit CLI pin.
 
 A package-version match alone cannot skip a prepared-source update. Its receipt
 must match the full source identity and runtime version, select that exact
-existing completed slot, and name its venv. Native candidate construction and
+existing completed slot, and name its venv. Completion-probe subprocess failures,
+including timeouts, become explicit receipt failures on the collected step,
+not exceptions that abort the remaining update portfolio. Native candidate construction and
 health remain the installer's responsibility. Ordinary runtime updates clear
 inherited transaction pins. This is provider-side, unprofiled legacy-runtime
 execution support: Manager's non-marketplace suite-update preflight remains

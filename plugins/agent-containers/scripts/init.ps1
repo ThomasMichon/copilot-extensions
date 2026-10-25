@@ -356,6 +356,7 @@ try {
 } catch [IO.FileNotFoundException] {
 } catch [IO.DirectoryNotFoundException] {
 }
+$SourceSelected = $SourceSelected -or (Test-Path Env:\COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
 if ($SourceSelected) {
     $SourceRuntimeIdentity = Get-SourceRuntimeVersion -Format json
     $SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version

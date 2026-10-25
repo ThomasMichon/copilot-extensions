@@ -404,7 +404,7 @@ _source_runtime_identity() {
 }
 
 _initialize_source_runtime() {
-    [[ -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
+    [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" || -e "$PLUGIN_DIR/runtime-source.json" || -L "$PLUGIN_DIR/runtime-source.json" ]] || return 0
     SOURCE_RUNTIME_IDENTITY="$(_source_runtime_identity)" || return 1
     if [[ "$SOURCE_RUNTIME_IDENTITY" == '{}' ]]; then
         _fail 'Source runtime identity disappeared during runtime selection'

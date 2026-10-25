@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -212,3 +213,42 @@ def test_malformed_selected_source_is_not_an_untyped_key_error(selected):
     for invalid in ({}, {"runtime_source": {}, "runtime_version": "version"}):
         with pytest.raises(ValueError, match="complete source selection"):
             dataclasses.replace(source, identity=json.dumps(invalid))
+
+
+@pytest.mark.parametrize("kind", ["engine", "module", "registered", "execute"])
+def test_completion_probe_timeout_is_an_attributable_failed_step(selected, monkeypatch, kind):
+    owner, artifact, runtime, source = selected
+    runtime.mkdir()
+    slot = runtime / "versions" / source.version
+    slot.mkdir(parents=True)
+    manifest = json.loads(source.identity)
+    manifest.update(service="agent-worktrees", venv=str(slot))
+    (runtime / "deploy-manifest.json").write_text(json.dumps(manifest))
+    (runtime / "current-version").write_text(source.version)
+    original = subprocess.run
+
+    def run(argv, **kwargs):
+        if "is-complete" in argv:
+            raise subprocess.TimeoutExpired(argv, 30)
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if kind == "execute":
+        step = update_runtime_plan.RuntimeUpdateStep(
+            "agent-worktrees", "engine_runtime", owner, source=source,
+            runtime_root=runtime, project_root=ROOT, target_version=source.version,
+            environment={**os.environ, PIN_ENV: source.identity},
+            argv=(sys.executable, "-c", "raise AssertionError('must not run')"),
+        )
+
+        def installer(argv, **kwargs):
+            kwargs["receipt"]()
+            pytest.fail("timed-out receipt must refuse execution")
+
+        monkeypatch.setattr(update_runtime, "_run_human_installer", installer)
+        status = update_runtime._execute_runtime_step(step)
+    else:
+        step = plan(kind, owner, source)
+        assert step.blocked
+        status = step.status
+    assert "Source completion probe failed" in status

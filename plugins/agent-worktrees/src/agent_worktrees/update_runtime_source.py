@@ -114,12 +114,15 @@ class PreparedRuntimeSource:
             or Path(manifest["venv"]) != slot
         ):
             return None
-        result = subprocess.run(
-            [sys.executable, "-I", "-B", str(owner / "scripts" / "versioned_runtime.py"),
-             "--root", str(root), "--json", "is-complete", self.version],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=30, check=False, **no_window_kwargs(),
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-I", "-B", str(owner / "scripts" / "versioned_runtime.py"),
+                 "--root", str(root), "--json", "is-complete", self.version],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30, check=False, **no_window_kwargs(),
+            )
+        except subprocess.SubprocessError as error:
+            raise ValueError(f"Source completion probe failed: {error}") from error
         if result.returncode not in (0, 1):
             raise ValueError(
                 f"Source completion probe failed: {result.stderr.strip() or result.returncode}"
