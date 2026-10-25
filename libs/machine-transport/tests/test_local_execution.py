@@ -325,6 +325,53 @@ def test_structured_physical_names_are_not_execution_reference_tokens(physical: 
     assert (context.machine, context.execution_machine) == (physical, "opaque-device")
 
 
+@pytest.mark.parametrize("physical", ["Physical computer", "Rack/Computer", "Rack#1", r"Rack\Computer"])
+@pytest.mark.parametrize(("declared", "environment", "binding"), [
+    ("windows", "wsl", "native-label-wsl"),
+    ("wsl", "windows", "native-label-win"),
+    ("wsl", "linux", "{physical}"),
+    ("", "wsl", "native"),
+])
+def test_missing_customization_keeps_structured_physical_label_and_clean_local_key(
+    physical: str, declared: str, environment: str, binding: str,
+) -> None:
+    entry = MachineEntry(
+        "native", "Friendly computer", hostname="RAW-HOST", alias="native-label",
+        physical_host=physical, execution_platform=declared,
+    )
+    entries = {entry.key: entry}
+    observed = resolve_local_execution_context(entries, hostname="RAW-HOST", environment=environment)
+    configured = resolve_local_execution_context(
+        entries, hostname="RAW-HOST", environment=environment,
+        configured_machine=binding.format(physical=physical),
+    )
+    assert observed == configured
+    assert (observed.machine, observed.execution_machine, observed.customization_key) == (
+        physical, "raw-host-wsl" if environment == "wsl" else "raw-host", None,
+    )
+
+
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("slot", ["key", "alias", "compatibility_aliases"])
+def test_structured_physical_fallback_still_checks_execution_collisions(
+    configured: bool, slot: str,
+) -> None:
+    native = MachineEntry(
+        "native", "", hostname="raw-host", physical_host="Rack/Computer",
+        execution_platform="windows", alias="native-label",
+    )
+    other = MachineEntry(
+        "RAW-HOST-WSL" if slot == "key" else "foreign", "", execution_platform="linux",
+        alias="RAW-HOST-WSL" if slot == "alias" else "",
+        compatibility_aliases=("RAW-HOST-WSL",) if slot == "compatibility_aliases" else (),
+    )
+    with pytest.raises(ValueError, match="conflicts"):
+        resolve_local_execution_context(
+            {native.key: native, other.key: other}, hostname="raw-host", environment="wsl",
+            configured_machine="native-label-wsl" if configured else None,
+        )
+
+
 @pytest.mark.parametrize("name", ["bad\0host", "bad\nhost", "bad\rhost", "bad\u2003host"])
 def test_execution_reference_tokens_reject_unclean_or_multiterm_names(name: str) -> None:
     with pytest.raises(IdentityError):

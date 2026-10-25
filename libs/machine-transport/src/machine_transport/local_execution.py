@@ -47,6 +47,13 @@ def _name(value: str, label: str) -> str:
     return cleaned
 
 
+def _fallback_execution(physical: str, observed: str, platform: str) -> str:
+    base = _clean_name(physical, "physical machine")
+    if any(char.isspace() or char in "/\\#" for char in base):
+        base = observed.casefold()
+    return MachineEnvironment(base, platform).logical_machine
+
+
 def _physical(entry: MachineEntry, observed: str) -> str:
     if entry.physical_host:
         return entry.physical_host.strip()
@@ -129,6 +136,11 @@ def _literal_binding(
     if not direct:
         if configured.casefold() == observed.casefold():
             return True
+        if not any(
+            entry.display_name and entry.display_name.casefold() == configured.casefold()
+            for entry in registry.values()
+        ):
+            split_machine_environment(configured, platform)
         try:
             selected = find_machine_entry(registry, configured, reject_ambiguous=True)
         except (PhysicalMachineError, MissingExecutionSpaceError):
@@ -206,10 +218,20 @@ def resolve_local_execution_context(
                 MachineEnvironment(exc.physical_host, platform) if exc.physical_host
                 else split_machine_environment(configured, platform)
             )
-            return _context(registry, observed, target.machine, platform, target.logical_machine, None)
+            execution = (
+                _fallback_execution(target.machine, observed, platform) if exc.physical_host
+                else target.logical_machine
+            )
+            return _context(registry, observed, target.machine, platform, execution, None)
+        execution = selected.entry.key if selected.entry is not None else selected.target.logical_machine
+        if selected.entry is None and any(
+            _physical(entry, observed).casefold() == selected.target.machine.casefold()
+            for entry in registry.values()
+        ):
+            execution = _fallback_execution(selected.target.machine, observed, platform)
         return _context(
             registry, observed, selected.target.machine, platform,
-            selected.entry.key if selected.entry is not None else selected.target.logical_machine,
+            execution,
             selected.entry.key if selected.entry is not None else None,
         )
 
@@ -235,13 +257,13 @@ def resolve_local_execution_context(
         physical = _physical(entry, observed)
         derived_guest = platform == "wsl" and _platform(entry, observed) != "wsl"
         execution = (
-            f"{physical}-wsl" if derived_guest else entry.key
+            _fallback_execution(physical, observed, platform) if derived_guest else entry.key
         )
         customization_key = None if derived_guest else entry.key
     else:
         if len(folded_families) > 1:
             raise IdentityError(f"observed hostname {observed!r} has ambiguous physical associations")
         physical = min(families) if families else observed.casefold()
-        execution = f"{physical}-wsl" if platform == "wsl" else physical
+        execution = _fallback_execution(physical, observed, platform)
         customization_key = None
     return _context(registry, observed, physical, platform, execution, customization_key)

@@ -95,7 +95,11 @@ context. A matching map can customize physical and execution names. An observed
 physical hostname resembling `-wsl`, `-win` or a parenthesized environment label
 is literal, not address syntax.
 Physical grouping names are structured clean strings, not execution-reference
-tokens. Allocation callers still own portable path/Git-ref validation.
+tokens. When a mapped physical label cannot form an execution token and the
+current platform has no declared execution key, the observed hostname supplies
+the fallback execution name (with `-wsl` for a guest), without changing the
+physical label. This fallback uses the same collision checks as other local
+execution names. Allocation callers still own portable path/Git-ref validation.
 
 This is an additive API for the reviewed local-first correction, not an
 activation of tuple producers or an automatic migration of existing consumers.
@@ -103,7 +107,9 @@ The existing target selectors and ownership fences retain their contracts.
 In particular, a missing guest customization can yield local guest naming
 facts here without making its native registry entry a guest target. Explicit
 configured conflicts, ambiguous customizations and invalid declarations still
-raise. Do not supply a requested target or a record's stored owner as the
+raise. Inferred binding qualifiers must agree with the actual platform; exact
+registered keys, aliases and applicable display selectors retain precedence.
+Do not supply a requested target or a record's stored owner as the
 current configured binding.
 
 An established guest binding remains usable when only its native customization

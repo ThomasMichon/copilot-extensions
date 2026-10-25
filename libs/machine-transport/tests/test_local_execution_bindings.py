@@ -233,3 +233,49 @@ def test_missing_guest_metadata_does_not_hide_ambiguous_physical_families() -> N
         resolve_local_execution_context(
             entries, hostname="raw-host", environment="wsl", configured_machine="Shared-wsl",
         )
+
+
+@pytest.mark.parametrize(("environment", "binding"), [
+    ("wsl", "desk-win"), ("wsl", "desk (Windows)"),
+    ("windows", "desk-wsl"), ("windows", "desk (WSL)"),
+    ("linux", "desk-win"), ("linux", "desk (WSL)"),
+])
+def test_inferred_local_binding_cannot_hide_a_conflicting_platform(
+    environment: str, binding: str,
+) -> None:
+    entry = MachineEntry("desk", "", hostname="desk")
+    for entries in ({}, {entry.key: entry}):
+        with pytest.raises(ValueError, match="conflicts"):
+            resolve_local_execution_context(
+                entries, hostname="desk", environment=environment, configured_machine=binding,
+            )
+
+
+@pytest.mark.parametrize(("slot", "binding"), [
+    ("key", "desk-win"), ("key", "desk(Windows)"),
+    ("alias", "desk-win"), ("alias", "desk (Windows)"),
+])
+def test_registered_literal_binding_precedes_inferred_platform(slot: str, binding: str) -> None:
+    entry = MachineEntry(
+        binding if slot == "key" else "desk",
+        "",
+        alias=binding if slot == "alias" else "",
+        hostname="desk", physical_host="physical", execution_platform="wsl",
+    )
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="desk", environment="wsl", configured_machine=binding,
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "physical", entry.key, entry.key,
+    )
+
+
+@pytest.mark.parametrize("binding", ["desk-win", "desk (Windows)"])
+def test_exact_unscoped_display_binding_is_not_an_inferred_qualifier(binding: str) -> None:
+    entry = MachineEntry("desk", binding, hostname="desk")
+    context = resolve_local_execution_context(
+        {entry.key: entry}, hostname="desk", environment="wsl", configured_machine=binding,
+    )
+    assert (context.machine, context.execution_machine, context.customization_key) == (
+        "desk", "desk-wsl", None,
+    )
