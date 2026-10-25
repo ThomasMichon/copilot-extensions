@@ -307,7 +307,9 @@ unchanged.
   `agent-containers` binstub implements `namespace-list`,
   `namespace-resolve`, `namespace-ensure-ready`, `namespace-recreate`, and
   `relay-profile`; bridge shells out to those commands rather than requiring
-  this package in the bridge venv. `namespace-recreate` is the destructive,
+  this package in the bridge venv. Inventory uses one `docker ps` query without
+  a separate version preflight; missing CLI, daemon and query failures remain
+  errors, not successful empty inventories. `namespace-recreate` is the destructive,
   target-scoped parity seam: it removes only the identity-checked Docker
   instance of one trusted configured member, recreates the same deterministic
   name, and reports the new instance identity without exposing launch data.
