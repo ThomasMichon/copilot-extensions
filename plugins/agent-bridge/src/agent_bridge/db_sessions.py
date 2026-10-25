@@ -37,7 +37,8 @@ class _SessionsMixin:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (session_id, name, agent_name, caller_id, caller_session_id,
              target_dir, target_type,
-             status, config_json, target_json, int(background_recovery_enabled),
+             status, config_json, target_json,
+             int(background_recovery_enabled and runtime_admission is None),
              now, now, acp_session_id, admission_document(runtime_admission)),
             runtime_admission,
         )
@@ -74,7 +75,8 @@ class _SessionsMixin:
                 conn.execute(
                     "UPDATE sessions SET status='stopped', pid=NULL, "
                     "background_recovery_enabled=CASE WHEN ?=1 "
-                    "AND cold_recovery_stop_token IS NULL THEN 1 ELSE 0 END, "
+                    "AND cold_recovery_stop_token IS NULL "
+                    "AND runtime_custody_json IS NULL THEN 1 ELSE 0 END, "
                     "updated_at=? WHERE id=?",
                     (1 if background_recovery_enabled else 0, now, session_id),
                 )
@@ -103,7 +105,7 @@ class _SessionsMixin:
         """Persist recovery permission only if no newer durable stop forbids it."""
         cursor = self.execute_write(
             "UPDATE sessions SET background_recovery_enabled=? WHERE id=? "
-            "AND (?=0 OR cold_recovery_stop_token IS ?)",
+            "AND (?=0 OR (cold_recovery_stop_token IS ? AND runtime_custody_json IS NULL))",
             (1 if enabled else 0, session_id, 1 if enabled else 0, expected_stop_token),
         )
         return enabled and cursor.rowcount == 1

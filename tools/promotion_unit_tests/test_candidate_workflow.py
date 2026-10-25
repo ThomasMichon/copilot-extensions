@@ -55,3 +55,20 @@ def test_real_controller_publication_requires_explicit_candidate_profile():
     assert "candidate-units-v3" in jobs["merge-promotion"]["if"]
     assert "compose-candidate" in jobs["report-failure"]["needs"]
     assert "needs.compose-candidate.result == 'failure'" in jobs["report-failure"]["if"]
+
+
+def test_complete_source_is_attested_and_read_back_before_the_final_main_pr():
+    job = yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_text())["jobs"]["publish-python-artifacts"]
+    steps = job["steps"]
+    prepare = next(number for number, step in enumerate(steps) if "promotion_source_archive.py" in step.get("run", ""))
+    attest = next(number for number, step in enumerate(steps) if step.get("uses", "").startswith("actions/attest-build-provenance@"))
+    publish = next(number for number, step in enumerate(steps) if step.get("id") == "publish")
+    land = next(number for number, step in enumerate(steps) if step.get("id") == "land")
+    assert prepare < attest < publish < land
+    assert steps[attest]["with"]["subject-path"] == "${{ runner.temp }}/complete-source/*"
+    assert '--complete-source-dir "$RUNNER_TEMP/complete-source"' in steps[publish]["run"]
+    assert "--qualification-receipt qualification/qualification.json" in steps[prepare]["run"]
+    assert "--source-index python-artifacts/python-artifacts.json" in steps[prepare]["run"]
+    assert job["permissions"]["id-token"] == job["permissions"]["attestations"] == "write"
+    assert "GH_TOKEN" not in steps[prepare].get("env", {})
+    assert "APERTURE_RELEASE_TOKEN" not in str(steps[attest])

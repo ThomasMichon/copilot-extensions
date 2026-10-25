@@ -684,7 +684,10 @@ class _SessionCoreMixin(_SessionDrainGateMixin):
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
             session.restart_status = status
-            session.background_recovery_enabled = bool(row.get("background_recovery_enabled", 1))
+            session.background_recovery_enabled = (
+                row.get("runtime_custody_json") is None
+                and bool(row.get("background_recovery_enabled", 1))
+            )
 
             # Restore the session's declared per-session MCP toolset. Without
             # this, a daemon restart silently drops it forever (it otherwise

@@ -2878,6 +2878,10 @@ async def test_idle_unwatched_session_goes_dormant_after_repeated_recovery_failu
     session.status = SessionStatus.IDLE
     session.acp_session_id = "acp-1"
     session.client = None
+    tmp_db.create_session(
+        session.session_id, session.name, None, str(tmp_path), "local", "idle", 1.0,
+        acp_session_id=session.acp_session_id,
+    )
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(
         session_id=session.session_id,
@@ -2935,6 +2939,10 @@ async def test_recoverable_stopped_session_also_reaches_idle_dormancy(
     session.status = SessionStatus.STOPPED  # as rehydrate() would leave it
     session.acp_session_id = "acp-1"
     session.client = None
+    tmp_db.create_session(
+        session.session_id, session.name, None, str(tmp_path), "local", "stopped", 1.0,
+        acp_session_id=session.acp_session_id,
+    )
     session.background_recovery_enabled = True  # not an explicit stop
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(
@@ -3097,6 +3105,10 @@ async def test_recover_disconnected_hosts_feeds_codespace_unavailable_into_backo
     session.status = SessionStatus.IDLE
     session.acp_session_id = "acp-1"
     session.client = None
+    tmp_db.create_session(
+        session.session_id, session.name, None, str(tmp_path), "local", "idle", 1.0,
+        acp_session_id=session.acp_session_id,
+    )
     manager._sessions[session.session_id] = session
     rec = SimpleNamespace(
         session_id=session.session_id,

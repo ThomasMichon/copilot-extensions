@@ -68,6 +68,31 @@ reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 installed-state marker is present; setup success is not a full authentication
 or repository-adoption verdict.
 
+### Optional repository setup
+
+`setup` may also select an HTTPS Git source after the existing prerequisite
+and core stages:
+
+```text
+worktree-manager setup --apply --repository <https-git-url>
+  [--repository-target <absolute-path>] [--trust-repository-setup]
+```
+
+Without `--apply`, this remains a plan. The target and trust options require a
+repository and are validated before provisioning. Apply requires fresh actual
+core readiness, then invokes the engine's
+[`repos setup` contract](../plugins/agent-worktrees/docs/repository-setup.md)
+with inherited stdio. An older/absent engine refuses this optional stage, not
+the completed core installation. Repository failure never uninstalls core.
+
+The existing bootstrap forwards the same `setup` argument array. Selecting a
+repository does not change the Manager's installation/update source, enroll
+maintenance, launch an agent or imply full machine adoption. Explicit trust is
+required before even the repository's check entry runs. A repository without
+the supported declaration is unsupported, not inferred from a README or hook.
+Native synthetic consumer coverage is not proof of actual attended provider
+authentication or a working adopter onboarding command.
+
 The Manager is a standalone canonical Python-installer-engine adopter. Bootstrap
 selects Python 3.11 or newer without running project resolution, then the engine
 retains the source/dependency/configuration inputs and constructs a non-editable

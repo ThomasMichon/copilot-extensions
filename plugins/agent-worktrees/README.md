@@ -50,6 +50,11 @@ front-door route as the already repo-aware handler. Without an explicit repo,
 ordinary project resolution remains required; the change does not start
 reconciliation or installation merely by resolving the route.
 
+For explicit source acquisition and repository-owned check/apply/final-check,
+use [`repos setup`](docs/repository-setup.md). It is plan-only by default,
+requires consent before repository code runs, and preserves editing/agent
+preferences rather than silently adopting the selected source.
+
 Portable installation-mode probes and selected-context validation run the
 selected Python with `-I -S` and explicit UTF-8 output. Their payload-owned
 helper uses only the standard library, so repeated probes need neither

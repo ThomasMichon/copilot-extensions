@@ -6,7 +6,7 @@ import asyncio
 import json
 import time
 from dataclasses import asdict, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .acquisition_authority import verify_dispatch, verify_worktree, worktree_command, bind_dispatch_receipt, mark_dispatch_acquisition
 from .acquisition_contract import (
@@ -33,6 +33,9 @@ from .routes.worktrees import _fresh_start_locks
 from .transport import SpawnTarget
 from .worktree_charter import _apply_bound_charter
 
+if TYPE_CHECKING:
+    from .acquisition_launch_owner import AcquisitionFrontend
+
 
 class AcquisitionRuntime:
     """One operation owns selection, launch, identity verification and delivery."""
@@ -42,7 +45,9 @@ class AcquisitionRuntime:
         self.state = state
         self.store = AcquisitionStore(db)
 
-    async def acquire(self, req: AcquisitionRequest) -> AcquisitionResult:
+    async def acquire(
+        self, req: AcquisitionRequest, *, custody: AcquisitionFrontend | None = None,
+    ) -> AcquisitionResult:
         if self.manager.is_draining:
             raise AcquisitionRefused("acquisition_draining", "bridge is draining")
         if req.mode == "cli" and any(
@@ -58,7 +63,7 @@ class AcquisitionRuntime:
                     raise AcquisitionRefused("acquisition_draining", "bridge is draining")
                 self.manager._active_acquisitions = getattr(self.manager, "_active_acquisitions", 0) + 1
                 try:
-                    return await self._acquire_locked(req)
+                    return await self._acquire_locked(req, custody=custody)
                 except AcquisitionRefused as exc:
                     if self.store.journal.refused_before_effect(req):
                         exc.effect = "not_started"
@@ -66,7 +71,9 @@ class AcquisitionRuntime:
                 finally:
                     self.manager._active_acquisitions -= 1
 
-    async def _acquire_locked(self, req: AcquisitionRequest) -> AcquisitionResult:
+    async def _acquire_locked(
+        self, req: AcquisitionRequest, *, custody: AcquisitionFrontend | None = None,
+    ) -> AcquisitionResult:
         completed = self.db.execute_read(
             "SELECT state FROM acquisition_attempts WHERE delivery_id=?",
             (req.delivery_id,),
@@ -76,10 +83,13 @@ class AcquisitionRuntime:
             assert replay.result is not None
             self.store.release_gate(req)
             return replay.result
+        from .acquisition_launch_owner import original_admission
+
+        admission = original_admission(self, req, custody)
         venue = await verify_dispatch(req, self.resolver)
         preflight_claim = None
         if not completed and not self.store.pending(req.worktree_id):
-            preflight_claim = self.store.journal.claim(req)
+            preflight_claim = self.store.journal.claim(req, runtime_admission=admission)
         try:
             row, head = await verify_worktree(req)
         except AcquisitionRefused as exc:
@@ -92,10 +102,14 @@ class AcquisitionRuntime:
         venue = await verify_dispatch(req, self.resolver)
         row, head = await verify_worktree(req)
         try:
-            claim = preflight_claim or self.store.journal.claim(req)
+            claim = preflight_claim or self.store.journal.claim(req, runtime_admission=admission)
         except AcquisitionRefused as exc:
             if exc.code != "acquisition_pending":
                 raise
+            if admission is not None:
+                from .runtime_custody import RuntimeCustodyError
+
+                raise RuntimeCustodyError("Original acquisition remains held; reconcile without replay") from exc
             token, stage, data = self.store.recovery(req)
             return await self._recover(req, token, stage, data, row, head)
         if claim.result is not None:
@@ -234,7 +248,10 @@ class AcquisitionRuntime:
             if decision.retirement_recovered and decision.conversation else None,
         )
         try:
-            session_id, native = await self._launch(req, decision, row, target, request_env)
+            session_id, native = await self._launch(
+                req, decision, row, target, request_env,
+                **({"custody": custody} if custody is not None else {}),
+            )
         except AcquisitionRefused as exc:
             if exc.code == "acquisition_draining":
                 self.store.journal.refuse(req, token, exc.code)
@@ -359,67 +376,15 @@ class AcquisitionRuntime:
         row: dict[str, Any],
         target: Any,
         request_env: dict[str, str],
+        *,
+        custody: AcquisitionFrontend | None = None,
     ) -> tuple[str, str]:
         if self.manager.is_draining:
             raise AcquisitionRefused("acquisition_draining", "bridge drained before launch")
         if req.mode == "acp":
-            if decision.conversation:
-                session = self.manager.get_session(decision.conversation.session_id)
-                if decision.acquired == "resumed":
-                    session = await self.manager.resume_session(
-                        decision.conversation.session_id,
-                        drain=False,
-                        allow_recreate=False,
-                    )
-            else:
-                target = replace(
-                    target, cwd=row["path"], worktree_id=req.worktree_id, explicit_cwd=True
-                )
-                session = await self.manager.start_session(
-                    target,
-                    agent_name=req.target,
-                    caller_id=f"acquisition:{req.delivery_id}",
-                    caller_owner_ref=req.caller_owner_ref,
-                    caller_session_id=req.caller_session_id,
-                    copilot_args=["--agent", req.charter] if req.charter else None,
-                    model=req.model,
-                    effort=req.effort,
-                    env_overrides=request_env or None,
-                )
-            if not session or not session.acp_session_id or session.status != SessionStatus.IDLE:
-                raise AcquisitionRefused(
-                    "native_start_unproven", "ACP launch did not prove an idle native conversation"
-                )
-            context = self._prepared_context(
-                session.target, row, session.acp_session_id,
-                require_prepared=decision.conversation is None,
-            )
-            _token, stage, data = self.store.recovery(req)
-            self.store.stage(
-                req, stage, **{
-                    **data, "prepared_context": context,
-                    "session_id": session.session_id, "native_session_id": session.acp_session_id,
-                },
-            )
-            if not self.db.reserve_worktree_ownership(
-                req.worktree_id,
-                session.session_id,
-                now=time.time(),
-            ):
-                raise AcquisitionRefused("live_holder", "ACP ownership fence was not acquired")
-            await worktree_command(
-                [
-                    "bind-session",
-                    "--session-id",
-                    session.acp_session_id,
-                    "--worktree-id",
-                    req.worktree_id,
-                    "--worktree-dir",
-                    row["path"],
-                ],
-                req.project,
-            )
-            return session.session_id, session.acp_session_id
+            from .acquisition_local_launch import launch
+
+            return await launch(self, req, decision, row, target, request_env, custody=custody)
         if decision.acquired == "reused":
             assert decision.conversation and decision.conversation.native_session_id
             if target.plugin_preparation_request is not None:

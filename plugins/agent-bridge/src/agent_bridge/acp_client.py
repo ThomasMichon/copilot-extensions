@@ -69,9 +69,12 @@ from .acp_continuation import IdleAcpTransport, idle_operation
 from .acp_host_streams import AcpHostStreamsMixin
 from .acp_prompts import AcpPromptMixin
 from .privileged_plugins import lifecycle_rpc
+from .runtime_custody import RuntimeCustodyError
 
 if TYPE_CHECKING:
     from .events import EventLog
+    from .acquisition_launch_owner import AcquisitionLaunchOwner
+    from .acquisition_host_transport import AcquisitionHostTransport
     from .native_turn_transport import NativeTurnTransport
 
 log = logging.getLogger("agent-bridge")
@@ -323,7 +326,8 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         self._process: asyncio.subprocess.Process | None = None
         self._connection: ClientSideConnection | None = None
         self._acp_session_id: str | None = None
-        self._native_turn_transport: NativeTurnTransport | None = None
+        self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
+        self._acquisition_launch: AcquisitionLaunchOwner | None = None
 
         # Auto-approve all permission requests (agent-bridge default).
         # Ignored when on_permission is set.
@@ -547,6 +551,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         cwd: str,
         mcp_servers: list[dict[str, Any]] | None = None,
         timing_callback: Callable[[str, float], None] | None = None,
+        acquisition_launch: AcquisitionLaunchOwner | None = None,
     ) -> str:
         """Create a new ACP session. Returns the ACP session ID.
 
@@ -555,14 +560,19 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        if self._acquisition_launch is not acquisition_launch:
+            raise RuntimeCustodyError("Session RPC requires its original acquisition owner")
         started = time.monotonic()
         servers = build_mcp_servers(mcp_servers)
         if timing_callback is not None:
             timing_callback("session_new_mcp_build", time.monotonic() - started)
         started = time.monotonic()
         self._subagent_attr.reset()
+        method = self._connection.new_session
+        if acquisition_launch is not None:
+            method = acquisition_launch.native_method(self, "new", method)
         result = await lifecycle_rpc(self,
-            self._connection.new_session,
+            method,
             cwd=cwd, mcp_servers=servers,
         )
         if timing_callback is not None:
@@ -573,7 +583,11 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         # copilot ignores the ``--model`` launch flag in ``--acp`` mode, so the
         # model is chosen here against the advertised select options.
         started = time.monotonic()
-        await self._apply_model_config(getattr(result, "config_options", None))
+        await self._apply_model_config(
+            getattr(result, "config_options", None),
+            **({"before_effect": lambda: acquisition_launch.require_configuration(self)}
+               if acquisition_launch is not None else {}),
+        )
         if timing_callback is not None:
             timing_callback("session_new_model_config", time.monotonic() - started)
         return result.session_id
@@ -604,6 +618,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         suppress_replay: bool = True,
         mcp_servers: list[dict[str, Any]] | None = None,
         timing_callback: Callable[[str, float], None] | None = None,
+        acquisition_launch: AcquisitionLaunchOwner | None = None,
     ) -> None:
         """Reload a previously persisted ACP session (for resume).
 
@@ -623,6 +638,8 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        if self._acquisition_launch is not acquisition_launch:
+            raise RuntimeCustodyError("Session RPC requires its original acquisition owner")
         if self._remote_transport is not None and not self._remote_can_load:
             raise PermissionError("Remote agent does not advertise session/load")
         self._cancel_out_of_turn()
@@ -636,8 +653,11 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             if timing_callback is not None:
                 timing_callback("session_load_mcp_build", time.monotonic() - started)
             started = time.monotonic()
+            method = self._connection.load_session
+            if acquisition_launch is not None:
+                method = acquisition_launch.native_method(self, "load", method)
             result = await lifecycle_rpc(self,
-                self._connection.load_session,
+                method,
                 cwd=cwd, session_id=session_id,
                 mcp_servers=servers,
             )
@@ -652,7 +672,11 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         # Re-assert the model/effort on resume: a reloaded session may report
         # the agent's default in its config options (dotfiles#790).
         started = time.monotonic()
-        await self._apply_model_config(getattr(result, "config_options", None), resuming=True)
+        await self._apply_model_config(
+            getattr(result, "config_options", None), resuming=True,
+            **({"before_effect": lambda: acquisition_launch.require_configuration(self)}
+               if acquisition_launch is not None else {}),
+        )
         if timing_callback is not None:
             timing_callback("session_load_model_config", time.monotonic() - started)
 

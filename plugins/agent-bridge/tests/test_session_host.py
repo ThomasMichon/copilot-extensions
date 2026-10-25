@@ -2153,6 +2153,7 @@ async def test_legacy_remote_record_keeps_fresh_spawn_fallback(
 async def test_codespace_resume_replacement_uses_new_session_host(
     session_manager,
     monkeypatch,
+    permitted_provider_hosting,
 ):
     from unittest.mock import AsyncMock, MagicMock
 
@@ -2174,6 +2175,10 @@ async def test_codespace_resume_replacement_uses_new_session_host(
     session.acp_session_id = "acp-1"
     session.status = SessionStatus.STOPPED
     session.event_log = MagicMock()
+    session_manager.db.create_session(
+        "s1", "one", session.agent_name, "/workspaces/repo", "command", "stopped", 1.0,
+        acp_session_id="acp-1",
+    )
     session_manager._sessions["s1"] = session
     monkeypatch.setattr(
         session_manager,
@@ -2204,6 +2209,7 @@ async def test_codespace_resume_replacement_uses_new_session_host(
 async def test_legacy_codespace_resume_replacement_uses_session_host(
     session_manager,
     monkeypatch,
+    permitted_provider_hosting,
 ):
     from unittest.mock import AsyncMock, MagicMock
 
@@ -2226,6 +2232,10 @@ async def test_legacy_codespace_resume_replacement_uses_session_host(
     session.acp_session_id = "acp-1"
     session.status = SessionStatus.STOPPED
     session.event_log = MagicMock()
+    session_manager.db.create_session(
+        "s1", "one", session.agent_name, "/workspaces/repo", "command", "stopped", 1.0,
+        acp_session_id="acp-1",
+    )
     session_manager._sessions["s1"] = session
     monkeypatch.setattr(
         session_manager,
@@ -2670,6 +2680,7 @@ async def test_launch_session_host_process_owns_child(tmp_path):
     handle = await asyncio.to_thread(
         launch_session_host, [sys.executable, "-c", _STREAMER],
         state_dir=str(tmp_path),
+        cwd=str(tmp_path),
     )
     try:
         assert handle.child_pid > 0 and handle.port > 0
@@ -2733,7 +2744,7 @@ async def test_local_spawner_secures_with_nonce(tmp_path):
 
     from agent_bridge.session_host.spawner import LocalSpawner
 
-    spawned = await LocalSpawner().spawn([sys.executable, "-c", _STREAMER])
+    spawned = await LocalSpawner().spawn([sys.executable, "-c", _STREAMER], cwd=str(tmp_path))
     try:
         assert spawned.boundary == "local"
         assert spawned.nonce and spawned.local_port > 0
@@ -2867,7 +2878,7 @@ async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_session_host_bundle_runs_and_secures(tmp_path):
+async def test_session_host_bundle_runs_and_secures(tmp_path, monkeypatch):
     """The content-hashed zipapp bundle builds with a stable hash, runs as a host
     owning a child, and is nonce-gated -- the version-alignment mechanism for the
     CodeSpace/mesh far side (it runs the host's exact bytes)."""
@@ -2875,6 +2886,7 @@ async def test_session_host_bundle_runs_and_secures(tmp_path):
     import signal
     import subprocess
     import sys
+    import shlex
 
     from agent_bridge.session_host.bundle import (
         build_session_host_bundle,
@@ -2886,10 +2898,34 @@ async def test_session_host_bundle_runs_and_secures(tmp_path):
     # Stable + reused (the cache-by-hash property the CS relies on).
     assert build_session_host_bundle(dest_dir=str(tmp_path / "bundles")) == (path, sha)
 
+    # The synthetic far side still needs an enforcing repository-policy owner.
+    receiver = tmp_path / "policy-owner.py"
+    receiver.write_text(
+        "import json, sys\n"
+        "from repository_policy import require_agent_hosting\n"
+        "assert sys.argv[1:4] == ['agent-policy', 'check', '--path']\n"
+        "assert sys.argv[5] == '--operation' and sys.argv[7] == '--json'\n"
+        "policy = require_agent_hosting(sys.argv[4], operation=sys.argv[6])\n"
+        "print(json.dumps({'allowed': True, **policy.to_dict()}))\n",
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    if os.name == "nt":
+        owner = bin_dir / "agent-worktrees.cmd"
+        owner.write_text(f'@"{sys.executable}" "{receiver}" %*\r\n', encoding="utf-8")
+    else:
+        owner = bin_dir / "agent-worktrees"
+        owner.write_text(
+            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(receiver))} \"$@\"\n",
+            encoding="utf-8",
+        )
+        owner.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
     sf = tmp_path / "state.json"
     env = dict(os.environ, AGENT_BRIDGE_SESSION_HOST_NONCE="bundlenonce")
     proc = subprocess.Popen(
-        [sys.executable, "-S", str(path), "--port", "0", "--state-file", str(sf),
+        [sys.executable, "-S", str(path), "--port", "0", "--state-file", str(sf), "--cwd", str(tmp_path),
          "--", sys.executable, "-c", _STREAMER], env=env)
     child_pid = None
     try:
@@ -3232,7 +3268,7 @@ async def test_run_host_end_to_end_reattach(tmp_path):
     task = asyncio.create_task(
         launcher.run_host(
             [sys.executable, "-c", _STREAMER],
-            port=0, state_file=str(state), ready=ready,
+            port=0, state_file=str(state), ready=ready, cwd=str(tmp_path),
         )
     )
     try:
@@ -3287,7 +3323,7 @@ async def test_run_host_persists_child_exit_state(tmp_path):
     task = asyncio.create_task(
         launcher.run_host(
             [sys.executable, "-c", "raise SystemExit(7)"],
-            port=0, state_file=str(state), ready=ready,
+            port=0, state_file=str(state), ready=ready, cwd=str(tmp_path),
         )
     )
     try:

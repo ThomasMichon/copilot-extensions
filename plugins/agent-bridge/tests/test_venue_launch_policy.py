@@ -185,6 +185,7 @@ async def test_a_refused_resume_is_terminal_never_retried_or_recreated(session_m
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("permitted_provider_hosting")
 async def test_a_refused_resync_records_the_refusal_and_the_durable_stop(session_manager, monkeypatch):
     from unittest.mock import AsyncMock, MagicMock
 
@@ -197,6 +198,10 @@ async def test_a_refused_resync_records_the_refusal_and_the_durable_stop(session
     session.status = SessionStatus.IDLE
     session.event_log = MagicMock()
     session_manager._sessions["s1"] = session
+    session_manager.db.create_session(
+        "s1", "one", "codespace:cs-one", "/workspace", "command", "idle", 1.0,
+        acp_session_id="acp-1", target_json=target.to_json(),
+    )
     monkeypatch.setattr("agent_bridge.session_manager.spawn",
                         AsyncMock(side_effect=vlp.LaunchRefusedError("cs-one", "paused")))
     with pytest.raises(vlp.LaunchRefusedError):

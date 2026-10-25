@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK, original-turn DB and explicit local native transport source merged; full custody/qualification/restoration open
+- **Status:** Active; opt-in SDK, original-turn/acquisition DB and explicit local native transport source merged; full custody/qualification/restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -140,8 +140,10 @@ require their own review and qualification.
       wiring merged in #8732. Full lifecycle/cohort coverage and installed
       qualification remain open. The
       [original-acquisition DB foundation](../../../plugins/agent-bridge/docs/acquisition-custody.md)
-      adds internal epoch association and one-shot launch observations; actual
-      acquisition/create/start/resume and host effect-owner wiring remains next.
+      merged in #8750 with internal epoch association and one-shot launch observations.
+      The explicit local acquisition adapter is implemented in the current
+      source slice; normal review/merge and the other lifecycle/host cohorts
+      remain open.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -256,6 +258,91 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-24 - Original local acquisition effect owners under validation
+
+- Added an explicit internal original-frontend selection through the existing
+  acquisition, keyed start, strict resume, LocalSpawner, local Host child/exec
+  and ACP new/load owners. Pending work cannot fall back to ordinary recovery,
+  metadata retry, reattachment or recreation. The accepted original Host
+  transport carries prompt delivery through the existing turn journal and
+  final SDK gate. See the [owner boundary](../../../plugins/agent-bridge/docs/acquisition-custody.md).
+- Four isolated synthetic wire cases exercise the actual Host, child and ACP
+  SDK for new/load and lost replies, with independent original-row readback.
+  Source controls cover closure across scheduling and effects, exact live
+  references, configuration effects and no downgrade. These do not constitute
+  a native model conversation, attributed consumption or platform qualification.
+- Wider source validation exposed stale permitted-venue and durable-row test
+  fixtures; corrected those fixtures without disabling hosting policy or
+  changing runtime denial behavior. The frozen preference authority vectors
+  also require a genuine committed-source capture, not a replacement hash.
+  Genuine committed-source capture of the three owned authority vectors and
+  final combined validation now pass: 1,100 isolated controls, with the two
+  existing collection skips. Normal review and merge remain pending.
+  A concurrent lifecycle handoff is also excluded at the launch owner's
+  actual native effect boundary.
+- Source review identified two remaining replay paths: resync could replace
+  an unresolved associated load, and capture failure after native acceptance
+  could leave ordinary prompt admission unassociated. Resync now refuses
+  before teardown and rechecks under its lifecycle lock; the original client
+  and durable-session prompt/handoff paths remain fenced until capture.
+  Accepted launch observations remain intact. Two additional real-Host
+  synthetic cases close admission before capture, and lost-load recovery plus
+  under-lock controls prove no replacement launch or prompt escapes.
+  Expanded validation passed 1,273 controls; its remaining stale provider/
+  durable-session fixture was corrected and the focused 104-control
+  acquisition/resync selection then passed. No runtime denial was relaxed.
+- Follow-up source review exposed lifecycle handoff treating the capture
+  refusal as optional brief failure, plus a selected resume launching before
+  rejecting a retained turn owner. Durable association now refuses handoff
+  before either seed branch, and retained-owner resume refuses before launch.
+  The isolated acquisition/handoff selection passes 224 controls, including
+  both failed-capture handoff branches and selected create, stop/reap, then
+  selected-resume refusal. No owner transfer or replacement launch is enrolled.
+- Shutdown recovery now preserves the durable association's exclusion through
+  insertion, stop, enable attempts and hydration, including legacy enabled
+  flags. Startup and direct Host reattachment refuse associated history before
+  client adoption. The isolated acquisition/reattach/dormancy/Host/manager
+  selection passes 456 controls, including a selected launch, ordinary
+  shutdown detach, closed epoch and fresh-manager hydration with no ordinary
+  reattachment or prompt. The retained Host remains alive for its real owner.
+- Direct ACP lifecycle entry points now require the retained original launch
+  owner, so omitting it cannot select the raw SDK new/load path. Connected
+  controls try omitted, copied and exhausted original owners after successful
+  startup and failed capture; no extra native request is observed. The focused
+  acquisition/ACP/preference selection passes 129 controls.
+- Retained the original HTTP-50 capture checkpoint unchanged at
+  `refs/tags/contract-evidence/http50-d5219b038a431a9579fed66a1c1ea71fdfad7a77`.
+  Provider ref and commit-object reads confirm the original identity; the
+  dependent source-preparation owner independently confirmed successful CI.
+  No capture fact or historical provenance was rewritten.
+- This source slice closes no full Phase 1/1b or Validation item. Other
+  creation/background cohorts, reattachment/transfer, remote owners, native
+  qualification, compatibility, guarded restoration and running adoption stay open.
+
+### 2026-10-24 - Original-acquisition DB prerequisite merged
+- #8750 merged as `a1c5a6ec30d2cf2fcf256e0317d253852eb78833` at
+  17:06:29 PDT after exact-head approval `5640689283` on
+  `2478f2cb3f9e79beeddae82fdd7bbc3783826975`, no open findings and
+  passing required checks. Both review corrections have reproduced regressions:
+  retired creation retains historical prior IDs without reviving them, and a
+  new allocation refuses an incompatible resume before handoff retention.
+- The final bounded coupled lane passes 844 controls. Genuine HTTP-50
+  write/no-write capture from `d5219b038a431a9579fed66a1c1ea71fdfad7a77`
+  covers both fixture installation modes and 72 outputs, preserving all 814
+  fixture packets and historical provenance. These remain model-free
+  ASGI/SQLite observations, not native lifecycle qualification.
+- Reread the full Plan and Validation Plan after merge. Only the original
+  acquisition DB prerequisite closes; Phase 1/1b, actual acquisition,
+  creation/start/resume and host final-owner wiring, attributed consumption,
+  target compatibility, restoration and installed/native qualification stay
+  open. Guarded reconciliation verified all three surviving source commits
+  were already published, with zero post-merge commits, retained the reviewed
+  tip and advanced only the owned source venue.
+- Next carry the original acquisition through the actual local ACP
+  creation/start/resume owners and awaited preparation. Preserve unknown
+  effects and explicit unsupported cohorts rather than enrolling defaults.
+  No live enrollment, process stop or deployment is authorized by this merge.
 
 ### 2026-10-24 - Local native transport source merged; lifecycle custody next
 - #8732 merged as `92215b6e389b5e4981c9f6d7c7446b4b367aa2ab` at

@@ -28,6 +28,7 @@ from .session_manager import (
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
+    from .acquisition_launch_owner import AcquisitionLaunchOwner
     from .hosting_policy import SessionHostingFence
 
 _NATIVE_OWNER_CALLER_PREFIX = "native-owner-resume:"
@@ -118,6 +119,7 @@ class _SessionResumeMixin:
         drain: bool = True,
         allow_recreate: bool = False,
         owner_native_resume: bool = False,
+        acquisition_launch: AcquisitionLaunchOwner | None = None,
     ) -> Session:
         """Resume a stopped session by spawning a new process.
 
@@ -150,12 +152,15 @@ class _SessionResumeMixin:
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        from .acquisition_launch_owner import require_resume_owner
+        require_resume_owner(self, session, acquisition_launch, drain=drain, allow_recreate=allow_recreate)
         from .hosting_policy import require_session_hosting
 
         hosting_fence = await require_session_hosting(self, session, operation="resume")
         return await self._resume_session_admitted(
             session_id, permission_callback, drain=drain, allow_recreate=allow_recreate,
             owner_native_resume=owner_native_resume, hosting_fence=hosting_fence,
+            acquisition_launch=acquisition_launch,
         )
 
     @admitted_recovery
@@ -170,6 +175,7 @@ class _SessionResumeMixin:
         allow_recreate: bool = False,
         owner_native_resume: bool = False,
         hosting_fence: SessionHostingFence,
+        acquisition_launch: AcquisitionLaunchOwner | None = None,
     ) -> Session:
         """Observe admitted recovery; retain fresh checks at later effect boundaries."""
         from .hosting_policy import require_session_hosting, require_target_hosting
@@ -204,6 +210,8 @@ class _SessionResumeMixin:
 
         async with lifecycle_lock(session._lifecycle_lock):
             await require_session_hosting(self, session, operation="resume", fence=hosting_fence)
+            from .acquisition_launch_owner import require_resume_owner
+            require_resume_owner(self, session, acquisition_launch, drain=drain, allow_recreate=allow_recreate)
             from .cold_outages import resume_policy
 
             cold_outage = resume_policy(self, session)
@@ -246,7 +254,7 @@ class _SessionResumeMixin:
 
                 await settle_partial_replacement(self, session)
                 cold_outage = resume_policy(self, session)
-            self._set_background_recovery_enabled(session, True)
+            self._set_background_recovery_enabled(session, acquisition_launch is None)
             self._clear_disconnected_reattach_retry_state(session_id)
 
             # Prefer reattaching to a surviving Session Host (adopt the running
@@ -269,7 +277,8 @@ class _SessionResumeMixin:
             # reattachable Session Host was waiting on the other end.
             with phase("session-host-reattach"):
                 reattached = (
-                    not cold_pending or cold_outage["recovery_phase"] == "registered"
+                    acquisition_launch is None
+                    and (not cold_pending or cold_outage["recovery_phase"] == "registered")
                 ) and await self._try_reattach_live_host(session)
             if reattached:
                 log.info(
@@ -315,7 +324,7 @@ class _SessionResumeMixin:
 
                         launching(self, session)
                     with phase("session-host-preparation"):
-                        if cold_outage is not None and session.target.type == "local":
+                        if acquisition_launch is not None or cold_outage is not None and session.target.type == "local":
                             from .connect import ConnectTracker
 
                             host_result = await self._connect_via_session_host(
@@ -325,6 +334,7 @@ class _SessionResumeMixin:
                                 mcp_servers=session.mcp_servers,
                                 load_session_id=session.acp_session_id,
                                 model=session.model_override, effort=session.effort_override,
+                                **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
                             )
                         else:
                             host_result = await self._resume_via_new_remote_host(
@@ -467,12 +477,12 @@ class _SessionResumeMixin:
                         with contextlib.suppress(Exception):
                             await client.shutdown()
                     session.client = None
-                    if cold_outage is not None:
+                    if cold_outage is not None or acquisition_launch is not None:
                         session.status = SessionStatus.STOPPED
                         self._db.update_session_status(
                             session_id, SessionStatus.STOPPED.value, time.time(),
                         )
-                        log.error("Cold native launch remains fenced for %s: %s", session_id, exc_desc)
+                        log.error("Original native launch remains fenced for %s: %s", session_id, exc_desc)
                         raise
                     if isinstance(exc, PrivilegedLaunchRefused):
                         session.status = SessionStatus.STOPPED
@@ -683,8 +693,10 @@ class _SessionResumeMixin:
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
+        from .acquisition_launch_owner import require_unassociated_session
         from .hosting_policy import require_session_hosting
 
+        require_unassociated_session(self, session, operation="resync")
         hosting_fence = await require_session_hosting(self, session, operation="resync")
         return await self._resync_session_admitted(session_id, hosting_fence=hosting_fence)
 
@@ -694,8 +706,10 @@ class _SessionResumeMixin:
     ) -> int:
         """Retain recovery admission only after repository hosting is allowed."""
         session = self._sessions[session_id]
+        from .acquisition_launch_owner import require_unassociated_session
         from .cold_outages import latest
 
+        require_unassociated_session(self, session, operation="resync")
         if latest(self._db, session_id) is not None:
             await self.resume_session(session_id, drain=False, allow_recreate=False)
             return len(session.event_log.get_events(0)) if session.event_log else 0
@@ -710,6 +724,7 @@ class _SessionResumeMixin:
             from .hosting_policy import require_session_hosting
 
             await require_session_hosting(self, session, operation="resync", fence=hosting_fence)
+            require_unassociated_session(self, session, operation="resync")
             core = _core()
             if session.status == SessionStatus.RUNNING:
                 turn_live = (

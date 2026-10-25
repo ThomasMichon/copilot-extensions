@@ -7,7 +7,7 @@ from pathlib import Path
 
 import publish_python_artifacts as publisher
 from promotion_python_artifacts import INDEX_NAME, PromotionArtifactError
-from promotion_release_evidence import MAX_EVIDENCE_ASSETS, supplementary_evidence_asset
+from promotion_release_evidence import EVIDENCE_PREFIXES, MAX_EVIDENCE_ASSETS, supplementary_evidence_asset
 
 
 def _expected(directory: Path, index: dict) -> dict[str, str]:
@@ -34,7 +34,7 @@ def _read_release(repository: str, tag: str) -> dict | None:
 
 
 def _assets(
-    repository: str, release: dict, expected: dict[str, str], *, pending_evidence: str = "",
+    repository: str, release: dict, expected: dict[str, str], *, pending_evidence: str | tuple[str, ...] = "",
 ) -> dict[str, dict]:
     result = publisher._gh(
         ["api", "--paginate", "--slurp",
@@ -46,7 +46,8 @@ def _assets(
         if not isinstance(pages, list) or not all(isinstance(page, list) for page in pages):
             raise ValueError("invalid asset pages")
         assets, seen, evidence_count = {}, set(), 0
-        if pending_evidence and pending_evidence not in expected:
+        pending = (pending_evidence,) if isinstance(pending_evidence, str) and pending_evidence else pending_evidence
+        if not set(pending) <= expected.keys():
             raise ValueError("pending evidence has no expected digest")
         for page in pages:
             for asset in page:
@@ -54,7 +55,7 @@ def _assets(
                 if not isinstance(name, str) or name in seen:
                     raise ValueError("duplicate or invalid asset name")
                 seen.add(name)
-                if name.startswith("promotion-unit-evidence-"):
+                if name.startswith(EVIDENCE_PREFIXES):
                     if not supplementary_evidence_asset(
                         asset, str(release["tag_name"]).removeprefix("python-artifacts-"),
                     ):
@@ -72,7 +73,7 @@ def _assets(
                 ):
                     raise ValueError("unexpected, incomplete or conflicting immutable asset")
                 assets[name] = asset
-        if pending_evidence and pending_evidence not in seen and evidence_count == MAX_EVIDENCE_ASSETS:
+        if evidence_count + len(set(pending) - seen) > MAX_EVIDENCE_ASSETS:
             raise ValueError("supplementary evidence capacity is exhausted")
         return assets
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:

@@ -424,7 +424,7 @@ def test_push_changes_refuses_branch_switch_after_reconciliation(
 @pytest.mark.parametrize("failure", [
     "provider-error", "provider-head", "provider-closed", "provider-number", "provider-branch",
     "provider-destination", "destination", "ownership", "duplicate", "evidence", "mutable-target",
-    "unrelated-source", "missing-ref",
+    "unrelated-source", "missing-ref", "repointed-retention", "missing-retention",
 ])
 def test_normal_entrypoints_refuse_unproved_reconciliation(
     owned_publication, monkeypatch, capfd, command, failure,
@@ -465,6 +465,14 @@ def test_normal_entrypoints_refuse_unproved_reconciliation(
         data = json.loads(pr_recovery._path(str(wt)).read_text())
         data["checkpoints"][record(wid).pr.pr_id]["target_head"] = "origin/master"
         pr_recovery._path(str(wt)).write_text(json.dumps(data))
+    elif failure in ("repointed-retention", "missing-retention"):
+        data = json.loads(pr_recovery._path(str(wt)).read_text())
+        point = data["checkpoints"][record(wid).pr.pr_id]
+        if failure == "repointed-retention":
+            assert point["published_head"] != published
+            git("update-ref", point["published_ref"], published, cwd=wt)
+        else:
+            git("update-ref", "-d", point["published_ref"], cwd=wt)
     else:
         git("reset", "--hard", saved, cwd=wt)
     source = git("rev-parse", "HEAD", cwd=wt)
@@ -483,7 +491,7 @@ def test_normal_entrypoints_refuse_unproved_reconciliation(
 @pytest.mark.parametrize("command", ["push-changes", "sync"])
 @pytest.mark.parametrize("changed", ["provider", "remote", "source", "tracking", "destination"])
 def test_reconciliation_rechecks_after_retaining_objects(
-    owned_publication, monkeypatch, command, changed,
+    owned_publication, monkeypatch, capfd, command, changed,
 ) -> None:
     config, wid, wt, remote, saved, branch, published = owned_publication
     retain = pr_recovery.retain_rewrite
@@ -511,6 +519,10 @@ def test_reconciliation_rechecks_after_retaining_objects(
     monkeypatch.setattr(pr_recovery, "retain_rewrite", interpose)
     monkeypatch.setattr(git_ops, "push", lambda *a, **k: pytest.fail("Changed proof must not push."))
     assert not invoke(command, config, wid)
+    if changed == "source":
+        diagnostic = capfd.readouterr().out
+        assert "retry the normal command" in diagnostic
+        assert "sign-off" not in diagnostic
     assert record(wid).pr.head_sha == saved
     assert git("--git-dir", str(remote), "rev-parse", branch, cwd=wt) == (
         saved if changed == "remote" else published

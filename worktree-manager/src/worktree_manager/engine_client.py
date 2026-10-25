@@ -36,6 +36,7 @@ from .engine_environment import (
     _PYTHON_PARENT_ENV as _PYTHON_PARENT_ENV,
     _engine_environment as _engine_environment,
     _is_parent_python_variable as _is_parent_python_variable,
+    _terminal_aware_launch_options as _terminal_aware_launch_options,
 )
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
@@ -303,7 +304,8 @@ def run_json(project: str | None, args: list[str], *,
 
 def run_engine_passthrough(project: str | None, args: list[str], *,
                            timeout: int | None = None,
-                           environment: dict[str, str] | None = None) -> int:
+                           environment: dict[str, str] | None = None,
+                           terminal_aware: bool = False) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -331,7 +333,8 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            **handoff_launch_options(child_environment, handoff),
+            **{**handoff_launch_options(child_environment, handoff),
+               **(_terminal_aware_launch_options() if terminal_aware else {})},
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

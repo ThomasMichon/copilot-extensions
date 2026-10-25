@@ -146,6 +146,7 @@ repos add <name> <path> [--class C] [--remote URL]
                         [--tags a,b] [--contributing PATH]
 repos remove <name>
 repos clone <remote> [--name N] [--target PATH]
+repos setup <https-url> [--target PATH] [--apply] [--trust-repository-setup]
 repos srcroot [--set PATH] [--platform windows|wsl|linux]
 repos migrate [--default-class reference|singleton|worktree]
 repos status [--tag T] [--class C] [--json]
@@ -162,6 +163,10 @@ rather than `repos list` followed by a lookup per repository. The existing
 resident produces that [bounded map](../../docs/repository-map.md); missing,
 stale or unavailable inventory is not healthy empty inventory. This browsing
 projection does not grant execution or editing authority.
+
+For explicit repository-owned setup, follow the bounded
+[`repos setup` contract](../../docs/repository-setup.md). Plan first; selecting a
+source is not consent to run its check/apply code or adopt a project.
 
 ### `allow-edits` -- break-glass edit grants
 

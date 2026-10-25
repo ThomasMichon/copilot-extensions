@@ -7,10 +7,15 @@ from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
+from . import repository_bootstrap
 
 
 def cmd_setup(rest: list[str], *, banner: str) -> int:
-    do_apply = "--apply" in rest
+    try:
+        args = repository_bootstrap.parse(rest)
+    except SystemExit as error:
+        return int(error.code)
+    do_apply = args.apply
     gaps = missing(detect_baseline())
     actions = provision_plan(gaps)
     core = core_status()
@@ -83,6 +88,15 @@ def cmd_setup(rest: list[str], *, banner: str) -> int:
             print(f"    ! core still {core.state} after install — see output above.")
 
     print()
+    if args.repository:
+        if do_apply:
+            core = core_status()
+            if gaps or not core.installed:
+                print("  ! repository stage was not attempted: fresh core readiness is required.")
+                return 1
+        repository_status = repository_bootstrap.run(args)
+        if repository_status:
+            return repository_status
     if not do_apply:
         print("  (plan only — nothing was changed. Re-run with --apply to execute.)")
     print()

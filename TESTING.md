@@ -165,6 +165,18 @@ CI, live timer/serving-worker proof, selected-snapshot recipe admission or rollo
 
 ## Optional CodeSpaces bootstrap adoption
 
+Independent Windows evaluator admission is a separate native packet:
+`plugins/agent-codespaces/tests/test_bootstrap_python.py` covers the selector,
+while `libs/payload-invocation/tests/test_evaluator_bootstrap_consumers.py`
+covers both adopters' dispatcher routing, cleanup, complete SDK parity and
+terminal refusals.
+Use the existing bounded process-containment harness. Set
+`EVALUATOR_BOOTSTRAP_TEST_PYTHON` to an explicit existing signed console CPython
+base for actual native admission; a supplied but unfit fixture fails rather
+than skipping. The consumer's real-admission case skips without this explicit
+fixture. ABI stubs and platform/fixture skips are not native trust qualification.
+These subprocess/registry/signature cases are not required pure-unit CI.
+
 The manual `installation-context-full.yml` portfolio `codespaces-bootstrap`
 qualifies the actual materialized legacy hook on fresh Windows and Linux
 runners. It enforces the existing 15-second deadline and `{}` response,
@@ -791,6 +803,23 @@ receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
 ## Unit-only promotion packet
+
+Complete-source units in `test_complete_source.py`,
+`test_complete_source_publication.py` and `test_source_objects.py` under
+`tools/promotion_unit_tests/` use synthetic blobs, Git protocol responses and
+release metadata. They prove full-tree reconstruction, immutable generation
+bindings, fresh exact-subject admission and publication refusal; no Git
+storage, network or child actor is used. Separate controller contract tests
+inspect the proposal's prepare/attest/publish/PR ordering. They are not packet
+inputs: independently owned Main workflows need not match a Dev proposal.
+
+The separate `tools/test_complete_source_native.py` witness is opt-in:
+set `COPILOT_EXTENSIONS_SOURCE_ARCHIVE_INTEGRATION=1` and run that file through
+bounded development validation. It creates a fresh temporary Git repository
+with export attributes, executable and symlink blobs, then verifies the
+actual object's complete reconstruction. It is not enrolled in required CI
+or the unit-only promotion packet, and does not prove live release publication
+or Main activation.
 
 The three retained-input cardinality/remapping controls live in
 `tools/promotion_unit_tests/test_installer_retention.py` and are shared with

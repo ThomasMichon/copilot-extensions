@@ -4,7 +4,7 @@ Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
 Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
 $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 
-$forwardArgs = @($args)
+$forwardArgs = [string[]]@($args)
 $payloadRoot = [Environment]::GetEnvironmentVariable('AGENT_CONTAINERS_PAYLOAD_ROOT', 'Process')
 if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Container)) {
     [Console]::Error.WriteLine('[agent-containers] owning payload root is unavailable.')
@@ -13,6 +13,8 @@ if (-not $payloadRoot -or -not (Test-Path -LiteralPath $payloadRoot -PathType Co
 $payloadRoot = (Resolve-Path -LiteralPath $payloadRoot).Path
 $scriptDir = Join-Path $payloadRoot 'scripts'
 $modeRunner = Join-Path $scriptDir 'installation-context\installation-context.ps1'
+$portableModeRunner = Join-Path $scriptDir 'installation-context\installation_context.py'
+$bootstrapHelper = Join-Path $scriptDir 'bootstrap-python.ps1'
 $runtimeResolver = Join-Path $scriptDir 'resolve-runtime.ps1'
 $installer = Join-Path $scriptDir 'init.ps1'
 $legacyRoot = if ($env:AGENT_CONTAINERS_HOME) {
@@ -43,125 +45,184 @@ if (-not $hostExe) {
 
 $runtimeRoot = $legacyRoot
 $context = ''
-$statusArgs = @(
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-    'status',
-    '-PayloadRoot', $payloadRoot,
-    '-PluginId', 'agent-containers',
-    '-LegacyRoot', $legacyRoot
-)
+$userHomePath = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+$copilotHome = Join-Path $userHomePath '.copilot'
+$durableHome = Join-Path $userHomePath '.copilot-extensions'
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-    $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
     $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
     1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
-    $statusArgs += @('-DurableHome', $durableHome)
 }
-$resolutionJson = @(& $hostExe @statusArgs)
-if ($LASTEXITCODE -ne 0) {
-    [Console]::Error.WriteLine(
-        '[agent-containers] installation context could not be resolved.'
+$bootstrap = [pscustomobject]@{
+    Status = 'unavailable'; Reason = 'payload-bootstrap-unavailable'; Python = $null; Guard = $null
+}
+$nativePathSemantics = @($legacyRoot, $durableHome) | Where-Object {
+    $_.Contains('%') -or
+    ($_ -match '^[A-Za-z]:(?![\\/])') -or ($_ -match '^[\\/](?![\\/])')
+}
+if ($nativePathSemantics) {
+    $bootstrap.Reason = 'native-path-semantics'
+} elseif ((Test-Path -LiteralPath $bootstrapHelper -PathType Leaf) -and
+    (Test-Path -LiteralPath $portableModeRunner -PathType Leaf)) {
+    . $bootstrapHelper
+    # Only exclusion paths are normalized; SDK arguments retain their original semantics.
+    $evaluationDirectory = (Get-Location).ProviderPath
+    $bootstrap = Resolve-EvaluatorBootstrapPython -ExcludedRoots @(
+        [IO.Path]::GetFullPath([IO.Path]::Combine($evaluationDirectory, $legacyRoot)),
+        [IO.Path]::GetFullPath([IO.Path]::Combine($evaluationDirectory, (Join-Path $durableHome 'marketplaces')))
     )
-    exit 126
 }
+
+function Invoke-ContextRead {
+    param([string[]]$NativeArguments, [string[]]$PortableArguments)
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $global:LASTEXITCODE = 126
+        if ($bootstrap.Status -ceq 'selected') {
+            & $bootstrap.Python -I -S -B -X utf8 $portableModeRunner @PortableArguments
+        } elseif ($bootstrap.Status -ceq 'unavailable') {
+            & $hostExe @NativeArguments
+        } else {
+            throw 'Evaluator bootstrap returned an invalid selection status.'
+        }
+        $script:ContextReadCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
+}
+
 try {
-    $resolution = ($resolutionJson -join "`n") | ConvertFrom-Json
-} catch {
-    [Console]::Error.WriteLine(
-        '[agent-containers] installation context returned malformed status.'
+    $statusArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+        'status',
+        '-PayloadRoot', $payloadRoot,
+        '-PluginId', 'agent-containers',
+        '-LegacyRoot', $legacyRoot
     )
-    exit 126
-}
-
-function Test-LegacyInvocationAllowed($Decision) {
-    return (($Decision.status -ceq 'ready' -and $Decision.actualMode -ceq 'legacy' -and
-             $Decision.desiredMode -ceq 'legacy') -or
-        ($Decision.status -ceq 'provenance-blocked' -and -not $env:COPILOT_EXTENSIONS_CONTEXT -and
-         $Decision.policy.enabled -is [bool] -and -not $Decision.policy.enabled -and
-         $null -eq $Decision.legacy.tombstone -and $Decision.legacy.disposition -ceq 'active'))
-}
-
-$resolutionStatus = [string]$resolution.status
-$resolutionReason = [string]$resolution.reason
-$actualMode = [string]$resolution.actualMode
-$installGeneration = [string]$resolution.installGeneration
-
-if (Test-LegacyInvocationAllowed $resolution) {
+    $portableStatusArgs = @(
+        'status', '--copilot-home', $copilotHome,
+        '--payload-root', $payloadRoot, '--plugin-id', 'agent-containers',
+        '--legacy-root', $legacyRoot
+    )
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $statusArgs += @('-Context', $env:COPILOT_EXTENSIONS_CONTEXT)
+        $statusArgs += @('-DurableHome', $durableHome)
+        $portableStatusArgs += @('--context', $env:COPILOT_EXTENSIONS_CONTEXT, '--durable-home', $durableHome)
+    }
+    $resolutionJson = @(Invoke-ContextRead -NativeArguments $statusArgs -PortableArguments $portableStatusArgs)
+    if ($ContextReadCode -ne 0) {
         [Console]::Error.WriteLine(
-            '[agent-containers] requested installation context is not active.'
+            '[agent-containers] installation context could not be resolved.'
         )
         exit 126
     }
-}
-elseif (
-    (
-        $resolutionStatus -ceq 'ready' -and
-        $resolutionReason -ceq 'namespaced-active'
-    ) -or
-    $resolutionStatus -ceq 'deactivation-required'
-) {
-    if ($actualMode -cne 'namespaced') {
+    try {
+        $resolution = ($resolutionJson -join "`n") | ConvertFrom-Json
+    } catch {
+        [Console]::Error.WriteLine(
+            '[agent-containers] installation context returned malformed status.'
+        )
+        exit 126
+    }
+
+    function Test-LegacyInvocationAllowed($Decision) {
+        return (($Decision.status -ceq 'ready' -and $Decision.actualMode -ceq 'legacy' -and
+                 $Decision.desiredMode -ceq 'legacy') -or
+            ($Decision.status -ceq 'provenance-blocked' -and -not $env:COPILOT_EXTENSIONS_CONTEXT -and
+             $Decision.policy.enabled -is [bool] -and -not $Decision.policy.enabled -and
+             $null -eq $Decision.legacy.tombstone -and $Decision.legacy.disposition -ceq 'active'))
+    }
+
+    $resolutionStatus = [string]$resolution.status
+    $resolutionReason = [string]$resolution.reason
+    $actualMode = [string]$resolution.actualMode
+    $installGeneration = [string]$resolution.installGeneration
+
+    if (Test-LegacyInvocationAllowed $resolution) {
+        if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+            [Console]::Error.WriteLine(
+                '[agent-containers] requested installation context is not active.'
+            )
+            exit 126
+        }
+    }
+    elseif (
+        (
+            $resolutionStatus -ceq 'ready' -and
+            $resolutionReason -ceq 'namespaced-active'
+        ) -or
+        $resolutionStatus -ceq 'deactivation-required'
+    ) {
+        if ($actualMode -cne 'namespaced') {
+            [Console]::Error.WriteLine(
+                "[agent-containers] installation context blocks invocation: " +
+                "status=$resolutionStatus reason=$resolutionReason."
+            )
+            exit 126
+        }
+        $runtimeRoot = [string]$resolution.runtimeRoot
+        $context = [string]$resolution.context
+        if (-not $runtimeRoot -or -not $context) {
+            [Console]::Error.WriteLine(
+                '[agent-containers] active installation context is incomplete.'
+            )
+            exit 126
+        }
+        $validationDurableHome = $context
+        1..5 | ForEach-Object {
+            $validationDurableHome = Split-Path -Parent $validationDurableHome
+        }
+        $validationArgs = @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
+            'validate',
+            '-Context', $context,
+            '-DurableHome', $validationDurableHome,
+            '-ExpectedPluginId', 'agent-containers',
+            '-ExpectedPayloadRoot', $payloadRoot
+        )
+        $portableValidationArgs = @(
+            'validate', '--copilot-home', $copilotHome,
+            '--context', $context, '--durable-home', $validationDurableHome,
+            '--expected-plugin-id', 'agent-containers', '--expected-payload-root', $payloadRoot
+        )
+        $validationJson = @(Invoke-ContextRead -NativeArguments $validationArgs -PortableArguments $portableValidationArgs)
+        if ($ContextReadCode -ne 0) {
+            [Console]::Error.WriteLine(
+                '[agent-containers] installation context validation failed.'
+            )
+            exit 126
+        }
+        try {
+            $validatedContext = ($validationJson -join "`n") | ConvertFrom-Json
+        } catch {
+            [Console]::Error.WriteLine(
+                '[agent-containers] installation context validation was malformed.'
+            )
+            exit 126
+        }
+        if ([string]$validatedContext.generation -cne $installGeneration -or
+            [string]$validatedContext.pluginRoot -cne $runtimeRoot) {
+            [Console]::Error.WriteLine(
+                '[agent-containers] installation context generation does not match governance.'
+            )
+            exit 126
+        }
+    }
+    else {
         [Console]::Error.WriteLine(
             "[agent-containers] installation context blocks invocation: " +
             "status=$resolutionStatus reason=$resolutionReason."
         )
         exit 126
     }
-    $runtimeRoot = [string]$resolution.runtimeRoot
-    $context = [string]$resolution.context
-    if (-not $runtimeRoot -or -not $context) {
-        [Console]::Error.WriteLine(
-            '[agent-containers] active installation context is incomplete.'
-        )
-        exit 126
-    }
-    $validationDurableHome = $context
-    1..5 | ForEach-Object {
-        $validationDurableHome = Split-Path -Parent $validationDurableHome
-    }
-    $validationArgs = @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $modeRunner,
-        'validate',
-        '-Context', $context,
-        '-DurableHome', $validationDurableHome,
-        '-ExpectedPluginId', 'agent-containers',
-        '-ExpectedPayloadRoot', $payloadRoot
-    )
-    $validationJson = @(& $hostExe @validationArgs)
-    if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine(
-            '[agent-containers] installation context validation failed.'
-        )
-        exit 126
-    }
-    try {
-        $validatedContext = ($validationJson -join "`n") | ConvertFrom-Json
-    } catch {
-        [Console]::Error.WriteLine(
-            '[agent-containers] installation context validation was malformed.'
-        )
-        exit 126
-    }
-    if ([string]$validatedContext.generation -cne $installGeneration -or
-        [string]$validatedContext.pluginRoot -cne $runtimeRoot) {
-        [Console]::Error.WriteLine(
-            '[agent-containers] installation context generation does not match governance.'
-        )
-        exit 126
-    }
-}
-else {
-    [Console]::Error.WriteLine(
-        "[agent-containers] installation context blocks invocation: " +
-        "status=$resolutionStatus reason=$resolutionReason."
-    )
-    exit 126
-}
 
-if (-not $context) { $runtimeRoot = [string]$resolution.legacy.root }
-if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
-    [Console]::Error.WriteLine('[agent-containers] installation context is missing the canonical runtime root.')
-    exit 126
+    if (-not $context) { $runtimeRoot = [string]$resolution.legacy.root }
+    if (-not $runtimeRoot -or -not [IO.Path]::IsPathRooted($runtimeRoot)) {
+        [Console]::Error.WriteLine('[agent-containers] installation context is missing the canonical runtime root.')
+        exit 126
+    }
+} finally {
+    if ($null -ne $bootstrap.Guard) { $bootstrap.Guard.Dispose() }
 }
 
 function Resolve-RuntimePython([string]$TraceMode = 'ready') {
@@ -186,17 +247,19 @@ function Invoke-Runtime {
     } else {
         Remove-Item Env:COPILOT_EXTENSIONS_CONTEXT -ErrorAction SilentlyContinue
     }
-    $nativeArgs = $forwardArgs
     $argumentMode = Get-Variable PSNativeCommandArgumentPassing -ValueOnly -ErrorAction SilentlyContinue
-    if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
-        $nativeArgs = @($forwardArgs | ForEach-Object {
-            '"' + [regex]::Replace([regex]::Replace([string]$_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
-        })
-    }
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_containers @nativeArgs
+        if (-not $argumentMode -or $argumentMode -eq 'Legacy') {
+            # Match Codespaces' lossless forwarding across legacy native argument passing.
+            $json = ConvertTo-Json -InputObject @($forwardArgs) -Compress
+            $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+            $runtimeBootstrap = "import base64,json,runpy,sys;sys.argv=['agent_containers']+json.loads(base64.b64decode(sys.argv[1]));runpy.run_module('agent_containers',run_name='__main__',alter_sys=True)"
+            & $Python -c $runtimeBootstrap $encoded
+        } else {
+            & $Python -m agent_containers @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }
