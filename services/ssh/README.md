@@ -132,6 +132,10 @@ An incumbent admitted before selecting this policy is reported as `retained`,
 not falsely relabeled peer-approved. Selecting the policy does not rotate or
 erase those existing keys. Changed pending bindings/policy refuse stale
 decisions; changing an admitted key still requires a new selected generation.
+Observing an unchanged admitted incumbent durably records that derived retained
+outcome in the existing transaction; it does not grant admission. Equivalent
+request IDs reuse an existing candidate decision instead of inventing another
+revision. Caller withdrawal before commit rolls back any such receipt repair.
 
 Enrollment receipts include the decision's original `directory_revision`, not
 an embedded global directory. Read the current directory through its existing

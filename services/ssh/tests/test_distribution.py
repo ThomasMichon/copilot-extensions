@@ -6,9 +6,36 @@ import sys
 import tarfile
 import zipfile
 
+import pytest
+
+from agent_ssh_service import __version__
 from agent_procutil.owned_process import run_caller_owned
 from fleet_manager.komodo_roles import KomodoRoleProvider
 from fleet_manager.role_bindings import parse_bindings
+
+
+@pytest.mark.parametrize("flag", ["--help", "--version"])
+def test_metadata_does_not_import_the_runtime_backend(flag):
+    script = """
+import builtins,runpy,sys
+original=builtins.__import__
+def guarded(name,*args,**kwargs):
+    if name.split('.')[0] in {'asyncio','sqlite3','subprocess','fleet_manager','single_instance_lease'}:
+        raise AssertionError('runtime dependency imported for metadata')
+    return original(name,*args,**kwargs)
+builtins.__import__=guarded
+sys.argv=['agent-ssh-service',sys.argv[1]]
+runpy.run_module('agent_ssh_service',run_name='__main__')
+"""
+    result = run_caller_owned(
+        [sys.executable, "-I", "-c", script, flag],
+        timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+    if flag == "--help":
+        assert "--config" in result.stdout
+    else:
+        assert result.stdout.strip() == __version__
 
 
 def test_offline_wheel_and_sdist_do_not_require_a_checkout_or_marketplace(tmp_path, monkeypatch):

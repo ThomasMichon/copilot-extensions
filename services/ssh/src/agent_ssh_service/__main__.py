@@ -1,10 +1,7 @@
 """The SSH service's internal foreground container/host entry point."""
 
 import argparse
-import asyncio
 from pathlib import Path
-import sqlite3
-import subprocess
 import sys
 
 from . import __version__
@@ -28,6 +25,10 @@ def main(argv=None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, required=True)
     args = parser.parse_args(argv)
+    import asyncio
+    import sqlite3
+    import subprocess
+
     from fleet_manager.gateway_service_channel import TransportError
     from fleet_manager.planning import PlanError
     from single_instance_lease import AlreadyRunningError

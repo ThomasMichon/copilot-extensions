@@ -71,6 +71,23 @@ class PeerApproval:
             check(candidate == self._candidate(principal, request), "stale-pending-enrollment")
         return request, candidate, row[2], decision
 
+    def _retain(self, db, principal: str, fingerprint: str) -> dict:
+        prior = db.execute(
+            "SELECT decision FROM enrollment_pending "
+            "WHERE principal=? AND fingerprint=? AND decision IS NOT NULL ORDER BY rowid LIMIT 1",
+            (principal, fingerprint),
+        ).fetchone()
+        decision = decode(prior[0]) if prior is not None else {
+            "method": "retained", "principal": None,
+            "directory_revision": db.execute("SELECT revision FROM metadata WHERE id=1").fetchone()[0],
+        }
+        db.execute(
+            "UPDATE enrollment_pending SET decision=? "
+            "WHERE principal=? AND fingerprint=? AND decision IS NULL",
+            (canonical(decision), principal, fingerprint),
+        )
+        return decision
+
     def _result(self, db, principal: str, request_id: str, *, current=True) -> dict:
         request, candidate, fingerprint, decision = self._load(
             db, principal, request_id, current=current)
@@ -81,10 +98,7 @@ class PeerApproval:
         check(active is None or admitted or decision is not None,
               "pending-identity-superseded")
         if admitted and decision is None:
-            decision = {
-                "method": "retained", "principal": None,
-                "directory_revision": db.execute("SELECT revision FROM metadata WHERE id=1").fetchone()[0],
-            }
+            decision = self._retain(db, principal, fingerprint)
         result = {
             "schema": "agent-ssh.enrollment-result", "version": 1,
             "status": "active" if admitted else "superseded" if decision else "pending",
@@ -96,7 +110,7 @@ class PeerApproval:
 
     def submit(self, db, principal: str, request: dict) -> tuple[dict, bool]:
         self._require_policy()
-        snapshot = self.store._snapshot(db)
+        self.store._snapshot(db)
         candidate = self._candidate(principal, request)
         active = self._active(db, principal)
         check(active is None or active == (
@@ -112,23 +126,17 @@ class PeerApproval:
                 principal, request["request_id"], canonical(request), canonical(candidate),
                 self._fingerprint(candidate),
             ))
-            if active is not None:
-                db.execute(
-                    "UPDATE enrollment_pending SET decision=? WHERE principal=? AND request_id=?",
-                    (canonical({
-                        "method": "retained", "principal": None,
-                        "directory_revision": snapshot["directory"]["revision"],
-                    }),
-                     principal, request["request_id"]),
-                )
         return self._result(db, principal, request["request_id"]), False
 
-    def status(self, principal: str, request_id: str) -> dict:
+    def status(self, principal: str, request_id: str, *, checkpoint=lambda: None) -> dict:
         self._require_policy()
         self.store.config.binding(principal)
         with self.store._transaction() as db:
+            checkpoint()
             self.store._snapshot(db)
-            return self._result(db, principal, request_id, current=False)
+            result = self._result(db, principal, request_id, current=False)
+            checkpoint()
+            return result
 
     def pending(self, principal: str, *, after: str | None = None) -> dict:
         self._require_policy()

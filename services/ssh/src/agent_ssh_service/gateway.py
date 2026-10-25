@@ -121,7 +121,8 @@ class SSHService:
                 if target.path.startswith("/enrollment/requests/") and not target.query:
                     result = await self._disk(
                         self.store.approval.status, request.context.principal,
-                        target.path.removeprefix("/enrollment/requests/"))
+                        target.path.removeprefix("/enrollment/requests/"),
+                        checkpoint=lambda: self._checkpoint(request))
                     self._checkpoint(request)
                     return ServiceResponse(200, (), canonical(result))
             if request.method == "POST" and target.path == "/enroll" and not target.query:

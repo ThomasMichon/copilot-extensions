@@ -491,6 +491,18 @@ takeover or implementation completion is asserted.
   [40176923839](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40176923839)
   passed on `a8e7d19df91f7b8fed0e05541803996d0b83ac6a`; these corrections still
   require fresh current-head review, required CI and native qualification.
+- The next review identified a retained outcome synthesized after a policy
+  round trip without persisting its decision. Observation now repairs that
+  receipt transactionally, reuses the original decision for equivalent request
+  aliases, and rolls back if the observing request is withdrawn.
+- The rebuilt Windows suite passes 127 tests with six Linux-only skips,
+  including four retained-history controls and real-process metadata controls.
+  The offline distribution check also passes with its unchanged ten-second
+  CLI deadline; metadata parsing no longer imports runtime-only dependencies.
+  All six installed changed production modules match the candidate and Ruff
+  passes. The preceding head passed both hosted native jobs in run
+  [40182383847](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40182383847);
+  this corrected head still requires fresh review, CI and native qualification.
 
 ### 2026-10-16 - Intake and current boundary
 

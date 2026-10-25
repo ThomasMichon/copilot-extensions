@@ -866,6 +866,10 @@ compact original decisions remain retrievable as the directory grows,
 oversized response construction refuses, capacity failure rolls back the whole
 decision transaction, and every long-identifier candidate remains reachable
 through byte-bounded pending pages.
+Policy-round-trip controls also prove that a retained observation is durable,
+stable across later directory growth, and remains readable as superseded after
+a generation change. New identical request aliases preserve the original
+candidate decision; a withdrawn status caller cannot commit receipt repair.
 
 ## Optional diagnostic telemetry
 
