@@ -702,9 +702,11 @@ def account_token_for_slug(slug: str | None, prcfg) -> str | None:
         return tok
     if (getattr(prcfg, "provider", "") or "") != "github":
         return None
-    from .. import git_ops, repos
+    from .. import git_ops
+    from ..github_credentials import account_selection
 
-    account = repos.account_for_github_slug(slug)
+    selection = account_selection(slug)
+    account = selection.login
     if not account:
         return None
     # Owner == active gh account -> use ambient auth, not a stale minted token.
@@ -712,7 +714,7 @@ def account_token_for_slug(slug: str | None, prcfg) -> str | None:
     if active and active.casefold() == account.casefold():
         return None
     try:
-        return git_ops.gh_token_for_target(account, slug)
+        return git_ops.gh_token_for_target(selection)
     except git_ops.AccountCredentialError as exc:
         raise ProviderError(str(exc)) from exc
 

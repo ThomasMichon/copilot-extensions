@@ -379,15 +379,17 @@ def _resolve_fork_credential(repo_slug: str, prcfg) -> tuple[str | None, str]:
     if token:
         return token, _token_scope(token)
 
-    from . import git_ops, repos
+    from . import git_ops
+    from .github_credentials import account_selection
 
-    account = repos.account_for_github_slug(repo_slug) or ""
+    selection = account_selection(repo_slug)
+    account = selection.login or ""
     active = git_ops.active_gh_account() or ""
     if not account or (active and active.casefold() == account.casefold()):
         return None, active
     from .providers.base import ProviderError
     try:
-        minted = git_ops.gh_token_for_target(account, repo_slug)
+        minted = git_ops.gh_token_for_target(selection)
     except git_ops.AccountCredentialError as exc:
         raise ProviderError(str(exc)) from exc
     return (minted, account) if minted else (None, active)

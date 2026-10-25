@@ -13,6 +13,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from . import git_ops, push_timeout
+from .github_credentials import GitAuthArgs
 
 _destination: ContextVar[
     tuple[str, tuple[str, ...], tuple[tuple[str, str], ...], str | None] | None
@@ -20,12 +21,8 @@ _destination: ContextVar[
 REMOTE_TRANSPORT_SETTINGS = ("receivepack", "uploadpack", "proxy", "proxyauthmethod", "vcs", "mirror", "pushoption")
 
 
-def _auth_attempts(auth: list[str], url: str | None) -> list[list[str]]:
-    from . import repos
-
-    if auth and not repos.account_for_github_slug(
-        git_ops.slug_from_url(url), configured_only=True,
-    ):
+def _auth_attempts(auth: list[str]) -> list[list[str]]:
+    if auth and isinstance(auth, GitAuthArgs) and auth.allow_ambient_retry:
         return [auth, []]
     return [auth]
 
@@ -112,10 +109,7 @@ def push(
                      else git_ops._auth_config_args(remote, cwd=cwd))
     except git_ops.GitError as exc:
         return git_ops.PushResult(ok=False, stderr=exc.stderr)
-    auth_url = (
-        auth_destination if destinations else git_ops._remote_url(remote, cwd=cwd)
-    ) if auth_args else None
-    attempts = _auth_attempts(auth_args, auth_url)
+    attempts = _auth_attempts(auth_args)
     last_stderr = last_stdout = ""
     for prefix in attempts:
         try:
@@ -158,7 +152,7 @@ def observed_ref(remote: str, destinations: tuple[str, ...], target: str,
     probe_remote = f"agent-worktrees-probe-{uuid.uuid4().hex}"
     auth = git_ops._auth_config_args_for_url(destinations[0])
     with _url_aliases([(destinations[0], alias)]) as alias_args:
-        for prefix in _auth_attempts(auth, destinations[0]):
+        for prefix in _auth_attempts(auth):
             published = git_ops.git(
                 *prefix, *alias_args,
                 "-c", f"remote.{probe_remote}.url={alias}",

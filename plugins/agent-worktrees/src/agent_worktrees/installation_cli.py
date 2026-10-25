@@ -214,13 +214,14 @@ def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
     falls back to the active gh account). An unavailable explicitly configured
     identity raises ``AccountCredentialError`` before execution.
     """
-    from . import repos
+    from .github_credentials import account_selection
 
     env = dict(os.environ)
-    login = repos.account_for_github_slug(target)
+    selection = account_selection(target)
+    login = selection.login
     injected = False
     if login:
-        token = git_ops.gh_token_for_target(login, target)
+        token = git_ops.gh_token_for_target(selection)
         if token:
             env["GH_TOKEN"] = token
             injected = True

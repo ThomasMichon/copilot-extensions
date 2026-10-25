@@ -265,7 +265,7 @@ class TestResolveForkCredential:
 
     def test_unmapped_repo_falls_back_to_active_account(self, monkeypatch):
         monkeypatch.setattr(
-            "agent_worktrees.repos.account_for_github_slug", lambda s: None,
+            "agent_worktrees.repos.account_for_github_slug", lambda s, **kwargs: None,
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: "whoami",
@@ -277,7 +277,7 @@ class TestResolveForkCredential:
         is genuinely unknown, so the scope must be '' (never a value two
         different unresolvable callers could collide on)."""
         monkeypatch.setattr(
-            "agent_worktrees.repos.account_for_github_slug", lambda s: None,
+            "agent_worktrees.repos.account_for_github_slug", lambda s, **kwargs: None,
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: None,
@@ -286,7 +286,7 @@ class TestResolveForkCredential:
 
     def test_mapping_equal_to_active_uses_active(self, monkeypatch):
         monkeypatch.setattr(
-            "agent_worktrees.repos.account_for_github_slug", lambda s: "Same",
+            "agent_worktrees.repos.account_for_github_slug", lambda s, **kwargs: "Same",
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: "same",
@@ -298,7 +298,7 @@ class TestResolveForkCredential:
 
     def test_mintable_cross_account_mapping_wins(self, monkeypatch):
         monkeypatch.setattr(
-            "agent_worktrees.repos.account_for_github_slug", lambda s: "mapped",
+            "agent_worktrees.repos.account_for_github_slug", lambda s, **kwargs: "mapped",
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: "active",

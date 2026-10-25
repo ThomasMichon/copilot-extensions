@@ -348,7 +348,10 @@ inline, so agents never hand-switch:
   it never substitutes an inherited token or another active account. Check
   that login's authentication/credential store before retrying. Unconfigured
   derived-owner hints retain legacy ambient behavior, and the existing
-  same-active-account Git/PR path remains unchanged. No global switch.
+  same-active-account Git/PR path remains unchanged. Identity and fallback
+  policy are selected from one registry snapshot before credential lookup;
+  removing a pin during that lookup cannot authorize an ambient retry.
+  Configuration changes apply to the next operation. No global switch.
 - **git push/fetch**: the account credential is injected per-invocation via
   `http.extraheader` (this tool's own commands only). A rejected explicitly
   selected credential is reported without a plain-push/ambient retry;

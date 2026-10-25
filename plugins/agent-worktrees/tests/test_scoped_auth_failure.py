@@ -255,6 +255,83 @@ def test_rejected_git_credential_never_retries_ambient(
     assert any(arg.startswith("http.extraheader=") for arg in calls[0])
 
 
+@pytest.mark.parametrize("source", ["repo", "map"])
+@pytest.mark.parametrize("minted", [None, "selected-token"])
+@pytest.mark.parametrize("operation", ["gh", "provider", "fork", "push", "observe"])
+def test_pin_removed_during_lookup_does_not_change_selected_policy(
+    registry, monkeypatch, capfd, source, minted, operation,
+):
+    pin(registry, source)
+    calls = []
+    url = "https://github.com/example-org/sample.git"
+
+    def mint(account):
+        assert account == "selected-writer"
+        if source == "repo":
+            registry.repos["sample"].account = ""
+        else:
+            registry.account_map.clear()
+        return minted
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 1, "", "HTTP 401: Bad credentials")
+
+    monkeypatch.setattr(git_ops, "gh_token_for_account", mint)
+    monkeypatch.setattr(git_ops, "_remote_url", lambda *args, **kwargs: url)
+    monkeypatch.setattr(git_ops, "git", run)
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "gh")
+    prcfg = config.PRConfig(provider="github")
+    if operation == "gh":
+        assert cli.cmd_repos_dispatch(
+            ["gh", "example-org/sample", "--", "issue", "create"],
+        ) == 1
+        if minted:
+            assert calls[0][1]["env"]["GH_TOKEN"] == minted
+        else:
+            assert "selected-writer" in capfd.readouterr().out
+    elif operation in ("provider", "fork"):
+        resolve = (
+            lambda: base.account_token_for_slug("example-org/sample", prcfg)
+            if operation == "provider"
+            else fork_pr._resolve_fork_credential("example-org/sample", prcfg)
+        )
+        if minted:
+            result = resolve()
+            assert result == (minted if operation == "provider" else (minted, "selected-writer"))
+        else:
+            with pytest.raises(base.ProviderError, match="selected-writer"):
+                resolve()
+    elif operation == "push":
+        assert not git_ops.push("origin", "topic", cwd=".").ok
+    else:
+        error = OSError if minted else git_ops.GitError
+        with pytest.raises(error):
+            git_push_transport.observed_ref("origin", (url,), "refs/heads/topic", ".")
+    assert repos.account_for_github_slug(
+        "example-org/sample", configured_only=True,
+    ) is None
+    network = operation in ("gh", "push", "observe")
+    assert len(calls) == (1 if minted and network else 0)
+
+
+def test_account_selection_uses_one_registry_snapshot(registry, monkeypatch):
+    from agent_worktrees.github_credentials import account_selection
+
+    pin(registry, "repo")
+    reads = []
+
+    def read(**kwargs):
+        reads.append(kwargs)
+        return registry
+
+    monkeypatch.setattr(repos, "read_registry", read)
+    selection = account_selection("example-org/sample")
+    assert (selection.login, selection.configured) == ("selected-writer", True)
+    assert reads == [{"strict": True}]
+
+
 def test_stale_provider_token_fails_without_ambient_retry(registry, monkeypatch):
     pin(registry, "repo")
     monkeypatch.setattr(git_ops, "gh_token_for_account", lambda account: "stale-token")

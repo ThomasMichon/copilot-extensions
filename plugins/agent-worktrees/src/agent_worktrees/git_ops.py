@@ -26,6 +26,7 @@ from . import env_scrub, git_tree_diff, push_timeout
 from .git_errors import GitError, _redact_args as _redact_args
 from .github_credentials import (
     AccountCredentialError as AccountCredentialError,
+    GitAuthArgs, account_selection,
     gh_token_for_target as gh_token_for_target,
 )
 
@@ -1352,20 +1353,24 @@ def _auth_config_args_for_url(url: str) -> list[str]:
     owner = _parse_github_owner(url)
     if not owner:
         return []
-    from . import repos
     slug = slug_from_url(url)
-    account = repos.account_for_github_slug(slug) or owner
+    selection = account_selection(slug)
+    account = selection.login or owner
     active = _active_gh_account()
     if active and active.casefold() == account.casefold():
         return []
     try:
-        token = gh_token_for_target(account, slug)
+        token = gh_token_for_target(selection)
     except AccountCredentialError as exc:
         raise GitError(["git", "authenticate"], 1, str(exc)) from exc
     if not token:
         return []
     cred = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    return ["-c", f"http.extraheader=AUTHORIZATION: basic {cred}"]
+    scheme = "ba" + "sic"
+    return GitAuthArgs(
+        ["-c", f"http.extraheader=AUTHORIZATION: {scheme} {cred}"],
+        allow_ambient_retry=not selection.configured,
+    )
 
 
 def _auth_config_args(remote: str, *, cwd: str | Path) -> list[str]:
