@@ -270,6 +270,53 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
 
 ## Journal
 
+### 2026-10-25 - Provider-owned original binding storage prerequisite
+
+- Extend the existing Containers dispatch-binding owner with a separately
+  selected fresh-birth format. Ordinary allocation still writes version `1`;
+  only an explicit internal fresh birth can carry version `2`. Legacy and
+  previously launched bindings are not retrospectively enrolled.
+- Retain the small original Bridge admission/handoff and consumer association
+  with the provider runtime observation, closure and one-shot outstanding
+  attempt. Replays only observe the original; process/admission cleanup cannot
+  settle it, replace it or grant a second attempt. No separate ledger, native
+  outcome claim or automatic clear is introduced.
+- Guard ordinary verification, worker admission, credential projection, spawn
+  construction and destructive liveness/closure against downgrade. The
+  unsupported retained birth remains unknown rather than being described as
+  idle. The [provider storage guide](../../../plugins/agent-containers/docs/creation-custody.md)
+  owns the actual source boundary.
+- The bounded isolated storage, projection, prepared-target, replacement and
+  lease selection passes 271 controls with four reported skips. Separate real
+  processes prove one-shot attempt serialization and closure ordering under the
+  existing provider kernel lock. Synthetic original/replay, corruption,
+  closure, wrapper-admission cleanup and ordinary-path refusals stay distinct
+  from guest/native execution qualification.
+- This is internal storage, not an enabled provider caller. Exact selected
+  execution/retention, current cross-owner authority, actual provider and guest
+  admission, native responsibility, reconciliation, full inventory and platform
+  qualification remain open. Both profiles still declare retained creation
+  unsupported; no full Plan or Validation Plan item closes.
+
+### 2026-10-25 - Immutable declaration prerequisite merged
+
+- #8958 merged as `1b0df02d8c2950f1dd94b55328b54e0d457451ec` after
+  independent approval `5642789788` of exact head
+  `8a3ce8be824d36ab96ff6822e5a6520c915e8b7f`, with no open findings and
+  successful required checks. Normal managed Maintainer completion confirmed
+  the merge; no blocking review, failed check, hold or conflict was bypassed.
+- Re-read the complete Plan and Validation Plan after merge. The descriptor
+  prerequisite closes no full-cohort item. Both profiles still declare retained
+  creation unsupported; no Bridge caller or provider/guest effect fence is
+  enabled by the new metadata.
+- Continue through the existing provider dispatch-binding/admission owner:
+  retain the original Bridge association and unresolved outcome before any
+  provider launch, without creating a second ledger or treating ordinary
+  session-admission TTL as durable custody. Exact selected execution and
+  continuing slot retention remain required before caller integration.
+- Only the clean merged source worktree was reconciled. No live runtime,
+  provider, guest, lane or adoption operation occurred.
+
 ### 2026-10-25 - Immutable provider declaration prerequisite
 
 - Extend the existing Containers slot profile, not a new handshake, service or

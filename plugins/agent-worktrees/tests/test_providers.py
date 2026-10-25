@@ -82,7 +82,7 @@ class TestAccountTokenForSlug:
     def test_github_resolves_account_token(self, monkeypatch):
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
-            lambda slug: "host-acct",
+            lambda slug, **kwargs: "host-acct",
         )
         # Owner differs from the active gh account -> the cross-account mint path.
         monkeypatch.setattr(
@@ -101,7 +101,7 @@ class TestAccountTokenForSlug:
         # provider uses gh's dynamic ambient auth. Regression for the pr-* 401.
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
-            lambda slug: "Host-Acct",
+            lambda slug, **kwargs: "Host-Acct",
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: "host-acct",
@@ -119,7 +119,7 @@ class TestAccountTokenForSlug:
         # authenticates as the owning identity.
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
-            lambda slug: "other-acct",
+            lambda slug, **kwargs: "other-acct",
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: "host-acct",
@@ -142,16 +142,16 @@ class TestAccountTokenForSlug:
 
     def test_github_no_account_is_none(self, monkeypatch):
         monkeypatch.setattr(
-            "agent_worktrees.repos.account_for_github_slug", lambda slug: None,
+            "agent_worktrees.repos.account_for_github_slug", lambda slug, **kwargs: None,
         )
         prcfg = cfg.PRConfig(provider="github")
         assert base.account_token_for_slug("", prcfg) is None
 
     def test_github_account_without_gh_token_is_none(self, monkeypatch):
-        # Account resolves but gh has no token for it -> fall through to ambient.
+        # An unconfigured owner hint without a token retains legacy behavior.
         monkeypatch.setattr(
             "agent_worktrees.repos.account_for_github_slug",
-            lambda slug: "host-acct",
+            lambda slug, **kwargs: None if kwargs.get("configured_only") else "host-acct",
         )
         monkeypatch.setattr(
             "agent_worktrees.git_ops.active_gh_account", lambda: None,

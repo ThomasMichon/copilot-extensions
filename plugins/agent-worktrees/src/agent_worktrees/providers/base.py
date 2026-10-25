@@ -693,23 +693,34 @@ def account_token_for_slug(slug: str | None, prcfg) -> str | None:
 
     v1 is GitHub-only: non-github providers (and github repos with no
     resolvable account) fall straight through to today's behavior, so this is
-    additive and safe.
+    additive and safe. A missing credential for an explicit repository account
+    or account map raises ``ProviderError`` before provider execution; only an
+    unconfigured derived-owner hint may fall back after a failed lookup.
     """
     tok = resolve_token(prcfg)
     if tok:
         return tok
     if (getattr(prcfg, "provider", "") or "") != "github":
         return None
-    from .. import git_ops, repos
+    from .. import git_ops
+    from ..github_credentials import account_selection
+    from ..repos_registry_reader import RepositoryResolutionError
 
-    account = repos.account_for_github_slug(slug)
+    try:
+        selection = account_selection(slug)
+    except RepositoryResolutionError as exc:
+        raise ProviderError(str(exc)) from exc
+    account = selection.login
     if not account:
         return None
     # Owner == active gh account -> use ambient auth, not a stale minted token.
     active = git_ops.active_gh_account()
     if active and active.casefold() == account.casefold():
         return None
-    return git_ops.gh_token_for_account(account)
+    try:
+        return git_ops.gh_token_for_target(selection)
+    except git_ops.AccountCredentialError as exc:
+        raise ProviderError(str(exc)) from exc
 
 
 def run_cli(

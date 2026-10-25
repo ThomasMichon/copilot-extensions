@@ -96,7 +96,10 @@ def test_auth_retry_retains_configured_bound(monkeypatch):
     import subprocess
 
     attempts = []
-    monkeypatch.setattr(git_ops, "_auth_config_args", lambda *a, **k: ["-c", "test.auth=true"])
+    monkeypatch.setattr(
+        git_ops, "_auth_config_args",
+        lambda *a, **k: git_ops.GitAuthArgs(["-c", "test.auth=true"], allow_ambient_retry=True),
+    )
 
     def git(*args, **kwargs):
         attempts.append(kwargs)

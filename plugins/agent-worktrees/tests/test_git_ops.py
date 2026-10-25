@@ -211,8 +211,11 @@ class TestPush:
         injected cross-account token."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         no_hooks_seen: list[bool] = []
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
@@ -345,8 +348,11 @@ class TestPushTimeout:
         import subprocess
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
 
         def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
                      no_hooks=False, kill_tree=False, isolated_repository=False):
@@ -724,10 +730,8 @@ class TestCrossAccountAuth:
         from agent_worktrees import repos as repos_mod
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: "https://github.com/example-org/r.git")
         # Registry maps this owner's repo to a different account login.
-        monkeypatch.setattr(
-            repos_mod, "account_for_github_owner",
-            lambda owner: "host-acct" if owner == "example-org" else owner,
-        )
+        registry = repos_mod.ReposRegistry(account_map={"example-org": "host-acct"})
+        monkeypatch.setattr(repos_mod, "read_registry", lambda **kwargs: registry)
         monkeypatch.setattr(go, "_active_gh_account", lambda: "example-org")
         seen: list[str] = []
 
@@ -797,8 +801,11 @@ class TestCrossAccountAuth:
         override so the default credential helper can authenticate."""
         monkeypatch.setattr(
             go, "_auth_config_args",
-            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+            lambda remote, *, cwd: go.GitAuthArgs(
+                ["-c", "http.extraheader=AUTHORIZATION: basic x"], allow_ambient_retry=True,
+            ),
         )
+        monkeypatch.setattr(go, "_remote_url", lambda *args, **kwargs: None)
         calls: list[bool] = []
 
         def fake_git(*args, **kwargs):
