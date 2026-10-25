@@ -37,9 +37,10 @@ Runtime enabling and production rollout retain their existing gates.
   The installation-context `resolve_runtime_profile_policy` reader (#8494) supplies
   the configuration-intent side through the existing source/mode/deployment
   owner, with no new policy file. It does not approve an exact record or
-  independently verify source bytes. Release authentication is #8367; actual
-  composition with that channel, governed source closure and the native
-  constructor remains required before checking this item.
+  independently verify source bytes. Release authentication (#8568) and the
+  policy/release planner (#8586) now supply repository-only composition. Actual
+  invocation-bound source authorization, governed source closure and the native
+  constructor remain required before checking this item.
   Bind source-mode authorization to the actual invoked setup and its selected
   configuration through the existing installation/custody owner. The read-only
   intent reader is not itself evidence of an authorized setup operation.

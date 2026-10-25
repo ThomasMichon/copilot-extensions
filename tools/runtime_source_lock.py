@@ -28,7 +28,7 @@ _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
 sys.path.insert(0, str(_ROOT / "libs" / "versioned-runtime"))
 import installer_dependency_policy as dependencies
-from installer_engine import _source_files
+from installer_engine import _package_roots, _source_files, runtime
 from installer_wheel_inputs import _check_deadline
 from versioned_runtime_source import SourceIdentity, read_source_identity
 
@@ -45,6 +45,17 @@ class SourceLockCandidate:
 
     def record(self) -> dict:
         return json.loads(self.canonical)
+
+    def verify(self, *, deadline: float) -> None:
+        """Recheck the selected retained inputs before exposing constructed health."""
+        _check_deadline(deadline)
+        record = self.record()
+        if "sha256:" + hashlib.sha256(self.requirements).hexdigest() != record["requirements_sha256"]:
+            raise ProfileError("source candidate requirements changed")
+        observed = runtime.fingerprint_source(_source_files(_package_roots(self.payload)))
+        if "sha256:" + observed != record["retained_source_sha256"]:
+            raise ProfileError("retained source differs from the selected source lock")
+        _check_deadline(deadline)
 
 
 def _pins(content: bytes, environment: dict, deadline: float) -> list[dict]:
@@ -167,6 +178,8 @@ def retain_source_lock(
         ) as transaction:
             _source(payload, expected_source)
             _retained_source(transaction, payload, deadline)
+            retained_roots = tuple(transaction.sources.values())
+            retained_hash = runtime.fingerprint_source(_source_files(retained_roots))
             _check_deadline(deadline)
             result = subprocess.run(
                 list(transaction.argv), env=transaction.environment, cwd=transaction.cwd,
@@ -182,14 +195,21 @@ def retain_source_lock(
             if len(content) > max_lock_bytes:
                 raise ProfileError("source candidate exceeds its lock byte budget")
             _source(payload, expected_source)
+            if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
+                raise ProfileError("retained source changed during candidate resolution")
             record = {
                 "schema": "copilot-extensions.source-lock-candidate", "version": 1,
                 "mode": "source", "source": expected_source.document(),
                 "trigger": plan.source_trigger, "policy": policy, "target": frozen_target,
                 "component": component, "extras": list(extras),
+                "python": str(python.resolve(strict=True)),
+                "retained_source_sha256": "sha256:" + retained_hash,
                 "pins": _pins(content, frozen_target["environment"], deadline),
                 "requirements_sha256": "sha256:" + hashlib.sha256(content).hexdigest(),
             }
             canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
             _check_deadline(deadline)
             yield SourceLockCandidate(canonical, content, transaction.sources[payload])
+            _check_deadline(deadline)
+            if runtime.fingerprint_source(_source_files(retained_roots)) != retained_hash:
+                raise ProfileError("retained source changed during candidate consumption")

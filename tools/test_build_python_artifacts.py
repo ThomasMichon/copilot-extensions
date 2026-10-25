@@ -1452,8 +1452,7 @@ def test_query_marker_environment_uses_isolated_mode(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     bpa._query_marker_environment(tmp_path / "python")
 
-    assert seen_cmds[0][1] == "-I"
-    assert seen_cmds[0][2] == "-c"
+    assert seen_cmds[0][1:4] == ["-I", "-S", "-c"]
 
 
 def test_resolve_toolchain_lock_reuses_existing_venv(
@@ -3556,11 +3555,11 @@ def test_build_wheel_strips_index_credentials_with_toolchain(
             out_dir = Path(cmd[cmd.index("-o") + 1])
             (out_dir / "plugin-1.0.0-py3-none-any.whl").write_bytes(b"")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        if len(cmd) > 3 and cmd[3] == btl._MARKER_ENV_QUERY_SCRIPT:
+        if len(cmd) > 3 and cmd[-1] == btl._MARKER_ENV_QUERY_SCRIPT:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
             )
-        if len(cmd) > 3 and cmd[3] == btl._BUILD_REQUIRES_CHECK_SCRIPT:
+        if len(cmd) > 3 and cmd[-1] == btl._BUILD_REQUIRES_CHECK_SCRIPT:
             # `requires = []` -- trivially satisfied, no need to exercise
             # the real comparison logic for this credential-stripping test.
             return subprocess.CompletedProcess(
@@ -4231,8 +4230,7 @@ def _dispatch_toolchain_subprocess(
     the actual comparison logic rather than a reimplementation of it)."""
     assert cmd[0] == str(toolchain.venv_python)
     assert cmd[1] == "-I"
-    assert cmd[2] == "-c"
-    script = cmd[3]
+    script = cmd[cmd.index("-c") + 1]
     if script == btl._MARKER_ENV_QUERY_SCRIPT:
         return subprocess.CompletedProcess(
             cmd, 0,
@@ -4551,7 +4549,7 @@ def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_l
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        if cmd[3] == btl._MARKER_ENV_QUERY_SCRIPT:
+        if cmd[-1] == btl._MARKER_ENV_QUERY_SCRIPT:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
             )

@@ -83,6 +83,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 from artifact_source_build import parse_wheel_identity
@@ -591,6 +592,33 @@ def sha256_file(path: Path) -> str:
     return f"sha256:{h.hexdigest()}"
 
 
+def _build_child(command: list[str], environment: dict[str, str], deadline: float | None):
+    if deadline is None:
+        return subprocess.run(
+            command, capture_output=True, text=True, env=environment,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise subprocess.TimeoutExpired(command, 0)
+    previous = sys.path.copy()
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
+        import agent_procutil
+        from installer_engine_process import run_owned
+    finally:
+        sys.path[:] = previous
+    with tempfile.TemporaryFile() as ownership:
+        try:
+            return run_owned(
+                command, cwd=Path.cwd(), env=environment, timeout=remaining, deadline=deadline,
+                procutil=agent_procutil, construction_fd=ownership.fileno(),
+            )
+        except subprocess.CalledProcessError as error:
+            return subprocess.CompletedProcess(command, error.returncode, error.stdout, error.stderr)
+
+
 def build_wheel(
     source_dir: Path,
     out_dir: Path,
@@ -598,6 +626,8 @@ def build_wheel(
     python: str | None = None,
     toolchain: ToolchainLock | None = None,
     reserved_names: set[str] | None = None,
+    uv: str = "uv",
+    deadline: float | None = None,
 ) -> Path:
     """Builds a wheel for ``source_dir`` via `uv build --wheel`.
 
@@ -634,10 +664,12 @@ def build_wheel(
     ``reserved_names`` entry to collide with)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     if toolchain is not None:
-        _assert_toolchain_satisfies_build_requires(source_dir, toolchain)
+        _assert_toolchain_satisfies_build_requires(
+            source_dir, toolchain, **({"deadline": deadline} if deadline is not None else {}),
+        )
     with tempfile.TemporaryDirectory(prefix="build-python-artifacts-") as staging:
         staging_dir = Path(staging)
-        cmd = ["uv", "build", "--wheel", "-o", str(staging_dir)]
+        cmd = [uv, "build", "--wheel", "-o", str(staging_dir)]
         if toolchain is not None:
             cmd += ["--no-build-isolation", "--python", str(toolchain.venv_python)]
         elif python:
@@ -655,9 +687,7 @@ def build_wheel(
             # credential variables so it can authenticate), this build
             # subprocess has no such need and strips them too.
             strip_package_source_env_vars(build_env, strip_credentials=True)
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, env=build_env
-        )
+        result = _build_child(cmd, build_env, deadline)
         if result.returncode != 0:
             raise ArtifactBuildError(
                 f"uv build failed for {source_dir}:\n{result.stdout}\n{result.stderr}"

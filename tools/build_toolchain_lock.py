@@ -31,6 +31,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -324,14 +325,16 @@ _MARKER_ENV_QUERY_SCRIPT = (
 )
 
 
-def _query_marker_environment(python_exe: Path) -> dict:
+def _query_marker_environment(python_exe: Path, *, deadline: float | None = None) -> dict:
     """Queries ``python_exe`` itself for its own PEP 508 marker-environment
     values -- never assumed from the process running this script, which
     may be a different Python than ``--python`` locked into the toolchain
     venv."""
     result = subprocess.run(
-        [str(python_exe), "-I", "-c", _MARKER_ENV_QUERY_SCRIPT],
+        [str(python_exe), "-I", "-S", "-c", _MARKER_ENV_QUERY_SCRIPT],
         capture_output=True, text=True, env=sanitize_subprocess_env(),
+        **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode != 0:
         raise ArtifactBuildError(
@@ -920,7 +923,7 @@ def _read_build_system_requires(source_dir: Path) -> list[str]:
 
 
 def _assert_toolchain_satisfies_build_requires(
-    source_dir: Path, toolchain: ToolchainLock
+    source_dir: Path, toolchain: ToolchainLock, *, deadline: float | None = None,
 ) -> None:
     """Fails closed unless the locked toolchain's exact `setuptools`/
     `wheel` versions satisfy every applicable constraint ``source_dir``
@@ -954,6 +957,8 @@ def _assert_toolchain_satisfies_build_requires(
     the comparison runs under the SAME interpreter whose
     `marker_environment` it evaluates markers against."""
     requires = _read_build_system_requires(source_dir)
+    if deadline is not None and toolchain._marker_environment is None:
+        toolchain._marker_environment = _query_marker_environment(toolchain.venv_python, deadline=deadline)
     payload = json.dumps(
         {
             "requires": requires,
@@ -965,6 +970,8 @@ def _assert_toolchain_satisfies_build_requires(
         [str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
         input=payload, capture_output=True, text=True,
         env=sanitize_subprocess_env(),
+        **({"timeout": max(0, deadline - time.monotonic())} if deadline is not None else {}),
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     if result.returncode != 0:
         raise ArtifactBuildError(
