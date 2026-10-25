@@ -183,8 +183,11 @@ of **every tracked blob in the final candidate tree**, including metadata,
 admitted Main controls and materialized first-party sources. Raw Git object
 batches avoid `git archive`'s `export-ignore` and `export-subst` transformations.
 The verifier reconstructs the exact Git tree from member bytes and modes,
-without extracting files or following source links. Unsupported submodules,
-unsafe/ambiguous paths and escaping links fail closed. The existing artifact
+without extracting files or following source links. Link resolution uses the
+complete in-memory graph, including case-equivalent references; chained
+escapes, cycles, more than 40 traversals or literal targets over 4096 bytes
+fail closed. Unsupported submodules and unsafe/ambiguous paths are refused.
+The existing artifact
 bounds remain 512 MiB for the archive and expanded tree, 128 MiB per file and
 100,000 files.
 

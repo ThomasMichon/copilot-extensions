@@ -6,12 +6,15 @@ import io
 import json
 import re
 import zipfile
+from collections import deque
 
 from promotion_unit_contract import MAX_PACKET_FILE_BYTES
 
 SCHEMA = "copilot-extensions.complete-promotion-source"
 MAX_SOURCE_BYTES = 512 << 20
 MAX_SOURCE_FILES = 100_000
+MAX_LINK_BYTES = 4096
+MAX_LINK_HOPS = 40
 IDENTITY_FIELDS = {
     "dev_sha", "candidate_sha", "main_before", "control_sha", "content_tree", "tree",
     "source_index_sha256", "qualification_digest",
@@ -64,10 +67,38 @@ def _object(kind: str, raw: bytes) -> bytes:
     return hashlib.sha1(kind.encode() + b" " + str(len(raw)).encode() + b"\0" + raw).digest()
 
 
+def _validate_links(links: dict[str, str]) -> None:
+    targets = {name: tuple(target.split("/")) for name, target in links.items()}
+    canonical = {name.casefold(): name for name in links}
+    for name in links:
+        pending = deque([*name.split("/")[:-1], *targets[name]])
+        resolved, hops = [], 1
+        while pending:
+            part = pending.popleft()
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not resolved:
+                    raise ValueError("complete-source link escapes the source root")
+                resolved.pop()
+                continue
+            resolved.append(part)
+            path = "/".join(resolved)
+            link = canonical.get(path.casefold())
+            if link is not None:
+                if link != path:
+                    raise ValueError("case-equivalent complete-source link target")
+                hops += 1
+                if hops > MAX_LINK_HOPS:
+                    raise ValueError("cyclic or excessive complete-source link traversal")
+                resolved.pop()
+                pending.extendleft(reversed(targets[link]))
+
+
 def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
     if not isinstance(files, dict) or not 1 <= len(files) <= MAX_SOURCE_FILES:
         raise ValueError("complete-source inventory is empty or oversized")
-    root, aliases, inventory, total = {}, {}, [], 0
+    root, aliases, inventory, links, total = {}, {}, [], {}, 0
     for name, entry in sorted(files.items()):
         parts = _path(name)
         if (
@@ -93,20 +124,15 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
                 if not isinstance(node, dict):
                     raise ValueError("complete-source file is an ancestor")
         if mode == "120000":
+            if not 0 < len(raw) <= MAX_LINK_BYTES:
+                raise ValueError("complete-source link exceeds its byte bound")
             try:
                 target = raw.decode("utf-8")
             except UnicodeDecodeError as exc:
                 raise ValueError("invalid complete-source link") from exc
-            stack = parts[:-1].copy()
             if not target or target.startswith("/") or re.search(r'[:\\\x00-\x1f\x7f]', target):
                 raise ValueError("unsafe complete-source link")
-            for part in target.split("/"):
-                if part == "..":
-                    if not stack:
-                        raise ValueError("complete-source link escapes the source root")
-                    stack.pop()
-                elif part not in ("", "."):
-                    stack.append(part)
+            links[name] = target
         inventory.append({
             "path": name, "mode": mode, "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
         })
@@ -120,6 +146,7 @@ def _inventory(files: dict[str, tuple[str, bytes]]) -> tuple[list[dict], str]:
             records.append((encoded + (b"/" if directory else b""), mode.encode() + b" " + encoded + b"\0" + digest))
         return _object("tree", b"".join(record for _key, record in sorted(records)))
 
+    _validate_links(links)
     return inventory, tree(root).hex()
 
 

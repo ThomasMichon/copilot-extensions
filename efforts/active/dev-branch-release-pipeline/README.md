@@ -1257,6 +1257,16 @@ activation or a clean live cycle. Late-control reconciliation, fresh policy
 admission, server-enforced base freshness and the actual under-thirty-minute
 publication-before-PR / exact-merged-tree witness remain open.
 
+The first implementation head then qualified all 1669 admitted units through
+hosted CI before #8790 opened. A later inventory reconciliation preserved
+1594 incoming selections and placed the 82 owned additions beside related
+evidence groups, rather than the shared append seam. Re-review found that
+lexical link checks missed chained escapes and cycles. Ten new creation/
+readback controls reproduced that gap. Complete in-memory graph resolution,
+case-alias refusal and explicit literal/traversal bounds now pass all 98
+source/archive/publication/object cases; fresh current-head CI and review
+remain required before merge.
+
 ### 2026-10-24 - Phase 9d plan reviewed; production implementation next
 
 Plan #8745 merged as `85c5d7a3fd8790886808c3fa571f947e1f0d64b1`.

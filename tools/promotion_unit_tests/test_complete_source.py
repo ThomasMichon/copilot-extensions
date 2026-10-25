@@ -131,3 +131,83 @@ def test_independent_archive_readback_refuses_tamper_and_incomplete_inventory(ch
         manifest["unadmitted"] = "value"
     with pytest.raises(ValueError):
         source.verify_source_archive(raw, manifest, identity=identity)
+
+
+def _unchecked_link_archive(links):
+    identity = case()[1]
+    records, inventory = [], []
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, target in sorted(links.items()):
+            raw = target.encode()
+            records.append(b"120000 " + name.encode() + b"\0" + source._object("blob", raw))
+            inventory.append({"path": name, "mode": "120000", "size": len(raw),
+                              "sha256": hashlib.sha256(raw).hexdigest()})
+            member = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            member.create_system = 3
+            member.compress_type = zipfile.ZIP_DEFLATED
+            member.external_attr = 0o120000 << 16
+            archive.writestr(member, raw)
+    identity["tree"] = source._object("tree", b"".join(records)).hex()
+    raw = output.getvalue()
+    return raw, {
+        "schema": source.SCHEMA, "version": 1, **identity,
+        "archive_sha256": hashlib.sha256(raw).hexdigest(), "files": inventory,
+    }, identity
+
+
+@pytest.mark.parametrize("links", [
+    {"a": ".", "b": "a/.."},
+    {"a": ".", "b": "a", "c": "b/.."},
+    {"a": ".", "b": "a/../outside"},
+    {"a": ".", "b": "A/.."},
+    {"a": "b", "b": "a"},
+    {"a": "a"},
+])
+@pytest.mark.parametrize("boundary", ["creation", "readback"])
+def test_complete_link_graph_refuses_chained_escape_and_cycles_on_both_boundaries(links, boundary):
+    raw, manifest, identity = _unchecked_link_archive(links)
+    with pytest.raises(ValueError):
+        if boundary == "creation":
+            source.source_archive(
+                {name: ("120000", target.encode()) for name, target in links.items()}, identity=identity,
+            )
+        else:
+            source.verify_source_archive(raw, manifest, identity=identity)
+
+
+@pytest.mark.parametrize("target", ["a/bin/run", "a/a/bin/run"])
+def test_non_escaping_chains_and_repeated_aliases_preserve_original_link_bytes(target):
+    files, identity = case()
+    files.update(a=("120000", b"."), b=("120000", target.encode()))
+    identity["tree"] = source._inventory(files)[1]
+    raw, manifest = source.source_archive(files, identity=identity)
+    assert source.verify_source_archive(raw, manifest, identity=identity) == files
+
+
+@pytest.mark.parametrize("count", [40, 41])
+def test_complete_source_link_traversal_bound_is_inclusive(count):
+    files, identity = case()
+    for number in range(count):
+        target = f"l{number + 1}" if number + 1 < count else "bin/run"
+        files[f"l{number}"] = ("120000", target.encode())
+    if count > source.MAX_LINK_HOPS:
+        with pytest.raises(ValueError, match="link traversal"):
+            source._inventory(files)
+    else:
+        identity["tree"] = source._inventory(files)[1]
+        raw, manifest = source.source_archive(files, identity=identity)
+        assert source.verify_source_archive(raw, manifest, identity=identity) == files
+
+
+@pytest.mark.parametrize("size", [4096, 4097])
+def test_complete_source_link_literal_bound_is_inclusive(size):
+    files, identity = case()
+    files["link"] = ("120000", b"x" * size)
+    if size > source.MAX_LINK_BYTES:
+        with pytest.raises(ValueError, match="link.*byte bound"):
+            source._inventory(files)
+    else:
+        identity["tree"] = source._inventory(files)[1]
+        raw, manifest = source.source_archive(files, identity=identity)
+        assert source.verify_source_archive(raw, manifest, identity=identity) == files
