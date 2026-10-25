@@ -981,7 +981,8 @@ broader effort and adopter acceptance remain separately owned.)_
 
 _(Agent-recommended realization of the 2026-10-24 operator direction.
 Participant: Composite-source contributor; bounded tracker: #8736.
-Status: Active; reviewed plan #8745 precedes implementation.)_
+Status: Active; plan #8745 and source-publication implementation #8790 merged;
+late-control reconciliation, Main activation and live acceptance remain open.)_
 
 - [x] Land this amendment through current-head review and required CI: #8745,
       `85c5d7a3fd8790886808c3fa571f947e1f0d64b1`.
@@ -1231,6 +1232,90 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-25 - Trusted control retirement and transition classification
+
+The next source slice authenticates previous preservation receipts against
+ancestor Main declarations and exact regular blob inventories. Main-deleted
+workflow paths retain bounded, revalidated tombstones so older Dev copies
+cannot reappear in later promotions. A path that Main retains but declassifies
+still follows ordinary Dev composition; explicit Main reintroduction clears
+its tombstone. All deletion destinations are preflighted before control writes.
+
+The companion transition classifier compares complete pinned Main trees.
+Only exact previously/currently declared controls and operator pause fields
+qualify as control-only. Payload, baselines, unknown governance, promotion or
+rollback lineage, and removal of the ownership contract refuse recomposition.
+Every changed snapshot requires fresh trusted execution; this helper is not
+artifact equivalence, new admission or permission for a stale controller.
+Existing frozen-publication and merge-base refusals remain unchanged.
+
+The first 59 in-process cases passed in 7.21 seconds; touched Python lint
+passed. The manual `promotion-controls` portfolio separately exercises actual
+Git composition under its original 100-second packet budget, without adding
+integration to required CI or promotion. Its execution and the final unit
+packet remain validation obligations, not inferred passes. Build/landing
+compatibility, current admission, independently governed Main activation and
+the actual complete promotion remain open.
+
+The first hosted branch proof correctly refused publication. Run `40157795196`
+passed all 1754 assertions but rejected the metadata-only workflow guard for
+having no production call coverage. That guard was moved intact to the optional
+integration packet; the required portfolio retains the 59 production-exercising
+new cases and its unchanged effect/coverage rules. Run `40157824781` exposed a
+fixture no-op: the first Dev edit changed only a preserved workflow, so the
+composer correctly returned no candidate. The fixture now changes ordinary
+payload too and asserts an actual first promotion before advancing fixture Main.
+Both hosted packets must pass the corrected immutable head before PR opening.
+
+The corrected head passed hosted CI `40158566781`: 1753 units, complete
+unit/effect/coverage packet in 27.554 seconds, coverage recorded once. Optional
+Git witness `40158586667` passed all six cases in 1.88 seconds. #8838 then opened.
+Its first current-head review found Python's boolean/number dictionary-equality
+alias in non-operator state. Seven regressions reproduced that class, including
+nested values and non-finite numbers. Canonical type-preserving comparison now
+rejects them; all 66 focused controls passed in 16.51 seconds. Fresh hosted
+qualification and re-review remain required for the corrected head.
+
+Re-review identified a second real boundary defect: a missing Main manifest
+could return early before checking recorded control provenance. Three downgrade
+controls reproduced it while three genuine legacy controls passed. The composer
+now refuses ownership removal when Main records prior controls/tombstones;
+malformed provenance cannot downgrade that refusal. All 72 focused cases passed
+in 12.82 seconds. The optional actual-Git portfolio adds this negative composition
+case under the same 100-second bound. No live ownership deactivation is enabled.
+
+### 2026-10-25 - Complete-source implementation merged; late controls remain
+
+#8790 merged as `28a0ff3911f02d457160dd856b448a8965204931` at
+`02:14:40Z`. Genuine Copilot approval `5641030342` covers exact published
+head `9bdc948ae58faf476f93878ad270df2315880ff3`, with no open findings or
+unresolved threads. Required PR CI passed: run `40152384443` executed all
+1694 admitted units in 24.20 seconds and completed the canonical unit/effect/
+coverage packet in 26.142 seconds, recording coverage once. The authorized
+Maintainer completion path merged after those gates; no failing CI was waived.
+
+The corrected archive contract resolves the full in-memory link graph rather
+than checking targets lexically. Ten controls first reproduced chained
+escapes/cycles at creation and readback; all 98 source/archive/publication/
+object cases then passed, including case aliases, safe repeated aliases and
+inclusive link bounds. Incoming unit selections and their relative order were
+preserved. New cases sit beside related evidence groups to avoid unrelated
+end-of-list conflicts.
+
+Re-read the Phase 9d Plan and Validation Plan after merge. Its source-delivery
+items are now recorded in the subplan, while the overall slice stays Active.
+The continuing worktree was pulled onto the actual merged Dev commit; only
+provider-confirmed merged commits were dropped after a safely aborted ordinary
+rebase, with recovery refs retained.
+
+Next is explicit build/landing compatibility and trusted Main-control
+reconciliation, retaining the existing signed index, lifecycle, publisher and
+strict server freshness gate. Main-only additions/deletions/renames and
+operator state must remain distinct from source/promotion lineage; changed
+authority needs current trusted execution. No new Main controller has been
+activated by this source PR, and no live complete-source asset, exact merged
+Main tree or under-thirty-minute new-contract release is claimed.
 
 ### 2026-10-24 - Complete-source implementation, not yet activated
 

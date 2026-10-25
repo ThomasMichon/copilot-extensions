@@ -1169,8 +1169,32 @@ files fail closed. Source, helper, test and documentation paths are not allowed.
 the pinned main commit, after ordinary versioning and materialization, and
 their blob IDs appear in the promotion summary and pipeline provenance.
 
-Removing a workflow from the trusted declaration returns it to normal dev
-composition; its actual retirement must be reviewed explicitly. This mechanism
+Removing a workflow from the trusted declaration while leaving it on Main returns
+it to normal Dev composition. Removing the actual Main file as well retires it
+only when Main's prior `last_promotion.control_preserved` receipt authenticates
+the exact prior declaration and regular blobs against an ancestor Main commit.
+Dev state never grants deletion authority. The composer retains at most 64
+`retired` path-to-origin tombstones in that receipt, revalidates their ancestor
+declarations and removes matching obsolete Dev copies before staging. This
+survives later promotions; explicit Main reintroduction clears the tombstone.
+Unsafe deletion destinations and malformed or unavailable provenance refuse the
+composition before controls are written.
+Once Main records control provenance, removing its ownership manifest also
+refuses composition rather than silently restoring legacy behavior.
+
+`tools/promotion_control_transition.py` classifies two pinned ancestor-related
+Main snapshots against their actual exact declarations. Only declared control
+changes and the operator's `paused`/`pause_reason` settings are control-only.
+Payload, coverage-baseline, unknown-governance, promoter-lineage and rollback
+changes require a new plan; removal of the ownership manifest also refuses.
+Non-operator state comparison preserves JSON types, including nested values;
+boolean/number substitutions and non-finite values cannot hide a policy change.
+Every changed control snapshot requires a fresh trusted execution. This
+classification does not qualify artifacts, prove equivalent construction inputs
+or authorize the old running controller to execute newer policy. The current
+frozen-candidate publication and merge paths still refuse a changed base.
+
+This mechanism
 does not establish admission authorization, atomic merge freshness, wrapper/helper
 compatibility or control-preserving rollback. Those contracts and their live
 rejection/recovery proof are prerequisites to activating a manifest; existing

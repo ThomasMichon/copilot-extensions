@@ -115,6 +115,92 @@ def _destination(root: Path, relative: str) -> Path:
     return current
 
 
+def _historical_control(repo: Path, prior: str, main_head: str) -> tuple[dict, list[str]]:
+    if (
+        _git(repo, ["cat-file", "-t", prior]).strip() != b"commit"
+        or _git(repo, ["merge-base", prior, main_head]).strip().decode("ascii") != prior
+    ):
+        raise ControlPreservationError("previous control is not an ancestor of pinned main")
+    entries = _tree(repo, prior)
+    manifest = entries.get(MANIFEST_PATH)
+    if manifest is None:
+        raise ControlPreservationError("previous control manifest is missing")
+    paths = _paths(_blob(repo, manifest, limit=64 << 10))
+    for path in paths:
+        if path not in entries:
+            raise ControlPreservationError("previous declared control is missing")
+        _blob(repo, entries[path], limit=1 << 20)
+    return entries, paths
+
+
+def _read_state(repo: Path, entries: dict) -> dict | None:
+    state_entry = entries.get(".github/release-pipeline-state.json")
+    if state_entry is None:
+        return None
+    try:
+        state = json.loads(
+            _blob(repo, state_entry, limit=1 << 20).decode("utf-8"),
+            object_pairs_hook=_unique_object,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ControlPreservationError("invalid main pipeline state") from exc
+    if (
+        not isinstance(state, dict)
+        or state.get("schema") != "copilot-extensions.release-pipeline-state"
+        or type(state.get("version")) is not int or state["version"] != 1
+        or not isinstance(state.get("last_promotion"), (dict, type(None)))
+    ):
+        raise ControlPreservationError("unsupported main pipeline state")
+    return state
+
+
+def _previous_paths(repo: Path, main_head: str, entries: dict) -> dict[str, str]:
+    """Authenticate deletion scope from Main's previous preservation receipt."""
+    state = _read_state(repo, entries)
+    if state is None:
+        return {}
+    previous = (state.get("last_promotion") or {}).get("control_preserved")
+    if previous is None:
+        return {}
+    if (
+        not isinstance(previous, dict)
+        or set(previous) - {"main_head", "manifest_blob", "files", "retired"}
+        or not {"main_head", "manifest_blob", "files"} <= set(previous)
+        or not isinstance(previous["main_head"], str)
+        or not _SHA.fullmatch(previous["main_head"])
+        or not isinstance(previous["files"], dict)
+        or not isinstance(previous["manifest_blob"], str)
+        or not _SHA.fullmatch(previous["manifest_blob"])
+    ):
+        raise ControlPreservationError("invalid previous control provenance")
+    prior = previous["main_head"]
+    old_entries, paths = _historical_control(repo, prior, main_head)
+    if old_entries[MANIFEST_PATH][2] != previous["manifest_blob"]:
+        raise ControlPreservationError("previous control manifest differs from provenance")
+    if set(paths) != set(previous["files"]):
+        raise ControlPreservationError("previous control path inventory differs from provenance")
+    for path in paths:
+        entry = old_entries.get(path)
+        if entry is None or entry[2] != previous["files"][path]:
+            raise ControlPreservationError("previous control blob differs from provenance")
+    retired = previous.get("retired", {})
+    if not isinstance(retired, dict) or len(retired) > 64:
+        raise ControlPreservationError("invalid retired control provenance")
+    snapshots = {prior: (old_entries, paths)}
+    for path, origin in retired.items():
+        if (
+            not isinstance(path, str) or not _WORKFLOW.fullmatch(path)
+            or not isinstance(origin, str) or not _SHA.fullmatch(origin)
+            or path in paths
+        ):
+            raise ControlPreservationError("invalid retired control path or origin")
+        if origin not in snapshots:
+            snapshots[origin] = _historical_control(repo, origin, main_head)
+        if path not in snapshots[origin][1]:
+            raise ControlPreservationError("retired control was not declared by its origin")
+    return {**retired, **dict.fromkeys(paths, prior)}
+
+
 def _preserve_control(scratch: Path, *, main_head: str, repo: Path) -> dict | None:
     if not _SHA.fullmatch(main_head) or _git(repo, ["cat-file", "-t", main_head]).strip() != b"commit":
         raise ControlPreservationError("control input must be a pinned main commit")
@@ -129,6 +215,8 @@ def _preserve_control(scratch: Path, *, main_head: str, repo: Path) -> dict | No
     if manifest_aliases and manifest_aliases != [MANIFEST_PATH]:
         raise ControlPreservationError("case-equivalent main control manifest")
     if manifest_entry is None:
+        if _previous_paths(repo, main_head, entries):
+            raise ControlPreservationError("control ownership removal requires a new plan")
         candidate_manifest = scratch / MANIFEST_PATH
         if (
             any(path.casefold() == MANIFEST_PATH.casefold() for path in candidate_entries)
@@ -138,11 +226,17 @@ def _preserve_control(scratch: Path, *, main_head: str, repo: Path) -> dict | No
         return None
     raw = _blob(repo, manifest_entry, limit=64 << 10)
     paths = _paths(raw)
+    retired = {
+        path: origin for path, origin in _previous_paths(repo, main_head, entries).items()
+        if path not in paths and path not in entries
+    }
+    if len(retired) > 64:
+        raise ControlPreservationError("retired control inventory exceeds its bound")
     candidate_manifest = _destination(scratch, MANIFEST_PATH)
     if candidate_manifest.exists() and candidate_manifest.read_bytes() != raw:
         raise ControlPreservationError("dev carries a conflicting control declaration")
     contents = {}
-    for path in paths:
+    for path in [*paths, *sorted(retired)]:
         parts = path.split("/")
         prefixes = ["/".join(parts[:end]) for end in range(1, len(parts) + 1)]
         for existing in entries:
@@ -154,22 +248,29 @@ def _preserve_control(scratch: Path, *, main_head: str, repo: Path) -> dict | No
         for prefix in prefixes:
             if candidate_entries.get(prefix) in (b"120000", b"160000"):
                 raise ControlPreservationError(f"symlink or submodule candidate control path: {path}")
+        _destination(scratch, path)
+        if path in retired:
+            continue
         if any(existing.startswith(path + "/") for existing in entries):
             raise ControlPreservationError(f"non-file main control path: {path}")
         if path not in entries:
             raise ControlPreservationError(f"missing declared main control file: {path}")
         contents[path] = _blob(repo, entries[path], limit=1 << 20)
-        _destination(scratch, path)
+    for path in sorted(retired):
+        (scratch / path).unlink(missing_ok=True)
     for path, content in contents.items():
         destination = scratch / path
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(content)
         destination.chmod(0o644)
-    return {
+    result = {
         "main_head": main_head,
         "manifest_blob": manifest_entry[2],
         "files": {path: entries[path][2] for path in paths},
     }
+    if retired:
+        result["retired"] = retired
+    return result
 
 
 def preserve_control(scratch: Path, *, main_head: str, repo: Path) -> dict | None:
