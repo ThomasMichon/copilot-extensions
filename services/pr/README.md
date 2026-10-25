@@ -148,6 +148,22 @@ or activated by this repository. A trusted builder supplies:
   `agent-worktrees` artifact supplying the configured snapshot command.
 
 Use a **dedicated context containing only those inputs and this Dockerfile**.
+The repository-only `tools/pr_service_image_inputs.py` consumer prepares that
+disposable context from an exact Linux `RuntimeProfile` and an already retained
+`WheelSnapshot`. It reuses canonical complete-wheel inspection, requires the
+service, PR core, Fleet and native Worktrees distributions, and writes an exact
+version/hash requirements lock. The context contains only the existing recipe,
+lock and inspected wheels and is removed when its context manager exits.
+Keep both retained-wheel custody and the context open through the builder's
+input consumption, and pass the returned `python_base` as `PYTHON_BASE`.
+
+This is byte construction only, not an installer or approval adapter. The
+trusted construction caller must independently approve the exact profile,
+first-party release, target/base image and governed feed acquisition. A profile
+record or returned context is not permission, and this helper never resolves,
+downloads, invokes Docker or activates a service. Its synthetic offline-install
+test does not establish a production dependency closure or an image build.
+
 Never use a developer checkout, home, credential directory or replay volume as
 the context. Installation is network-free, wheel-only and hash-required; image
 construction never reads host configuration or credentials. The resulting
