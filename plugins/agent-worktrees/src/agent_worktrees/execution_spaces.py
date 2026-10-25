@@ -1,4 +1,4 @@
-"""Registered execution-space fences for local ownership and lifecycle writes."""
+"""Receiving execution-space fences for local ownership and lifecycle writes."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 from machine_transport.registry import MachineEntry, find_machine_entry, machine_name, resolve_machine_selection
-from machine_transport import split_machine_environment
+from machine_transport import LocalExecutionContext, resolve_local_execution_context, split_machine_environment
 
 
 class ExecutionSpaceError(RuntimeError):
@@ -119,7 +119,8 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
         if owner is None or not owner.is_qualified:
             return
         require_record_mutation(record, config)
-        if owner.machine == config.machine:
+        caller_key = current_execution_context(config).execution_machine
+        if owner.machine in (config.machine, caller_key):
             parent_path = cfg.project_dir(owner.project) / "worktrees" / f"{owner.worktree_id}.yaml"
             legacy_parent = False
         else:
@@ -137,13 +138,11 @@ def settle_parent_obligation(record: Any, config: Any, worktree_id: str, *, outp
                 return
             receiving_config = project_record_config(parent)
             require_record_mutation(parent, receiving_config)
-            caller = resolve_machine_selection(
-                registry_for_config(config), config.machine, cfg.detect_platform(),
-            )
-            caller_key = caller.entry.key if caller.entry is not None else config.machine
             if not require_owner_identity(caller_key, receiving_config):
                 raise ExecutionSpaceError("caller is not local to the parent receiving execution space")
-            child_ref = tracking.format_claim_ref(config.machine, config.repo_name, worktree_id)
+            child_ref = tracking.format_claim_ref(
+                getattr(record, "execution_machine", record.machine), config.repo_name, worktree_id,
+            )
             if child_ref == paired_claims.paired_ref(parent) and any(
                 c.ref == child_ref and c.kind == "worktree" and c.state == obligations.RELEASED
                 for c in parent.resources
@@ -219,16 +218,51 @@ def _require_registered_current_space(config: Any, current: MachineEntry | None)
     return platform
 
 
+def _current_execution_context(
+    config: Any, entries: dict[str, MachineEntry],
+) -> LocalExecutionContext:
+    from . import config as cfg
+
+    platform = cfg.detect_platform()
+    try:
+        binding = getattr(config, "configured_machine", None)
+        context = resolve_local_execution_context(
+            entries, hostname=cfg.socket.gethostname(), environment=platform,
+            configured_machine=binding,
+        )
+        if binding is None and config.machine.casefold() not in {
+            context.hostname.casefold(), context.execution_machine.casefold(),
+        }:
+            # Retain established Config bindings supplied by legacy callers.
+            context = resolve_local_execution_context(
+                entries, hostname=context.hostname, environment=platform,
+                configured_machine=config.machine,
+            )
+    except ValueError as exc:
+        raise ExecutionSpaceError(f"current execution identity is invalid: {exc}") from exc
+    current = entries.get(context.customization_key) if context.customization_key else None
+    if current is not None and current.execution_platform and not current.legacy_key:
+        _require_registered_current_space(config, current)
+    return context
+
+
+def current_execution_context(config: Any) -> LocalExecutionContext:
+    """Resolve receiving configuration and actual substrate, never a stored owner."""
+    return _current_execution_context(config, registry_for_config(config))
+
+
 def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = True) -> bool:
     """Return whether an owner is local; reject ambiguous legacy scope names."""
     entries = registry_for_config(config)
+    context = _current_execution_context(config, entries)
+    if context.customization_key is None and owner == context.execution_machine:
+        return True
     try:
-        current = find_machine_entry(entries, config.machine)
+        current = entries.get(context.customization_key) if context.customization_key else None
         target = find_machine_entry(entries, owner)
     except ValueError as exc:
         raise ExecutionSpaceError(str(exc)) from exc
-    explicit = _requires_scoped_identity(entries, config.machine, owner)
-    if explicit:
+    if current is not None and current.execution_platform:
         _require_registered_current_space(config, current)
         if target is None or not target.execution_platform or (canonical_ref and owner != target.key):
             raise ExecutionSpaceError(
@@ -237,12 +271,11 @@ def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = Tru
         return target.key == current.key
     if current is not None and target is not None:
         return target is current
-    return owner == config.machine
+    return target is None and owner in (config.machine, context.execution_machine)
 
 
 def require_current_execution_space(config: Any) -> None:
-    if _requires_scoped_identity(registry_for_config(config), config.machine):
-        require_owner_identity(config.machine, config)
+    current_execution_context(config)
 
 
 def require_record_mutation(record: Any, config: Any) -> None:
@@ -258,22 +291,16 @@ def require_record_mutation(record: Any, config: Any) -> None:
     if identity is not None:
         from .config import detect_platform, project_dir
 
-        try:
-            selected = resolve_machine_selection(entries, identity.execution_machine, identity.environment)
-        except ValueError as exc:
-            raise ExecutionSpaceError(str(exc)) from exc
+        if identity.environment != detect_platform() or identity.environment != config.platform:
+            raise ExecutionSpaceError("record belongs to a different execution space/platform")
+        context = _current_execution_context(config, entries)
         if (
-            selected.entry is None
-            or selected.target.machine != identity.machine
-            or selected.target.environment != identity.environment
-            or selected.entry.key != identity.execution_machine
+            context.machine != identity.machine
+            or context.environment != identity.environment
+            or context.execution_machine != identity.execution_machine
         ):
-            raise ExecutionSpaceError("record tuple conflicts with its registered execution identity")
-        if (
-            identity.environment != detect_platform()
-            or identity.environment != config.platform
-            or not require_owner_identity(identity.execution_machine, config)
-        ):
+            raise ExecutionSpaceError("record tuple conflicts with its registered execution identity or local context")
+        if not require_owner_identity(identity.execution_machine, config):
             raise ExecutionSpaceError("record belongs to a different execution space/platform")
         if record.repo != config.repo_name:
             raise ExecutionSpaceError("record does not belong to the receiving project")
@@ -327,11 +354,26 @@ def require_record_mutation(record: Any, config: Any) -> None:
         return
     if not _requires_scoped_identity(entries, config.machine, record.machine):
         return
+    if getattr(record, "repo", None) and record.repo != config.repo_name:
+        raise ExecutionSpaceError("record does not belong to the receiving project")
+    if (
+        getattr(record, "worktree_path", None)
+        and _current_execution_context(config, entries).customization_key is None
+    ):
+        from .legacy_wsl_record_locality import record_namespace_matches
+
+        if not record_namespace_matches(record, config):
+            raise ExecutionSpaceError("record does not belong to the receiving worktree namespace")
     if not require_owner_identity(record.machine, config):
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} belongs to a different execution space"
         )
-    if getattr(record, "platform", None) != config.platform:
+    from .config import detect_platform
+
+    if (
+        getattr(record, "platform", None) != config.platform
+        or record.platform != detect_platform()
+    ):
         raise ExecutionSpaceError(
             f"record {record.worktree_id!r} has a different or unproven execution platform"
         )

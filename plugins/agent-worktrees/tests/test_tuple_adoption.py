@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
 from agent_worktrees import config as cfg, creation_identity, execution_spaces
 from agent_worktrees import git_ops, tracking, worktree_identity
@@ -103,6 +104,56 @@ def test_tuple_adoption_producer_tracking_json_and_relationships(
     assert record.yaml_path.read_bytes() == before
 
 
+@pytest.mark.parametrize("kind", ["anchor", "external"])
+@pytest.mark.parametrize("map_kind,physical_name", [
+    ("absent", "friendly-host"), ("empty", "friendly-host"), ("unrelated", "friendly-host"),
+    ("matching", "friendly-host"), ("sibling-only", "friendly-host"),
+    ("sibling-only", "friendly-wsl"), ("sibling-only", "friendly-win"),
+])
+def test_actual_tuple_adoption_without_map_enrollment(
+    adoption_config: cfg.Config, monkeypatch: pytest.MonkeyPatch, kind: str,
+    map_kind: str, physical_name: str,
+) -> None:
+    config = adoption_config
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host-win")
+    topology = Path(config.default_repo.anchor) / "machines.yaml"
+    maps = {
+        "empty": {},
+        "unrelated": {"peer-space": {
+            "execution_platform": "wsl", "physical_host": "peer-host",
+        }},
+        "matching": {"local-space": {
+            "hostname": "Observed-Host-win", "execution_platform": config.platform,
+            "physical_host": physical_name,
+        }},
+        "sibling-only": {"sibling-space": {
+            "hostname": "Observed-Host-win",
+            "execution_platform": "windows" if config.platform == "wsl" else "wsl",
+            "physical_host": physical_name,
+        }},
+    }
+    if map_kind == "absent":
+        topology.unlink()
+    else:
+        topology.write_text(yaml.safe_dump({"machines": maps[map_kind]}))
+    config = replace(config, machine=cfg.detect_machine(config.default_repo.anchor))
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    record = _produce(config, kind)
+    physical = physical_name if map_kind in ("matching", "sibling-only") else "observed-host-win"
+    execution = "local-space" if map_kind == "matching" else physical + (
+        "-wsl" if config.platform == "wsl" else ""
+    )
+    assert record.machine_identity == WorktreeMachineIdentity(physical, config.platform, execution)
+    execution_spaces.require_record_mutation(record, config)
+    if map_kind == "sibling-only":
+        assert not execution_spaces.require_owner_identity("sibling-space", config)
+    assert record.worktree_id == (
+        "@anchor" if kind == "anchor" else "desk-wsl-wsl-retained-01234567"
+    )
+    before = record.yaml_path.read_bytes()
+    assert _produce(config, kind).yaml_path.read_bytes() == before
+
+
 def _retain_history(record: tracking.WorktreeRecord) -> bytes:
     record.title = "retained title"
     record.follow_up = True
@@ -170,13 +221,15 @@ def test_tuple_adoption_competing_if_absent_winner_is_not_upgraded(
 
 
 @pytest.mark.parametrize("kind", ["anchor", "external"])
-@pytest.mark.parametrize("defect", ["missing-map", "foreign-platform", "config-platform", "namespace"])
+@pytest.mark.parametrize("defect", ["invalid-map", "foreign-platform", "config-platform", "namespace"])
 def test_new_tuple_adoption_refuses_without_creating_a_record(
     adoption_config: cfg.Config, monkeypatch: pytest.MonkeyPatch, kind: str, defect: str,
 ) -> None:
     config = adoption_config
-    if defect == "missing-map":
-        (Path(config.default_repo.anchor) / "machines.yaml").write_text("machines: {}\n")
+    if defect == "invalid-map":
+        (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+            "machines:\n  custom-space:\n    execution_platform: invalid\n",
+        )
     elif defect == "foreign-platform":
         monkeypatch.setattr(cfg, "detect_platform", lambda: (
             "linux" if config.platform != "linux" else "windows"

@@ -72,10 +72,13 @@ The typed tracking accessor preserves the exact historical machine label for
 legacy records. Ordinary saves do not migrate their format or alter a versioned
 identity. Concurrent changes to environment, execution owner or identity version
 invalidate a loaded writer even when its physical host is unchanged. Mutation
-still requires the receiving project's shared registry and actual execution
+still requires the receiving project's current execution context and actual
 platform; sharing a physical host does not make native and guest owners equal.
-Versioned records require an actual receiving-registry entry even when an
-unregistered execution spelling would match the legacy configuration fallback.
+The optional receiving registry customizes that context rather than enrolling
+the local machine. The complete physical/environment/execution tuple must match
+the validated context, and explicit registered execution keys retain their
+canonical-key and platform checks. Project and actual-ledger snapshot checks
+remain independent of naming; a detected name is not a receiving-record grant.
 Cleanup, including forced removal, applies that tuple check before any missing,
 empty or unscoped registry fallback retained for historical records. Resolved
 controller navigation and strict resource-owner scans use the execution owner;
@@ -91,9 +94,40 @@ is reported and leaves the pending resource claim unsettled.
 
 `_create_worktree_core` has an internal `identity_mode="tuple-v1"` opt-in;
 omitting it retains `legacy`. It derives the physical/environment/owner tuple
-from the existing receiving registry and actual platform, then revalidates it
-before allocation. Missing or conflicting local execution evidence refuses.
+from existing receiving configuration, the OS hostname and actual platform,
+with optional registry customization, then revalidates it before allocation.
+Absent, empty or unrelated-only maps do not prevent local tuple creation.
+Conflicting local execution evidence still refuses.
 Callers cannot supply arbitrary tuple metadata through this mode.
+Derived names retain their observation provenance: a physical customization
+ending in `-win` or `-wsl` is not reparsed as an explicit environment choice.
+Parent-obligation settlement uses the same validated execution owner, including
+when the map customizes only the native or guest sibling.
+The reciprocal creation claim uses the admitted tuple owner as well; native
+configuration may retain its raw hostname without changing the child's qualified
+reference. Legacy creation and settlement preserve their original owner labels.
+Creation also checks the child's execution owner against the independently
+loaded parent project's context under the parent record lock. A prospective
+claim that the receiving project cannot later settle refuses before writing.
+Session-registration authority preserves explicit machine bindings from project,
+global and drop-in configuration, so an explicit key can disambiguate entries
+sharing the observed hostname; observation alone still cannot select among them.
+The authority-only registration loader uses the same naming adapter as ordinary
+configuration. Legacy native records retaining the literal observed hostname
+remain usable when only the sibling environment is customized. This is a
+record-scoped compatibility proof: actual platform, receiving project,
+checkout namespace and the existing ledger still have to agree. It does not
+make a foreign execution key or hostname-only target globally local.
+The record-proven legacy-parent shortcut applies only to legacy children.
+Tuple children must satisfy their lifecycle's execution-owner fence before
+journaling or carving; an unsupported mixed parent spelling leaves no new
+obligation. Historical legacy platform/path overrides retain their existing
+actual-record compatibility. Tuple admission and explicit non-legacy execution
+keys still require the configured platform to match actual execution.
+A legacy fallback also compares the record's platform to actual execution;
+matching a configured path override alone cannot admit a foreign-platform
+record. Only the earlier actual-record compatibility proof preserves a valid
+legacy override.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names
@@ -129,6 +163,9 @@ checks without being rewritten. Explicit creation-tail repair uses the retained
 tuple and exact pair stub, not a fresh allocation. A proven compatible legacy
 registry alias keeps its original record and reciprocal-reference spelling.
 Replacement of the retained nonce or owner during repair refuses.
+Later customization that changes the current tuple still refuses explicitly;
+it cannot reformat an already admitted allocation. Compatibility for that
+retained case remains separate from prospective derivation.
 
 `load_or_create_anchor_record` and `_adopt_linked_worktree` expose the same
 internal opt-in for genuinely new records. The existing if-absent record lock

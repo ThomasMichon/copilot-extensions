@@ -10,9 +10,10 @@ import sqlite3
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import config as cfg, local_cache_refresh, tracking
+from agent_worktrees import config as cfg, execution_spaces, local_cache_refresh, tracking
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
@@ -79,17 +80,166 @@ def test_ordinary_producer_stays_legacy(tmp_path: Path, monkeypatch: pytest.Monk
     assert "machine_identity_version" not in row and "execution_machine" not in row
 
 
-@pytest.mark.parametrize("defect", ["missing", "foreign-platform", "config-platform", "unknown-mode"])
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("owned", [False, True])
+def test_ordinary_sibling_only_creation_remains_mutable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, owned: bool,
+) -> None:
+    from agent_worktrees import config_authority, obligations, tracking_session_registration_write
+
+    load_config = cfg.load_config
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    sibling = "windows" if platform == "wsl" else "wsl"
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n  sibling-space:\n    hostname: raw-host\n"
+        f"    physical_host: friendly-host\n    execution_platform: {sibling}\n",
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({
+        "repo_name": config.repo_name, "repos": {config.repo_name: {
+            "anchor": config.default_repo.anchor,
+            "worktree_root": config.default_repo.worktree_root,
+        }},
+    }))
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+    config = load_config(
+        path, project=config.repo_name, include_control_plane_related_pr=False,
+        include_knowledge_preferences=False,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir() / "worktrees")
+    cfg.project_dir().mkdir()
+    (cfg.project_dir() / "config.yaml").write_text(path.read_text())
+    monkeypatch.setattr(config_authority, "_load_state_root_authority", lambda *_a: ({}, ""))
+    owner_ref = None
+    if owned:
+        parent_checkout = Path(config.default_repo.worktree_root) / "parent"
+        parent_checkout.mkdir(parents=True)
+        parent = tracking.create_new_record(
+            "parent", "worktree/parent", str(parent_checkout), config.repo_name,
+            config.machine, platform, cfg.tracking_dir(),
+        )
+        owner_ref = f"{config.machine}/{config.repo_name}/parent"
+        monkeypatch.setattr(
+            m, "_coordination_readiness_for_owner_ref", lambda *_a: SimpleNamespace(ready=True),
+        )
+    row = m._create_worktree_core(
+        config, creation_key="ordinary-request", owner_ref=owner_ref,
+    )["worktree"]
+    record = tracking.load_record(cfg.tracking_dir() / f"{row['id']}.yaml")
+    assert record.machine_identity is None
+    assert record.machine == config.machine
+    before = record.yaml_path.read_bytes()
+    execution_spaces.require_record_mutation(record, config)
+    replayed = m._create_worktree_core(
+        config, creation_key="ordinary-request", owner_ref=owner_ref,
+    )
+    assert replayed["worktree"] == row
+    assert record.yaml_path.read_bytes() == before
+    registered = tracking_session_registration_write.apply_session_register({
+        "worktree_id": record.worktree_id, "yaml_path": str(record.yaml_path),
+        "session_id": "ordinary-session",
+    })
+    assert registered == {"ok": True, "linked_handoff": None}
+    assert tracking.load_record(record.yaml_path).session_entry("ordinary-session") is not None
+    before = record.yaml_path.read_bytes()
+    for changes in (
+        {"machine": "sibling-space"}, {"platform": sibling},
+        {"repo": "foreign-project"}, {"worktree_path": str(tmp_path / "unproven")},
+    ):
+        try:
+            execution_spaces.require_record_mutation(replace(record, **changes), config)
+        except execution_spaces.ExecutionSpaceError:
+            pass
+        else:
+            pytest.fail(f"accepted foreign record changes: {changes!r}")
+        assert record.yaml_path.read_bytes() == before
+    if owned:
+        warnings = []
+        execution_spaces.settle_parent_obligation(
+            tracking.load_record(record.yaml_path), config, record.worktree_id,
+            output=SimpleNamespace(ok=lambda _message: None, warn=warnings.append),
+        )
+        assert warnings == []
+        assert tracking.load_record(parent.yaml_path).resources[0].state == obligations.AT_REST
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+def test_tuple_child_does_not_borrow_legacy_parent_proof(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    from agent_worktrees.legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
+
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    topology = Path(config.default_repo.anchor) / "machines.yaml"
+    if platform == "wsl":
+        topology.unlink()
+    else:
+        topology.write_text(
+            "machines:\n  sibling-space:\n    hostname: raw-host\n"
+            "    physical_host: friendly-host\n    execution_platform: wsl\n",
+        )
+    legacy_owner = "raw-host"
+    config = replace(
+        config, machine=f"{legacy_owner}-wsl" if platform == "wsl" else legacy_owner,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir() / "worktrees")
+    monkeypatch.setattr(
+        m, "_coordination_readiness_for_owner_ref", lambda *_a: SimpleNamespace(ready=True),
+    )
+    parent_checkout = Path(config.default_repo.worktree_root) / "parent"
+    parent_checkout.mkdir(parents=True)
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(parent_checkout), config.repo_name,
+        legacy_owner, platform, cfg.tracking_dir(),
+    )
+    owner_ref = f"{legacy_owner}/{config.repo_name}/parent"
+    assert resolve_legacy_wsl_owner_ref(tracking.parse_claim_ref(owner_ref), config) == parent.yaml_path
+    before = parent.yaml_path.read_bytes()
+    effects = []
+    carve = m.git_ops.create_worktree
+
+    def create_checkout(*args: str) -> None:
+        effects.append("git")
+        carve(*args)
+
+    monkeypatch.setattr(m.git_ops, "create_worktree", create_checkout)
+    with pytest.raises(RuntimeError, match="cross-space|physical-host"):
+        m._create_worktree_core(
+            config, identity_mode="tuple-v1",
+            owner_ref=owner_ref,
+            creation_intent=lambda _allocation: effects.append("reserve"),
+        )
+    assert effects == []
+    assert parent.yaml_path.read_bytes() == before
+    assert [path.name for path in cfg.tracking_dir().glob("*.yaml")] == ["parent.yaml"]
+
+
+@pytest.mark.parametrize("defect", [
+    "invalid-map", "foreign-platform", "config-platform", "config-platform-unmapped", "unknown-mode",
+])
 def test_tuple_refusal_precedes_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str,
 ) -> None:
     config = _setup(tmp_path, monkeypatch)
-    if defect == "missing":
-        (Path(config.default_repo.anchor) / "machines.yaml").write_text("machines: {}\n")
+    if defect == "invalid-map":
+        (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+            "machines:\n  guest-space: {execution_platform: windows}\n",
+        )
     elif defect == "foreign-platform":
         monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
-    elif defect == "config-platform":
+    elif defect in ("config-platform", "config-platform-unmapped"):
         config = replace(config, platform="windows")
+        if defect == "config-platform-unmapped":
+            (Path(config.default_repo.anchor) / "machines.yaml").unlink()
     effects = []
     monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: effects.append("git"))
     with pytest.raises((ValueError, RuntimeError), match="identity|mode|platform|execution"):
@@ -99,6 +249,118 @@ def test_tuple_refusal_precedes_allocation(
         )
     assert effects == []
     assert not (tmp_path / "tracking").exists()
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("map_kind,physical_name", [
+    ("absent", "friendly-host"), ("empty", "friendly-host"), ("unrelated", "friendly-host"),
+    ("matching", "friendly-host"), ("sibling-only", "friendly-host"),
+    ("sibling-only", "friendly-wsl"), ("sibling-only", "friendly-win"),
+])
+@pytest.mark.parametrize("kind", ["session", "bridge", "system"])
+def test_actual_local_tuple_creation_without_map_enrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    platform: str, map_kind: str, physical_name: str, kind: str,
+) -> None:
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host-wsl")
+    topology = Path(config.default_repo.anchor) / "machines.yaml"
+    maps = {
+        "empty": {},
+        "unrelated": {"peer-space": {
+            "execution_platform": "linux", "physical_host": "peer-host",
+        }},
+        "matching": {"local-space": {
+            "hostname": "Observed-Host-wsl", "execution_platform": platform,
+            "physical_host": physical_name,
+        }},
+        "sibling-only": {"sibling-space": {
+            "hostname": "Observed-Host-wsl",
+            "execution_platform": "windows" if platform == "wsl" else "wsl",
+            "physical_host": physical_name,
+        }},
+    }
+    if map_kind == "absent":
+        topology.unlink()
+    else:
+        topology.write_text(yaml.safe_dump({"machines": maps[map_kind]}))
+    config = replace(config, machine=cfg.detect_machine(config.default_repo.anchor))
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    physical = physical_name if map_kind in ("matching", "sibling-only") else "observed-host-wsl"
+    execution = "local-space" if map_kind == "matching" else physical + (
+        "-wsl" if platform == "wsl" else ""
+    )
+    assert execution_spaces.require_owner_identity(execution, config)
+    if map_kind == "sibling-only":
+        assert not execution_spaces.require_owner_identity("sibling-space", config)
+    result = m._create_worktree_core(
+        config, kind=kind, name="service", identity_mode="tuple-v1",
+        creation_key="local-request",
+    )
+    row = result["worktree"]
+    record = tracking.load_record(tmp_path / "tracking" / f"{row['id']}.yaml")
+    assert record.machine_identity == WorktreeMachineIdentity(physical, platform, execution)
+    assert {key: row[key] for key in record.machine_fields} == record.machine_fields
+    before = record.yaml_path.read_bytes()
+    monkeypatch.setattr(
+        m.git_ops, "create_worktree", lambda *_a: pytest.fail("replay must not allocate"),
+    )
+    replayed = m._create_worktree_core(
+        config, kind=kind, name="service", identity_mode="legacy",
+        creation_key="local-request",
+    )
+    assert replayed["worktree"] == row
+    assert record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_owned_tuple_creation_journals_and_settles_its_execution_owner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    from agent_worktrees import creation_identity, obligations
+
+    config = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    (Path(config.default_repo.anchor) / "machines.yaml").write_text(
+        "machines:\n  sibling-space:\n    hostname: raw-host\n"
+        "    physical_host: friendly-host\n    execution_platform: wsl\n",
+    )
+    config = replace(config, machine="raw-host")
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(
+        cfg, "project_dir", lambda name=None: tmp_path / "state" / (name or config.repo_name),
+    )
+    monkeypatch.setattr(
+        cfg, "tracking_dir", lambda name=None: cfg.project_dir(name) / "worktrees",
+    )
+    monkeypatch.setattr(
+        m, "_coordination_readiness_for_owner_ref", lambda *_a: SimpleNamespace(ready=True),
+    )
+    identity = creation_identity.new_machine_identity(config, "tuple-v1")
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(tmp_path / "worktrees" / "parent"),
+        config.repo_name, identity.machine, platform, cfg.tracking_dir(),
+        machine_identity=identity,
+    )
+    owner_ref = f"{identity.execution_machine}/{config.repo_name}/parent"
+    row = m._create_worktree_core(
+        config, owner_ref=owner_ref, identity_mode="tuple-v1",
+        creation_intent=lambda _allocation: None,
+    )["worktree"]
+    child = tracking.load_record(cfg.tracking_dir() / f"{row['id']}.yaml")
+    saved = tracking.load_record(parent.yaml_path)
+    assert saved.resources[0].ref == (
+        f"{child.execution_machine}/{config.repo_name}/{child.worktree_id}"
+    )
+    assert saved.resources[0].state == obligations.ACTIVE
+    warnings = []
+    execution_spaces.settle_parent_obligation(
+        child, config, child.worktree_id,
+        output=SimpleNamespace(ok=lambda _message: None, warn=warnings.append),
+    )
+    assert warnings == []
+    assert tracking.load_record(parent.yaml_path).resources[0].state == obligations.AT_REST
 
 
 def test_changed_tuple_refuses_before_reserving_or_carving(

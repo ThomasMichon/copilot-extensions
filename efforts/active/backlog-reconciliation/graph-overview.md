@@ -424,6 +424,41 @@ received. No metadata-only arrival is pending; initial research layers and
 provenance remain unchanged. These are tracking outcomes, not implementation,
 native qualification, source/resource transfers or parent completion.
 
+## Tenth delivered consolidation
+
+Batch 100 considered ten ordinary-guidance and independent-custody issues.
+Four complete cases, **#4174, #5714, #6092 and #6817**, were received
+directly in **OPEN #2173** before administrative source supersession.
+The ENTIRE actual 31,590-byte body and original discussion/custody were
+read back. All 40 incumbent unchecked rows and earlier bytes survive;
+sixteen Plan, ten Validation and eight Coordination rows add the four
+complete finite cases, for 74 unchecked rows total. No ROOT was amended.
+
+The cases preserve optional legacy-registry documentation, actual target-local
+raw-provider instruction ordering, declared-version governed reconciliation of
+the SAME consumer with a small actual hook check, and all three explicit
+disabled/enabled/control native-resolver cases plus isolated actual loading.
+**#5063 remains independent** for ordinary missing-baseline/unknown-descendant
+cleanup diagnostics. **#1508, #2256, assigned #5993 and narrow #6814**
+retain complete independent recovery, conformance, admission/rollout and
+qualified installed-identity custody. No group signal, source/resource transfer,
+custom aggregator, universal service or new all-host/native-every-leaf gate
+is authorized. See the
+[dated checkpoint](<journal/2026/10.24 ordinary-guidance-family-100.md>).
+
+All ten public dispositions, original bodies, 21 original comments and whole
+receiver were audited before the census: **900 whole-queue OPEN at
+2026-10-24 21:05:38 PDT**, comprising 731 original-cohort and 169 inflow
+issues. There are 653 eligible open and 247 untouched excluded-author issues,
+still 171 above the fixed checkpoint. No arrival or external closure intervened.
+
+The graph retains **717 historical eligible identities**: 653 open and 64
+closed, comprising 56 audited graph supersessions and eight external changes
+without credit. Sixteen numeric and three existing ROOT intakes have been
+received. No metadata-only arrival is pending; initial research layers and
+provenance remain unchanged. Batch 100 and 738 campaign closures are not
+the fixed whole-queue checkpoint or parent completion.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider

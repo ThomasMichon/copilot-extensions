@@ -150,7 +150,7 @@ def test_record_json_contains_physical_metadata_and_explicit_owner(tmp_path: Pat
             assert "machine_identity_version" not in result
 
 
-def test_tuple_requires_registered_owner_even_when_legacy_fallback_matches(
+def test_tuple_requires_exact_local_context_without_optional_map(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = cfg.Config(
@@ -164,8 +164,59 @@ def test_tuple_requires_registered_owner_even_when_legacy_fallback_matches(
 
     record.machine = "desk"
     record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "desk-wsl")
-    with pytest.raises(execution_spaces.ExecutionSpaceError, match="registered execution identity"):
+    execution_spaces.require_record_mutation(record, config)
+    for identity in (
+        WorktreeMachineIdentity("elsewhere", "wsl", "desk-wsl"),
+        WorktreeMachineIdentity("desk", "windows", "desk-wsl"),
+        WorktreeMachineIdentity("desk", "wsl", "foreign-space"),
+    ):
+        with pytest.raises(execution_spaces.ExecutionSpaceError, match="identity|execution space"):
+            execution_spaces.require_record_mutation(replace(
+                record, machine=identity.machine, platform=identity.environment, machine_identity=identity,
+            ), config)
+
+
+@pytest.mark.parametrize("unrelated_map", [False, True])
+@pytest.mark.parametrize("defect", ["snapshot", "repo", "platform", "owner", "execution"])
+def test_optional_map_never_replaces_receiving_record_fences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unrelated_map: bool, defect: str,
+) -> None:
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="desk-wsl", platform="wsl", repo_name="project",
+        repos={"project": cfg.RepoConfig(
+            anchor=str(tmp_path), worktree_root=str(tmp_path / "trees"),
+        )},
+    )
+    if unrelated_map:
+        (tmp_path / "machines.yaml").write_text(
+            "machines:\n  peer-space: {execution_platform: wsl, physical_host: peer-host}\n",
+        )
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "desk")
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+    monkeypatch.setattr(cfg, "project_dir", lambda project: tmp_path / project)
+    path = tmp_path / "project" / "worktrees" / "owned.yaml"
+    path.parent.mkdir(parents=True)
+    record = _record(path, versioned=False)
+    record.machine = "desk"
+    record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "desk-wsl")
+    tracking.save_record(record, path)
+    before = path.read_bytes()
+    execution_spaces.require_record_mutation(record, config)
+    record = tracking.load_record(path)
+    if defect == "snapshot":
+        record.worktree_path = str(tmp_path / "foreign" / "owned")
+    elif defect == "repo":
+        record.repo = "foreign-project"
+    elif defect == "platform":
+        record.platform = "windows"
+        record.machine_identity = WorktreeMachineIdentity("desk", "windows", "desk")
+    elif defect == "owner":
+        record.owner_ref = "peer-space/project/parent"
+    else:
+        record.machine_identity = WorktreeMachineIdentity("desk", "wsl", "peer-space")
+    with pytest.raises(execution_spaces.ExecutionSpaceError):
         execution_spaces.require_record_mutation(record, config)
+    assert path.read_bytes() == before
 
 
 def test_owner_refs_and_native_session_claims_use_execution_key(tmp_path: Path) -> None:

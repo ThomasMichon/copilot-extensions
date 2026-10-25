@@ -39,7 +39,6 @@ from . import (
     codename_tracking,
     git_ops,
     local_cache_refresh,
-    obligations,
     permissions,
     profile_assignment,
     state_root as state_root_mod,
@@ -409,70 +408,20 @@ def _journal_owner_reciprocal_claim(
     owner_ref: str | None,
     *,
     owner_locked: bool = False,
+    machine_identity: WorktreeMachineIdentity | None = None,
 ) -> bool:
-    """Journal the reciprocal ``worktree`` claim onto an owner's ledger (Ph3c).
-
-    A worktree created with an ``owner_ref`` is another worktree's outbound
-    resource. This writes the **forward** half of that bidirectional link -- a
-    ``worktree``-kind :class:`ResourceClaim` on the *owner*'s record whose ``ref``
-    is this worktree's qualified ClaimRef -- so the owner's finalize gate sees
-    the obligation and the child's finalize ``_settle_parent_obligation`` has a
-    matching claim to settle. Without it the link is half-formed (backward
-    ``owner_ref`` set, but the owner holds no claim), so settlement is a silent
-    no-op.
-
-    Same-machine owner -> written here; a **cross-machine** owner defers to the
-    lease mirror (``_resolve_owner_ref_record_path`` returns no local path).
-    Fully best-effort: any failure returns ``False`` and never raises (so it
-    can never break a worktree carve). Idempotent -- ``add_resource_claim``
-    dedups by ref, so a ``run``-driven create that also journals is harmless.
-    Returns ``True`` only when a claim was written.
-    """
+    """Preserve the compatibility-root owner resolver for reciprocal claims."""
     if not owner_ref:
         return False
     core = _core()
-    # Stage D: real implementation lives in claims_cli (cluster-free).
     from . import claims_cli as _claims_cli
+    from .creation_owner_claim import journal_owner_claim
 
-    _resolve_owner_ref_record_path = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
-
-    try:
-        owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
-        if owner_path is None or not owner_path.exists():
-            return False
-        child_ref = tracking.format_claim_ref(
-            config.machine,
-            config.repo_name,
-            worktree_id,
-        )
-
-        def _write_claim() -> None:
-            owner_rec = tracking.load_record(owner_path)
-            from .execution_spaces import require_project_record_mutation
-
-            require_project_record_mutation(owner_rec)
-            tracking.add_resource_claim(
-                owner_rec,
-                tracking.ResourceClaim(
-                    kind="worktree",
-                    ref=child_ref,
-                    created_at=tracking._now_iso(),
-                    state=obligations.ACTIVE,
-                ),
-                save=False,
-            )
-            tracking.save_record(owner_rec, owner_path)
-
-        if owner_locked:
-            _write_claim()
-        else:
-            with tracking._RecordLock(owner_path, require_sidecar=True):
-                _write_claim()
-        print(f"Journaled this worktree as an obligation on {owner_ref}.", file=sys.stderr,)
-        return True
-    except Exception as exc:  # never let journaling break the carve
-        print(f"owner-claim journaling failed (non-fatal): {exc}", file=sys.stderr)
-        return False
+    resolve_owner = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+    return journal_owner_claim(
+        config, worktree_id, owner_ref, resolve_owner=resolve_owner,
+        owner_locked=owner_locked, machine_identity=machine_identity,
+    )
 
 
 @step("Synchronizing repository source")
@@ -678,8 +627,12 @@ def _create_worktree_core(
                 f"--owner-ref must be qualified as machine/project/worktree_id (got {owner_ref!r})"
             )
         from .execution_spaces import require_owner_identity
+        from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
-        if not require_owner_identity(parsed_owner.machine, config):
+        if (
+            (machine_identity is not None or resolve_legacy_wsl_owner_ref(parsed_owner, config) is None)
+            and not require_owner_identity(parsed_owner.machine, config)
+        ):
             raise RuntimeError(
                 f"cross-space owner {owner_ref} cannot synchronously accept "
                 "this worktree obligation; use a dispatch/lease flow that "
@@ -844,7 +797,8 @@ def _create_worktree_core(
                     "branch": branch, "repo": config.repo_name,
                 })
             if owner_guard is not None and not core._journal_owner_reciprocal_claim(
-                config, worktree_id, owner_ref, owner_locked=True
+                config, worktree_id, owner_ref, owner_locked=True,
+                **({"machine_identity": machine_identity} if machine_identity is not None else {}),
             ):
                 raise RuntimeError(f"owner {owner_ref} cannot accept a new worktree obligation")
 
