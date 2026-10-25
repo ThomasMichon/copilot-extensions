@@ -174,7 +174,10 @@ class LaunchHistoryScreen(ModalScreen[None]):
         )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        if self._busy or event.data_table.id != "history-list":
+        if event.data_table.id != "history-list":
+            return
+        event.stop()
+        if self._busy:
             return
         attempt_id = str(event.row_key.value)
         self.query_one("#history-status", Static).update(
@@ -197,7 +200,11 @@ class LaunchHistoryScreen(ModalScreen[None]):
     def _render_detail(self) -> None:
         text = json.dumps(self._detail, ensure_ascii=False, indent=2)
         if len(text) > _DISPLAY_LIMIT:
-            text = text[:_DISPLAY_LIMIT] + "\n[Preview truncated; use launch-attempts ID --json for detail.]"
+            attempt = self._detail["attempt"]
+            command = f"worktree-manager launch-attempts {attempt['attempt_id']} --json"
+            if "input" in attempt:
+                command += " --include-input"
+            text = text[:_DISPLAY_LIMIT] + f"\n[Preview truncated; use {command} for detail.]"
         self.query_one("#history-detail", Static).update(text)
         self.query_one("#history-status", Static).update(
             "Local evidence only; prompt acceptance remains unknown. "

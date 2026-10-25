@@ -701,6 +701,8 @@ class WorktreeManagerApp(App):
             pass
 
     def on_data_table_row_selected(self, event) -> None:  # Enter on a row
+        if self.screen is not self.screen_stack[0]:
+            return
         descriptor = self._active_pivot()
         if (
             descriptor.pivot.entity == "worktree"

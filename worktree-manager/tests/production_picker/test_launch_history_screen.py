@@ -196,7 +196,8 @@ def test_close_during_slow_metadata_read_drops_late_result(journal, monkeypatch)
     asyncio.run(run())
 
 
-def test_preview_budget_is_explicit_and_counts_unicode_characters(journal, monkeypatch):
+@pytest.mark.parametrize("include_input", [False, True])
+def test_preview_budget_is_explicit_and_counts_unicode_characters(journal, monkeypatch, include_input):
     async def run():
         app = App()
         screen = LaunchHistoryScreen("demo")
@@ -207,13 +208,64 @@ def test_preview_budget_is_explicit_and_counts_unicode_characters(journal, monke
             monkeypatch.setattr(
                 screen.query_one("#history-detail", Static), "update", rendered.append,
             )
-            screen._detail = {"attempt": {"input": {"prompt": "\u03bb" * 40000}}}
+            screen._detail = {"attempt": {"attempt_id": "a" * 32}}
+            if include_input:
+                screen._detail["attempt"]["input"] = {"prompt": "\u03bb" * 40000}
+            else:
+                screen._detail["engine"] = {"evidence": "\u03bb" * 40000}
             screen._render_detail()
             prefix, notice = rendered[-1].split("\n[Preview truncated;", 1)
             assert len(prefix) == 32768
             assert prefix == json.dumps(screen._detail, ensure_ascii=False, indent=2)[:32768]
-            assert "launch-attempts ID --json" in notice
+            assert f"launch-attempts {'a' * 32} --json" in notice
+            assert ("--include-input" in notice) == include_input
             screen._detail = None
+
+    asyncio.run(run())
+
+
+def test_compact_history_row_messages_never_reach_resume_even_while_busy(journal, monkeypatch):
+    from worktree_manager.picker_app import WorktreeManagerApp
+
+    entered, release = threading.Event(), threading.Event()
+    leaked, launches = [], []
+
+    class CompactApp(WorktreeManagerApp):
+        def on_data_table_row_selected(self, event):
+            leaked.append(event)
+            super().on_data_table_row_selected(event)
+
+    def evidence(*args, **kwargs):
+        entered.set()
+        assert release.wait(5)
+        return {"receipts": [], "errors": [], "prompt_acceptance": "unknown"}
+
+    monkeypatch.setattr(launch_history_cli, "engine_evidence", evidence)
+
+    async def run():
+        app = CompactApp(lambda: [], project="demo")
+        monkeypatch.setattr(app, "_request_launch", launches.append)
+        async with app.run_test(size=(100, 40)) as pilot:
+            try:
+                await pilot.press("ctrl+shift+h")
+                screen = app.screen
+                await _ready(pilot, screen)
+                table = screen.query_one("#history-list", DataTable)
+                table.focus()
+                await pilot.press("enter")
+                async with asyncio.timeout(5):
+                    while not entered.is_set():
+                        await pilot.pause(0.01)
+                assert screen._busy and launches == [] and leaked == []
+                table.post_message(DataTable.RowSelected(table, 0, table.ordered_rows[0].key))
+                await pilot.pause()
+                assert launches == [] and leaked == []
+                release.set()
+                await _ready(pilot, screen)
+                assert screen._detail is not None and app.screen is screen
+                assert launches == [] and leaked == []
+            finally:
+                release.set()
 
     asyncio.run(run())
 
