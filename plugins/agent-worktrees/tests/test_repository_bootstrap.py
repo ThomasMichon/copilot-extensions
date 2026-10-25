@@ -469,6 +469,42 @@ def test_existing_exact_commit_reuses_without_fetch_or_checkout(source, registry
     assert registry.read_bytes() == before
 
 
+@pytest.mark.parametrize("phase", ["plan", "apply", "reverify"])
+def test_replacement_tree_cannot_satisfy_an_approved_commit(
+    source, registry, monkeypatch, phase,
+) -> None:
+    approved = git(source, "rev-parse", "HEAD")
+    for name in ("setup.ps1", "setup.sh"):
+        (source / name).write_text("# unapproved replacement source\n", encoding="utf-8")
+    commit(source)
+    replacement = git(source, "rev-parse", "HEAD")
+    git(source, "replace", approved, replacement)
+    git(source, "-c", "core.hooksPath=" + os.devnull, "checkout", "-q", "--detach", approved)
+    assert git(source, "rev-parse", "HEAD") == approved
+    assert git(source, "status", "--porcelain") == ""
+    before = registry.read_bytes()
+    monkeypatch.setattr(protocol, "_interpreter", lambda *a: pytest.fail("replacement source executed"))
+    if phase == "reverify":
+        # Revalidate a setup authorized by a reader that honored replacement refs.
+        script = source / ("setup.ps1" if sys.platform == "win32" else "setup.sh")
+        selected = protocol.Setup(
+            protocol.Source(source, URL, approved), script,
+            "powershell" if sys.platform == "win32" else "bash",
+            protocol._digest(source / protocol.DECLARATION), protocol._digest(script),
+        )
+        with pytest.raises(protocol.SetupError, match="source changes"):
+            protocol.run(selected, apply=True, trusted=True)
+    else:
+        assert bootstrap.command([
+            URL, "--target", str(source), "--commit", approved,
+            *(["--apply", "--trust-repository-setup"] if phase == "apply" else []),
+        ]) == 1
+    assert registry.read_bytes() == before
+    assert git(source, "rev-parse", "HEAD") == approved
+    assert git(source, "rev-parse", f"refs/replace/{approved}") == replacement
+    assert (source / "setup.ps1").read_text() == "# unapproved replacement source\n"
+
+
 @pytest.mark.parametrize("failure", ["peeled-tag", "checkout"])
 def test_new_commit_selection_failure_preserves_partial_target_without_registration(
     tmp_path, registry, monkeypatch, failure,
@@ -485,10 +521,12 @@ def test_new_commit_selection_failure_preserves_partial_target_without_registrat
         if "ls-remote" in argv:
             return subprocess.CompletedProcess(argv, 0, URL, "")
         if "clone" in argv:
+            assert "--no-replace-objects" in argv
             target.mkdir()
             (target / ".git").mkdir()
             return subprocess.CompletedProcess(argv, 0)
         assert failure == "checkout" and "checkout" in argv
+        assert "--no-replace-objects" in argv
         assert "core.hooksPath=" + os.devnull in argv
         assert "--detach" in argv and requested in argv and "--force" not in argv
         assert "timeout" not in kwargs and not kwargs.get("capture_output", False)

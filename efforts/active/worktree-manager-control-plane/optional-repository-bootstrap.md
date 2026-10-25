@@ -315,3 +315,14 @@ These are fresh-source and synthetic-provider controls on Windows, not real
 GCM/browser authentication, tool-less provisioning, native POSIX or external
 machine qualification. The unchecked full-entry and attended acceptance items
 above remain open. Merge/release/rollout are separate and no rollout was made.
+
+The first review of #8944 identified a real replacement-ref gap: Git could
+report the approved HEAD and a clean virtual replacement tree while the setup
+bytes belonged to another commit. A real Git regression reproduced admission
+and attempted interpreter selection before the fix. Shared source qualification
+and every revalidation now read unreplaced objects; clone and explicit checkout
+also disable replacement objects without changing or deleting user refs.
+Three real replacement-tree controls cover plan, apply and revalidation.
+The focused packet also checked ordinary source inspection/setup and the native
+pinned HTTPS consumer. A checkout-argument assertion caught a missing flag in
+the first fix; it and the real pinned consumer passed after correction.

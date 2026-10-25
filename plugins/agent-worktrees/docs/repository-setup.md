@@ -71,6 +71,12 @@ require owner reconciliation before retry. The command never selects a different
 commit to make setup succeed. Execution trust remains bound to the actual
 qualified commit, declaration and setup entry.
 
+Source qualification and every subsequent revalidation use unreplaced Git
+objects, not the virtual history selected by `refs/replace`. The explicit
+detached checkout does likewise. An existing replacement-tree checkout cannot
+present different setup bytes as a clean approved commit; refusal preserves
+its source and replacement refs rather than rewriting either.
+
 The additive `repos-setup/1` CLI capability is `immutable-commit`.
 The selected executable's strict parser gates the explicit capability request
 before repository effects; an older receiver without `--commit` reports an

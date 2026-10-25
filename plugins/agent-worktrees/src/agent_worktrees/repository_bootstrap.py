@@ -172,7 +172,7 @@ def _clone(
     if resolved.returncode or protocol.https_url(resolved.stdout.strip()) != protocol.https_url(url):
         raise protocol.SetupError("Git URL rewrites select another remote; acquisition was refused.")
     completed = subprocess.run(
-        ["git", *credential_args, "-c", "core.hooksPath=" + os.devnull,
+        ["git", "--no-replace-objects", *credential_args, "-c", "core.hooksPath=" + os.devnull,
          "clone", *(["--no-checkout"] if commit else []), "--", url, str(path)],
         cwd=path.parent, env=environment, **protocol._stdio_kwargs(),
     )
@@ -195,7 +195,7 @@ def _clone(
         if resolved_commit != commit:
             raise protocol.SetupError("Requested object is not the exact selected commit.")
         completed = subprocess.run(
-            ["git", *credential_args, "-c", "core.hooksPath=" + os.devnull,
+            ["git", "--no-replace-objects", *credential_args, "-c", "core.hooksPath=" + os.devnull,
              "-C", str(path), "checkout", "--detach", commit, "--"],
             env=environment, **protocol._stdio_kwargs(),
         )
