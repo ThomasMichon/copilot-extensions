@@ -33,6 +33,7 @@ from test_runtime_custody import close, installation
     ("new", "reply"), ("load", "reply"), ("new", "drop-reply"), ("load", "drop-reply"),
     ("new", "close-before-capture"), ("load", "close-before-capture"),
     ("new", "stop-reap-resume"),
+    ("new", "shutdown-rehydrate"),
 ])
 async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, mode: str,
@@ -162,6 +163,33 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                     )
                 assert rig.runtime.store.journal.read_launch(continuation)["started_at"] is None
                 assert session._native_turn_transport is retained_owner
+            elif mode == "shutdown-rehydrate":
+                await rig.manager.stop_session(
+                    session.session_id, cancel_turn=False, allow_background_recovery=True,
+                )
+                assert handles[0].proc.poll() is None
+                stored = rig.db.get_session(session.session_id)
+                assert not stored["background_recovery_enabled"]
+                assert stored["cold_recovery_stop_token"] is None
+                close(rig.db, identity, producer)
+                successor = SessionManager(rig.db)
+                successor._host_index = rig.manager._host_index
+                retained = successor.get_session(session.session_id)
+                assert retained.client is None and not retained.background_recovery_enabled
+                attach = AsyncMock(side_effect=AssertionError("must not reattach"))
+                monkeypatch.setattr(successor, "_reattach_one", attach)
+                assert await successor.reattach_session_hosts(recover_cold=False) == 0
+                attach.assert_not_awaited()
+                with pytest.raises(RuntimeCustodyError, match="Host reattachment"):
+                    await successor._try_reattach_live_host(retained)
+                with pytest.raises(RuntimeCustodyError, match="Host reattachment"):
+                    await _SessionHostConnectionMixin._reattach_one(
+                        successor, successor._host_index.get(session.session_id),
+                        retained, new_status=SessionStatus.IDLE,
+                    )
+                with pytest.raises(RuntimeCustodyError, match="prompt"):
+                    await successor.submit_prompt(session.session_id, "must not recover")
+                assert retained.client is None and handles[0].proc.poll() is None
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         assert [item["method"] for item in received] == (
             [f"session/{kind}"] if mode in ("drop-reply", "close-before-capture")

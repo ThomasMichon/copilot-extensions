@@ -81,6 +81,10 @@ History resync also refuses associated sessions before client teardown and
 rechecks their association under the lifecycle lock.
 A retained turn owner also refuses selected resume before another Host or
 native load; stopping and reaping its processes does not enroll owner transfer.
+Session insertion, shutdown stop and recovery-enable writes preserve the
+durable association's automatic-recovery exclusion. Hydration excludes
+associated history even if an older recovery flag was enabled. Startup and
+direct Host reattachment refuse that association before adopting another client.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates
@@ -131,6 +135,9 @@ network request, tree/hash walk or full-history scan is added. Only the selected
 local Host opens the same database passively at its child/exec boundaries.
 Prompt and handoff admission without an installed turn owner add one local
 primary-key lookup on the existing connection to refuse a retained association.
+Startup performs one such lookup per indexed Host before planning or claiming
+reattachment; direct reattachment checks before client teardown. Hydration uses
+the session rows it already reads, without another history scan.
 
 The focused source controls cover closure across worker scheduling, one-shot
 commit, child creation, native RPC and consecutive configuration effects;

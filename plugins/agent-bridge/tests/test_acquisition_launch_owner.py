@@ -360,3 +360,19 @@ async def test_acquisition_launch_resync_rechecks_original_association_before_te
     spawn.assert_not_awaited()
     assert rig.session.client is client
     assert rig.session.status == SessionStatus.IDLE
+
+
+def test_acquisition_launch_durable_association_keeps_recovery_excluded(local_launch):
+    from agent_bridge.session_manager import SessionManager
+
+    rig = local_launch
+    sid = rig.session.session_id
+    assert not rig.db.get_session(sid)["background_recovery_enabled"]
+    assert not rig.db.update_session_background_recovery(sid, True)
+    assert not rig.db.update_session_stopped(sid, 3.0, True)
+    assert not rig.db.get_session(sid)["background_recovery_enabled"]
+    rig.db.execute_write(
+        "UPDATE sessions SET background_recovery_enabled=1 WHERE id=?", (sid,),
+    )
+    successor = SessionManager(rig.db)
+    assert not successor.get_session(sid).background_recovery_enabled

@@ -299,6 +299,13 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   The isolated acquisition/handoff selection passes 224 controls, including
   both failed-capture handoff branches and selected create, stop/reap, then
   selected-resume refusal. No owner transfer or replacement launch is enrolled.
+- Shutdown recovery now preserves the durable association's exclusion through
+  insertion, stop, enable attempts and hydration, including legacy enabled
+  flags. Startup and direct Host reattachment refuse associated history before
+  client adoption. The isolated acquisition/reattach/dormancy/Host/manager
+  selection passes 456 controls, including a selected launch, ordinary
+  shutdown detach, closed epoch and fresh-manager hydration with no ordinary
+  reattachment or prompt. The retained Host remains alive for its real owner.
 - Retained the original HTTP-50 capture checkpoint unchanged at
   `refs/tags/contract-evidence/http50-d5219b038a431a9579fed66a1c1ea71fdfad7a77`.
   Provider ref and commit-object reads confirm the original identity; the

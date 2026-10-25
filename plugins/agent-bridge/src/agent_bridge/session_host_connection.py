@@ -635,6 +635,9 @@ class _SessionHostConnectionMixin:
         from .session_host.acp_adapter import open_acp_streams
         from .session_host.client import SessionHostClient
         from .session_host.endpoints import CredentialRelayReadinessError
+        from .acquisition_launch_owner import require_unassociated_session
+
+        require_unassociated_session(self, session, operation="Host reattachment")
 
         def _on_acp_event(event_type: str, data: dict[str, Any]) -> None:
             self._route_acp_event(session, event_type, data)
