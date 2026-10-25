@@ -38,16 +38,15 @@ permissions:
   contents: read
 
 jobs:
-  bridge-commands:
+  bridge-commands-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
-    name: Bridge commands (${{ matrix.runner }}, ${{ matrix.packet.name }})
-    runs-on: ${{ matrix.runner }}
+    name: Bridge commands (Ubuntu, ${{ matrix.packet.name }})
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, windows-latest]
-        packet:
+        packet: &bridge-command-packets
           - name: refusal-driver
             select: refusal and (missing-driver or old-driver or old-resolver or old-dispatcher)
           - name: refusal-policy
@@ -59,18 +58,13 @@ jobs:
           - {name: payload, select: original_operation and payload}
           - {name: primary, select: original_operation and primary}
           - {name: ordinary, select: original_operation and ordinary}
-          - {name: cmd, select: original_operation and cmd}
           - {name: concurrent, select: concurrent}
           - {name: failed, select: failed}
           - {name: transport, select: cold_wait}
-        exclude:
-          - runner: ubuntu-latest
-            packet: {name: cmd, select: original_operation and cmd}
     env:
       UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
-      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UV_PYTHON: "3.12"
-    steps:
+    steps: &bridge-command-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -85,15 +79,29 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_bridge_command.py
           -k "${{ matrix.packet.select }}" --test-timeout 900 --timeout 1080
-  bridge-command-publication:
+  bridge-commands-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
-    name: Bridge publication (${{ matrix.runner }}, ${{ matrix.packet }})
-    runs-on: ${{ matrix.runner }}
+    name: Bridge commands (Windows, ${{ matrix.packet.name }})
+    runs-on: windows-latest
     timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-latest, windows-latest]
+        packet: *bridge-command-packets
+        include:
+          - packet: {name: cmd, select: original_operation and cmd}
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-steps
+  bridge-command-publication-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge publication (Ubuntu, ${{ matrix.packet }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy: &bridge-command-publication-packets
+      fail-fast: false
+      matrix:
         packet:
           - "cell_stamp and available"
           - "cell_stamp and pointer and not publisher"
@@ -108,7 +116,7 @@ jobs:
           - "actual and stamped-no-pointer"
     env:
       UV_PYTHON: "3.12"
-    steps:
+    steps: &bridge-command-publication-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -123,18 +131,23 @@ jobs:
           python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
           --test-file tests/test_bridge_first_use_publication.py
           -k "${{ matrix.packet }}" --test-timeout 60 --timeout 900
-  bridge-command-controls:
+  bridge-command-publication-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
-    name: Bridge command controls (${{ matrix.runner }})
-    runs-on: ${{ matrix.runner }}
+    name: Bridge publication (Windows, ${{ matrix.packet }})
+    runs-on: windows-latest
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-latest, windows-latest]
+    strategy: *bridge-command-publication-packets
     env:
       UV_PYTHON: "3.12"
-    steps:
+    steps: *bridge-command-publication-steps
+  bridge-command-controls-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge command controls (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-control-steps
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -154,6 +167,14 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_first_use_bridge_snapshot.py -k "not actual"
           --test-timeout 90 --timeout 600
+  bridge-command-controls-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge command controls (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-control-steps
   bridge-snapshots-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
     name: Bridge selected snapshots (Ubuntu)
