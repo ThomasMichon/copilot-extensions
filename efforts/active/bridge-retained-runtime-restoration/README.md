@@ -357,8 +357,12 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   The expanded creation/acquisition/Host cohort passes 678 controls, with eight
   capability skips and verified cleanup. It includes live silent peers,
   initialize/native deadlines, cancellation, late Host readiness and the
-  closed-epoch configuration boundary. Fresh source-authority capture,
-  independent current-head review and required CI remain owed.
+  closed-epoch configuration boundary. Genuine write/no-write capture from
+  `d33335b83a2fc0c83db7b21c94d9dc9730c898e8` reproduces the three current
+  Host-authority vectors. The authority/registry consumer cohort passes 109
+  controls with two collection skips and verified cleanup; both contracts and
+  all 814 fixtures validate. Independent current-head review and required CI
+  remain owed.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.
