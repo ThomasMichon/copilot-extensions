@@ -1217,7 +1217,10 @@ The packet lives in `tools/promotion_unit_tests/`, independent of mixed
 integration test modules and their conftests. The manifest binds source and
 test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
-or phase rejects the result. The runner rejects process, network, native-loader,
+or phase rejects the result. Each admitted file is collected once; an exact
+node whitelist deselects other cases before execution and restores manifest
+order. Missing or duplicate admitted nodes reject collection before execution.
+The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 

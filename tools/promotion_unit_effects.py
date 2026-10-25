@@ -13,11 +13,12 @@ from promotion_unit_contract import UnitEvidenceError
 
 
 class UnitRun(CoveragePlugin):
-    def __init__(self, coverage, root: Path, sources: dict, temporary: Path):
+    def __init__(self, coverage, root: Path, sources: dict, temporary: Path, *, nodes=()):
         self.coverage = coverage
         self.root = root
         self.sources = sources
         self.temporary = temporary
+        self.nodes = tuple(nodes)
         self.opened_sources: set[str] = set()
         self.collected: list[str] = []
         self.reports: list[dict] = []
@@ -116,6 +117,20 @@ class UnitRun(CoveragePlugin):
                 self.opened_sources.add(relative)
                 if relative not in self.sources:
                     self.refuse("unadmitted source read: " + relative)
+
+    def pytest_collection_modifyitems(self, session, config, items):
+        ranks = {node: rank for rank, node in enumerate(self.nodes)}
+        selected = [item for item in items if item.nodeid in ranks]
+        observed = [item.nodeid for item in selected]
+        if (
+            not ranks or len(ranks) != len(self.nodes)
+            or len(observed) != len(set(observed)) or set(observed) != set(ranks)
+        ):
+            raise UnitEvidenceError("collected unit nodes differ from the exact admitted inventory")
+        deselected = [item for item in items if item.nodeid not in ranks]
+        items[:] = sorted(selected, key=lambda item: ranks[item.nodeid])
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
 
     def pytest_collection_finish(self, session):
         self.collected = [item.nodeid for item in session.items]
