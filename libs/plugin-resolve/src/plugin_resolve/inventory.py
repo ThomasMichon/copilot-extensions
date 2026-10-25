@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import math
 import os
 import stat
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 
 from .conventions import (
@@ -170,6 +172,39 @@ def inventory_item(
         return {**installed_item(source, home, cache), "marketplace": definition}
     if registration is not None:
         return None
+    return native_git_inventory_item(
+        source, home, cache, definition=definition,
+        environment=environment, execution_cwd=execution_cwd,
+    )
+
+
+def native_git_inventory_item(
+    source: str, home: Path, cache: Path, *, definition: dict,
+    environment=None, execution_cwd: Path | None = None,
+    deadline: float | None = None, strict: bool = False,
+) -> dict | None:
+    """Prove cache consistency, independently of registration or origin trust.
+
+    Strict consumers refuse an ineligible candidate attributable to the selected
+    catalog or remote. Ordinary inventory retains its availability-only policy.
+    This operation never authenticates the repository behind a remote URL.
+    """
+    name, marketplace = split_source(source)
+    registration = _settings_document(home / "settings.json", jsonc_header=True).get(
+        "extraKnownMarketplaces", {},
+    ).get(marketplace)
+
+    def remaining():
+        if deadline is None:
+            return 30
+        if (
+            isinstance(deadline, bool) or not isinstance(deadline, (int, float))
+            or not math.isfinite(deadline) or deadline <= time.monotonic()
+        ):
+            raise ValueError("Native cache proof deadline exceeded or invalid")
+        return min(30, deadline - time.monotonic())
+
+    remaining()
     origin = definition.get("source", {})
     kind = origin.get("source")
     field = "repo" if kind == "github" else "url"
@@ -212,28 +247,36 @@ def inventory_item(
         try:
             result = subprocess.run(
                 [executable, "--literal-pathspecs", "-c", "core.fsmonitor=false",
-                 "-C", str(root), *arguments],
-                capture_output=True, text=True, encoding="utf-8", timeout=30, env=env,
+                 "-c", "core.longpaths=true", "-C", str(root), *arguments],
+                capture_output=True, text=True, encoding="utf-8", timeout=remaining(), env=env,
                 errors="surrogateescape",
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except subprocess.TimeoutExpired:
+            remaining()
             logging.getLogger("plugin-resolve").warning(
                 "%s native cache candidate is ineligible (probe-timeout); "
                 "ordinary acquisition remains available", source,
             )
             return None
+        remaining()
         return result.stdout.rstrip("\r\n") if result.returncode == 0 else None
 
     from .reflection import _allowed, subset
 
     matches = []
+    attributable = set()
     for candidate in candidates:
+        remaining()
         try:
             if not candidate.is_dir():
                 continue
             if candidate.is_symlink() or getattr(candidate.lstat(), "st_reparse_tag", 0):
                 continue
+            if strict:
+                candidate_remote = git(candidate, "config", "--get", "remote.origin.url")
+                if candidate_remote is not None and normalize_remote(candidate_remote) == remote:
+                    attributable.add(candidate)
             root = candidate / location
             canonical_candidate = candidate.resolve(strict=True)
             if not root.is_dir() or not root.resolve(strict=True).is_relative_to(canonical_candidate):
@@ -252,6 +295,7 @@ def inventory_item(
             continue
         if document.get("name") != marketplace:
             continue
+        attributable.add(candidate)
         entries, metadata, owner = (
             document.get("plugins"), document.get("metadata", {}), document.get("owner"),
         )
@@ -293,6 +337,9 @@ def inventory_item(
             candidate, "rev-parse", "--verify", "--end-of-options", selector + "^{commit}",
         ) != head):
             continue
+        tree_id = git(candidate, "rev-parse", "--verify", head + "^{tree}")
+        if tree_id is None:
+            continue
         references: set[Path] = set()
         try:
             if not _allowed(payload.relative_to(candidate)):
@@ -333,6 +380,7 @@ def inventory_item(
                 continue
             committed = set()
             for row in tree.split("\0"):
+                remaining()
                 if not row:
                     continue
                 metadata, separator, filename = row.partition("\t")
@@ -377,11 +425,15 @@ def inventory_item(
             "inventory": {
                 "home": str(home), "cache": str(cache), "payload": str(payload),
                 "registration": registration, "catalog_root": str(root),
-                "git_commit": head,
+                "git_commit": head, "git_tree": tree_id,
+                "git_root": str(canonical_candidate),
                 "payload_digest": hashlib.sha256(content).hexdigest(),
             },
             "catalog": metadata, "entry": entry,
         })
     if len(matches) > 1:
         raise ValueError(f"Native Git marketplace inventory is ambiguous: {source}")
+    if strict and len(matches) != len(attributable):
+        raise ValueError(f"Native Git marketplace evidence is corrupt, foreign or changed: {source}")
+    remaining()
     return matches[0] if matches else None

@@ -3,6 +3,21 @@
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+The opt-in `installation-context-acceptance.yml` dependency-compile selection
+also runs independent registered-marketplace provider and inventory partitions
+on Linux and Windows, each retaining a six-minute job ceiling.
+`tools/test_runtime_marketplace_source.py` uses real registered catalogs,
+installed ledgers, independent Git clone/fetch and canonical preparation.
+A test-owned Git transport maps synthetic declared remotes to independent local
+repositories; no production origin or feed is contacted. Controls reject a
+cache-created commit absent from upstream, preserve an older installed commit
+when Main advances, refuse source/version/registration/ledger changes and
+ambiguous caches, and separate two marketplace owners.
+`libs/plugin-resolve/tests/test_native_git_inventory.py` preserves existing
+ordinary inventory behavior and qualifies the reusable registered-cache proof.
+These fresh isolated fixtures qualify the explicit provider, not normal
+bootstrap, the production dependency closure, installation speed or rollout.
+
 The opt-in `installation-context-acceptance.yml` admitted-source jobs also run
 `tools/test_manager_source_install.py` and `tools/test_manager_source_native.py`.
 Profiles, refusal controls and Manager reuse run in disjoint partitions on

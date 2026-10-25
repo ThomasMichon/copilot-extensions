@@ -286,6 +286,11 @@ mechanism or permission to select another release.
    `packaging` dependency from a bootstrap interpreter, introduce another
    resolver/constructor, or enable defaults on the strength of these fixtures.
 
+The explicit `runtime_marketplace_source` implementation composes this boundary
+without changing default consumers. Qualification remains in progress; the
+parent does not credit default marketplace/bootstrap integration, production
+closure/feed evidence or measured installation savings from this component.
+
 ## Validation and completion
 
 - [x] The bounded archive/file-inspection component and complete-profile byte

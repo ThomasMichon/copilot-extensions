@@ -3565,6 +3565,37 @@ production consumer, persistent offline discovery, source-cache GC, activation
 or a live-feed exception. See [source preparation](../tools/prepare_runtime_source.md)
 and [validation coverage](../TESTING.md#wheel-input-inspection).
 
+### Explicit registered-marketplace source authentication
+
+`runtime_marketplace_source.retain_authenticated_marketplace_source` is a
+repository-only provider for an actual installed native Git/GitHub marketplace.
+It resolves effective registration, installation ownership and the native
+installed ledger through their existing owners. The reusable
+`plugin_resolve.inventory.native_git_inventory_item` proves only cache
+consistency: remote/ref, real commit/tree, catalog and complete referenced bytes.
+It does not authenticate the origin behind a local remote URL. Ordinary
+registered inventory and acquisition retain their existing behavior.
+
+The provider independently acquires the exact cached commit through
+`worktree_manager.runtime_source.acquire`, requires its fetched Main ancestry
+and tree, and runs canonical source preparation. The installed payload's actual
+assembly and version, including the ledger version, must match that prepared
+payload. It retains the acquisition lease and private prepared inputs and
+rechecks policy, runtime-source preferences, registration, ledger, cache and
+both payloads through consumption. Keep its context open and call `verify()`
+at the existing backend, health and publication boundaries.
+
+This initial provider supports root catalogs with `plugins/<plugin>` payloads
+and absent/Main/full-commit refs using the existing Main acquisition semantics.
+Other refs and layouts remain explicitly unavailable, never reinterpreted as
+the latest branch tip. Missing native evidence is unavailable; attributable
+corrupt, foreign, ambiguous or changed evidence refuses. It neither refreshes
+the native installation nor changes runtime-source preferences, requires
+artifact publication, maps the marketed engine to the distinct Manager identity,
+or enables bootstrap. Bootstrap-safe packaging, normal installer integration,
+production feed/closure qualification and measured installation savings remain
+separate gates.
+
 ### Explicit Manager source-install integration
 
 The repository caller `runtime_source_build.install_manager_source_runtime`
@@ -3632,8 +3663,8 @@ selection. Its caller still owns source/feed authentication; constructor input
 objects and receipts are not approval. The settings-only warm path makes no
 package-feed requests, resolves no dependencies and rebuilds no runtime;
 configured-source authentication may still access its selected Git origin.
-Marketplace-source authentication, production dependency/native qualification
-and measured cold/warm speedup remain separate gates.
+Default marketplace/bootstrap integration, production dependency/native
+qualification and measured cold/warm speedup remain separate gates.
 
 ### Bounded wheel inspection
 

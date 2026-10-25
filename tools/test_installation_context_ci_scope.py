@@ -370,6 +370,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
+        "marketplace-source-linux", "marketplace-source-windows",
         "installer-latency-linux", "installer-latency-windows",
         "logger-installer-latency-linux", "logger-installer-latency-windows",
         "candidate-profiles-linux", "candidate-profiles-windows",
@@ -876,7 +877,13 @@ def test_installer_latency_contracts_are_native_bounded_and_opt_in() -> None:
             "python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml",
             "python -m pytest -q tools/test_installer_venv_seeding.py",
         ]
-        assert shlex.split(commands[2]) == [
+        assert commands[2] == (
+            "python -m pytest -q "
+            "tools/test_run_plugin_tests.py::test_short_temp_alias_reaches_real_daemon_registry"
+        )
+        daemon_step = next(step for step in job["steps"] if step.get("run") == commands[2])
+        assert daemon_step["if"] == "runner.os == 'Windows'"
+        assert shlex.split(commands[3]) == [
             "python", "tools/run-plugin-tests.py", "agent-codespaces", "--allow-explicit-tiers",
             "--test-file", "tests/test_installer_engine_adoption.py",
             "-k", "library_install_order_retry_and_errors or native_batch_installs_cold or signed_venv_recovery",

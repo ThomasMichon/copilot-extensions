@@ -789,6 +789,51 @@ jobs:
           worktree-manager/tests/test_manager_update_check.py
           libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
 
+  marketplace-source-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Registered marketplace source (Linux, ${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: &marketplace-source-matrix
+        include:
+          - suite: provider-selection
+            test: tools/test_runtime_marketplace_source.py
+            expression: not source_and_configuration
+          - suite: provider-mutation
+            test: tools/test_runtime_marketplace_source.py
+            expression: source_and_configuration
+          - suite: inventory-cache
+            test: libs/plugin-resolve/tests/test_native_git_inventory.py
+            expression: native_git_cache and not (refuse or prevents or permission or invalid or timeout or cyclic or excluded)
+          - suite: inventory-selection
+            test: libs/plugin-resolve/tests/test_native_git_inventory.py
+            expression: not native_git_cache and not (refuse or prevents or permission or invalid or timeout or cyclic or excluded)
+          - suite: inventory-refusal
+            test: libs/plugin-resolve/tests/test_native_git_inventory.py
+            expression: refuse or prevents or permission or invalid or timeout or cyclic or excluded
+    steps: &marketplace-source-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - name: Actual registered Git source and independent exact acquisition
+        run: python -m pytest -q ${{ matrix.test }} -k "${{ matrix.expression }}"
+
+  marketplace-source-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Registered marketplace source (Windows, ${{ matrix.suite }})
+    runs-on: windows-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: *marketplace-source-matrix
+    steps: *marketplace-source-steps
+
   source-build-windows:
     if: ${{ inputs.dependency_compile }}
     name: Admitted source build (Windows, ${{ matrix.suite }})

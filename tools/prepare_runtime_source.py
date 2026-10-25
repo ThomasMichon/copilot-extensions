@@ -88,7 +88,7 @@ def _git(source: Path, *arguments: str, deadline: float | None = None) -> str:
     creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     result = subprocess.run(
         ["git", "--no-replace-objects", "-c", "core.fsmonitor=false",
-         "-c", "core.autocrlf=false", "-C", str(source), *arguments],
+         "-c", "core.autocrlf=false", "-c", "core.longpaths=true", "-C", str(source), *arguments],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
         timeout=_remaining(deadline), env=environment, check=False, creationflags=creationflags,
     )

@@ -66,6 +66,23 @@ def no_install(*args, **kwargs):
     raise AssertionError("cold installation was selected")
 
 
+def test_registered_inventory_can_request_consistency_without_replacing_authority(native_inventory):
+    from plugin_resolve.inventory import native_git_inventory_item
+
+    target, home, clone, definition, environment = native_inventory
+    atomic_json(home / "settings.json", {"extraKnownMarketplaces": {"git-fixture": definition}})
+    before = (home / "settings.json").read_bytes()
+    item = native_git_inventory_item(
+        "helper@git-fixture", home, clone.parent.parent, definition=definition,
+        environment=environment, execution_cwd=target, strict=True,
+    )
+    assert item["inventory"]["git_root"] == str(clone.resolve())
+    assert item["inventory"]["git_commit"] == git(clone, "rev-parse", "HEAD")
+    assert item["inventory"]["git_tree"] == git(clone, "rev-parse", "HEAD^{tree}")
+    assert item["inventory"]["registration"] == definition
+    assert (home / "settings.json").read_bytes() == before
+
+
 def directory_link(link, target):
     if os.name == "nt":
         import _winapi
