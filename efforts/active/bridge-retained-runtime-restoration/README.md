@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** proposal first, then sequential source PRs against `dev`
 - **Created:** 2026-10-23
-- **Status:** Active; opt-in SDK, original-turn/acquisition DB and explicit local native/acquisition/creation source merged; full custody/qualification/restoration open
+- **Status:** Active; opt-in SDK, original-turn/acquisition/provider DB and explicit local native/acquisition/creation source merged; full custody/qualification/restoration open
 - **Vision:** [State-aware rollback](../../../visions/plugin-services/README.md#state-aware-rollback), [canonical Bridge deployment](../../../visions/plugins/agent-bridge/README.md#one-canonical-deploy-path), [version-skew-safe contracts](../../../visions/plugins/agent-bridge/README.md#version-skew-safe-contract-evolution)
 - **Umbrella issue:** [#8063](https://github.com/ThomasMichon/copilot-extensions/issues/8063)
 - **Parent contract:** [Acknowledged Execution Handoff](../acknowledged-execution-handoff/README.md)
@@ -150,7 +150,10 @@ require their own review and qualification.
       fence merged in #8869. Explicit original local Host/child/native creation,
       binding and first-turn source merged in #8895. Ground-owner child and
       actual native/platform qualification, provider and remaining effect-owner
-      integration stay open.
+      integration stay open. Original provider native-handoff storage merged in
+      #8935 as an internal prerequisite, not provider effect-owner mediation.
+      Review the [provider boundary specialization](provider-custody.md) before
+      extending the existing provider binding/admission and guest/native owners.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
 
@@ -265,6 +268,48 @@ in [#8389](https://github.com/ThomasMichon/copilot-extensions/pull/8389).
 Full custody, actual native consumer/SDK qualification and restoration remain open.
 
 ## Journal
+
+### 2026-10-25 - Select the actual provider custody boundary
+
+- Traced the prepared provider target through the container resolver, existing
+  dispatch binding, provider session admission, guest worker-generation check
+  and stdio child into Bridge's ACP native creation. Readiness and
+  instance-pinned execution do not negotiate retained custody.
+- The existing wrapper admission expires/cleans up as liveness; the binding's
+  worker generation and guest lock do not retain the original Bridge handoff or
+  native outcome. The remote-ACP resource-relationship owner covers a different
+  transport and cannot be relabeled as provider custody.
+- Propose [provider-custody.md](provider-custody.md) as the bounded Phase-1
+  specialization before effect-owner implementation: provider-first support,
+  original association under the existing binding/admission owners, guest/native
+  final fences and same-operation reconciliation. Exact wire/storage revisions
+  and source fixtures belong to the implementation reviews.
+- No runtime code, provider invocation, native call, installed capture or
+  operational permission changes. The effort stays Active and all full-cohort,
+  compatibility, restoration and adoption gates remain open.
+
+### 2026-10-25 - Provider native-handoff storage merged; actual effect owners next
+
+- #8935 merged as `5cb096118b13f7810e7c2c5726729c767c57c4e2` at
+  02:40:49 PDT after independent approval `5642546563` on exact head
+  `9e7ef0f4d7d6e68fc9a243d22ead73edaa7ce23a`, with no open findings and
+  required CI green. Completion used the normal managed Maintainer path;
+  no blocking review or check was bypassed.
+- The actual merge retains the provider DB prerequisite, the 405-control
+  creation/custody and 116-control DB/evidence selections, and genuine
+  schema-38 source evidence. The immutable capture-time source tag remains
+  independently retrievable; the managed post-merge operation verified and
+  reconciled only the single already-merged local source commit.
+- Re-read the full Plan and Validation Plan. No Phase 1 or full qualification
+  checkbox closes: a storage handoff is not actual provider subprocess,
+  native or remote custody. This is merged source, not release or deployment.
+- Continue by tracing the existing ready provider-exec target through its
+  actual transport and native invocation owners. Reuse their existing
+  contract and resource ownership, and retain explicit unsupported behavior
+  wherever the provider/remote participant cannot acknowledge custody.
+  Do not invent a provider allocation, fake local workspace, second ledger,
+  retrospective enrollment or parallel remote protocol. Ground-child
+  filesystem and all remaining cohort/restoration gates stay open.
 
 ### 2026-10-25 - Provider native-handoff DB prerequisite under validation
 
