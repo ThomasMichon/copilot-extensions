@@ -95,6 +95,7 @@ def _record_driver(fixture: dict, shell: str) -> None:
             contract +
             "param([string]$Root,[string]$Payload,[string]$RuntimeRoot,"
             "[string]$Project,[string]$InstallerAction,[switch]$Wait)\n"
+            "[System.Runtime.ProfileOptimization]::StartProfile($null)\n"
             "$record=@{action=$InstallerAction;root=$RuntimeRoot;project=$Project;"
             "wait=[bool]$Wait;executionRoot=$Root}|ConvertTo-Json -Compress\n"
             "[IO.File]::WriteAllText((Join-Path $RuntimeRoot 'driver-observed.json'),$record)\n"
@@ -146,7 +147,10 @@ def _initialize_shell_profiles(
         allowed.update(parent.as_posix() for parent in Path(name).parents)
         allowed.add(name)
     before = _snapshot(fixture["home"])
-    selected = (POWERSHELL, shutil.which("pwsh")) if engines is None else engines
+    selected = (
+        POWERSHELL, shutil.which("pwsh"),
+        str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+    ) if engines is None else engines
     for engine in dict.fromkeys(filter(None, selected)):
         control = subprocess.run(
             [engine, "-NoLogo", "-NoProfile", "-Command",
