@@ -1447,13 +1447,13 @@ def _cmd_update(rest: list[str]) -> int:
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source
 
+    if not preflight_runtime_source():
+        return 1
+    prepared = prepare_update(rest)
+    if prepared.exit_code:
+        return prepared.exit_code
     run = UpdateRun()
     try:
-        if not preflight_runtime_source(run):
-            return run.finish(1)
-        prepared = prepare_update(rest)
-        if prepared.exit_code:
-            return run.finish(prepared.exit_code)
         return run.finish(_cmd_update_steps(
             prepared.arguments, run, fresh_manager=prepared.fresh_manager,
             environment=prepared.environment,

@@ -1086,6 +1086,8 @@ the selection. `reset` explicitly restores ordinary
 marketplace runtime delivery. Canonical source preparation, immutable runtime
 planning and the existing installation driver remain the next integration
 boundary; this command adds no alternate installer or recurring worker.
+The early preflight is read-only: invalid bootstrap arguments still retain
+their existing failure scope without opening aggregate update telemetry.
 The existing update request's source identity includes this policy, so changing
 it after submission rejects the old request rather than running a different
 runtime selection under its name.

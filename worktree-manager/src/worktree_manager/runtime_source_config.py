@@ -32,7 +32,7 @@ class RuntimeSource:
             raise ValueError("runtime source repo must be a nonempty repository locator")
         url = urlsplit(self.repo) if "://" in self.repo else None
         if (
-            "::" in self.repo
+            re.match(r"^[A-Za-z][A-Za-z0-9+.-]*::", self.repo)
             or (url is not None and (
                 url.scheme not in {"https", "http", "ssh", "git", "file"}
                 or url.password is not None or url.query or url.fragment

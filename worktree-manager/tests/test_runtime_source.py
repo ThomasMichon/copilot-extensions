@@ -95,6 +95,14 @@ def test_invalid_policy_is_refused(arguments):
         config.RuntimeSource(**arguments)
 
 
+@pytest.mark.parametrize("repo", [
+    "https://[2001:db8::1]/tools.git",
+    "ssh://git@[2001:db8::1]/tools.git",
+])
+def test_ipv6_source_locator_is_not_a_git_remote_helper(repo):
+    assert config.RuntimeSource("main", repo).repo == repo
+
+
 def test_credential_refusal_uses_real_url_password_not_a_masked_placeholder():
     from urllib.parse import urlsplit
 
@@ -262,7 +270,7 @@ def test_cli_is_default_off_and_dev_requires_consent(tmp_path, monkeypatch, caps
 
 
 @pytest.mark.parametrize("repair", [False, True])
-def test_update_policy_precedes_engine_repair_with_real_telemetry(
+def test_update_policy_precedes_engine_repair_without_aggregate_telemetry(
     tmp_path, monkeypatch, capsys, repair,
 ):
     from worktree_manager import __main__ as manager
@@ -271,15 +279,17 @@ def test_update_policy_precedes_engine_repair_with_real_telemetry(
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
-    monkeypatch.setattr(update_events, "_ut", None)
-    monkeypatch.setattr(update_events, "HumanOperation", None)
+    monkeypatch.setattr(
+        update_events, "UpdateRun",
+        lambda: pytest.fail("pre-bootstrap policy refusal must not open aggregate telemetry"),
+    )
     monkeypatch.setattr(
         update_bootstrap, "prepare_update",
         lambda _rest: pytest.fail("runtime source preflight must precede engine repair"),
     )
     rest = ["--repair-engine", str(tmp_path / "fresh")] if repair else []
     assert manager._cmd_update(rest) == 1
-    assert "No update was run" in capsys.readouterr().out
+    assert "No update was run" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("repair", [False, True])
