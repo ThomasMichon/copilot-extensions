@@ -309,7 +309,13 @@ yet wired to `sync.retention_days`.
 ## Compaction (cold-session archival)
 
 Scheduled runs preserve source-qualified usage evidence before transfer or
-compaction. Transcript accounting reads at most 64 MiB / 200,000 events per
+compaction. SQLite collection partitions multi-session scopes that exceed the
+reader's 20,000-row or five-second budget; neither per-read limit is raised.
+An individual session that still exceeds either budget remains an explicit
+failure, retaining its last good ledger. Unsafe/schema/corruption errors do not
+trigger partition retries.
+
+Transcript accounting reads at most 64 MiB / 200,000 events per
 session per pass, and at most 256 MiB across the pass. Large finite histories
 converge over subsequent runs instead of failing solely because of total size.
 The existing 4 MiB individual-line and bounded accounting-artifact limits remain.

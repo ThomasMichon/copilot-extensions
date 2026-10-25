@@ -49,6 +49,10 @@ class UsageRowLimitError(UsageReadError):
     """The scoped read exceeds its row budget; a smaller scope may fit."""
 
 
+class UsageTimeLimitError(UsageReadError):
+    """The scoped read exceeds its wall budget; a smaller scope may fit."""
+
+
 def _pin_file(
     directory: ArchiveDirectory,
     name: str,
@@ -185,13 +189,16 @@ def read_sqlite_usage(
         return {}
 
     deadline = time.monotonic() + timeout
+    interrupted_by_budget = False
 
     def check_budget() -> None:
         if time.monotonic() >= deadline:
-            raise UsageReadError("accounting store read exceeded time budget")
+            raise UsageTimeLimitError("accounting store read exceeded time budget")
 
     def progress() -> int:
-        return int(time.monotonic() >= deadline)
+        nonlocal interrupted_by_budget
+        interrupted_by_budget = time.monotonic() >= deadline
+        return int(interrupted_by_budget)
 
     result: dict[str, list[dict[str, Any]]] = {}
     try:
@@ -271,6 +278,10 @@ def read_sqlite_usage(
         raise UsageStoreMissingError("accounting store is missing") from None
     except OSError:
         raise UsageReadError("accounting store path is unsafe or unreadable") from None
-    except (sqlite3.Error, RuntimeError, ValueError):
+    except sqlite3.Error:
+        if interrupted_by_budget:
+            raise UsageTimeLimitError("accounting store read exceeded time budget") from None
+        raise UsageReadError("accounting store could not be read safely") from None
+    except (RuntimeError, ValueError):
         raise UsageReadError("accounting store could not be read safely") from None
     return result

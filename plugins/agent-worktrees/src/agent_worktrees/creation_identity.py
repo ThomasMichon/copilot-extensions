@@ -1,11 +1,9 @@
-"""Prospective record identities derived from the existing execution-space map."""
+"""Prospective record identities derived from the current local context."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Literal
-
-from machine_transport.registry import resolve_machine_selection
 
 from . import config as cfg, execution_spaces
 from .worktree_machine_identity import WorktreeMachineIdentity
@@ -25,22 +23,13 @@ def new_machine_identity(
     validate_mode(mode)
     if mode == "legacy":
         return None
-    execution_spaces.require_current_execution_space(config)
-    platform = cfg.detect_platform()
-    if config.platform != platform:
-        raise execution_spaces.ExecutionSpaceError("creation identity conflicts with the current platform")
-    selected = resolve_machine_selection(
-        execution_spaces.registry_for_config(config), config.machine, platform,
-    )
-    if (
-        selected.entry is None or selected.target.environment != platform
-        or not execution_spaces.require_owner_identity(selected.entry.key, config)
-    ):
+    if config.platform != cfg.detect_platform():
         raise execution_spaces.ExecutionSpaceError(
-            "tuple creation requires a registered local execution identity",
+            "tuple creation platform must match the current execution platform",
         )
+    context = execution_spaces.current_execution_context(config)
     return WorktreeMachineIdentity(
-        selected.target.machine, selected.target.environment, selected.entry.key,
+        context.machine, context.environment, context.execution_machine,
     )
 
 

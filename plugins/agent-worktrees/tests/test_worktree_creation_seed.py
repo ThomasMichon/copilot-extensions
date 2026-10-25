@@ -141,6 +141,7 @@ def test_creation_uses_one_environment_suffix_and_short_identity(
 ) -> None:
     config = replace(_create_config(tmp_path), machine=machine, platform=platform)
     monkeypatch.setattr(m.cfg, "detect_platform", lambda: platform)
+    monkeypatch.setattr(m.cfg.socket, "gethostname", lambda: machine)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
 

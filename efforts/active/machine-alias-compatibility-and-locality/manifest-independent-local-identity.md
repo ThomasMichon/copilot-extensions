@@ -74,12 +74,19 @@ strings, literal OS suffixes and explicit conflict refusals have direct loader
 regressions. Update and launch consumers share that naming adapter while
 retaining the independent runtime manifest policy.
 
-This adoption does not yet change tuple producers, receiving-side writes or
-Manager entry points. Registration/creation entry-point proof, the remainder of
-steps 2-3 and the complete validation matrix below remain open. In particular,
-observed naming facts are not receiving-project or allocation authority;
-existing admission receipts and identifiers must not be regenerated from a later
-optional customization.
+Prospective tuple producers now derive through the same current-context owner,
+including actual session/bridge/system creation and new anchor/external records.
+Receiving tuple checks compare all three identity dimensions with that validated
+context rather than requiring optional map enrollment. Canonical explicit keys,
+actual platform, receiving project, snapshot and parent-owner checks remain
+independent gates. Completed creation-key replay retains its original result
+under unchanged customization and either supported producer mode.
+
+Registration and Manager entry-point proof, retained-allocation compatibility
+after later customization, the remainder of steps 2-3 and the complete validation
+matrix below remain open. Observed naming facts are not receiving-project or
+allocation authority; existing admission receipts and identifiers must not be
+regenerated from a later optional customization.
 
 ## Validation Plan
 

@@ -14,7 +14,8 @@ from agent_logger.sync.publication_directory import publication_directory
 from agent_logger.usage_ledger import UsageEvidenceError, merge_session_evidence
 from agent_logger.usage_progress import TranscriptBudget, capture_order, read_transcript_progress
 from agent_logger.usage_sqlite import (
-    UsageReadError, UsageRowLimitError, UsageStoreMissingError, read_sqlite_usage,
+    UsageReadError, UsageRowLimitError, UsageStoreMissingError, UsageTimeLimitError,
+    read_sqlite_usage,
 )
 from agent_logger.usage_transcript import read_transcript_usage
 
@@ -128,7 +129,7 @@ def _capture_batch(
     try:
         stored = read_sqlite_usage(source / "session-store.db", set(sessions))
         store_coverage = "captured"
-    except UsageRowLimitError as exc:
+    except (UsageRowLimitError, UsageTimeLimitError) as exc:
         if len(sessions) == 1:
             return CaptureResult(failures=(f"{sessions[0]}: session-store capture: {exc}",))
         split = True
