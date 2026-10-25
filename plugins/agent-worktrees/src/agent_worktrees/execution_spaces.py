@@ -250,12 +250,14 @@ def current_execution_context(config: Any) -> LocalExecutionContext:
 def require_owner_identity(owner: str, config: Any, *, canonical_ref: bool = True) -> bool:
     """Return whether an owner is local; reject ambiguous legacy scope names."""
     entries = registry_for_config(config)
+    context = _current_execution_context(config, entries)
+    if context.customization_key is None and owner == context.execution_machine:
+        return True
     try:
-        current = find_machine_entry(entries, config.machine)
+        current = entries.get(context.customization_key) if context.customization_key else None
         target = find_machine_entry(entries, owner)
     except ValueError as exc:
         raise ExecutionSpaceError(str(exc)) from exc
-    context = _current_execution_context(config, entries)
     if current is not None and current.execution_platform:
         _require_registered_current_space(config, current)
         if target is None or not target.execution_platform or (canonical_ref and owner != target.key):

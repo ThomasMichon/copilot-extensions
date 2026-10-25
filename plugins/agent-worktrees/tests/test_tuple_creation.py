@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 import agent_worktrees.__main__ as m
-from agent_worktrees import config as cfg, local_cache_refresh, tracking
+from agent_worktrees import config as cfg, execution_spaces, local_cache_refresh, tracking
 from agent_worktrees.worktree_machine_identity import WorktreeMachineIdentity
 from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
 
@@ -105,7 +105,7 @@ def test_tuple_refusal_precedes_allocation(
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
-@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching"])
+@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching", "sibling-only"])
 @pytest.mark.parametrize("kind", ["session", "bridge", "system"])
 def test_actual_local_tuple_creation_without_map_enrollment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -123,6 +123,11 @@ def test_actual_local_tuple_creation_without_map_enrollment(
             "hostname": "Observed-Host-wsl", "execution_platform": platform,
             "physical_host": "friendly-host",
         }},
+        "sibling-only": {"sibling-space": {
+            "hostname": "Observed-Host-wsl",
+            "execution_platform": "windows" if platform == "wsl" else "wsl",
+            "physical_host": "friendly-host",
+        }},
     }
     if map_kind == "absent":
         topology.unlink()
@@ -130,10 +135,13 @@ def test_actual_local_tuple_creation_without_map_enrollment(
         topology.write_text(yaml.safe_dump({"machines": maps[map_kind]}))
     config = replace(config, machine=cfg.detect_machine(config.default_repo.anchor))
     monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
-    physical = "friendly-host" if map_kind == "matching" else "observed-host-wsl"
-    execution = "local-space" if map_kind == "matching" else (
-        "observed-host-wsl-wsl" if platform == "wsl" else "observed-host-wsl"
+    physical = "friendly-host" if map_kind in ("matching", "sibling-only") else "observed-host-wsl"
+    execution = "local-space" if map_kind == "matching" else physical + (
+        "-wsl" if platform == "wsl" else ""
     )
+    assert execution_spaces.require_owner_identity(execution, config)
+    if map_kind == "sibling-only":
+        assert not execution_spaces.require_owner_identity("sibling-space", config)
     result = m._create_worktree_core(
         config, kind=kind, name="service", identity_mode="tuple-v1",
         creation_key="local-request",

@@ -105,7 +105,7 @@ def test_tuple_adoption_producer_tracking_json_and_relationships(
 
 
 @pytest.mark.parametrize("kind", ["anchor", "external"])
-@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching"])
+@pytest.mark.parametrize("map_kind", ["absent", "empty", "unrelated", "matching", "sibling-only"])
 def test_actual_tuple_adoption_without_map_enrollment(
     adoption_config: cfg.Config, monkeypatch: pytest.MonkeyPatch, kind: str, map_kind: str,
 ) -> None:
@@ -121,6 +121,11 @@ def test_actual_tuple_adoption_without_map_enrollment(
             "hostname": "Observed-Host-win", "execution_platform": config.platform,
             "physical_host": "friendly-host",
         }},
+        "sibling-only": {"sibling-space": {
+            "hostname": "Observed-Host-win",
+            "execution_platform": "windows" if config.platform == "wsl" else "wsl",
+            "physical_host": "friendly-host",
+        }},
     }
     if map_kind == "absent":
         topology.unlink()
@@ -129,11 +134,14 @@ def test_actual_tuple_adoption_without_map_enrollment(
     config = replace(config, machine=cfg.detect_machine(config.default_repo.anchor))
     monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
     record = _produce(config, kind)
-    physical = "friendly-host" if map_kind == "matching" else "observed-host-win"
-    execution = "local-space" if map_kind == "matching" else (
-        "observed-host-win-wsl" if config.platform == "wsl" else "observed-host-win"
+    physical = "friendly-host" if map_kind in ("matching", "sibling-only") else "observed-host-win"
+    execution = "local-space" if map_kind == "matching" else physical + (
+        "-wsl" if config.platform == "wsl" else ""
     )
     assert record.machine_identity == WorktreeMachineIdentity(physical, config.platform, execution)
+    execution_spaces.require_record_mutation(record, config)
+    if map_kind == "sibling-only":
+        assert not execution_spaces.require_owner_identity("sibling-space", config)
     assert record.worktree_id == (
         "@anchor" if kind == "anchor" else "desk-wsl-wsl-retained-01234567"
     )
