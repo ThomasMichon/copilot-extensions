@@ -35,6 +35,18 @@ pytestmark = pytest.mark.skipif(
 REPOSITORY = Path(__file__).resolve().parents[3]
 
 
+def set_payload_version(payload, version):
+    project = payload / "pyproject.toml"
+    project.write_text(
+        re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{version}"', project.read_text()),
+        encoding="utf-8",
+    )
+    identity = payload / "plugin.json"
+    manifest = json.loads(identity.read_text())
+    manifest["version"] = version
+    identity.write_text(json.dumps(manifest), encoding="utf-8")
+
+
 @pytest.mark.parametrize("action", ["stamp", "provision", "install"])
 def test_bridge_fixed_action_retains_context_staging_and_native_result(
     owning_bridge, area, monkeypatch, action,
@@ -578,17 +590,13 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_actions_and_immutable_
             task_path.write_text(json.dumps(interactive), encoding="utf-8")
             (adapter / "mode").unlink(missing_ok=True)
     if cold_action == "install":
-        project_file = payload / "pyproject.toml"
         old_selected, old_complete = selected, complete
         old_stub = installation.parent / ".local/bin" / (
             "agent-bridge.ps1" if os.name == "nt" else "agent-bridge"
         )
         original_stub = old_stub.read_bytes()
         for version, failure in (("98.0.0", "registration-denied"), ("98.0.1", "effect-fatal")):
-            project_file.write_text(
-                re.sub(r'(?m)^version\s*=\s*"[^"]+"', f'version = "{version}"', project_file.read_text()),
-                encoding="utf-8",
-            )
+            set_payload_version(payload, version)
             unit = installation.parent / ".config/systemd/user/agent-bridge.service"
             unit_content = None
             if os.name == "nt":
@@ -658,9 +666,7 @@ def test_actual_bridge_native_caller_loss_concurrent_cold_actions_and_immutable_
     assert status(root=root)[-1].state == "completed"
     assert (installation / "current-version").read_text().strip() == selected
     assert completion.read_bytes() == complete
-    project_file = payload / "pyproject.toml"
-    project_file.write_text(re.sub(r'(?m)^version\s*=\s*"[^"]+"', 'version = "99.0.0"',
-                                   project_file.read_text()), encoding="utf-8")
+    set_payload_version(payload, "99.0.0")
     # A new version has no prepared target slot on either native installer.
     failed = native_recipe_runner.run(
         command(cold_action), env=env, cwd=project, root=root, diagnostic=diagnostic,
