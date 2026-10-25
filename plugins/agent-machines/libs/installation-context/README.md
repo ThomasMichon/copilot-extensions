@@ -701,9 +701,18 @@ tuple: `sourceFingerprint`, `pluginId`, `mode`, `runtimeRoot` and `environment`
 ownership, not a runtime-artifact source selector or a new installation mode.
 No copy of a policy may redirect the resolver to its recorded root.
 
-The same owner-bound file optionally accepts `runtimeProfiles`, with only
-`allowSourceFallback` (a JSON boolean) and `backend` (an explicit opaque
-capability reference). All three native deployment readers validate these
+The same owner-bound file optionally accepts `runtimeProfiles`, with
+`allowSourceFallback` (a JSON boolean), `backend` (an explicit opaque
+capability reference), and `downloadOrigins` (optional exact HTTPS origins).
+The latter is an array of at most 256 ASCII origins, each at most 2048 characters;
+it permits no userinfo, wildcard, query, fragment or path beyond a root slash.
+DNS labels and hexadecimal IPv6 literals are validated; ports must be 1-65535.
+Case, default port and root slash are normalized, entries sorted, and duplicates
+refused. Missing/empty origins preserve existing selection defaults; a nonempty
+set enters the existing owner-bound policy identity. It supplements selected
+index-origin trust, never authorizes another index or a public-feed fallback,
+and is not published in a portable release profile.
+All three native deployment readers validate these
 fields; malformed or self-authorizing fields, including an approvals map,
 refuse rather than becoming defaults. Older readers safely refuse this
 optional extension instead of ignoring a stricter policy.

@@ -743,6 +743,103 @@ win grows with build complexity.
 
 ## Journal
 
+### 2026-10-24 - Bounded exact-wheel acquisition implementation
+
+- Implemented the #8728 design under the canonical installer input/process
+  owners. Exact selected files are acquired through bounded TLS simple-index
+  metadata and pre-request download/redirect trust checks. One owned worker
+  bounds DNS, headers and body time; helper/control bytes count against storage.
+  The existing snapshot and constructor remain the only byte-custody and
+  assembly paths. No dependency resolver, service or proxy was introduced.
+- The repository adapter rechecks the actual installation owner, selected
+  interpreter and retained native UV settings without compiling or installing.
+  Native URL/named/netrc/stored credential inputs remain private. Effective
+  policy identity excludes transient retained paths and advancing current-date
+  cutoffs, while binding actual feed/trust and semantic seasoning policy.
+  Optional exact download origins are validated consistently by Python,
+  PowerShell and POSIX readers in the existing owner-bound policy.
+- Acquired file/policy facts bind into the existing owned construction receipt
+  without altering the approved profile lock. Changed or removed facts cannot
+  reuse a numbered generation. Legacy receipt shape is unchanged when the
+  optional evidence is absent. Closed-wheel children and retries share the
+  acquisition deadline; ordinary source execution defaults remain unchanged.
+- Controlled tests exercise real TLS, named authentication, exact byte/storage
+  thresholds, blocked DNS and trickling responses, worker settlement and
+  complete-profile inspection into a real offline runtime/installed health.
+  The real constructor timeout control preserves the selected healthy prior,
+  releases its lease and removes partial inputs. Native Windows PowerShell
+  passes all 19 download-origin parity cases; final regression/publication and
+  Linux hosted evidence remain open.
+- The combined development run passed 458 controls and one expected POSIX-only
+  skip, but a deadline fault test incorrectly required its target to start even
+  when cold preparation exhausted the budget. The repair separates that
+  preparation/refusal outcome from a prepared real-child timeout and a delayed
+  real Windows guardian startup. The absolute deadline now crosses the existing
+  process owner/guardian without renewal and bounds bootstrap-source copying.
+  All 102 affected acquisition/configuration/construction/guardian controls pass
+  in 401.69 seconds, with one expected POSIX guardian skip on Windows. Existing
+  relative-timeout outcomes remain covered. The unchanged required packet
+  passes all 1509 units without observed effects in 222.406 seconds at
+  `81c7d8c232`; only the two changed admitted-source hashes were refreshed,
+  with no node or budget growth. Canonical synchronization, module-size,
+  changefile and effort-structure guards pass. Published-head review and
+  native qualification gates remain open.
+- Publication reconciliation preserved the newer upstream 1594-unit roster.
+  Its Windows/Python 3.11 run exposed a missing-platform-attribute mock in the
+  newly admitted host-policy packet. All six parser models now explicitly
+  create their mocked `os.set_blocking` attribute, as their other POSIX-only
+  mocks already do. All 42 host-policy wrapper cases pass on Windows without
+  skipping assertions or changing production behavior. The admitted test hash
+  is refreshed; the complete current packet passes all 1594 units without
+  observed effects in 231.906 seconds at `24b491492a`.
+- This is still preparation, not consumer enabling or live feed approval.
+  The initial adapter supports system trust on Windows/Linux plus captured CA
+  certificates. Unsupported proxy/bypass, keyring, bundled-root/Darwin providers,
+  resolver-altering constraints and per-package index routing defer explicitly
+  before HTTP rather than being ignored. Integrity/trust refusals remain fatal.
+  The parent retains broader provider/source-mode admission, supplied
+  revocation/offline reuse, real release/client/helper integration, measured
+  defaults, publication and rollout gates; it remains **Active**.
+
+### 2026-10-24 - Acquisition published-head native and review repairs
+
+- #8820's initial head passes required CI and both Linux/Windows wheel-input
+  and retained dependency-compile jobs. Windows runtime-policy acceptance
+  passes, but Linux rejects 15 invalid-origin cases with malformed JSON:
+  the helper's command-substitution failure did not propagate through the
+  enclosing captured snapshot. The caller now explicitly fails that snapshot
+  so the existing owner returns a structured invalid-policy result.
+- Review also identified malformed IPv6 boundary groups accepted by POSIX but
+  rejected by Python. The shared native validator now rejects stray leading
+  and trailing colons while retaining valid `::`, `::1` and `1::` forms.
+  Native parity tests include both malformed examples and valid compressed
+  boundaries. Both fixes are synchronized through every native adopter.
+  Final-head review and Linux/Windows qualification remain open.
+- The repaired policy head passes all six selected Linux/Windows jobs and
+  required CI. A fresh review found a separate stable-identity defect:
+  per-attempt acquisition counters entered the construction and health hash.
+  The generation receipt now projects only validated schema, policy and exact
+  file facts; complete counters remain available through acquisition evidence.
+  A real TLS reacquisition after unrelated index growth reuses the same healthy
+  numbered generation, while changed/removed policy still refuses reuse.
+  This regression plus existing snapshot controls passes all 34 cases locally.
+  All eight snapshot adopters are synchronized; final-head review/native
+  qualification remain open.
+
+### 2026-10-24 - Concrete exact-wheel acquisition design approved
+
+- #8728 merged as `a8f3464ae4121d97360d2c5a9b8c68160a223c7f`.
+  Review `5640430980` approved head
+  `37339d37955e6eb9752daf00564a03b178caaf8f` with no findings or threads;
+  required CI `40140352693` and source-attribution/workflow guards pass.
+  The existing Maintainer CODEOWNER exception applies; no CI bypass was used.
+- Re-read the parent Plan and Validation Plan after merge. The reviewed
+  execution design does not close acquisition, source-mode admission,
+  real-profile publication, helper-consumer or rollout gates; the parent remains
+  **Active**. Next implement the exact selected-wheel acquisition boundary
+  described in `wheel-input-admission.md`, including actual installation-owned
+  policy/configuration rather than a self-declared trusted input map.
+
 ### 2026-10-24 - Source candidate binding merged; acquisition next
 
 - #8705 merged as `06ae28c96f9f8cf7961b4328cbe07ee2e44ab962`.

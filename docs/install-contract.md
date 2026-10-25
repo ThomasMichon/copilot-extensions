@@ -3243,7 +3243,11 @@ existing installation owner. No profile/approval file is required for the
 CPU-first, artifact-preferred, governed-source-permitted baseline. Optional
 `runtimeProfiles` settings in the existing owner-bound deployment policy can
 disable source fallback or explicitly select a capability. Retained capability
-and explicit unprofiled migration remain distinct. See the
+and explicit unprofiled migration remain distinct. Optional exact
+`downloadOrigins` names additional HTTPS file origins through that same owner;
+missing/empty values preserve the baseline, and nonempty values enter its policy
+identity. This is not an index allowlist, profile approval or a new policy file.
+See the
 [library contract](../libs/installation-context/README.md) for fields and
 readiness/refusal behavior. Its owner/effective-policy digest is an invalidation
 input, not whole-record approval, source-byte authentication, a feed permission
@@ -3370,6 +3374,65 @@ hardware, admit a feed, supply production budgets or choose verified-source
 fallback. Missing or rejected inputs never trigger an automatic source or
 public-index fallback. Those authority/acquisition and consumer-enabling
 contracts remain required.
+
+### Exact-wheel acquisition preparation
+
+The stdlib-only `installer_wheel_acquisition.acquire_wheel_inputs` mechanism
+acquires already-selected filenames/hashes, never resolves or substitutes a
+dependency. It checks each initial link and redirect before issuing a request,
+preserves file upload-time/seasoning and yanked/withdrawn decisions, hashes
+streamed bytes and hands them to the existing exact `WheelSnapshot` owner.
+Index credentials stay on their own origin; receipts contain opaque feed/policy
+identities and origin-chain hashes, not credentials or URLs.
+
+Callers declare inclusive package/request/redirect/candidate, metadata,
+per-wheel/closure and total temporary file-content budgets and one monotonic deadline.
+One invocation-owned worker uses the existing installer process owner; DNS,
+headers and body reads cannot renew the deadline. Its frozen helper/control
+bytes count against storage and are removed after child settlement, before
+snapshot copying. Peak storage is the greater of control plus downloads and
+the original/retained wheel copies. No service, proxy or alternate constructor
+is introduced. Filesystem allocation/metadata overhead remains a separate
+measurement before enabled defaults. A windowless Windows caller uses the
+existing process primitive to select a console interpreter for captured worker
+protocol, without allocating a visible console. Native extended paths preserve
+long selected wheel names. The same deadline caps closed-wheel constructor children and
+retry waits through installed health; ordinary source child defaults are
+unchanged.
+
+The repository-only `runtime_feed_configuration.retain_native_feed_inputs`
+composes an existing release selection with freshly resolved installation
+policy and the canonical retained UV preflight. It does not implement another
+configuration-precedence reader or execute dependency compilation. Native
+interpreter facts, effective indexes, credential inputs, TLS roots and seasoning
+are captured before HTTP. Effective policy identities exclude retained paths
+and the advancing current-date cutoff, but bind semantic seasoning and actual
+source/trust policy. Named environment credentials, retained URL credentials,
+bounded netrc input and native UV credential lookup remain private.
+
+The initial adapter supports Windows/Linux system certificate trust plus
+captured native explicit CA certificates. Unsupported proxy/bypass, keyring,
+bundled-root/Darwin trust providers, resolver-altering constraints, metadata
+overrides and package-specific index routing defer explicitly before HTTP;
+they are never silently ignored or translated into different settings.
+Unsafe trust, source ambiguity, corrupt metadata or digest mismatch remain
+refusals, not availability. A typed acquisition-unavailable outcome is input to
+the existing authority, not permission to change mode or waive a restriction.
+No production caller or enabled default budget is supplied.
+
+`AcquiredWheels.construction_inputs` binds validated acquisition facts into
+`WheelInstallInputs` and the existing owned generation receipt without mutating
+the approved profile/lock. Actual policy/file bindings enter construction
+identity and installed health; changing or stripping them cannot reuse that
+generation. Legacy wheel inputs without this optional evidence keep their
+existing receipt shape. Per-attempt request, redirect, byte and storage counters
+remain available through `AcquiredWheels.evidence()` but do not enter stable
+generation identity or installed health; unrelated index growth must not
+invalidate the same admitted policy and exact wheels.
+This consistency binding is not approval or offline
+reuse authority: authenticated admission, supplied revocation, source fallback,
+real release/client integration and measured production budgets remain parent
+gates.
 
 ### Bounded wheel inspection
 

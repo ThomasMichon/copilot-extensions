@@ -710,6 +710,8 @@ jobs:
           python -m pytest -q
           tools/test_installer_wheel_inputs.py
           tools/test_installer_wheel_snapshot.py
+          tools/test_installer_wheel_acquisition.py
+          tools/test_runtime_feed_configuration.py
           tools/test_installer_closed_wheels.py
           tools/promotion_unit_tests/test_runtime_profile_wheels.py
           tools/test_runtime_profile_bootstrap.py

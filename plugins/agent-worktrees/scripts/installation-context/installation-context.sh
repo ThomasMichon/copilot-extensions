@@ -1216,6 +1216,8 @@ valid_ipv6() {
     local address="$1" left right group count=0 compressed=false
     local -a groups=()
     [[ "$address" =~ ^[0-9A-Fa-f:]+$ && "$address" != *:::* ]] || return 1
+    [[ "$address" != :* || "$address" == ::* ]] || return 1
+    [[ "$address" != *: || "$address" == *:: ]] || return 1
     if [[ "$address" == *::* ]]; then
         compressed=true
         left="${address%%::*}"
@@ -4797,6 +4799,56 @@ emit_legacy_json() {
 
 DEPLOYMENT_JSON=""
 
+runtime_download_origins() {
+    local document="$1" prefix="$2" count index origin normalized authority host label previous separator=""
+    local LC_ALL=C
+    local -a origins=() labels=()
+    [[ "$(json_type_path "$document" "$prefix")" == array ]] ||
+        fail "runtimeProfiles.downloadOrigins must be a bounded JSON array."
+    count="$(json_length_path "$document" "$prefix")"
+    ((count <= 256)) || fail "runtimeProfiles.downloadOrigins must be a bounded JSON array."
+    for ((index=0; index<count; index++)); do
+        [[ "$(json_type_path "$document" "$(path_join "$prefix" "$index")")" == string ]] ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        json_optional_into origin "$document" "$(path_join "$prefix" "$index")"
+        ((${#origin} <= 2048)) && [[ "$origin" =~ ^[!-~]+$ ]] &&
+            matches "$origin" '^[Hh][Tt][Tt][Pp][Ss]://([^/?#@%\\]+)(/)?$' ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        normalized="$(normalize_git_url "$origin" 2>/dev/null)" ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        normalized="${normalized%/}"
+        [[ "$normalized" != *:0 ]] ||
+            fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        authority="${normalized#https://}"
+        if [[ "$authority" == \[* ]]; then
+            matches "$authority" '^(\[[0-9a-f:]+\])(:[0-9]+)?$' ||
+                fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+        else
+            host="${authority%%:*}"
+            [[ "$host" != .* && "$host" != *. && "$host" != *..* ]] ||
+                fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+            IFS=. read -r -a labels <<<"$host"
+            for label in ${labels[@]+"${labels[@]}"}; do
+                [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] ||
+                    fail "runtimeProfiles.downloadOrigins requires exact HTTPS origins."
+            done
+        fi
+        for previous in ${origins[@]+"${origins[@]}"}; do
+            [[ "$previous" != "$normalized" ]] ||
+                fail "runtimeProfiles.downloadOrigins contains duplicate origins."
+        done
+        origins+=("$normalized")
+    done
+    printf '['
+    if ((${#origins[@]} > 0)); then
+        while IFS= read -r origin; do
+            printf '%s%s' "$separator" "$(json_quote "$origin")"
+            separator=","
+        done < <(printf '%s\n' "${origins[@]}" | LC_ALL=C sort)
+    fi
+    printf ']'
+}
+
 deployment_policy_snapshot() {
     local path="$1" actual_mode="$2" status="$3" runtime_root="$4"
     local encoded document="" schema version managed owner field value source_snapshot
@@ -4856,7 +4908,7 @@ deployment_policy_snapshot() {
         [[ "$profile_type" == object ]] || fail "runtimeProfiles must be a JSON object."
         profile_count="$(json_length_path "$document" runtimeProfiles)"
         profiles="{"
-        for field in allowSourceFallback backend; do
+        for field in allowSourceFallback backend downloadOrigins; do
             profile_type="$(json_type_path "$document" "$(path_join runtimeProfiles "$field")")"
             [[ -n "$profile_type" ]] || continue
             case "$field" in
@@ -4873,14 +4925,18 @@ deployment_policy_snapshot() {
                         fail "runtimeProfiles.backend must be an explicit opaque capability reference."
                     profile_value="$(json_quote "$profile_value")"
                     ;;
-                *) fail "runtimeProfiles supports only allowSourceFallback and backend." ;;
+                downloadOrigins)
+                    profile_value="$(runtime_download_origins "$document" "$(path_join runtimeProfiles "$field")")" ||
+                        fail "runtimeProfiles.downloadOrigins is invalid."
+                    ;;
+                *) fail "runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins." ;;
             esac
             profiles="$profiles$separator$(json_quote "$field"):$profile_value"
             separator=","
             recognized=$((recognized + 1))
         done
         [[ "$recognized" == "$profile_count" ]] ||
-            fail "runtimeProfiles supports only allowSourceFallback and backend."
+            fail "runtimeProfiles supports only allowSourceFallback, backend and downloadOrigins."
         profiles="$profiles}"
     elif [[ "$property_count" != 4 ]]; then
         fail "Runtime deployment policy has missing or unsupported fields."

@@ -639,6 +639,7 @@ def retain_uv_install(
     excluded_local_packages: tuple[str, ...] = (),
     _operation: str = "install",
     deadline: float | None = None, native_target: bool = False,
+    _projection: list[str] | None = None,
 ):
     """Own the admitted graph and optional first-party exclusion constraints."""
     with _configuration.retain_local_exclusions(
@@ -648,6 +649,7 @@ def retain_uv_install(
         retained_resource_roots=retained_resource_roots, _operation=_operation,
         **({"deadline": deadline} if deadline is not None else {}),
         **({"native_target": True} if native_target else {}),
+        **({"_projection": _projection} if _projection is not None else {}),
     ) as transaction:
         yield transaction
 
@@ -661,6 +663,7 @@ def _retain_uv_install(
     _operation: str = "install",
     _generated_constraints: tuple[Path, ...] = (),
     deadline: float | None = None, native_target: bool = False,
+    _projection: list[str] | None = None,
 ):
     """Own the admitted graph until the caller's execution and health settle."""
     check_time = partial(_configuration.remaining_timeout, deadline, error_type=DependencyPolicyError)
@@ -899,6 +902,9 @@ def _retain_uv_install(
         check_time()
         if editables:
             admitted.extend(["--config-setting", "editable_mode=compat"])
+        if _projection is not None:
+            _projection.append(original_projection[0])
+            _projection.append(retained_projection[0])
         yield RetainedUVInstall(
             (uv, "pip", "compile" if _operation == "source-compile" else _operation, *admitted),
             retained_environment, retained_base,

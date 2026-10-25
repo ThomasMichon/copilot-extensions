@@ -48,9 +48,17 @@ def run_owned(
     procutil: ModuleType, construction_fd: int,
     runtime_root: Path | None = None, runtime_version: str | None = None,
     runtime_path: Path | None = None,
+    deadline: float | None = None,
 ) -> subprocess.CompletedProcess:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("installer child timeout must be finite and positive")
+    if deadline is not None:
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+            raise ValueError("installer child deadline must be finite")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ChildTimeoutExpired(argv, 0, output="", stderr="")
+        timeout = min(timeout, remaining)
     if any(value is not None for value in (runtime_root, runtime_version, runtime_path)):
         if not all(value is not None for value in (runtime_root, runtime_version, runtime_path)):
             raise ValueError("installer retained child requires complete runtime custody")
@@ -58,6 +66,7 @@ def run_owned(
             return _retained_windows(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
                 root=runtime_root, version=runtime_version, runtime_path=runtime_path,
+                **({"deadline": deadline} if deadline is not None else {}),
             )
     options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -74,7 +83,9 @@ def run_owned(
         except procutil.SyncProcessLaunchError as error:
             raise ChildLaunchError(f"Installer child could not start: {error}") from error
         try:
-            stdout, stderr = process.communicate(timeout=timeout)
+            stdout, stderr = process.communicate(
+                timeout=timeout if deadline is None else max(0, min(timeout, deadline - time.monotonic())),
+            )
         except subprocess.TimeoutExpired as error:
             timeout_error = error
         finally:
@@ -98,7 +109,9 @@ def run_owned(
             os.close(owner_read)
             owner_read = -1
             try:
-                stdout, stderr = process.communicate(timeout=timeout)
+                stdout, stderr = process.communicate(
+                    timeout=timeout if deadline is None else max(0, min(timeout, deadline - time.monotonic())),
+                )
             except subprocess.TimeoutExpired as error:
                 timeout_error = error
             finally:
@@ -110,6 +123,8 @@ def run_owned(
                 os.close(owner_read)
             if owner_write >= 0:
                 os.close(owner_write)
+    if timeout_error is None and deadline is not None and time.monotonic() >= deadline:
+        timeout_error = subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr)
     if timeout_error is not None:
         # Read both captured streams only after every owned writer has settled.
         stdout, stderr = process.communicate(timeout=10)
@@ -121,7 +136,7 @@ def run_owned(
     return result
 
 
-def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runtime_path):
+def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runtime_path, deadline=None):
     import msvcrt
 
     reader, writer = os.pipe()
@@ -138,7 +153,8 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version, "--runtime-path", str(runtime_path),
                      "--procutil-path", str(Path(procutil.__file__).resolve()),
-                     "--timeout", str(timeout), "--", *argv],
+                     "--timeout", str(timeout),
+                     *(["--deadline", str(deadline)] if deadline is not None else []), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
                     startupinfo=startup, close_fds=True, executable=sys.executable,
@@ -205,8 +221,6 @@ def _supervise_windows(args, argv):
     import ctypes
     from ctypes import wintypes
 
-    runtime = _load_resource("installer_guardian_runtime", args.runtime_path)
-    procutil = _load_resource("installer_guardian_procutil", args.procutil_path)
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.PeekNamedPipe.argtypes = (
         wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD, ctypes.c_void_p,
@@ -223,10 +237,18 @@ def _supervise_windows(args, argv):
             return True
         raise ctypes.WinError(error)
 
+    absolute_deadline = getattr(args, "deadline", None)
+    expired = {"returncode": 1, "stdout": "", "stderr": "", "timed_out": True, "launch_error": None}
     try:
+        runtime = _load_resource("installer_guardian_runtime", args.runtime_path)
+        procutil = _load_resource("installer_guardian_procutil", args.procutil_path)
+        if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+            return expired
         with runtime.retention_lease(Path(args.runtime_root), args.runtime_version):
             if disconnected():
                 raise RuntimeError("installer caller exited before child execution")
+            if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
+                return expired
             try:
                 process, job = procutil.spawn_sync_in_kill_on_close_job(
                     argv, require_job=True, allow_breakaway=False, executable=argv[0],
@@ -239,6 +261,8 @@ def _supervise_windows(args, argv):
                     "timed_out": False, "launch_error": str(error),
                 }
             deadline = time.monotonic() + args.timeout
+            if absolute_deadline is not None:
+                deadline = min(deadline, absolute_deadline)
             timed_out = False
             try:
                 while True:
@@ -348,10 +372,13 @@ if __name__ == "__main__":
     parser.add_argument("--runtime-path")
     parser.add_argument("--procutil-path")
     parser.add_argument("--timeout", type=float)
+    parser.add_argument("--deadline", type=float)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if not args.command or args.command[0] != "--" or len(args.command) < 2:
         parser.error("a child argv after -- is required")
+    if args.deadline is not None and (not math.isfinite(args.deadline) or args.deadline <= 0):
+        parser.error("a finite positive monotonic deadline is required")
     if args.owner_handle is not None:
         if os.name != "nt" or not all((
             args.runtime_root, args.runtime_version, args.runtime_path, args.procutil_path,

@@ -26,6 +26,35 @@ ADMISSION_RUNNERS = (
     *(("posix32",) if os.name != "nt" and os.environ.get("INSTALLATION_CONTEXT_BASH32") else ()),
 )
 
+DOWNLOAD_PROFILES = {
+    "profile-download-empty": {"downloadOrigins": []},
+    "profile-download-origins": {"downloadOrigins": [
+        "https://other.example:8443", "https://FILES.example:443/",
+    ]},
+    "profile-download-ipv6": {"downloadOrigins": ["https://[2001:0DB8:0000::1]:443/"]},
+    "profile-download-ipv6-boundaries": {"downloadOrigins": [
+        "https://[::]", "https://[::1]", "https://[1::]",
+    ]},
+    "profile-download-ipv6-trailing-group": {"downloadOrigins": ["https://[1:2:3:4:5:6:7:8:]"]},
+    "profile-download-ipv6-leading-group": {"downloadOrigins": ["https://[:1::2]"]},
+    "profile-download-duplicate": {"downloadOrigins": ["https://files.example", "https://FILES.example:443/"]},
+    "profile-download-string": {"downloadOrigins": "https://files.example"},
+    "profile-download-userinfo": {"downloadOrigins": ["https://user:password@files.example"]},
+    "profile-download-insecure": {"downloadOrigins": ["http://files.example"]},
+    "profile-download-path": {"downloadOrigins": ["https://files.example/path"]},
+    "profile-download-wildcard": {"downloadOrigins": ["https://*.example"]},
+    "profile-download-query": {"downloadOrigins": ["https://files.example?hidden=credential"]},
+    "profile-download-fragment": {"downloadOrigins": ["https://files.example#fragment"]},
+    "profile-download-port-zero": {"downloadOrigins": ["https://files.example:0"]},
+    "profile-download-port-overflow": {"downloadOrigins": ["https://files.example:65536"]},
+    "profile-download-unicode": {"downloadOrigins": ["https://\u2603.example"]},
+    "profile-download-count": {"downloadOrigins": ["https://files.example"] * 257},
+    "profile-download-long": {"downloadOrigins": ["https://" + "a" * 2048]},
+    "profile-download-underscore": {"downloadOrigins": ["https://files_example"]},
+    "profile-download-ipv6-invalid": {"downloadOrigins": ["https://[2001:::1]"]},
+    "profile-download-port-alias": {"downloadOrigins": ["https://files.example:00443/"]},
+}
+
 
 def _run_adapter(runner: str, arguments: list[str]) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
@@ -71,6 +100,7 @@ def test_stock_bash_management_retains_modern_shell_floor(tmp_path: Path) -> Non
     "profile-empty-key", "profile-newline-key", "profile-known-and-empty-key",
     "profile-known-and-suffixed-key", "profile-known-and-prefixed-key",
     "profile-known-fallback-and-suffixed-key",
+    *DOWNLOAD_PROFILES,
 ])
 def test_native_policy_decision_matches_reference(
     tmp_path: Path, runner: str, case: str,
@@ -133,6 +163,7 @@ def test_native_policy_decision_matches_reference(
             "profile-known-fallback-and-suffixed-key": {
                 "allowSourceFallback": False, "allowSourceFallback\n": True,
             },
+            **DOWNLOAD_PROFILES,
         }[case]
         policy["managed"] = False
     if case not in {"missing", "directory"}:

@@ -32,6 +32,7 @@ PYTHON_FILES = (
     "installer_engine.py", "installer_engine_process.py", "runtime_launcher.py",
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
+    "installer_wheel_acquisition.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",

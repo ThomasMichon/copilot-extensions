@@ -136,6 +136,61 @@ def test_owner_bound_optional_policy_can_disable_source_and_select_accelerator(a
     assert path.read_bytes() == before
 
 
+def test_download_origins_are_optional_canonical_and_bound_to_policy_identity(adopter):
+    module, arguments, _ = adopter
+    path, policy = owned_policy(module, arguments)
+    before = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
+    policy["runtimeProfiles"]["downloadOrigins"] = []
+    _write_json(path, policy)
+    assert module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"] == before
+    policy["runtimeProfiles"]["downloadOrigins"] = [
+        "https://FILES.example:443/", "https://other.example:8443",
+    ]
+    _write_json(path, policy)
+    first = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
+    assert first["selection"]["downloadOrigins"] == [
+        "https://files.example", "https://other.example:8443",
+    ]
+    assert first["policyId"] != before["policyId"]
+    policy["runtimeProfiles"]["downloadOrigins"].reverse()
+    _write_json(path, policy)
+    assert module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"] == first
+    policy["runtimeProfiles"]["downloadOrigins"] = ["https://files.example"]
+    _write_json(path, policy)
+    assert module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]["policyId"] != first["policyId"]
+
+
+@pytest.mark.parametrize("origins", [
+    None, "https://files.example", {},
+    ["http://files.example"], ["https://*.example"], ["https://files.example/path"],
+    ["https://user:password@files.example"], ["https://files.example?credential=hidden"],
+    ["https://files.example#fragment"], ["https://files.example\n"],
+    ["https://files.example\\other"], ["https://files.example:0"],
+    ["https://files.example:65536"], ["https://files.example", "https://FILES.example:443/"],
+    ["https://[1:2:3:4:5:6:7:8:]"], ["https://[:1::2]"],
+    ["https://files.example"] * 257,
+])
+def test_invalid_download_origins_block_policy_without_mutation(adopter, origins):
+    module, arguments, _ = adopter
+    path, _ = owned_policy(module, arguments, downloadOrigins=origins)
+    before = path.read_bytes()
+    result = module.resolve_runtime_profile_policy(**arguments)
+    assert result["runtimeProfiles"]["status"] == "blocked"
+    assert result["runtimeProfiles"]["selection"] is None
+    assert result["runtimeProfiles"]["policyId"] is None
+    assert path.read_bytes() == before
+
+
+def test_download_origins_do_not_make_a_foreign_policy_authoritative(adopter):
+    module, arguments, _ = adopter
+    path, policy = owned_policy(module, arguments, downloadOrigins=["https://files.example"])
+    policy["owner"]["sourceFingerprint"] = "sha256:" + "0" * 64
+    _write_json(path, policy)
+    result = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
+    assert result["status"] == "blocked"
+    assert result["selection"] is None
+
+
 def test_policy_identity_changes_for_effective_policy_and_owner_not_file_format(adopter):
     module, arguments, _ = adopter
     first = module.resolve_runtime_profile_policy(**arguments)["runtimeProfiles"]
