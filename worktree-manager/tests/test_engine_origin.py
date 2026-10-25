@@ -475,9 +475,14 @@ def test_unconfirmed_cleanup_retains_scratch_and_custody(case, monkeypatch):
         shutil.rmtree(failure.neutral_directory)
 
 
-def test_windows_sharing_update_retries_within_original_budget(case, monkeypatch):
+@pytest.mark.parametrize("configured,budget", [
+    (None, 180), ("600", 600), ("1.2e3", 1200), ("3600", 3600),
+])
+def test_windows_sharing_update_retries_within_original_budget(case, monkeypatch, configured, budget):
     _write_ledger(case)
     selected = _select(case)
+    if configured is not None:
+        case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = configured
     clock = [0.0]
     timeouts = []
     monkeypatch.setattr(origin_api, "_WINDOWS", True)
@@ -496,8 +501,36 @@ def test_windows_sharing_update_retries_within_original_budget(case, monkeypatch
     monkeypatch.setattr(origin_api, "_native_acquisition", acquire)
     actual = origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
     assert actual["sourceFingerprint"] == case.identity["fingerprint"]
-    assert timeouts == [180, 119]
+    assert timeouts == [budget, budget - 61]
     assert clock[0] == 61
+
+
+@pytest.mark.parametrize("configured", [
+    "", "0", "-1", "nan", "inf", "-inf", "3601", "1e300", "invalid",
+])
+def test_invalid_acquisition_budget_refuses_before_native_acquisition(case, configured):
+    _write_ledger(case)
+    selected = _select(case)
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = configured
+    with pytest.raises(RuntimeError, match="positive finite number no greater than 3600"):
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+
+
+def test_configured_acquisition_timeout_is_not_replayed(case, monkeypatch):
+    _write_ledger(case)
+    selected = _select(case)
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = "600"
+    calls = []
+    monkeypatch.setattr(origin_api, "monotonic", lambda: 0)
+
+    def acquire(argv, environment, cwd, *, timeout):
+        calls.append(timeout)
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    monkeypatch.setattr(origin_api, "_native_acquisition", acquire)
+    with pytest.raises(RuntimeError, match="timed out"):
+        origin_api.refresh_registered_origin(primitive, selected, environment=case.env)
+    assert calls == [600]
 
 
 @pytest.mark.parametrize("windows,installed,detail", [
@@ -598,9 +631,12 @@ def test_sharing_retry_revalidates_after_backoff(case, monkeypatch, change):
     assert len(calls) == 1
 
 
-def test_sharing_retry_does_not_extend_exhausted_deadline(case, monkeypatch):
+@pytest.mark.parametrize("configured,budget", [(None, 180), ("600", 600)])
+def test_sharing_retry_does_not_extend_exhausted_deadline(case, monkeypatch, configured, budget):
     _write_ledger(case)
     selected = _select(case)
+    if configured is not None:
+        case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = configured
     clock = [0.0]
     calls = []
     monkeypatch.setattr(origin_api, "_WINDOWS", True)
@@ -608,7 +644,7 @@ def test_sharing_retry_does_not_extend_exhausted_deadline(case, monkeypatch):
 
     def acquire(argv, environment, cwd, **kwargs):
         calls.append(argv)
-        clock[0] = 180
+        clock[0] = budget
         return subprocess.CompletedProcess(argv, 1, "", "sharing (os error 32)")
 
     def unexpected_sleep(seconds):
@@ -634,6 +670,7 @@ def test_windows_sharing_recovery_preserves_real_directory_holder(
 ):
     _materialize(case)
     selected = _select(case)
+    case.env["WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC"] = "600"
     before = case.settings.read_bytes(), (case.home / "config.json").read_bytes()
     cli = case.home / "native_cli.py"
     cli.write_text(
@@ -656,6 +693,7 @@ def test_windows_sharing_recovery_preserves_real_directory_holder(
     attempts = []
 
     def acquire(*args, **kwargs):
+        assert 180 < kwargs["timeout"] <= 600
         result = case.native(*args, **kwargs)
         attempts.append(result.returncode)
         if len(attempts) == 1:
