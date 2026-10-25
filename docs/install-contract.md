@@ -2689,12 +2689,13 @@ from the admitted artifact. Execution holds the existing owner's managed
 module install fallback. This does not create an installation cell, data root,
 new driver, or a public alternative installation command.
 
-SSH and Machines' native publications under that transaction pin pass their
+SSH, Machines and MCP's native publications under that transaction pin pass their
 unbound schema-3 manifest to the original installed owner's existing
 `command_binding.py --publish-legacy --write-manifest` operation. The borrowed
 management lease supplies ownership validation and atomic publication; a refused
 SDK call cannot fall back to replacing the manifest directly. Machines captures
-its original source locator before constructing an immutable snapshot.
+its original source locator before constructing an immutable snapshot, and MCP
+retains that locator before activation.
 `source.path` therefore retains the owning publisher while `source.version`
 remains the prepared package version and `runtime_source` identifies its exact
 code assembly. Ordinary unpinned and cell publication retain their separate

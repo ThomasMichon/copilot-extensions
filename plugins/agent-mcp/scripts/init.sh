@@ -735,6 +735,11 @@ _git_info() {
     echo "$commit $branch $dirty"
 }
 
+SOURCE_MANIFEST_PATH="$PLUGIN_DIR"
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+    SOURCE_MANIFEST_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+fi
+
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     # Point the stable .venv link at this version's freshly-built slot, moving a
@@ -751,7 +756,7 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
     _versioned_mark_complete || exit 1
     # Source manifest inputs are captured before activation.
     if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
-        SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$PLUGIN_DIR/../.." && pwd)")" || exit 1
+        SOURCE_MANIFEST_GIT="$(_git_info "$(cd "$SOURCE_MANIFEST_PATH/../.." && pwd)")" || exit 1
     fi
     _assert_source_runtime || exit 1
     if ! "$VENV_PYTHON" "$VR_SCRIPT" --root "$INSTALL_DIR" --link-name '.venv' \
@@ -862,7 +867,7 @@ SOURCE_FIELDS=""
 if [[ -n "$SOURCE_RUNTIME_IDENTITY" ]]; then
     SOURCE_FIELDS="${SOURCE_RUNTIME_IDENTITY:1:${#SOURCE_RUNTIME_IDENTITY}-2},"
 fi
-KIND="$(_source_kind "$PLUGIN_DIR")"
+KIND="$(_source_kind "$SOURCE_MANIFEST_PATH")"
 if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
     VER="$PACKAGE_VERSION"
 else
@@ -879,7 +884,7 @@ if [[ "$KIND" == "local" ]]; then
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
 TMP="$MANIFEST_PATH.tmp"
-cat > "$TMP" << EOF
+manifest_json="$(cat << EOF
 {
   "schema_version": 3,
   "service": "agent-mcp",
@@ -888,7 +893,7 @@ cat > "$TMP" << EOF
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {
     "kind": "$KIND",
-    "path": "$PLUGIN_DIR",
+    "path": "$SOURCE_MANIFEST_PATH",
     "repo": "copilot-extensions",
     "plugin": "agent-mcp",
     "version": "$VER",
@@ -900,7 +905,21 @@ cat > "$TMP" << EOF
   "runtime": "python"
 }
 EOF
-mv -f "$TMP" "$MANIFEST_PATH"
+)" || exit 1
+if [[ -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN:-}" ]]; then
+    if ! printf '%s\n' "$manifest_json" |
+        "$VENV_PYTHON" -I -B -X utf8 "$SOURCE_MANIFEST_PATH/scripts/command_binding.py" \
+            --payload-root "$SOURCE_MANIFEST_PATH" --source-payload-root "$SOURCE_MANIFEST_PATH" \
+            --plugin-id agent-mcp --legacy-root "$INSTALL_DIR" \
+            --project-root "${COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT:-$PWD}" \
+            --publish-legacy --write-manifest >/dev/null; then
+        _fail 'Command ownership validation refused MCP source manifest publication.'
+        exit 1
+    fi
+else
+    printf '%s\n' "$manifest_json" > "$TMP"
+    mv -f "$TMP" "$MANIFEST_PATH"
+fi
 _ok "Deploy manifest written (source: $KIND)"
 
 # -- 6. Verify ---------------------------------------------------------

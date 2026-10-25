@@ -829,6 +829,10 @@ Write-Ok 'Package installed: agent-mcp'
 
 }
 
+$sourceManifestPath = if ($env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN -and $env:COPILOT_PLUGIN_STAGED_FROM) {
+    $env:COPILOT_PLUGIN_STAGED_FROM
+} else { $PluginDir }
+
 # === install-contract:v3 versioned-venv activate -- keep byte-identical across plugins ===
 if ($VersionedRuntime) {
     # Point the stable `.venv` link at this version's freshly-built slot, moving a
@@ -847,7 +851,7 @@ if ($VersionedRuntime) {
     if (-not (Invoke-VersionedMarkComplete)) { throw 'Runtime construction completion failed' }
     # Source manifest inputs are captured before activation.
     if ($script:SourceRuntimeIdentity) {
-        $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $PluginDir))
+        $sourceManifestGit = Get-GitInfo -Path (Split-Path -Parent (Split-Path -Parent $sourceManifestPath))
     }
     Assert-SourceRuntime
     Invoke-Hidden -FilePath $VenvPython -ArgList @($VrScript, '--root', $InstallDir, '--link-name', '.venv', 'activate', $SrcVersion, '--no-link') | Out-Null
@@ -949,7 +953,7 @@ if (-not $script:SourceRuntimeIdentity) { Assert-SourceRuntime }
 # Unified schema_version 3 manifest (install-contract): records the source
 # footprint (marketplace vs local) so deploys are auditable like the siblings.
 $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-$kind = Get-SourceKind -PluginPath $PluginDir
+$kind = Get-SourceKind -PluginPath $sourceManifestPath
 $ver = if ($script:SourceRuntimeIdentity) { $PackageVersion } else { '0.0.0' }
 $pyproj = Join-Path $PluginDir 'pyproject.toml'
 if (-not $script:SourceRuntimeIdentity -and (Test-Path $pyproj)) {
@@ -969,7 +973,7 @@ $manifest = [ordered]@{
     deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
     source         = [ordered]@{
         kind    = $kind
-        path    = ($PluginDir -replace '\\', '/')
+        path    = ($sourceManifestPath -replace '\\', '/')
         repo    = 'copilot-extensions'
         plugin  = 'agent-mcp'
         version = $ver
@@ -986,8 +990,23 @@ if ($script:SourceRuntimeIdentity) {
     $manifest.runtime_source = $fields.runtime_source
 }
 $tmp = "$manifestPath.tmp"
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-Move-Item -Force -Path $tmp -Destination $manifestPath
+if ($env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN) {
+    $publicationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+        $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+    } else { (Get-Location).Path }
+    $result = Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+        '-I', '-B', '-X', 'utf8', (Join-Path $sourceManifestPath 'scripts/command_binding.py'),
+        '--payload-root', $sourceManifestPath, '--source-payload-root', $sourceManifestPath,
+        '--plugin-id', 'agent-mcp', '--legacy-root', $InstallDir,
+        '--project-root', $publicationProject, '--publish-legacy', '--write-manifest'
+    ) -InputText ($manifest | ConvertTo-Json -Depth 8 -ErrorAction Stop)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command ownership validation refused MCP source manifest publication: $result"
+    }
+} else {
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+    Move-Item -Force -Path $tmp -Destination $manifestPath
+}
 Write-Ok "Deploy manifest written (source: $kind)"
 
 # -- 6. Verify ----------------------------------------------------------

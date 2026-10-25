@@ -1,0 +1,13 @@
+{
+  "comment": "Retain original MCP command ownership through collected source updates and qualify native publication.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

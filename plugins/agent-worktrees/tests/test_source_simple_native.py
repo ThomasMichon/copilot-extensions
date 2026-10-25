@@ -1,4 +1,4 @@
-"""Opt-in collected-source updates through service-less native frontends."""
+"""Opt-in collected-source updates without resident-service effects."""
 from __future__ import annotations
 
 import hashlib
@@ -27,11 +27,13 @@ home.mkdir()
 os.environ.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
                   COPILOT_EXTENSIONS_TEST_CONTAINED="1")
 for key in list(os.environ):
-    if key.startswith(("COPILOT_PLUGIN_", "AGENT_MACHINES_", "AGENT_SSH_")) or key in (
+    if key.startswith(("COPILOT_PLUGIN_", "AGENT_MACHINES_", "AGENT_SSH_", "AGENT_MCP_")) or key in (
         "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN",
         "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
     ):
         del os.environ[key]
+if plugin == "agent-mcp":
+    os.environ.update(AGENT_MCP_NO_CUTOVER="1", AGENT_MCP_NO_VERSION_REAP="1")
 sys.path.insert(0, str(repository / "tools"))
 import prepare_runtime_source as preparation
 artifact = home / "prepared"
@@ -63,7 +65,7 @@ settings.write_text(json.dumps({
 os.environ["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(project)
 shell = shutil.which("pwsh") if os.name == "nt" else shutil.which("bash")
 assert shell
-installer = "init" if plugin == "agent-machines" else "install"
+installer = "init" if plugin in {"agent-machines", "agent-mcp"} else "install"
 
 def run(arguments, timeout=120, input_text=None, environment=None):
     result = subprocess.run(arguments, cwd=project, capture_output=True, text=True,
@@ -141,6 +143,9 @@ step = update_runtime_plan.plan_registered(
 )
 assert not step.status, step.status
 assert step.payload == owner and step.artifact == artifact and step.runtime_root == root
+if plugin == "agent-mcp":
+    assert step.environment["AGENT_MCP_NO_CUTOVER"] == "1"
+    assert step.environment["AGENT_MCP_NO_VERSION_REAP"] == "1"
 status = update_runtime._execute_runtime_step(step)
 assert status == "OK", status
 manifest = json.loads((root / "deploy-manifest.json").read_text())
@@ -169,8 +174,11 @@ module_path, prefix, installed_version, module_version = json.loads(
 )
 assert Path(module_path).is_relative_to(slot) and Path(prefix) == slot
 assert reconcile._versions_equal(installed_version, version), (installed_version, version)
-assert reconcile._versions_equal(module_version, version), (module_version, version)
-suffix = ".cmd" if plugin == "agent-machines" else ".ps1"
+expected_module_version = identity.runtime_version if plugin == "agent-mcp" else version
+assert reconcile._versions_equal(module_version, expected_module_version), (
+    module_version, expected_module_version,
+)
+suffix = ".cmd" if plugin in {"agent-machines", "agent-mcp"} else ".ps1"
 launcher = home / ".local/bin" / (plugin + suffix if os.name == "nt" else plugin)
 assert launcher.is_file()
 if os.name == "nt" and suffix == ".cmd":
@@ -212,10 +220,10 @@ def _persistent_user_path_fingerprint() -> str | None:
 
 @pytest.mark.skipif(
     os.environ.get("COPILOT_TEST_NATIVE_SOURCE_SIMPLE") != "1",
-    reason="opt-in service-less native source construction",
+    reason="opt-in native source construction without resident-service effects",
 )
 @pytest.mark.timeout(360)
-@pytest.mark.parametrize("plugin", ["agent-ssh", "agent-machines"])
+@pytest.mark.parametrize("plugin", ["agent-ssh", "agent-machines", "agent-mcp"])
 def test_native_collected_source_preserves_service_less_owner(
     tmp_path_factory: pytest.TempPathFactory, portfolio_source_snapshot: Path, plugin: str,
 ) -> None:

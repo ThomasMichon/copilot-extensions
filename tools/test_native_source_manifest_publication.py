@@ -15,11 +15,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _publication_body(plugin: str, suffix: str) -> str:
-    installer = "init" if plugin == "agent-machines" else "install"
+    installer = "init" if plugin in {"agent-machines", "agent-mcp"} else "install"
     text = (ROOT / "plugins" / plugin / "scripts" / f"{installer}.{suffix}").read_text(
         encoding="utf-8",
     )
-    if plugin == "agent-machines":
+    if plugin in {"agent-machines", "agent-mcp"}:
         start = text.index("# -- 5.")
         return text[start:text.index("# -- 6.", start)]
     marker = "$sourcePublication =" if suffix == "ps1" else 'SOURCE_FIELDS=""'
@@ -28,7 +28,7 @@ def _publication_body(plugin: str, suffix: str) -> str:
     return text[start:text.index(end, start)]
 
 
-@pytest.mark.parametrize("plugin", ["agent-ssh", "agent-machines"])
+@pytest.mark.parametrize("plugin", ["agent-ssh", "agent-machines", "agent-mcp"])
 @pytest.mark.parametrize("suffix", ["ps1", "sh"])
 def test_sdk_refusal_preserves_native_source_manifest(
     tmp_path: Path, plugin: str, suffix: str,
@@ -89,6 +89,7 @@ def test_sdk_refusal_preserves_native_source_manifest(
             f"$LinkDir={quote(root / 'slot')}; $sourcePath={quote(owner)}\n"
             f"$pythonCmd={quote(sys.executable)}; $SourceRuntimeIdentity={quote(json.dumps(fields))}\n"
             f"$script:SourceManifestPath={quote(owner)}\n"
+            f"$sourceManifestPath={quote(owner)}\n"
             "$CellMode=$false; $PackageVersion='1.2.3'; $sourceManifestHash='fixture-hash'\n"
             "$script:SourceManifestGit=@{commit='abc';branch='dev';dirty=$false}\n"
             + _publication_body(plugin, suffix),
@@ -106,6 +107,7 @@ def test_sdk_refusal_preserves_native_source_manifest(
             f"_source_python() {{ printf '%s\\n' {shlex.quote(sys.executable)}; }}\n"
             f"INSTALL_DIR={shlex.quote(str(root))}; PLUGIN_DIR={shlex.quote(str(prepared))}\n"
             f"SOURCE_PATH={shlex.quote(str(owner))}; SOURCE_OWNER={shlex.quote(str(owner))}\n"
+            f"SOURCE_MANIFEST_PATH={shlex.quote(str(owner))}\n"
             f"VENV_DIR={shlex.quote(str(root / 'slot'))}; VENV_PYTHON={shlex.quote(sys.executable)}\n"
             f"SOURCE_RUNTIME_IDENTITY={shlex.quote(json.dumps(fields))}\n"
             "CELL_MODE=0; PACKAGE_VERSION=1.2.3\n"

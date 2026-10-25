@@ -59,7 +59,9 @@ function Write-ServiceHeader($value) {{ }}
 function Write-ServiceOk($value) {{ }}
 function Write-Ok($value) {{ }}
 function Deploy-SelfProvisioningBinstub {{
-    if (-not ${str(locked or succeeds).lower()}) {{ throw 'Unexpected binstub publication' }}
+    if (-not ${str(locked or succeeds or plugin == 'agent-codespaces').lower()}) {{
+        throw 'Unexpected binstub publication'
+    }}
 }}
 function Materialize-SnapshotDependencies {{ throw 'Source snapshot was rematerialized' }}
 {native._function(plugin, 'Invoke-Stamp', language)}
@@ -316,6 +318,7 @@ function Get-SourceRuntimeIdentity {{
 function Get-BootstrapPython {{ return {q(sys.executable)} }}
 function Write-Fail($value) {{ throw $value }}
 function Write-Ok($value) {{ }}
+function Write-Step($value) {{ }}
 function Deploy-SelfProvisioningBinstub {{ }}
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
 {_function('agent-machines', 'Enter-StampLock')}
