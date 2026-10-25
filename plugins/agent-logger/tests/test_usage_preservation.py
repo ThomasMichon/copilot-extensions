@@ -190,6 +190,47 @@ def test_sync_with_internal_metadata_preserves_accounting_and_succeeds(tmp_path:
     assert (published / ARTIFACT).read_bytes() == (session / ARTIFACT).read_bytes()
 
 
+def test_scheduled_capture_converges_above_total_transcript_limit(tmp_path: Path) -> None:
+    from agent_logger.usage_capture import capture_for_sync
+    from agent_logger.usage_transcript import MAX_TRANSCRIPT_BYTES
+
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    usage = (session / "events.jsonl").read_bytes()
+    padding = json.dumps({"type": "assistant.message", "data": {"content": "x" * 1024}}).encode() + b"\n"
+    with (session / "events.jsonl").open("wb") as stream:
+        for _ in range(MAX_TRANSCRIPT_BYTES // len(padding) + 1):
+            stream.write(padding)
+        stream.write(usage)
+    assert (session / "events.jsonl").stat().st_size > MAX_TRANSCRIPT_BYTES
+
+    assert capture_for_sync(cfg, None) == (False, False)
+    assert not (session / ARTIFACT).exists()
+    assert capture_for_sync(cfg, None) == (True, False)
+    evidence = json.loads((session / ARTIFACT).read_text())
+    transcript = [row for row in evidence["records"] if row["source"] == "transcript"]
+    assert len(transcript) == 1 and transcript[0]["values"]["input_tokens"] == 10
+    before = (session / ARTIFACT).read_bytes()
+    assert capture_for_sync(cfg, None) == (True, False)
+    assert (session / ARTIFACT).read_bytes() == before
+
+
+def test_scheduled_capture_converges_above_total_event_limit(tmp_path: Path) -> None:
+    from agent_logger.usage_capture import capture_for_sync
+    from agent_logger.usage_transcript import MAX_EVENTS
+
+    cfg = _cfg(tmp_path)
+    session = _session(cfg.sync_source)
+    _db(cfg.sync_source)
+    usage = (session / "events.jsonl").read_bytes()
+    (session / "events.jsonl").write_bytes(b"{}\n" * MAX_EVENTS + usage)
+    assert capture_for_sync(cfg, None) == (False, False)
+    assert capture_for_sync(cfg, None) == (True, False)
+    evidence = json.loads((session / ARTIFACT).read_text())
+    assert len([row for row in evidence["records"] if row["source"] == "transcript"]) == 1
+
+
 @pytest.mark.guard
 def test_usage_transcript_allowlist_and_token_composition(tmp_path: Path) -> None:
     session = _session(tmp_path)
@@ -466,7 +507,7 @@ def test_usage_huge_numeric_record_retains_prior_and_allows_raw_transfer(
     assert copied.read_bytes() == transcript.read_bytes()
 
 
-@pytest.mark.parametrize("store", ["missing", "corrupt"])
+@pytest.mark.parametrize("store", ["missing", "corrupt", "deferred"])
 def test_usage_incomplete_capture_still_delivers_existing_archives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: str,
 ) -> None:
@@ -475,13 +516,21 @@ def test_usage_incomplete_capture_still_delivers_existing_archives(
 
     cfg = _cfg(tmp_path)
     cfg._data["sync"]["compact"] = {"enabled": True}
-    _session(cfg.sync_source)
+    session = _session(cfg.sync_source)
     archived_session = _session(tmp_path / "old-source", "old")
     cfg.compact_archive_root.mkdir(parents=True)
     archive = cfg.compact_archive_root / "old.tar.gz"
     get_codec("targz").archive_dir(archived_session, archive)
     if store == "corrupt":
         (cfg.sync_source / "session-store.db").write_bytes(b"corrupt")
+    elif store == "deferred":
+        from agent_logger import usage_transcript
+
+        _db(cfg.sync_source)
+        assert capture_usage(cfg.sync_source, None).complete
+        with (session / "events.jsonl").open("ab") as stream:
+            stream.write(b"{}\n")
+        monkeypatch.setattr(usage_transcript, "MAX_EVENTS", 1)
     target = engine.build_target(cfg.sync_target, cfg.target_options(cfg.sync_target))
 
     def forbidden(*args: object, **kwargs: object) -> None:
