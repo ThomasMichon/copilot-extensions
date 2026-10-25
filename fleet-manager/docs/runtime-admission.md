@@ -9,6 +9,10 @@ The [resident Gateway](gateway-runtime.md) has its own existing static
 index/credential enrollment API; this library does not replace or wire it.
 An owner-agreed current-snapshot adapter remains necessary before advertising
 these observation/operation permits on that serving plane.
+The separate [service Gateway SDK](gateway-service-profile.md#in-process-deployment-owners)
+binds its original retained verified caller to local operation admission.
+That opt-in bridge still requires independent current operation policy and
+effect-owner custody; it does not adopt the legacy serving plane or a live fleet.
 
 ## Trusted owner and currentness
 
@@ -41,6 +45,15 @@ Authority/fleet/issuer/audience replacement requires a new owner and invalidates
 all old permits. The trusted integer clock is sampled under its lock before and
 after callback/decision work. Expiry at the final checkpoint and clock rollback
 refuse; completion order cannot fabricate time order.
+
+`AuthoritySnapshot.identity_profile` defaults to the original `jwt-pop-v1`.
+An adopter may separately select `enrolled-pop-v1` to consume an actual verified
+`EnrolledIdentity` of kind `caller` from the existing enrolled-key serving
+boundary. Both Gateway and operation policy must explicitly admit that profile.
+An enrolled service identity cannot become an operator, and default operation
+policy does not silently accept another identity profile. Profile replacement,
+like issuer/audience replacement, requires a new admission owner. No token
+rewriting, identity reconstruction, provider login or new verifier is supplied.
 
 ## Supported requests and exact branches
 
@@ -92,6 +105,15 @@ uses a fresh proof and verification result with the original operation ID and
 content, not a human check-in, cached allow or evidence rollback.
 
 ## Permit checkpoints, renewal and bounds
+
+A trusted in-process embedding can supply `checkpoint=...` to `authorize`.
+This is a short I/O-free scope/lifetime check, not a policy or identity
+authenticator, and must return `None` or raise. It runs before and after
+admission and remains attached to every renewed handle's revalidation and
+completion. Its refusal consumes a retained handle without refunding proof
+evidence. Cleanup via `discard` never calls it or turns failure into authority.
+The service Gateway uses this seam for its original retained caller/route and
+local request custody; wire requests cannot supply a callback.
 
 The immutable `Permit` retains actor/enrollment, authority/fleet, action,
 canonical digest, exact effective resources, issuing policy revision and finite

@@ -869,11 +869,34 @@ refusal assertions. No test enables Developer Mode or elevates the process.
 
 ## Client frontdoor native acceptance
 
+The Fleet test helper gives **wheel construction only** a 60-second budget,
+separate from its 30-second native-command and source-distribution
+budgets. This covers cold setuptools import, canonical resource checks and file
+copying, not a product/runtime or publication deadline. The local-Gateway
+distribution proof installs the real wheel offline and runs independent
+60-second SDK probes for both supported identity profiles and normal/UNKNOWN
+recovery. This probe-only allowance includes cold cryptographic imports; the
+shared native-command default remains 30 seconds and product/effect deadlines
+are unchanged. Each probe uses a minimal pytest-free consumer with real TLS,
+the SDK caller and native owner, not another test collector. On slower hosts,
+select each matrix case separately under the 120-second qualification
+envelope. A prepared qualifier with `pytest-timeout` may instead share the
+session's immutable wheel across the module, enforcing 120 seconds per case
+(including setup/teardown) inside the existing 600-second component envelope.
+Every installed consumer remains a fresh process and target; this is artifact
+reuse, not cached execution evidence. No fixture or source callback is readiness proof.
+
+The preparation Gateway's real-Git functional fixture selects the existing
+supported 30-second acquisition configuration for repeated source pulls.
+Production defaults to 15 seconds and caps selection at 30. Separate
+controls assert the default and a real authenticated deadline refusal;
+this does not relax the source owner or Gateway's execution limits.
+
 `fleet-manager/tests/test_client_frontdoor_native.py` separates the real
 construction prerequisite, concurrent independent registration owners, and
 platform command/exact-rerun behavior. The constructed client remains the real
 offline installed distribution; no construction, health, publication or
-registration primitive is mocked. Per-case 90-second, build 30-second,
+registration primitive is mocked. Per-case 90-second, wheel-build 60-second,
 registration-child 60-second and command 20-second bounds remain unchanged.
 Each registration case uses actual owned command withdrawal at teardown so a
 different test's directory cannot become its registration authority.
