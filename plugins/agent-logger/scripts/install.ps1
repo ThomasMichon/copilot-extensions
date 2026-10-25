@@ -1814,19 +1814,21 @@ $_gate = Join-Path $_payload 'scripts\runtime-gate.ps1'
 if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
     Select-String -LiteralPath $_gate -SimpleMatch '# Installation driver contract: logger-first-use-v1' -Quiet
 )) {
-    $_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $_gate -PathType Leaf) -or -not (
+        Select-String -LiteralPath $_gate -SimpleMatch 'AGENT_LOGGER_NO_SELFPROVISION' -Quiet
+    )) {
+        [Console]::Error.WriteLine("[$_command] selected snapshot lacks non-provisioning dispatch support; re-enable/update agent-logger.")
+        exit 126
+    }
+    $_resolver = Join-Path $_payload 'scripts\resolve-runtime.ps1'
     if (-not (Test-Path -LiteralPath $_resolver -PathType Leaf) -or -not (
         Select-String -LiteralPath $_resolver -SimpleMatch '# Trace contract: normal/read-only/ready-v1' -Quiet
     )) {
         [Console]::Error.WriteLine("[$_command] read-only runtime resolver is unavailable; re-enable/update agent-logger.")
         exit 126
     }
-    $env:AGENT_RT_ROOT = $_root
-    . $_resolver -TraceMode ready
-    if (-not $AgentRtPy) {
-        [Console]::Error.WriteLine("[$_command] selected snapshot lacks the queued command contract; re-enable/update agent-logger.")
-        exit 126
-    }
+    # The old gate owns effective-context resolution, but never construction.
+    $env:AGENT_LOGGER_NO_SELFPROVISION = '1'
 }
 $env:COPILOT_PLUGIN_ROOT = $_payload
 & $_shim @args

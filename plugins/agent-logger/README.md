@@ -132,6 +132,12 @@ canonical admission/execution owners.
 
 Healthy managed and installation-cell runtimes remain callable without
 installer work, preserving the command's module arguments and exit status.
+An auxiliary wrapper selecting an older dispatcher requires its existing
+no-self-provision control and delegates in that explicit mode: the dispatcher
+resolves its effective context/root, not the wrapper's global compatibility
+root. A healthy cell remains usable
+when the global runtime is absent; a healthy global runtime never authorizes
+construction at a cold custom root.
 Cold custom-root/cell construction remains explicitly unsupported through
 this Driver recipe rather than silently using legacy-root policy. An older
 resolver without the read-only contract or cold dispatcher/client without

@@ -981,19 +981,20 @@ fi
 _gate="$_payload/scripts/runtime-gate.sh"
 if [ ! -f "$_gate" ] ||
    ! grep -Fq '# Installation driver contract: logger-first-use-v1' "$_gate"; then
-    _resolver="$_root/bin/resolve-runtime.sh"
+    if [ ! -f "$_gate" ] ||
+       ! grep -Fq 'AGENT_LOGGER_NO_SELFPROVISION' "$_gate"; then
+        printf '[%s] selected snapshot lacks non-provisioning dispatch support; re-enable/update agent-logger.\n' "$_command" >&2
+        exit 126
+    fi
+    _resolver="$_payload/scripts/resolve-runtime.sh"
     if [ ! -f "$_resolver" ] ||
        ! grep -Fq '# Trace contract: normal/read-only/ready-v1' "$_resolver"; then
         printf '[%s] read-only runtime resolver is unavailable; re-enable/update agent-logger.\n' "$_command" >&2
         exit 126
     fi
-    AGENT_RT_ROOT="$_root"
-    AGENT_RT_RESOLVE_TRACE_MODE=ready
-    . "$_resolver"
-    if [ -z "${AGENT_RT_PY:-}" ]; then
-        printf '[%s] selected snapshot lacks the queued command contract; re-enable/update agent-logger.\n' "$_command" >&2
-        exit 126
-    fi
+    # The old gate owns effective-context resolution, but never construction.
+    AGENT_LOGGER_NO_SELFPROVISION=1
+    export AGENT_LOGGER_NO_SELFPROVISION
 fi
 COPILOT_PLUGIN_ROOT="$_payload"
 export COPILOT_PLUGIN_ROOT

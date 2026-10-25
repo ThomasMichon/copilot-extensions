@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -886,6 +887,88 @@ def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None
     )
     assert repeat.returncode == 0, repeat.stderr
     assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("case", ["healthy-cell-global-cold", "cold-custom-global-healthy"])
+def test_auxiliary_pre_contract_dispatch_uses_effective_runtime(tmp_path: Path, case: str) -> None:
+    helpers = runpy.run_path(str(_PLUGIN_ROOT / "tests/test_runtime_gate.py"))
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    suffix = "ps1" if os.name == "nt" else "sh"
+    if os.name == "nt":
+        shell = shutil.which("powershell.exe")
+        assert shell is not None
+        prefix = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+        stamp = prefix + [str(payload / "scripts/install.ps1"), "stamp"]
+    else:
+        prefix = ["bash"]
+        stamp = prefix + [str(payload / "scripts/install.sh"), "stamp"]
+    kwargs = dict(
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    result = subprocess.run(stamp, **kwargs)
+    assert result.returncode == 0, result.stdout + result.stderr
+    installation = home / ".agent-logger"
+    snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
+    # Exact dispatcher blobs from 62fa19a4b5, including the old foreground installer.
+    old_gate = (_PLUGIN_ROOT / "tests/fixtures" /
+                f"pre-command-driver-runtime-gate.{suffix}.txt").read_text(encoding="utf-8").encode("utf-8")
+    assert hashlib.sha256(old_gate).hexdigest() == {
+        "ps1": "b8dc70821b7982e6a20df9df483429cddfa4b1a01c189a2e2e4ca40423208fa8",
+        "sh": "2ea2af737ce935b18f8e7ae70a7c7ec1910b4f75cab19564fcddc2884a5167bd",
+    }[suffix]
+    (snapshot / "scripts" / f"runtime-gate.{suffix}").write_bytes(old_gate)
+    resolver = snapshot / "scripts" / f"resolve-runtime.{suffix}"
+    resolver_bytes = resolver.read_bytes()
+    helpers["_write_gate_stubs"](snapshot)
+    resolver.write_bytes(resolver_bytes)
+    capture = tmp_path / "capture.json"
+    env["TEST_CAPTURE"] = str(capture)
+    if case == "healthy-cell-global-cold":
+        effective = home / "marketplaces/example/plugins/agent-logger"
+        context = effective / "install.json"
+        effective.mkdir(parents=True)
+        context.write_text("{}\n", encoding="utf-8")
+        helpers["_fake_runtime"](effective)
+        env.update({
+            "TEST_CELL_ROOT": str(effective),
+            "COPILOT_EXTENSIONS_CONTEXT": str(context),
+            "TEST_INSTALLATION_STATUS": json.dumps({
+                "status": "ready", "reason": "namespaced-active",
+                "actualMode": "namespaced", "desiredMode": "namespaced",
+                "installGeneration": 1, "context": str(context),
+                "marketplaceId": "example--1234",
+                "policy": {"state": "valid", "enabled": True},
+            }),
+        })
+    else:
+        helpers["_fake_runtime"](installation)
+        effective = home / "custom-logger"
+        env["AGENT_LOGGER_HOME"] = str(effective)
+    ready_root = effective if case == "healthy-cell-global-cold" else installation
+    completion = ready_root / "versions/9.9.9/.install-complete.json"
+    completion.write_bytes(completion.read_text(encoding="utf-8").strip().encode("utf-8"))
+    for name in _COMMANDS[1:]:
+        command = home / ".local/bin" / (f"{name}.ps1" if os.name == "nt" else name)
+        result = subprocess.run(prefix + [str(command), "--probe"], **kwargs)
+        if case == "healthy-cell-global-cold":
+            assert result.returncode == 0, result.stdout + result.stderr
+            observed = json.loads(capture.read_text(encoding="utf-8"))
+            assert observed["home"] == str(effective)
+            assert observed["context"] == str(context)
+            assert observed["installation_id"] == "example--1234/agent-logger"
+            assert observed["args"] == ["--probe"]
+            capture.unlink()
+            assert not (installation / "versions").exists()
+        else:
+            assert result.returncode != 0, result.stdout + result.stderr
+            assert "AGENT_LOGGER_NO_SELFPROVISION set" in result.stderr
+            assert not effective.exists() and not capture.exists()
+    assert not (home / ".copilot-extensions/update-driver").exists()
+    assert not list(home.rglob(".provision*"))
 
 
 # Regression (coverage-guided-ci's full-matrix local validation pass,

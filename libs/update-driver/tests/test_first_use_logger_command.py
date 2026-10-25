@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -28,6 +29,18 @@ from test_first_use_vault_bootstrap import ordinary_receipt
 pytestmark = pytest.mark.skipif(
     os.name != "nt" and sys.platform != "linux", reason="native Windows/Linux Logger commands",
 )
+
+@pytest.fixture(autouse=True)
+def discard_read_only_command_case(request, area):
+    yield
+    if request.node.originalname in {
+        "test_logger_actual_command_refusal_precedes_cold_writes",
+        "test_logger_selected_command_never_substitutes_installed_payload",
+    }:
+        assert not (area / "profile/.copilot-extensions/update-driver").exists(), (
+            "Refusal case acquired installation state; retain it for diagnosis, not live-owner cleanup."
+        )
+        shutil.rmtree(area)
 
 
 def owning_command(fixture, entry, *, name="agent-logger"):
@@ -58,17 +71,20 @@ def owning_command(fixture, entry, *, name="agent-logger"):
     return source, installation, project, command
 
 
-@pytest.mark.parametrize("entry", ["primary", "payload", "auxiliary"])
 @pytest.mark.parametrize("reason", [
     "missing-driver", "old-driver", "no-self", "pinned", "nested", "managed",
     "malformed-policy", "old-resolver", "custom-root",
 ])
 def test_logger_actual_command_refusal_precedes_cold_writes(
-    materialized_logger, monkeypatch, entry, reason,
+    materialized_logger, monkeypatch, reason,
 ):
-    source, installation, project, command = owning_command(
-        materialized_logger, entry, name="collate-session" if entry == "auxiliary" else "agent-logger",
-    )
+    source, installation, project, primary = owning_command(materialized_logger, "primary")
+    suffix = ".ps1" if os.name == "nt" else ""
+    commands = [
+        primary,
+        command_for(source / "bin" / ("agent-logger" + suffix)),
+        command_for(installation.parent / ".local/bin" / ("collate-session" + suffix)),
+    ]
     if reason in {"missing-driver", "old-driver"}:
         driver = source / "libs/update-driver/scripts" / (
             "first-use.ps1" if os.name == "nt" else "first-use.sh"
@@ -87,11 +103,11 @@ def test_logger_actual_command_refusal_precedes_cold_writes(
         }[reason]
         monkeypatch.setenv(key, value)
     elif reason == "old-resolver":
-        directory = installation / "bin" if entry == "primary" else source / "scripts"
-        (directory / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")).write_text(
-            "throw 'Unqualified resolver executed'\n" if os.name == "nt" else
-            "printf 'Unqualified resolver executed' >&2\nexit 99\n", encoding="utf-8",
-        )
+        for directory in (installation / "bin", source / "scripts"):
+            (directory / ("resolve-runtime.ps1" if os.name == "nt" else "resolve-runtime.sh")).write_text(
+                "throw 'Unqualified resolver executed'\n" if os.name == "nt" else
+                "printf 'Unqualified resolver executed' >&2\nexit 99\n", encoding="utf-8",
+            )
     else:
         api = primitive(source)
         arguments = dict(payload_root=source, plugin_id="agent-logger",
@@ -105,25 +121,25 @@ def test_logger_actual_command_refusal_precedes_cold_writes(
         (installation / "runtime-deployment.json").write_text(json.dumps(policy), encoding="utf-8")
     before, source_before = files(installation), files(source)
     root = installation.parent / ".copilot-extensions/update-driver"
-    result = subprocess.run(
-        command, env=dict(os.environ), cwd=project, capture_output=True, text=True,
-        timeout=90, **agent_procutil.no_window_kwargs(),
-    )
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert not root.exists(), result.stdout + result.stderr
-    assert files(installation) == before and files(source) == source_before
-    assert "Unqualified driver executed" not in result.stderr
-    assert "Unqualified resolver executed" not in result.stderr
-    assert not (installation / ".provision.lock").exists()
-    assert not (installation / ".provision-status").exists()
+    for command in commands:
+        result = subprocess.run(
+            command, env=dict(os.environ), cwd=project, capture_output=True, text=True,
+            timeout=90, **agent_procutil.no_window_kwargs(),
+        )
+        assert result.returncode != 0, (command, result.stdout, result.stderr)
+        assert not root.exists(), result.stdout + result.stderr
+        assert files(installation) == before and files(source) == source_before
+        assert "Unqualified driver executed" not in result.stderr
+        assert "Unqualified resolver executed" not in result.stderr
+        assert not (installation / ".provision.lock").exists()
+        assert not (installation / ".provision-status").exists()
 
 
-@pytest.mark.parametrize("name", [name for name, _ in provision.LOGGER_COMMANDS])
 @pytest.mark.parametrize("reason", ["old-dispatcher", "unselected", "unavailable", "malformed"])
 def test_logger_selected_command_never_substitutes_installed_payload(
-    materialized_logger, name, reason,
+    materialized_logger, reason,
 ):
-    source, installation, project, command = owning_command(materialized_logger, "primary", name=name)
+    source, installation, project, _ = owning_command(materialized_logger, "primary")
     if reason == "old-dispatcher":
         (source / "scripts" / ("runtime-gate.ps1" if os.name == "nt" else "runtime-gate.sh")).write_text(
             "throw 'Unqualified dispatcher executed'\n" if os.name == "nt" else
@@ -137,14 +153,16 @@ def test_logger_selected_command_never_substitutes_installed_payload(
         (source / "snapshot-provenance.json").write_text("{", encoding="utf-8")
     before = files(installation)
     original = files(materialized_logger[0])
-    result = subprocess.run(
-        command, env=dict(os.environ), cwd=project, capture_output=True, text=True,
-        timeout=90, **agent_procutil.no_window_kwargs(),
-    )
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert "Unqualified dispatcher executed" not in result.stderr
-    assert not (installation.parent / ".copilot-extensions/update-driver").exists()
-    assert files(installation) == before and files(materialized_logger[0]) == original
+    for name, _module in provision.LOGGER_COMMANDS:
+        script = installation.parent / ".local/bin" / (name + ".ps1" if os.name == "nt" else name)
+        result = subprocess.run(
+            command_for(script), env=dict(os.environ), cwd=project, capture_output=True, text=True,
+            timeout=90, **agent_procutil.no_window_kwargs(),
+        )
+        assert result.returncode != 0, (name, result.stdout, result.stderr)
+        assert "Unqualified dispatcher executed" not in result.stderr
+        assert not (installation.parent / ".copilot-extensions/update-driver").exists()
+        assert files(installation) == before and files(materialized_logger[0]) == original
 
 
 @native_genesis
@@ -159,6 +177,9 @@ def test_logger_actual_command_survives_observer_loss_and_keeps_all_consumers(
         materialized_logger[0].rename(materialized_logger[0].with_name("unavailable-installed-payload"))
     env = cold_environment(installation, project, area)
     env.pop("AGENT_VAULT_HOME")
+    if entry == "cmd":
+        native_shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0"
+        env["PATH"] += os.pathsep + str(native_shell)
     adapter = logger_registration_adapter(env, area)
     root = installation.parent / ".copilot-extensions/update-driver"
     log, follower_log = area / "command.log", area / "follower.log"
@@ -283,24 +304,6 @@ def test_logger_actual_command_survives_observer_loss_and_keeps_all_consumers(
                 text=True, timeout=30, **agent_procutil.no_window_kwargs(),
             )
             assert healthy.returncode == 2 and healthy.stderr, healthy.stdout + healthy.stderr
-            snapshot = Path((installation / "payload-dir").read_text(encoding="utf-8-sig").strip())
-            gate = snapshot / "scripts" / ("runtime-gate.ps1" if os.name == "nt" else "runtime-gate.sh")
-            gate_bytes = gate.read_bytes()
-            gate.write_bytes(gate_bytes.replace(
-                b"# Installation driver contract: logger-first-use-v1", b"# Older healthy dispatcher",
-            ))
-            try:
-                for name, _module in provision.LOGGER_COMMANDS[1:]:
-                    script = installation.parent / ".local/bin" / (
-                        name + ".ps1" if os.name == "nt" else name
-                    )
-                    old = subprocess.run(
-                        command_for(script), env=env, cwd=project, capture_output=True,
-                        text=True, timeout=30, **agent_procutil.no_window_kwargs(),
-                    )
-                    assert old.returncode == 0 and "usage:" in old.stdout.lower(), old.stdout + old.stderr
-            finally:
-                gate.write_bytes(gate_bytes)
             assert len(status(root=root)) == 1 and completion.read_bytes() == completion_bytes
             assert not (installation / ".provision.lock").exists()
             assert not (installation / ".provision-status").exists()
