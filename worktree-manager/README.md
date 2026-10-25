@@ -412,6 +412,12 @@ their service labels, timed outcomes and child diagnostics without a duplicate r
 echo. Execution arguments are unchanged; this does not redact arbitrary output
 emitted by a child command.
 
+Windows PSMux creation is scoped to the resolved user home while the pane keeps
+its explicit selected worktree directory. The launcher's directory is restored
+even when creation fails. This avoids lending a retired checkout to an idle
+PSMux standby without changing global warm settings or non-mux launches.
+See [mux launch directory](../plugins/agent-worktrees/docs/mux.md#two-backends-one-model).
+
 Healthy native wrappers submit `launch-update automatic --detach` and hand off
 after acceptance, before optional acquisition or installation completes. The
 existing execution driver owns that entire finite operation: no shell-owned

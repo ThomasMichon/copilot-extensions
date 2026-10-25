@@ -192,6 +192,52 @@ another implementation assignment to the already-completed selector PR.
 Any different mechanism, including the existing Docker preflight, still requires
 its own measured trace, ownership check and separate reviewed plan.
 
+## Next proposed slice: one Docker inventory query
+
+This is an **agent-recommended, plan-only** follow-up, not implemented behavior
+or an eight-second qualification. The retained normal-runtime profile used the
+actual global legacy Worktrees command. Its 3.521-second peer wait dominates the
+Containers config read; that wait already contains the peer's startup and work
+and must not be added to a separate Worktrees profile. The latter attributes
+0.401 seconds to configuration and 1.371 seconds to imports, with overlap.
+Neither figure identifies equivalent removable work.
+
+The smaller, directly attributable duplication is `list_containers` calling
+`docker version` before `docker ps`. Two retained profiles measured the preflight
+at 0.197/0.199 seconds. The inventory query already contacts the daemon. Removing
+the preflight can eliminate one process/daemon round trip, but cannot by itself
+prove meaningful headroom or close the retained 1.378-second overrun.
+
+- [ ] Land this bounded proposal through review and required CI before code.
+- [ ] Refresh ownership and open PR files before implementation. Coordination
+  on #5761 and #8805 preserves #8805's mutation admission, exact-ID pinning and
+  lifecycle work. Do not modify `_docker`, lifecycle policy, configuration
+  precedence, Worktrees routing, launchers, SDKs or runtime ownership.
+- [ ] Remove only the version preflight from `list_containers`. Retain the
+  actual `docker ps` format, stopped-member inclusion, membership filtering,
+  security fields and complete empty/nonempty inventory behavior. Keep
+  `_check_docker` for its other callers.
+- [ ] Preserve explicit, actionable missing-CLI, unreachable-daemon, nonzero
+  query, timeout and malformed-response behavior. Keep the existing subprocess
+  deadlines and error propagation; never convert a failed query into `[]`.
+  A query failure must retain its operation and original diagnostic, with the
+  daemon-start hint where applicable.
+- [ ] Extend existing pure lifecycle/namespace tests to prove one inventory
+  call without a version call, complete result parity and failure propagation.
+  Run the focused contained packet, relevant source/unit gates, and the normal
+  install-contract/lint checks. Keep effectful native tests out of unit CI.
+- [ ] Measure the changed real Docker-list boundary in fresh processes against
+  a matching baseline, including a successful empty inventory and a disposable
+  member when practical. Test unavailable CLI/daemon behavior through isolated
+  command fixtures, not by stopping the shared daemon.
+- [ ] Rebuild normal source-independent fixtures before any whole-command
+  qualification. Continue the five-cold/five-warm and real Bridge reader gates
+  only when the first changed whole command meets eight seconds. Stop and retain
+  a failure rather than retrying the unchanged cohort or crediting an average.
+  Reject the slice as a latency optimization if it has no meaningful measured
+  benefit; even a useful component saving leaves unmet whole, first-touch,
+  release/control and authorized installed-consumption gates open.
+
 ## Validation plan
 
 | Tier | Required evidence |

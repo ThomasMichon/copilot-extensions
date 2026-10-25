@@ -23,6 +23,7 @@ pytestmark = pytest.mark.skipif(not PWSH, reason="PowerShell 7 is required")
 
 
 def _test_env(tmp_path: Path) -> dict[str, str]:
+    (tmp_path / "profile").mkdir(exist_ok=True)
     env = dict(
         os.environ, USERPROFILE=str(tmp_path / "profile"),
         HOME=str(tmp_path / "profile"), WORKTREE_PANE_MIN_RUNTIME="0",
@@ -407,6 +408,8 @@ def test_invalid_manifest_argv_is_rejected(tmp_path, argv):
 
 def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
     source = (WRAPPER.parent / "launch-session.ps1").read_text("utf-8")
+    helper_start = source.index("function Invoke-AwPsmuxFromHome {")
+    helper_end = source.index("\n}\n", helper_start) + 3
     start = source.index("    $savedPsmuxSession = ")
     end = source.index("    if ($newSessionExit -ne 0) {", start)
     fake = tmp_path / "fake-psmux.ps1"
@@ -427,13 +430,16 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
         "$RuntimeDir=$args[2]\n"
         "$paneLaunch=Join-Path (Split-Path -Parent $paneWrapper) 'pane-launch.ps1'\n"
         "$plan=[pscustomobject]@{work_dir=$args[2]}\n"
+        "$sessName='fixture-session'\n"
         "$wrapperArgs=@('payload','two words')\n$ahpArgs=@()\n$envFlags=@()\n"
+        "function Assert-AwColdResume {}\n"
         "function Write-SetupLog {}\nfunction Write-SetupStatus {}\n"
         "$script:stops=0\nfunction Stop-AwOwnedPsmuxSession { $script:stops++ }\n"
         "function Read-AwMuxRetryChoice { $false }\n"
+        + source[helper_start:helper_end] + "\n"
         + source[start:end]
         + "\n[pscustomobject]@{attempts=$totalCreateAttempts; stops=$script:stops;"
-        " code=$newSessionExit} | ConvertTo-Json -Compress\n",
+        " code=$newSessionExit; error=$newSessionError} | ConvertTo-Json -Compress\n",
         encoding="utf-8",
     )
     log = tmp_path / "attempts.txt"
@@ -444,7 +450,9 @@ def test_launcher_retry_regenerates_consumed_manifest(tmp_path):
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"attempts": 2, "stops": 1, "code": 0}
+    assert json.loads(result.stdout) == {
+        "attempts": 2, "stops": 1, "code": 0, "error": "",
+    }
     paths = log.read_text("utf-8").splitlines()
     assert len(set(paths)) == 2
     assert all(not Path(path).exists() for path in paths)

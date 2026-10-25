@@ -252,6 +252,55 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-24 - Actual peer attribution and bounded Docker proposal
+
+- Bound the retained normal Containers profile to its producer recipe: PATH
+  selected the normal global legacy Worktrees launcher, not the discarded
+  payload-frontdoor peer. Its 3.521-second peer wait includes that command's
+  startup and execution; do not add independently measured component times.
+- The separately retained Worktrees profile attributes 0.401 seconds to config
+  and 1.371 seconds to imports, including necessary config work. The rejected
+  import experiment remains rejected; these figures do not license another
+  unchanged whole-discovery attempt.
+- Selected the independently reviewable, agent-recommended
+  [single-query Docker proposal](startup-headroom.md#next-proposed-slice-one-docker-inventory-query).
+  Its approximately 0.2-second removable preflight is a component opportunity,
+  not a promise to close the 1.378-second whole-command gap.
+- Refreshed current open PRs and read #8805's actual lifecycle/test patches.
+  Its mutation admission and exact-ID work are outside this proposal.
+  Coordination is recorded on #5761 and #8805. No implementation, installed
+  change, daemon restart, deadline waiver or release-control action follows
+  from this plan-stage update.
+
+### 2026-10-24 - Fixture corrections merged; next mechanism remains unassigned
+
+- #8831 actually merged as `4e3a43318cfb31281cb6a101a9556074fe676f73`.
+  Copilot approved exact head `dfa3368ca14c7cb6330469e6637164e4b1837192`
+  in review `5641298407`, with no summary, inline or thread findings.
+  Required PR gate `40157147512`, eligible unit coverage, source attribution
+  and workflow lockdown passed before managed completion.
+- Re-read the parent after merge. Only fixture corrections and the negative
+  experiment record landed; no import optimization or latency qualification
+  was published. The native, release/control and running-consumption items
+  remain open, so do not finalize this effort or its worktree.
+- The existing Docker discovery path performs `version` and then `ps`.
+  Retained real profiles attribute 0.197 and 0.199 seconds to the version
+  preflight, compared with 0.376 and 0.397 seconds for the whole Docker-list
+  step. Removing it alone cannot explain or close the retained 1.378-second
+  whole-discovery overrun. Do not implement a speculative replacement or
+  relax daemon/CLI error reporting; assess the remaining startup owners
+  before proposing a separately reviewed mechanism.
+- A bounded diagnostic wrapped the unchanged selector's existing candidate and
+  native-type initialization functions, then ran the unchanged canonical SDK.
+  PS5/pwsh candidate discovery took 0.221/0.110 seconds, native type
+  initialization 0.440/0.417, total selection 0.780/0.640 and the SDK process
+  0.840/0.366. Outer diagnostic wall times were 3.032/1.750 seconds, with
+  identical complete status JSON. These are one-process component attributions,
+  not cold/tail qualification or additive whole-command savings. The existing
+  generated CMD entry already prefers pwsh; do not invent a host-switch fix.
+  Reconcile the residual against retained full-provider profiles before
+  selecting another source change.
+
 ### 2026-10-24 - Reject the first import experiment after real-command comparison
 
 - The bounded candidate deferred installation/session-registration imports and

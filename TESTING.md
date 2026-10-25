@@ -58,6 +58,23 @@ Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.
 
+## Optional native PSMux launch-directory control
+
+On Windows with PowerShell and PSMux already installed:
+
+```text
+python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_psmux_home_directory.py
+```
+
+The control uses fresh private profiles/registries and unique namespaces. It
+compares legacy and home-scoped launches, verifies the actual pane directory
+and caller restoration, and removes the retired checkout while its standby
+still runs. On affected PSMux 3.3.5, the legacy case must reproduce the lock.
+Both cycles observe owned windows/foreground activity and preserve pre-existing
+mux process identities. Cleanup targets only the test's own namespace and
+birth-checked processes; no default-namespace shutdown or installed update is
+performed. This is an explicit native lane, not additional required PR CI.
+
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
