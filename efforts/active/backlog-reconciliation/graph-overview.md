@@ -541,13 +541,48 @@ have been received. Initial research layers and provenance remain unchanged;
 no metadata-only arrival is pending. The parent remains Active, not completed
 by this unit or by 740 campaign closures.
 
+## Manager observation, adoption and selected actions
+
+Batch 103 considered thirteen issues and superseded **#4115, #4204,
+#5908, #5909, #5935, #5936, #5937 and #5961** only after new reviewed
+ROOT intake **#8874 actually merged** and the ENTIRE actual current
+Manager ROOT was read back, alongside all fifteen owned phase/history
+documents. Its 26 Plan, ten local Validation, ten Coordination and eight
+actual global Validation rows remain unchecked; all incumbent bytes and
+sixty prior checked rows survive.
+
+**#542, #3004, #4182, #8404 and #8545 remain independently OPEN.**
+The latest bootstrap caller source progress and bounded shared setup seam
+are credited without erasing #356's standalone first-repository outcome
+or the outstanding physical/installed qualification. Existing claims and
+source, provider, native and resource custody remain unchanged.
+See the [complete outcome mapping and dated checkpoint](<journal/2026/10.24 manager-observation-adoption-actions-103.md>).
+
+All thirteen exact public dispositions and original/discussion/custody
+records were audited. Later #8877 ROOT/Phase 5 additions were detected,
+read and preserved without overwriting their independent owner or any
+received acceptance. The subsequent census recorded **895 whole-queue
+OPEN at 2026-10-24 23:24:34 PDT**: 721 original-cohort and 174 inflow,
+648 eligible and 247 untouched excluded-author issues, still **166 above
+the fixed checkpoint**.
+
+Six arrivals enter metadata-only pending full admission: #8860, #8862,
+#8864, #8873, #8876 and #8877. Independently closed #8787 receives no
+campaign credit and no changed-closed body read. The historical union is
+**723 identities**, 648 open and 75 closed: 66 audited graph
+supersessions and nine external changes. Eighteen numeric and four
+existing ROOT receiving homes have received intakes; research layers and
+provenance remain unchanged. Neither eight tracking consolidations nor
+748 campaign closures completes the parent objective.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
 per-track families still have receiving-fit and custody obligations, not
-automatic closure lists. The same four researchers have selected coherent
-next families from their completed graph partitions rather than repeating
-the sweep; their proposals still require complete direct receiving admission.
+automatic closure lists. Completed evidence from the four original research
+partitions remains retained rather than repeating the sweep; further proposals
+still require complete direct receiving admission and an active bounded
+assignment before new delegated research.
 In particular, #5922's scenario-axis contract and #8511's concurrent artifact
 allocation remain independent rather than becoming optimistic reduction credit.
 

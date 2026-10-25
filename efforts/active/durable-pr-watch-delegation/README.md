@@ -331,6 +331,10 @@ _Operator-required scope; agent-recommended implementation and validation._
   the existing shared artifact path, preserving plugin compatibility and
   canonical source/resource identity (confirmed by #8293). This source leaf
   does not admit a runtime dependency closure or establish image acceptance.
+- [x] Land canonical retained hashed dependency compile/export through the
+  existing installer owner, preserving resolver seasoning, input isolation and
+  ordinary installation behavior (confirmed by #8327). This source prerequisite
+  constructs candidate locks, not approved target profiles or acquired closures.
 - [ ] Deliver the [shared artifact construction](artifact-construction.md)
   proposal through review, standalone first-party artifact support, admitted
   runtime closure and actual offline image acceptance. Preserve public
@@ -344,6 +348,17 @@ _Operator-required scope; agent-recommended implementation and validation._
 - [ ] Prove standalone/container lifecycle, restart and upgrade continuity,
   account/fleet isolation, observation sharing, disconnection recovery and the
   real client/Gateway/service path before treating fleet deployment as complete.
+
+### PR-service offline image inputs
+
+_Delegation driver source slice; agent-recommended implementation under the
+reviewed artifact-construction plan. The planning worktree retains its broader
+fleet-service binding._
+
+- [ ] Land the repository-only offline-context consumer and exact retained-wheel
+  and fresh offline-install controls through normal review and Linux/Windows
+  source validation. This does not close profile/feed/base approval, actual
+  image construction, container lifecycle or fleet acceptance above.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -689,6 +704,36 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-24 - Resume PR-service construction on the shared profile owner
+
+- Resume the PR service and watcher system. Separate SSH repair and native
+  desktop validation are not prerequisites for this service slice.
+- Close #8367 with operator confirmation as superseded by #8568 and #8586.
+  Preserve its reviewed commits and carry forward the unique #8327 effort
+  record rather than overwrite the newer release-profile representation or
+  installation-owned policy composition. No runtime-profile consumer is
+  enabled by this disposition.
+- #8327 merged as `18b688bb57d2c7fb33ea793bfae8ff3065facff6` from
+  approved head `1b1310c79ed783dbf10eb4890e186d3ddacaaa44`; required CI
+  `40039650223` and exact-head native acceptance `40039790134` passed.
+  The latter exercised all 55 selected tests on Linux and Windows. Local
+  targeted validation passed 234 cases and workflow scope passed 59.
+  This closes only retained hashed compile/export, not approved profile,
+  exact acquisition, offline image or installed/fleet acceptance.
+- Continue target-specific runtime closure and offline image construction
+  through the existing artifact and dependency owners. The parent remains
+  Active; provider, lifecycle, credentials, client, installed and fleet gates
+  remain open. No SSH update or unrelated deployment follows.
+- Implement the bounded PR offline-context consumer over canonical retained
+  exact-profile wheel inspection. Its context contains only the existing
+  recipe, complete wheels and exact version/hash lock; it grants no approval
+  and performs no acquisition or image build. All 44 standalone tests pass,
+  including 19 context controls and actual fresh offline installation with
+  synthetic packages followed by tampered-wheel refusal. An existing real
+  restart/ACK test now retries only the exact pre-entry store-busy response,
+  preserving original IDs and failing immediately on uncertainty. Local
+  Docker connection is unavailable, so image acceptance remains open.
 
 ### 2026-10-23 - Retain canonical dependency compile inputs before runtime admission
 
