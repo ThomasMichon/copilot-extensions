@@ -25,7 +25,9 @@ def test_source_lineage_settlement_requires_normal_mode_and_intact_evidence(
         worktree_id="owned", repo="example/project",
         worktree_path="/synthetic/owned", branch="worktree/owned",
     )
-    config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(api_base="")))
+    config = SimpleNamespace(default_repo=SimpleNamespace(
+        remote="origin", default_branch="main", pr=SimpleNamespace(api_base=""),
+    ))
     monkeypatch.setattr(pr_recovery_plan, "_evidence_snapshot", lambda *a: ("", False))
 
     def synced(*args, **kwargs):
@@ -34,6 +36,8 @@ def test_source_lineage_settlement_requires_normal_mode_and_intact_evidence(
         return None
 
     monkeypatch.setattr(pr_recovery, "synced", synced)
+    monkeypatch.setattr(pr_recovery, "_rev", lambda *a: "e" * 40)
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(stdout="d" * 40))
     monkeypatch.setattr(git_ops, "is_commit_ancestor", lambda *a, **k: ancestor)
     operation = pr_recovery_plan.build(
         config, record, pr, source_head="b" * 40, expected_head="c" * 40,
@@ -48,6 +52,7 @@ def test_source_lineage_settlement_requires_normal_mode_and_intact_evidence(
     assert operation.saved_head == "a" * 40
     assert operation.source_head == "b" * 40
     assert operation.expected_head == "c" * 40
+    assert operation.rebase_base_sha == ("d" * 40 if forward else "")
     assert bool(operation.evidence_fingerprint) == forward
     if unusable:
         captured = capsys.readouterr()
@@ -204,3 +209,29 @@ def test_completed_checkpoint_requires_its_commit_objects_and_intrinsic_lineage(
     monkeypatch.setattr(git_ops, "is_commit_ancestor", ancestor)
     _, unusable = pr_recovery_plan._evidence_snapshot(pr, "/synthetic/owned")
     assert unusable
+
+
+@pytest.mark.parametrize("bases", ["", "not-a-commit", "d" * 40 + "\n" + "e" * 40])
+def test_source_lineage_requires_one_immutable_publication_base(monkeypatch, bases):
+    pr = tracking.PRRecord(
+        state="open", provider="github", repo="example/project", number=7,
+        branch="pr/topic-owned", head_sha="a" * 40,
+    )
+    record = SimpleNamespace(
+        worktree_id="owned", repo="example/project",
+        worktree_path="/synthetic/owned", branch="worktree/owned",
+    )
+    config = SimpleNamespace(default_repo=SimpleNamespace(
+        remote="origin", default_branch="main", pr=SimpleNamespace(api_base=""),
+    ))
+    monkeypatch.setattr(pr_recovery_plan, "_evidence_snapshot", lambda *a: ("", False))
+    monkeypatch.setattr(pr_recovery, "synced", lambda *a, **k: None)
+    monkeypatch.setattr(pr_recovery, "_rev", lambda *a: "f" * 40)
+    monkeypatch.setattr(git_ops, "is_commit_ancestor", lambda *a, **k: True)
+    monkeypatch.setattr(git_ops, "git", lambda *a, **k: SimpleNamespace(stdout=bases))
+    with pytest.raises(ValueError, match="unique accepted-publication base"):
+        pr_recovery_plan.build(
+            config, record, pr, source_head="b" * 40, expected_head="c" * 40,
+            identity="github.com/example/project", overrides=(), cwd="/synthetic/owned",
+            routine=True,
+        )

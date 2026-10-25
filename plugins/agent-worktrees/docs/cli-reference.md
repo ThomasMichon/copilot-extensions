@@ -548,7 +548,11 @@ an accepted rebase result; without that checkpoint, the same verified ancestry
 permits a non-forcing continuation recorded as `source-lineage`. The stale saved
 head need not be an ancestor of the accepted result: an earlier successful
 rebase publication can legitimately have replaced it. Both heads are retained,
-not discarded. No confirmation token or ownership waiver is used. Changed
+not discarded. Source-lineage settlement also records the unique immutable
+merge base of the accepted head and configured upstream, so later sync and
+publication do not mistake upstream merge history for the PR's source series.
+That base is revalidated with the rest of the plan.
+No confirmation token or ownership waiver is used. Changed
 ownership/destination, corrupt evidence and unrelated history remain refusals.
 
 Acknowledgement loss outside that settlement case still uses the existing

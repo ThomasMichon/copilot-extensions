@@ -136,6 +136,17 @@ def build(
         routine and point is None and not unusable
         and git_ops.is_commit_ancestor(expected_head, source_head, cwd=cwd)
     )
+    publication_base = ""
+    if forward:
+        repo = config.default_repo
+        upstream = pr_recovery._rev(f"refs/remotes/{repo.remote}/{repo.default_branch}", cwd)
+        bases = git_ops.git(
+            "--no-replace-objects", "merge-base", "--all", expected_head, upstream,
+            cwd=cwd, isolated_repository=True,
+        ).stdout.split()
+        if len(bases) != 1 or not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", bases[0]):
+            raise ValueError("Cannot establish a unique accepted-publication base; refresh upstream and retry normally.")
+        publication_base = bases[0]
     return pr_break_glass.RecoveryPreview(
         provider=pr.provider or config.default_repo.pr.provider,
         repo=pr.repo, number=pr.number, branch=pr.branch,
@@ -154,7 +165,7 @@ def build(
             "unusable" if unusable else "backed-sync" if point is not None else
             "source-lineage" if forward else "none"
         ),
-        rebase_base_sha=point.target_head if point is not None else "",
+        rebase_base_sha=point.target_head if point is not None else publication_base,
         overrides=overrides,
     )
 

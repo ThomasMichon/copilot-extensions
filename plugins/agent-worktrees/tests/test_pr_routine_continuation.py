@@ -33,7 +33,7 @@ pytestmark = [
 
 
 @pytest.fixture
-def owned_publication(published_refspec_pr_repo, monkeypatch):
+def owned_publication(published_refspec_pr_repo, monkeypatch, request):
     config, wid, wt, remote = published_refspec_pr_repo
     monkeypatch.setattr(git_ops, "remote_slug", lambda *a, **k: "example/project")
     _stub_remote_target(monkeypatch, None, "example/project")
@@ -52,9 +52,18 @@ def owned_publication(published_refspec_pr_repo, monkeypatch):
     current.pr.rewrite_identity = pr_publish.push_identity("origin", cwd=str(wt))
     tracking.save_record(current)
     anchor = Path(config.default_repo.anchor)
+    upstream_merge = getattr(request, "param", "") == "upstream-merge"
+    if upstream_merge:
+        git("switch", "-c", "upstream-side", cwd=anchor)
+        (anchor / "side.txt").write_text("upstream side\n")
+        git("add", "side.txt", cwd=anchor)
+        git("commit", "-m", "upstream side", cwd=anchor)
+        git("switch", "master", cwd=anchor)
     (anchor / "upstream.txt").write_text("new upstream\n")
     git("add", "upstream.txt", cwd=anchor)
     git("commit", "-m", "new upstream", cwd=anchor)
+    if upstream_merge:
+        git("merge", "--no-ff", "upstream-side", "-m", "merge upstream history", cwd=anchor)
     git("push", "origin", "master", cwd=anchor)
     git("fetch", "origin", cwd=wt)
     git("rebase", "origin/master", cwd=wt)
@@ -252,3 +261,31 @@ def test_completed_checkpoint_settlement_preserves_normal_authority(
     assert audit["operation"]["evidence_status"] == (
         "backed-sync" if evidence == "backed" else "source-lineage"
     )
+
+
+@pytest.mark.timeout(300)
+@pytest.mark.parametrize("owned_publication", ["upstream-merge"], indirect=True)
+def test_source_lineage_settlement_then_sync_and_publish_across_upstream_merge(
+    owned_publication, monkeypatch,
+):
+    config, wid, wt, remote, _saved, branch, published = owned_publication
+    accepted_base = git("merge-base", published, "origin/master", cwd=wt)
+    assert len(git("show", "-s", "--format=%P", accepted_base, cwd=wt).split()) == 2
+    source = git("rev-parse", "HEAD", cwd=wt)
+    monkeypatch.setattr(
+        pr_break_glass, "confirm",
+        lambda *a, **k: pytest.fail("Owned continuation must not request operator recovery."),
+    )
+    assert pr_routine_recovery.reconcile(config, record(wid), cwd=str(wt)) == source
+    settled_base = record(wid).pr.base_sha
+    anchor = Path(config.default_repo.anchor)
+    (anchor / "later-upstream.txt").write_text("later upstream\n")
+    git("add", "later-upstream.txt", cwd=anchor)
+    git("commit", "-m", "advance merged upstream", cwd=anchor)
+    git("push", "origin", "master", cwd=anchor)
+    assert git_collab.sync_forward(wid, config)
+    assert finalize.push_changes(wid, config)
+    assert pr_publish._tip("origin", branch, str(wt)) == git("rev-parse", "HEAD", cwd=wt)
+    assert settled_base == accepted_base
+    assert record(wid).pr.base_sha == git("rev-parse", "origin/master", cwd=wt)
+    assert git("show", "HEAD:unpublished.txt", cwd=wt) == "keep this unpublished"
