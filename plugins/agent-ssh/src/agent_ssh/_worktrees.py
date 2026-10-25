@@ -142,13 +142,15 @@ def main() -> int:
         adapter = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(adapter)
         argv, environment = adapter.worktrees_command(payload, own)
+        from agent_procutil import no_window_kwargs
+
         return subprocess.call(
             argv,
             env=environment,
             stdin=subprocess.DEVNULL,
             stdout=sys.stdout,
             stderr=sys.stderr,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            **no_window_kwargs(),
         )
     except FileNotFoundError:
         if own is not None:
