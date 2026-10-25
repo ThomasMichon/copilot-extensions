@@ -357,15 +357,16 @@ class MuxCompanionApp(App):
         align: center middle;
     }
 
-    #exit-btn, #cutover-btn, #refresh-btn {
-        width: 24;
+    #exit-btn, #cutover-btn, #refresh-btn, #view-btn {
+        width: 1fr;
+        min-width: 12;
         background: #454545;
         color: white;
         border: none;
         margin: 0 1;
     }
 
-    #exit-btn:focus, #cutover-btn:focus, #refresh-btn:focus {
+    #exit-btn:focus, #cutover-btn:focus, #refresh-btn:focus, #view-btn:focus {
         background: #d78700;
         color: black;
         text-style: bold;
@@ -379,12 +380,21 @@ class MuxCompanionApp(App):
 
     BINDINGS = [("r", "refresh", "Refresh"), ("escape", "quit", "Exit")]
 
-    def __init__(self, cwd: str | None = None) -> None:
+    def __init__(
+        self, cwd: str | None = None, *, cli_pane: str | None = None,
+        project: str | None = None, worktree_id: str | None = None,
+        session_incarnation: str | None = None,
+    ) -> None:
         super().__init__()
         self._cwd = cwd
+        self._cli_pane = cli_pane
+        self._observer_identity = (project, worktree_id, session_incarnation)
+        self._checking_cli = False
+        self._navigating = False
         self._data = _CompanionData()
         self._loading = True
         self._read_cancel = Event()
+        self._navigation_cancel = Event()
         self._action_message: Text | None = None
 
     def compose(self) -> ComposeResult:
@@ -406,14 +416,42 @@ class MuxCompanionApp(App):
                 yield Button("Cut over", id="cutover-btn", disabled=True)
         with Horizontal(id="footer-row"):
             yield Button("Refresh", id="refresh-btn")
+            yield Button(
+                "Return to CLI" if self._cli_pane else "Show Summary pane",
+                id="view-btn",
+            )
             yield Button("Exit", id="exit-btn")
         yield Footer()
 
     def on_mount(self) -> None:
         self._reload()
+        if self._cli_pane and all(self._observer_identity):
+            self._poll_cli()
+            self.set_interval(1, self._poll_cli)
+
+    def _poll_cli(self) -> None:
+        if not self._checking_cli:
+            self._checking_cli = True
+            self._observe_cli()
+
+    @work(group="cli-lifecycle")
+    async def _observe_cli(self) -> None:
+        from .companion_lifecycle import cli_alive
+
+        project, worktree_id, incarnation = self._observer_identity
+        try:
+            alive = await asyncio.to_thread(
+                cli_alive, project, worktree_id, self._cli_pane,
+                session_incarnation=incarnation,
+            )
+            if alive is False:
+                self.exit()
+        finally:
+            self._checking_cli = False
 
     def on_unmount(self) -> None:
         self._read_cancel.set()
+        self._navigation_cancel.set()
 
     @work(exclusive=True)
     async def _reload(self) -> None:
@@ -439,6 +477,32 @@ class MuxCompanionApp(App):
         if not self._loading:
             self._action_message = None
             self._reload()
+
+    @work(exclusive=True, group="navigation")
+    async def _navigate(self) -> None:
+        from .companion_pane import PaneError, switch
+
+        self._navigating = True
+        self.query_one("#view-btn", Button).disabled = True
+        try:
+            await asyncio.to_thread(
+                switch, "return" if self._cli_pane else "show", self._cwd,
+                cli_pane=self._cli_pane,
+                cancelled=self._navigation_cancel,
+                session_incarnation=self._observer_identity[2],
+                runner=cc.cancellable_read_runner(
+                    self._navigation_cancel, cwd=self._cwd or os.getcwd(),
+                ),
+            )
+        except (PaneError, ec.EngineError) as exc:
+            self._action_message = Text(f"View switch failed: {exc}", style="bold red")
+            self._refresh_view(reload=False)
+        else:
+            if not self._cli_pane:
+                self.exit()
+        finally:
+            self._navigating = False
+            self.query_one("#view-btn", Button).disabled = False
 
     def _refresh_view(self, *, reload: bool = True) -> None:
         """(Re)paint the whole view from ``self._data`` -- optionally
@@ -555,12 +619,47 @@ class MuxCompanionApp(App):
             self.action_refresh()
         elif event.button.id == "cutover-btn":
             self._cut_over()
+        elif event.button.id == "view-btn" and not self._navigating:
+            self._navigate()
 
 
-def run() -> int:
-    MuxCompanionApp().run()
+def run(
+    cwd: str | None = None, cli_pane: str | None = None, *,
+    project: str | None = None, worktree_id: str | None = None,
+    session_incarnation: str | None = None,
+) -> int:
+    try:
+        MuxCompanionApp(
+            cwd, cli_pane=cli_pane, project=project, worktree_id=worktree_id,
+            session_incarnation=session_incarnation,
+        ).run()
+    finally:
+        if cli_pane:
+            from .companion_pane import PaneError, switch
+
+            try:
+                runner = cc.cancellable_read_runner(Event(), cwd=cwd or os.getcwd())
+                switch(
+                    "return", cwd, cli_pane=cli_pane,
+                    runner=lambda command, timeout: runner(command, min(timeout, 2)),
+                    session_incarnation=session_incarnation,
+                )
+            except (PaneError, ec.EngineError):
+                pass
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cwd")
+    parser.add_argument("--cli-pane")
+    parser.add_argument("--project")
+    parser.add_argument("--worktree-id")
+    parser.add_argument("--session-incarnation")
+    args = parser.parse_args()
+    raise SystemExit(run(
+        args.cwd, args.cli_pane, project=args.project, worktree_id=args.worktree_id,
+        session_incarnation=args.session_incarnation,
+    ))

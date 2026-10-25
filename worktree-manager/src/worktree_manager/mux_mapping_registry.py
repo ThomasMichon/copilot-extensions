@@ -112,6 +112,9 @@ else:
             return False
 
 
+_UNCONDITIONAL = object()
+
+
 def registry_path(root: Path | None = None) -> Path:
     """The Manager-owned per-worktree mapping registry snapshot."""
     return (root if root is not None else default_root()) / "mux-mapping.json"
@@ -307,13 +310,38 @@ class MuxMappingRegistry:
             entries = self._read_all()
             return self._register_locked(payload, entries)
 
-    def register_next(self, payload: dict) -> dict:
+    def register_next(self, payload: dict, *, expected: object = _UNCONDITIONAL) -> dict:
         """Like :meth:`register`, but allocate ``mapping_revision`` under the
-        registry's own interprocess lock when the caller omitted it."""
+        registry lock. Explicit ``expected`` fences the reconciled snapshot;
+        ``None`` fences absence. Omission preserves unconditional registration."""
         with self._interprocess_lock():
-            entries = self._read_all()
+            try:
+                entries = (
+                    self._read_all() if expected is _UNCONDITIONAL else self._read_all(strict=True)
+                )
+            except (OSError, ValueError):
+                if expected is _UNCONDITIONAL:
+                    raise
+                return {"applied": False, "reason": "registry-unavailable"}
             raw_project = payload.get("project")
             raw_worktree_id = payload.get("worktree_id")
+            current = (
+                entries.get((raw_project, raw_worktree_id))
+                if isinstance(raw_project, str) and isinstance(raw_worktree_id, str) else None
+            )
+            if expected is not _UNCONDITIONAL:
+                identity = (
+                    "mapping_revision", "project", "worktree_id", "live", "mux_session",
+                    "mux_bin", "session_incarnation", "worktree_path", "native_session_incarnation", "panes",
+                )
+                if (
+                    (current is None) != (expected is None)
+                    or (current is not None and (
+                        not isinstance(expected, dict)
+                        or any(current.get(field) != expected.get(field) for field in identity)
+                    ))
+                ):
+                    return {"applied": False, "reason": "mapping-changed"}
             if (
                 "mapping_revision" not in payload
                 and isinstance(raw_project, str)
@@ -594,9 +622,12 @@ def register_mapping(payload: dict, root: Path | None = None) -> dict:
     return registry.register(payload)
 
 
-def register_next_mapping(payload: dict, root: Path | None = None) -> dict:
+def register_next_mapping(
+    payload: dict, root: Path | None = None, *, expected: object = _UNCONDITIONAL,
+) -> dict:
+    """Register with an optional lookup-snapshot fence; omitted means unconditional."""
     registry = MuxMappingRegistry(registry_path(root))
-    return registry.register_next(payload)
+    return registry.register_next(payload, expected=expected)
 
 
 def remove_mapping(

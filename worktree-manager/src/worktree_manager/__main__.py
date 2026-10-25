@@ -806,6 +806,18 @@ def _cmd_companion(rest: list[str]) -> int:
     return run_companion()
 
 
+def _cmd_companion_pane(rest: list[str]) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="worktree-manager companion-pane")
+    parser.add_argument("--action", required=True, choices=("show", "return"))
+    parser.add_argument("--cwd")
+    options = parser.parse_args(rest)
+    from .companion_pane import run
+
+    return run(action=options.action, cwd=options.cwd)
+
+
 def _cmd_picker(rest: list[str]) -> int:
     """Run, mock, or capture the Manager-owned production Picker."""
     if rest and rest[0] == "review":
@@ -1539,6 +1551,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
+        print("  companion-pane --action show|return [--cwd PATH]  same-window Companion navigation")
         print("  mux-daemon <run|ensure|register|remove|show|status|recovery-evidence>  (managed mux)")
         print()
         print("A bare invocation reads current installation state without changing it.")
@@ -1564,6 +1577,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_picker(args[1:])
     if args and args[0] == "companion":
         return _cmd_companion(args[1:])
+    if args and args[0] == "companion-pane":
+        return _cmd_companion_pane(args[1:])
     if args and args[0] == "mux-daemon":
         return _cmd_mux_daemon(args[1:])
     if args and args[0] == "daemons":

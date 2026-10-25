@@ -1,7 +1,12 @@
-param([switch]$Companion)
+param(
+    [switch]$Companion,
+    [switch]$CompanionPane,
+    [ValidateSet('show', 'return')][string]$Action,
+    [string]$Cwd
+)
 
 function Get-ManagerRuntimeInvocation {
-    param([string]$PayloadRoot, [string[]]$ModuleArguments)
+    param([string]$PayloadRoot, [string[]]$ModuleArguments, [switch]$RequireInstalled)
     $slot = Split-Path -Parent $PayloadRoot
     $versions = Split-Path -Parent $slot
     $environment = @{}
@@ -19,6 +24,7 @@ function Get-ManagerRuntimeInvocation {
         $clearEnvironment = @('PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV', '__PYVENV_LAUNCHER__')
         $environment['WORKTREE_MANAGER_ROOT'] = Split-Path -Parent $versions
     } else {
+        if ($RequireInstalled) { throw 'Companion pane requires a constructed Manager runtime' }
         $fileName = (Get-Command uv -CommandType Application -ErrorAction Stop).Source
         $commandArguments = @('run', '--quiet', '--project', $PayloadRoot)
     }
@@ -55,6 +61,20 @@ function Invoke-ManagerMuxCallback {
     } finally {
         $process.Dispose()
     }
+}
+
+if ($CompanionPane) {
+    if (-not $Action -or -not $Cwd) { throw 'Companion pane requires Action and Cwd' }
+    $invocation = Get-ManagerRuntimeInvocation -PayloadRoot (Split-Path -Parent $PSScriptRoot) `
+        -RequireInstalled -ModuleArguments @('-m', 'worktree_manager', 'companion-pane', '--action', $Action, '--cwd', $Cwd)
+    foreach ($name in @($invocation.ClearEnvironment) + @('GH_TOKEN', 'GITHUB_TOKEN', 'AGENT_WORKTREES_AHP_AUTH_TOKEN')) {
+        [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+    }
+    foreach ($name in $invocation.Environment.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $invocation.Environment[$name], 'Process')
+    }
+    & $invocation.FileName @($invocation.Arguments)
+    exit $LASTEXITCODE
 }
 
 if ($Companion) {

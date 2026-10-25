@@ -388,8 +388,9 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 - [x] Land reviewed [purpose-first intent and sequence](purpose-first.md)
       and the revised `visions/mux-companion` before implementation.
-- [ ] Reuse existing authoritative purpose, summary and claims sources in
+- [x] Reuse existing authoritative purpose, summary and claims sources in
       the default Textual dialog; retain recovery as a secondary view.
+      Source merged in #8822; installed/native rollout remains separate.
 - [ ] Implement a compact topology presentation for phases, sub-agents,
       bridges, downstream worktrees, open PRs and accumulated tool-call stats,
       using the same sources as other companion clients.
@@ -402,8 +403,9 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 - [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
-- [ ] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
+- [x] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
       long values, missing/stale/error sources and secondary recovery actions.
+      The 156-test packet includes real process shutdown and target-cwd isolation.
 - [ ] Purpose-first: contract tests for graph identities, reported phases,
       agent/bridge/worktree/PR relationships and authoritative tool totals.
 - [ ] Purpose-first: prove actual CLI/summary switches preserve the original
@@ -466,6 +468,69 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-24 - Observer review fixes and lifecycle qualification
+
+- Addressed the four findings on #8881: native session-ID option targeting
+  for POSIX tmux, visible translation of Windows Job failures, a
+  cross-process guard around observer lookup/creation/publication, and
+  termination of the observer after its original CLI is confirmed ended.
+- The observer pins its original native incarnation before its first poll,
+  never adopts a successor, and treats unavailable evidence as unknown.
+  Its one-second check reads only the registered CLI's native inventory
+  off the UI loop, with no engine or transcript scan.
+- The local focused/native packet passed 136 tests with three platform
+  skips. It includes two overlapping processes and actual PSMux CLI exit,
+  observer termination and subsequent clean CLI relaunch.
+- Added the opt-in `mux-companion` Ubuntu portfolio for actual tmux option
+  targeting, same-window navigation and CLI-exit cleanup. Its result must
+  be recorded before claiming POSIX native qualification; Windows skips
+  do not prove that platform. No production rollout is authorized here.
+
+### 2026-10-24 - Same-window observer source and native controller proof
+
+- Added explicit Show Summary / Return to CLI navigation while preserving the
+  existing Ctrl+K popup. The installed-runtime observer reuses one pane in the
+  same native window; CLI identity comes from launcher registration, never
+  an assumed pane index. Stale, missing or ambiguous identities refuse.
+- The combined UI, registration, runtime-consumer and explicit native packet
+  passed (90 tests, two platform skips). The disposable native PSMux check passed three
+  view round trips with one observer, one window, the original CLI pane ID
+  and its unchanged process ID, including closing and reopening the observer.
+  The observer invocation reached its selected
+  synthetic installed prefix through the real bootstrap, including paths
+  with spaces and apostrophes. This is not an installed production rollout
+  or proof of rendered status chrome or mouse dispatch.
+- Native tests rejected two plausible but incorrect assumptions: pane-only
+  targets do not select PSMux's per-session server, and pane-scoped user
+  options are accepted without persisting. Actions now qualify native pane
+  targets with the session and retain the observer reference in a
+  session-scoped option; CLI identity remains in the Manager registry.
+- Session-level directories can differ from the exact CLI pane's worktree
+  directory. Navigation verifies that registered pane's actual directory
+  and native incarnation rather than relying on the session directory.
+  This does not repair the independent older discovery path.
+- The combined switching/attention and native chrome validation rows remain
+  open. Continue with authoritative topology and attention observations,
+  then two-line chrome/click acceptance; retain all earlier handoff holds.
+
+### 2026-10-24 - Summary/Claims merged; same-window observer next
+
+- #8822 merged after current-head Copilot approval, green required CI and
+  resolution of both shutdown and target-cwd findings. Source milestone only:
+  the full effort remains Active and installed rollout is not asserted.
+- Re-read Step 6, the Validation Plan and continuing Journal. Closed only the
+  Summary/Claims source and focused consumer-test rows. Topology, attention,
+  same-window view integration and two-line/click acceptance remain open.
+- A disposable native psmux 3.3.5 probe repeatedly split, selected and zoomed
+  two inert panes inside one window, retaining the original CLI pane ID and
+  PID. `status=2` and `status-format[1]` were accepted, with `status 2` read
+  back. This proves pane/option state, not rendered status or mouse dispatch.
+  Every probe session was cleaned up; no live session or installed slot changed.
+- The next source slice is an explicit same-window Summary observer and
+  return-to-CLI action, preserving Ctrl+K's existing popup and using the
+  Manager's installation-owned invocation path. Never assume pane index zero
+  or repurpose session-lineage succession as allocated-sub-agent topology.
 
 ### 2026-10-24 - Reviewed intent merged; Summary/Claims source slice
 
