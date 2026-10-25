@@ -283,6 +283,13 @@ authentication, permission, integrity or policy refusals are not replayed.
 Persistent contention remains a failed update; a refreshed payload alone still
 does not prove a healthy, selected engine runtime.
 
+On Windows, a positively settled acquisition timeout retains up to 8,192 bytes
+from each native output stream before closing its private capture. The registered
+origin error includes bounded excerpts from both channels through the existing
+credential/URL redactor, without exposing the command representation. Unconfirmed
+cleanup retains its custody failure rather than reporting a settled timeout.
+This diagnostic recovery does not replay the acquisition or extend its deadline.
+
 For a measured slow-host recovery, set
 `WORKTREE_MANAGER_ENGINE_ACQUISITION_TIMEOUT_SEC` for that update invocation to
 a positive finite duration of at most 3,600 seconds, for example `600`. The

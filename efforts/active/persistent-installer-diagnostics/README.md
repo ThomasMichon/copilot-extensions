@@ -195,6 +195,28 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
 
 ## Journal
 
+### 2026-10-25 - Complementary registered-origin timeout capture
+
+- Admitted a bounded consumer repair under the existing diagnostics intent and
+  #8370/#8826/#6812 coordination. It does not replace the canonical installer
+  attempt producer, shared formatter or native watchdog owners.
+- A contained Windows reproduction established that registered-origin acquisition
+  settled its owned Job but closed its temporary stdout/stderr captures before
+  attaching them to the timeout. Error formatting then discarded the child-stage
+  evidence by rendering only the exception's command/timeout representation.
+- Retain bounded capture only after confirmed settlement and pass both channels
+  through the existing diagnostic redactor. Preserve timeout classification,
+  cleanup-failure custody, source revalidation, retry ceilings and deadlines.
+- Focused Windows qualification passed 92 tests with four POSIX-only skips,
+  including actual native capture, Unicode/byte limits, delayed descendants,
+  cleanup-failure precedence and the registered-origin formatter consumer.
+  An earlier run detected machine-environment drift and failed its host-state
+  audit; no rollback or guard suppression was applied, and guarded revalidation
+  passed. The unrelated installer fixture mismatches remain with #8826.
+- Source/native qualification, review, merge, release and separately authorized
+  rollout remain distinct gates. This slice does not claim to repair an underlying
+  native CLI stall or complete a whole-suite update.
+
 ### 2026-10-23 - Request, policy and bounded source setup
 
 - Confirmed the slug and the operator's early-location, retention and degraded

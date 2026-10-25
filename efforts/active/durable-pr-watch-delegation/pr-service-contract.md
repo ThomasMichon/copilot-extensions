@@ -180,6 +180,108 @@ backend is explicit; once acceptance is uncertain, only reconciliation may
 establish whether any fallback is safe. Losing transport is not permission to
 select a different account, local owner or second subscriber.
 
+## Scoped replay selection amendment _(agent-recommended; proposed)_
+
+The current optional embedding constructs a replay consumer, but the normal
+Dispatch `server.build_app` does not select one. Its v1 client's strict
+five-field capabilities response proves operation support, not the current
+service namespace or admitted consumer/account binding. A successful probe
+alone cannot prevent a later request from reaching a remapped target at the
+same Gateway URL.
+
+Keep the existing `agent-pull-requests.watch/v1` routes, six operations and
+exact response shapes unchanged. Propose a parallel
+`agent-pull-requests.watch/v2` at `/v2/watch/<target>/<operation>`, using the
+same operation names, domain transactions, request bounds and receipt retention.
+This is a new opt-in scoped contract, not a v1 schema extension or an API
+already available in the runtime.
+
+### Expected binding is a restriction, never a credential
+
+The embedding supplies one explicit expected binding with exactly these
+nonsecret fields: `fleet`, `gateway`, `slot`, `namespace`, `principal`,
+`target`, `consumer`, `account`, and `repo`. They identify the existing trusted
+Gateway context, configured target mapping and persistent replay namespace.
+The expected values come from the selected deployment configuration, not
+trust-on-first-use of a capability response. Gateway HTTPS origin and route
+prefix remain explicit client routing inputs, distinct from Gateway identity.
+
+Only the admitted Gateway context supplies the actual principal, fleet,
+Gateway and slot. Only the service's trusted target mapping supplies the
+actual consumer/account/repository, and its bound replay store supplies the
+namespace. V2 requires the existing durable service-identity binding; an
+unbound legacy store is not sufficient. Equality with caller-supplied expected
+values narrows an otherwise authorized request; it cannot select a different
+mapping, enroll a principal, acquire credentials or grant forge access.
+Expose only the admitted caller's selected binding, never other targets or
+registration inventory.
+
+V2 `GET capabilities` returns the existing capability fields with protocol v2
+plus `binding`. The client requires exact supported protocol, operations,
+bounds and expected binding before preparing a new suspended wait. An absent,
+malformed or incompatible v2 response is an explicit unsupported scoped
+contract, not permission to try an effectful v1 request.
+
+Every v2 POST has exactly `binding` and `request`: the former is the expected
+binding and the latter is the existing operation payload. The server validates
+both shapes and compares the binding to its actual selected context and
+configuration before accessing that consumer's state. It rechecks the selected
+binding and persisted service/namespace identity inside the existing
+transaction ownership boundary before lookups, timeout sweeps or effects.
+This includes `inspect` and `pending`; neither is a harmless unscoped probe.
+Malformed input is a 400 refusal; a valid but unequal binding is a 409
+`watch_binding_mismatch` refusal without disclosing current field values.
+Successful operation bodies retain their existing receipt/batch semantics.
+No new Gateway header, identity forwarding, hash attestation or policy RPC
+is required. The generic transport already supports conditional headers, but
+a replay binding is not the changing event representation's HTTP entity tag.
+
+### Durable selection and coordinator composition
+
+Persist protocol and the complete expected binding alongside the existing
+Gateway/route/target/repository and original request intent. Include them in
+the immutable queue scope comparison before preparation and every subsequent
+operation. Keep the existing strict legacy record variant readable and
+operable through its explicitly selected legacy embedding; do not rewrite an
+unsettled v1 row into v2 or infer its missing binding from current discovery.
+A configuration or principal change must not adopt those rows, mint replacement
+requests or acknowledge their events through a new namespace.
+
+The ordinary coordinator remains native/default-off for remote replay.
+An explicit optional composition supplies one selected scoped consumer factory
+to the existing `create_app` lifetime, active-route checkpoint and shared
+bounded scheduler. It obtains `ServiceCaller` through the existing trusted
+Fleet credential/PoP construction, not arbitrary config-imported code, token
+labels or a serialized admission permit. Selection data does not itself make
+that construction available. Missing selected dependencies, caller material
+or scoped-contract support is a visible replay-admission failure; ordinary
+Dispatch remains independently usable without PR/Fleet imports or a second
+poller. Retain original unresolved rows for reconciliation, never silently
+fall back to a process wait or another backend after possible acceptance.
+
+A binding refusal establishes only that this invocation was refused before
+its replay work, not that an earlier transmitted operation did not commit.
+Existing request/registration/event identities, deadlines, uncertainty,
+credential-loss behavior and draining transaction custody remain authoritative.
+
+### Provider-first delivery and required proof
+
+1. Review this amendment, then add v2 serving and client support while keeping
+   v1 available with unchanged semantics. No v1 retirement is proposed.
+2. Add the strict scoped durable-intent variant and optional coordinator
+   composition only after that provider seam exists. Deployment selection and
+   credentials remain separately authorized; a source merge enables neither.
+3. Qualify old client/new service on v1, scoped client/old service with explicit
+   pre-effect refusal, and scoped client/new service through the real TLS/PoP
+   Gateway. Exercise provider rollback without downgrade or replacement.
+4. Change each binding dimension and remap a target between capabilities and
+   POST. Prove refusal before replay lookup/sweep/commit; malformed, omitted
+   and extra fields also refuse. Verify no unrelated scope metadata leaks.
+5. Restart both disk owners with unresolved v1 and v2 rows, change coordinator
+   configuration/principal, lose a registration or ACK response, withdraw
+   credentials and drain ownership. Assert original-ID reconciliation, no
+   cross-binding adoption, no duplicate wake and unchanged native defaults.
+
 ## Forge credentials
 
 The service's observation worker obtains the minimum authorized forge access
