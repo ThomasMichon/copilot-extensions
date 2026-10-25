@@ -183,10 +183,11 @@ create another ownership registry.
 
 ## Explicit local host artifact
 
-The distribution's `service` extra adds only the canonical
-`agent-single-instance-lease` and `agent-endpoint-rendezvous` libraries. It
+The distribution's `service` extra adds the canonical `agent-procutil`,
+`agent-single-instance-lease` and `agent-endpoint-rendezvous` libraries for
+daemon-instance custody, single-instance ownership and endpoint publication. It
 requires neither Copilot, another service, a source checkout, a sibling runtime,
-Docker nor a process-provider helper. Installing the core without that extra
+nor Docker. Installing the core without that extra
 does not acquire those dependencies; attempting to host reports
 `host_service_dependencies_missing` without creating data or provisioning them.
 

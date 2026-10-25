@@ -585,3 +585,51 @@ caller coverage, not one launcher or one platform passing.
   source bindings remain exact. Native/shared-process bytes are unchanged.
   Source publication, passing review and current-head CI remain open. The
   effort stays Active and no runtime rollout is authorized.
+
+### 2026-10-25 - MCP shutdown and minimal tooling qualification
+
+- Reproduced the summary-only MCP cleanup finding in three failing tests with
+  a real warm stdio upstream still alive after the cancelled host returned.
+  A single shielded shutdown owner now retains instance and singleton custody
+  through listeners, background tasks, accepted connections and warm upstream
+  teardown, surviving repeated cancellation.
+- Accepted in-flight calls/lists and attached sessions still drain naturally;
+  only idle readers are cancelled. Existing regression tests caught and
+  prevented an intermediate implementation from cancelling pending warm opens.
+  The final Windows serving packet passed 49 tests with one transport skip,
+  including nine new actual-upstream/connection retirement cases.
+- Qualified the complete 1,796-test packet using only the documented pytest,
+  coverage, packaging and PyYAML environment plus their transitive dependencies.
+  All tests passed in 244.594 seconds under the unchanged 300-second limit.
+  Synthetic test storage must remain outside the source checkout: an initial
+  incorrectly placed sandbox correctly triggered the unadmitted-source guard.
+  No test-policy, effect guard or time budget was weakened.
+- Current source CI also passed both required guard/unit executions on
+  `b27ccc7b96`. The new Chat optional-dependency/installed-service finding and
+  these MCP corrections still require qualification, publication, fresh review
+  and current-head CI. The effort remains Active; there is no rollout.
+
+### 2026-10-25 - Final MCP and Chat consumer replay
+
+- The final MCP packet passed 49 tests with one transport skip on both
+  Windows and isolated Linux. Linux verified all 409 snapshot files and all
+  28 installed process-library Python files against the frozen source, using
+  retained offline test tooling and PyYAML's documented pure-Python fallback.
+  No dependency download, host credential or network access was needed; the
+  test-owned container was confirmed removed.
+- Chat now keeps core-only imports dependency-free and reports the existing
+  actionable JSON refusal from both hosting entry paths when service extras
+  are absent. Service-extra qualification requires procutil inside the actual
+  isolated installation, rather than incorrectly requiring its absence.
+  Actual core/service wheel tests passed 35 on Windows and 35 on Linux;
+  independent Windows replay also passed. Linux explicitly built fixture
+  wheels as source artifacts, never compiled during service startup.
+- Kept both original Chat startup census owners and their direct admission
+  calls. The coverage checker recognizes only a canonical optional import
+  with an immediately raising missing-dependency branch; pass/return,
+  application work, dynamic exception arguments/keywords and effectful
+  exception causes still refuse. All 42 coverage tests passed.
+- Updated the lightweight ASGI wrapper fixture to supply an actual app/state
+  shape after database settlement became part of that lifecycle. Real native
+  database retirement remains covered separately by the 65-test Bridge packet.
+  No native/core bytes or admitted unit inputs changed in this round.

@@ -140,6 +140,44 @@ def test_exact_shared_decorator_admits_async_entry(tmp_path):
     assert GUARD.verify(tmp_path) == []
 
 
+def test_fail_closed_optional_import_preserves_direct_admission(tmp_path):
+    fixture(
+        tmp_path,
+        "def serve():\n"
+        "    try:\n"
+        "        from agent_procutil.daemon_instances import admit_daemon_instance\n"
+        "    except ImportError:\n"
+        "        raise RuntimeError('service dependencies missing') from None\n"
+        "    with admit_daemon_instance('service', source=__file__):\n"
+        "        application_work()\n",
+        entries={"s:service.py::serve": "service"},
+    )
+    assert GUARD.verify(tmp_path) == []
+
+
+@pytest.mark.parametrize("handler", [
+    "pass",
+    "return",
+    "application_work()",
+    "raise RuntimeError(application_work())",
+    "raise RuntimeError(reason=application_work())",
+    "raise RuntimeError('missing') from application_work()",
+])
+def test_optional_import_cannot_admit_a_non_refusing_failure_branch(tmp_path, handler):
+    fixture(
+        tmp_path,
+        "def serve():\n"
+        "    try:\n"
+        "        from agent_procutil.daemon_instances import admit_daemon_instance\n"
+        "    except ImportError:\n"
+        f"        {handler}\n"
+        "    with admit_daemon_instance('service', source=__file__):\n"
+        "        application_work()\n",
+        entries={"s:service.py::serve": "service"},
+    )
+    assert any("lacks shared startup admission" in problem for problem in GUARD.verify(tmp_path))
+
+
 def test_service_identity_must_match(tmp_path):
     fixture(
         tmp_path,
@@ -299,7 +337,7 @@ def test_known_production_role_requires_an_explicit_declaration(tmp_path):
 @pytest.mark.parametrize("failed", [False, True])
 def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, monkeypatch):
     import sys
-    from types import ModuleType
+    from types import ModuleType, SimpleNamespace
 
     from agent_procutil import daemon_instances
 
@@ -346,7 +384,7 @@ def test_actual_asgi_entry_retains_admission_until_cleanup(relative, failed, mon
     exec(compile(wrapper, str(source), "exec"), namespace)
 
     async def run():
-        async with namespace["lifespan"](object()):
+        async with namespace["lifespan"](SimpleNamespace(state=SimpleNamespace())):
             assert events == ["admit", "body"]
             if failed:
                 raise RuntimeError("synthetic application failure")

@@ -40,6 +40,13 @@ Forwarding and passive cutover reserve that same socket-state directory before
 creating the child, including when an explicit socket lives outside the home.
 Socket/log spellings stay lexical so linked parents cannot be hidden by resolution.
 
+Resident shutdown stops accepting new work and joins accepted connections.
+In-flight `call`/`list` requests and attached sessions retain their existing
+natural-drain boundary; idle connections close. A single shielded cleanup owner
+retains the instance admission and singleton lease until upstream/session,
+listener and background-task teardown settles, including repeated caller
+cancellation and partial control-listener startup failure.
+
 ## Standalone quick start
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a

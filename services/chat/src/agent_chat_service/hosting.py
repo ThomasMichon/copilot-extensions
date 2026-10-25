@@ -261,8 +261,10 @@ class HostedChat:
     """One explicitly owned store and local endpoint, with caller-controlled lifetime."""
 
     def __init__(self, config):
-        from agent_procutil.daemon_instances import admit_daemon_instance
-
+        try:
+            from agent_procutil.daemon_instances import admit_daemon_instance
+        except ImportError:
+            raise HostError("host_service_dependencies_missing") from None
         self._instance_guard = admit_daemon_instance(
             "agent-chat-service", source=__file__, purpose="production",
         )
@@ -383,12 +385,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     args = parser.parse_args(argv)
-    return _run(args.config)
+    try:
+        return _run(args.config)
+    except HostError as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr, flush=True)
+        return 1
 
 
 def _run(config_path):
-    from agent_procutil.daemon_instances import admit_daemon_instance
-
+    try:
+        from agent_procutil.daemon_instances import admit_daemon_instance
+    except ImportError:
+        raise HostError("host_service_dependencies_missing") from None
     with admit_daemon_instance("agent-chat-service", source=__file__, purpose="production"):
         return _serve(config_path)
 

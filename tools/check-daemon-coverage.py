@@ -174,11 +174,44 @@ def native_executable_text(text: str) -> str:
 
 def admitted(node: ast.AST, service: str, text: str, *, production: bool = False) -> bool:
     """Only executable shared admission counts, never a comment or detach flag."""
+    def admission_import(statement):
+        if isinstance(statement, ast.Try):
+            if (
+                len(statement.body) != 1 or len(statement.handlers) != 1
+                or statement.orelse or statement.finalbody
+            ):
+                return None
+            handler = statement.handlers[0]
+            if (
+                not isinstance(handler.type, ast.Name)
+                or handler.type.id not in {"ImportError", "ModuleNotFoundError"}
+                or len(handler.body) != 1 or not isinstance(handler.body[0], ast.Raise)
+            ):
+                return None
+            cause = handler.body[0].cause
+            if cause is not None and not (
+                isinstance(cause, ast.Constant) and cause.value is None
+            ):
+                return None
+            error = handler.body[0].exc
+            if error is not None and not (
+                isinstance(error, ast.Call) and isinstance(error.func, ast.Name)
+                and error.func.id.endswith("Error") and not error.keywords
+                and all(isinstance(arg, ast.Constant) for arg in error.args)
+            ):
+                return None
+            statement = statement.body[0]
+        return statement if (
+            isinstance(statement, ast.ImportFrom)
+            and statement.module == "agent_procutil.daemon_instances"
+        ) else None
+
     imports = {}
     module = ast.parse(text)
     for item in [*module.body, *getattr(node, "body", [])]:
-        if isinstance(item, ast.ImportFrom) and item.module == "agent_procutil.daemon_instances":
-            imports.update({alias.asname or alias.name: alias.name for alias in item.names})
+        imported = admission_import(item)
+        if imported is not None:
+            imports.update({alias.asname or alias.name: alias.name for alias in imported.names})
     for item in module.body:
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             imports.pop(item.name, None)
@@ -220,6 +253,8 @@ def admitted(node: ast.AST, service: str, text: str, *, production: bool = False
         "sys.path.insert", "str", "int", "Path",
     }
     for statement in body:
+        if isinstance(statement, ast.Try) and admission_import(statement) is not None:
+            continue
         call = statement.value if isinstance(statement, (ast.Assign, ast.AnnAssign)) else None
         if isinstance(statement, (ast.With, ast.AsyncWith)) and len(statement.items) == 1:
             call = statement.items[0].context_expr
