@@ -330,7 +330,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
             payloads_ok
             and (phase is None or peers)
             and _core_helper("_update_registered_plugins", _update_registered_plugins)(
-                peers
+                peers, **({"allow_project_fallback": False} if phase == "payloads" and selected else {}),
             )
             is False
         ):
@@ -353,7 +353,6 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
 
     output.info(f"Plugin source: {plugin_dir}")
     _events.enter("runtime_preflight")
-
     plat = cfg.detect_platform()
     if phase == "integration":
         from .update_integration import run_selected
@@ -366,6 +365,7 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         plugin_dir, plat, skip_modules, force=force,
         targets=registered_targets, force_runtimes=forced, sources=sources,
         **({"selected_plugins": selected} if selected else {}),
+        **({"isolated_engine": True} if phase in {"preflight", "runtimes"} else {}),
     )
     portfolio = tuple(
         step for step in (engine_step, *module_plan, *registered_plan) if step is not None

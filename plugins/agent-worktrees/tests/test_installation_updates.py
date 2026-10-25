@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -113,6 +114,73 @@ def test_old_engine_installer_cannot_recover_manager_as_target_effect(tmp_path, 
     for ext in ("sh", "ps1"):
         (tmp_path / "scripts" / f"install.{ext}").write_text("AGENT_WORKTREES_TARGETED_UPDATE")
     assert owner.target_plan("agent-worktrees", None).environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"
+
+
+@pytest.mark.parametrize("prepared_supported", [False, True])
+def test_isolated_engine_checks_execution_artifact_not_authority(tmp_path, prepared_supported):
+    authority, prepared = tmp_path / "authority", tmp_path / "prepared"
+    for payload, supported in ((authority, not prepared_supported), (prepared, prepared_supported)):
+        (payload / "scripts").mkdir(parents=True)
+        for extension in ("sh", "ps1"):
+            (payload / "scripts" / f"install.{extension}").write_text(
+                "AGENT_WORKTREES_TARGETED_UPDATE" if supported else "old installer",
+            )
+    step = update_runtime_plan.RuntimeUpdateStep(
+        "agent-worktrees", "engine_runtime", authority,
+        source=SimpleNamespace(payload=prepared),
+    )
+    if prepared_supported:
+        assert owner.isolated_engine_step(step).environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"
+    else:
+        with pytest.raises(ValueError, match="lacks targeted"):
+            owner.isolated_engine_step(step)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="native POSIX installer function")
+@pytest.mark.parametrize("targeted", [False, True])
+def test_posix_engine_installer_recovery_matches_selected_scope(tmp_path, targeted):
+    from agent_procutil import no_window_kwargs
+
+    payload = Path(__file__).resolve().parents[1]
+    text = (payload / "scripts" / "install.sh").read_text()
+    function = "_deploy_python_runtime() {" + text.split(
+        "_deploy_python_runtime() {", 1,
+    )[1].split("\n}\n", 1)[0] + "\n}\n"
+    (tmp_path / "runtime_install.py").write_text(
+        "import json, os, pathlib, sys\n"
+        "assert ('--recover-adopted-manager' in sys.argv) == "
+        "(os.environ.get('AGENT_WORKTREES_TARGETED_UPDATE') != '1')\n"
+        "pathlib.Path(sys.argv[sys.argv.index('--result') + 1]).write_text(json.dumps({"
+        "'runtime_version': 'fixture', 'runtime_python': sys.executable, "
+        "'deployment_manifest_published': True, 'helpers_published': True}))\n",
+    )
+    script = function + r"""
+set -eu
+ACTION=update
+OWNER_ARG=
+CONTEXTUAL_INSTALL=false
+PLUGIN_DIR="$FIXTURE_ROOT"
+SCRIPT_DIR="$FIXTURE_ROOT"
+INSTALL_DIR="$FIXTURE_ROOT/root"
+VENV_DIR="$INSTALL_DIR/versions/fixture"
+_bootstrap_python() { printf '%s\n' "$FIXTURE_PYTHON"; }
+_ensure_uv() { :; }
+_ensure_uv_index() { :; }
+_assert_source_runtime() { :; }
+ok() { :; }
+err() { printf '%s\n' "$*" >&2; }
+_deploy_python_runtime
+[[ "$PYTHON_RUNTIME_MANIFEST_PUBLISHED" == 1 ]]
+"""
+    result = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, timeout=20,
+        env={
+            **os.environ, "FIXTURE_ROOT": str(tmp_path), "FIXTURE_PYTHON": sys.executable,
+            "AGENT_WORKTREES_TARGETED_UPDATE": "1" if targeted else "",
+        },
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_installer_branches_preserve_unrelated_finishing_effects():

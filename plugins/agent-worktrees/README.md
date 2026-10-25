@@ -124,7 +124,10 @@ against already-installed payloads without downloading other plugins.
 owners. Anchor/prune phases do not enumerate registered plugins, and local
 phases do not eagerly discover unrelated network authentication.
 Filtered payload requests prepare authentication only when acquiring their
-selected contexts; unknown selections refuse before auth discovery.
+selected contexts, including when refresh fails; they never fall back to an
+unrelated project's marketplace context. Unknown selections refuse before auth
+discovery. Engine runtime phases require an installer with targeted-update
+support and suppress adopted Manager recovery as well as local integration.
 
 A successful selected phase is **partial**, not full-update convergence.
 Detached/status JSON includes `phase`, `plugins` and `full_update: false`;

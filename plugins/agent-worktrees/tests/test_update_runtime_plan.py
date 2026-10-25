@@ -28,6 +28,10 @@ def portfolio(monkeypatch, tmp_path):
         (directory / "plugin.json").write_text(json.dumps({
             "name": directory.name, "version": "2", "runtimeScope": "universal",
         }))
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text(
+            "# AGENT_WORKTREES_TARGETED_UPDATE\nexit 0\n",
+        )
     targets = {"agent-example": update_runtime._RegisteredPluginTarget(
         context=tmp_path, activation=update_runtime._PluginActivation.ACTIVE,
     )}
@@ -70,7 +74,7 @@ def phase_portfolio(portfolio, monkeypatch):
     )
     monkeypatch.setattr(
         core, "_update_registered_plugins",
-        lambda targets: calls.append(["payloads", *sorted(targets)]) or True,
+        lambda targets, **kw: calls.append(["payloads", *sorted(targets)]) or True,
     )
     monkeypatch.setattr(
         update_runtime, "_run_human_installer",
@@ -185,12 +189,68 @@ def test_selected_peer_requires_readable_module_ownership(phase_portfolio):
 def test_engine_only_phase_does_not_read_unrelated_module_manifest(phase_portfolio, monkeypatch):
     from agent_worktrees import update_runtime_plan
 
-    _engine, _peer, calls, planned = phase_portfolio
+    engine, _peer, calls, planned = phase_portfolio
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text("AGENT_WORKTREES_TARGETED_UPDATE")
     monkeypatch.setattr(update_runtime_plan, "plan_modules",
                         lambda *a, **kw: pytest.fail("engine-only phase read module manifest"))
     assert update_cli._update_in_plugin_steps(_phase_args("preflight", ["agent-worktrees"])) == 0
     assert calls == []
     assert planned == ["agent-worktrees"]
+
+
+@pytest.mark.parametrize("phase", ["preflight", "runtimes"])
+@pytest.mark.parametrize("supported", [False, True])
+def test_engine_phase_refuses_unscoped_installer_and_suppresses_recovery(
+    phase_portfolio, monkeypatch, phase, supported,
+):
+    engine, _peer, calls, _planned = phase_portfolio
+    for extension in ("sh", "ps1"):
+        (engine / "scripts" / f"install.{extension}").write_text(
+            "AGENT_WORKTREES_TARGETED_UPDATE" if supported else "old installer",
+        )
+    environments = []
+    monkeypatch.setattr(
+        update_cli, "_run_engine_installer",
+        lambda argv, payload, deadline, environment, **kw:
+        environments.append(dict(environment)) or 0,
+    )
+    args = _phase_args(phase, ["agent-worktrees"])
+    args.force = True
+    assert update_cli._update_in_plugin_steps(args) == (0 if supported else 1)
+    assert calls == []
+    assert len(environments) == int(supported and phase == "runtimes")
+    for environment in environments:
+        assert environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"
+        assert environment["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] == "1"
+
+
+@pytest.mark.parametrize("filtered", [False, True])
+def test_failed_payload_refresh_does_not_escape_explicit_filter(
+    phase_portfolio, monkeypatch, filtered,
+):
+    from agent_worktrees import update_auth_context as auth
+
+    engine, peer, calls, _planned = phase_portfolio
+    selected_context = engine.parent / "selected-context"
+    unrelated_context = engine.parent / "unrelated-context"
+    target = update_runtime._RegisteredPluginTarget(
+        selected_context, update_runtime._PluginActivation.ACTIVE,
+    )
+    monkeypatch.setattr(core, "_registered_plugin_targets", lambda: {peer.name: target})
+    monkeypatch.setattr(core, "_update_registered_plugins", update_runtime._update_registered_plugins)
+    monkeypatch.setattr(core, "_project_update_context", lambda: unrelated_context)
+    prepared, refreshed = [], []
+    monkeypatch.setattr(auth, "prepare_marketplace", lambda context, **kw: prepared.append(context))
+    monkeypatch.setattr(core, "_refresh_marketplace",
+                        lambda marketplace, **kw: refreshed.append(kw["cwd"]) or False)
+    monkeypatch.setattr(core, "_update_one_plugin_payload", lambda *a, **kw: "acquisition failed")
+    assert update_cli._update_in_plugin_steps(
+        _phase_args("payloads", [peer.name] if filtered else None),
+    ) == 1
+    expected = [selected_context] if filtered else [selected_context, unrelated_context]
+    assert prepared == refreshed == expected
+    assert calls == ([] if filtered else [["payload", "agent-worktrees"]])
 
 
 @pytest.mark.parametrize("kind", ["registered", "module"])
@@ -401,7 +461,7 @@ def test_whole_update_keeps_prepared_sources_and_original_owners(
             raise ValueError("prepared payload bytes changed")
 
     monkeypatch.setattr(PreparedRuntimeSource, "validate", validate)
-    monkeypatch.setattr(PreparedRuntimeSource, "deployed_version", lambda *a: None)
+    monkeypatch.setattr(PreparedRuntimeSource, "deployed_version", lambda *a, **kw: None)
     monkeypatch.setattr(update_cli, "_run_engine_installer", lambda *a, **kw: (
         executed.append(kw["source_step"]) or 0
     ))

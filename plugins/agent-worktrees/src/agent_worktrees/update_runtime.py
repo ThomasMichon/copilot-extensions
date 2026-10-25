@@ -161,6 +161,8 @@ class _RegisteredPluginTarget:
 
 def _update_registered_plugins(
     targets: dict[str, _RegisteredPluginTarget] | None = None,
+    *,
+    allow_project_fallback: bool = True,
 ) -> bool:
     """Acquire required payloads first; stop before advisory work on failure."""
     from . import reconcile
@@ -188,7 +190,7 @@ def _update_registered_plugins(
         if refresh_marketplace(reconcile.MARKETPLACE, cwd=context):
             browse_contexts.append(context)
 
-    if not browse_contexts:
+    if not browse_contexts and allow_project_fallback:
         try:
             fallback_context = _core_helper(
                 "_project_update_context", _project_update_context

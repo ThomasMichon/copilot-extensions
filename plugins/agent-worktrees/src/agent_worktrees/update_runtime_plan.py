@@ -297,12 +297,20 @@ def plan_portfolio(
     force: bool, targets: Mapping[str, _RegisteredPluginTarget],
     force_runtimes: Collection[str], sources: Mapping[str, PreparedRuntimeSource] | None = None,
     selected_plugins: Collection[str] = (),
+    isolated_engine: bool = False,
 ) -> tuple[RuntimeUpdateStep | None, tuple[RuntimeUpdateStep, ...], tuple[RuntimeUpdateStep, ...]]:
     """Collect the engine, module and remaining active registered runtime owners."""
     engine = plan_engine(
         plugin_dir, platform_name, force=force or "agent-worktrees" in force_runtimes,
         **({"source": sources.get("agent-worktrees")} if sources is not None else {}),
     ) if not selected_plugins or "agent-worktrees" in selected_plugins else None
+    if isolated_engine and engine is not None and not engine.blocked:
+        from .installation_updates import isolated_engine_step
+
+        try:
+            engine = isolated_engine_step(engine)
+        except (OSError, ValueError) as error:
+            engine = dataclasses.replace(engine, status=f"isolated engine update blocked: {error}")
     modules = () if set(selected_plugins) == {"agent-worktrees"} else plan_modules(
         plugin_dir, platform_name, skip_modules, force=force,
         targets=targets, force_runtimes=force_runtimes,
