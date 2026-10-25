@@ -65,6 +65,10 @@ controls preserve the single semantic inspector, byte/metadata refusals and
 promotion's additional first-party source check. These are narrow import and
 validation contracts, not complete toolkit packaging or admitted-tooling
 consumer qualification.
+Manager inventory/update fixtures select the shared configuration root through
+`WORKTREE_MANAGER_ROOT`, not an attribute patch on the installer re-export.
+The unsupported-source case reads that actual policy before forbidding engine
+submission, retaining the refusal contract across configuration-owner changes.
 
 `tools/test_runtime_source_reuse.py` covers bounded persisted evidence admission,
 changed current selections, missing completed receipts, source/receipt corruption, current digest denials
