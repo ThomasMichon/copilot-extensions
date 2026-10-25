@@ -792,17 +792,20 @@ def self_install(
         return SelfInstallResult(version=None, action="error", root=str(r),
                                  reason="could not read payload __version__")
     slot = version_slot(version, r)
-    if dry_run:
-        would_clean = tuple(plan_legacy_cleanup(r))
-        if not needs_install(version, r):
-            return SelfInstallResult(version=version, action="already-current", root=str(r),
-                                     slot=str(slot), marker=version, cleaned=would_clean)
-        return SelfInstallResult(version=version, action="planned", root=str(r),
-                                 slot=str(slot), reason="dry-run", cleaned=would_clean)
-    previous = current_version(r)
-    was_current = not needs_install(version, r)
     try:
         installer = _runtime_installer()
+        if dry_run:
+            selected = _selected_runtime_slot(r)
+            generation, source_matches = installer.source_install_selection(pd, version, selected)
+            slot = version_slot(generation, r)
+            would_clean = tuple(plan_legacy_cleanup(r))
+            if source_matches and selected is not None and not needs_install(version, r):
+                return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                         slot=str(selected), marker=selected.name, cleaned=would_clean)
+            return SelfInstallResult(version=version, action="planned", root=str(r),
+                                     slot=str(slot), reason="dry-run", cleaned=would_clean)
+        previous = current_version(r)
+        was_current = not needs_install(version, r)
         with installer.candidate(pd, r, assemble=_copy_payload) as ready:
             slot = ready.slot
             return _complete_candidate(
@@ -987,11 +990,9 @@ def self_update(
 ) -> SelfUpdateResult:
     """Fetch and version-install the Manager through its existing source authority.
 
-    A newer payload publishes a new slot and marker; a matching version is a no-op.
-    Fetch uses Git when available, enabling a lightweight in-place refetch; otherwise it falls
-    back to a GitHub codeload tarball (:func:`manager_tarball_url`), so a bare machine can still
-    update. The tarball fallback needs a GitHub source; a non-GitHub remote (local
-    path / enterprise) still requires git and returns ``skipped``.
+    Fetch uses Git or GitHub codeload; non-GitHub sources without Git are skipped.
+    Prepared source payloads select their exact immutable generation, not merely
+    an equal package version. A healthy matching selection can be reused.
 
     Deliberately **best-effort and non-fatal**: git/uv missing, offline, or a
     fetch error return an ``error``/``skipped`` result rather than raising, so a
