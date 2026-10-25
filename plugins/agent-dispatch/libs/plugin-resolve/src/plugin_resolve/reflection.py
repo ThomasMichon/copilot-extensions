@@ -61,7 +61,9 @@ def _allowed(path: Path) -> bool:
     )
 
 
-def subset(root: Path, payload: Path) -> bytes:
+def subset(
+    root: Path, payload: Path, *, referenced_paths: set[Path] | None = None,
+) -> bytes:
     """Preserve existing sibling references without flattening plugin trees.
 
     Required skill/reference and runtime paths extend the closure. Top-level
@@ -109,7 +111,11 @@ def subset(root: Path, payload: Path) -> bytes:
                     if candidate.is_dir() and payload.resolve().is_relative_to(resolved):
                         continue
                     resolved.relative_to(root)
+                    if referenced_paths is not None:
+                        referenced_paths.add(candidate)
                     pending.append(candidate)
+                elif referenced_paths is not None and candidate.is_relative_to(root):
+                    referenced_paths.add(candidate)
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, path in sorted(files.items()):

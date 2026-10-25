@@ -91,6 +91,19 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
     }
     companions = {}
     if component == "fleet-manager":
+        # This build tests retained Fleet resources, not the optional SSH packages.
+        for relative, name in (
+            ("plugins/agent-ssh", "agent-ssh"),
+            ("libs/single-instance-lease", "agent-single-instance-lease"),
+        ):
+            dependency = checkout / relative
+            dependency.mkdir(parents=True)
+            (dependency / "pyproject.toml").write_text(
+                '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
+                f'[project]\nname="{name}"\nversion="1.0"\n'
+                '[tool.setuptools.packages.find]\nwhere=["src"]\n', encoding="utf-8",
+            )
+            (dependency / "src").mkdir()
         companions = {
             "_runtime_launcher.py": Path("libs/installer-engine/runtime_launcher.py"),
             "_installer_process.py": Path("libs/installer-engine/installer_engine_process.py"),
@@ -128,7 +141,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             [sys.executable, "-I", "-c",
              "from setuptools.build_meta import build_wheel; "
              f"build_wheel({str(output)!r})"],
-            cwd=candidate, capture_output=True, text=True, timeout=30,
+            cwd=candidate, capture_output=True, text=True, timeout=60,
             **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
         assert result.returncode == 0, result.stdout + result.stderr
@@ -149,7 +162,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
             assert wheel.read(f"{package}/{name}") == data
 
 
-def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_path, monkeypatch):
+def test_fleet_manager_preparation_selects_ssh_and_lease_sources_without_hosting(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "run_uv_install", lambda uv, args, **kwargs: runner.subprocess.run(
         [uv, "pip", "install", *args], **{key: value for key, value in kwargs.items() if key not in ("trusted_source_roots", "retained_resource_roots")},
     ))
@@ -168,7 +181,10 @@ def test_fleet_manager_preparation_has_no_service_or_plugin_dependencies(tmp_pat
     python.parent.parent.mkdir(parents=True)
     runner.prepare("fleet-manager", python)
     assert calls[-1] == [
-        "uv", "pip", "install", "--python", str(python), str(tmp_path / "fleet-manager") + "[dev]",
+        "uv", "pip", "install", "--python", str(python),
+        str(tmp_path / "plugins" / "agent-ssh"),
+        str(tmp_path / "libs" / "single-instance-lease"),
+        str(tmp_path / "fleet-manager") + "[dev]",
     ]
     assert "fleet-manager" in runner.STANDALONE_CONSUMERS
 
@@ -249,6 +265,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         "plugins/agent-index": "agent-index",
         "plugins/agent-dispatch": "agent-dispatch",
         "plugins/agent-pull-requests": "agent-pull-requests",
+        "plugins/agent-ssh": "agent-ssh",
         "plugins/agent-index/libs/dropin-registry": "agent-dropin-registry",
         "libs/zdd": "agent-zdd",
         "libs/agent-procutil": "agent-procutil",
@@ -264,7 +281,7 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             '[build-system]\nrequires=[]\nbuild-backend="setuptools.build_meta"\n'
             f'[project]\nname="{name}"\nversion="1.0"\n'
             '[project.optional-dependencies]\ndev=[]\nnative=[]\ntest=[]\nstore=[]\nserver=[]\n'
-            'fleet=[]\nservice-gateway=[]\n',
+            'fleet=[]\nservice-gateway=[]\nssh-client=[]\n',
             encoding="utf-8",
         )
         with (project / "pyproject.toml").open("a", encoding="utf-8") as manifest:
@@ -318,6 +335,10 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
     assert "--exclude-newer" in installs[0] and "--reinstall" in installs[0]
     extra = "[test]" if component == "services/index" else "[dev]"
     assert any(argument.endswith(component.replace("/", os.sep) + extra) for argument in installs[0])
+    if component == "services/ssh":
+        assert any(argument.endswith(
+            str(Path("fleet-manager")) + "[service-gateway,ssh-client]",
+        ) for argument in installs[0])
     if component in ("services/index", "services/dispatch", "services/pr", "services/ssh"):
         assert "--override" in installs[0]
 
@@ -514,7 +535,8 @@ def exercise_native_legacy_service_cli(tmp_path, legacy, canonical):
             encoding="utf-8",
         )
     runner.REPO = tmp_path
-    assert runner.main([legacy, "--timeout", "10"]) == 0
+    # Fresh native interpreters and containment startup are not a 10-second SLA.
+    assert runner.main([legacy, "--timeout", "30"]) == 0
     assert (root / "executed.txt").read_text() == "canonical"
     assert not (tmp_path / ".test-venvs" / sys.platform / legacy).exists()
 
@@ -536,7 +558,7 @@ def test_native_legacy_service_cli_runs_canonical_tests_without_separate_environ
         f"{legacy!r}, {canonical!r})\n"
     )
     result = subprocess.run(
-        [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=30,
+        [str(python), "-I", "-c", script], capture_output=True, text=True, timeout=60,
         env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
         **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )

@@ -96,7 +96,11 @@ or live-readiness permits.
 `fleet_manager.ssh_directory.SSHDirectoryClient` uses the existing authenticated
 `ServiceCaller` for enrollment and finite notification waits. Its `watch`
 method belongs inside the machine's **existing Fleet lifetime owner**, not an
-AI polling loop or a second daemon. It catches up first and advances only after
+AI polling loop or a second daemon. Fleet's explicitly selected
+[`serve --role ssh-client`](../../fleet-manager/docs/ssh-machine.md) supplies
+that foreground consumer with fixed local agent-ssh writers and external
+credential references; installation alone starts none of it.
+It catches up first and advances only after
 the explicit synchronous local consumer completes. Local convergence failures
 stop the watch visibly; it does not hide a failed write or replay a remote
 effect. The local owner still validates controller, policy, target, local key

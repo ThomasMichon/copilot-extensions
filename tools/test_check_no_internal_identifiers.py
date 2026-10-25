@@ -211,7 +211,7 @@ def test_live_sweep_disabled_by_default_env_var(repo: Path, monkeypatch: pytest.
     monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
     called = []
     monkeypatch.setattr(
-        module.subprocess, "run",
+        module, "_run_live_sweep",
         lambda *a, **k: called.append(1) or (_ for _ in ()).throw(AssertionError("should not run")),
     )
     assert module._load_live_sweep_identifiers() == []
@@ -475,9 +475,9 @@ def test_live_sweep_concrete_owned_failures_block_publication(repo, monkeypatch,
         raise error
 
     monkeypatch.setattr(module, "_run_live_sweep", fail)
-    with pytest.raises(module.LiveSweepFailure, match="observed safely") as caught:
+    with pytest.raises(type(error)) as caught:
         module._load_live_sweep_identifiers()
-    assert caught.value.__cause__ is error
+    assert caught.value is error
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows pipe-inheriting descendant boundary")
@@ -549,6 +549,166 @@ def test_native_posix_live_sweep_preserves_command_and_deadline(tmp_path):
     with pytest.raises(subprocess.TimeoutExpired):
         module._run_live_sweep([sys.executable, "-c", "import time; time.sleep(60)"])
     assert time.monotonic() - started < 15
+def test_live_sweep_missing_capture_helper_fails_closed(repo: Path, monkeypatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: sys.executable)
+    with pytest.raises(module.LiveSweepFailure, match="requires repository agent-procutil"):
+        module._load_live_sweep_identifiers()
+
+
+def _sweep_ownership(monkeypatch):
+    monkeypatch.syspath_prepend(str(SCRIPT.parents[1] / "libs/agent-procutil/src"))
+    from agent_procutil import owned_process
+
+    return owned_process
+
+
+def test_live_sweep_uses_fixed_owned_capture_contract(monkeypatch):
+    module = _load_module(SCRIPT.parent.parent)
+    ownership = _sweep_ownership(monkeypatch)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "selected-sweep")
+    monkeypatch.setenv("LIVE_SWEEP_CONTEXT_FIXTURE", "preserved")
+    calls = []
+
+    def run(argv, **kwargs):
+        environment = kwargs.pop("env")
+        calls.append((
+            argv, kwargs, environment.get("AGENT_WORKTREES_NO_SELFPROVISION"),
+            environment.get("LIVE_SWEEP_CONTEXT_FIXTURE"),
+        ))
+        return subprocess.CompletedProcess(argv, 0, '{"error":null,"entries":[]}', "")
+
+    monkeypatch.setattr(ownership, "run_caller_owned", run)
+    assert module._load_live_sweep_identifiers() == []
+    assert calls == [(
+        ["selected-sweep", "identifiers", "sweep", "--format", "json"],
+        {"cwd": module.REPO, "timeout": 10, "max_stdout_bytes": 32 * 1024 * 1024,
+         "max_stderr_bytes": 1024 * 1024},
+        "1", "preserved",
+    )]
+
+
+def test_live_sweep_retains_unconfirmed_cleanup_custody(monkeypatch):
+    module = _load_module(SCRIPT.parent.parent)
+    ownership = _sweep_ownership(monkeypatch)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "selected-sweep")
+    process, job = object(), object()
+    failure = ownership.OwnedCleanupError(process, job)
+
+    def run(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(ownership, "run_caller_owned", run)
+    with pytest.raises(ownership.OwnedCleanupError) as caught:
+        module._load_identifier_data()
+    assert caught.value is failure
+    assert caught.value.process is process and caught.value.job is job
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_live_sweep_output_limit_is_not_absence(monkeypatch, stream):
+    module = _load_module(SCRIPT.parent.parent)
+    ownership = _sweep_ownership(monkeypatch)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "selected-sweep")
+
+    def run(*args, **kwargs):
+        raise ownership.OutputLimitExceeded(stream, 16)
+
+    monkeypatch.setattr(ownership, "run_caller_owned", run)
+    with pytest.raises(module.LiveSweepFailure, match=f"{stream} exceeded"):
+        module._load_live_sweep_identifiers()
+
+
+@pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="native Windows process handle or Linux pidfd observer required",
+)
+def test_live_sweep_timeout_settles_exited_parent_and_inherited_pipes(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import ExitStack
+    import ctypes
+    import signal
+    import time
+
+    module = _load_module(SCRIPT.parent.parent)
+    _sweep_ownership(monkeypatch)
+    monkeypatch.syspath_prepend(str(SCRIPT.parents[1] / "libs/agent-procutil/tests"))
+    import caller_owned_fixture as fixture
+
+    ready, gate, exited = (tmp_path / name for name in ("ready", "gate", "parent-exiting"))
+    child = (
+        "import os,sys,time; from pathlib import Path; "
+        "ready=Path(sys.argv[1]); pending=ready.with_suffix('.pending'); "
+        "pending.write_text(str(os.getpid())); pending.replace(ready); time.sleep(60)"
+    )
+    parent = (
+        "import os,subprocess,sys,time; from pathlib import Path; "
+        "from agent_procutil import no_window_kwargs; "
+        f"subprocess.Popen([sys.executable,'-I','-c',{child!r},{str(ready)!r}],"
+        "stdin=subprocess.DEVNULL,**no_window_kwargs()); "
+        f"gate=Path({str(gate)!r}); "
+        "\nwhile not gate.exists(): time.sleep(.01)\n"
+        f"Path({str(exited)!r}).write_text('exiting'); os._exit(0)"
+    )
+    # The parent needs only the same canonical helper for its hidden leaf launch.
+    bootstrap = (
+        f"import sys; sys.path.insert(0,{str(SCRIPT.parents[1] / 'libs/agent-procutil/src')!r}); "
+        + parent
+    )
+    with ExitStack() as cleanup, ThreadPoolExecutor(max_workers=1) as pool:
+        started = time.monotonic()
+        future = pool.submit(module._run_live_sweep, [sys.executable, "-I", "-c", bootstrap])
+        try:
+            deadline = started + 6
+            while not ready.exists():
+                if future.done():
+                    future.result()
+                assert time.monotonic() < deadline, "sweep leaf did not become ready"
+                time.sleep(.01)
+            identity = fixture.identity(int(ready.read_text()))
+            if os.name == "nt":
+                kernel = fixture.windows_kernel()
+                handle = kernel.OpenProcess(0x1000 | 0x100000 | 0x0001, False, identity["pid"])
+                if not handle:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                cleanup.callback(kernel.CloseHandle, handle)
+                assert fixture.handle_birth(kernel, handle) == identity["birth"]
+
+                def gone():
+                    status = kernel.WaitForSingleObject(handle, 0)
+                    assert status in (0, 0x102)
+                    return status == 0
+
+                def kill():
+                    if not gone() and not kernel.TerminateProcess(handle, 137):
+                        raise ctypes.WinError(ctypes.get_last_error())
+            else:
+                fd = fixture.open_pidfd(identity["pid"])
+                cleanup.callback(os.close, fd)
+                assert fixture.identity(identity["pid"]) == identity
+
+                def gone():
+                    return fixture.pidfd_exited(fd)
+
+                def kill():
+                    if not gone():
+                        fixture.signal_pidfd(fd, signal.SIGKILL)
+            cleanup.callback(kill)
+            gate.touch()
+            with pytest.raises(subprocess.TimeoutExpired):
+                future.result(timeout=15)
+            assert exited.read_text() == "exiting"
+            deadline = time.monotonic() + 2
+            while not gone() and time.monotonic() < deadline:
+                time.sleep(.01)
+            assert time.monotonic() - started < 15
+            assert gone(), "owned sweep leaf survived the capture timeout"
+        finally:
+            gate.touch()
 
 
 def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
