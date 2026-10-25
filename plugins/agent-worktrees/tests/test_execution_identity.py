@@ -38,10 +38,10 @@ def test_detection_preserves_native_and_qualifies_guest(topology, monkeypatch, e
 
 
 @pytest.mark.parametrize("hostname", ["example-host", "example-host-wsl"])
-def test_standalone_guest_is_qualified_once(monkeypatch, hostname):
+def test_standalone_guest_keeps_literal_os_hostname(monkeypatch, hostname):
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: hostname)
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
-    assert cfg.detect_machine() == "example-host-wsl"
+    assert cfg.detect_machine() == hostname + "-wsl"
 
 
 @pytest.mark.parametrize("source", ["local", "global", "default"])
@@ -74,7 +74,7 @@ def test_config_precedence_and_topology_mapping(topology, tmp_path, monkeypatch,
 def test_auto_config_preserves_hostname_provenance_until_project_topology(
     tmp_path, monkeypatch, scoped,
 ):
-    from agent_worktrees.execution_spaces import ExecutionSpaceError, require_current_execution_space
+    from agent_worktrees.execution_spaces import require_current_execution_space
 
     anchor = tmp_path / "anchor"
     anchor.mkdir()
@@ -95,13 +95,9 @@ def test_auto_config_preserves_hostname_provenance_until_project_topology(
     monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
-    if scoped:
-        with pytest.raises(ExecutionSpaceError, match="explicit machine configuration"):
-            cfg.load_config(local, include_control_plane_related_pr=False)
-    else:
-        config = cfg.load_config(local, include_control_plane_related_pr=False)
-        assert config.machine == "example-host-wsl"
-        require_current_execution_space(config)
+    config = cfg.load_config(local, include_control_plane_related_pr=False)
+    assert config.machine == ("generated-host-wsl" if scoped else "example-host-wsl")
+    require_current_execution_space(config)
 
 
 def test_knowledge_topology_uses_loaded_config_without_recursion(
@@ -295,7 +291,7 @@ def test_guest_fallback_collision(tmp_path, monkeypatch, owner):
     )
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "generated-host")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
-    with pytest.raises(ValueError, match="guest identity.*collides.*native machine"):
+    with pytest.raises(ValueError, match="local execution identity.*conflicts.*registered machine"):
         cfg.detect_machine(tmp_path)
     config = cfg.Config(
         srcroot="", machine="example-host-wsl", platform="wsl", repo_name="example",
@@ -387,11 +383,9 @@ def test_registered_container_identity_survives_shared_wsl_kernel(tmp_path, monk
 
 
 @pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
-def test_registered_execution_spaces_do_not_infer_machine_from_hostname(
+def test_registered_execution_spaces_customize_detection_not_mutation_authority(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, environment: str,
 ) -> None:
-    from agent_worktrees.execution_spaces import ExecutionSpaceError
-
     entries = {
         "example-space": cfg.MachineEntry(
             key="example-space", display_name="Example", hostname="example-host",
@@ -401,8 +395,7 @@ def test_registered_execution_spaces_do_not_infer_machine_from_hostname(
     monkeypatch.setattr(cfg, "load_machines_yaml", lambda _path: entries)
     monkeypatch.setattr(cfg, "detect_platform", lambda: environment)
     monkeypatch.setattr(cfg.socket, "gethostname", lambda: "example-host")
-    with pytest.raises(ExecutionSpaceError, match="explicit machine configuration"):
-        cfg.detect_machine(tmp_path)
+    assert cfg.detect_machine(tmp_path) == "example-space"
 
 
 def test_registered_guest_space_keeps_its_explicit_key(

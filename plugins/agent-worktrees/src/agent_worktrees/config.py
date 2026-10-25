@@ -708,7 +708,9 @@ def load_machines_yaml(
         )
     return {
         key: replace(entry, ssh_environments=[env for env in entry.ssh_environments if env.alias])
-        for key, entry in _mt_normalize_machine_entries(entries).items()
+        for key, entry in _mt_normalize_machine_entries(
+            entries, observed_hostname=socket.gethostname(),
+        ).items()
     }
 
 
@@ -741,7 +743,7 @@ def detect_machine(
     from .machine_identity import load_execution_registry, resolve_execution_machine
 
     return resolve_execution_machine(
-        value if value is not None else socket.gethostname().lower(),
+        value if value is not None else socket.gethostname(),
         guest=detect_platform() == "wsl", configured=value is not None,
         load_entries=(lambda: load_execution_registry(repo_dir, config=config))
         if repo_dir is not None else None,
@@ -1144,29 +1146,19 @@ def _load_config_uncached(
         ),
         copilot_identity_switch_enabled=bool(machine_raw.get("copilot_identity_switch_enabled", global_raw.get("copilot_identity_switch_enabled", False))),
     )
-    from .execution_spaces import canonicalize_legacy_config
-
-    config = canonicalize_legacy_config(config, configured=bool(configured_machine))
-    # Explicit execution-space keys are not a migration surface.
-    if detect_platform() != "wsl":
-        return config
-    try:
-        entries = load_machines_yaml(config.default_repo.anchor, config=config)
-    except FileNotFoundError:
-        entries = {}
-    if any(entry.execution_platform and not entry.legacy_key for entry in entries.values()):
-        if not configured_machine:
-            detect_machine(config.default_repo.anchor)
-        return config
     # Resolve after the config-source binding is available, without calling
     # load_machines_yaml's overlay fallback (which loads this config recursively).
-    identity_anchors = [config.default_repo.anchor]
-    if config.default_repo.stateless or config.default_repo.requires_external_state_root:
+    try:
+        repo = config.default_repo
+    except KeyError:
+        repo = None
+    identity_anchors = [repo.anchor] if repo is not None and repo.anchor else []
+    if repo is not None and repo.anchor:
         from . import state_root
 
         identity_anchors = [
             source.anchor for source in state_root.config_source_anchors(
-                config, base_anchor=config.default_repo.anchor,
+                config, base_anchor=repo.anchor,
             )
         ]
     for anchor in identity_anchors:
@@ -1174,8 +1166,13 @@ def _load_config_uncached(
         if any((root / rel).is_file() for rel in (
             Path(INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
         )):
-            return replace(config, machine=detect_machine(
-                anchor, value=config.machine if configured_machine else None,
+            from .machine_identity import load_execution_registry, resolve_execution_machine
+
+            return replace(config, machine=resolve_execution_machine(
+                configured_machine if configured_machine else socket.gethostname(),
+                guest=detect_platform() == "wsl", configured=bool(configured_machine),
+                load_entries=lambda: load_execution_registry(anchor, config=config),
+                preserve_native_hostname=True,
             ))
     else:
         if machine_raw.get("machine") or global_raw.get("machine"):

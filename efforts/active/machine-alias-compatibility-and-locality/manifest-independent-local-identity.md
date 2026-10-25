@@ -67,11 +67,19 @@ selection, ambiguity and generated-key collisions. Target selection retains its
 authority boundaries; mixed-registry legacy guest lookup and conflicting named
 profiles have focused compatibility regressions.
 
-This foundation does not yet change registration/configuration, tuple producers,
-receiving-side writes or Manager entry points. Steps 2-3 and the complete
-validation matrix below remain open. In particular, observed naming facts are
-not receiving-project or allocation authority; existing admission receipts and
-identifiers must not be regenerated from a later optional customization.
+Worktrees configuration now consumes this context through its existing local
+detection adapter. Absent, empty and unrelated-only maps allow configuration
+loading on Windows, WSL and Linux; matching customization, native legacy binding
+strings, literal OS suffixes and explicit conflict refusals have direct loader
+regressions. Update and launch consumers share that naming adapter while
+retaining the independent runtime manifest policy.
+
+This adoption does not yet change tuple producers, receiving-side writes or
+Manager entry points. Registration/creation entry-point proof, the remainder of
+steps 2-3 and the complete validation matrix below remain open. In particular,
+observed naming facts are not receiving-project or allocation authority;
+existing admission receipts and identifiers must not be regenerated from a later
+optional customization.
 
 ## Validation Plan
 

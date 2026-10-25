@@ -216,19 +216,32 @@ other-environment target still uses its configured transport.
 
 ### Execution machine identity
 
-Registries declaring `execution_platform` require an explicitly configured
-execution-space key; hostname detection and legacy guest suffix inference do
-not select that authority. The configured key and actual platform must satisfy
-the execution-space mutation fence.
+Machine maps are optional for local detection and configuration loading.
+Missing, empty and unrelated-only maps do not require enrollment of the
+current OS or substrate. A matching map customizes the local physical name and
+execution key through the shared local-execution context; invalid declarations,
+ambiguous matches and explicitly selected platform conflicts still fail.
+Existing config-source routing includes machine-local project maps for ordinary
+projects and bound knowledge overlays where applicable; no repository copy is
+required to retain those customizations.
+Naming facts do not grant receiving-project, record or allocation authority.
+The existing execution-space mutation fences and configured-identity read
+provenance remain independent; this configuration adapter does not relax them.
+Update and launch runtime-policy evaluation retain the same current context
+for physical-name lookup, including missing guest customization and literal OS
+suffixes. Non-local target selection remains strict, and a present runtime
+manifest still refuses omitted or foreign deployment selectors.
 
 For legacy registries without execution-space declarations,
 `machine` resolves machine-local > global > OS hostname. Repository config
 does not override that precedence. Windows and native Linux retain the winning
 configured string, or the OS hostname when unconfigured: there is no
 alias-to-key ownership migration. Direct native topology detection retains its
-existing `alias`-or-key result. WSL maps through topology keys and always uses
-`<host>-wsl`, adding the suffix
-only once, including when a local/global setting still names the host.
+existing `alias`-or-key result. WSL maps through topology keys or derives a
+guest execution name from the literal OS hostname or established local binding.
+A platform-like suffix in the actual hostname is part of the physical name:
+an OS hostname `example-wsl` without a customization yields `example-wsl-wsl`
+on WSL. An explicitly configured execution key remains unchanged.
 Qualification follows the actual execution environment, not an inherited
 `platform` path-selection override.
 
