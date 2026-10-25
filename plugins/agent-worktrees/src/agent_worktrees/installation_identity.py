@@ -79,7 +79,7 @@ def _prospective_configs(
     return for_project(project, machine_raw), for_project(ordinary, ordinary_raw), state
 
 
-def _registry_root(config: cfg.Config, state: Path | None) -> Path:
+def _registry_root(config: cfg.Config, state: Path | None) -> Path | None:
     anchor = Path(config.default_repo.anchor)
     overlay = config_overlay_root(str(state), str(anchor)) if state is not None else None
     roots = [anchor]
@@ -88,18 +88,19 @@ def _registry_root(config: cfg.Config, state: Path | None) -> Path:
     if knowledge := knowledge_config_source(config, base_anchor=str(anchor)):
         roots.append(Path(knowledge.anchor))
     for root in roots:
-        if any((root / relative).is_file() for relative in (
+        if any((root / relative).exists() for relative in (
             Path(cfg.INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
         )):
             return root
-    return anchor
+    return None
 
 
 def _admit(
     prospective: cfg.Config, state: Path | None, configured_machine: str | None,
 ) -> tuple[str, str, cfg.MachineEntry | None]:
+    root = _registry_root(prospective, state)
     try:
-        entries = cfg.load_machines_yaml(_registry_root(prospective, state), config=prospective)
+        entries = cfg.load_machines_yaml(root, config=prospective) if root is not None else {}
     except FileNotFoundError:
         entries = {}
     platform = cfg.detect_platform()

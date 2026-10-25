@@ -150,7 +150,9 @@ def test_actual_register_without_machine_enrollment(
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("command", ["register", "install"])
-@pytest.mark.parametrize("fault", ["collision", "platform", "ambiguous", "malformed", "declaration"])
+@pytest.mark.parametrize("fault", [
+    "collision", "platform", "ambiguous", "malformed", "declaration", "directory",
+])
 def test_registration_refuses_invalid_identity_before_effects(
     registration, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
     platform: str, command: str, fault: str,
@@ -184,6 +186,8 @@ def test_registration_refuses_invalid_identity_before_effects(
     }
     if fault == "malformed":
         (fixture.repo / "machines.yaml").write_text("machines: [\n")
+    elif fault == "directory":
+        (fixture.repo / "machines.yaml").mkdir()
     else:
         (fixture.repo / "machines.yaml").write_text(yaml.safe_dump({"machines": entries[fault]}))
     if fault == "platform":
@@ -386,7 +390,7 @@ def test_registration_matches_retained_binding_precedence(
 @pytest.mark.parametrize("case", [
     "fresh", "retained", "aliased-foreign", "aliased-map", "aliased-map-valid",
     "aliased-map-shadowed", "aliased-checkout", "aliased-checkout-valid",
-    "aliased-checkout-forced", "missing-receipt", "foreign-receipt",
+    "aliased-checkout-forced", "retarget-absent-map", "missing-receipt", "foreign-receipt",
 ])
 def test_namespaced_registration_checks_prospective_owned_state_before_writes(
     registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -424,7 +428,9 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
     fixture.overrides["_prepare_namespaced_project_state"] = prepare
     if case != "fresh":
         previous = "previous-label" if case.startswith("aliased") else "registered"
-        _register_repo(previous, remote)
+        _register_repo(
+            previous, "https://github.com/example/previous.git" if case == "retarget-absent-map" else remote,
+        )
         state = project_state.ensure_project_state(previous)
         (state / "config.yaml").write_text(yaml.safe_dump({
             "machine": "foreign-space" if case in ("aliased-foreign", "aliased-map") else "local-space",
@@ -453,7 +459,10 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
             value["repositoryId"] = "repo-foreign"
             identity_path.write_text(json.dumps(value))
     other = "windows" if platform == "wsl" else "wsl"
-    map_root = state / cfg.INREPO_CONFIG_DIRNAME if case.startswith("aliased-map") else fixture.repo
+    map_root = (
+        state / cfg.INREPO_CONFIG_DIRNAME
+        if case.startswith("aliased-map") or case == "retarget-absent-map" else fixture.repo
+    )
     map_root.mkdir(parents=True, exist_ok=True)
     (map_root / "machines.yaml").write_text(yaml.safe_dump({"machines": {
         "local-space": {
@@ -485,7 +494,10 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
             cfg.project_dir("registered") / "config.yaml", project="registered",
             include_control_plane_related_pr=False, include_knowledge_preferences=False,
         )
-        assert config.machine == "local-space"
+        expected = ("raw-host-wsl" if platform == "wsl" else "raw-host") if case == "retarget-absent-map" else "local-space"
+        assert config.machine == expected
+        if case == "retarget-absent-map":
+            assert "instructions" not in fixture.effects
         assert "prepare" in fixture.effects
 
 
