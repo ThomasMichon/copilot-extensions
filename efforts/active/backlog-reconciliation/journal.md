@@ -3,6 +3,7 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-10-24 - Lifecycle/materialization: one complete conditional-question consolidation](<journal/2026/10.24 lifecycle-materialization-family-101.md>)
 - [2026-10-24 - Ordinary guidance and independent custody: four complete consolidations](<journal/2026/10.24 ordinary-guidance-family-100.md>)
 - [2026-10-24 - Mesh, venue input and supervisor control: five complete consolidations](<journal/2026/10.24 mesh-venue-supervisor-family-99.md>)
 - [2026-10-24 - Deliberate-reap family: three complete consolidations and four protected arrivals](<journal/2026/10.24 deliberate-reap-family-98.md>)

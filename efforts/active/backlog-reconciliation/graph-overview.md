@@ -459,6 +459,47 @@ received. No metadata-only arrival is pending; initial research layers and
 provenance remain unchanged. Batch 100 and 738 campaign closures are not
 the fixed whole-queue checkpoint or parent completion.
 
+## Eleventh delivered consolidation
+
+Batch 101 considered ten lifecycle/materialization issues. Only **#5417 was
+administratively superseded into OPEN #5472**, as a complete still-unresolved
+conditional signing-policy question, not an adopted policy or implemented
+upgrade. Five direct Plan rows, five paired Validation rows and three
+continuing Coordination rows were delivered before supersession. I read back
+the ENTIRE actual 14,270-byte receiver; all ten incumbent unchecked rows,
+original bytes, inherited #777/Logger #5468 acceptance, fifty existing
+comments and current bounded ownership survive. There are 23 unchecked rows.
+No effort ROOT was amended.
+
+The original contention-induced unsigned fallback is repaired. The remaining
+question concerns a genuinely unsigned initial runtime followed by later
+signed-Python availability. Pursuit or decline stays with the existing owner;
+equivalent provenance may replace a suggested marker, and successful adoption
+requires a distinct healthy immutable generation, never retained failure as
+an alternative success. Current Slot/control-ABI and narrow guardian scope
+remain distinct from client, constructor, listener, source and native owners.
+
+**#3444, #3654, #3905, #4122, #4163, #5851, #6369 and #6564 remain
+independently OPEN**, as does the receiver. #3654 receives no extra case:
+shared-library materialization is not a generic native input, fingerprint or
+post-build cleanup umbrella. Explicit source-install and concurrency claims,
+finite actual consumers and original qualification remain protected.
+See the [dated checkpoint](<journal/2026/10.24 lifecycle-materialization-family-101.md>).
+
+All ten exact public dispositions, original bodies, 77 original comments,
+whole receiver and custody were audited before the census: **899 whole-queue
+OPEN at 2026-10-24 21:28:16 PDT**, comprising 730 original-cohort and 169
+inflow issues. There are 652 eligible open and 247 untouched excluded-author
+issues, still 170 above the fixed checkpoint. No arrival or external closure
+intervened.
+
+The graph retains **717 historical eligible identities**: 652 open and 65
+closed, comprising 57 audited graph supersessions and eight external changes
+without credit. Seventeen numeric and three existing ROOT intakes have been
+received. No metadata-only arrival is pending; initial research layers and
+provenance remain unchanged. Neither this unresolved question's transfer nor
+739 campaign closures completes the parent objective.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider
