@@ -487,10 +487,13 @@ def test_actual_dispatch_reuse_failed_candidate_and_unavailable_source_preserve_
     assert {path: path.read_bytes() for path in retained} == retained
     assert not list((installation / "versions").glob("99.0.0*/.install-complete.json"))
     payload.rename(payload.with_name("unavailable-dispatch"))
-    primary = bin_dir / ("agent-dispatch.ps1" if os.name == "nt" else "agent-dispatch")
+    python = installation / "versions" / selected / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
     history = status(root=root)
     consumer = subprocess.run(
-        command_for(primary), env={**env, "AGENT_DISPATCH_NO_SELFPROVISION": "1"},
+        [str(python), "-I", "-B", "-m", "agent_dispatch", "--help"],
+        env={**env, "AGENT_DISPATCH_NO_SELFPROVISION": "1"},
         cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert consumer.returncode == 0 and "usage:" in consumer.stdout.lower(), consumer.stdout + consumer.stderr
