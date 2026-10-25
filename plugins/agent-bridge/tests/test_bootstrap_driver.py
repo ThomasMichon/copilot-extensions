@@ -149,7 +149,7 @@ def test_native_handoff_preserves_project_history_and_unattended_mode(tmp_path, 
     if condition == "no-python" and os.name != "nt":
         tools = tmp_path / "native-tools"
         tools.mkdir()
-        for name in ("awk", "bash", "cut", "date", "dirname", "grep", "sed", "sort", "tr", "uname"):
+        for name in ("awk", "bash", "basename", "cut", "date", "dirname", "grep", "sed", "sort", "tr", "uname"):
             executable = shutil.which(name)
             assert executable is not None, name
             (tools / name).symlink_to(executable)
