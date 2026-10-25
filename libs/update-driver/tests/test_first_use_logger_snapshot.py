@@ -128,6 +128,7 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
     "reselected", "substituted", "unavailable", "after-freeze", "during-copy",
     "missing-import", "manifest-array", "identity-array",
     "invalid-installer", "invalid-fragment",
+    "metadata-project", "metadata-tool", "metadata-uv", "metadata-sources", "dependency-project",
 ])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
@@ -152,6 +153,15 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
                           '        Path(source).write_bytes(Path(source).read_bytes() + b"\\n# fixture source mutation\\n")\n'
                           '    return result\n'
                           'shutil.copyfile = _mutating_copyfile\n', encoding="utf-8")
+    elif change == "dependency-project":
+        dependency = payload / "libs/fixture-dependency"
+        dependency.mkdir(parents=True)
+        (dependency / "pyproject.toml").write_text(
+            '[project]\nname="fixture-dependency"\nversion="1.0.0"\n', encoding="utf-8",
+        )
+        metadata = payload / "pyproject.toml"
+        metadata.write_text(metadata.read_text() + '\n[tool.uv.sources]\n'
+                            'fixture-dependency={path="libs/fixture-dependency"}\n', encoding="utf-8")
     request = provision.enqueue(payload, installation, project, root=root)
     if change == "reselected":
         (installation / "payload-dir").write_text(str(payload.with_name("other")), encoding="utf-8")
@@ -172,12 +182,25 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
         )
         assert script.is_file()
         script.write_text("def broken(\n", encoding="utf-8")
+    elif change.startswith("metadata-") or change == "dependency-project":
+        manifest = payload / "pyproject.toml"
+        if change == "dependency-project":
+            manifest = payload / "libs/fixture-dependency/pyproject.toml"
+        manifest.write_text({
+            "metadata-project": 'project="damaged"\n',
+            "metadata-tool": 'tool="damaged"\n[project]\nname="agent-logger"\n',
+            "metadata-uv": '[project]\nname="agent-logger"\n[tool]\nuv="damaged"\n',
+            "metadata-sources": '[project]\nname="agent-logger"\n[tool.uv]\nsources="damaged"\n',
+            "dependency-project": 'project="damaged"\n',
+        }[change], encoding="utf-8")
     drain(root=root)
     result = status(request.id, root=root)
     assert result.spec == request.spec and result.state == "completed" and result.exit_code == 1
     assert "Selected Logger source refused before installer execution" in result.log_path.read_text()
     if change == "during-copy":
         assert "Runtime input content changed while freezing inputs" in result.log_path.read_text()
+    if change.startswith("metadata-") or change == "dependency-project":
+        assert "must be a table" in result.log_path.read_text()
     assert not (installation / "executed").exists()
     assert (installation / ".install-stage").exists() == (change in {"after-freeze", "during-copy"})
 

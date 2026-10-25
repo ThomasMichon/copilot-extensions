@@ -718,7 +718,10 @@ identity, default legacy root and complete retained input graph. Admission is
 rechecked before execution and after freezing. An unavailable, reselected or
 changed accepted Logger snapshot records a logged, settled nonzero result
 before starting an installer; no source is substituted and queue history is
-retained. Uncertain execution/custody failures still interrupt normally.
+retained. Canonical package inspection validates metadata table shapes for
+every local dependency, so malformed source metadata is a typed refusal rather
+than an accidental field-access failure. Uncertain execution/custody failures
+still interrupt normally.
 The fixed native lifecycle is reserved against the queued snapshot, not its
 frozen staging path. Repeated provision retains the healthy generation and
 canonical command owner. The explicit manual `logger-recipes` portfolio covers

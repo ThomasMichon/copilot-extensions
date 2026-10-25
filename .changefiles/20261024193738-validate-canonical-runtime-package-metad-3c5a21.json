@@ -1,0 +1,17 @@
+{
+  "comment": "Validate canonical runtime package metadata tables before reading fields",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
