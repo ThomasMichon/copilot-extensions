@@ -102,6 +102,9 @@ CI_LIST_ENV = "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"
 # this script's own tests deterministic/machine-independent (set by default
 # in their subprocess harness; see tools/test_check_no_internal_identifiers.py).
 LIVE_SWEEP_DISABLE_ENV = "COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"
+_LIVE_SWEEP_TIMEOUT = 10
+_LIVE_SWEEP_STDOUT_LIMIT = 32 * 1024 * 1024
+_LIVE_SWEEP_STDERR_LIMIT = 1024 * 1024
 
 # Files this guard must not flag for merely *implementing* the mechanism.
 SELF = {
@@ -215,27 +218,40 @@ def _is_benign_absence(stdout: str, stderr: str) -> bool:
     return False
 
 
-def _run_live_sweep(command: list[str]) -> subprocess.CompletedProcess:
+def _run_live_sweep(argv: list[str]) -> subprocess.CompletedProcess[str]:
     source = REPO / "libs" / "agent-procutil" / "src"
-    if not (source / "agent_procutil" / "owned_process.py").is_file():
-        raise RuntimeError("canonical finite-process support is unavailable")
+    expected = source / "agent_procutil" / "owned_process.py"
+    if not expected.is_file():
+        raise LiveSweepFailure("live identifier sweep requires repository agent-procutil", [])
+    previous_path = sys.path.copy()
     sys.path.insert(0, str(source))
     batch_source = REPO / "libs" / "plugin-resolve" / "src"
     sys.path.insert(0, str(batch_source))
     environment = {**os.environ, "AGENT_WORKTREES_NO_SELFPROVISION": "1"}
     try:
-        from agent_procutil.owned_process import run_caller_owned
-        if os.name == "nt" and Path(command[0]).suffix.lower() in (".cmd", ".bat"):
-            from plugin_resolve.execution import windows_batch_command
-            command = windows_batch_command(command, environment)
+        from agent_procutil import owned_process
+        if os.name == "nt" and Path(argv[0]).suffix.lower() in (".cmd", ".bat"):
+            from plugin_resolve import execution
+            if Path(execution.__file__).resolve() != (
+                batch_source / "plugin_resolve" / "execution.py"
+            ).resolve():
+                raise LiveSweepFailure("live identifier sweep loaded a non-repository resolver", [])
+            argv = execution.windows_batch_command(argv, environment)
+    except ImportError as error:
+        raise LiveSweepFailure("live identifier sweep could not load agent-procutil", []) from error
     finally:
-        sys.path.remove(str(batch_source))
-        sys.path.remove(str(source))
-    return run_caller_owned(
-        command, cwd=REPO, timeout=10,
-        max_stdout_bytes=32 * 1024 * 1024, max_stderr_bytes=1024 * 1024,
-        env=environment,
-    )
+        sys.path[:] = previous_path
+    if Path(owned_process.__file__).resolve() != expected.resolve():
+        raise LiveSweepFailure("live identifier sweep loaded a non-repository agent-procutil", [])
+    try:
+        return owned_process.run_caller_owned(
+            argv, cwd=REPO, timeout=_LIVE_SWEEP_TIMEOUT,
+            max_stdout_bytes=_LIVE_SWEEP_STDOUT_LIMIT,
+            max_stderr_bytes=_LIVE_SWEEP_STDERR_LIMIT,
+            env=environment,
+        )
+    except owned_process.OutputLimitExceeded as error:
+        raise LiveSweepFailure(f"live identifier sweep failed: {error}", []) from error
 
 
 def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
@@ -244,10 +260,12 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     target (auto-resolved from cwd by ``identifiers sweep``).
 
     Absent anywhere this isn't installed/registered (a fresh clone, CI) --
-    a missing binary, a timeout, or any other environment-level failure to
-    even run the command is silently swallowed so this is purely additive,
-    never a new requirement. Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``
-    to opt out entirely.
+    a missing binary, a settled timeout, or an OS-level launch failure is
+    silently swallowed so this is purely additive,
+    never a new requirement. The timeout retires the owned process tree,
+    including descendants holding captured pipes after their parent exits.
+    Unconfirmed cleanup and output-budget failures are never absence.
+    Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`` to opt out entirely.
 
     A sweep that DID run but failed (nonzero exit -- e.g. another locally
     registered repo's ``.identifier-blocklist/`` file is malformed YAML) is
@@ -282,7 +300,7 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
         proc = _run_live_sweep([exe, "identifiers", "sweep", "--format", "json"])
     except (OSError, subprocess.TimeoutExpired):
         return []
-    except (subprocess.SubprocessError, RuntimeError, ImportError, UnicodeError) as error:
+    except (RuntimeError, ImportError, UnicodeError) as error:
         raise LiveSweepFailure("Live identifier sweep could not be observed safely", []) from error
     if proc.returncode != 0 and _is_benign_absence(proc.stdout, proc.stderr):
         # An installed agent-worktrees that either predates the

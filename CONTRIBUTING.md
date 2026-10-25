@@ -207,6 +207,8 @@ copilot-extensions finalize          # clean up the worktree
   32 MiB/1 MiB stdout/stderr caps. Unsafe cleanup, decoding, output-budget or
   malformed-response failures remain blocking; ordinary unavailable/timeout
   results retain the existing optional-source policy.
+  Manual capture code must come from this repository. Missing helper code
+  refuses the audit, and unconfirmed cleanup preserves exact process/Job custody.
 - **Merge is deliberately manual.** No auto-merge label is bound (the repo's
   `pr-self-merge` profile authorizes the submitter to merge directly): once
   the wait-for-a-verdict loop below is satisfied, squash-merge with

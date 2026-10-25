@@ -688,3 +688,39 @@ takeover or implementation completion is asserted.
   authentication/proof compatibility, managed setup, live transport, migration
   or fleet adoption. No keys, credentials, installation, runtime update, service
   restart or deployment were performed by this source slice.
+
+### 2026-10-25 - Foreground SSH consumer publication follow-through
+
+- #8910 adds the explicitly selected Fleet SSH directory subscriber after
+  #8000. Source review exposed unsupported cross-plugin UV references; the
+  optional SDK names now use normal dependency metadata and standalone test
+  preparation selects the first-party packages explicitly. The actual release
+  materializer regression passes without a plugin-vendoring exception.
+- The isolated native run found a coupled elevated Windows authorization-file
+  owner check. The correction accepts only OS-default privileged file owners
+  under the unchanged protected current-account directory and closed user/SYSTEM
+  grant policy; foreign owners/grants still refuse, with no ACL repair.
+  The corrected published head still owes both native platform lanes.
+- Local focused Fleet/Gateway/SSH/materializer checks passed 72 cases; the
+  installed real TLS/DPoP service packet passed 24 and affected preparation
+  families passed 10. These are disposable source/package fixtures, not a
+  production deployment or complete source-free shared-library closure.
+- Managed publication hit its unchanged 30-second transport deadline because
+  a timed-out live identifier sweep waited on descendant-held pipes. Reused the
+  canonical caller-owned capture helper with its unchanged 10-second sweep
+  deadline. All identifier sources, configuration-failure/partial-entry rules
+  and both independent publication guards remain enabled. Missing capture code,
+  output overflow and unconfirmed cleanup fail closed; cleanup errors retain
+  exact custody instead of masquerading as optional-source absence.
+- The 63-case identifier/publication packet passes, including native
+  parent-exits/descendant-holds-pipes retirement with a birth-pinned observer.
+  The same-input identifier guard body fell from 42.266 to 12.674 seconds.
+  This measures deadline recovery, not a successful complete live sweep:
+  the optional producer still times out and contributes no additional entries.
+  Review, required current-head CI and the corrected native lane remain open;
+  this shared effort and its release/setup/adoption obligations stay Active.
+- Reconciliation with the concurrently merged #8855 retains its equivalent
+  caller-owned sweep, no-self-provision environment, Windows batch quoting and
+  32 MiB/1 MiB stream limits. This branch adds canonical-source verification,
+  explicit missing-helper refusal and exact cleanup-error custody, plus the
+  birth-pinned inherited-pipe control; it does not replace those upstream fixes.
