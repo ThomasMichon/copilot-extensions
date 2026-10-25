@@ -501,12 +501,14 @@ def materialize_installer_engine_refs(
 def materialize_launch_wrapper_assets_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
+    reuse_existing: bool = False,
 ) -> list[str]:
     return mlwa.materialize_into(
         source_consumer_dir=source_consumer_dir,
         dest_consumer_dir=dest_consumer_dir,
         canonical_root=canonical_root,
         dest_root=dest_root,
+        reuse_existing=reuse_existing,
     )
 
 

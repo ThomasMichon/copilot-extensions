@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -194,6 +195,111 @@ def test_prepare_materializes_canonical_vendor_content(
     assert "../../libs/example" not in materialized
     assert "editable" not in materialized
     assert not _git(root, "status", "--porcelain", "--ignored")
+
+
+def _manager_source(root: Path) -> Path:
+    manager = root / "worktree-manager"
+    (manager / "src" / "worktree_manager").mkdir(parents=True)
+    (manager / "src" / "worktree_manager" / "__init__.py").write_text("VALUE = 3\n")
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="0.1.0-dev97"\n'
+        '[tool.uv.sources]\nagent-example={path="../libs/example", editable=true}\n',
+        encoding="utf-8",
+    )
+    library = root / "libs" / "example"
+    (library / "src" / "example").mkdir(parents=True)
+    (library / "src" / "example" / "__init__.py").write_text("VALUE = 7\n")
+    (library / "pyproject.toml").write_text(
+        '[project]\nname="agent-example"\nversion="1.0.0"\n', encoding="utf-8",
+    )
+    shutil.copyfile(
+        REPOSITORY / "worktree-manager" / "packaged-assets.json",
+        manager / "packaged-assets.json",
+    )
+    tools = root / "tools"
+    tools.mkdir()
+    manifest = json.loads((manager / "packaged-assets.json").read_text())
+    for name in manifest["files"]:
+        (tools / name).write_text("raise RuntimeError('fetched tool must not execute')\n")
+    return manager
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_shipped_trusted_toolkit_prepares_manager_without_executing_fetched_tools(
+    repository: tuple[Path, str], tmp_path: Path, retained: bool,
+) -> None:
+    root, _ = repository
+    manager = _manager_source(root)
+    if retained:
+        report = source_runtime.materializer.materialize_launch_wrapper_assets_into(
+            source_consumer_dir=manager, dest_consumer_dir=manager, canonical_root=root,
+        )
+        assert report and all(line.startswith("OK") for line in report)
+    commit = _merged_commit(root)
+    installed = tmp_path / "installed-manager"
+    installed.mkdir()
+    shutil.copyfile(manager / "packaged-assets.json", installed / "packaged-assets.json")
+    report = source_runtime.materializer.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=installed, dest_consumer_dir=installed, canonical_root=REPOSITORY,
+    )
+    assert report and all(line.startswith("OK") for line in report)
+    scripts = installed / "scripts"
+    for helper in (REPOSITORY / "libs" / "versioned-runtime").glob("versioned_runtime*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    (unrelated / "materialize_main.py").write_text("raise RuntimeError('cwd import')\n")
+    command = [
+        sys.executable, "-I", "-B",
+        str(scripts / "runtime-source-tools" / "prepare_runtime_source.py"),
+        "--source", str(root), "--commit", commit, "--plugin", "worktree-manager",
+        "--output", str(tmp_path / "prepared"),
+    ]
+    documents = []
+    for _ in range(2):
+        result = subprocess.run(
+            command, cwd=unrelated, capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        assert result.returncode == 0, result.stderr
+        documents.append(json.loads(result.stdout))
+    assert [document["reused"] for document in documents] == [False, True]
+    assert documents[0]["identity"] == documents[1]["identity"]
+    payload = Path(documents[0]["payload"])
+    identity = source_runtime.read_source_identity(
+        payload, "0.1.0-dev97", plugin="worktree-manager",
+    )
+    assert identity is not None and identity.source_commit == commit
+    assert not (payload / "plugin.json").exists()
+    assert (payload / "libs" / "example" / "src" / "example" / "__init__.py").is_file()
+    assert "editable" not in (payload / "pyproject.toml").read_text()
+    assert (payload / "scripts" / "runtime-source-tools" / "prepare_runtime_source.py").read_bytes() == (
+        root / "tools" / "prepare_runtime_source.py"
+    ).read_bytes()
+    assert not _git(root, "status", "--porcelain", "--ignored")
+
+
+@pytest.mark.parametrize("kind", ["project-name", "retained-asset"])
+def test_prepare_manager_refuses_mismatched_identity_or_retained_asset(
+    repository: tuple[Path, str], tmp_path: Path, kind: str,
+) -> None:
+    root, _ = repository
+    manager = _manager_source(root)
+    if kind == "project-name":
+        project = manager / "pyproject.toml"
+        project.write_text(project.read_text().replace(
+            "copilot-extensions-worktree-manager", "unrelated-project",
+        ))
+        message = "project identity"
+    else:
+        toolkit = manager / "scripts" / "runtime-source-tools"
+        toolkit.mkdir(parents=True)
+        (toolkit / "prepare_runtime_source.py").write_text("different assembly\n")
+        message = "already exists"
+    commit = _merged_commit(root)
+    with pytest.raises(source_runtime.SourcePreparationError, match=message):
+        source_runtime.prepare(root, commit, "worktree-manager", tmp_path / "prepared")
+    assert not list((tmp_path / "prepared").rglob("runtime-source.json"))
 
 
 def test_prepared_generation_refuses_changed_content(

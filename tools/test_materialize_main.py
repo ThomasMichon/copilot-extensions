@@ -119,6 +119,52 @@ def test_packaged_projection_assets_expand_into_own_payload(tmp_path):
     assert not (dest.parent / "customizing-copilot").exists()
 
 
+def test_packaged_assets_include_standalone_manager_without_plugins(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    consumer = root / "worktree-manager"
+    consumer.mkdir(parents=True)
+    source = _canonical_file(root, "tools/prepare.py", content="print('trusted')\n")
+    (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "tools", "payloadDir": "scripts/runtime-source-tools",
+        "files": ["prepare.py"],
+    }), encoding="utf-8")
+    dest = tmp_path / "release"
+    (dest / "worktree-manager").mkdir(parents=True)
+    report = mm.materialize_launch_wrapper_assets(dest, canonical_root=root)
+    assert len(report) == 1 and report[0].startswith("OK")
+    assert (
+        dest / "worktree-manager" / "scripts" / "runtime-source-tools" / "prepare.py"
+    ).read_bytes() == source.read_bytes()
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+@pytest.mark.parametrize("changed", [False, True])
+def test_packaged_assets_retain_exact_bytes_only_when_requested(
+    tmp_path: Path, reuse: bool, changed: bool,
+) -> None:
+    source = tmp_path / "tools"
+    source.mkdir()
+    (source / "prepare.py").write_text("canonical\n", encoding="utf-8")
+    consumer = tmp_path / "worktree-manager"
+    (consumer / "scripts").mkdir(parents=True)
+    retained = consumer / "scripts" / "prepare.py"
+    retained.write_text("changed\n" if changed else "canonical\n", encoding="utf-8")
+    original_stat = retained.stat()
+    (consumer / lwar.PACKAGED_MANIFEST_NAME).write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "tools", "payloadDir": "scripts", "files": ["prepare.py"],
+    }), encoding="utf-8")
+    report = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer,
+        canonical_root=tmp_path, reuse_existing=reuse,
+    )
+    assert bool(report) is (not reuse or changed)
+    assert all(line.startswith("SKIP ") for line in report)
+    assert retained.stat() == original_stat
+    assert retained.read_text() == ("changed\n" if changed else "canonical\n")
+
+
 @pytest.mark.parametrize("directory", ["../outside", "..\\outside", "C:\\outside"])
 def test_packaged_assets_refuse_escaping_payload_directory(tmp_path, directory):
     consumer = tmp_path / "plugins" / "agent-worktrees"
