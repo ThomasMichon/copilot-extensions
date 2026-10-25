@@ -134,10 +134,12 @@ implementation and validation choices remain proposed means.
   without changing registration identity, execution parameters or runtime
   behavior (#8841). Structured operator controls and independent client
   adoption remain separate acceptance.
-- [ ] Add source-declared bounded operator controls through the existing Save
+- [x] Add source-declared bounded operator controls through the existing Save
   lifecycle and native field vocabulary. Pin edits to the exact original
   source, retain advanced CLI compatibility, and refuse unsupported human
   editing rather than exposing declaration or agent-guidance JSON.
+  PR #8937 closes this source/native slice; independent graphical adoption,
+  promotion and authorized installed proof remain open.
 - [x] Expose sufficient machine-readable inputs and prerequisites for clients
   to instantiate offered emitter, evaluator and pool templates; retain an
   advanced declaration path where appropriate. PR #8363 supplies the bounded
@@ -508,6 +510,38 @@ and first-touch/restart evidence, normal review/CI/release and separately
 authorized installed proof remain distinct obligations.
 
 ## Journal
+
+### 2026-10-25 - Bounded source-owned operator controls merged
+
+- PR #8937 merged at 12:49:03Z as
+  `646d8b294d287a56868b09eeb0b4f52cc3ccacd9`, from approved head
+  `7effc9ca55b95249f4483e4ec98e6c1054c298c9`. Both review threads were
+  resolved and all three required checks passed before managed Maintainer
+  self-merge. No required CI was waived.
+- Version-1 source-declared text/choice fields reuse `workers save` with
+  `--operator-inputs`, opaque revisions, source binding, Save-only and explicit
+  activation consent. Advanced CLI editing remains available; unsupported,
+  legacy and unknown human contracts stay read-only, never raw JSON editors.
+  Original source and local values are rechecked under the owner lock; exact
+  retry and partial values retain their existing semantics.
+- Native Configuration consumes the same bounded fields and renders captions
+  literally. One read-only supplier snapshot per refresh covers discovery,
+  prerequisites and binding verification, including negative results; Save
+  obtains fresh evidence. This does not change production deadlines.
+- Final owner/materialization/revision coverage passed 402 tests with four
+  skips; producer/resource coverage passed 354 with one skip; refresh snapshot
+  coverage passed nine (33 deselected). Earlier native field/backstage coverage
+  passed 37 with one skip, including 13 scenarios; native preview coverage
+  passed 68. Lint, module ceilings and install contracts passed. Contained
+  first-touch CLI and actual native consumers were exercised. Fresh PNG export
+  was unavailable because the official renderer dependency installation timed
+  out; no installer or admission gate was bypassed. No live external or installed
+  lane was run: this slice changed source contracts, not deployment or activation.
+- Re-read this effort's Plan and Validation Plan after merge. Closed only
+  the bounded source/native controls item. Independent graphical configure/Save
+  and rendered parity, history, mapped production, migration, promotion and
+  authorized installed acceptance remain open. The effort stays Active.
+  Next is independent graphical adoption through this same owner contract.
 
 ### 2026-10-24 - Bounded provider instantiation source merged
 
