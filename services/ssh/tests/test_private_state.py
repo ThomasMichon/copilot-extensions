@@ -1,13 +1,23 @@
 import ctypes
 import os
+from types import SimpleNamespace
 import pytest
+from single_instance_lease import AlreadyRunningError, SingleInstance
 
 from agent_ssh_service import hosting
 from agent_ssh_service.config import ServiceConfig
 from fleet_manager.planning import PlanError
-from fleet_manager.private_state import private_directory, windows_private
+from fleet_manager.private_state import create_private_file, private_directory, windows_private
 
 from conftest import document
+
+
+class StoppedConnector:
+    def __init__(self, **_):
+        pass
+
+    async def run(self, stop):
+        stop.set()
 
 
 def test_native_private_creation_and_preserving_existing_refusal(tmp_path):
@@ -43,7 +53,10 @@ def shared_windows_acl(path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual native Windows security descriptors")
-@pytest.mark.parametrize("shared", ["root", "directory.sqlite3", "agent-ssh-service.lock"])
+@pytest.mark.parametrize("shared", [
+    "root", "directory.sqlite3", "agent-ssh-service.lock", "directory.sqlite3-journal",
+    "directory.sqlite3-wal", "directory.sqlite3-shm",
+])
 async def test_shared_windows_state_refuses_before_credentials_lease_or_sqlite(
     tmp_path, monkeypatch, shared,
 ):
@@ -51,7 +64,8 @@ async def test_shared_windows_state_refuses_before_credentials_lease_or_sqlite(
     private_directory(root)
     selected = root if shared == "root" else root / shared
     if selected != root:
-        selected.write_bytes(b"preserve-existing-state")
+        with os.fdopen(create_private_file(selected), "wb") as stream:
+            stream.write(b"preserve-existing-state")
     shared_windows_acl(selected)
     before = {entry.name: entry.read_bytes() for entry in root.iterdir()}
     monkeypatch.setattr(hosting, "load_service_credentials",
@@ -63,6 +77,71 @@ async def test_shared_windows_state_refuses_before_credentials_lease_or_sqlite(
     assert {entry.name: entry.read_bytes() for entry in root.iterdir()} == before
     with pytest.raises(PlanError, match="shared access grant"):
         windows_private(selected)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual native Windows owner and ACL inheritance")
+async def test_actual_host_restart_retains_token_user_owned_database_and_writer_lease(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "restartable-service"
+    selected = ServiceConfig.from_dict(document(root))
+
+    monkeypatch.setattr(hosting, "ServiceConnector", StoppedConnector)
+    monkeypatch.setattr(hosting, "load_service_credentials",
+                        lambda **_: SimpleNamespace(access_token=None, proof_key=None))
+    for iteration in range(2):
+        await hosting.run(selected)
+        windows_private(root)
+        windows_private(root / "directory.sqlite3")
+        windows_private(root / "agent-ssh-service.lock")
+        if iteration == 0:
+            # Model SQLite's default-owner recovery artifact, not an ownership repair.
+            journal = root / "directory.sqlite3-journal"
+            journal.write_bytes(b"")
+            windows_private(journal, privileged_owner=True)
+
+
+async def test_interrupted_first_start_retries_with_only_its_validated_lease_file(
+    config, monkeypatch,
+):
+    from pathlib import Path
+
+    root = Path(config.to_dict()["data_dir"])
+    original = hosting.DirectoryStore
+    monkeypatch.setattr(hosting, "ServiceConnector", StoppedConnector)
+    monkeypatch.setattr(hosting, "load_service_credentials",
+                        lambda **_: SimpleNamespace(access_token=None, proof_key=None))
+
+    def interrupted(_config):
+        raise OSError("synthetic interruption before SQLite")
+
+    monkeypatch.setattr(hosting, "DirectoryStore", interrupted)
+    with pytest.raises(OSError, match="interruption before SQLite"):
+        await hosting.run(config)
+    assert {entry.name for entry in root.iterdir()} == {"agent-ssh-service.lock"}
+    monkeypatch.setattr(hosting, "DirectoryStore", original)
+    await hosting.run(config)
+    assert (root / "directory.sqlite3").is_file()
+
+
+async def test_lease_only_retry_does_not_displace_an_actual_live_writer(config, monkeypatch):
+    from pathlib import Path
+
+    root = Path(config.to_dict()["data_dir"])
+    os.close(create_private_file(root / "agent-ssh-service.lock"))
+    owner = SingleInstance(str(root), service="agent-ssh-service")
+    monkeypatch.setattr(hosting, "ServiceConnector", StoppedConnector)
+    monkeypatch.setattr(hosting, "load_service_credentials",
+                        lambda **_: SimpleNamespace(access_token=None, proof_key=None))
+    owner.acquire()
+    try:
+        with pytest.raises(AlreadyRunningError):
+            await hosting.run(config)
+        assert owner.held and not (root / "directory.sqlite3").exists()
+    finally:
+        owner.release()
+    await hosting.run(config)
+    assert (root / "directory.sqlite3").is_file()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Native POSIX ownership/mode boundary")

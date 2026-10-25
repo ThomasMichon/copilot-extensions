@@ -9,12 +9,14 @@ import signal
 
 from fleet_manager.credential_references import load_service_credentials
 from fleet_manager.gateway_service_connector import ServiceConnector
-from fleet_manager.private_state import private_directory, windows_private
+from fleet_manager.private_state import create_private_file, private_directory, windows_private
 from single_instance_lease import SingleInstance
 
 from .config import ServiceConfig, absolute, check
 from .gateway import SSHService, _drain
 from .store import DirectoryStore
+
+_LEASE = "agent-ssh-service.lock"
 
 
 class UnsettledRelay(RuntimeError):
@@ -85,20 +87,36 @@ async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> No
     selected = config.to_dict()
     root = absolute(selected["data_dir"])
     private_directory(root)
+    lease_path = absolute(str(root / _LEASE))
     if os.name == "nt":
         for name in ("directory.sqlite3", "directory.sqlite3-journal",
-                     "directory.sqlite3-wal", "directory.sqlite3-shm", "agent-ssh-service.lock"):
+                     "directory.sqlite3-wal", "directory.sqlite3-shm", _LEASE):
             path = absolute(str(root / name))
             if path.exists():
                 check(path.is_file() and path.stat().st_nlink == 1, "invalid-directory-store")
-                windows_private(path)
-    check((root / "directory.sqlite3").exists() or not any(root.iterdir()),
+                # SQLite creates recovery files with the token's default owner.
+                # Privileged ownership does not widen the same closed access grants.
+                windows_private(path, privileged_owner=name.startswith("directory.sqlite3-"))
+    if lease_path.exists():
+        info = lease_path.stat()
+        check(lease_path.is_file() and info.st_nlink == 1 and (
+            os.name == "nt" or (info.st_uid == os.getuid() and info.st_mode & 0o022 == 0)
+        ), "invalid-service-lease")
+    check((root / "directory.sqlite3").exists()
+          or {entry.name for entry in root.iterdir()} <= {_LEASE},
           "unowned-service-data-directory")
     credentials = load_service_credentials(
         proof_key_file=absolute(selected["proof_key_file"]),
         access_token_file=absolute(selected["access_token_file"]),
     )
     lease = SingleInstance(str(root), service="agent-ssh-service")
+    if os.name == "nt":
+        try:
+            descriptor = create_private_file(lease.lock_path)
+        except FileExistsError:
+            windows_private(lease.lock_path)
+        else:
+            os.close(descriptor)
     lease.acquire()
     service = None
     relay = None

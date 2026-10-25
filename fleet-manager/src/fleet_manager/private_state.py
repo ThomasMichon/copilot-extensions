@@ -51,8 +51,8 @@ def _windows_identity():
     return kernel, security, user, sid_text
 
 
-def windows_private(path):
-    """Require the actual token user and the existing admission ACL policy."""
+def windows_private(path, *, privileged_owner: bool = False):
+    """Keep the admission ACL policy; recovery may select a privileged OS owner."""
     import ctypes as c
     from ctypes import wintypes as w
 
@@ -71,7 +71,8 @@ def windows_private(path):
     if error:
         raise c.WinError(error)
     try:
-        if not owner.value or sid_text(owner) != user or not acl.value:
+        owners = {user, "S-1-5-18", "S-1-5-32-544"} if privileged_owner else {user}
+        if not owner.value or sid_text(owner) not in owners or not acl.value:
             raise PlanError("state path is not private to its owner")
         allowed = {user, "S-1-3-4", "S-1-5-18", "S-1-5-32-544"}
         count = c.c_ushort.from_address(acl.value + 4).value
@@ -88,37 +89,66 @@ def windows_private(path):
         kernel.LocalFree(descriptor)
 
 
+def _windows_create(path: Path, *, directory: bool) -> int | None:
+    import ctypes as c
+    from ctypes import wintypes as w
+
+    class Attributes(c.Structure):
+        _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
+
+    kernel, security, user, _ = _windows_identity()
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        w.LPCWSTR, w.DWORD, c.POINTER(w.LPVOID), w.LPVOID,
+    ]
+    security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = w.BOOL
+    kernel.CreateDirectoryW.argtypes = [w.LPCWSTR, c.POINTER(Attributes)]
+    kernel.CreateDirectoryW.restype = w.BOOL
+    kernel.CreateFileW.argtypes = [
+        w.LPCWSTR, w.DWORD, w.DWORD, c.POINTER(Attributes), w.DWORD, w.DWORD, w.HANDLE,
+    ]
+    kernel.CreateFileW.restype = w.HANDLE
+    descriptor = w.LPVOID()
+    sddl = f"O:{user}D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+    if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl, 1, c.byref(descriptor), None,
+    ):
+        raise c.WinError(c.get_last_error())
+    try:
+        attributes = Attributes(c.sizeof(Attributes), descriptor, False)
+        if directory:
+            if not kernel.CreateDirectoryW(str(path), c.byref(attributes)):
+                raise c.WinError(c.get_last_error())
+            return None
+        handle = kernel.CreateFileW(str(path), 0x40000000, 0, c.byref(attributes), 1, 0x80, None)
+        if handle == c.c_void_p(-1).value:
+            raise c.WinError(c.get_last_error())
+        import msvcrt
+
+        try:
+            return msvcrt.open_osfhandle(handle, os.O_WRONLY | os.O_BINARY)
+        except OSError:
+            kernel.CloseHandle(handle)
+            raise
+    finally:
+        kernel.LocalFree(descriptor)
+
+
+def create_private_file(path: Path) -> int:
+    """Create a new file with TokenUser ownership even for an elevated caller."""
+    if os.name == "nt":
+        descriptor = _windows_create(path, directory=False)
+        assert descriptor is not None
+        return descriptor
+    return os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+
+
 def private_directory(path: Path) -> None:
     """Create privately in one operation, or validate without repairing ownership."""
     if not path.exists():
-        if os.name != "nt":
-            path.mkdir(mode=0o700)
+        if os.name == "nt":
+            _windows_create(path, directory=True)
         else:
-            import ctypes as c
-            from ctypes import wintypes as w
-
-            class Attributes(c.Structure):
-                _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
-
-            kernel, security, user, _ = _windows_identity()
-            security.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
-                w.LPCWSTR, w.DWORD, c.POINTER(w.LPVOID), w.LPVOID,
-            ]
-            security.ConvertStringSecurityDescriptorToSecurityDescriptorW.restype = w.BOOL
-            kernel.CreateDirectoryW.argtypes = [w.LPCWSTR, c.POINTER(Attributes)]
-            kernel.CreateDirectoryW.restype = w.BOOL
-            descriptor = w.LPVOID()
-            sddl = f"O:{user}D:P(A;OICI;FA;;;{user})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
-            if not security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                sddl, 1, c.byref(descriptor), None,
-            ):
-                raise c.WinError(c.get_last_error())
-            try:
-                attributes = Attributes(c.sizeof(Attributes), descriptor, False)
-                if not kernel.CreateDirectoryW(str(path), c.byref(attributes)):
-                    raise c.WinError(c.get_last_error())
-            finally:
-                kernel.LocalFree(descriptor)
+            path.mkdir(mode=0o700)
     info = path.lstat()
     if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
         raise PlanError("state root is not an ordinary private directory")

@@ -9,6 +9,7 @@ import sqlite3
 from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
 from fleet_manager.gateway_ssh_provider import directory_snapshot, public_key
 from fleet_manager.planning import canonical, decode, identifier, integer
+from fleet_manager.private_state import create_private_file
 
 from .config import ServiceConfig, absolute, check
 
@@ -26,7 +27,7 @@ class DirectoryStore:
         self.path = self.root / "directory.sqlite3"
         created = False
         try:
-            descriptor = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            descriptor = create_private_file(self.path)
         except FileExistsError:
             absolute(str(self.path))
             check(self.path.is_file() and self.path.stat().st_nlink == 1,

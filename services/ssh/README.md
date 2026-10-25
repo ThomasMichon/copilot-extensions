@@ -48,13 +48,20 @@ The local data directory must be dedicated and owner-private. The foreground
 host creates it atomically with a protected current-account ACL on Windows,
 and validates existing ownership, access grants and retained state before
 reading credentials or acquiring the writer lease. Shared state is refused,
-never silently adopted or repaired. The foreground host holds the canonical
+never silently adopted or repaired. New database and lease files explicitly
+bind that same account even under an elevated Windows token. SQLite-created
+recovery files may keep the OS's privileged default owner, but must retain
+the same closed current-account/System/Administrators access grants.
+The foreground host holds the canonical
 single-instance lease before opening its SQLite
 store. Configuration revision and per-target generation floors, exact service
 ownership, public bindings and original request/content correlations survive
 restart. Lower or equal-revision changed configuration refuses; removing a
 binding does not reset its generation floor. A changed host-local volume or
 cross-host writer transfer requires the deployment owner's separate admission.
+A first-start interruption may leave only the validated canonical lease file.
+That otherwise empty directory can retry through the same exclusive OS lease;
+a live holder or unrelated retained contents are never displaced or adopted.
 
 ## Gateway routes and notifications
 
