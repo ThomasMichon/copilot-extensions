@@ -1,0 +1,9 @@
+{
+  "comment": "Allow explicit operator fresh-conversation recovery for the exact retained targeted allocation without changing ownership or holder safeguards",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
