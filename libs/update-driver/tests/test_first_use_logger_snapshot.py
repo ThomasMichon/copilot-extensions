@@ -124,7 +124,7 @@ def test_logger_snapshot_refusal_precedes_acquisition_queue_and_writes(
     assert {path: path.read_bytes() for path in payload.rglob("*") if path.is_file()} == source
 
 
-@pytest.mark.parametrize("change", ["reselected", "substituted", "unavailable", "after-freeze"])
+@pytest.mark.parametrize("change", ["reselected", "substituted", "unavailable", "after-freeze", "during-copy"])
 def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snapshot, area, change):
     payload, installation, project = selected_logger_snapshot
     root = area / "queue"
@@ -138,6 +138,16 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
                           '    (_Path(__file__).resolve().parents[3] / "payload-dir").write_text(\n'
                           '        str(_Path(__file__).resolve().parents[1].with_name("other")), encoding="utf-8")\n'
                           '    return result\n', encoding="utf-8")
+    elif change == "during-copy":
+        engine = payload / "scripts/installer_engine.py"
+        engine.write_text(engine.read_text() + '\n'
+                          '_canonical_copyfile = shutil.copyfile\n'
+                          'def _mutating_copyfile(source, target, **kwargs):\n'
+                          '    result = _canonical_copyfile(source, target, **kwargs)\n'
+                          '    if Path(source) == Path(__file__).with_name("install.sh"):\n'
+                          '        Path(source).write_bytes(Path(source).read_bytes() + b"\\n# fixture source mutation\\n")\n'
+                          '    return result\n'
+                          'shutil.copyfile = _mutating_copyfile\n', encoding="utf-8")
     request = provision.enqueue(payload, installation, project, root=root)
     if change == "reselected":
         (installation / "payload-dir").write_text(str(payload.with_name("other")), encoding="utf-8")
@@ -149,8 +159,10 @@ def test_logger_snapshot_change_preserves_accepted_request(selected_logger_snaps
     result = status(request.id, root=root)
     assert result.spec == request.spec and result.state == "completed" and result.exit_code == 1
     assert "Selected Logger source refused before installer execution" in result.log_path.read_text()
+    if change == "during-copy":
+        assert "Runtime input content changed while freezing inputs" in result.log_path.read_text()
     assert not (installation / "executed").exists()
-    assert (installation / ".install-stage").exists() == (change == "after-freeze")
+    assert (installation / ".install-stage").exists() == (change in {"after-freeze", "during-copy"})
 
 
 @native_genesis

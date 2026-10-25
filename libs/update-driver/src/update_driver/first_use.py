@@ -330,6 +330,7 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         payload = Path(admission["payload"])
         runtime_root = Path(admission["runtime_root"])
         installer_action = admission.get("installer_action", "provision")
+        logger_snapshot = admission["plugin"] == "agent-logger" and payload.parent == runtime_root / "snapshots"
         if client_only and (
             installer_action != "provision" or admission["plugin"] != "agent-vault"
         ):
@@ -357,13 +358,18 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
             if legacy_stage:
                 # Keep legacy staging reapers off this live, queue-owned native tree.
                 destination = inputs / f"{custody.request_id}-{os.getpid()}" / admission["plugin"]
-            frozen = engine.freeze_inputs(payload, destination)
+            try:
+                frozen = engine.freeze_inputs(payload, destination)
+            except RuntimeError as error:
+                if not logger_snapshot:
+                    raise
+                raise ProvisionError(f"selected Logger snapshot freeze validation failed: {error}") from error
             if frozen.payload_hash != admission["input_hash"] or _inspect(
                 payload, runtime_root, Path(admission["project"]), installer_action=installer_action,
             ) != admission:
                 raise ProvisionError("owning source or installation changed while freezing provision inputs")
         except (ProvisionError, OSError, ValueError) as error:
-            if admission["plugin"] != "agent-logger" or payload.parent != runtime_root / "snapshots":
+            if not logger_snapshot:
                 raise
             # No installer has started; this new recipe can certify a settled refusal.
             custody.assert_owned()
