@@ -361,12 +361,16 @@ def native_recipe_runner(area):
     calls, owners, descriptors, roots = [], [], [], {}
     caller_jobs = {}
 
-    def start(command, *, env, cwd, root, diagnostic, contain_caller=False):
+    def start(
+        command, *, env, cwd, root, diagnostic, contain_caller=False,
+        stdin=subprocess.DEVNULL, stdout=None,
+    ):
         path = area / f"native-recipe-{len(calls)}.log"
         output = path.open("wb")
         arguments = dict(
-            env=env, cwd=cwd, stdin=subprocess.DEVNULL, stdout=output,
-            stderr=subprocess.STDOUT, **no_window_kwargs(),
+            env=env, cwd=cwd, stdin=stdin,
+            stdout=output if stdout is None else stdout,
+            stderr=subprocess.STDOUT if stdout is None else output, **no_window_kwargs(),
         )
         if contain_caller and os.name == "nt":
             from agent_procutil import spawn_sync_in_kill_on_close_job
@@ -412,8 +416,16 @@ def native_recipe_runner(area):
             os.killpg(process.pid, signal.SIGKILL)
         process.wait(timeout=30)
 
+    def owners_finished():
+        if os.name == "nt":
+            return bool(owners) and all(owner.poll() is not None for owner in owners)
+        from agent_procutil._caller_owned import _pidfd_exited
+        return bool(descriptors) and all(_pidfd_exited(descriptor) for descriptor in descriptors)
+
     try:
-        yield SimpleNamespace(start=start, run=run, lose_caller=lose_caller)
+        yield SimpleNamespace(
+            start=start, run=run, lose_caller=lose_caller, owners_finished=owners_finished,
+        )
     finally:
         with ExitStack() as settlement:
             for _process, output, _path in calls:

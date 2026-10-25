@@ -3,6 +3,7 @@
 # Installation driver lifecycle contract: bridge-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
 # Installation driver lifecycle contract: logger-command-v1
+# Installation driver lifecycle contract: bridge-command-v1
 param(
     [Parameter(Mandatory)][string]$Root,
     [Parameter(Mandatory)][string]$Payload,

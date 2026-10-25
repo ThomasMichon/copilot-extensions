@@ -1448,7 +1448,7 @@ _ensure_uv_index() {
 # Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
 # venv console script; otherwise it provisions on first use -- announcing (a human
 # line + a machine-readable ::agent-provisioning:: signal so a caller can extend
-# its timeout), lock-serialized, fail-fast. Replaces the old thin exec stub.
+# its timeout), observing the canonical queued installer rather than owning it.
 deploy_binstub() {
     mkdir -p "$INSTALL_DIR/bin" || return 1
     if $PUBLISH_GLOBAL_BINSTUBS; then
@@ -1471,19 +1471,20 @@ deploy_binstub() {
         return 0
     fi
 
-    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n' \
-        "$INSTALL_DIR" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$BINSTUB"
+    printf '#!/usr/bin/env bash\n_root=%q\n_source=%q\n_qualified_source=%q\n' \
+        "$INSTALL_DIR" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "${SOURCE_RUNTIME_IDENTITY:+1}" > "$BINSTUB"
     cat >> "$BINSTUB" << 'STUB'
 set -euo pipefail
 export PYTHONUTF8=1
 _snap="$(cat "$_root/payload-dir" 2>/dev/null || true)"
 _payload="$_snap"
 # Prefer the exact publisher for old snapshots lacking canonical source proof.
-if [[ -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ]]; then
+if [[ -z "$_qualified_source" && ( -z "$_snap" || ! -f "$_snap/snapshot-provenance.json" ) ]]; then
     _payload=""
     if [[ -f "$_source/scripts/runtime-gate.sh" ]]; then _payload="$_source"; fi
 fi
-if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
+if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]] ||
+   ! grep -Fq '# Installation driver contract: bridge-first-use-v1' "$_payload/scripts/runtime-gate.sh"; then
     if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
         _resolver="$_root/bin/resolve-runtime.sh"
         if [[ -f "$_resolver" ]] &&
@@ -1504,7 +1505,7 @@ if [[ -z "$_payload" || ! -f "$_payload/scripts/runtime-gate.sh" ]]; then
             fi
         fi
     fi
-    printf '[agent-bridge] retained runtime gate is unavailable. Re-enable/update the owning plugin, then retry.\n' >&2
+    printf '[agent-bridge] retained runtime gate lacks the queued command contract. Re-enable/update the owning plugin, then retry.\n' >&2
     exit 126
 fi
 export AGENT_BRIDGE_INSTALL_DIR="$_root"

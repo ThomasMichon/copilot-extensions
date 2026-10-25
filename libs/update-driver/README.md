@@ -726,8 +726,32 @@ The manual `bridge-snapshots` portfolio exercises canonical source preparation,
 actual stamp/selected-source provision, caller loss, same-package source
 generations, installed consumers and failed-candidate preservation on Windows
 and Linux. Its registration/start adapters are synthetic, not serving proof.
-Ordinary Bridge command publishers and explicit installers remain unadopted;
-this prerequisite authorizes neither host service rollout nor remote sessions.
+Bridge's ordinary legacy primary and payload commands submit the fixed single
+`provision` action through the packaged native first-use client and wait as
+observers. The `bridge-first-use-v1` dispatcher and `bridge-command-v1` client
+markers distinguish support independently of package versions. Generated
+primary commands retain exact source-qualified snapshot selection; ordinary
+unreceipted compatibility retains its exact publisher instead, without
+discovering another payload. Missing or older dispatchers cannot execute an
+old direct-installer path. A qualified read-only resolver may still serve a
+healthy source-independent runtime.
+
+Healthy dispatch precedes publication admission and cold-only controls.
+Managed, no-self-provision, pinned, nested, unavailable/skewed support and
+unsupported cold cell/custom-root requests refuse before acquisition, queue
+or plugin writes. Cold commands own no outer provision lock, reaper, private
+status or direct installer fallback. Historical records are left untouched.
+The documented `::agent-provisioning::` stderr cue references the canonical
+execution root, without promising an installation ETA. Native acknowledgement
+and driver progress remain distinct from an ordinary committed receipt/result;
+successful completion is followed by source-aware runtime resolution.
+
+The explicit `bridge-commands` native portfolio qualifies actual command
+publication and installed consumers separately from synthetic transport
+probes. Construction uses isolated registration/start/health adapters, never
+live host registrations or a Bridge session. Explicit installers, cold
+cells/custom roots, compound actions, macOS, rollout and remote sessions remain
+outside this adoption; canonical-installed-only bootstrap `install` is unchanged.
 
 Logger's fixed prerequisite admits its canonical installed payload at the
 default legacy root. It preserves the six declared command/module pairs,

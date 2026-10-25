@@ -249,8 +249,20 @@ def test_scoped_binding_remains_an_explicit_bounded_native_portfolio(
             f"github.event_name == 'workflow_dispatch' && inputs.portfolio == '{portfolio}'"
         )
         assert job["runs-on"] == runner and job["timeout-minutes"] == 10
-        assert "strategy" not in job
-        executions = [step["run"].split() for step in job["steps"] if "run" in step]
+        if plugin == "bridge":
+            assert job["strategy"] == {
+                "fail-fast": False,
+                "matrix": {"packet": [
+                    "available", "pointer and not publisher", "publisher and not pointer",
+                    "publisher-and-pointer and not deactivated", "deactivated",
+                ]},
+            }
+            selector = [
+                "-k", "test_bridge_cell_stamp_preserves_global_ownership and (${{ matrix.packet }})",
+            ]
+        else:
+            assert "strategy" not in job
+        executions = [shlex.split(step["run"]) for step in job["steps"] if "run" in step]
         assert executions == [[
             "python", "tools/run-plugin-tests.py", "payload-invocation",
             "--test-file", f"tests/{test_file}", *selector,
@@ -484,6 +496,71 @@ def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None
             "--test-timeout", "60", "--timeout", "180",
         ]
         assert not job.get("continue-on-error")
+
+
+def test_bridge_commands_partition_real_native_cases_without_relaxing_bounds() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "bridge-commands" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    job = workflow["jobs"]["bridge-commands"]
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'"
+    )
+    assert job["timeout-minutes"] == 35 and not job.get("continue-on-error")
+    assert job["strategy"]["fail-fast"] is False
+    matrix = job["strategy"]["matrix"]
+    assert matrix["runner"] == ["ubuntu-latest", "windows-latest"]
+    packets = {packet["name"]: packet["select"] for packet in matrix["packet"]}
+    assert packets == {
+        "refusal-driver": "refusal and (missing-driver or old-driver or old-resolver or old-dispatcher)",
+        "refusal-policy": "refusal and (managed or malformed-policy or no-self or nested)",
+        "refusal-source": "refusal and (unselected or unavailable or missing-provenance or malformed-provenance)",
+        "refusal-context": "refusal and (pinned or custom-root or cell or ordinary-copy)",
+        **{entry: f"original_operation and {entry}" for entry in ("payload", "primary", "ordinary", "cmd")},
+        "concurrent": "concurrent", "failed": "failed", "transport": "cold_wait",
+    }
+    assert matrix["exclude"] == [{
+        "runner": "ubuntu-latest", "packet": {"name": "cmd", "select": "original_operation and cmd"},
+    }]
+    assert job["env"]["UPDATE_DRIVER_NATIVE_LINUX_GENESIS"] == "1"
+    assert job["env"]["UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"] == "1"
+    execution = next(step["run"] for step in job["steps"] if "run" in step)
+    assert shlex.split(execution) == [
+        "python", "tools/run-plugin-tests.py", "update-driver",
+        "--test-file", "tests/test_first_use_bridge_command.py",
+        "-k", "${{ matrix.packet.select }}", "--test-timeout", "900", "--timeout", "1080",
+    ]
+    publication = workflow["jobs"]["bridge-command-publication"]
+    assert publication["if"] == job["if"] and publication["timeout-minutes"] == 35
+    assert not publication.get("continue-on-error")
+    assert publication["strategy"]["fail-fast"] is False
+    assert publication["strategy"]["matrix"] == {
+        "runner": ["ubuntu-latest", "windows-latest"],
+        "packet": [
+            "cell_stamp and available", "cell_stamp and pointer and not publisher",
+            "cell_stamp and publisher and not pointer",
+            "cell_stamp and publisher-and-pointer and not deactivated",
+            "cell_stamp and deactivated",
+            "actual and legacy and payload", "actual and selected-cell and payload",
+            "actual and catalog", "actual and stamped-global",
+            "actual and stamped-unavailable", "actual and stamped-no-pointer",
+        ],
+    }
+    execution = next(step["run"] for step in publication["steps"] if "run" in step)
+    assert shlex.split(execution) == [
+        "python", "tools/run-plugin-tests.py", "payload-invocation", "--allow-explicit-tiers",
+        "--test-file", "tests/test_bridge_first_use_publication.py", "-k", "${{ matrix.packet }}",
+        "--test-timeout", "60", "--timeout", "900",
+    ]
+    controls = workflow["jobs"]["bridge-command-controls"]
+    assert controls["if"] == job["if"] and controls["timeout-minutes"] == 35
+    assert not controls.get("continue-on-error")
+    assert controls["strategy"]["matrix"]["runner"] == ["ubuntu-latest", "windows-latest"]
+    required = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
+    for name in ("bridge-commands", "bridge-command-publication", "bridge-command-controls"):
+        assert name not in required["jobs"]
 
 
 def test_logger_command_adoption_uses_explicit_native_portfolio() -> None:

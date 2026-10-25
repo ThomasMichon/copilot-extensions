@@ -434,6 +434,34 @@ does not adopt ordinary command publishers, unreceipted copies, explicit
 installers, cells/custom roots or macOS. Exhaustive native qualification stays
 manual, outside required PR CI.
 
+## Optional Bridge command adoption
+
+The manual `installation-context-full.yml` portfolio `bridge-commands` qualifies
+the actual materialized primary/payload commands on native Windows and Ubuntu.
+Independent bounded packets cover Python-free original caller Job/group loss,
+concurrent ordinary callers, failed candidates and selected-source execution
+with the installed publisher unavailable. Windows also exercises the `.cmd`
+front. A launch acknowledgement is not a committed ordinary receipt; the
+original request must finish before any replacement submission.
+
+The separate cold-wait transport case installs an explicitly synthetic
+application protocol through the real queued Bridge recipe, without rewriting
+a completed slot. It exercises held-open binary frames, quoted multiline raw
+prompt input, nonzero exit/stderr and Windows PowerShell object input while
+callers observe the same cold owner. Product CLI/module/distribution health is
+qualified separately using unmodified Bridge sources. Service registration/start
+effects alone use the existing isolated adapters, never host tasks or a live
+bridge.
+
+Four refusal packets retain complete materialization and source/runtime/queue
+no-write comparisons. Publication controls are partitioned by scope/entry into
+separate runner roots; warm native transport and canonical snapshot admission
+remain separate controls. Existing 35-minute job, 900-second native test,
+1080-second runner and 2 GiB temporary-storage bounds are unchanged; publication
+cases retain their own 60-second bound. A skipped platform or explicit native
+case is not acceptance. This portfolio does not qualify cold cells/custom roots,
+unreceipted snapshot migration, explicit installers, macOS, serving or rollout.
+
 ## Optional Bridge bootstrap adoption
 
 The manual `installation-context-full.yml` portfolio `bridge-bootstrap` qualifies
