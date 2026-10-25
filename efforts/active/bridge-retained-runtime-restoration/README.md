@@ -292,6 +292,13 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   Expanded validation passed 1,273 controls; its remaining stale provider/
   durable-session fixture was corrected and the focused 104-control
   acquisition/resync selection then passed. No runtime denial was relaxed.
+- Follow-up source review exposed lifecycle handoff treating the capture
+  refusal as optional brief failure, plus a selected resume launching before
+  rejecting a retained turn owner. Durable association now refuses handoff
+  before either seed branch, and retained-owner resume refuses before launch.
+  The isolated acquisition/handoff selection passes 224 controls, including
+  both failed-capture handoff branches and selected create, stop/reap, then
+  selected-resume refusal. No owner transfer or replacement launch is enrolled.
 - Retained the original HTTP-50 capture checkpoint unchanged at
   `refs/tags/contract-evidence/http50-d5219b038a431a9579fed66a1c1ea71fdfad7a77`.
   Provider ref and commit-object reads confirm the original identity; the

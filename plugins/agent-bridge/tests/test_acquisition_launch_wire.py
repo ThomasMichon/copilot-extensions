@@ -32,6 +32,7 @@ from test_runtime_custody import close, installation
 @pytest.mark.parametrize("kind,mode", [
     ("new", "reply"), ("load", "reply"), ("new", "drop-reply"), ("load", "drop-reply"),
     ("new", "close-before-capture"), ("load", "close-before-capture"),
+    ("new", "stop-reap-resume"),
 ])
 async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, mode: str,
@@ -125,6 +126,12 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                 await rig.manager.submit_prompt(session.session_id, "must not send")
             with pytest.raises(RuntimeCustodyError, match="not been captured"):
                 await session.client.send_prompt("must not send directly")
+            start = AsyncMock(side_effect=AssertionError("must not start a successor"))
+            monkeypatch.setattr(rig.manager, "start_session", start)
+            for seed in (None, "external seed"):
+                with pytest.raises(RuntimeCustodyError, match="lifecycle handoff"):
+                    await rig.manager.handoff_session(session.session_id, seed_text=seed)
+            start.assert_not_awaited()
             assert session.turn_count == 0
             assert rig.db.get_turn(session.session_id, 0) is None
         else:
@@ -136,9 +143,29 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
             assert await rig.runtime.acquire(original) == result
             turn = rig.db.get_turn(result.session_id, 0)
             assert turn["native_accepted_at"] is not None and turn["native_consumed_at"] is None
+            if mode == "stop-reap-resume":
+                retained_owner = session._native_turn_transport
+                await rig.manager.stop_session(session.session_id, reap_host=True)
+                await asyncio.to_thread(handles[0].proc.wait, timeout=5)
+                assert session.client is None and session._native_turn_transport is retained_owner
+                continuation = req(
+                    delivery_id="delivery-b", allocation="reused", intent="continue",
+                    prior_session_id=session.session_id, prior_native_session_id=session.acp_session_id,
+                )
+                rig.runtime.store.journal.claim(continuation, runtime_admission=admission)
+                launch = frontend.prepare(
+                    continuation, session_id=session.session_id, native_session_id=session.acp_session_id,
+                )
+                with pytest.raises(RuntimeCustodyError, match="without replay"):
+                    await rig.manager.resume_session(
+                        session.session_id, drain=False, acquisition_launch=launch,
+                    )
+                assert rig.runtime.store.journal.read_launch(continuation)["started_at"] is None
+                assert session._native_turn_transport is retained_owner
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         assert [item["method"] for item in received] == (
-            [f"session/{kind}"] if mode != "reply" else [f"session/{kind}", "session/prompt"]
+            [f"session/{kind}"] if mode in ("drop-reply", "close-before-capture")
+            else [f"session/{kind}", "session/prompt"]
         )
         assert len(handles) == 1
         assert {item["pid"] for item in received} == {handles[0].child_pid}

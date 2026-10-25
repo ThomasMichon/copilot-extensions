@@ -79,6 +79,8 @@ background recovery are not selected. An associated pending acquisition or
 session cannot downgrade to the ordinary recovery/resume path.
 History resync also refuses associated sessions before client teardown and
 rechecks their association under the lifecycle lock.
+A retained turn owner also refuses selected resume before another Host or
+native load; stopping and reaping its processes does not enroll owner transfer.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates
@@ -115,6 +117,8 @@ prompt sends. Session prompt and handoff admission also refuse a durable
 association without its turn owner, including after a failed capture or reload.
 Capture failure preserves the accepted launch observation; it never authorizes
 an unassociated turn.
+Lifecycle handoff refuses the durable association before either authored-brief
+or external-seed handling, so a failed brief cannot trigger an unfenced successor.
 
 ## Cost and source controls
 

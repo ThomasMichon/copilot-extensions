@@ -306,6 +306,7 @@ def require_resume_owner(
         manager is not owner.frontend.manager or session.session_id != owner.session_id
         or not owner.native_session_id or session.acp_session_id != owner.native_session_id
         or association != owner.admission.document() or session.client is not None
+        or session._native_turn_transport is not None
         or session.status != SessionStatus.STOPPED or drain or allow_recreate
     ):
         raise RuntimeCustodyError("Acquisition resume requires a stopped admitted local owner without replay")
