@@ -146,6 +146,63 @@ def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() ->
     assert set(trigger) == {"schedule", "workflow_dispatch"}
 
 
+@pytest.mark.parametrize(("name", "route"), [
+    ("update-diagnostics-linux", "ubuntu-latest"),
+    ("update-diagnostics-windows", "windows-latest"),
+])
+def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, route):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    job = workflow["jobs"][name]
+    assert job["if"] == "${{ inputs.update_diagnostics }}"
+    assert job["runs-on"] == route
+    checkout = job["steps"][0]
+    assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+    commands = [step["run"] for step in job["steps"] if "run" in step]
+    assert "os.environ['GITHUB_SHA']" in commands[0]
+    expected = {
+        "tests/test_update_auth.py", "tests/test_update_driver.py",
+        "tests/test_update_launch_cli.py", "tests/test_update_entry.py",
+        "tests/test_update_entry_windows.py",
+    }
+    assert all(any(path in command for command in commands) for path in expected)
+    for command in commands[1:]:
+        assert "tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers" in command
+        assert not any(flag in command for flag in (
+            "--test-timeout", "--timeout", "--plugin-timeout", "--allow-host-state",
+        ))
+    assert not any(step.get("continue-on-error", False) for step in job["steps"])
+
+
+@pytest.mark.parametrize("matches", [False, True])
+def test_update_diagnostics_checks_actual_checkout_before_reporting_source(
+    monkeypatch, capsys, matches,
+):
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    step = next(
+        item for item in workflow["jobs"]["update-diagnostics-linux"]["steps"]
+        if item.get("name") == "Record exact update qualification source"
+    )
+    argv = shlex.split(step["run"])
+    assert argv[:2] == ["python", "-c"] and len(argv) == 3
+    expected = "a" * 40
+    monkeypatch.setenv("GITHUB_SHA", expected)
+    monkeypatch.setattr(
+        subprocess, "check_output",
+        lambda *a, **kw: (expected if matches else "b" * 40) + "\n",
+    )
+    if matches:
+        exec(compile(argv[2], "<update-workflow-identity>", "exec"), {})
+        assert capsys.readouterr().out == f"source={expected}\n"
+    else:
+        with pytest.raises(AssertionError):
+            exec(compile(argv[2], "<update-workflow-identity>", "exec"), {})
+        assert not capsys.readouterr().out
+
+
 @pytest.mark.parametrize("fail_on", ["tools/seasoned_uv.py", "-m"])
 def test_windows_step_does_not_mask_native_admission_failure(
     tmp_path, fail_on,

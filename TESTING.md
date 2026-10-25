@@ -290,6 +290,31 @@ Workflow contract tests and CI enablement are not native qualification. Inspect
 all four cells' actual selected test outcomes and skips against the recorded
 candidate SHA; only real Linux/macOS execution can establish native PASS.
 
+## Optional native update diagnostic contracts
+
+The manual `installation-context-acceptance.yml` selector
+`update_diagnostics=true` runs the complete native auth, durable queue and fixed
+launch-request contracts on isolated Linux and Windows runners. Each platform
+also exercises its actual selected-phase shell front doors, including missing
+engine refusal without repair downloads or implicit provisioning.
+
+```bash
+gh workflow run installation-context-acceptance.yml \
+  --ref <published-candidate-branch> -f update_diagnostics=true
+```
+
+Both jobs check out and record the immutable dispatch SHA without persisting
+credentials. The existing five-second auth budget, twenty-second worker bound,
+thirty-second test-item limit and runner aggregate limits remain unchanged.
+The fifteen-minute job envelope includes governed tooling preparation, not a
+production deadline exception. Selection suppresses default diagnostic-copy
+jobs and leaves other explicit selectors unchanged. This opt-in packet adds no
+schedule, required PR gate, host-state opt-in or deployment.
+
+Inspect actual selected test results and platform skips against the recorded
+SHA. Ordinary unit CI, a collected test or a skipped platform case is not native
+qualification.
+
 ## Optional macOS guardian follow-through
 
 The manual `installation-context-acceptance.yml` selector
