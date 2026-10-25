@@ -74,13 +74,20 @@ runtime permit; it is not enabled by the planner or an SDK review. Production
 controller wiring, complete lifecycle, support-owner authentication and live
 readiness/job acceptance remain open. It never supervises ARC pods through Komodo.
 
+The separate, explicit Linux-root [host profile bootstrap](docs/host-profiles.md)
+owns one fixed, enforcing trusted-systemd AppArmor profile. Its module CLI
+installs, inspects or retires that versioned policy only; it never changes Docker,
+loads arbitrary caller-supplied policy, grants deployment authority or runs during
+ordinary planning/startup. It is an independent host bootstrap prerequisite,
+not the missing Fleet/Komodo installer or proof that a container is ready.
+
 ## Output and safety
 
 The JSON `fleet-manager.plan` includes preserved suggested config, per-role
 observations, config suggestions, aggregate proposed creation count and explicit
 blockers. `review-required` means a nonblocked proposal, **not a ready fleet**.
 CLI exit 0 means the proposal was produced, 2 means blockers, and 1 means invalid
-input/I/O. No apply command exists. `mutations_performed` is always false and
+input/I/O. Ordinary planning has no apply command. Its `mutations_performed` is always false and
 `cleanup_actions` is empty.
 
 Each plan binds exact canonical input/policy digests and inventory expiry.
