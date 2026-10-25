@@ -146,6 +146,14 @@ Existing installer-selection behavior, SDK validation algorithms,
 Manager/lifetime work and installed rollout remain excluded. Coordinate any
 newly overlapping consumer PR rather than modifying its still-open change.
 
+Subsequent operator direction, captured verbatim:
+
+> Help drive to adoption
+
+**Direction summary:** Drive the existing dependency, source merge, qualified
+release and already-authorized normal adoption flow. This does not waive review,
+CI, installation ownership or live-control gates.
+
 ## Plan
 
 ### Phase 1 - Review the bounded repair plan
@@ -251,6 +259,23 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Original-owner dependency merged and integration resumed
+
+- The original owner reported #8805 merged; provider state independently
+  confirms `c7b1cfca8624103272ba0ee4f846c922c42549c0` at
+  `2026-10-25T05:32:38Z`. Its owner retained the corrections, current-head
+  review, required CI, merge and child finalization; no competing patch or
+  takeover was used.
+- Backed up the clean owned source and used the managed sync to integrate
+  that actual merge. The resulting branch contains its hosting-policy fixture
+  repairs and namespace/lifecycle ownership guards while retaining only this
+  effort's independent inventory optimization.
+- Updated the canonical inventory source hash to the actual integrated
+  lifecycle bytes. The broader regression packet and exact-source unit gate
+  must pass before advancing the source PR. Earlier native results remain
+  attributed to their measured bytes; they do not automatically qualify the
+  new combined source, a containing release or installed consumption.
 
 ### 2026-10-24 - Changed Docker candidate passes native reader cohorts
 

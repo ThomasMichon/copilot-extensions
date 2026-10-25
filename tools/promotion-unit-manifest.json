@@ -1881,7 +1881,7 @@
         "tools/promotion_unit_tests/test_mcp_home.py": "979e26f5099c3d582fe7567318887a37ecd0c36f45cb4cc8836ea84a7d6bc634",
         "plugins/agent-mcp/src/agent_mcp/home.py": "c27b390c5771eb2b876596a973d1dbe387fa96ad7d5f75fcf51d7d0f726b7ade",
         "tools/promotion_unit_tests/test_container_inventory.py": "de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
-        "plugins/agent-containers/src/agent_containers/lifecycle.py": "523f7752e0ec4ef9dd07fccc1e4f318a726928d20f4f593a9b0dcb4e954af39d"
+        "plugins/agent-containers/src/agent_containers/lifecycle.py": "10e0108feed7e4f44c2ad27d1aec29863e1868aa26e614db8bcca552847f020c"
     },
     "coverage_targets": [
         "plugins/agent-containers/src/agent_containers/lifecycle.py",
