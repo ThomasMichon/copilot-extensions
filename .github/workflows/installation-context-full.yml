@@ -33,8 +33,8 @@ permissions:
 jobs:
   mux-companion-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mux-companion'
-    name: Mux Companion native tmux (isolated session)
-    runs-on: ubuntu-latest
+    name: Mux Companion native tmux 3.4 (isolated session)
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +51,7 @@ jobs:
         run: |
           git show --no-patch --format='source=%H parents=%P'
           tmux -V
+          case "$(tmux -V)" in "tmux 3.4"*) ;; *) exit 1 ;; esac
       - name: Qualify real tmux observer navigation
         run: >-
           python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers

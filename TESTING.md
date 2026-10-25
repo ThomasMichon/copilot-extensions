@@ -78,7 +78,7 @@ controls are independent of the heavier Git-backed publication packet.
 ## Optional native Mux Companion navigation
 
 The manual `installation-context-full.yml` portfolio `mux-companion` runs
-`tests/native/test_companion_pane_tmux.py` on Ubuntu against the dispatch's
+`tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 against the dispatch's
 recorded immutable source. It verifies actual tmux option targeting, a fresh
 synthetic constructed-prefix invocation, same-window reuse and the unchanged
 CLI process in an isolated socket. It is not a required PR lane or a production
