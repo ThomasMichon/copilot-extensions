@@ -851,6 +851,24 @@ The Windows lane remains control-plane-only and explicitly skips Linux-native
 cases. These tests do not qualify a built native container image, normal Fleet
 placement, provider/Vault admission or a preserving production migration.
 
+## Focused installer diagnostics
+
+The manual `installation-context-acceptance.yml` selector
+`installer_diagnostics=true` runs the Worktrees capture, standalone producer
+and retained guardian controls, followed by both real-UV construction variants
+(capture disabled/enabled). Linux uses the canonical hardened, network-isolated
+test-container wrapper; hosted Windows uses the existing native contained runner.
+Both check out the dispatch's immutable source SHA without persisted credentials.
+The existing locked, seasoned Dev Containers CLI preparation is shared with the
+periodic Linux portfolio through `tools/setup_test_devcontainer_cli.py`.
+
+This is optional candidate evidence, not required PR CI, promotion, rollout,
+whole-portfolio Windows enrollment or installed/serving qualification. It does
+not run the larger installer/monitor case, increase item/group/aggregate test
+budgets, or opt into desktop observation. Platform/prerequisite skips are not
+passes. The default derived-copy matrix and disabled Windows rotation remain
+unchanged when the selector is absent.
+
 ## Optional diagnostic telemetry
 
 Manager's `tests/test_launch_update_requests.py` native lane checks the user-local
@@ -3337,6 +3355,16 @@ rather than deleting potentially owned files. Normal exit, deadline and
 cancellation retain the same reaping requirement and existing resource limits.
 If the environment audit also fails, the unreaped error retains precedence
 and reports both failures; an audit exception cannot authorize file deletion.
+
+After verified reaping, Windows access/sharing errors 5, 32 and 33 may retry
+the same directory cleanup for at most five monotonic seconds, with a visible
+warning. The asynchronous group cleaner and outer sandbox use the same helper.
+Expiry raises `SandboxCleanupError` with the original error as its cause and
+retains the outer sandbox without starting a second retry budget. Other
+errors, POSIX cleanup and unreaped-process retention remain unchanged.
+Pending native cancellation is preserved. Cleanup adds no process termination
+or permission-repair path, and its time still counts against the existing
+plugin aggregate budget; no test, group or installer deadline is extended.
 
 Full dispatch execution in the CI smoke matrix (push, manual and promotion)
 distributes its complete file inventory across three independent jobs.

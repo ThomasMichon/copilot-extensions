@@ -12,6 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -197,6 +198,80 @@ def test_reaped_group_cleanup_overlaps_the_next_group(
     assert len(workers) == 1
     assert not list(tmp_path.glob("ce-alph-*"))
     assert "including preparation and cleanup" in capsys.readouterr().out
+
+
+def test_reaped_group_cleanup_retries_transient_windows_access(
+    monkeypatch, capsys, cleanup_runner,
+):
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    attempts, events, roots = [], [], []
+    failure = PermissionError("synthetic transient group sharing failure")
+    failure.winerror = 5
+    monkeypatch.setattr(containment.sys, "platform", "win32")
+
+    def remove(name, *args, **kwargs):
+        if Path(name).name == "g1":
+            attempts.append(name)
+            events.append("cleanup")
+            if len(attempts) == 1:
+                raise failure
+        return original_remove(name, *args, **kwargs)
+
+    def run(*args, **kwargs):
+        roots.append(kwargs["sandbox"])
+        events.append("settled")
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    assert cleanup_runner() == 0
+    assert len(attempts) == 2 and len(roots) == 2
+    assert events.index("settled") < events.index("cleanup")
+    assert not roots[0].exists()
+    output = capsys.readouterr()
+    assert "[WARN] Windows sandbox cleanup" in output.err
+    assert "[FAIL]" not in output.err
+
+
+def test_reaped_group_cleanup_expiry_retains_outer_without_another_retry(
+    monkeypatch, capsys, cleanup_runner,
+):
+    original_remove = runner.tempfile.TemporaryDirectory._rmtree
+    failure = PermissionError("synthetic persistent group sharing failure")
+    failure.winerror = 5
+    roots, attempts = [], []
+    clock = iter([10, 14.99, 15])
+    allow_cleanup = False
+    monkeypatch.setattr(containment.sys, "platform", "win32")
+    monkeypatch.setattr(containment, "time", SimpleNamespace(
+        monotonic=lambda: next(clock), sleep=lambda delay: None,
+    ))
+
+    def remove(name, *args, **kwargs):
+        if not allow_cleanup and Path(name).name == "g1":
+            attempts.append(name)
+            raise failure
+        return original_remove(name, *args, **kwargs)
+
+    def run(*args, **kwargs):
+        roots.append(kwargs["sandbox"])
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run)
+    monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
+    try:
+        with pytest.raises(containment.SandboxCleanupError) as caught:
+            cleanup_runner()
+        assert caught.value.__cause__ is failure and len(attempts) == 3
+        assert roots[0].exists()
+        output = capsys.readouterr().err
+        assert output.count("[WARN]") == 1
+        assert "[FAIL] Group sandbox cleanup failed" in output
+        assert "[KEEP] Cleanup retry exhausted" in output
+    finally:
+        allow_cleanup = True
+        if roots:
+            containment.cleanup_reaped_directory(roots[0])
 
 
 @pytest.mark.parametrize("interruption", [None, KeyboardInterrupt, runner.UnreapedProcessError])

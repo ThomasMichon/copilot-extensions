@@ -118,7 +118,10 @@ def test_native_jobs_do_not_reenter_required_unit_only_ci(retired_job: str) -> N
     units = workflow["jobs"]["unit-tests"]
     execution = next(step for step in units["steps"] if step.get("id") == "units")
     assert execution["if"] == "steps.impact.outputs.run == 'true'"
-    assert "tools/ci_pr_unit_reuse.py" in execution["run"]
+    assert execution["run"].split() == [
+        "python", "tools/ci_pr_unit_reuse.py", "--source-sha", '"$GITHUB_SHA"',
+        "--output-dir", '"$RUNNER_TEMP/promotion-unit-evidence"',
+    ]
     assert not execution.get("continue-on-error", False)
 
 
@@ -353,6 +356,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "runtime_profiles", "chat_construction",
         "immutable_runtime", "immutable_runtime_ref",
         "interactive_completion", "ssh_service",
+        "installer_diagnostics",
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
@@ -380,6 +384,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "immutable-runtime-linux", "immutable-runtime-macos",
         "interactive-completion-linux", "interactive-completion-macos",
         "interactive-completion-windows",
+        "installer-diagnostics-linux", "installer-diagnostics-windows",
     }
     for name, runner in routes.items():
         job = workflow["jobs"][name]
@@ -389,7 +394,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
             "&& !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service "
             "&& !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles "
             "&& !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs "
-            "&& !inputs.runtime_profiles }}"
+            "&& !inputs.runtime_profiles && !inputs.installer_diagnostics }}"
         )
         assert job["runs-on"] == runner
         assert job["timeout-minutes"] == 4
@@ -684,6 +689,53 @@ def test_ssh_bootstrap_uses_explicit_bounded_native_portfolio() -> None:
              "--test-file", "tests/test_install_snapshot.py", "-k", "checkout_stamp",
              "--test-timeout", "120", "--timeout", "240"],
         ]
+
+
+def test_installer_diagnostics_is_manual_exact_head_and_preserves_test_budgets() -> None:
+    root = HERE.parent
+    workflow = yaml.safe_load(
+        (root / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert set(trigger) == {"workflow_dispatch"}
+    assert trigger["workflow_dispatch"]["inputs"]["installer_diagnostics"] == {
+        "description": "Run focused installer capture, guardian and real-UV controls only",
+        "type": "boolean", "default": False,
+    }
+    assert workflow["permissions"] == {"contents": "read"}
+    for platform, runner, wrapper, deadline in (
+        ("linux", "ubuntu-latest", "tools/run_tests_in_devcontainer.py", 30),
+        ("windows", "windows-latest", "tools/run-plugin-tests.py", 20),
+    ):
+        job = workflow["jobs"]["installer-diagnostics-" + platform]
+        assert job["if"] == "${{ inputs.installer_diagnostics }}"
+        assert job["runs-on"] == runner and job["timeout-minutes"] == deadline
+        assert not job.get("continue-on-error") and not job.get("strategy")
+        assert not job.get("env") and not job.get("permissions")
+        checkout = job["steps"][0]
+        assert checkout["with"] == {"ref": "${{ github.sha }}", "persist-credentials": False}
+        commands = [step["run"].split() for step in job["steps"] if "run" in step]
+        if platform == "linux":
+            assert commands.pop(0) == ["python", "tools/setup_test_devcontainer_cli.py"]
+        else:
+            assert any(step.get("uses") == "astral-sh/setup-uv@v9.0.0" for step in job["steps"])
+        assert commands == [
+            ["python", wrapper, "agent-worktrees",
+             "--test-file", "tests/test_installer_diagnostics.py",
+             "--test-file", "tests/test_installer_python_producer.py",
+             "--test-file", "tests/test_installer_guardian.py",
+             "--max-files-per-sub-suite", "1"],
+            ["python", wrapper, "agent-worktrees",
+             "--test-file", "tests/test_python_installer_engine.py",
+             "-k", "test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change"],
+        ]
+    periodic = yaml.safe_load((root / ".github/workflows/windows-coverage-rotation.yml").read_text())
+    assert periodic["jobs"]["test"]["if"] == "${{ false }}"
+    setup = next(
+        step for step in periodic["jobs"]["linux-full"]["steps"]
+        if step.get("name") == "Provision the locked seasoned Dev Containers CLI"
+    )
+    assert setup["run"] == "python tools/setup_test_devcontainer_cli.py"
 
 
 def test_pr_service_acceptance_is_bounded_and_independently_selected() -> None:

@@ -16,6 +16,7 @@ from pathlib import Path
 from packaging.version import Version
 
 _LIFECYCLE_FILES = (
+    "installer_diagnostics.py", "installer_diagnostics_redact.py", "installer_diagnostics_files.py",
     "runtime_install.py", "runtime_install_governance.py", "runtime_install_modes.py",
     "runtime_install_publication.py", "installer_engine.py",
     "installer_engine_process.py", "installer_dependency_policy.py",

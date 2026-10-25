@@ -267,7 +267,14 @@ def unregistered_adopters() -> list[str]:
 
 
 def verify() -> list[str]:
-    problems: list[str] = []
+    diagnostic_problems = []
+    for source, destination in ier.diagnostics_pairs(REPO):
+        if any(uer._find_symlinked_ancestor(path, REPO.resolve()) is not None
+               for path in (source, destination)):
+            diagnostic_problems.append(f"{destination}: linked diagnostic asset")
+        elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            diagnostic_problems.append(f"{destination}: installer diagnostic asset drift")
+    problems: list[str] = diagnostic_problems
     try:
         projected = ier.native_executable_config(CANONICAL_DIR)
         config = CANONICAL_DIR / "installer_dependency_config.py"
@@ -346,6 +353,14 @@ def verify() -> list[str]:
 
 def sync() -> list[str]:
     written: list[str] = []
+    for source, destination in ier.diagnostics_pairs(REPO):
+        for path in (source, destination):
+            indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
+            if indirect is not None:
+                raise RuntimeError(f"{indirect}: linked diagnostics asset refused")
+        if not destination.is_file() or destination.read_bytes() != source.read_bytes():
+            shutil.copyfile(source, destination)
+            written.append(destination.relative_to(REPO).as_posix())
     projected = ier.native_executable_config(CANONICAL_DIR)
     config = CANONICAL_DIR / "installer_dependency_config.py"
     if projected is not None and config.read_text(encoding="utf-8") != projected:

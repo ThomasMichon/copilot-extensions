@@ -67,13 +67,17 @@ on:
         description: Exercise actual owner-bound runtime-profile policy readers without installation
         type: boolean
         default: false
+      installer_diagnostics:
+        description: Run focused installer capture, guardian and real-UV controls only
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.installer_diagnostics }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -94,7 +98,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.installer_diagnostics }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -840,3 +844,58 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 6
     steps: *source-profiles-steps
+
+  installer-diagnostics-linux:
+    if: ${{ inputs.installer_diagnostics }}
+    name: Focused installer diagnostics (Linux isolated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Provision the locked seasoned Dev Containers CLI
+        run: python tools/setup_test_devcontainer_cli.py
+      - name: Capture and producer controls in the canonical hardened container
+        run: >-
+          python tools/run_tests_in_devcontainer.py agent-worktrees
+          --test-file tests/test_installer_diagnostics.py
+          --test-file tests/test_installer_python_producer.py
+          --test-file tests/test_installer_guardian.py
+          --max-files-per-sub-suite 1
+      - name: Real UV construction with and without capture in the same containment
+        run: >-
+          python tools/run_tests_in_devcontainer.py agent-worktrees
+          --test-file tests/test_python_installer_engine.py
+          -k test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change
+
+  installer-diagnostics-windows:
+    if: ${{ inputs.installer_diagnostics }}
+    name: Focused installer diagnostics (native Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Capture, producer and retained Job guardian controls
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_installer_diagnostics.py
+          --test-file tests/test_installer_python_producer.py
+          --test-file tests/test_installer_guardian.py
+          --max-files-per-sub-suite 1
+      - name: Real UV construction with and without capture in the same containment
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_python_installer_engine.py
+          -k test_numbered_construction_uses_real_uv_and_remains_frozen_after_source_change

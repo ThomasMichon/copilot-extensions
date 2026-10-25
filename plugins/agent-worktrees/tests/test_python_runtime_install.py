@@ -43,6 +43,83 @@ def test_driver_governance_uses_current_scripts(driver):
     assert governance.SCRIPTS == scripts
 
 
+@pytest.fixture
+def diagnostic_publication(driver, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from agent_worktrees import runtime_deployment as deployment
+
+    home, root = tmp_path / "home", tmp_path / "runtime"
+    home.mkdir()
+    slot = _slot(driver, root, "1.0.0")
+    for key in ("HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(home))
+    for key in ("ATTEMPT", "WRITER", "DIRECTORY", "MISSING"):
+        monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_" + key, raising=False)
+    identity = driver._installed_identity(slot)
+    manifest = deployment.manifest_bytes(identity, slot, "previous")
+    (root / "current-version").write_text(slot.name + "\n")
+    deployment.publish(root, manifest)
+    checked = []
+    governance = SimpleNamespace(root=root, recheck=lambda: checked.append("governance"))
+    with driver.diagnostics.writer():
+        directory = driver.diagnostics.context()
+        yield governance, slot, identity, manifest, directory, checked
+
+
+def test_diagnostics_associate_only_installed_publication(driver, diagnostic_publication):
+    governance, slot, identity, manifest, directory, checked = diagnostic_publication
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    record = json.loads((directory / "installation.json").read_text())
+    assert checked == ["governance"]
+    assert record["runtime_root"] == str(governance.root)
+    assert record["runtime_slot"] == slot.name
+    assert record["runtime_generation"] == identity["build_info"]["runtime_generation"]
+    assert record["deployment_manifest_sha256"] == hashlib.sha256(manifest).hexdigest()
+    assert record["log_directory"] == str(directory)
+    assert "source" not in record and "receipt" not in record and "serving" not in record
+    # Idempotent evidence never replaces an earlier publication association.
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    assert json.loads((directory / "installation.json").read_text()) == record
+    reference = driver.diagnostics.launch_reference(dict(os.environ))
+    assert reference["attribution"] == "VALIDATED_INSTALLATION_RECORDED"
+    assert reference["installation"] == record
+    assert json.loads((directory / "attempt.json").read_text())["attribution"] == "UNATTRIBUTED"
+
+
+@pytest.mark.parametrize("damage", ["governance", "selected", "manifest", "identity", "log", "marker"])
+def test_unverified_installation_remains_unattributed(
+    driver, diagnostic_publication, monkeypatch, damage,
+):
+    governance, slot, identity, manifest, directory, _checked = diagnostic_publication
+    if damage == "governance":
+        def changed():
+            raise driver.InstallationRefused("changed owner")
+        governance.recheck = changed
+    elif damage == "selected":
+        _slot(driver, governance.root, "2.0.0")
+        (governance.root / "current-version").write_text("2.0.0\n")
+    elif damage == "manifest":
+        (governance.root / "deploy-manifest.json").write_text("{}")
+    elif damage == "identity":
+        identity = {**identity, "package_version": "2.0.0"}
+    elif damage == "marker":
+        marker = driver.runtime.marker_path(governance.root, slot.name)
+        marker.unlink()
+    elif damage == "log":
+        original = driver.diagnostics.files().open_file
+
+        def refused(path, *args, **kwargs):
+            if path.suffix == ".log":
+                raise PermissionError("log path ownership changed")
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(driver.diagnostics.files(), "open_file", refused)
+    # Diagnostic refusal is deliberately not an installer failure/rollback.
+    driver._associate_diagnostics(governance, slot, identity, manifest)
+    assert not (directory / "installation.json").exists()
+    assert (directory / "missing-diagnostics.json").exists()
+    assert json.loads((directory / "attempt.json").read_text())["attribution"] == "UNATTRIBUTED"
+
+
 @pytest.mark.parametrize(("section", "field"), [
     ("state", key) for key in (
         "actualMode", "desiredMode", "status", "reason", "runtimeRoot",
@@ -180,6 +257,7 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
         assert source.read_source_identity(snapshot, "1.0.0") == identity
         assert kwargs["reuse_generations"] is False
         assert kwargs["construction_data"] is provenance
+        assert kwargs["progress"] is driver.diagnostics.phase
         raise ConstructionReached
 
     monkeypatch.setattr(driver, "_source_provenance", attribute)
@@ -218,6 +296,17 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         '[project]\nname="agent-worktrees"\nversion="2.0.0"\n', encoding="utf-8",
     )
     authority = []
+    associations = []
+
+    def associate(record):
+        assert authority == ["enter", "leave", "enter"]
+        for retained in ("1.0.0", "2.0.0"):
+            with pytest.raises(driver.runtime.RetentionTimeout):
+                with driver.runtime._kernel_lease(
+                    root, retained, kind="retention", shared=False, timeout=0,
+                ):
+                    pytest.fail("diagnostic association outlived retained-slot custody")
+        associations.append(record)
 
     class Governance:
         def __init__(self, requested, payload):
@@ -287,6 +376,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             return "", ""
 
     monkeypatch.setattr(driver, "Governance", Governance)
+    monkeypatch.setattr(driver.diagnostics, "associate_installed", associate)
     monkeypatch.setattr(driver, "_source_provenance", lambda *_args: {})
     monkeypatch.setattr(driver.engine, "_construct", construct)
     monkeypatch.setattr(
@@ -314,6 +404,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         assert driver.runtime.current_version(root) == "2.0.0"
     assert previous.is_dir()
     assert authority == ["enter", "leave", "enter", "cutover-released", "leave"]
+    assert len(associations) == (0 if rollback else 1)
     for version in ("1.0.0", "2.0.0"):
         with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):
             pass

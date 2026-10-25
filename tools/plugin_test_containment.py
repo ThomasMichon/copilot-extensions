@@ -18,6 +18,7 @@ import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 
@@ -142,6 +143,39 @@ class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
 
 
+class SandboxCleanupError(OSError):
+    """Cleanup exhausted its retry; an enclosing owner must retain the files."""
+
+
+def _cleanup_with_windows_retry(cleanup: Callable[[], _T]) -> _T:
+    retry_deadline = None
+    while True:
+        try:
+            return cleanup()
+        except OSError as error:
+            if sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32, 33):
+                raise
+            now = time.monotonic()
+            if retry_deadline is None:
+                retry_deadline = now + 5
+                print(
+                    "[WARN] Windows sandbox cleanup temporarily unavailable; "
+                    "retrying for at most 5 seconds.",
+                    file=sys.stderr,
+                )
+            remaining = retry_deadline - now
+            if remaining <= 0:
+                raise SandboxCleanupError(
+                    f"Windows sandbox cleanup retry expired: {error}",
+                ) from error
+            time.sleep(min(0.05, remaining))
+
+
+def cleanup_reaped_directory(path: Path | str) -> None:
+    """Remove a runner-owned directory only after its caller verifies reaping."""
+    _cleanup_with_windows_retry(lambda: tempfile.TemporaryDirectory._rmtree(path))
+
+
 class TestSandbox(tempfile.TemporaryDirectory):
     """Retain owned files whenever termination cannot be established."""
 
@@ -149,12 +183,12 @@ class TestSandbox(tempfile.TemporaryDirectory):
         super().__init__(*args, **kwargs)
         self.retained = False
 
-    def retain(self) -> None:
+    def retain(self, reason: str = "Unreaped process tree") -> None:
         if not self.retained:
             self._finalizer.detach()
             self.retained = True
             print(
-                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
+                f"[KEEP] {reason}: sandbox retained at {self.name}",
                 file=sys.stderr,
             )
 
@@ -162,9 +196,17 @@ class TestSandbox(tempfile.TemporaryDirectory):
         if isinstance(exc_value, UnreapedProcessError):
             self.retain()
             return False
+        if isinstance(exc_value, SandboxCleanupError):
+            self.retain("Cleanup retry exhausted")
+            return False
+        exit_sandbox = super().__exit__
         try:
-            return super().__exit__(exc_type, exc_value, traceback)
+            return _cleanup_with_windows_retry(
+                lambda: exit_sandbox(exc_type, exc_value, traceback),
+            )
         except OSError as cleanup_error:
+            if isinstance(cleanup_error, SandboxCleanupError):
+                self.retain("Cleanup retry exhausted")
             if not isinstance(exc_value, (KeyboardInterrupt, SystemExit)):
                 raise
             print(f"[FAIL] Sandbox cleanup failed: {cleanup_error}", file=sys.stderr)

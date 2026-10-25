@@ -41,6 +41,24 @@ PYTHON_ADOPTERS = (
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)
 STANDALONE_NATIVE_FILES = ("installer-engine.ps1", "installer-engine.sh")
+DIAGNOSTICS_ADOPTERS = ("agent-worktrees",)
+DIAGNOSTICS_FILES = ("installer-diagnostics.ps1", "installer-diagnostics.sh",
+                     "installer_diagnostics.py", "installer_diagnostics_files.py")
+
+
+def diagnostics_pairs(repo: Path):
+    adopters = tuple(name for name in DIAGNOSTICS_ADOPTERS
+                     if os.path.lexists(repo / "plugins" / name))
+    pairs = [
+        (repo / "libs" / "installer-engine" / name, repo / "plugins" / plugin / "scripts" / name)
+        for plugin in adopters for name in DIAGNOSTICS_FILES
+    ]
+    pairs.extend(
+        (repo / "libs" / "update-telemetry" / "src" / "update_telemetry" / "redact.py",
+         repo / "plugins" / plugin / "scripts" / "installer_diagnostics_redact.py")
+        for plugin in adopters
+    )
+    return pairs
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:

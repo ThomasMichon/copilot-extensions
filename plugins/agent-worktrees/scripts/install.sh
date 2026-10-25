@@ -33,6 +33,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+installer_diagnostics_complete() { :; }
+installer_diagnostics_run() { "$@"; }
+if [[ -f "$SCRIPT_DIR/installer-diagnostics.sh" ]]; then
+    source "$SCRIPT_DIR/installer-diagnostics.sh"
+    installer_diagnostics_init agent-worktrees
+else
+    export COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING=1
+    printf '%s\n' 'WARNING: installer diagnostics unavailable; continuing with missing diagnostics.' >&2 || :
+fi
+trap 'installer_diagnostics_complete "$?"' EXIT
+
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
 CONTEXTUAL_INSTALL=false
@@ -131,7 +142,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             __aw_admission_operation=publish
             [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
             if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
-                "$__aw_admission_python" "${__aw_admission_args[@]}" \
+                installer_diagnostics_run "$__aw_admission_python" "${__aw_admission_args[@]}" \
                     --check-lifecycle --lifecycle-operation "$__aw_admission_operation" || exit $?
             else
                 __aw_admission_bash="$(type -P -- bash)" || exit 1
@@ -144,7 +155,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 if [[ "$__aw_action" == install || "$__aw_action" == update ]]; then
                     __aw_admission_args+=(--human-operation "$__aw_action")
                 fi
-                "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
+                installer_diagnostics_run "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
                     "$__aw_admission_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
                 exit $?
             fi
