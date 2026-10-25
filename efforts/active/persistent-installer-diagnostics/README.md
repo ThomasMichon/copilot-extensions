@@ -1073,3 +1073,17 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   into the repository-local test environment through the seasoning adapter.
   Hosted native acceptance, current-head review and required CI remain gates;
   the draft is not merge or rollout authorization.
+- The cleanup/admission repair is committed at
+  `d758702702f84b9e3fb5e95df46793996de29f6e`. Two managed publication attempts
+  exhausted their unchanged **30-second** transport deadlines. Fresh provider
+  reads after each attempt still reported draft head `2131ac59b7`; neither
+  attempt is treated as successful. The actual pre-push hook runs identifier
+  and pushed-blob checks, not an updater; a separate invocation of those exact
+  guards completed in **9.60 seconds**. That does not establish which
+  transport phase timed out. No hook, lease or timeout was bypassed.
+- A local whole-unit-packet attempt refused the repository-local test
+  environment's framework source as an unadmitted repository read before
+  executing tests. It produced no evidence packet; its empty output directory
+  was removed. Hosted Linux remains the canonical whole-packet lane.
+  Its source-admission guard stays intact. Hosted native dispatch remains
+  deferred until the repaired head is published, reviewed and passes CI.
