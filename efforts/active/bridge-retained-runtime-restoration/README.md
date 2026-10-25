@@ -306,6 +306,22 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   start control preserves unselected registration. The coupled
   creation/acquisition/start/lineage lane passes 146 controls, with two
   collection skips and verified cleanup. Current-head review remains required.
+- A second source review found the idle-TTL sweep still explicitly reaped
+  retained Hosts despite their non-reapable STATUS/DETACH predicate. An actual
+  creation Host case and both captured/durable-only controls reproduced it.
+  The sweep now serializes with turn admission and rechecks custody; its
+  internal automatic-stop path rechecks after lifecycle scheduling and at the
+  final retirement boundary. Explicit operator stops remain separate.
+  Scheduling controls cover turn-lock, lifecycle-lock and final-reap changes.
+  The coupled source lane passes 153 controls with two collection skips and
+  verified cleanup, including legacy local/remote-boundary behavior and the
+  actual expanded HTTP-50 observations. Two older positive reaper fixtures now
+  retain their real session DB rows instead of relying on in-memory-only state.
+- The semantic lifecycle owner remains semantic. Its fresh current-generation
+  capture explicitly executes retained automatic-stop refusal and ordinary
+  unassociated stop, in addition to the original recovery observations. Fresh
+  committed-source capture, canonical-reader validation and independent review
+  remain required; no earlier capture is relabeled as that correction.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.

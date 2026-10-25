@@ -166,6 +166,11 @@ Ordinary Host status and graceful detach never mark an associated or retained
 native transport reapable merely because its current turn is idle; retiring
 that Host requires its actual custody owner. Unassociated idle Hosts retain
 their ordinary reaping behavior.
+The existing idle-TTL sweep uses the same custody predicate under the session's
+turn lock. Its internal automatic-stop path rechecks the original live session
+after acquiring the lifecycle lock and at the final Host-retirement boundary;
+late enrollment cannot turn a stale idle snapshot into reaping permission.
+Explicit operator stop/reap behavior is unchanged.
 Native acceptance, first-turn admission, attributed consumption and semantic
 completion remain separate.
 
@@ -192,6 +197,8 @@ No new daemon, background scan, provider preflight or synchronous telemetry
 export is introduced. Actual native timing and platform budgets remain unmeasured.
 Idle Host-reapability checks without a captured native owner add one existing
 session primary-key association read; busy and captured-owner paths short-circuit.
+The existing expired-candidate idle sweep repeats these bounded checks at its
+lock and final-retirement boundaries, without a new timer, history scan or process.
 
 Focused controls cover both creation kinds, original inputs and immutable
 history, closure/replay, concurrent SQLite owners, process exit after a committed

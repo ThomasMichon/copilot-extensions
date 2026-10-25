@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve original native custody through idle sweep scheduling and final automatic Host retirement without changing explicit operator stops.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

@@ -194,6 +194,7 @@ class _SessionLifecycleMixin:
         self, session_id: str, *, force: bool = False, reap_host: bool = False,
         cancel_turn: bool = True,
         allow_background_recovery: bool | None = None,
+        _automatic_reap: bool = False,
     ) -> None:
         """Stop a session -- shut down ACP client, preserve state for resume.
 
@@ -221,12 +222,27 @@ class _SessionLifecycleMixin:
 
         ``allow_background_recovery`` (default: derived from ``cancel_turn``):
         explicit stops go dormant; redeploy detaches stay auto-recoverable.
+
+        Internal automatic reaping requires the caller's turn lock and current
+        unassociated idle custody, rechecked after lifecycle scheduling and
+        immediately before Host retirement. Explicit operator stops are separate.
         """
         session_id = self._resolve_ref(session_id) or session_id
         session = self._sessions.get(session_id)
         if not session:
             raise KeyError(f"Session {session_id} not found")
 
+        def require_automatic_reap() -> None:
+            if _automatic_reap:
+                from .runtime_custody import RuntimeCustodyError
+
+                if (
+                    self._sessions.get(session_id) is not session
+                    or not session._turn_start_lock.locked() or not self._host_reapable(session)
+                ):
+                    raise RuntimeCustodyError("Automatic Host reaping cannot replace retained session custody")
+
+        require_automatic_reap()
         if not force and session.has_active_background_tasks:
             session._stop_requested = False  # the stop a notice announced isn't happening
             raise SessionBusyError(session_id, session.active_background_tasks)
@@ -242,6 +258,7 @@ class _SessionLifecycleMixin:
         # uses): otherwise a reattach begun before this stop could land a
         # live client after stop already persisted dormancy (review of #3058).
         async with session._lifecycle_lock:
+            require_automatic_reap()
             await self._quiesce_session(session, cancel_turn=cancel_turn)
             # An explicit (dormant) stop has no turn left that needs the
             # credential relay; retire its supervisor so it cannot re-wake a
@@ -256,6 +273,7 @@ class _SessionLifecycleMixin:
             if reap_host and self._host_index is not None:
                 rec = self._host_index.get(session_id)
                 if rec is not None:
+                    require_automatic_reap()
                     self._reap_host_record(rec, "idle reap (#1826)")
 
             session.status = SessionStatus.STOPPED

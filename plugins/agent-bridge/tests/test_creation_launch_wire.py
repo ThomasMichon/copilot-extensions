@@ -168,6 +168,13 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             assert session.acp_session_id == "synthetic-created"
             assert result["turn_index"] == (None if prompt is None else 0)
             assert not session.background_recovery_enabled
+            if prompt is not None:
+                manager._idle_reap_ttl_seconds = 1
+                session.updated_at = 0
+                client = session.client
+                assert not manager._host_reapable(session)
+                assert await manager.sweep_idle_sessions() == 0
+                assert session.client is client and handles[0].proc.poll() is None
             before = db.runtime_epoch(identity)
             replay, observed = await frontend.start(target, key="original", prompt=prompt, **options)
             assert replay is session and observed == {**result, "replayed": True}

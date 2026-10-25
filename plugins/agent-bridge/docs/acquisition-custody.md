@@ -89,6 +89,9 @@ Ordinary Host status and graceful detach also retain that custody: an idle
 associated Host is not marked reapable. A captured native owner short-circuits
 the check; otherwise it reads the original session association. Only ordinary
 unassociated idle Hosts retain automatic reaping eligibility.
+The idle-TTL sweep also excludes retained custody, rechecking under the turn
+lock, after lifecycle scheduling and immediately before automatic Host retirement.
+Its internal guard does not change explicit operator stop/reap behavior.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates
