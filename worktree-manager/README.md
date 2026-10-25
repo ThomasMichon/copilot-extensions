@@ -1070,11 +1070,15 @@ fetches the selected branch/tag and returns its exact source identity as JSON.
 Reuse never moves the clone's checked-out files. Dirty, linked, worktree-backed,
 unowned, unavailable, substituted or unmerged input fails explicitly; neither
 an ambient developer checkout nor a marketplace payload is a fallback. Fetched
-code is never executed during acquisition.
+code is never executed during acquisition. Repository-routing overrides are
+removed from Git's environment, while configured credential helpers and scoped
+authentication configuration remain available; acquisition does not replace
+the user's authentication mechanism.
 
 **Source-backed suite execution is not connected yet.** With a non-marketplace
-policy, `update` fails before Manager self-update or runtime installation rather
-than silently ignoring the selection. `reset` explicitly restores ordinary
+policy, ordinary and bootstrap/repair `update` fail before Manager self-update,
+Manager bootstrap installation or engine repair rather than silently ignoring
+the selection. `reset` explicitly restores ordinary
 marketplace runtime delivery. Canonical source preparation, immutable runtime
 planning and the existing installation driver remain the next integration
 boundary; this command adds no alternate installer or recurring worker.

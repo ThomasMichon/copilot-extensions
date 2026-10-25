@@ -93,6 +93,17 @@ def configured_source(root: Path | None = None) -> RuntimeSource:
     return RuntimeSource(**table)
 
 
+def require_marketplace(root: Path | None = None) -> None:
+    selection = configured_source(root)
+    if selection.channel != "marketplace":
+        raise ValueError(
+            f"Runtime source {selection.channel!r} is configured, but source-backed "
+            "suite execution is not yet available. No update was run. "
+            "Use runtime-source resolve to inspect acquisition, or runtime-source reset "
+            "to explicitly restore marketplace runtime delivery."
+        )
+
+
 def set_source(selection: RuntimeSource, *, root: Path | None = None) -> None:
     """Replace only this policy table; retain Manager self-source and other config."""
     path = source_config.config_path(root)

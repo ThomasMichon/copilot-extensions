@@ -261,26 +261,81 @@ def test_cli_is_default_off_and_dev_requires_consent(tmp_path, monkeypatch, caps
     assert config.configured_source(root).channel == "marketplace"
 
 
-def test_update_never_silently_ignores_selected_runtime_source(tmp_path, monkeypatch):
-    from worktree_manager import update_orchestration
+@pytest.mark.parametrize("repair", [False, True])
+def test_update_policy_precedes_engine_repair_with_real_telemetry(
+    tmp_path, monkeypatch, capsys, repair,
+):
+    from worktree_manager import __main__ as manager
+    from worktree_manager import update_bootstrap, update_events
 
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
+    monkeypatch.setattr(update_events, "_ut", None)
+    monkeypatch.setattr(update_events, "HumanOperation", None)
+    monkeypatch.setattr(
+        update_bootstrap, "prepare_update",
+        lambda _rest: pytest.fail("runtime source preflight must precede engine repair"),
+    )
+    rest = ["--repair-engine", str(tmp_path / "fresh")] if repair else []
+    assert manager._cmd_update(rest) == 1
+    assert "No update was run" in capsys.readouterr().out
 
-    class Run:
-        errors: list[str] = []
 
-        def say(self, message, *, state):
-            assert state == "failed"
-            assert "No update was run" in message
+@pytest.mark.parametrize("repair", [False, True])
+def test_bootstrap_update_policy_precedes_manager_self_install(tmp_path, monkeypatch, capsys, repair):
+    import sys
+    from types import SimpleNamespace
 
-        def record_engine_error(self, message):
-            self.errors.append(message)
+    from worktree_manager import self_install
 
-        def self_update_phase(self):
-            pytest.fail("even Manager self-update must wait for runtime source preflight")
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
+    installer = self_install._runtime_installer()
+    monkeypatch.setattr(
+        self_install, "self_install",
+        lambda *args, **kwargs: pytest.fail("source preflight must precede Manager installation"),
+    )
+    monkeypatch.setitem(sys.modules, "update_entry", SimpleNamespace(
+        validate_manager_ownership=lambda *args, **kwargs: pytest.fail(
+            "source preflight must precede bootstrap ownership/repair",
+        ),
+    ))
+    arguments = ["--root", str(root), "--payload", str(self_install.running_payload_dir())]
+    if repair:
+        arguments.append("--repair-update")
+    assert installer.main([*arguments, "--", "update"]) == 1
+    assert "No update was run" in capsys.readouterr().err
 
-    run = Run()
+
+def test_real_update_error_record_requires_explicit_missing_argument(tmp_path, monkeypatch):
+    from worktree_manager import update_events, update_orchestration
+
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    config.set_source(config.RuntimeSource("dev", allow_dev=True), root=root)
+    monkeypatch.setattr(update_events, "_ut", None)
+    monkeypatch.setattr(update_events, "HumanOperation", None)
+    run = update_events.UpdateRun()
     assert update_orchestration.run_update_steps([], run, version="1.0") == 1
-    assert len(run.errors) == 1
+    assert run.finish(1) == 1
+
+
+def test_git_keeps_approved_global_and_scoped_auth_without_repository_override(
+    repository, tmp_path, monkeypatch,
+):
+    repo, release, _development = repository
+    global_config = tmp_path / "gitconfig"
+    global_config.write_text('[credential]\nhelper = approved-global-helper\n', encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(global_config))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "credential.helper")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "approved-scoped-helper")
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "foreign.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "foreign-worktree"))
+    assert source._git(repo, "config", "--get-all", "credential.helper") == (
+        "approved-global-helper\napproved-scoped-helper"
+    )
+    assert source._git(repo, "rev-parse", "HEAD") == release

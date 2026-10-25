@@ -20,6 +20,13 @@ from agent_procutil import no_window_kwargs
 from .runtime_source_config import RuntimeSource
 from .source_config import absolute_local_source
 
+_GIT_ROUTING_ENV = {
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX",
+    "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_SHALLOW_FILE", "GIT_GRAFT_FILE", "GIT_REPLACE_REF_BASE", "GIT_CONFIG",
+}
+
 
 class SourceAcquisitionError(RuntimeError):
     """The configured runtime source could not be acquired without substitution."""
@@ -51,10 +58,9 @@ def _ordinary(path: Path) -> None:
 
 def _git(checkout: Path, *arguments: str) -> str:
     environment = {
-        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+        key: value for key, value in os.environ.items() if key.upper() not in _GIT_ROUTING_ENV
     }
     environment.update(
-        GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
         GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0",
     )
     try:

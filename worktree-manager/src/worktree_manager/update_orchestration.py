@@ -5,6 +5,18 @@ from __future__ import annotations
 from .update_events import UpdateRun
 
 
+def preflight_runtime_source(run: UpdateRun) -> bool:
+    from .runtime_source_config import require_marketplace
+
+    try:
+        require_marketplace()
+    except (OSError, ValueError) as error:
+        run.say(str(error), state="failed")
+        run.record_engine_error(str(error), missing=False)
+        return False
+    return True
+
+
 def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
     out: list[str] = []
     project: str | None = None
@@ -23,21 +35,9 @@ def run_update_steps(
     environment: dict[str, str] | None = None,
 ) -> int:
     from . import engine_client as ec
-    from .runtime_source_config import configured_source
     from .self_install import SelfUpdateResult, self_update
 
-    try:
-        runtime_source = configured_source()
-        if runtime_source.channel != "marketplace":
-            raise ValueError(
-                f"Runtime source {runtime_source.channel!r} is configured, but source-backed "
-                "suite execution is not yet available. No update was run. "
-                "Use runtime-source resolve to inspect acquisition, or runtime-source reset "
-                "to explicitly restore marketplace runtime delivery."
-            )
-    except (OSError, ValueError) as error:
-        run.say(str(error), state="failed")
-        run.record_engine_error(str(error))
+    if not preflight_runtime_source(run):
         return 1
 
     with run.self_update_phase():
