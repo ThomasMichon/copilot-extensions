@@ -2969,6 +2969,10 @@ descriptor writer is outstanding per caller module, with a 50 ms presentation
 wait and no queued replay or buffered-stdio lock. A stalled reader may lose the
 notice but cannot withhold launch or interpreter exit; the exact private
 reference and missing/unknown state remain in the result and event stream.
+The canonical Python producer applies the same bounded presentation rule to
+entry announcements, fixed phase labels and missing-diagnostics warnings.
+Phase archival writes occur before optional presentation, so a notice lost to
+backpressure does not erase private producer progress.
 
 The retained Worktrees publication receiver can record `installation.json`
 only inside its existing governance and candidate/rollback retention custody,
@@ -3020,6 +3024,10 @@ The guardian's JSON completion protocol is not an archived child stream.
 Capture setup/write failure continues draining, preserves the native result and
 reports missing diagnostics; private raw/pending files remain conservative
 incomplete evidence rather than gaining automatic retirement permission.
+Optional helper-import failures, including syntax and import-time exceptions,
+are guarded separately in the guardian and parent warning-propagation path.
+Native execution, completion validation and settlement stay outside those
+guards. The helper-unavailable fallback warning is also bounded and once-only.
 Other engine consumers remain opted out.
 
 Python text/binary tees preserve original stream descriptors, encoding,

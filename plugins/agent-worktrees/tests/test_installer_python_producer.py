@@ -6,8 +6,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 import pytest
+from update_telemetry.human import _available
 
 from test_installer_diagnostics import POWERSHELLS, SCRIPTS, load_diagnostics, native_environment, ps_run
 from test_installer_diagnostics import diagnostic_context as _diagnostic_context
@@ -150,6 +152,64 @@ runpy.run_path(sys.argv[0],run_name='__main__')
     )
     assert result.returncode == 0, result.stderr
     assert b"usage:" in result.stdout
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_available_helper_notices_cannot_hold_entry_on_unread_stderr(tmp_path, missing):
+    release = tmp_path / "release"
+    program = """
+import json,os,sys,threading,time
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import installer_diagnostics as diagnostics
+filler=os.dup(2)
+def fill():
+    try:
+        os.write(filler,b'x'*1048576)
+    finally:
+        os.close(filler)
+threading.Thread(target=fill,daemon=True).start()
+release=Path(sys.argv[2])
+deadline=time.monotonic()+10
+while not release.exists():
+    if time.monotonic()>deadline:
+        raise SystemExit(91)
+    time.sleep(.01)
+with diagnostics.writer(announce=True):
+    diagnostics.phase('producer-entered')
+    if sys.argv[3]=='True':
+        diagnostics.warn()
+    print(json.dumps(diagnostics.reference()),flush=True)
+    raise SystemExit(23)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-X", "utf8", "-c", program, str(SCRIPTS), str(release), str(missing)],
+        env=native_environment(USERPROFILE=str(tmp_path), HOME=str(tmp_path)),
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not _available(process.stderr.fileno()) and process.poll() is None:
+            assert time.monotonic() < deadline, "fixture did not fill stderr"
+            time.sleep(.01)
+        assert process.poll() is None
+        release.touch()
+        process.wait(timeout=10)  # Keep the parent presentation pipe full and unread.
+        assert process.returncode == 23
+        reference = json.loads(process.stdout.read())
+        assert reference["missing_diagnostics"] is missing
+        directory, _, text, completed = evidence(tmp_path)
+        assert reference["directory"] == str(directory)
+        assert "Installer phase: producer-entered" in text
+        assert completed[0]["exit"] == 23
+        assert (directory / "missing-diagnostics.json").exists() is missing
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait(timeout=5)
+        process.stdout.close()
+        process.stderr.close()
 
 
 def test_uncaught_python_exception_preserves_class_and_useful_text(tmp_path):

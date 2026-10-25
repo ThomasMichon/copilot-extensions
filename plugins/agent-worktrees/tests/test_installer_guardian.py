@@ -60,6 +60,75 @@ def test_retained_dispatch_preserves_deadline_and_capture_options(
     assert ("diagnostics_path" in calls[0]) is with_capture
 
 
+@pytest.mark.parametrize("damage", ["syntax", "runtime"])
+def test_optional_capture_import_failure_does_not_catch_native_body(
+    guardian, tmp_path, monkeypatch, capsys, damage,
+):
+    helper = tmp_path / "broken-diagnostics.py"
+    helper.write_text("def invalid(\n" if damage == "syntax" else
+                      "raise RuntimeError('optional import failed')\n", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING", raising=False)
+    primary = RuntimeError("native body failure")
+    with pytest.raises(RuntimeError) as caught:
+        with guardian._diagnostic_capture(helper) as (destinations, warn):
+            assert destinations == {}
+            warn()
+            raise primary
+    assert caught.value is primary
+    assert os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] == "1"
+    assert capsys.readouterr().err.count("continuing with missing diagnostics") == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
+@pytest.mark.parametrize("boundary", ["guardian", "parent"])
+@pytest.mark.parametrize("damage", ["syntax", "runtime"])
+@pytest.mark.timeout(30)
+def test_retained_guardian_optional_import_failure_preserves_native_exit(
+    guardian, tmp_path, monkeypatch, capsys, boundary, damage,
+):
+    valid = SCRIPTS / "installer_diagnostics.py"
+    helper = guardian._load_resource("import_failure_diagnostics_fixture", valid)
+    environment = helper.reserve_launch(dict(os.environ, USERPROFILE=str(tmp_path), HOME=str(tmp_path)))
+    for name in (
+        "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT",
+        "COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY",
+    ):
+        monkeypatch.setenv(name, environment[name])
+    monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING", raising=False)
+    broken = tmp_path / "broken-diagnostics.py"
+    broken.write_text("def invalid(\n" if damage == "syntax" else
+                      "raise RuntimeError('optional import failed')\n", encoding="utf-8")
+    if boundary == "parent":
+        original = guardian._load_resource
+
+        def load(name, path):
+            if name == "installer_parent_diagnostics":
+                raise SyntaxError("invalid helper") if damage == "syntax" else RuntimeError("helper failed")
+            return original(name, path)
+
+        monkeypatch.setattr(guardian, "_load_resource", load)
+        broken.unlink()  # The guardian first reports unavailable capture to its parent.
+    runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    runtime = guardian._load_resource("optional_import_runtime", runtime_path)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    slot = runtime.slot(root, "probe")
+    with runtime.construction_lease(root, "probe") as descriptor:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            guardian.run_owned(
+                [sys.executable, "-I", "-c", "print('native child entered',flush=True); raise SystemExit(23)"],
+                cwd=slot, env=environment, timeout=3, procutil=agent_procutil,
+                construction_fd=descriptor, runtime_root=root, runtime_version="probe",
+                runtime_path=runtime_path, diagnostics_path=broken,
+            )
+        assert caught.value.returncode == 23 and caught.value.stdout == "native child entered\n"
+        with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
+            assert admitted
+    assert os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] == "1"
+    assert "continuing with missing diagnostics" in capsys.readouterr().err
+    assert helper.launch_reference(environment)["missing_diagnostics"]
+
+
 @pytest.mark.parametrize("state,exited", [("S\n", False), ("Z\n", True), ("Z+\n", True)])
 def test_missing_waitid_uses_nonreaping_process_state(guardian, monkeypatch, state, exited):
     monkeypatch.setattr(guardian, "os", SimpleNamespace())

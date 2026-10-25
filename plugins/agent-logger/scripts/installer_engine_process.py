@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import importlib.util
+import io
 import json
 import math
 import os
@@ -17,6 +18,9 @@ from contextlib import contextmanager
 from pathlib import Path
 import threading
 from types import ModuleType
+
+
+_DIAGNOSTICS_WARNED = False
 
 
 class ChildLaunchError(RuntimeError):
@@ -192,10 +196,10 @@ def _retained_windows(
                     "installer_parent_diagnostics",
                     Path(__file__).with_name("installer_diagnostics.py"),
                 )
-            except (OSError, ValueError, TypeError, ImportError):
-                _diagnostics_warning()
-            else:
                 diagnostics.warn()
+            except Exception:
+                # Optional diagnostics cannot replace the guardian's native outcome.
+                _diagnostics_warning()
         try:
             outcome = json.loads(stdout)
         except ValueError:
@@ -239,11 +243,38 @@ def _load_resource(name, path):
 
 
 def _diagnostics_warning():
+    global _DIAGNOSTICS_WARNED
     os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
+    if _DIAGNOSTICS_WARNED:
+        return
+    _DIAGNOSTICS_WARNED = True
+    sink = sys.stderr
+    message = "WARNING: installer diagnostics unavailable; continuing with missing diagnostics.\n"
+    if isinstance(sink, io.StringIO) or (
+        isinstance(sink, io.TextIOWrapper) and isinstance(sink.buffer, io.BytesIO)
+    ):
+        try:
+            sink.write(message)
+        except (OSError, ValueError):
+            pass
+        return
+
+    def notify():
+        descriptor = None
+        try:
+            descriptor = os.dup(sink.fileno())
+            os.write(descriptor, message.encode("ascii"))
+        except (OSError, ValueError, AttributeError):
+            pass
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
     try:
-        print("WARNING: installer diagnostics unavailable; continuing with missing diagnostics.",
-              file=sys.stderr, flush=True)
-    except (OSError, ValueError):
+        thread = threading.Thread(target=notify, name="installer-guardian-notice", daemon=True)
+        thread.start()
+        thread.join(.05)
+    except RuntimeError:
         pass
 
 
@@ -254,7 +285,7 @@ def _diagnostic_capture(path):
         return
     try:
         diagnostics = _load_resource("installer_guardian_diagnostics", path)
-    except (OSError, ValueError, TypeError, ImportError):
+    except Exception:
         _diagnostics_warning()
         yield {}, _diagnostics_warning
         return

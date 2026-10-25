@@ -1215,3 +1215,28 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
 - The updated exact-scope guard passes (**1 passed, 76 deselected, 0.42
   seconds**) and targeted Ruff passes. This is structural routing evidence
   only; the sixth native sub-suite is not yet hosted qualification.
+- Review `5643057642` assessed `9c22497f4a`, acknowledged the caller-notice
+  repair, and identified two further Medium defects: helper syntax/import-time
+  exceptions escaped the Windows guardian and parent warning imports, while
+  available-helper entry/phase notices still synchronously wrote stderr.
+  These are actual repair obligations, not native-qualification exceptions.
+- The canonical producer now sends entry, phase and warning presentation through
+  one bounded best-effort raw writer, retaining private phase capture before
+  presentation. The guardian and its parent isolate ordinary exceptions from
+  optional diagnostic imports without enclosing native execution or settlement;
+  their once-only unavailable-helper warning is bounded too. All nine engine
+  consumers and the representative packaged helper were synchronized.
+- Focused local one-file groups pass **64 controls, with 1 POSIX-only skip and
+  63 deselections, in 85.87 seconds; 203.02 seconds including preparation and
+  cleanup**. This includes actual available-helper entry/phase/warning operation
+  with an unread full stderr pipe, private progress and original exit **23**;
+  four actual Windows retained-guardian controls cover syntax/runtime import
+  failures in both child and parent while preserving native exit **23** and
+  positively released construction custody. Direct capture controls preserve
+  the exact native-body exception rather than catching it as a helper failure.
+- Canonical synchronization, targeted Ruff, touched-module ceilings and every
+  admitted source hash pass. Only the existing engine-process source digest was
+  regenerated; nodes, coverage requirements and budgets were not removed or
+  relaxed. The updated install contract documents these remaining notification
+  boundaries. Hosted native acceptance and current-head CI/review remain owed,
+  with the earlier full qualification, merge and rollout holds unchanged.
