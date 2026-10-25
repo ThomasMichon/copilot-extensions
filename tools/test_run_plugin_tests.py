@@ -233,13 +233,15 @@ def test_reaped_group_cleanup_retries_transient_windows_access(
     assert "[FAIL]" not in output.err
 
 
+@pytest.mark.parametrize("interruption", [None, KeyboardInterrupt, SystemExit])
 def test_reaped_group_cleanup_expiry_retains_outer_without_another_retry(
-    monkeypatch, capsys, cleanup_runner,
+    monkeypatch, capsys, cleanup_runner, interruption,
 ):
     original_remove = runner.tempfile.TemporaryDirectory._rmtree
     failure = PermissionError("synthetic persistent group sharing failure")
     failure.winerror = 5
     roots, attempts = [], []
+    primary = interruption("second group interrupted") if interruption else None
     clock = iter([10, 14.99, 15])
     allow_cleanup = False
     monkeypatch.setattr(containment.sys, "platform", "win32")
@@ -248,6 +250,8 @@ def test_reaped_group_cleanup_expiry_retains_outer_without_another_retry(
     ))
 
     def remove(name, *args, **kwargs):
+        if not allow_cleanup and Path(name).name.startswith("ce-alph-"):
+            pytest.fail("expired group cleanup must retain the outer sandbox")
         if not allow_cleanup and Path(name).name == "g1":
             attempts.append(name)
             raise failure
@@ -255,16 +259,24 @@ def test_reaped_group_cleanup_expiry_retains_outer_without_another_retry(
 
     def run(*args, **kwargs):
         roots.append(kwargs["sandbox"])
+        if len(roots) == 2 and primary is not None:
+            raise primary
         return 0
 
     monkeypatch.setattr(runner, "run_contained", run)
     monkeypatch.setattr(runner.tempfile.TemporaryDirectory, "_rmtree", staticmethod(remove))
     try:
-        with pytest.raises(containment.SandboxCleanupError) as caught:
+        with pytest.raises(interruption or containment.SandboxCleanupError) as caught:
             cleanup_runner()
-        assert caught.value.__cause__ is failure and len(attempts) == 3
+        if primary is not None:
+            assert caught.value is primary
+        else:
+            assert caught.value.__cause__ is failure
+        assert len(attempts) == 3
         assert roots[0].exists()
-        output = capsys.readouterr().err
+        captured = capsys.readouterr()
+        assert "[PASS]" not in captured.out
+        output = captured.err
         assert output.count("[WARN]") == 1
         assert "[FAIL] Group sandbox cleanup failed" in output
         assert "[KEEP] Cleanup retry exhausted" in output

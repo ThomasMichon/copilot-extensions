@@ -1052,3 +1052,24 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   controls pass in **0.47 seconds; 5.43 seconds including preparation and
   cleanup**. Targeted Ruff also passes. These are source-contract checks, not
   another native timing retry or hosted acceptance result.
+- The reconciled draft head `2131ac59b7` reached GitHub through the managed
+  source-owned rebase path and was mergeable. Its CI run `40176109325` exposed
+  a duplicate `Callable` import introduced by the upstream union and stale
+  admitted hashes for the two changed canonical engine modules. The duplicate
+  was removed and canonical copies regenerated; only those two source hashes
+  were readmitted. Unit nodes, closure membership and budgets remain unchanged.
+- Review `4370039962` identified combined cleanup expiry and cancellation:
+  preserving `KeyboardInterrupt` or `SystemExit` could hide the exhausted
+  cleanup from the outer sandbox and permit another removal attempt. Both
+  cancellation variants failed a regression forbidding that attempt. The
+  joined cleanup worker now records retention directly on its existing sandbox
+  owner before preserving the primary exception; an already-retained sandbox
+  cannot enter outer cleanup. All **43** selected cleanup/ownership controls
+  pass in **32.15 seconds**, including actual contained readonly-file removal.
+  An initial host-interpreter attempt lacked `pytest-timeout`; the provisioned
+  runner environment supplied it without changing test deadlines.
+- Full-tree Ruff, the touched-module cap, canonical synchronization and all
+  admitted unit-source hash checks pass. Missing coverage was provisioned only
+  into the repository-local test environment through the seasoning adapter.
+  Hosted native acceptance, current-head review and required CI remain gates;
+  the draft is not merge or rollout authorization.

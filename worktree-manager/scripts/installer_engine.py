@@ -14,7 +14,6 @@ import subprocess
 import sys
 import time
 from contextlib import ExitStack, contextmanager
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
