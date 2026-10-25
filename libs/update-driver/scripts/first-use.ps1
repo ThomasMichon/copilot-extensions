@@ -117,13 +117,13 @@ if ($plugin -cin @('agent-codespaces', 'agent-logger', 'agent-bridge') -and (
         ([IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
             (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
             [IO.Path]::GetFileName($Payload) -ceq $plugin) -or
-        ($plugin -ceq 'agent-logger' -and $InstallerAction -ceq 'provision' -and
+        ($plugin -cin @('agent-logger', 'agent-bridge') -and $InstallerAction -ceq 'provision' -and
             [IO.Path]::GetDirectoryName($Payload) -ieq (Join-Path $RuntimeRoot 'snapshots'))
     ))) {
     throw "$label first use requires its canonical installed payload and default legacy root."
 }
-if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger')) {
-    $label = @{ 'agent-ssh' = 'SSH'; 'agent-logger' = 'Logger'; 'agent-pull-requests' = 'Pull Requests' }[$plugin]
+if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger', 'agent-bridge')) {
+    $label = @{ 'agent-ssh' = 'SSH'; 'agent-logger' = 'Logger'; 'agent-bridge' = 'Bridge'; 'agent-pull-requests' = 'Pull Requests' }[$plugin]
     $installed = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Payload)) -ieq
         (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -and
         ($plugin -ceq 'agent-pull-requests' -or [IO.Path]::GetFileName($Payload) -ceq $plugin)
@@ -138,6 +138,17 @@ if ($plugin -cin @('agent-pull-requests', 'agent-ssh', 'agent-logger')) {
         $receipt = [IO.File]::ReadAllText($receiptPath) | ConvertFrom-Json
         if ($receipt.schema -cne 'copilot-extensions.legacy-snapshot-source') {
             throw "$label first use requires canonical selected snapshot provenance."
+        }
+        if ($plugin -ceq 'agent-bridge') {
+            $sourcePath = Join-Path $Payload 'runtime-source.json'
+            $null = [CopilotExtensions.NativeFoundationState]::CheckPath($sourcePath, $false, $false)
+            $selectedSource = [IO.File]::ReadAllText($sourcePath) | ConvertFrom-Json
+            if ($selectedSource.schema -cne 'copilot-extensions.runtime-source' -or
+                $selectedSource.plugin -cne $plugin -or
+                $selectedSource.package_version -cne $identity.version -or
+                $selectedSource.runtime_version -cne [IO.Path]::GetFileName($Payload)) {
+                throw 'Bridge first use requires its source-qualified selected snapshot.'
+            }
         }
     }
 }

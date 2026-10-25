@@ -685,7 +685,7 @@ disabled config, native enabled/disabled/unknown registration adapters and
 caller loss. Adapter observations do not establish live host registration or
 serving readiness; no real CodeSpace or connection is needed.
 
-Bridge's fixed `stamp`/`provision`/`install` recipes admit only its canonical
+Bridge's fixed `stamp`/`provision`/`install` recipes admit its canonical
 installed payload and default legacy root, required direct command/module
 declaration and native runtime gates. Its canonical Python engine helpers
 provide the existing complete-input freezer. Both materialized native engine
@@ -709,8 +709,21 @@ The manual `bridge-recipes` portfolio exercises actual materialized payloads,
 Python-free callers, caller Job/group loss, coalescing and installed safe CLI
 consumers. Registration/start effects use isolated adapters, whose synthetic
 health replies prove adapter control flow, not actual serving or deployment.
-Snapshots, cells, custom roots and compound actions refuse. Ordinary
-Bridge command/bootstrap publishers and explicit installers remain unadopted;
+Only `provision` additionally admits the exact source-qualified selected legacy
+snapshot. Its canonical provenance must describe the current `payload-dir` and
+`stamped-version`; its full immutable runtime-source identity and assembly are
+validated before durable queue acceptance and rechecked around complete-input
+freezing. The native Python-free admission checks the ordinary source declaration
+and canonical selection before acquisition; launch acknowledgement is not
+durable request acceptance. A changed accepted snapshot records an explicit,
+settled nonzero refusal before any installer starts, without switching sources.
+`stamp`, `install` and bootstrap publication remain canonical-installed-only.
+Unreceipted copies, cells, custom roots and compound actions still refuse.
+The manual `bridge-snapshots` portfolio exercises canonical source preparation,
+actual stamp/selected-source provision, caller loss, same-package source
+generations, installed consumers and failed-candidate preservation on Windows
+and Linux. Its registration/start adapters are synthetic, not serving proof.
+Ordinary Bridge command publishers and explicit installers remain unadopted;
 this prerequisite authorizes neither host service rollout nor remote sessions.
 
 Logger's fixed prerequisite admits its canonical installed payload at the

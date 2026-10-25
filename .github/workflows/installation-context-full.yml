@@ -25,6 +25,7 @@ on:
           - logger-commands
           - bridge-recipes
           - bridge-bootstrap
+          - bridge-snapshots
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
@@ -36,6 +37,58 @@ permissions:
   contents: read
 
 jobs:
+  bridge-snapshots-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
+    name: Bridge selected snapshots (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-snapshots-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify selected-source admission and frozen-input refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k "not actual" --test-timeout 90 --timeout 600
+      - name: Qualify actual source preparation, caller loss and native consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k actual --test-timeout 900 --timeout 1080
+      - name: Preserve installed-source fixed recipes and native lifecycle
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss" --test-timeout 900 --timeout 900
+      - name: Preserve shared Logger selected-source refusal behavior
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_snapshot.py
+          -k "not actual" --test-timeout 90 --timeout 600
+      - name: Preserve canonical-installed-only bootstrap publication
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_driver.py
+          --test-timeout 60 --timeout 180
+  bridge-snapshots-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
+    name: Bridge selected snapshots (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-snapshots-steps
   bridge-bootstrap-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
     name: Bridge bootstrap (Ubuntu)

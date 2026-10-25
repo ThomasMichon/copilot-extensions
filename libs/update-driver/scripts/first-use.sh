@@ -119,15 +119,16 @@ if [[ "$plugin" == agent-codespaces || "$plugin" == agent-logger || "$plugin" ==
     [[ ! -v "$installation_hint" && "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
           "$(basename -- "$payload")" == "$plugin" ) ||
-        ( "$plugin" == agent-logger && "$installer_action" == provision &&
+        ( ( "$plugin" == agent-logger || "$plugin" == agent-bridge ) && "$installer_action" == provision &&
           "$(dirname -- "$payload")" == "$runtime/snapshots" ) ) ]] || {
         printf '%s first use requires its canonical installed payload and default legacy root.\n' "$label" >&2
         exit 1
     }
 fi
-if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" == agent-logger ]]; then
+if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" == agent-logger || "$plugin" == agent-bridge ]]; then
     label='Pull Requests'; [[ "$plugin" != agent-ssh ]] || label=SSH
     [[ "$plugin" != agent-logger ]] || label=Logger
+    [[ "$plugin" != agent-bridge ]] || label=Bridge
     [[ "$runtime" == "$HOME/.$plugin" && (
         ( "$(dirname -- "$(dirname -- "$payload")")" == "$HOME/.copilot/installed-plugins" &&
           ( "$plugin" == agent-pull-requests || "$(basename -- "$payload")" == "$plugin" ) ) ||
@@ -141,6 +142,16 @@ if [[ "$plugin" == agent-pull-requests || "$plugin" == agent-ssh || "$plugin" ==
         [[ "$(query "$receipt" schema)" == copilot-extensions.legacy-snapshot-source ]] || {
             printf '%s first use requires canonical selected snapshot provenance.\n' "$label" >&2; exit 1;
         }
+        if [[ "$plugin" == agent-bridge ]]; then
+            _native_foundation_plain "$payload/runtime-source.json" file
+            selected_source="$(cat -- "$payload/runtime-source.json")"
+            [[ "$(query "$selected_source" schema)" == copilot-extensions.runtime-source &&
+                "$(query "$selected_source" plugin)" == "$plugin" &&
+                "$(query "$selected_source" package_version)" == "$(query "$identity" version)" &&
+                "$(query "$selected_source" runtime_version)" == "$(basename -- "$payload")" ]] || {
+                printf 'Bridge first use requires its source-qualified selected snapshot.\n' >&2; exit 1;
+            }
+        fi
     fi
 fi
 [[ "$plugin" == agent-vault || "${#service_mode[@]}" == 0 ]] || {
