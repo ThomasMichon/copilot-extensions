@@ -630,7 +630,7 @@ def _create_worktree_core(
         from .legacy_wsl_record_locality import resolve_legacy_wsl_owner_ref
 
         if (
-            resolve_legacy_wsl_owner_ref(parsed_owner, config) is None
+            (machine_identity is not None or resolve_legacy_wsl_owner_ref(parsed_owner, config) is None)
             and not require_owner_identity(parsed_owner.machine, config)
         ):
             raise RuntimeError(

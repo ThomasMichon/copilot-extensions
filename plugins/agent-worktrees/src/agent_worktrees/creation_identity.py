@@ -23,6 +23,10 @@ def new_machine_identity(
     validate_mode(mode)
     if mode == "legacy":
         return None
+    if config.platform != cfg.detect_platform():
+        raise execution_spaces.ExecutionSpaceError(
+            "tuple creation platform must match the current execution platform",
+        )
     context = execution_spaces.current_execution_context(config)
     return WorktreeMachineIdentity(
         context.machine, context.environment, context.execution_machine,

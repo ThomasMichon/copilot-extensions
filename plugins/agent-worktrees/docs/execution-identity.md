@@ -118,6 +118,12 @@ remain usable when only the sibling environment is customized. This is a
 record-scoped compatibility proof: actual platform, receiving project,
 checkout namespace and the existing ledger still have to agree. It does not
 make a foreign execution key or hostname-only target globally local.
+The record-proven legacy-parent shortcut applies only to legacy children.
+Tuple children must satisfy their lifecycle's execution-owner fence before
+journaling or carving; an unsupported mixed parent spelling leaves no new
+obligation. Historical legacy platform/path overrides retain their existing
+actual-record compatibility. Tuple admission and explicit non-legacy execution
+keys still require the configured platform to match actual execution.
 
 New session and bridge names use the selected physical machine and environment;
 a physical name ending in a platform-like suffix is not truncated. Names

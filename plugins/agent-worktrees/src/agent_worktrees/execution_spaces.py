@@ -224,10 +224,6 @@ def _current_execution_context(
     from . import config as cfg
 
     platform = cfg.detect_platform()
-    if getattr(config, "platform", platform) != platform:
-        raise ExecutionSpaceError(
-            "configured execution-space key and platform must match the current execution platform"
-        )
     try:
         binding = getattr(config, "configured_machine", None)
         context = resolve_local_execution_context(

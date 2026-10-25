@@ -425,7 +425,7 @@ def test_unaccepted_new_cannot_recreate_removed_worktree(tmp_path, authority, mo
 def test_new_recovery_never_creates_a_different_persisted_allocation(
     tmp_path, authority, monkeypatch, changed,
 ):
-    from agent_worktrees import execution_spaces, worktree_creation
+    from agent_worktrees import worktree_creation
 
     dispatch = request._dispatch
 
@@ -448,11 +448,9 @@ def test_new_recovery_never_creates_a_different_persisted_allocation(
     monkeypatch.setattr(request, "_dispatch", dispatch)
     if changed == "machine":
         authority = replace(authority, machine="renamed")
-        error, message = ValueError, "Stored New allocation"
     else:
         monkeypatch.setattr(request.cfg, "detect_platform", lambda: "wsl")
-        error, message = execution_spaces.ExecutionSpaceError, "current execution platform"
-    with pytest.raises(error, match=message):
+    with pytest.raises(ValueError, match="Stored New allocation"):
         request.execute(authority, intent)
     assert admission.read_bytes() == before
     assert not json.loads(before).get("creation_started")
