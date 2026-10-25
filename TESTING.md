@@ -734,6 +734,19 @@ factory through the real front door's queue, active-route checkpoint and
 lifespan/drain. Default-import protection covers that front door with neither
 optional PR nor Fleet package admitted.
 
+The same manual packet includes `test_delegated_replay_credentials.py`, a T2
+integration over the actual watcher, scoped Dispatch consumer, native GitHub PR reader
+and typed TLS credential exchange. Per-request renewal must override poisoned
+ambient credentials; provider refusal across a drained watcher restart must
+retain original waits without a wake even when the synthetic PR has merged.
+Restored authorization settles one wake per wait without persisted credentials.
+The fixture substitutes forge CLI responses, not credential acquisition or
+native snapshot construction. It is not a live provider or deployment test.
+Its two service lifetimes and nested native commands have a 180-second Windows
+and 120-second non-Windows item watchdog; production deadlines and the existing
+ten-minute manual jobs remain unchanged. This does not add native work to the
+required unit-only portfolio.
+
 The real watcher nonevent/restart/lost-ACK case has a 120-second item watchdog
 on Windows. Its two service lifetimes, native subprocess observations and
 durable recovery measured 20.90/23.46 seconds locally for v1/v2, while hosted

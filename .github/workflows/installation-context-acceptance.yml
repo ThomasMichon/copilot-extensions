@@ -605,6 +605,7 @@ jobs:
           --test-file tests/test_delegated_replay_consumer.py
           --test-file tests/test_delegated_replay_binding.py
           --test-file tests/test_delegated_replay_transport.py
+          --test-file tests/test_delegated_replay_credentials.py
           --test-file tests/test_waiter_maintenance.py
           --max-files-per-sub-suite 2
 

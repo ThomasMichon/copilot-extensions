@@ -384,16 +384,21 @@ existing serving/consumer contract, not a second watcher or evaluator._
   (confirmed by #8938; implementation and qualification remain below).
 - [x] Deliver the parallel v2 provider/client binding seam without changing v1
   (#8945). Exact-head native source qualification passed 340 cases on each of
-  Linux and Windows; scoped Dispatch intent and normal coordinator selection
-  remain pending.
-- [ ] Implement and qualify current service/consumer binding at every replay
+  Linux and Windows; scoped Dispatch intent and explicit programmatic
+  coordinator selection followed in #8957.
+- [x] Implement and qualify current service/consumer binding at every replay
   operation, then wire explicit optional coordinator composition through its
   existing lifetime, active-route and credential owners. No configuration label
-  grants admission or deployment authority.
-- [ ] Exercise the amendment's mixed-version/rollback, remapped-target,
+  grants admission or deployment authority (source confirmed by #8957).
+- [x] Exercise the amendment's mixed-version/rollback, remapped-target,
   malformed binding, restart, credential-loss and ambiguous-response controls
   through the real Gateway and durable queue/store. Keep live provider, image,
-  independent evaluator and installed/fleet acceptance separate.
+  independent evaluator and installed/fleet acceptance separate (#8945, #8957).
+- [ ] Qualify the actual watch-service and Dispatch consumer with the native
+  credential-backed observation path and typed credential exchange in one
+  isolated integration. Preserve renewal/refusal, original intent and one wake
+  after recovery; synthetic issuers/forge responses do not close live provider,
+  installed, image or fleet acceptance.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -739,6 +744,31 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Merge scoped durable intent and coordinator composition
+
+- #8957 merged as `2b89f0cbf3e50b5997a481287ac109d06bc920b6` from
+  approved head `0b23f098058ff3c5ee8ef13010c66e5038023ee9`.
+  Copilot review `5642864682` approved without findings; full reviews and
+  review/issue comments were read. Required CI `40187435521` passed.
+- Exact-head native run `40187527865` passed 235 selected cases on Windows
+  and 234 on Linux with one explicit platform skip. Scoped durable intent,
+  v1 compatibility, original-ID replay, real watcher nonevents/restart/lost-ACK
+  recovery and the trusted programmatic front door passed. Default CLI startup
+  still selects no remote backend.
+- The initial hosted Windows run exhausted the 30-second item watchdog in
+  the multi-phase watcher integration. Bounded local phase instrumentation
+  found distributed observation/durable/restart/recovery cost, with complete
+  v1/v2 calls taking 20.90/23.46 seconds. Only that Windows integration item
+  now has a 120-second watchdog; internal and production deadlines and all
+  functional assertions are unchanged. The final local transport packet passed
+  15 cases before publication; temporary instrumentation was removed.
+- Re-read the parent Plan/Validation after merge. Refreshing the recorded
+  merged PR head let managed completion retain its backup and reconcile only
+  the two already-merged commits. Continue the finite native credential-backed
+  watcher/consumer integration above, not a new polling or credential owner.
+  Independent evaluator, production providers, image and installed/fleet
+  acceptance remain open; no runtime or deployment was activated.
 
 ### 2026-10-25 - Merge scoped replay provider/client support
 
