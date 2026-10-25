@@ -206,7 +206,10 @@ current hostname against the adopted topology and filters by the actual runtime
 platform, keeping native Windows, WSL and Linux spaces distinct. No match leaves
 the daemon without a local machine selection; named remote targets remain
 available. Ambiguous matches are reported rather than choosing an arbitrary
-space.
+space. Automatic discovery considers all same-platform host-family candidates,
+even when one registered key exactly matches the observed hostname. A host
+registered only for another platform remains remote-only, including when
+adopted profiles list native and guest spaces separately.
 
 An optional `local_execution_space` in the Bridge service configuration selects
 a canonical registered key explicitly, for example when several same-platform

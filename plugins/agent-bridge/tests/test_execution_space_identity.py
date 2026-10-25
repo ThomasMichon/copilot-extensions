@@ -209,6 +209,40 @@ def test_unmatched_hostname_does_not_invent_local_ownership():
     assert platform == "windows"
 
 
+@pytest.mark.parametrize("platform,foreign", [
+    ("windows", "wsl"), ("windows", "linux"), ("wsl", "windows"), ("linux", "windows"),
+])
+def test_other_platform_hostname_remains_remote_only(platform, foreign):
+    machines = {"foreign": MachineConfig(
+        key="foreign", display_name="Foreign", hostname="workstation",
+        physical_host="workstation", execution_platform=foreign,
+    )}
+    with patch.object(agent_registry, "_detect_platform", return_value=platform), \
+            patch("socket.gethostname", return_value="workstation"):
+        current, detected = agent_registry._detect_local_machine(machines)
+        assert current is None
+        assert detected == platform
+        with pytest.raises(ValueError, match="execution platform"):
+            agent_registry._detect_local_machine(machines, "foreign")
+
+
+@pytest.mark.parametrize("exact_key", ["workstation", "WORKSTATION"])
+def test_exact_key_does_not_hide_same_platform_hostname_collision(exact_key):
+    machines = {
+        key: MachineConfig(
+            key=key, display_name=key, hostname="workstation",
+            physical_host="workstation", execution_platform="windows",
+        )
+        for key in (exact_key, "other-windows")
+    }
+    with patch.object(agent_registry, "_detect_platform", return_value="windows"), \
+            patch("socket.gethostname", return_value="workstation"):
+        with pytest.raises(ValueError, match="[Aa]mbiguous"):
+            agent_registry._detect_local_machine(machines)
+        selected, _ = agent_registry._detect_local_machine(machines, exact_key)
+        assert selected.key == exact_key
+
+
 def test_same_platform_hostname_ambiguity_requires_explicit_selection():
     spaces = _spaces()
     spaces["another-windows"] = MachineConfig(

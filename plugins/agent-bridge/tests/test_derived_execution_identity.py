@@ -141,7 +141,8 @@ def test_roster_build_ignores_source_binding_and_control_project(
     assert cfg.local_execution_space is None
 
 
-def test_unbound_topology_reaches_service_readiness(source, tmp_path, monkeypatch):
+@pytest.mark.parametrize("split_profiles", [False, True])
+def test_unbound_topology_reaches_service_readiness(source, tmp_path, monkeypatch, split_profiles):
     import time
 
     import yaml
@@ -151,14 +152,19 @@ def test_unbound_topology_reaches_service_readiness(source, tmp_path, monkeypatc
 
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv("AGENT_WORKTREES_PROJECTS_YAML", str(tmp_path / "no-projects.yaml"))
-    machines_path = tmp_path / "machines.yaml"
-    machines_path.write_text(yaml.safe_dump({
-        "control_plane": {"project": "unregistered-project"},
-        "machines": {
-            key: {"hostname": "local-host", "execution_platform": platform}
-            for key, platform in (("native", "windows"), ("guest", "wsl"))
-        },
-    }), encoding="utf-8")
+    entries = {
+        key: {"hostname": "local-host", "execution_platform": platform}
+        for key, platform in (("native", "windows"), ("guest", "wsl"))
+    }
+    groups = ({key: {key: entry} for key, entry in entries.items()}
+              if split_profiles else {"source": entries})
+    topologies = {}
+    for name, machines in groups.items():
+        machines_path = tmp_path / f"{name}.yaml"
+        machines_path.write_text(yaml.safe_dump({
+            "control_plane": {"project": "unregistered-project"}, "machines": machines,
+        }), encoding="utf-8")
+        topologies[name] = TopologyProfile(machines_yaml=str(machines_path))
     monkeypatch.setattr(agent_registry, "load_local_repos", lambda: [])
     monkeypatch.setattr(agent_registry, "discover_local_agents", lambda: {})
     monkeypatch.setattr(agent_registry, "load_elevated_projects", lambda: set())
@@ -171,7 +177,7 @@ def test_unbound_topology_reaches_service_readiness(source, tmp_path, monkeypatc
     monkeypatch.setattr(app_module, "_start_credential_relay", no_relay)
     cfg = ServiceConfig(
         port=0, db_path=str(tmp_path / "test.db"), enable_credential_relay=False,
-        topologies={"source": TopologyProfile(machines_yaml=str(machines_path))},
+        topologies=topologies,
     )
     app = app_module.create_app(config=cfg, token="synthetic")
     app.state.publish_on_ready = False

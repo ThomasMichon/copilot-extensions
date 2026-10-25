@@ -194,7 +194,10 @@ def _detect_local_machine(
     """Match the local hostname to a machine in topology."""
     import socket
 
-    from machine_transport import find_machine_entry, is_local_machine
+    from machine_transport import (
+        AmbiguousMachineError, entry_physical_host, find_machine_entry,
+        is_local_machine, machine_identity_names,
+    )
 
     hostname = socket.gethostname()
     platform = _detect_platform()
@@ -209,9 +212,28 @@ def _detect_local_machine(
             raise ValueError("local_execution_space does not match this daemon's execution platform")
         return selected, platform
     if scoped:
-        return find_machine_entry(
-            machines, hostname, reject_ambiguous=True, execution_platform=platform,
-        ), platform
+        observed = hostname.casefold()
+        families = {
+            entry_physical_host(entry).casefold()
+            for entry in machines.values()
+            if observed in {
+                entry.hostname.casefold(), entry_physical_host(entry).casefold(),
+                *(name.casefold() for name in machine_identity_names(entry, include_metadata=False)),
+            }
+        }
+        candidates = [
+            entry for entry in machines.values()
+            if entry.execution_platform == platform
+            and entry_physical_host(entry).casefold() in families
+        ]
+        if len(candidates) > 1:
+            raise AmbiguousMachineError(
+                f"Observed hostname {hostname!r} has ambiguous {platform} entries; "
+                "configure local_execution_space"
+            )
+        if candidates:
+            return candidates[0], platform
+        machines = {key: entry for key, entry in machines.items() if not entry.execution_platform}
 
     try:
         machine_config = find_machine_entry(machines, hostname, reject_ambiguous=True)
