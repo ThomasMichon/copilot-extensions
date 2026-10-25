@@ -445,59 +445,33 @@ covering worktree lifecycle, the status/tracking model, PR flow, and the Textual
 
 ### Deploy After Merge
 
-After the PR merges to `main`, deploy on each target machine. **Payload-only plugins**
-(skills / hooks / extensions — e.g. efforts, visions, context-handoff, agent-ssh,
-customizing-copilot, copilot-extensions-harness) need only `copilot plugin
-update` — no runtime installer. **Runtime plugins** additionally run their own
-installer; the examples below are illustrative, with the
-`copilot-extensions-harness:contributing-to-copilot-extensions` skill and each plugin's `scripts/` as the
-authority:
-
-```bash
-# agent-worktrees -- via the update subcommand
-agent-worktrees update
-
-# agent-bridge -- via your project's service framework or the installer
-# directly from the local checkout:
-cd plugins/agent-bridge
-./scripts/install.sh update    # Linux/WSL
-.\scripts\install.ps1 update   # Windows
-
-# agent-codespaces -- via its installer
-cd plugins/agent-codespaces
-./scripts/install.sh update    # Linux/WSL
-.\scripts\install.ps1 update   # Windows
-
-# agent-containers / agent-mcp -- re-run init (no separate installer)
-cd plugins/agent-containers     # or plugins/agent-mcp
-./scripts/init.sh --force       # Linux/WSL
-.\scripts\init.ps1 -Force       # Windows
-```
+A merge is not authorization to update a shared host. Wait for promotion to
+`main` and the target's explicit rollout authorization, then follow the unified
+repository update flow owned by
+`copilot-extensions-harness:contributing-to-copilot-extensions`. Do not turn
+test validation into a host update, per-plugin reinstall or daemon restart.
 
 ### Local Testing (Before PR Publication)
 
-Run the installer from the local checkout to deploy your uncommitted
-changes through the real pipeline:
+Use the contained test runner above, not an installer against the operator's
+runtime. Installer, native-terminal and daemon tests must use fixture-owned
+state **and** verified private IPC targets. Redirecting `HOME`, `USERPROFILE`,
+or a data directory does not isolate a shared mux, service or container engine.
+Process containment owns children; it does not authorize commands against
+pre-existing resources.
 
-```powershell
-# Windows -- agent-worktrees
-cd plugins\agent-worktrees
-.\scripts\install.ps1 update
+Never use server-wide mux shutdown, name/image/pattern-based process kills,
+shared service/WSL shutdown or bulk container pruning as test cleanup. Use
+owned process handles or identity-checked, explicitly scoped fixture targets.
+Real mux fixtures must use the runner's private namespace helper and preserve
+pre-existing process identities. Host-state/explicit-tier flags do not waive
+these requirements. Mock destructive commands to test their construction;
+use a disposable OS boundary when actual effects cannot be proven private.
+Do not rerun an unsafe command to prove an incident's cause.
 
-# Windows -- agent-bridge
-cd plugins\agent-bridge
-.\scripts\install.ps1 update
-```
-
-```bash
-# Linux/WSL -- agent-worktrees
-cd plugins/agent-worktrees
-./scripts/install.sh update
-
-# Linux/WSL -- agent-bridge
-cd plugins/agent-bridge
-./scripts/install.sh update
-```
+`TESTING.md`'s **Shared-host command safety** section owns the guard coverage,
+limitations and safe validation flow. A host runtime update is a separate,
+explicitly authorized rollout, never implicit test preparation.
 
 ---
 

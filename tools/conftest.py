@@ -4,6 +4,10 @@ import os
 
 import pytest
 
+from plugin_test_command_safety import install_command_guard
+
+install_command_guard()
+
 
 @pytest.fixture
 def native_file_symlink():

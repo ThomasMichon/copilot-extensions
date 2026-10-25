@@ -1,0 +1,9 @@
+{
+  "comment": "Require runner-owned native mux namespaces and preserve separate sentinel and pre-existing processes during cleanup.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
