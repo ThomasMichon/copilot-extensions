@@ -241,3 +241,30 @@ def test_missing_native_customization_returns_execution_token_not_physical_label
         path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
     ).machine == "observed-host"
     assert {item: item.read_bytes() for item in before} == before
+
+
+@pytest.mark.parametrize("environment", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("binding", [None, "custom-space", "local-alias"])
+def test_ordinary_project_uses_machine_local_map_without_repository_copy(
+    local_config, monkeypatch: pytest.MonkeyPatch, environment: str, binding: str | None,
+) -> None:
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "Observed-Host")
+    anchor, path, before = local_config(environment, None, binding)
+    topology = path.parent / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+    topology.parent.mkdir(parents=True)
+    topology.write_text(yaml.safe_dump({"machines": {
+        "custom-space": {
+            "hostname": "Observed-Host", "alias": "local-alias",
+            "execution_platform": environment, "physical_host": "physical-host",
+        },
+    }}), encoding="utf-8")
+    before[topology] = topology.read_bytes()
+    loaded = cfg.load_config(
+        path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
+    )
+    assert not loaded.default_repo.stateless
+    assert not loaded.default_repo.requires_external_state_root
+    assert loaded.machine == cfg.detect_machine(
+        anchor, value=binding, config=loaded,
+    ) == "custom-space"
+    assert {item: item.read_bytes() for item in before} == before

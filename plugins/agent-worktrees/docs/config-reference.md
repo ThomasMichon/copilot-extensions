@@ -221,6 +221,9 @@ Missing, empty and unrelated-only maps do not require enrollment of the
 current OS or substrate. A matching map customizes the local physical name and
 execution key through the shared local-execution context; invalid declarations,
 ambiguous matches and explicitly selected platform conflicts still fail.
+Existing config-source routing includes machine-local project maps for ordinary
+projects and bound knowledge overlays where applicable; no repository copy is
+required to retain those customizations.
 Naming facts do not grant receiving-project, record or allocation authority.
 The existing execution-space mutation fences and configured-identity read
 provenance remain independent; this configuration adapter does not relax them.

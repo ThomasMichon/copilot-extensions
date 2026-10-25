@@ -1153,7 +1153,7 @@ def _load_config_uncached(
     except KeyError:
         repo = None
     identity_anchors = [repo.anchor] if repo is not None and repo.anchor else []
-    if repo is not None and (repo.stateless or repo.requires_external_state_root):
+    if repo is not None and repo.anchor:
         from . import state_root
 
         identity_anchors = [
