@@ -418,6 +418,16 @@ or a reason to create a daemon.
   submodule files without that parent proof retain ordinary acquisition.
   Enumeration errors report bounded unavailable-inventory diagnostics rather
   than aborting installation fallback. Final-head validation remains open.
+- The complete-closure head passed 357 tests with one platform skip in
+  576.10 seconds, with a clean host-state result. The next review identified
+  executable-mode drift hidden by `core.filemode` and candidate-path permission
+  errors outside the catalog guard. Failing-first controls reproduce both.
+- Candidate discovery, inspection and canonicalization now share the existing
+  bounded invalid-catalog fallback. Git top-level comparison reuses that
+  verified canonical root. POSIX qualification compares the owner executable
+  bit with the committed mode; Windows does not inherit POSIX bit semantics.
+  Controlled-stat tests cover both platforms, and native POSIX chmod controls
+  are included for POSIX runners rather than claimed exercised on Windows.
 
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 

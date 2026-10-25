@@ -229,17 +229,18 @@ def inventory_item(
         return None
     matches = []
     for candidate in candidates:
-        if not candidate.is_dir():
-            continue
-        if candidate.is_symlink() or getattr(candidate.lstat(), "st_reparse_tag", 0):
-            continue
-        root = candidate / location
-        if not root.is_dir() or not root.resolve().is_relative_to(candidate.resolve()):
-            continue
-        path = marketplace_manifest_path(root)
-        if path is None:
-            continue
         try:
+            if not candidate.is_dir():
+                continue
+            if candidate.is_symlink() or getattr(candidate.lstat(), "st_reparse_tag", 0):
+                continue
+            root = candidate / location
+            canonical_candidate = candidate.resolve(strict=True)
+            if not root.is_dir() or not root.resolve(strict=True).is_relative_to(canonical_candidate):
+                continue
+            path = marketplace_manifest_path(root)
+            if path is None:
+                continue
             _require_unlinked_path(candidate, path)
             document = strict_json(path)
         except (OSError, ValueError):
@@ -269,7 +270,7 @@ def inventory_item(
         if payload is None:
             continue
         top = git(candidate, "rev-parse", "--show-toplevel")
-        if top is None or Path(top).resolve() != candidate.resolve():
+        if top is None or Path(top) != canonical_candidate:
             continue
         actual_remote = git(candidate, "config", "--get", "remote.origin.url")
         if (
@@ -315,6 +316,10 @@ def inventory_item(
                     raise ValueError("Native cache member is not an ordinary committed file")
                 member = candidate / relative
                 _require_unlinked_path(candidate, member)
+                if sys.platform != "win32" and bool(
+                    member.stat().st_mode & stat.S_IXUSR,
+                ) != (mode == "100755"):
+                    raise ValueError("Native cache executable mode differs from the selected commit")
                 data = member.read_bytes()
                 algorithm = {40: "sha1", 64: "sha256"}.get(len(object_id))
                 if algorithm is None or hashlib.new(

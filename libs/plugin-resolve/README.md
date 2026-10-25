@@ -256,6 +256,9 @@ bytes when the index has `assume-unchanged` or `skip-worktree` entries.
 Every file in the reflected closure must have one of those verified ordinary
 blobs; required files inside sibling submodules cannot inherit the parent
 repository's proof and retain ordinary acquisition.
+On POSIX, the owner executable bit must also match the committed Git mode even
+when `core.filemode` suppresses status reporting. Windows retains its native
+non-POSIX mode semantics.
 Checkout transformations that change those bytes retain ordinary acquisition.
 The selected catalog and all higher-priority catalog locations participate in
 the proof even when currently missing; deleted native catalogs cannot silently
@@ -279,6 +282,8 @@ Git qualification probes keep their 30-second deadline; a probe timeout reports
 an ineligible candidate and leaves ordinary acquisition available.
 An inaccessible native-cache directory likewise reports unavailable inventory
 without preventing ordinary installation.
+Permission errors while inspecting or resolving an individual candidate are
+reported as ineligible catalog evidence and do not abort that fallback.
 Git filename output decodes losslessly with `surrogateescape`, so non-UTF-8
 POSIX filenames do not abort the optional qualification path.
 Catalog plugin entries must be objects and owner/location metadata must be valid.

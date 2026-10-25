@@ -3,9 +3,11 @@
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -727,3 +729,95 @@ def test_unreadable_cache_directory_uses_ordinary_installation(
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
     assert "unreadable-cache" in caplog.text
+
+
+@pytest.mark.parametrize("probe", ["lstat", "resolve"])
+def test_candidate_path_permission_error_preserves_installation_fallback(
+    native_inventory,
+    monkeypatch,
+    caplog,
+    probe,
+):
+    target, _home, clone, definition, environment = native_inventory
+    original = getattr(Path, probe)
+    denied = clone if probe == "lstat" else clone / "catalog-a"
+
+    def inaccessible(path, *args, **kwargs):
+        if path == denied:
+            raise PermissionError("synthetic candidate path denied")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, probe, inaccessible)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert "invalid-catalog" in caplog.text
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("committed_executable", [False, True])
+def test_cache_file_mode_proof_respects_platform_semantics(
+    native_inventory,
+    monkeypatch,
+    platform,
+    committed_executable,
+):
+    import plugin_resolve.inventory as inventory
+
+    target, _home, clone, definition, environment = native_inventory
+    marker = clone / "catalog-a" / "helper" / "marker.txt"
+    git(
+        clone,
+        "update-index",
+        "--chmod=" + ("+x" if committed_executable else "-x"),
+        "catalog-a/helper/marker.txt",
+    )
+    git(clone, "commit", "--quiet", "--allow-empty", "-m", "tracked mode fixture")
+    git(clone, "config", "core.filemode", "false")
+    definition["source"]["ref"] = "HEAD"
+    original = Path.stat
+
+    def changed_mode(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path != marker:
+            return info
+        values = {name: getattr(info, name) for name in dir(info) if name.startswith("st_")}
+        values["st_mode"] = (info.st_mode & ~0o111) | (0 if committed_executable else stat.S_IXUSR)
+        return SimpleNamespace(**values)
+
+    monkeypatch.setattr(Path, "stat", changed_mode)
+    monkeypatch.setattr(inventory, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    if platform == "win32":
+        assert prepare(request(target, definition), environment=environment) == {
+            "helper@git-fixture": str(clone / "catalog-a" / "helper"),
+        }
+    else:
+        with pytest.raises(AssertionError, match="cold installation"):
+            prepare(request(target, definition), environment=environment)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable-bit filesystem semantics")
+@pytest.mark.parametrize("committed_executable", [False, True])
+def test_native_posix_executable_mode_drift_prevents_reuse(
+    native_inventory,
+    monkeypatch,
+    committed_executable,
+):
+    target, _home, clone, definition, environment = native_inventory
+    marker = clone / "catalog-a" / "helper" / "marker.txt"
+    git(
+        clone,
+        "update-index",
+        "--chmod=" + ("+x" if committed_executable else "-x"),
+        "catalog-a/helper/marker.txt",
+    )
+    git(clone, "commit", "--quiet", "--allow-empty", "-m", "native tracked mode fixture")
+    definition["source"]["ref"] = "HEAD"
+    git(clone, "config", "core.filemode", "false")
+    mode = marker.stat().st_mode & ~0o111
+    marker.chmod(mode if committed_executable else mode | stat.S_IXUSR)
+    assert not git(clone, "status", "--porcelain", "--", "catalog-a/helper/marker.txt")
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
