@@ -214,6 +214,29 @@ def _is_benign_absence(stdout: str, stderr: str) -> bool:
     return False
 
 
+def _run_live_sweep(command: list[str]) -> subprocess.CompletedProcess:
+    source = REPO / "libs" / "agent-procutil" / "src"
+    if not (source / "agent_procutil" / "owned_process.py").is_file():
+        raise RuntimeError("canonical finite-process support is unavailable")
+    sys.path.insert(0, str(source))
+    batch_source = REPO / "libs" / "plugin-resolve" / "src"
+    sys.path.insert(0, str(batch_source))
+    environment = {**os.environ, "AGENT_WORKTREES_NO_SELFPROVISION": "1"}
+    try:
+        from agent_procutil.owned_process import run_caller_owned
+        if os.name == "nt" and Path(command[0]).suffix.lower() in (".cmd", ".bat"):
+            from plugin_resolve.execution import windows_batch_command
+            command = windows_batch_command(command, environment)
+    finally:
+        sys.path.remove(str(batch_source))
+        sys.path.remove(str(source))
+    return run_caller_owned(
+        command, cwd=REPO, timeout=10,
+        max_stdout_bytes=32 * 1024 * 1024, max_stderr_bytes=1024 * 1024,
+        env=environment,
+    )
+
+
 def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     """Best-effort source 4: a locally registered ``agent-worktrees``' live
     cross-repo identifier-blocklist sweep, scoped to this repo as the sweep
@@ -255,12 +278,11 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     if not exe:
         return []
     try:
-        proc = subprocess.run(
-            [exe, "identifiers", "sweep", "--format", "json"],
-            cwd=REPO, capture_output=True, text=True, timeout=10, check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+        proc = _run_live_sweep([exe, "identifiers", "sweep", "--format", "json"])
+    except (OSError, subprocess.TimeoutExpired):
         return []
+    except (subprocess.SubprocessError, RuntimeError, ImportError, UnicodeError) as error:
+        raise LiveSweepFailure("Live identifier sweep could not be observed safely", []) from error
     if proc.returncode != 0 and _is_benign_absence(proc.stdout, proc.stderr):
         # An installed agent-worktrees that either predates the
         # `identifiers` command entirely, or whose cwd isn't a registered

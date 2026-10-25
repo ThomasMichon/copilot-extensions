@@ -377,7 +377,7 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
             "register, install, uninstall, update, install-status, get, validate",
         ),
         ("Namespaces", "services ..., repos ..."),
-        ("Diagnostics", "activity"),
+        ("Diagnostics", "activity, pr-sweep"),
         ("Info", "--version, --help"),
     ]
     for title, cmds in groups:

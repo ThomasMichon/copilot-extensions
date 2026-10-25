@@ -1,0 +1,9 @@
+{
+  "comment": "Add a read-only repository PR census and selected-cell claim sweep with explicit partial coverage.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

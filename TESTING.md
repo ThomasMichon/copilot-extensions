@@ -24,6 +24,28 @@ gh workflow run installation-context-full.yml --ref <published-branch> \
   -f portfolio=promotion-controls
 ```
 
+## Optional repository PR sweep qualification
+
+The manual `installation-context-full.yml` portfolio `pr-sweep` runs the
+focused provider, selection, original-root and native-process packet on Ubuntu
+with Python3.12. It adds no schedule or required PR matrix. Its ten-minute job
+and existing60-second item deadline contain only synthetic state and processes;
+no live forge, remote host, credentials, installation or rollout are needed.
+The recorded checkout SHA identifies the candidate actually exercised.
+
+```bash
+gh workflow run installation-context-full.yml --ref <published-candidate-branch> -f portfolio=pr-sweep
+```
+
+The same packet runs locally through `tools/run-plugin-tests.py agent-worktrees`
+with the six explicit test files named in that job. Native Windows and POSIX
+shell cases skip on the other OS; inspect actual outcomes instead of crediting
+skips as qualification. It exercises the real CLI in a synthetic registered
+context, known read-only claims adapter, exact quoted catalog paths,
+unsupported-old-client refusal and owned descendant timeout.
+Live read/coverage evidence remains separate and never requires lifting a
+held route or installing the candidate into another owner's runtime.
+
 ## Optional Dispatch scoped-stamp binding
 
 The manual `installation-context-full.yml` portfolio `dispatch-binding` runs
