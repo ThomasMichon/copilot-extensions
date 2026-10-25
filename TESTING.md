@@ -113,6 +113,17 @@ Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.
 
+## Optional native Mux Companion navigation
+
+The manual `installation-context-full.yml` portfolio `mux-companion` runs
+`tests/native/test_companion_pane_tmux.py` on Ubuntu 24.04 with tmux 3.4 against the dispatch's
+recorded immutable source. It verifies actual tmux option targeting, a fresh
+synthetic constructed-prefix invocation, same-window reuse and the unchanged
+CLI process in an isolated socket. It is not a required PR lane or a production
+runtime rollout. The Windows counterpart is
+`tests/native/test_companion_pane_native.py`, run through the same explicit
+plugin runner with `--allow-explicit-tiers --test-file <path>`.
+
 ## Optional native PSMux launch-directory control
 
 On Windows with PowerShell and PSMux already installed:

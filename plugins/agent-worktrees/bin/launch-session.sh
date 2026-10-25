@@ -1265,6 +1265,14 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             # below.
             local incarnation=""
             incarnation="$(tmux display-message -t "$sess" -p '#{session_id}:#{session_created}' 2>/dev/null || true)"
+            local cli_pane=""
+            local -a cli_pane_args=()
+            if [[ "${3:-}" == created ]]; then
+                cli_pane="$(tmux display-message -t "$sess" -p '#{pane_id}' 2>/dev/null || true)"
+                if [[ "$cli_pane" =~ ^%[0-9]+$ ]]; then
+                    cli_pane_args=("--cli-pane=$cli_pane")
+                fi
+            fi
             # Only the canonical spawn handshake is synchronous; expensive
             # registration continues outside the launcher's lifetime.
             aw_manager_callback "$wm_root" register \
@@ -1273,6 +1281,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 --worktree-path="$spath" \
                 --mux-session="$sess" \
                 --mux-bin=tmux \
+                "${cli_pane_args[@]+"${cli_pane_args[@]}"}" \
                 ${incarnation:+--session-incarnation="$incarnation"} \
                 >/dev/null 2>&1 || true
         }
@@ -1493,7 +1502,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             activity_log mux_attached "$WORKTREE_ID" mux=create \
                 "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"
             _aw_apply_session_opts "$TMUX_SESS"
-            _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}"
+            _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}" created
             if [[ "$_PENDING_NEW_SEED" != "1" ]]; then
                 _aw_deliver_pending_seed "$WORKTREE_ID"
             fi

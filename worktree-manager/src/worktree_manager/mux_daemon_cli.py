@@ -3,7 +3,145 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import subprocess
 from pathlib import Path
+
+from agent_procutil import no_window_kwargs
+
+from .mux_child_process import run as run_mux_child
+from .mux_mapping_registry import get_mapping, register_next_mapping
+
+_LOOKUP = object()
+
+
+def _reconnect_cli_panes(payload: dict, incumbent: object = _LOOKUP) -> list[dict]:
+    """Preserve a same-owner CLI unless native evidence confirms its loss."""
+    identity = ("project", "worktree_id", "worktree_path", "mux_bin",
+                "mux_session", "session_incarnation")
+    if any(not isinstance(payload.get(key), str) or not payload[key] for key in identity):
+        return []
+    if incumbent is _LOOKUP:
+        incumbent = get_mapping(payload["project"], payload["worktree_id"])
+    if not incumbent or incumbent.get("live") is not True:
+        return []
+    if any(incumbent.get(key) != payload[key] for key in identity if key != "worktree_path"):
+        return []
+    if os.path.normcase(os.path.realpath(str(incumbent.get("worktree_path") or ""))) != (
+        os.path.normcase(os.path.realpath(payload["worktree_path"]))
+    ):
+        return []
+    cli = [
+        pane for pane in incumbent.get("panes", [])
+        if pane.get("role") == "cli" and pane.get("live") is True
+        and re.fullmatch(r"%[0-9]+", str(pane.get("pane_id", "")))
+    ]
+    if len(cli) != 1 or not re.fullmatch(r"\$[0-9]+:[0-9]+", payload["session_incarnation"]):
+        return []
+    retained = [{"pane_id": cli[0]["pane_id"], "role": "cli", "live": True}]
+    try:
+        probe = run_mux_child(
+            [payload["mux_bin"], "list-panes", "-s", "-t", "=" + payload["mux_session"], "-F",
+             "#{pane_id}\t#{pane_dead}\t#{session_name}\t#{session_id}:#{session_created}"],
+            capture_output=True, text=True, timeout=2, **no_window_kwargs(),
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return retained
+    if probe.returncode or not isinstance(probe.stdout, str):
+        return retained
+    rows = [line.split("\t") for line in probe.stdout.splitlines() if line.strip()]
+    if any(
+        len(row) != 4 or not re.fullmatch(r"%[0-9]+", row[0])
+        or row[1] not in {"0", "1"} or not row[2] or not re.fullmatch(r"\$[0-9]+:[0-9]+", row[3])
+        for row in rows
+    ) or len({row[0] for row in rows}) != len(rows):
+        return retained
+    matches = [row for row in rows if row[0] == cli[0]["pane_id"]]
+    if matches != [[cli[0]["pane_id"], "0", payload["mux_session"], payload["session_incarnation"]]]:
+        return []
+    return retained
+
+
+def _confirm_creation_cli(payload: dict) -> dict:
+    """Confirm the actual launch pane; psmux's session_path may remain HOME."""
+    try:
+        probe = run_mux_child(
+            [payload["mux_bin"], "list-panes", "-s", "-t", "=" + payload["mux_session"], "-F",
+             "#{pane_id}\t#{pane_dead}\t#{session_name}\t"
+             "#{session_id}:#{session_created}\t#{pane_current_path}"],
+            capture_output=True, text=True, timeout=2, **no_window_kwargs(),
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return {"applied": False, "reason": "enumeration-unavailable"}
+    if probe.returncode or not isinstance(probe.stdout, str):
+        return {"applied": False, "reason": "enumeration-unavailable"}
+    rows = [line.split("\t") for line in probe.stdout.splitlines() if line.strip()]
+    if any(
+        len(row) != 5 or not re.fullmatch(r"%[0-9]+", row[0])
+        or row[1] not in {"0", "1"} or row[2] != payload["mux_session"]
+        or not re.fullmatch(r"\$[0-9]+:[0-9]+", row[3])
+        for row in rows
+    ) or len({row[0] for row in rows}) != len(rows) or len({row[3] for row in rows}) > 1:
+        return {"applied": False, "reason": "session-unconfirmed"}
+    if rows and rows[0][3] != payload["session_incarnation"]:
+        return {"applied": False, "reason": "stale-incarnation"}
+    matches = [row for row in rows if row[0] == payload["panes"][0]["pane_id"]]
+    if len(matches) != 1 or matches[0][1] != "0" or not matches[0][4]:
+        return {"applied": False, "reason": "cli-unconfirmed"}
+    if os.path.normcase(os.path.realpath(matches[0][4])) != os.path.normcase(
+        os.path.realpath(payload["worktree_path"])
+    ):
+        return {"applied": False, "reason": "unattributed-path"}
+    return {"applied": True}
+
+
+def _register_reconnect(payload: dict, *, creation: bool = False) -> dict:
+    """Fence both detached creation callbacks and reconnect reconciliation."""
+    from . import mux_daemon
+
+    mux_daemon.ensure_daemon_running()
+    for attempt in range(3):
+        try:
+            incumbent = get_mapping(payload.get("project"), payload.get("worktree_id"))
+        except (OSError, ValueError, RuntimeError):
+            return {"applied": False, "reason": "registry-unavailable"}
+        conflict = incumbent is not None and (
+            incumbent.get("live") is not True
+            or any(incumbent.get(field) != payload.get(field) for field in (
+                "project", "worktree_id", "mux_bin", "mux_session", "session_incarnation", "worktree_path",
+            ))
+        )
+        if attempt and (incumbent is None or conflict):
+            return {"applied": False, "reason": "mapping-changed"}
+        if conflict and re.fullmatch(r"\$[0-9]+:[0-9]+", str(incumbent.get("session_incarnation", ""))):
+            from .mux_discovery import confirm_native_session
+
+            if any(not isinstance(payload.get(field), str) or not payload[field] for field in (
+                "mux_bin", "mux_session", "session_incarnation", "worktree_path",
+            )):
+                return {"applied": False, "reason": "session-unconfirmed"}
+            try:
+                confirmed = (
+                    _confirm_creation_cli(payload) if creation
+                    else confirm_native_session(payload, connected_only=False)
+                )
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+                return {"applied": False, "reason": "enumeration-unavailable"}
+            if not confirmed.get("applied"):
+                return confirmed
+        reconciled = dict(
+            payload, panes=payload["panes"] if creation else _reconnect_cli_panes(payload, incumbent),
+        )
+        result = register_next_mapping(reconciled, expected=incumbent)
+        if result.get("reason") == "mapping-changed":
+            continue
+        if result.get("applied"):
+            entry = get_mapping(payload["project"], payload["worktree_id"])
+            if entry is not None:
+                mux_daemon.publish_live_observation(entry, ensure_monitor=True)
+        return result
+    return {"applied": False, "reason": "mapping-changed"}
 
 
 def cmd_mux_daemon(rest: list[str]) -> int:
@@ -82,6 +220,12 @@ def cmd_mux_daemon(rest: list[str]) -> int:
                 key, _, value = arg[2:].partition("=")
                 values[key.replace("-", "_")] = value
         payload: dict = dict(values)
+        cli_pane = payload.pop("cli_pane", None)
+        if cli_pane is not None:
+            if not cli_pane.startswith("%") or not cli_pane[1:].isdigit():
+                print("error: --cli-pane must be a native pane ID")
+                return 2
+            payload["panes"] = [{"pane_id": cli_pane, "role": "cli", "live": True}]
         for int_field in ("mapping_revision", "attached_clients"):
             if int_field in payload:
                 try:
@@ -92,7 +236,7 @@ def cmd_mux_daemon(rest: list[str]) -> int:
         if "live" in payload:
             payload["live"] = payload["live"].strip().lower() not in ("0", "false", "no")
         try:
-            result = mux_daemon.register_managed_mapping(payload)
+            result = _register_reconnect(payload, creation=cli_pane is not None)
         except ValueError as exc:
             print(f"error: {exc}")
             return 2

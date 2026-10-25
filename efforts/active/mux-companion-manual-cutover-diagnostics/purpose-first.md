@@ -60,6 +60,13 @@ requested feature set without creating another data or session authority.
    and its process alive. Use existing Manager mux registration and wrappers.
    Visible refresh must not block Textual input or repeat whole-fleet scans.
    Closing the observer is not closing or replacing the CLI.
+   The first integration should preserve Ctrl+K's existing popup and offer
+   an explicit Show Summary pane action plus return to CLI. Resolve the
+   registered session and actual CLI pane/window at action time; never
+   assume pane zero. Use the Manager's installation-owned command/wrapper,
+   not ambient `uv` or source-checkout borrowing. A split/select/zoom prototype
+   is not complete until original CLI identity, repeated switches, observer
+   close and detach/reattach are tested through the real consumer.
 4. **Attention and status chrome.** Consume the existing attention/turn-state
    source for questions and idle. Add named CLI/Summary click targets and a
    permanent claims row through the existing relay. Keep session-scoped

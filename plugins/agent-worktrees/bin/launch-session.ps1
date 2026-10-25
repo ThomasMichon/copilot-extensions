@@ -1694,7 +1694,7 @@ function Invoke-AwPsmuxAttach {
 # rendered @aw_* values back through Worktree Manager's daemon instead of
 # leaving a per-session status-updater loop behind.
 function Invoke-ManagedMuxRegister {
-    param([string]$Session, [string]$WorkDir)
+    param([string]$Session, [string]$WorkDir, [switch]$Created)
     if (
         -not $Session -or
         [string]::IsNullOrWhiteSpace([string]$script:LaunchProject) -or
@@ -1723,6 +1723,12 @@ function Invoke-ManagedMuxRegister {
         )
         if (-not [string]::IsNullOrWhiteSpace([string]$incarnation)) {
             $registerArgs += "--session-incarnation=$incarnation"
+        }
+        if ($Created) {
+            $cliPane = (& $script:AwPsmuxBin display-message -t $Session -p '#{pane_id}' 2>$null)
+            if ([string]$cliPane -match '^%[0-9]+$') {
+                $registerArgs += "--cli-pane=$cliPane"
+            }
         }
         # Wait only for the canonical spawn handshake, not registration work.
         Invoke-ManagerMuxCallback -PayloadRoot $managerRoot -CallbackArguments $registerArgs
@@ -2257,7 +2263,7 @@ if (-not $noMux) {
         # Apply the Companion's Ctrl+K popup bind AFTER passthrough -- see
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
-        Invoke-ManagedMuxRegister $sessName $muxStatusPath
+        Invoke-ManagedMuxRegister $sessName $muxStatusPath -Created
         if (-not $plan.seed_pending) {
             Invoke-SeedDeliverySafe $plan.worktree_id
         }
