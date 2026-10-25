@@ -41,11 +41,12 @@ class CreationFrontend:
         owner.require_current()
         return owner
 
-    def require_current(self) -> None:
-        if self.manager.db is not self.db or self.manager.is_draining:
+    def require_current(self, *, effect: bool = True) -> None:
+        if self.manager.db is not self.db or effect and self.manager.is_draining:
             raise RuntimeCustodyError("Original creation frontend changed or is draining")
         require_frontend_process(
             self.db, self.installation, self.admission, self.producer, self.database_identity,
+            effect=effect,
         )
 
     async def allocate(
@@ -55,7 +56,7 @@ class CreationFrontend:
         from .hosting_policy import require_target_hosting
         from .workspace_creation import allocate_workspace
 
-        self.require_current()
+        self.require_current(effect=False)
         require_local(target)
         if not target.project or target.worktree_id or target.explicit_cwd:
             raise RuntimeCustodyError("Original allocation requires a new local project workspace")
@@ -80,6 +81,7 @@ class CreationFrontend:
                     "creation_allocation_pending",
                     "original allocation outcome is unknown; observe the same attempt, never retry",
                 )
+            self.require_current()
             await require_target_hosting(original_target, operation="original keyed allocation")
 
             def before_spawn() -> None:

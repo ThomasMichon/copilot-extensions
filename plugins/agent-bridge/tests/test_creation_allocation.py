@@ -81,6 +81,25 @@ async def test_original_allocation_replay_never_starts_native_or_allocates_again
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("draining", [False, True])
+async def test_allocation_closed_epoch_replay_is_observation_only(
+    allocation, monkeypatch, draining: bool,
+) -> None:
+    rig = allocation
+    row = await rig.frontend.allocate(rig.target, key="original-key")
+    close(rig.db, rig.identity, rig.producer)
+    before = rig.db.runtime_epoch(rig.identity)
+    if draining:
+        monkeypatch.setattr(type(rig.manager), "is_draining", property(lambda _self: True))
+    assert await rig.frontend.allocate(rig.target, key="original-key") == row
+    assert rig.db.runtime_epoch(rig.identity) == before
+    assert len(rig.calls) == 1
+    with pytest.raises(RuntimeCustodyError, match="open epoch"):
+        await rig.frontend.allocate(rig.target, key="new-key")
+    assert len(rig.db.execute_read("SELECT * FROM workspace_embodiments")) == 1
+
+
+@pytest.mark.asyncio
 async def test_allocation_closure_during_preparation_prevents_actual_spawn(allocation, monkeypatch) -> None:
     rig = allocation
 
@@ -162,6 +181,7 @@ async def test_allocation_unknown_or_closed_reply_keeps_original_attempt(
         row = await rig.frontend.allocate(rig.target, key="original-key")
         assert row["state"] == "allocated"
         assert CreationJournal(rig.db).read(rig.request) == row
+        assert await rig.frontend.allocate(rig.target, key="original-key") == row
     else:
         with pytest.raises((ConnectionError, AcquisitionRefused, RuntimeCustodyError, asyncio.CancelledError)):
             await rig.frontend.allocate(rig.target, key="original-key")

@@ -19,13 +19,22 @@ if TYPE_CHECKING:
 
 def frontend_producer(
     db: Database, installation: RuntimeInstallation, admission: RuntimeAdmission,
+    *, effect: bool = True,
 ) -> RuntimeProducer:
     identity = db._runtime_installation(installation)
     with db._runtime_transaction(write=False) as conn:
-        db._runtime_admission(conn, identity, admission, cohort="Original frontend")
+        if effect:
+            db._runtime_admission(conn, identity, admission, cohort="Original frontend")
+        elif type(admission) is not RuntimeAdmission or admission.installation != identity:
+            raise RuntimeCustodyError("Original frontend observation belongs to another installation")
+        else:
+            db._runtime_epoch(conn, identity)
         row = conn.execute(
-            "SELECT producer_json FROM bridge_runtime_producers WHERE id=?", (admission.producer,),
+            "SELECT installation,epoch,producer_json FROM bridge_runtime_producers WHERE id=?",
+            (admission.producer,),
         ).fetchone()
+        if row is None or (row["installation"], row["epoch"]) != (identity, admission.epoch):
+            raise RuntimeCustodyError("Original frontend producer history changed")
         try:
             producer = RuntimeProducer(**decode(row["producer_json"]))
         except (TypeError, ValueError) as exc:
@@ -38,6 +47,7 @@ def frontend_producer(
 def require_frontend_process(
     db: Database, installation: RuntimeInstallation, admission: RuntimeAdmission,
     producer: RuntimeProducer, database_identity: tuple[int, int],
+    *, effect: bool = True,
 ) -> None:
     stat = Path(installation.database).stat()
     if (
@@ -47,5 +57,5 @@ def require_frontend_process(
         or producer_id(installation.document(), admission.epoch, producer) != admission.producer
     ):
         raise RuntimeCustodyError("Original frontend process or database changed")
-    if frontend_producer(db, installation, admission) != producer:
+    if frontend_producer(db, installation, admission, effect=effect) != producer:
         raise RuntimeCustodyError("Original frontend producer history changed")

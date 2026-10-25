@@ -74,7 +74,11 @@ the external allocation completed or did not happen.
 
 An exact successful keyed allocation response records its project, path,
 worktree ID and nonce on the same row as `allocated`, including after closure.
-A replay returns that observation without another subprocess. Lost, malformed,
+A replay by the original captured frontend validates its identity and retained
+producer history without requiring an open epoch, even during draining. It
+returns that observation without another subprocess or inventory revision.
+Fresh allocation still requires open admission before policy preparation and
+again at the final subprocess boundary. Lost, malformed,
 cancelled or wrong-project replies retain `allocation_started` without retry
 permission; a restarted reader can observe the same attempt. A changed result
 cannot replace the retained identity. The ground owner's own keyed allocation
