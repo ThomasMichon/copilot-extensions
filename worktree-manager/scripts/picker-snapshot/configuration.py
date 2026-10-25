@@ -91,6 +91,10 @@ def capture_configuration(source, scenario):
             return "error", [], "Fixture: provider unavailable; retry after repair", {}
         return "ready", copy.deepcopy(rows), "", summary
 
+    def read_stream(runtime, machine, context):
+        state, entries, error, details = read(runtime, context)
+        runtime._finish(machine, (state, entries, error), details)
+
     async def open_state(scr, pilot):
         scr._update_state_pinned = scr._manager_update_state_pinned = True
         scr.update_state = scr.manager_update_state = "current"
@@ -174,6 +178,7 @@ def capture_configuration(source, scenario):
         for method in ("_poll_update_state", "_poll_manager_update_state", "_prewarm_machine_key_map"):
             stack.enter_context(patch.object(PickerScreen, method, return_value=None))
         stack.enter_context(patch.object(tasks.RegisteredPivotRuntime, "_exec_list", read))
+        stack.enter_context(patch.object(tasks.RegisteredPivotRuntime, "_run_list_stream", read_stream))
         stack.enter_context(patch.object(
             tasks.RegisteredPivotRuntime, "run_resolved",
             return_value=(True, json.dumps({

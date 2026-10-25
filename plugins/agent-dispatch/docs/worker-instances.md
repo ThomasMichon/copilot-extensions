@@ -117,6 +117,45 @@ The catalog retains other instances and templates and includes the path and
 reason in that row's `publication_errors` and `summary.errors`; it never
 substitutes draft capacity for an unreadable publication.
 
+### Human-facing titles and descriptions
+
+A declaration document may supply an optional `title`: nonempty, single-line
+text of at most 200 characters, without control characters. Use a short,
+human-facing name, with a friendly README-style summary in the existing
+`description` field. Keep execution instructions in the owning recipe,
+worker identity or charter, not in either display field. Source declarations
+remain read-only in the catalog; change their guidance through the owning
+repository/plugin or an agent-supplied addendum only when its template permits.
+
+Titles are presentation metadata, not registration identity. The catalog keeps
+the immutable `name`, registration IDs, component identities and toggle target
+unchanged. Omitted titles fall back to the exact existing name; built-in
+templates use friendly labels while retaining their existing template IDs and
+fragment revisions. Provider template titles still come from their own index.
+Clients must not infer capabilities, routing or guidance from these labels.
+Unlike execution-related scalar overrides, a display `title` never supplies
+an implicit recipe parameter. An execution template that intentionally needs
+a `{title}` placeholder must receive its value explicitly through `params.title`,
+independently of the display label.
+
+The shared document expander applies a title to each component of a loop
+after recipe inheritance, without inserting it into the embedded producer
+configuration or changing runtime registrations. Nested `pool.title` is
+rejected as derived metadata, like `pool.description`; put the title at the
+document root. For a published instance,
+the row's title and description describe the published snapshot; a newer
+Save-only draft remains separate and does not relabel it. An unpublished
+instance displays its draft metadata. Details retain the technical name.
+This metadata change does not replace the existing advanced configuration
+form with a guidance editor or authorize any additional action.
+
+Upgrade the owning Dispatch runtime before adding `title` to active
+declaration documents. Older owners keep their strict unknown-field rejection;
+they do not silently discard it. Removing the optional title restores the
+older document contract for rollback. Existing documents need no migration,
+and existing catalog consumers continue reading `title` and `description`
+without a new command, schema version or capability probe.
+
 ## Edit or instantiate
 
 Select **Edit — Save only**, **Edit — Save and Activate**, or the corresponding

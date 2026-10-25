@@ -30,6 +30,18 @@ def test_plain_catalog_keeps_its_existing_json_contract(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == payload
 
 
+def test_stream_keeps_friendly_template_labels_and_stable_names(monkeypatch, capsys):
+    rows = workers_catalog.builtin_template_rows()
+    monkeypatch.setattr(workers_catalog, "catalog", lambda: {"entries": rows, "summary": {}})
+    assert workers_catalog.command(arguments("--stream")) == 0
+    frames = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    emitted = [frame["entry"] for frame in frames if frame["type"] == "row"]
+    assert emitted == rows + rows
+    pool = next(row for row in emitted if row["id"] == "template:worker-pool")
+    assert pool["name"] == "worker-pool" and pool["title"] == "Task worker pool"
+    assert pool["description"] == "Run eligible queued tasks with a bounded number of workers."
+
+
 @pytest.mark.parametrize("failed", [False, True])
 def test_stream_flushes_safe_templates_before_discovery_and_reports_completion(monkeypatch, failed):
     output = StringIO()

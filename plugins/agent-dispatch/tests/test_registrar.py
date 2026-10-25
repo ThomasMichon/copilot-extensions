@@ -30,6 +30,144 @@ def test_minimal_declaration_defaults():
     assert d.reactive is False
     assert d.body == Body()  # embody / task-worker
     assert d.fleet == Fleet()
+    assert d.title is None
+
+
+@pytest.mark.parametrize("kind", ["supervised-lane", "emitter"])
+def test_display_title_does_not_change_registration_or_supervisor_args(kind):
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    document = {"name": "stable-unit", "owner": "repo:example", "kind": kind}
+    if kind == "emitter":
+        document["spec"] = {"id": "stable-unit", "command": ["discover"], "interval_seconds": 60}
+    original = load_declaration(document)
+    titled = load_declaration({**document, "title": "Friendly task source"})
+    assert titled.title == "Friendly task source"
+    assert titled.name == original.name
+    assert titled.to_supervise_args() == original.to_supervise_args()
+    assert declaration_to_registration(titled, machine="fixture") == declaration_to_registration(
+        original, machine="fixture",
+    )
+
+
+@pytest.mark.parametrize("title", [
+    "", "  ", "x" * 201, "two\nlines", "tab\there", "nul\0here",
+    "del\x7fhere", "c1\x85here", "two\u2028lines", "two\u2029lines", 42, [], {},
+])
+def test_invalid_display_titles_are_refused(title):
+    with pytest.raises(RegistrarError, match="title:"):
+        load_declaration({"name": "stable-unit", "title": title})
+
+
+def test_display_title_accepts_boundary_without_rewriting_source():
+    document = {"name": "stable-unit", "title": "x" * 200}
+    assert load_declaration(document).title == document["title"]
+    assert document == {"name": "stable-unit", "title": "x" * 200}
+
+
+def test_inherited_display_title_is_owned_by_recipe_without_changing_runtime(tmp_path):
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    recipe = tmp_path / "pool.json"
+    recipe.write_text(json.dumps({
+        "labels": ["work"], "title": "Recipe workers", "description": "Run selected tasks.",
+    }), encoding="utf-8")
+    before = recipe.read_bytes()
+    document = {"name": "stable-pool", "extends": str(recipe)}
+    inherited, = expand_declaration_document(document, directory=tmp_path, repo_root=tmp_path)
+    overridden, = expand_declaration_document(
+        {**document, "title": "Consumer workers"}, directory=tmp_path, repo_root=tmp_path,
+    )
+    assert inherited.title == "Recipe workers"
+    assert overridden.title == "Consumer workers"
+    assert inherited.description == overridden.description == "Run selected tasks."
+    assert declaration_to_registration(inherited, machine="fixture") == declaration_to_registration(
+        overridden, machine="fixture",
+    )
+    assert recipe.read_bytes() == before
+
+
+@pytest.mark.parametrize("intermediate", [False, True])
+def test_inherited_display_title_is_not_an_implicit_runtime_parameter(tmp_path, intermediate):
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    recipe = tmp_path / "source.json"
+    recipe.write_text(json.dumps({
+        "kind": "emitter", "title": "Inherited display label",
+        "spec": {"id": "stable-source", "command": ["discover", "{title}", "{repo}"], "interval_seconds": 60},
+    }), encoding="utf-8")
+    paths = [recipe]
+    if intermediate:
+        alias = tmp_path / "alias.json"
+        alias.write_text(json.dumps({
+            "extends": str(recipe), "title": "Intermediate display label",
+        }), encoding="utf-8")
+        recipe = alias
+        paths.append(alias)
+    before = [path.read_bytes() for path in paths]
+    document = {
+        "name": "stable-source", "extends": str(recipe), "params": {"repo": "example/project"},
+    }
+    first, = expand_declaration_document(
+        {**document, "title": "First display label"}, directory=tmp_path, repo_root=tmp_path,
+    )
+    second, = expand_declaration_document(
+        {**document, "title": "Second display label"}, directory=tmp_path, repo_root=tmp_path,
+    )
+    assert first.title == "First display label" and second.title == "Second display label"
+    assert first.spec["command"] == second.spec["command"] == ["discover", "{title}", "example/project"]
+    assert declaration_to_registration(first, machine="fixture") == declaration_to_registration(
+        second, machine="fixture",
+    )
+    explicit, = expand_declaration_document(
+        {**document, "title": "Display label", "params": {"title": "runtime-value", "repo": "example/project"}},
+        directory=tmp_path, repo_root=tmp_path,
+    )
+    assert explicit.title == "Display label"
+    assert explicit.spec["command"] == ["discover", "runtime-value", "example/project"]
+    assert [path.read_bytes() for path in paths] == before
+
+
+@pytest.mark.parametrize("kind", ["repository-issue-loop", "effort-driver-loop", "reviewer-loop"])
+def test_document_display_title_reaches_loop_components_without_entering_runtime_spec(tmp_path, kind):
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    document = {
+        "name": "stable-loop", "kind": kind, "repo": "example/project",
+        "task_label": "work", "owner": "repo:example",
+        "pool": {"body": {"type": "headless"}},
+    }
+    if kind == "reviewer-loop":
+        document.update(
+            emitter={"command": ["discover"], "interval_seconds": 60},
+            evaluator={"evaluator_spec": {"rules": []}},
+        )
+    else:
+        document.update(source="fixture", cadence_seconds=3600)
+        if kind == "repository-issue-loop":
+            document.update(
+                forge={"provider": "github", "producer_login": "fixture-bot"},
+                reservation={"label": "reserved", "comment": True},
+            )
+        else:
+            document.update(state_root=str(tmp_path), effort_slugs=["fixture"])
+    original = expand_declaration_document(document, directory=tmp_path, repo_root=tmp_path)
+    titled_document = {**document, "title": "Friendly workflow"}
+    before = json.dumps(titled_document, sort_keys=True)
+    titled = expand_declaration_document(titled_document, directory=tmp_path, repo_root=tmp_path)
+    assert all(declaration.title == "Friendly workflow" for declaration in titled)
+    assert [declaration_to_registration(d, machine="fixture") for d in titled] == [
+        declaration_to_registration(d, machine="fixture") for d in original
+    ]
+    assert json.dumps(titled_document, sort_keys=True) == before
+    with pytest.raises(RegistrarError, match="pool.*title.*derived"):
+        expand_declaration_document(
+            {**document, "pool": {**document["pool"], "title": "Nested workers"}},
+            directory=tmp_path, repo_root=tmp_path,
+        )
 
 
 def test_reactive_compatibility_value_is_normalized_off():

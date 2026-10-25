@@ -729,7 +729,8 @@ def resolve_extends(
     - every *other* top-level key (the ordinary override fields -- `name`,
       `repo`, `owner`, ...) is used for substitution **and** deep-merged
       into the output, since those are legitimate declaration fields in
-      their own right.
+      their own right. Display ``title`` is merge-only; use explicit
+      ``params.title`` for an execution placeholder with that name.
 
     **Chaining:** a resolved template may itself carry an ``extends:`` key
     -- that is resolved recursively, against *its own* base directory (a
@@ -921,7 +922,7 @@ def _resolve_extends_tracking_cwd_origin(
     scalar_params = {
         key: value
         for key, value in {**overrides, **params_block}.items()
-        if isinstance(value, (str, int, float, bool))
+        if isinstance(value, (str, int, float, bool)) and (key != "title" or key in params_block)
     }
     filled_template = substitute_placeholders(template, scalar_params)
     if pending_cwd_origin is not None:

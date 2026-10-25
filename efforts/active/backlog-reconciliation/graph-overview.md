@@ -500,6 +500,47 @@ received. No metadata-only arrival is pending; initial research layers and
 provenance remain unchanged. Neither this unresolved question's transfer nor
 739 campaign closures completes the parent objective.
 
+## Registry/account observation and action authority
+
+The next ten-issue unit considered **#69, #1043, #3434, #4199, #4756,
+#5791, #5904, #5963, #6184 and #6187**. Their common boundary is that an
+observation does not silently confer execution, activation, consent or cleanup
+authority. This is a research/publication group, not a new implementation
+parent or proof that all ten outcomes are interchangeable.
+
+Only **#3434** was superseded into existing **OPEN #1043**, whose Dispatch
+registrar/doctor family now directly carries its entire unfinished report-only
+declaration-migration outcome: four Plan rows, four paired Validation rows and
+continuing source coordination. Reliable schema/migration evidence, actual
+target-machine venues, valid no-charter profiles, unknown-versus-invalid
+classification and exact file/pool/value/correction reports all remain.
+No YAML rewrite, invented venue or retrospective blocker on #3338 is introduced.
+
+The ENTIRE actual 11,894-byte receiving body was read before administrative
+not-planned supersession. All incumbent bytes, both #396 unchecked rows,
+six original comments and the managed SSH claim survive, alongside explicit
+common/family continuations. The receiver has 26 unchecked rows and remains
+OPEN. #5791 receives nothing; **the other nine issues remain OPEN**, including
+#5904's distinct present-unknown-ownership cleanup requirement. Its earlier
+atomic publication repair is credited without treating serialization or a
+tolerant reader's `None` as unlink permission.
+See the [dated checkpoint](<journal/2026/10.24 registry-account-authority-family-102.md>).
+
+All ten exact public dispositions, original bodies, twenty original comments,
+whole receiver and current custody were audited before census: **898
+whole-queue OPEN at 2026-10-24 21:56:47 PDT**, comprising 729 original-cohort
+and 169 inflow issues. There are 651 eligible open and 247 untouched
+excluded-author issues, still **169 above the fixed whole-queue checkpoint**.
+The original cohort reaching 729 does not satisfy that checkpoint.
+No arrival or external closure intervened.
+
+The historical graph union remains **717 eligible identities**: 651 open and
+66 closed, comprising 58 audited graph supersessions and eight external
+changes without credit. Eighteen numeric and three existing ROOT intakes
+have been received. Initial research layers and provenance remain unchanged;
+no metadata-only arrival is pending. The parent remains Active, not completed
+by this unit or by 740 campaign closures.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider

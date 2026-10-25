@@ -55,8 +55,8 @@ requested feature set without creating another data or session authority.
    progress from titles. Preserve relationship direction, entity identity,
    freshness and partial failures. Show phases only when actually reported;
    absent telemetry is unknown, not zero.
-3. **Alternate pane.** Add a mux-owned observer presentation for the same
-   worktree, with explicit view switching that leaves the original CLI pane
+3. **Alternate pane.** Add a mux-owned observer presentation in the same
+   mux window, with explicit view switching that leaves the original CLI pane
    and its process alive. Use existing Manager mux registration and wrappers.
    Visible refresh must not block Textual input or repeat whole-fleet scans.
    Closing the observer is not closing or replacing the CLI.
@@ -75,6 +75,11 @@ requested feature set without creating another data or session authority.
 
 ## Scope and coordination
 
+- **Operator layout decision:** when offered native windows versus a
+  same-window pane switch, the operator selected `same-window`: "Same mux
+  window; switch between CLI and summary panes." Separate CLI/Summary mux
+  windows are not an accepted substitute. This is requested intent, not
+  agent-recommended sequencing.
 - The same Companion app effort owns this continuation. The existing
   `mux-bind-relay` effort remains the owner for command wrappers, registration,
   popup focus/lifetime and platform-specific relay safety. Neither effort's

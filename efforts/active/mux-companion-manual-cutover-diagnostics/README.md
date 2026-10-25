@@ -386,7 +386,7 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ### Step 6 - Purpose-first Summary and Claims continuation (#8811)
 
-- [ ] Land reviewed [purpose-first intent and sequence](purpose-first.md)
+- [x] Land reviewed [purpose-first intent and sequence](purpose-first.md)
       and the revised `visions/mux-companion` before implementation.
 - [ ] Reuse existing authoritative purpose, summary and claims sources in
       the default Textual dialog; retain recovery as a secondary view.
@@ -400,7 +400,7 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 
 ## Validation Plan
 
-- [ ] Purpose-first: confirm the captured continuation preserves the request
+- [x] Purpose-first: confirm the captured continuation preserves the request
       and distinguishes requested intent from agent-recommended sequencing.
 - [ ] Purpose-first: unit and real Textual consumer tests for Summary/Claims,
       long values, missing/stale/error sources and secondary recovery actions.
@@ -466,6 +466,40 @@ https://github.com/ThomasMichon/copilot-extensions/pull/5517 .
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-24 - Reviewed intent merged; Summary/Claims source slice
+
+- #8815 merged after Copilot approval and required CI. Re-read the parent
+  Step 6 and Validation Plan; the entire effort remains Active.
+- Extended the existing Companion with Summary as initial view, actual Claims
+  and secondary Recovery. The process-boundary engine client consumes the
+  existing independently marked `worktree-status-bundle` contract and rejects
+  wrong-worktree/malformed envelopes. No new ledger or phase inference.
+- Startup and refresh reads run off the Textual event loop; unavailable facts
+  and lineage failures remain visible. The existing human-gated cutover
+  action is preserved. These are application tabs, not the requested mux tabs.
+- Initial focused source validation: 144 tests passed, including actual
+  Textual tab/cutover interaction, partial failures, literal claim labels and
+  blocked-producer responsiveness. Further process-boundary and native
+  acceptance is retained; no installed runtime or live mux change is claimed.
+- Review identified that a default executor thread could keep the popup
+  process alive after Escape. Read cancellation now uses the Manager's
+  existing owned process/job boundary; startup, refresh and handoff-state
+  reads share that cancellation. The expanded packet passed 155 tests,
+  including a real Companion process exiting while its producer stays
+  blocked, and native Windows renderer/grandchild timeout cleanup. The latter
+  fixture now answers the current hosting-policy probe before its intentional
+  blocking resolve. No production admission check was weakened.
+- Native relay constraint from existing source: the current psmux click bind
+  is deliberately withheld because it corrupts the supported root table.
+  Do not silently enable it to satisfy view-tab presentation.
+- The operator selected `same-window` for the CLI/Summary layout; captured
+  verbatim in the linked continuation and reflected in standing intent.
+  Native windows are not a substitute. A further review found target-cwd
+  loss in the new runner; it now binds every observation read to the selected
+  worktree without changing legacy two-argument runner callbacks. A real
+  different-process-cwd versus selected-worktree handoff test passes;
+  the final focused packet is 156 passed.
 
 ### 2026-10-24 - Purpose-first continuation proposed
 

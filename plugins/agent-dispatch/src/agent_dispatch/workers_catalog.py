@@ -12,7 +12,7 @@ import time
 from . import registrar_discovery as rd
 from .config import overrides_path
 from .overrides import overridden_off_ids
-from .registrar import ProfileDeclaration, RegistrarError
+from .registrar import ProfileDeclaration, RegistrarError, _load_title
 from .registrar_reconcile import declared_registration_id, declaration_to_registration
 from .supervisor_registration import registration_override_ids
 from .worker_instances import (
@@ -32,17 +32,18 @@ ACTIVATE_EFFECTS = (
     "loop templates, create agentic tasks. No second supervisor is started. "
     "Without a running supervisor activation remains pending; publication is not proof of running."
 )
-TEMPLATE_DESCRIPTIONS = {
-    "worker-pool": "Bounded pool that binds eligible queued tasks",
-    "repository-issue-loop": "Discover and reserve repository issues for one worker",
-    "goal-driven": "Drive repository issue goals through their completion gate",
-    "backlog-triager": "Classify repository backlog issues using a consumer evaluator",
-    "issue-reproducer": "Reproduce and classify issues using a consumer evaluator",
-    "effort-builder": "Shape tracked efforts from repository issues",
-    "effort-driver": "Drive tracked efforts through their completion gate",
-    "reviewer": "Discover, review and evaluate repository pull requests",
-    "conflict-resolution": "Reconcile conflicted pull requests under their landing policy",
+TEMPLATE_METADATA = {
+    "worker-pool": ("Task worker pool", "Run eligible queued tasks with a bounded number of workers."),
+    "repository-issue-loop": ("Repository issue worker", "Discover and reserve repository issues for one worker at a time."),
+    "goal-driven": ("Issue goal driver", "Work on repository issue goals until their completion requirements are met."),
+    "backlog-triager": ("Backlog triager", "Classify repository backlog issues using the configured evaluation policy."),
+    "issue-reproducer": ("Issue reproducer", "Reproduce repository issues and evaluate the findings."),
+    "effort-builder": ("Effort builder", "Turn repository issues into tracked implementation efforts."),
+    "effort-driver": ("Effort driver", "Drive tracked efforts through their planned work and validation."),
+    "reviewer": ("Pull request reviewer", "Discover, review and evaluate repository pull requests."),
+    "conflict-resolution": ("Pull request conflict resolver", "Reconcile conflicted pull requests under the repository's landing policy."),
 }
+TEMPLATE_DESCRIPTIONS = {name: description for name, (_, description) in TEMPLATE_METADATA.items()}
 
 
 def _fields(name: str, document: dict, repo_root: str = "") -> list[dict]:
@@ -229,6 +230,7 @@ def builtin_template_rows() -> list[dict]:
     rows = []
     for name, fragment in templates().items():
         kind = fragment["kind"]
+        title, description = TEMPLATE_METADATA[name]
         prerequisite = (
             "Supply a unique instance name and complete JSON declaration. "
             + ("Requires repository root, repo, source, task_label, cadence_seconds, forge "
@@ -239,8 +241,8 @@ def builtin_template_rows() -> list[dict]:
                "Choose watched labels, placement/filter, capacity and worker body.")
         )
         rows.append(_cards({
-            "id": f"template:{name}", "title": name, "group": "Available templates",
-            "description": TEMPLATE_DESCRIPTIONS[name],
+            "id": f"template:{name}", "name": name, "title": title, "group": "Available templates",
+            "description": description,
             "provenance": "agent-dispatch built-in recipe",
             "validity": "fragment" if name != "worker-pool" else "template",
             "enabled": "not-instantiated", "activity": "not-applicable",
@@ -323,9 +325,15 @@ def catalog() -> dict:
             d.name in discovered_names for d in active_declarations
         )
         published_revision = digest(active_conf) if active_conf is not None else None
+        display_document = (active_conf or conf)["declaration"]
+        try:
+            title = _load_title(display_document.get("title"))
+        except RegistrarError:
+            title = None
         row = {
-            "id": record["id"], "title": record["name"], "group": "Configured",
-            "description": conf["declaration"].get("description") or "User-local worker instance",
+            "id": record["id"], "name": record["name"], "title": title or record["name"],
+            "group": "Configured",
+            "description": display_document.get("description") or "User-local worker instance",
             "validity": "invalid" if draft_errors or publication_errors else "valid",
             "editable": "true", "instantiable": "false",
             "revision": record["revision"], "fields": _fields(record["name"], conf["declaration"], conf["repo_root"]),
@@ -367,7 +375,8 @@ def catalog() -> dict:
         elif active_conf is None:
             row.update(enabled="not-published", activity="not-published")
         body = (
-            f"{row['description']}\n\nSource: {row['provenance']} ({record['source']['revision']}). "
+            f"{row['description']}\n\nInstance name: {record['name']}."
+            f"\n\nSource: {row['provenance']} ({record['source']['revision']}). "
             f"Local publication: {row['publication']}; effective state: {row['enabled']}; "
             f"activity: {row['activity']}. Statistics: {json.dumps(row['statistics'])}."
             f"\n\nDraft: {row['draft_state']} ({record['revision']}); "
@@ -391,7 +400,8 @@ def catalog() -> dict:
             continue
         row = {
             "id": f"source:{declared_registration_id(declaration)}",
-            "title": declaration.name, "group": "Source declarations",
+            "name": declaration.name, "title": declaration.title or declaration.name,
+            "group": "Source declarations",
             "description": declaration.description or f"{declaration.kind} declaration",
             "provenance": declaration.owner or "local",
             "source_path": declaration.source_path,
@@ -404,7 +414,8 @@ def catalog() -> dict:
                 context=f"source:{declared_registration_id(declaration)}", errors=errors,
             ),
         }
-        body = (f"{row['description']}\n\nOwned by {row['provenance']}. "
+        body = (f"{row['description']}\n\nDeclaration name: {declaration.name}."
+                f"\n\nOwned by {row['provenance']}. "
                 "Read-only here: edit through the owning repository/plugin configuration flow.")
         try:
             _validate_dependencies(

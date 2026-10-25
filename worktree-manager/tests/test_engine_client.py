@@ -16,6 +16,7 @@ import sys
 import pytest
 
 from worktree_manager import engine_client as ec
+from worktree_manager import companion_client as cc
 
 
 @pytest.fixture(autouse=True)
@@ -79,6 +80,50 @@ def test_engine_environment_removes_parent_python_runtime(monkeypatch):
     assert env["PYTHONUTF8"] == "1"
     assert env["PYTHONSAFEPATH"] == "1"
     assert env["UV_DEFAULT_INDEX"] == "https://example.invalid/simple"
+
+
+def test_worktree_status_bundle_uses_selected_engine_contract(monkeypatch):
+    bundle = {"worktree_id": "wt-selected", "facts": {"claims": {"value": None}}}
+    calls = []
+    monkeypatch.setattr(
+        ec, "run_json",
+        lambda project, args, **kw: calls.append((project, args)) or bundle,
+    )
+    assert cc.worktree_status_bundle("project", "wt-selected") is bundle
+    assert calls == [("project", [
+        "worktree-status-bundle", "--worktree", "wt-selected", "--json",
+    ])]
+
+
+@pytest.mark.parametrize("payload", [
+    {"worktree_id": "other", "facts": {}},
+    {"worktree_id": "wt-selected", "facts": []},
+    {"error": "not found"},
+    None,
+])
+def test_worktree_status_bundle_refuses_wrong_or_unavailable_identity(monkeypatch, payload):
+    monkeypatch.setattr(ec, "run_json", lambda *a, **k: payload)
+    with pytest.raises(ec.EngineError, match="selected worktree"):
+        cc.worktree_status_bundle(None, "wt-selected")
+
+
+def test_worktree_status_bundle_through_real_subprocess(tmp_path):
+    script = tmp_path / "example engine.py"
+    script.write_text(
+        "import json, sys\n"
+        "assert sys.argv[1:] == ['--project', 'example project', "
+        "'worktree-status-bundle', '--worktree', 'wt-selected', '--json']\n"
+        "print(json.dumps({'worktree_id': 'wt-selected', 'facts': {"
+        "'claims': {'value': {'resources': []}, 'confirmed': True, "
+        "'observed_at': 1700000000}}}))\n",
+        encoding="utf-8",
+    )
+    ec.set_engine_command([sys.executable, str(script)])
+    try:
+        bundle = cc.worktree_status_bundle("example project", "wt-selected")
+    finally:
+        ec.set_engine_command(None)
+    assert bundle["facts"]["claims"]["value"]["resources"] == []
 
 
 def test_engine_environment_preserves_differently_cased_posix_names(monkeypatch):

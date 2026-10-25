@@ -49,6 +49,7 @@ _KNOWN_KEYS = frozenset(
         "filters",
         "evaluator",
         "owner",
+        "title",
         "description",
         "runtime_generation",
         "transition_group",
@@ -263,6 +264,7 @@ class ProfileDeclaration:
     source_path: str | None = None
     plugin_version: str | None = None
     activation_scopes: tuple[str, ...] = ()
+    title: str | None = None
 
     def to_supervise_args(self) -> list[str]:
         """Render the equivalent ``agent-dispatch supervise`` args (lossless).
@@ -608,6 +610,18 @@ def _load_label_max_attempts(value: object) -> dict[str, int]:
     return out
 
 
+def _load_title(value: object) -> str | None:
+    if value is not None and (
+        not isinstance(value, str) or not value.strip() or len(value) > 200
+        or any(
+            ord(character) < 32 or 127 <= ord(character) <= 159 or character in "\u2028\u2029"
+            for character in value
+        )
+    ):
+        raise RegistrarError("title: expected nonempty single-line text of at most 200 characters")
+    return value
+
+
 def load_declaration(
     data: Mapping, *, allow_plugin_companion: bool = False
 ) -> ProfileDeclaration:
@@ -640,6 +654,7 @@ def load_declaration(
         v = data.get(opt_key)
         if v is not None and not isinstance(v, str):
             raise RegistrarError(f"{opt_key}: expected a string, got {v!r}")
+    title = _load_title(data.get("title"))
 
     kind = data.get("kind", "supervised-lane")
     if not isinstance(kind, str):
@@ -658,6 +673,7 @@ def load_declaration(
             "spec",
             "filters",
             "owner",
+            "title",
             "description",
             "runtime_generation",
             "transition_group",
@@ -706,6 +722,7 @@ def load_declaration(
             spec=dict(spec),
             filters=_load_filters(data.get("filters")),
             owner=data.get("owner"),
+            title=title,
             description=data.get("description"),
             runtime_generation=runtime_generation,
             transition_group=transition_group,
@@ -759,6 +776,7 @@ def load_declaration(
         filters=_load_filters(data.get("filters")),
         evaluator=evaluator,
         owner=data.get("owner"),
+        title=title,
         description=data.get("description"),
     )
 

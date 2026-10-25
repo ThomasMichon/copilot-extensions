@@ -7,7 +7,7 @@ from dataclasses import replace
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from .registrar import ProfileDeclaration, RegistrarError, load_declaration
+from .registrar import ProfileDeclaration, RegistrarError, _load_title, load_declaration
 
 
 def _identity_origin_root(origin: Path | str, leaf_root: Path) -> str:
@@ -186,6 +186,8 @@ def expand_declaration_document(
             activation=activation,
             expected_context=expected_context,
         )
+    # Presentation metadata belongs to the document, not an embedded loop spec.
+    title = _load_title(data.pop("title", None))
     if data.get("kind") == "reviewer-loop":
         from .registrar_recipes import _absolutize_emitter_cwd
         from .reviewer_loops import expand_reviewer_loop
@@ -222,6 +224,9 @@ def expand_declaration_document(
             load_declaration(data, allow_plugin_companion=allow_plugin_companion),
         )
     return tuple(
-        _resolve_declaration_paths(declaration, directory)
+        _resolve_declaration_paths(
+            replace(declaration, title=title) if title is not None else declaration,
+            directory,
+        )
         for declaration in declarations
     )
