@@ -149,8 +149,8 @@ def _inspect(
         raise ProvisionError("owning payload does not declare a supported fixed provision recipe")
     if installer_action == "stamp-provision" and plugin != "agent-ssh":
         raise ProvisionError("stamp-to-selected-snapshot provisioning requires SSH")
-    if installer_action == "install" and plugin != "agent-logger":
-        raise ProvisionError("fixed install action requires Logger")
+    if installer_action == "install" and plugin not in ("agent-logger", "agent-bridge"):
+        raise ProvisionError("fixed install action requires Logger or Bridge")
     prefix = RECIPES[plugin]
     if plugin == "agent-bridge" and any(not (scripts / name).is_file() for name in BRIDGE_HELPERS):
         raise ProvisionError("Bridge first use requires its complete materialized installation helpers")

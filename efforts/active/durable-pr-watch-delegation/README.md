@@ -382,6 +382,10 @@ existing serving/consumer contract, not a second watcher or evaluator._
   before implementing a parallel opt-in v2 binding contract. Preserve strict v1
   wire/record compatibility, original identities and default native operation
   (confirmed by #8938; implementation and qualification remain below).
+- [x] Deliver the parallel v2 provider/client binding seam without changing v1
+  (#8945). Exact-head native source qualification passed 340 cases on each of
+  Linux and Windows; scoped Dispatch intent and normal coordinator selection
+  remain pending.
 - [ ] Implement and qualify current service/consumer binding at every replay
   operation, then wire explicit optional coordinator composition through its
   existing lifetime, active-route and credential owners. No configuration label
@@ -735,6 +739,30 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Merge scoped replay provider/client support
+
+- #8945 merged as `913a1a970ba982a3ebfdd0510ec4e8ae0beef478` from
+  approved head `dfedfefc2f74aff628d31a41b0311b7179b7e1f0`.
+  Copilot review `5642688345` approved without findings; all reviews and
+  review/issue comments were read. Required checks passed.
+- Exact-head native run `40183559810` passed 296 selected service/client cases
+  and 44 standalone cases on each of Linux and Windows, 340 per platform.
+  The real TLS/PoP path covers v1 compatibility, v2 expected-binding refusal,
+  post-discovery remapping, provider rollback without downgrade, disk restart
+  and original-ID recovery across policy/channel/cancellation loss. Synthetic
+  issuer/provider fixtures are not production credential or fleet proof.
+- The local expanded packet passed 295 cases before the final persisted-
+  namespace control; its final 38-case binding rerun and all 75 workflow-scope
+  controls passed. Fatal lint, install-contract, documentation consistency,
+  changed-module and whitespace gates passed. Only the existing manual
+  native lane expands; required CI gains no process matrix.
+- Re-read the parent Plan/Validation and current journal after merge. Managed
+  completion retained a backup and reconciled only the merged source commit.
+  Continue the scoped Dispatch durable-intent variant and explicit optional
+  coordinator composition. No service, credentials, runtime update, image or
+  deployment was enabled. Parent, independent evaluator, live provider,
+  installed and fleet acceptance remain open.
 
 ### 2026-10-25 - Merge the scoped replay selection contract
 

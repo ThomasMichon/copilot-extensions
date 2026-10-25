@@ -1470,7 +1470,7 @@ def _cmd_update(rest: list[str]) -> int:
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source
 
-    if not preflight_runtime_source():
+    if not preflight_runtime_source(suite=rest[:1] != ["--repair-engine"]):
         return 1
     prepared = prepare_update(rest)
     if prepared.exit_code:

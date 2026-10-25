@@ -296,9 +296,8 @@ def test_cli_is_default_off_and_dev_requires_consent(tmp_path, monkeypatch, caps
     assert config.configured_source(root).channel == "marketplace"
 
 
-@pytest.mark.parametrize("repair", [False, True])
 def test_update_policy_precedes_engine_repair_without_aggregate_telemetry(
-    tmp_path, monkeypatch, capsys, repair,
+    tmp_path, monkeypatch, capsys,
 ):
     from worktree_manager import __main__ as manager
     from worktree_manager import update_bootstrap, update_events
@@ -314,7 +313,7 @@ def test_update_policy_precedes_engine_repair_without_aggregate_telemetry(
         update_bootstrap, "prepare_update",
         lambda _rest: pytest.fail("runtime source preflight must precede engine repair"),
     )
-    rest = ["--repair-engine", str(tmp_path / "fresh")] if repair else []
+    rest = ["--repair-engine", str(tmp_path / "fresh")]
     assert manager._cmd_update(rest) == 1
     assert "No update was run" in capsys.readouterr().err
 

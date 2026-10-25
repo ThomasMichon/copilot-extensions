@@ -1,5 +1,6 @@
 # Installation driver lifecycle contract: vault-stamp-v1
 # Installation driver lifecycle contract: logger-install-v1
+# Installation driver lifecycle contract: bridge-install-v1
 # Installation driver lifecycle contract: ssh-command-v1
 # Installation driver lifecycle contract: logger-command-v1
 param(
@@ -56,8 +57,8 @@ switch -CaseSensitive ($plugin) {
 if ($InstallerAction -ceq 'stamp-provision' -and $plugin -cne 'agent-ssh') {
     throw 'Stamp-to-selected-snapshot provisioning requires SSH.'
 }
-if ($InstallerAction -ceq 'install' -and $plugin -cne 'agent-logger') {
-    throw 'Fixed install action requires Logger.'
+if ($InstallerAction -ceq 'install' -and $plugin -cnotin @('agent-logger', 'agent-bridge')) {
+    throw 'Fixed install action requires Logger or Bridge.'
 }
 if ($plugin -ceq 'agent-logger') {
     foreach ($helper in @(

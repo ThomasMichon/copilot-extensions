@@ -184,8 +184,10 @@ select a different account, local owner or second subscriber.
 
 The provider/client realization is documented in the
 [Gateway adapter](../../../plugins/agent-pull-requests/docs/watch-gateway.md#opt-in-scoped-v2).
-Scoped Dispatch durable intent and ordinary coordinator selection remain
-separate pending steps of this reviewed amendment.
+The [Dispatch consumer](../../../plugins/agent-dispatch/docs/delegated-service-replay.md)
+documents scoped durable intent and trusted programmatic coordinator selection.
+CLI/default startup still selects no remote backend; actual credential and
+deployment selection remain separate acceptance.
 
 The current optional embedding constructs a replay consumer, but the normal
 Dispatch `server.build_app` does not select one. Its v1 client's strict

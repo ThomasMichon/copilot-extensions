@@ -270,6 +270,15 @@ def owning_bridge(owning_codespaces):
         ).replace("agent_codespaces", "agent_bridge").replace(
             "AGENT_CODESPACES", "AGENT_BRIDGE",
         ), encoding="utf-8")
+    windows = payload / "scripts/install.ps1"
+    windows.write_text(windows.read_text().replace(
+        "@('provision', 'stamp')", "@('provision', 'stamp', 'install')",
+    ), encoding="utf-8")
+    posix = payload / "scripts/install.sh"
+    posix.write_text(posix.read_text().replace(
+        '"$1" == provision || "$1" == stamp',
+        '"$1" == provision || "$1" == stamp || "$1" == install',
+    ), encoding="utf-8")
     repository = Path(__file__).resolve().parents[3]
     shutil.copyfile(
         repository / "plugins/agent-bridge/payload-invocation.json",
