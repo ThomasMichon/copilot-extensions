@@ -37,6 +37,43 @@ def test_lifecycle_loads_single_file_procutil(tmp_path: Path) -> None:
     assert isinstance(raised.value, FileNotFoundError)
 
 
+@pytest.mark.parametrize("budget", [None, 10])
+def test_legacy_lifecycle_forwards_remaining_lock_budget(
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, budget: float | None,
+) -> None:
+    binding, primitive = binding_fixture["binding"], binding_fixture["primitive"]
+    lifecycle = binding._load_lifecycle()
+    moments = iter((100, 102))
+    monkeypatch.setattr(lifecycle, "time", SimpleNamespace(monotonic=lambda: next(moments)))
+    original = primitive._DirectoryLock
+    observed = []
+
+    def lock(path, **arguments):
+        observed.append(arguments.get("timeout_seconds"))
+        return original(path, **arguments)
+
+    monkeypatch.setattr(primitive, "_DirectoryLock", lock)
+    with lifecycle.legacy_lifecycle(
+        binding._rules(), primitive, reserve=False, lock_timeout=budget,
+        **binding_fixture["arguments"],
+    ) as lease:
+        lease.assert_owned()
+    assert observed == ([None] if budget is None else [8])
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
+@pytest.mark.parametrize("budget", [-1, float("nan"), float("inf")])
+def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict, budget: float) -> None:
+    binding = binding_fixture["binding"]
+    with pytest.raises(ValueError, match="finite and nonnegative"):
+        with binding._load_lifecycle().legacy_lifecycle(
+            binding._rules(), binding_fixture["primitive"], lock_timeout=budget,
+            **binding_fixture["arguments"],
+        ):
+            pytest.fail("Invalid deadline acquired publication custody")
+    assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
 @pytest.mark.parametrize("parent_exits", [False, True])
 def test_command_binding_deadline_stops_tree_before_releasing_admission(
@@ -458,6 +495,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
             "PLUGIN_DIR=\"$(dirname \"$SCRIPT_DIR\")\"\n"
             "INSTALL_DIR=\"$TEST_RUNTIME\"\nBIN_DIR=\"$INSTALL_DIR/bin\"\n"
             "LOCAL_BIN=\"$INSTALL_DIR/local-bin\"\nLINK_DIR=\"$INSTALL_DIR/.venv\"\n"
+            "_step() { :; }\n"
             "VENV_DIR=\"$INSTALL_DIR/versions/fixture\"\nVENV_PYTHON=\"$TEST_PYTHON\"\n"
             "SRC_VERSION=fixture\nSERVICE_NAME=fixture\n"
             "REMOVE_CONFIG=${TEST_REMOVE_CONFIG:-false}\nHAS_PROJECT=false\n"
@@ -509,6 +547,7 @@ def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> lis
         "function Get-SourceKind { param($PluginPath); 'marketplace' }\n"
         "function Write-ServiceHeader {}\nfunction Write-ServiceOk {}\n"
         "function Write-ServiceSkipped {}\nfunction Write-ServiceChanged {}\n"
+        "function Write-Step {}\n"
         "function Ensure-Uv { $true }\nfunction Ensure-UvIndex {}\n"
         "function Deploy-RuntimeResolvers { $true }\nfunction Deploy-GlobalBinstub {}\n"
         "function Ensure-InstallDir { param($Dir); [void][IO.Directory]::CreateDirectory($Dir) }\n"

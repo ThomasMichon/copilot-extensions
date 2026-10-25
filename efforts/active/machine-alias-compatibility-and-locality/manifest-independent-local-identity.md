@@ -101,8 +101,19 @@ customization. Older receipts remain unchanged; raw OS-derived owners can be
 reconstructed, while an unproven former custom owner still refuses rather than
 allocating a replacement. This sub-slice merged in #8852 after current-head
 approval and required CI, including unchanged legacy platform-override replay.
-Complete launch admission and creation-tail repair remain open, as do the rest
-of the source and installed validation gates below.
+Completed launch-admission replay merged in #8857 with the same receipt-bound
+compatibility, original allocation/nonce/relationship and receiving-namespace
+proof. Fresh/unstarted creation, first completion, Resume and actual seed
+writes retain ordinary mutation authority.
+
+The interrupted-tail source implementation now proves the original actual
+record, receiving project, nonce, Git checkout/branch, stopped state and retained
+New before bounded OS-derived naming compatibility. It independently checks
+the companion's receiving project and repeats original allocation/seed checks
+inside companion allocation. Existing parent/companion references remain
+unchanged; foreign owners, namespaces and changed intent refuse.
+This slice still needs review/merge. Complete registration and Manager
+entry-point proof and the installed validation gates below remain open.
 
 ## Validation Plan
 

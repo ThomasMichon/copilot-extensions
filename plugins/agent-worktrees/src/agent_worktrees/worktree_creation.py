@@ -153,6 +153,7 @@ def _carve_paired_knowledge(
     plat_short: str,
     machine_identity: WorktreeMachineIdentity | None = None,
     legacy_machine: str | None = None,
+    revalidate_creation: Callable[[], None] | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -184,6 +185,8 @@ def _carve_paired_knowledge(
         return None
     if not (res.requires_external and res.bound and res.path):
         return None
+    if revalidate_creation is not None:
+        revalidate_creation()
 
     from . import repos as repos_mod
 
@@ -320,6 +323,8 @@ def _carve_paired_knowledge(
                 f"{harness_worktree_path!r} branch={f'worktree/{harness_id}'!r}. "
                 "Remove it manually with `git worktree remove` if unwanted."
             ) from exc
+        if revalidate_creation is not None:
+            revalidate_creation()
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )

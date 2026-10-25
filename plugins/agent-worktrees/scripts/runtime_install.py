@@ -617,6 +617,7 @@ def settle_candidate(
 
         monitor_scope = cfg.install_dir().resolve() == root
         with governance.held(timeout=wait_timeout), ExitStack() as cutover_custody:
+            manifest = cutover_custody.enter_context(governance.manifest_publication(manifest))
             guard = cutover_guard
             if guard is None:
                 guard = cutover._acquire_cutover_lock(root / "status-monitor-routing")

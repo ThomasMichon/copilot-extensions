@@ -96,7 +96,8 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
     options = [
         git, "-C", str(root), "-c", f"core.hooksPath={hooks}",
-        "-c", "core.autocrlf=false", "-c", "commit.gpgsign=false",
+        "-c", "core.autocrlf=false", "-c", "core.longpaths=true",
+        "-c", "commit.gpgsign=false",
         "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
     ]
 
@@ -221,6 +222,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
 
         def signature(self):
             return {}
@@ -356,6 +358,7 @@ def test_publication_failure_retains_custody_through_observed_outcome(
     class Governance:
         def __init__(self, requested, payload):
             self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
 
         def signature(self):
             return {}

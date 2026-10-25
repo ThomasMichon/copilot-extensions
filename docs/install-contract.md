@@ -3697,6 +3697,30 @@ generations or silently downgrade to a plain package slot. Package provenance
 remains the declared package version; deployment evidence retains the full source
 identity, including when an explicit repair adds its own generation suffix.
 
+Worktrees retains the installed payload's command owner separately from those
+source inputs. Its Python publication binds the deployment manifest through
+the canonical legacy manifest-publication context, retaining the admitted
+command lease or publication lock through selection, commit and rollback.
+The resulting manifest includes the validated command receipt and completed
+lifecycle evidence, rather than replacing them with an unbound installed-build
+record. A prepared source artifact does not become the installation owner:
+the existing global command, runtime root and durable state remain addressed
+by the original installation identity. Namespaced publication retains its
+existing receipt and lock path.
+
+An installed Worktrees `dev-release` can restore a completed retained slot even
+when the original checkout and installed publisher are unavailable. Its exact
+completed-slot bootstrap validates the incumbent command receipt's normalized
+source, installation root and current environment, retaining the original
+publisher identity rather than attributing the bootstrap as a new source.
+Lifecycle evidence must be absent or complete for that same owner. Legacy
+publication custody precedes whole-operation cutover custody and is reused
+through nested settlement. This restoration does not override managed-deployment
+policy, admit unfinished lifecycle evidence, or grant ordinary source publishers
+permission to copy an incumbent receipt.
+Both legacy lock paths forward the caller's remaining wait budget; ordinary
+lifecycle admission consumes that same budget before acquisition.
+
 Reuse also runs an isolated installed-origin health probe under retention. Its
 historical, non-editable local origin remains attributable to this runtime's
 frozen-input staging root even after that build's snapshot is removed. Failed

@@ -241,6 +241,107 @@ def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
             yield governance, lease
 
 
+def test_manifest_binding_preserves_selected_installation_mode(publication_case, monkeypatch):
+    driver, root, _slot, owner, content, _identity = publication_case
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
+        installed = root.parent / ".copilot/installed-plugins/example/agent-worktrees"
+        shutil.copytree(owner, installed)
+        (root.parent / ".copilot/settings.json").write_text(json.dumps({
+            "extraKnownMarketplaces": {
+                "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+            },
+        }), encoding="utf-8")
+        owner = installed
+    raw = b'{"schema_version":3,"service":"agent-worktrees"}'
+    with admitted(driver, root, owner, content, monkeypatch) as (governance, lease):
+        previous = (root / "deploy-manifest.json").read_bytes()
+        with governance.manifest_publication(raw) as bound:
+            assert (root / "deploy-manifest.json").read_bytes() == previous
+            if governance.context:
+                assert bound == raw
+            else:
+                manifest = json.loads(bound)
+                assert Path(manifest["commandBinding"]["payloadRoot"]) == owner
+                assert manifest["commandLifecycle"] == {
+                    "version": 1, "state": "complete", "owner": lease.owner,
+                }
+        assert (root / "deploy-manifest.json").read_bytes() == previous
+
+
+@pytest.mark.parametrize("authority", ["source", "retained", "unattributed"])
+def test_legacy_release_owns_command_publication_before_cutover(
+    publication_case, monkeypatch, authority,
+):
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    driver, root, slot, owner, content, _identity = publication_case
+    if os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
+        pytest.skip("legacy command custody has no namespaced command owner")
+    binding = load(content / "scripts/command_binding.py", "release_custody_binding")
+    receipt = None
+    if authority != "unattributed":
+        installed = root.parent / ".copilot/installed-plugins/example/agent-worktrees"
+        shutil.copytree(owner, installed)
+        (root.parent / ".copilot/settings.json").write_text(json.dumps({
+            "extraKnownMarketplaces": {
+                "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+            },
+        }), encoding="utf-8")
+        owner = installed
+        initial = driver.Governance(root, owner)
+        binding.write_legacy_manifest(
+            initial.helper, {"schema_version": 3, "service": "agent-worktrees"},
+            payload_root=owner, plugin_id="agent-worktrees", legacy_root=root,
+        )
+        receipt = initial.helper.read_deployment_manifest(root / "deploy-manifest.json")["commandBinding"]
+    if authority == "retained":
+        owner.rename(owner.with_name("publisher-unavailable"))
+        bootstrap = slot / ".runtime-bootstrap"
+        shutil.copytree(content / "scripts", bootstrap)
+        monkeypatch.setattr(sys.modules[driver.Governance.__module__], "SCRIPTS", bootstrap)
+        owner = bootstrap
+    monkeypatch.setattr(sys, "prefix", str(slot))
+    expected = driver.Governance(root, owner).signature()
+    modes = load(content / "scripts/runtime_install_modes.py", "release_custody_modes")
+    monkeypatch.setattr(modes, "lifecycle", driver)
+    monkeypatch.setattr(driver, "_load_installed", lambda _slot: None)
+    lock_path = root.with_name(root.name + ".command-binding-publication.lock")
+    events = []
+
+    class Guard:
+        def release(self):
+            events.append("cutover-released")
+            assert (lock_path / "owner.json").is_file()
+
+    def acquire(*_args, **_kwargs):
+        assert (lock_path / "owner.json").is_file()
+        events.append("cutover-acquired")
+        return Guard()
+
+    def release(_root, _plugin, governance, *_args, **_kwargs):
+        assert events == ["cutover-acquired"]
+        held = governance.command_lock
+        assert held is not None
+        assert governance.publication_locks == ()
+        with governance.held():
+            assert governance.command_lock is held
+            with governance.manifest_publication(
+                b'{"schema_version":3,"service":"agent-worktrees"}',
+            ) as published:
+                assert json.loads(published).get("commandBinding") == receipt
+                held.assert_owned()
+        events.append("manifest-bound")
+        return {"restored": True}
+
+    monkeypatch.setattr(cutover, "_acquire_cutover_lock", acquire)
+    monkeypatch.setattr(modes, "_release", release)
+    assert modes.run_owned(
+        root, content, payload=owner, mode="dev-release", expected_governance=expected,
+    ) == {"restored": True}
+    assert events == ["cutover-acquired", "manifest-bound", "cutover-released"]
+    assert not lock_path.exists()
+
+
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["healthy", "publisher", "full-pin", "invalid-ack"])
 @pytest.mark.timeout(90)
@@ -304,6 +405,13 @@ def test_actual_native_callback_preserves_owner_and_selected_runtime(
                         assert (root / "bin").read_text() == "not a directory"
                         compact = re.sub(r"/+", "/", "".join(normalized.split()))
                         paths = ((root / "bin").as_posix(), _sh(root / "bin").strip("'"))
+                        if os.name == "nt" and shell == "sh":
+                            translated = subprocess.run(
+                                [executable, "-c", 'cygpath -u "$1"', "--", str(root / "bin")],
+                                capture_output=True, text=True, check=True, timeout=10,
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                            )
+                            paths += (translated.stdout.strip(),)
                         assert any("".join(path.casefold().split()) in compact for path in paths), diagnostic
                         assert ("directory" in normalized or "exists" in normalized or (
                             "could not find a part of the path" in normalized

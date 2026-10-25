@@ -49,8 +49,9 @@ Configuration adoption merged in #8786. Prospective opt-in tuples and bounded
 receiving/registration compatibility merged in #8812 after exact-head approval
 and passing required CI. Completed creation-key replay under later optional
 customization merged in #8852, preserving supported legacy platform overrides.
-Next is complete launch-admission replay and interrupted creation-tail
-compatibility; complete registration/Manager entry-point proof, qualified release
+Completed launch-admission replay merged in #8857 after current-head approval
+and required CI. Next is interrupted creation-tail compatibility; complete
+registration/Manager entry-point proof, qualified release
 and installed acceptance remain open. The parent effort remains Active.
 These source merges do not establish release, installation or default activation.
 

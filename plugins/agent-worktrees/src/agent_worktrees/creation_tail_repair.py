@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg, execution_spaces, finalize as fin, git_ops
+from . import creation_repair_identity
 from . import installer, knowledge_plugins, launch_admission, launch_seed_state, local_cache_refresh
 from . import output, permissions, repos, sessions, state_root, tracking
 from . import worktree_creation
@@ -41,12 +42,12 @@ def _same_repository(anchor: str, checkout: str, *, branch: str | None = None) -
 def _validate(
     config: cfg.Config, path: Path, seed_id: str | None, *,
     retained: tracking.WorktreeRecord | None = None,
+    retained_seed: launch_seed_state.LaunchSeed | None = None,
 ):
     execution_spaces.require_current_execution_space(config)
     if path.is_symlink():
         raise ValueError("tracking record symlink refused")
     record = tracking.load_record(path)
-    execution_spaces.require_record_mutation(record, config)
     if retained is not None and (
         any(getattr(record, field) != getattr(retained, field) for field in (
             "worktree_id", "repo", "branch", "worktree_path", "creation_nonce",
@@ -60,7 +61,6 @@ def _validate(
         raise ValueError("retained creation allocation identity changed during repair")
     if (
         record.worktree_id != path.stem or record.repo != config.repo_name
-        or not execution_spaces.require_owner_identity(record.execution_machine, config, canonical_ref=False)
         or record.platform != config.platform or record.platform != cfg.detect_platform()
         or record.kind != "session"
         or record.status != "active"
@@ -81,9 +81,15 @@ def _validate(
         raise ValueError("creation repair requires an unclaimed retained New intent")
     if seed_id is not None and seed.seed_id != seed_id:
         raise ValueError("retained New identity changed; inspect before retrying")
+    if retained_seed is not None and seed != retained_seed:
+        raise ValueError("retained New changed during creation recovery")
     error = cold_start_error(sessions.verify_worktree_active(record), "new")
     if error:
         raise ValueError(error)
+    expected_record = cfg.project_dir(config.repo_name) / "worktrees" / f"{record.worktree_id}.yaml"
+    if path.resolve() != expected_record.resolve() or path.resolve().parent != path.parent.resolve():
+        raise ValueError("creation repair requires the registered project's actual tracking record")
+    creation_repair_identity.require_retained_record(record, config)
     return record, seed
 
 
@@ -184,6 +190,8 @@ def _retained_sibling(
         }
         if any(getattr(child, field) != value for field, value in expected.items()):
             raise ValueError("retained paired allocation identity does not match")
+        if child.owner_ref is not None and child.owner_ref != harness_ref:
+            raise ValueError("retained paired allocation has a different parent owner")
         expected_path = Path(cfg.derive_worktree_root(root.path)) / knowledge_id
         if (
             Path(child.worktree_path).resolve() != expected_path.resolve()
@@ -205,6 +213,7 @@ def _pair_plan(config: cfg.Config, record: tracking.WorktreeRecord):
     allocation = None
     child = None
     if root.requires_external:
+        creation_repair_identity.require_companion_receiver(record, root)
         allocation = _allocation(record)
         child = _retained_sibling(config, record, root, *allocation)
         if existing is not None and existing.pair_kind == "worktree":
@@ -234,11 +243,11 @@ def _require_composition(result: dict) -> None:
 
 
 def _prepare_pair(
-    config: cfg.Config, record, path: Path, seed_id: str, plan, scope: ExitStack,
+    config: cfg.Config, record, path: Path, seed: launch_seed_state.LaunchSeed, plan, scope: ExitStack,
 ) -> None:
     root, existing, allocation, child = plan
     config = cfg.load_config()
-    record, _ = _validate(config, path, seed_id, retained=record)
+    record, _ = _validate(config, path, seed.seed_id, retained=record, retained_seed=seed)
     current_plan = _pair_plan(config, record)
     if (current_plan[0].repo, current_plan[0].path) != (root.repo, root.path):
         raise ValueError("knowledge binding changed during creation recovery")
@@ -257,11 +266,25 @@ def _prepare_pair(
                 target = Path(cfg.derive_worktree_root(root.path)) / knowledge_id
                 if target.exists():
                     raise ValueError("untracked paired checkout exists; do not allocate another")
+
+            def revalidate_creation() -> None:
+                fresh = cfg.load_config()
+                current, _ = _validate(
+                    fresh, path, seed.seed_id, retained=record, retained_seed=seed,
+                )
+                current_root, paired, _, companion = _pair_plan(fresh, current)
+                if (
+                    (current_root.repo, current_root.path) != (root.repo, root.path)
+                    or paired is not None or companion is not None
+                ):
+                    raise ValueError("original companion allocation changed before creation")
+
             stamp = worktree_creation._carve_paired_knowledge(
                 config, harness_id=record.worktree_id, timestamp=timestamp, suffix=suffix,
                 plat=record.platform, plat_short=platform,
                 machine_identity=record.machine_identity,
                 legacy_machine=record.machine if record.machine_identity is None else None,
+                revalidate_creation=revalidate_creation,
             )
             if stamp is None:
                 raise ValueError("paired creation did not establish its required companion")
@@ -277,7 +300,7 @@ def _prepare_pair(
         timeout=300, stale_after=3600,
     ))
     fresh = cfg.load_config()
-    current, _ = _validate(fresh, path, seed_id, retained=record)
+    current, _ = _validate(fresh, path, seed.seed_id, retained=record, retained_seed=seed)
     current_root, existing, _, child = _pair_plan(fresh, current)
     if (current_root.repo, current_root.path) != (root.repo, root.path):
         raise ValueError("knowledge binding changed during creation recovery")
@@ -295,7 +318,7 @@ def _prepare_pair(
         _require_composition(result)
         return
     fresh = cfg.load_config()
-    current, _ = _validate(fresh, path, seed_id, retained=record)
+    current, _ = _validate(fresh, path, seed.seed_id, retained=record, retained_seed=seed)
     current_root = state_root.resolve_state_root(fresh)
     if (current_root.repo, current_root.path) != (root.repo, root.path):
         raise ValueError("knowledge binding changed during creation recovery")
@@ -358,7 +381,9 @@ def targeted_doctor(args) -> int:
                 timeout=300, stale_after=3600,
             ), launch_admission.guard(path), ExitStack() as admission:
                 config = cfg.load_config()
-                record, seed = _validate(config, path, expected, retained=record)
+                record, seed = _validate(
+                    config, path, expected, retained=record, retained_seed=seed,
+                )
                 plan = _pair_plan(config, record)
                 root, _, allocation, _ = plan
                 if root.requires_external:
@@ -373,15 +398,15 @@ def targeted_doctor(args) -> int:
                 with step("Restoring creation permissions", worktree_id=identity):
                     _prepare_permissions(config.default_repo.anchor, record.worktree_path)
                 with step("Restoring creation pair", worktree_id=identity):
-                    _prepare_pair(config, record, path, seed.seed_id, plan, admission)
+                    _prepare_pair(config, record, path, seed, plan, admission)
                 with step("Restoring creation guidance", worktree_id=identity):
                     refreshed = local_cache_refresh.prepare_for_launch(record.worktree_path)
                     if refreshed.status != "ready":
                         raise ValueError(refreshed.diagnostic)
                 config = cfg.load_config()
-                current, retained_seed = _validate(config, path, seed.seed_id, retained=record)
-                if retained_seed != seed:
-                    raise ValueError("retained New changed during creation recovery")
+                current, _ = _validate(
+                    config, path, seed.seed_id, retained=record, retained_seed=seed,
+                )
                 current_plan = _pair_plan(config, current)
                 checks = _checks(current, current_plan)
                 if not all(checks.values()):

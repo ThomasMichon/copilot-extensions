@@ -931,6 +931,11 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
 - [ ] Wave 5: cross-platform, compatibility, clean-room, live-surface, and
       documentation acceptance; reconcile Phase 7 preset scope to avoid a
       second implementation.
+- [ ] Installation and Updates (#8877, `ticking-compass`): deliver the bounded
+      standing inventory and genuinely component-scoped durable updates in the
+      [Phase 5 slice](phase-5-configuration-workbench.md#installation-and-updates---bounded-vertical-slice-8877).
+      The operator request and Plan/Validation live there; #7028 maintenance,
+      #8545/#356 setup and all broader workbench waves retain existing owners.
 
 ### Phase 6 — Retire the bundled Picker (Done — the operator-visible end-state)
 - [x] Once the Manager Picker reaches parity (Phase 3), remove the in-plugin
@@ -2377,6 +2382,14 @@ No product, native, credential, host, process, service or resource operation
 is authorized by tracker consolidation.
 
 ## Journal
+
+### 2026-10-24 - Installation and Updates proposal
+
+- Claimed #8877's finite Phase 5 vertical slice as `ticking-compass`. Captured
+  the operator request verbatim in the canonical phase document and proposed
+  the corresponding Configurator vision extension and Plan/Validation.
+  Review/merge precedes runtime implementation. This does not complete Phase 5
+  or authorize background maintenance, native installation or rollout.
 
 - [2026-10-24 - Direct retained acceptance from #4096, #4098](<journal/2026/10.24 backlog-intake-85-86.md>)
 
