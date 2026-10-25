@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import io
+import logging
 import os
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
 from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS, REMOTE_MARKETPLACE_SOURCE_KINDS
@@ -206,7 +205,17 @@ def inventory_item(
             if member.is_symlink() or getattr(member.lstat(), "st_reparse_tag", 0):
                 break
             member = member.parent
-        if member != candidate or strict_json(path).get("name") != marketplace:
+        if member != candidate:
+            continue
+        try:
+            document = strict_json(path)
+        except (OSError, ValueError):
+            logging.getLogger("plugin-resolve").warning(
+                "%s native cache candidate is ineligible (invalid-catalog); "
+                "ordinary acquisition remains available", source,
+            )
+            continue
+        if document.get("name") != marketplace:
             continue
         catalog = load_marketplace(root)
         payload = plugin_dir(catalog, name) if catalog is not None else None
@@ -225,12 +234,19 @@ def inventory_item(
             candidate, "rev-parse", "--verify", "--end-of-options", selector + "^{commit}",
         ) != head):
             continue
-        content = subset(candidate, payload)
+        references: set[Path] = set()
+        try:
+            content = subset(candidate, payload, referenced_paths=references)
+            metadata, entry = publication_metadata(root, source)
+        except (OSError, ValueError):
+            logging.getLogger("plugin-resolve").warning(
+                "%s native cache candidate is ineligible (invalid-payload); "
+                "ordinary acquisition remains available", source,
+            )
+            continue
         relative_payload = payload.relative_to(candidate)
         paths = [str(path.relative_to(candidate)), str(relative_payload)]
-        with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
-            paths.extend(member.name for member in archive
-                         if not Path(member.name).is_relative_to(relative_payload))
+        paths.extend(str(member.relative_to(candidate)) for member in sorted(references))
         status = git(candidate, "status", "--porcelain", "-z", "--untracked-files=all",
                      "--ignored=matching", "--", *paths)
         if status is None or any(_allowed(Path(row[3:])) for row in status.split("\0") if row):
@@ -238,7 +254,6 @@ def inventory_item(
         if git(candidate, "ls-files", "--error-unmatch", "--",
                str(path.relative_to(candidate))) is None:
             continue
-        metadata, entry = publication_metadata(root, source)
         matches.append({
             "marketplace": definition,
             "inventory": {

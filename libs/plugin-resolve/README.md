@@ -256,7 +256,12 @@ retaining the complete Git declaration in repository settings. Its commit and
 filtered payload digest are rechecked under the publication lock; effectively
 enabled sources are qualified again before any settings are written. Ambiguous
 clones refuse. Missing or incompatible evidence follows ordinary isolated
-installation; copy mode and conflicting global registrations retain that path.
+installation; malformed/unreadable catalogs and invalid payload closures are
+reported as ineligible cache candidates rather than blocking that fallback.
+Referenced sibling files and directories remain in the qualification path set
+even when missing from the current tree, so deleted required assets cannot
+disappear from the Git status check. Copy mode and conflicting global
+registrations retain ordinary acquisition.
 This neither enables a plugin globally nor pins native startup to the cache's
 manifest version. The execution owner's existing startup-readiness barrier
 still gates task delivery.

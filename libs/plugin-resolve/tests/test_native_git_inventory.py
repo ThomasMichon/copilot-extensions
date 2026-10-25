@@ -286,3 +286,81 @@ def test_native_git_inventory_revalidates_before_settings_publication(
     with pytest.raises(ValueError, match="inventory changed|catalog was not prepared"):
         prepare(request(target, definition), environment=environment)
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["json", "unreadable"])
+def test_bad_unrelated_cache_does_not_block_valid_native_reuse(
+    native_inventory,
+    monkeypatch,
+    failure,
+):
+    import plugin_resolve.inventory as inventory
+
+    target, _home, clone, definition, environment = native_inventory
+    other = clone.with_name("aaa-unrelated") / "catalog-a"
+    other.mkdir(parents=True)
+    catalog = other / "marketplace.json"
+    if failure == "json":
+        catalog.write_text("{")
+    else:
+        atomic_json(catalog, {"name": "unrelated"})
+        original = inventory.strict_json
+
+        def unreadable(path, **kwargs):
+            if path == catalog:
+                raise PermissionError("synthetic unreadable cached catalog")
+            return original(path, **kwargs)
+
+        monkeypatch.setattr(inventory, "strict_json", unreadable)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    assert prepare(request(target, definition), environment=environment) == {
+        "helper@git-fixture": str(clone / "catalog-a" / "helper"),
+    }
+
+
+@pytest.mark.parametrize("failure", ["json", "closure"])
+def test_invalid_selected_cache_falls_back_to_ordinary_installation(
+    native_inventory,
+    monkeypatch,
+    caplog,
+    failure,
+):
+    target, _home, clone, definition, environment = native_inventory
+    if failure == "json":
+        (clone / "catalog-a" / "marketplace.json").write_text("{")
+    else:
+
+        def linked_payload(*args, **kwargs):
+            raise ValueError("Linked payload paths cannot be reflected")
+
+        monkeypatch.setattr("plugin_resolve.reflection.subset", linked_payload)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert "invalid-catalog" in caplog.text or "invalid-payload" in caplog.text
+
+
+@pytest.mark.parametrize("reference", ["file", "directory"])
+def test_deleted_required_sibling_asset_prevents_native_cache_reuse(
+    native_inventory,
+    monkeypatch,
+    reference,
+):
+    target, _home, clone, definition, environment = native_inventory
+    support = clone / "support"
+    support.mkdir()
+    (support / "guide.md").write_text("required guide")
+    (support / "retained.md").write_text("directory still exists")
+    scripts = clone / "catalog-a" / "helper" / "scripts"
+    scripts.mkdir()
+    (scripts / "use.txt").write_text(
+        "../../support/guide.md" if reference == "file" else "../../support",
+    )
+    git(clone, "add", ".")
+    git(clone, "commit", "--quiet", "-m", "required sibling fixture")
+    definition["source"]["ref"] = "HEAD"
+    (support / "guide.md").unlink()
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
