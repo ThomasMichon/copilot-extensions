@@ -440,6 +440,16 @@ or a reason to create a daemon.
   qualified the real cache in 15.89 seconds; replacing it with exact ancestor
   queries restored read-only qualification to 1.50 seconds without changing
   deadlines or scanning unrelated working-tree content.
+- The root/ancestor head passed the full contained suite: 370 tests, three
+  explicit platform skips, 601.39 seconds and clean host-state readback.
+  The next review identified older-Python symlink-loop exceptions escaping
+  optional cache qualification.
+- Four failing-first controls reproduced `RuntimeError` from candidate/catalog
+  resolution, declared-source lookup and required-asset reflection. Those
+  candidate-input boundaries now report ineligible cache evidence and retain
+  ordinary installation across supported Python versions. The inventory
+  packet passes 70 cases with three explicit native-POSIX skips; a real POSIX
+  cyclic-source control is included rather than claimed exercised on Windows.
 
 ### 2026-10-25 - Recover the retained allocation and qualify native availability
 

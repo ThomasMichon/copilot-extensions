@@ -289,6 +289,9 @@ without preventing ordinary installation.
 That guard includes the initial cache-root directory check as well as enumeration.
 Permission errors while inspecting or resolving an individual candidate are
 reported as ineligible catalog evidence and do not abort that fallback.
+Resolution loops also remain ineligible evidence on Python versions before
+3.13, where `Path.resolve()` reports `RuntimeError` rather than `OSError`.
+This applies to candidate roots, declared payload lookup and required assets.
 Git filename output decodes losslessly with `surrogateescape`, so non-UTF-8
 POSIX filenames do not abort the optional qualification path.
 Catalog plugin entries must be objects and owner/location metadata must be valid.

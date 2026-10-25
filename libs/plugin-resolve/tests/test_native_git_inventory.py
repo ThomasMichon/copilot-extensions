@@ -356,7 +356,7 @@ def test_bad_unrelated_cache_does_not_block_valid_native_reuse(
     }
 
 
-@pytest.mark.parametrize("failure", ["json", "closure"])
+@pytest.mark.parametrize("failure", ["json", "closure", "cycle"])
 def test_invalid_selected_cache_falls_back_to_ordinary_installation(
     native_inventory,
     monkeypatch,
@@ -369,6 +369,8 @@ def test_invalid_selected_cache_falls_back_to_ordinary_installation(
     else:
 
         def linked_payload(*args, **kwargs):
+            if failure == "cycle":
+                raise RuntimeError("synthetic pre-3.13 asset symlink loop")
             raise ValueError("Linked payload paths cannot be reflected")
 
         monkeypatch.setattr("plugin_resolve.reflection.subset", linked_payload)
@@ -870,3 +872,46 @@ def test_cache_root_permission_error_preserves_installation_fallback(
     with pytest.raises(AssertionError, match="cold installation"):
         prepare(request(target, definition), environment=environment)
     assert "unreadable-cache" in caplog.text
+
+
+@pytest.mark.parametrize("path_kind", ["candidate", "catalog", "payload"])
+def test_legacy_python_cyclic_path_error_preserves_installation_fallback(
+    native_inventory,
+    monkeypatch,
+    caplog,
+    path_kind,
+):
+    target, _home, clone, definition, environment = native_inventory
+    denied = {
+        "candidate": clone,
+        "catalog": clone / "catalog-a",
+        "payload": clone / "catalog-a" / "helper",
+    }[path_kind]
+    original = Path.resolve
+
+    def cyclic(path, *args, **kwargs):
+        if path == denied:
+            raise RuntimeError("synthetic pre-3.13 symlink loop")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", cyclic)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)
+    assert "invalid-catalog" in caplog.text or "invalid-payload" in caplog.text
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX unprivileged symbolic-link creation")
+def test_native_cyclic_source_links_preserve_installation_fallback(
+    native_inventory,
+    monkeypatch,
+):
+    target, _home, clone, definition, environment = native_inventory
+    selected = clone / "catalog-a" / "helper"
+    selected.rename(selected.with_name("retained-helper"))
+    loop = selected.with_name("loop")
+    selected.symlink_to(loop, target_is_directory=True)
+    loop.symlink_to(selected, target_is_directory=True)
+    monkeypatch.setattr("plugin_resolve.preparation._install", no_install)
+    with pytest.raises(AssertionError, match="cold installation"):
+        prepare(request(target, definition), environment=environment)

@@ -243,7 +243,8 @@ def inventory_item(
                 continue
             _require_unlinked_path(candidate, path)
             document = strict_json(path)
-        except (OSError, ValueError):
+        # Path.resolve() reports link loops as RuntimeError before Python 3.13.
+        except (OSError, ValueError, RuntimeError):
             logging.getLogger("plugin-resolve").warning(
                 "%s native cache candidate is ineligible (invalid-catalog); "
                 "ordinary acquisition remains available", source,
@@ -265,8 +266,15 @@ def inventory_item(
                 "ordinary acquisition remains available", source,
             )
             continue
-        catalog = load_marketplace(root)
-        payload = plugin_dir(catalog, name) if catalog is not None else None
+        try:
+            catalog = load_marketplace(root)
+            payload = plugin_dir(catalog, name) if catalog is not None else None
+        except RuntimeError:
+            logging.getLogger("plugin-resolve").warning(
+                "%s native cache candidate is ineligible (invalid-payload); "
+                "ordinary acquisition remains available", source,
+            )
+            continue
         if payload is None:
             continue
         top = git(candidate, "rev-parse", "--show-toplevel")
@@ -354,7 +362,7 @@ def inventory_item(
                     raise ValueError("Native cache closure contains unverified files")
             metadata, entry = publication_metadata(root, source)
             catalog_metadata(source, plugin_manifest(payload), metadata, entry)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
             logging.getLogger("plugin-resolve").warning(
                 "%s native cache candidate is ineligible (invalid-payload); "
                 "ordinary acquisition remains available", source,
