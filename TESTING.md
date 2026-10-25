@@ -369,6 +369,13 @@ The manual `installation-context-acceptance.yml` selector
 launch-request contracts on isolated Linux and Windows runners. Each platform
 also exercises its actual selected-phase shell front doors, including missing
 engine refusal without repair downloads or implicit provisioning.
+The packet also routes the real outer runtime planner/executor through Bridge's
+native completed-slot installer functions and shared slot evidence, with
+healthy-current, older-serving, refused-probe and failed-transition controls.
+It verifies one invocation, no build/install fallback and unchanged completed
+content. Windows exercises available PowerShell 5.1 and PowerShell 7 hosts;
+POSIX exercises Bash. Side-effecting service seams are synthetic: this does not
+qualify a live installed daemon or fleet preservation.
 
 ```bash
 gh workflow run installation-context-acceptance.yml \

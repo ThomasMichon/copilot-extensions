@@ -2,6 +2,8 @@
 
 This is the explicit update path, not the pull-free session-launch planner or
 a prepare/activate adapter. Installer ownership and execution stay unchanged.
+Bridge's installer also reconciles serving state when completed content is
+current; the outer updater must not bypass that phase.
 """
 
 from __future__ import annotations
@@ -140,7 +142,7 @@ def plan_registered(
         dver = _deployed_version(step)
     except (OSError, ValueError) as error:
         return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
-    if not force and pver and dver and reconcile._versions_equal(dver, pver):
+    if name != "agent-bridge" and not force and pver and dver and reconcile._versions_equal(dver, pver):
         return dataclasses.replace(step, status="SKIPPED (current)")
     context = environment.get("COPILOT_EXTENSIONS_CONTEXT")
     if context is not None:
@@ -220,7 +222,7 @@ def plan_module(
         dver = _deployed_version(step)
     except (OSError, ValueError) as error:
         return dataclasses.replace(step, status=f"source deployment receipt invalid: {error}")
-    if not force and pver and dver and pver == dver:
+    if name != "agent-bridge" and not force and pver and dver and pver == dver:
         return dataclasses.replace(step, status="SKIPPED (current)")
     # Modules historically use install/update even in a selected cell. Never
     # replace that contract with the registered-runtime init/cell-provision path.
@@ -240,7 +242,8 @@ def plan_module(
         return dataclasses.replace(step, status=runtime.installer_deadline_status(error))
     return dataclasses.replace(
         step, argv=tuple([*shell_prefix, *update_args]),
-        fallback_argv=tuple([*shell_prefix, "install"]), deadline_s=deadline,
+        fallback_argv=() if name == "agent-bridge" else tuple([*shell_prefix, "install"]),
+        deadline_s=deadline,
     )
 
 

@@ -129,6 +129,12 @@ unrelated project's marketplace context. Unknown selections refuse before auth
 discovery. Engine runtime phases require an installer with targeted-update
 support and suppress adopted Manager recovery as well as local integration.
 
+An eligible Bridge runtime reaches its existing installer even when its
+deployment receipt is current. That owner reuses completed content and
+separately probes/reconciles the serving runtime; slot completion is not
+serving-current evidence. A failed Bridge update never falls back to `install`
+and hides a refused serving transition. Other runtime quick-skips are unchanged.
+
 A successful selected phase is **partial**, not full-update convergence.
 Detached/status JSON includes `phase`, `plugins` and `full_update: false`;
 telemetry does not report the whole suite as verified-current. Run ordinary

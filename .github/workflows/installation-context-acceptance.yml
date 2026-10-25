@@ -166,6 +166,11 @@ jobs:
           --test-file tests/test_installation_updates.py
           --test-file tests/test_installer_powershell51.py
           -k "engine_phase or failed_payload_refresh or execution_artifact or recovery_matches or python_runtime_resolves_one_uv_application"
+      - name: Qualify outer updater through native Bridge completed-slot serving owner
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_serving_reconcile.py
       - name: Qualify POSIX selected-phase front doors
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Linux' }}
         run: >-
