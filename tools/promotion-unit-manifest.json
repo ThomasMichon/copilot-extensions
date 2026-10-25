@@ -1795,7 +1795,7 @@
         "tools/promotion_unit_tests/test_source_profile_derivation.py::test_marker_probe_disables_site_initialization"
     ],
     "sources": {
-        "tools/build_python_artifacts.py": "86f9ab54315d7cf01fbe92313e2f726e9743cb46bf21703a3dacc10aafefe748",
+        "tools/build_python_artifacts.py": "77c31cf6017886a0f3328ea5bbf965ca0ccac2936b030409ed33327e1781673e",
         "tools/seasoned_uv.py": "a4e0cf269da3eff0833188b69b5ccfe3445f17fc8a3b814923273559dc0c31d9",
         "tools/runtime_source_lock.py": "4c9ddc1411c2422701b9045257a3bd751b3ae6ff26877b37ff5840d34db4f0ec",
         "libs/installer-engine/installer_wheel_snapshot.py": "56822ac98aeff95e92bffbb23ed6fe36d7ae6228674a673c3d50dec504503e29",
@@ -1919,7 +1919,8 @@
         "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-        "tools/promotion_python_artifacts.py": "270066fb3d7532f38baf236bb9cd1139e167a113c0e0f306dc2080de15ffd0e0",
+        "tools/plugin_runtime_resources.py": "e0b89a0d1f230d73c53fbc9d6c9315a660130076e2af48726fef133bfa6c1824",
+        "tools/promotion_python_artifacts.py": "b813dbf0a8bc779c7c1922cc299237b9104baf30d7b2f5de8b01f75d0b3b59bd",
         "tools/promotion_unit_contract.py": "fd2128e4a492e5307533361c1443bb3e6623b338154d9c0ba8e9f4475029cfd5",
         "tools/promotion_unit_effects.py": "dd6f9737871e9bc6f2ae98f180529e6b5d48479df625f97326a882cfafbfc991",
         "tools/promotion_unit_packet.py": "363c6c6288c4d733c0ace951e851eca12d236dcb4d1e4dfbbbf8cf73dcc7cbab",

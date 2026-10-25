@@ -180,11 +180,13 @@ def test_unvalidated_build_hooks_fail_before_toolchain_resolution(tmp_path, monk
 
 
 def test_current_repository_packages_satisfy_static_build_admission():
+    from plugin_runtime_resources import build_inputs
+
     root = Path(artifacts.__file__).resolve().parent.parent
     projects = [path for tree in ("plugins", "libs") for path in (root / tree).rglob("pyproject.toml")]
     assert projects
     for project in projects:
-        artifacts.validate_static_build(project.parent)
+        build_inputs(project.parent, root=root)
 
 
 @pytest.mark.parametrize("case", [
