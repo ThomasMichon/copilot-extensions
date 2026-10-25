@@ -690,6 +690,21 @@ def _auto_clean_grace_secs() -> float:
     return float(gc_mod.SESSION_GC_GRACE_SECS)
 
 
+def _needs_session_cleanup(record: tracking.WorktreeRecord) -> bool:
+    if record.kind in tracking.MANAGED_KINDS or record.status == "archived":
+        return False
+    if (
+        record.status != "finalized" or not record.reaped_at
+        or (record.worktree_path and Path(record.worktree_path).exists())
+    ):
+        return True
+    # A retained tombstone needs another pass only when BOTH retirement can advance.
+    from . import paired_claims
+
+    sibling = paired_claims.reciprocal_sibling(record) if record.is_paired else None
+    return bool(sibling is not None and sibling.status == "finalized" and sibling.reaped_at)
+
+
 def sweep_finished_session_worktrees(
     *, dry_run: bool = False, min_idle_secs: float | None = None, now: float | None = None
 ) -> dict:
@@ -716,6 +731,12 @@ def sweep_finished_session_worktrees(
     must be fast and offline-safe), so a merge not yet locally provable simply
     waits for a later pass -- the sweep never collects on unproven state.
 
+    Already archived records and reaped, absent finalized checkouts are not
+    rescanned unless an exact reciprocal sibling is also reaped and finalized.
+    That permits paired record retirement without repeatedly cleaning history.
+    Selection only excludes work; every selected record still receives the
+    existing fresh, lock-held safety revalidation.
+
     Returns ``{removed: [{id, reason}], skipped: [{id, reason}]}``. Never raises
     for control-flow; the caller wraps it best-effort. The kill-switch
     (:func:`auto_clean_enabled`) is checked by the cadence callers, not here, so
@@ -728,9 +749,7 @@ def sweep_finished_session_worktrees(
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
-    records = [
-        r for r in tracking.list_records(tracking_path) if r.kind not in tracking.MANAGED_KINDS
-    ]
+    records = [r for r in tracking.list_records(tracking_path) if _needs_session_cleanup(r)]
     if not records:
         return result
 

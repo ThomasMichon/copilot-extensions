@@ -152,6 +152,8 @@ def test_pair_retirement_preserves_sibling_with_reopened_pr(
     )
     record = make_record(tmp_path, wt_id="parent")
     sibling = make_record(tmp_path, wt_id="sibling")
+    record.repo = "parent"
+    sibling.repo = "child"
     record.pair_id = sibling.pair_id = "pair"
     record.pair_role = "harness"
     sibling.pair_role = "knowledge"
@@ -306,8 +308,9 @@ def test_each_pair_identity_change_defers_retirement(
     record.pair_ref = "m/other/peer"
     path = tmp_path / "tracking" / f"{record.worktree_id}.yaml"
     tracking.save_record(record, path)
-    mutate_record(path, lambda latest: setattr(latest, field, value))
     original = path.read_bytes()
+    # A stale caller disagrees with the authoritative pair under the retirement lock.
+    setattr(record, field, value)
 
     assert tracking.retire_record(record, path.parent) is False
     assert path.read_bytes() == original
