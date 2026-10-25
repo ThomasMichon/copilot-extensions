@@ -148,6 +148,14 @@ def test_unavailable_does_not_render_zero_or_spurious_agents():
     assert "Starts / completions: unknown" in text and "Subagent evidence: unknown" in text
 
 
+def test_missing_snapshot_field_renders_unknown_instead_of_raising():
+    value = observation()
+    value["source"].pop("snapshot_bytes")
+    text = labels(topology_view({}, {}, value))
+    assert "malformed-observation" in text
+    assert "Tool records: unknown" in text
+
+
 def test_observed_empty_agents_are_not_runtime_absence():
     value = observation()
     value["subagents"]["agents"] = []

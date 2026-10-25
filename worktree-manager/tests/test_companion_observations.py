@@ -111,6 +111,15 @@ def test_unavailable_provider_without_snapshot_retains_its_envelope(monkeypatch)
     }
 
 
+def test_missing_snapshot_field_is_not_a_nullable_snapshot(monkeypatch):
+    value = envelope()
+    value["source"].pop("snapshot_bytes")
+    monkeypatch.setattr(ec, "run_json", lambda *a, **kw: value)
+    assert observations.read_session_observations(None, "session-a") == {
+        "observation": None, "error": "malformed-observation",
+    }
+
+
 @pytest.mark.parametrize(("path", "bad"), [
     (("contract",), "other-provider"),
     (("version",), True), (("version",), 2),

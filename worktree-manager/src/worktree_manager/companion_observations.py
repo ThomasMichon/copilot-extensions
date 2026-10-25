@@ -69,6 +69,7 @@ def observation_error(value, session_id: str | None = None) -> str | None:
     source, history, issues = (value.get(key) for key in ("source", "history", "issues"))
     if (
         not isinstance(source, dict) or source.get("kind") != "copilot.events.jsonl"
+        or "snapshot_bytes" not in source
         or not (source.get("snapshot_bytes") is None or _count(source["snapshot_bytes"]))
         or not _count(source.get("observed_bytes"))
         or not isinstance(history, dict) or history.get("scope") != "retained_file"
