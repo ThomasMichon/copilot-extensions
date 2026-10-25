@@ -15,17 +15,34 @@ from worktree_manager.launch_attempts import LaunchAttempts
 
 
 @pytest.mark.parametrize("include_input", [False, True])
-def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, include_input):
+def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, monkeypatch, include_input):
     raw = os.environ.get("WORKTREE_MANAGER_TEST_ENGINE_ARGV")
     if not raw:
         pytest.skip("Explicit prepared engine argv required for cross-runtime source qualification")
     engine = json.loads(raw)
     assert isinstance(engine, list) and engine and all(isinstance(part, str) for part in engine)
     assert Path(engine[0]).is_absolute() and Path(engine[0]).is_file()
+    redirected_git = tmp_path / "unselected.git"
+    monkeypatch.setenv("GIT_DIR", str(redirected_git))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "unselected-worktree"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "unselected-index"))
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith(("AGENT_", "COPILOT_", "WORKTREE_", "PYTHON", "GIT_"))
+    }
+    environment.update({
+        "AGENT_HOME": str(tmp_path), "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
+        "PYTHONUTF8": "1",
+    })
     flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
     anchor = tmp_path / "anchor"
     anchor.mkdir()
-    subprocess.run(["git", "init", "--quiet", str(anchor)], check=True, timeout=15, **flags)
+    subprocess.run(
+        ["git", "init", "--quiet", str(anchor)],
+        env=environment, check=True, timeout=15, **flags,
+    )
+    assert (anchor / ".git").is_dir()
+    assert not redirected_git.exists()
     project = tmp_path / ".example"
     project.mkdir()
     (project / "config.yaml").write_text(json.dumps({
@@ -48,14 +65,6 @@ def test_actual_manager_to_selected_engine_reads_without_mutation(tmp_path, incl
         is_local=True, prompt=prompt, options={"no_mux": True},
     )
     before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-    environment = {
-        key: value for key, value in os.environ.items()
-        if not key.startswith(("AGENT_", "COPILOT_", "WORKTREE_", "PYTHON"))
-    }
-    environment.update({
-        "AGENT_HOME": str(tmp_path), "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
-        "PYTHONUTF8": "1",
-    })
     script = textwrap.dedent("""
         import json, sys
         from pathlib import Path
