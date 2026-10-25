@@ -235,3 +235,38 @@ Keeping a version directory alive is not an acceptable substitute.
 - This change proposes the bounded removal/compatibility/validation contract
   for review before implementation. No uninstaller, runtime capability,
   process-survival acceptance or host rollout has been implemented by it.
+
+### 2026-10-24 - Linux uninstall prerequisite
+
+- The proposal and standing-intent amendment merged in #8675. The effort is
+  active; the complete installation-survival contract remains open.
+- A real disposable installation reproduced #8410: Bash rejected the
+  script-scope `local` declaration during tool-binstub removal. The bounded
+  repair removes that declaration without changing uninstall policy.
+- Validated code snapshot `806bccf01f793dbd9eaf73dad513e9f286142bde` through
+  native canonical source materialization in two fresh Linux clean rooms.
+  The real-branch regression executed with one pass and no skips. Actual
+  Worktrees and Manager installations passed; the complete Worktrees
+  uninstall exited zero and removed its previously inventoried versions,
+  Linux binstub, update helpers and deploy manifest.
+- Labelled disposable project configuration, session JSON and tmux
+  configuration retained identical hashes. Manager remained unchanged.
+  Shared selectors, runtime resolvers, metadata and Windows-specific shims
+  remain explicitly outside a complete-root-erasure claim. Both owned
+  containers were removed; no host installation or service was changed.
+- This evidence qualifies only the Linux uninstall prerequisite. Manager
+  teardown, reinstall, interactive Copilot and TTY continuity, handler
+  adoption, live update and native Windows survival remain unqualified.
+  The native Windows launch baseline is still failing; no fixture-only
+  success or timeout/containment relaxation closes that gate.
+
+### 2026-10-24 - Refreshed Linux prerequisite validation
+
+- After the upstream update, repeated the same packet at exact code snapshot
+  `7211b0ad7a60b3a72ade8f18962b8b5281f5f385`: one regression pass without
+  skips, both real installs successful, actual Worktrees uninstall exit zero,
+  unchanged labelled durable-state hashes and complete owned-container cleanup.
+- Preserved the separately merged Manager uninstall decision/contract while
+  resolving only the effort documentation overlap. The Bash repair is unchanged.
+  Supported Manager uninstall, actual interactive survival and the parent
+  effort's remaining gates are not completed by this prerequisite.

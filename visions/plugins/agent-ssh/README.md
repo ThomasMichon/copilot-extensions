@@ -5,7 +5,7 @@
   rather than merely borrowing whatever SSH profiles happen to already exist.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-10-22
+- **Last revised:** 2026-10-24
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's [`README`](../../../plugins/agent-ssh/README.md),
   `docs/transport-provider-contract.md`, and its skills (`agent-ssh`,
@@ -187,6 +187,20 @@ retains provenance, freshness and coverage rather than becoming another editable
 location registry.
 
 ## Features
+
+### explicit-peer-enrollment-approval
+An explicitly selected transport admission policy can require an already
+enrolled peer to approve the exact requesting machine's public identity before
+it becomes an active mesh member. Authentication, a declared target and a
+pending request do not substitute for that approval. Approval remains bound to
+the authenticated approver and the unchanged target identity; self-approval,
+stale requests and implicit key replacement are refused.
+
+First-peer bootstrap and recovery remain distinct, explicitly selected
+operations through their configured authority. An unavailable approver never
+silently activates recovery. Credential custody stays with its existing owner,
+and no machine receives another machine's private identity. Transports without
+this selected policy retain their existing admission behavior.
 
 ### conventional-repository-connectivity
 An operator's declared repository topology is discoverable through the existing
