@@ -45,6 +45,7 @@ if (-not $hostExe) {
 
 $runtimeRoot = $legacyRoot
 $context = ''
+$copilotHome = Join-Path $(if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }) '.copilot'
 $durableHome = Join-Path $env:USERPROFILE '.copilot-extensions'
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
     $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
@@ -98,7 +99,8 @@ try {
         '-LegacyRoot', $legacyRoot
     )
     $portableStatusArgs = @(
-        'status', '--payload-root', $payloadRoot, '--plugin-id', 'agent-containers',
+        'status', '--copilot-home', $copilotHome,
+        '--payload-root', $payloadRoot, '--plugin-id', 'agent-containers',
         '--legacy-root', $legacyRoot
     )
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
@@ -178,7 +180,8 @@ try {
             '-ExpectedPayloadRoot', $payloadRoot
         )
         $portableValidationArgs = @(
-            'validate', '--context', $context, '--durable-home', $validationDurableHome,
+            'validate', '--copilot-home', $copilotHome,
+            '--context', $context, '--durable-home', $validationDurableHome,
             '--expected-plugin-id', 'agent-containers', '--expected-payload-root', $payloadRoot
         )
         $validationJson = @(Invoke-ContextRead -NativeArguments $validationArgs -PortableArguments $portableValidationArgs)

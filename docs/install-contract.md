@@ -2754,6 +2754,8 @@ Candidate and addressed-root ancestors are inspected from the drive downward,
 before descending through any reparse point. A remote or redirected addressed
 root cannot establish independence and leaves the optional bootstrap unavailable;
 a genuinely missing local root suffix remains valid for first use.
+Native drive-root handle identity also rejects DOS-device/SUBST aliases on
+candidate or addressed-root drives, including missing suffixes beneath an alias.
 
 The result has `Status`, `Reason`, `Python` and `Guard`. `selected` retains a
 read-only file guard; the caller must dispose it after its finite SDK reads.
@@ -2772,7 +2774,8 @@ the caller's real cold/first-touch and refusal qualification.
 
 Codespaces' and Containers' Windows runtime gates opt in for their initial
 `status` and selected-context `validate` reads. They pass the same explicit SDK
-expectations, retain complete JSON and generation checks, and dispose the executable guard before
+expectations and the native evaluator's explicit Copilot home, even when `HOME`
+differs from `USERPROFILE`. They retain complete JSON and generation checks, and dispose the executable guard before
 resolving the ordinary plugin runtime. Missing optional bootstrap support,
 unavailable admission, or path inputs requiring native environment/drive
 semantics select PowerShell before evaluation. Publication probes and installer

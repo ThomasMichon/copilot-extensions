@@ -375,6 +375,65 @@ def test_linked_exclusion_cannot_hide_the_addressed_runtime(host, tmp_path, base
     assert result == {"status": "unavailable", "python": None}
 
 
+@pytest.fixture(params=("subst", "native"))
+def drive_alias(request, tmp_path):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.DefineDosDeviceW.argtypes = (wintypes.DWORD, wintypes.LPCWSTR, wintypes.LPCWSTR)
+    kernel.DefineDosDeviceW.restype = wintypes.BOOL
+    kernel.QueryDosDeviceW.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+    kernel.QueryDosDeviceW.restype = wintypes.DWORD
+    kernel.GetLogicalDrives.restype = wintypes.DWORD
+    used = kernel.GetLogicalDrives()
+    assert used, ctypes.WinError(ctypes.get_last_error())
+    device = next((chr(65 + bit) + ":" for bit in range(25, 12, -1) if not used & (1 << bit)), None)
+    assert device is not None, "native alias fixture requires an unused drive letter"
+    buffer = ctypes.create_unicode_buffer(32768)
+    assert not kernel.QueryDosDeviceW(device, buffer, len(buffer))
+    assert ctypes.get_last_error() in (2, 3)
+    if request.param == "native":
+        assert kernel.QueryDosDeviceW(tmp_path.drive, buffer, len(buffer))
+        target = buffer.value + str(tmp_path)[2:]
+        flags = 0x1 | 0x8
+    else:
+        target = str(tmp_path)
+        flags = 0x8
+    assert kernel.DefineDosDeviceW(flags, device, target), ctypes.WinError(ctypes.get_last_error())
+    try:
+        yield Path(device + "\\")
+    finally:
+        exact_target = target if request.param == "native" else "\\??\\" + target
+        assert kernel.DefineDosDeviceW(0xF, device, exact_target), ctypes.WinError(ctypes.get_last_error())
+
+
+@pytest.mark.parametrize("location", ("candidate", "exclusion", "missing-exclusion"))
+def test_dos_device_alias_cannot_supply_independence(
+    host, tmp_path, base_copy, drive_alias, location,
+):
+    alias = drive_alias / base_copy.name
+    result = _run(
+        host, tmp_path, _registration_fixture()
+        + "$control=Resolve-EvaluatorBootstrapPython\n"
+        + "if ($control.Status -cne 'selected') { throw 'explicit fixture was not admitted' }\n"
+        + "$control.Guard.Dispose()\n"
+        + "$env:FIXTURE_ROOT=$env:TEST_REGISTRATION_ROOT\n"
+        + "$s=Resolve-EvaluatorBootstrapPython -ExcludedRoots @($env:EXCLUDED_ROOT)\n"
+        + "try { [pscustomobject]@{status=$s.Status; python=$s.Python} | ConvertTo-Json -Compress }\n"
+        + "finally { if ($s.Guard) { $s.Guard.Dispose() } }\n",
+        environment={
+            "FIXTURE_ROOT": str(base_copy),
+            "TEST_REGISTRATION_ROOT": str(alias if location == "candidate" else base_copy),
+            "EXCLUDED_ROOT": str(
+                base_copy if location == "candidate" else
+                alias / "missing/runtime" if location == "missing-exclusion" else alias
+            ),
+        },
+    )
+    assert result == {"status": "unavailable", "python": None}
+
+
 def test_remote_exclusion_never_reaches_verification(host, tmp_path, base_copy):
     result = _run(
         host, tmp_path, _registration_fixture()

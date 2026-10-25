@@ -163,7 +163,8 @@ def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
         for key in ("isolated", "no_site", "no_bytecode", "utf8")
     )
     expected = [
-        "status", "--payload-root", str(binding_fixture["payload"]),
+        "status", "--copilot-home", str(binding_fixture["home"] / ".copilot"),
+        "--payload-root", str(binding_fixture["payload"]),
         "--plugin-id", binding_fixture["consumer"], "--legacy-root", str(binding_fixture["legacy"]),
     ]
     durable = binding_fixture["home"] / ".copilot-extensions"
@@ -171,7 +172,8 @@ def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
         context = environment["COPILOT_EXTENSIONS_CONTEXT"]
         expected += ["--context", context, "--durable-home", str(durable)]
         assert reads[1]["args"] == [
-            "validate", "--context", context, "--durable-home", str(durable),
+            "validate", "--copilot-home", str(binding_fixture["home"] / ".copilot"),
+            "--context", context, "--durable-home", str(durable),
             "--expected-plugin-id", binding_fixture["consumer"],
             "--expected-payload-root", str(binding_fixture["payload"]),
         ]
@@ -318,9 +320,13 @@ def test_actual_sdk_is_payload_local(plugin) -> None:
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("state", (
     "legacy", "namespaced", "deactivation", "foreign-source", "stale-context", "invalid-policy",
+    "legacy-unequal-home", "namespaced-unequal-home",
 ))
 def test_actual_sdk_routes_preserve_complete_status_and_refusals(binding_fixture, host, state):
     environment = _fixture(binding_fixture)
+    if state.endswith("-unequal-home"):
+        environment["HOME"] = str(binding_fixture["home"] / "different-home")
+        state = state.removesuffix("-unequal-home")
     plugin = binding_fixture["consumer"]
     scripts = binding_fixture["payload"] / "scripts"
     for name in ("installation_context.py", "installation-context.ps1"):

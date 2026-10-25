@@ -252,6 +252,29 @@ namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
 
+### 2026-10-24 - Native alias and provenance-home review corrections
+
+- #8789's first review found two concrete boundaries. Native controls
+  reproduced eight addressed-runtime exclusion failures through ordinary
+  SUBST and raw DOS-device aliases, including missing aliased suffixes.
+  Four actual-SDK legacy controls reproduced differing complete status when
+  `HOME` and `USERPROFILE` disagree. The positive signed-base controls passed;
+  those failures were not treated as unavailable native fixtures.
+- Admission now verifies drive-root handle identity against its addressed
+  drive before candidate execution, reusing the existing final-path primitive.
+  Candidate and exclusion aliases refuse; ordinary missing local suffixes
+  remain supported. Temporary native test aliases are removed by exact target
+  in caller-owned cleanup. Both adopter copies are synchronized.
+- Both portable status/validation calls explicitly pass the native evaluator's
+  Copilot home. This retains native provenance semantics without changing SDK
+  source/policy algorithms. ABI expectations include that exact argument.
+- All 62 native helper cases plus four real signed-base consumer cases pass
+  without skips. The remaining 116 two-adopter ABI/actual-SDK cases also pass
+  without skips, accounting for all 120 consumer cases. Lint passes with the
+  existing tooling; no dependency installation, timeout or coverage waiver
+  was needed. Review of the corrected head and final combined-cost evidence
+  remain required before merge.
+
 ### 2026-10-24 - Component publication retains shared-library release fan-out
 
 - Opened #8789 for the bounded selector/two-adopter implementation, with

@@ -217,6 +217,22 @@ namespace CopilotExtensions {
         private static extern uint GetFinalPathNameByHandle(
             SafeFileHandle file, System.Text.StringBuilder path, uint capacity, uint flags);
 
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle OpenDirectory(
+            string path, uint access, uint sharing, IntPtr security, uint disposition, uint flags, IntPtr template);
+
+        public static bool IsCanonicalDrive(string path) {
+            string root = Path.GetPathRoot(path);
+            using (SafeFileHandle directory = OpenDirectory(
+                root, 0, 7, IntPtr.Zero, 3, 0x02000000, IntPtr.Zero)) {
+                if (directory.IsInvalid)
+                    throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+                return String.Equals(FinalPath(directory).TrimEnd('\\'), root.TrimEnd('\\'),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
         public static string FinalPath(SafeFileHandle file) {
             System.Text.StringBuilder path = new System.Text.StringBuilder(1024);
             uint size = GetFinalPathNameByHandle(file, path, (uint)path.Capacity, 0);
@@ -371,9 +387,15 @@ function Resolve-EvaluatorBootstrapPython {
     if ($machine -eq 0) {
         return [pscustomobject]@{ Status = 'unavailable'; Reason = 'unsupported-architecture'; Python = $null; Guard = $null }
     }
+    foreach ($excluded in $ExcludedRoots) {
+        if ($excluded -and -not [CopilotExtensions.EvaluatorBootstrapTrustV1]::IsCanonicalDrive($excluded)) {
+            return [pscustomobject]@{ Status = 'unavailable'; Reason = 'aliased-exclusion-drive'; Python = $null; Guard = $null }
+        }
+    }
     foreach ($candidate in $candidates) {
         $guard = $null
         try {
+            if (-not [CopilotExtensions.EvaluatorBootstrapTrustV1]::IsCanonicalDrive($candidate.Python)) { continue }
             $guard = [IO.File]::Open($candidate.Python, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
             if (-not (Test-EvaluatorBootstrapPath -Path $candidate.Python -Root $candidate.Root -ExcludedRoots $ExcludedRoots)) {
                 continue
