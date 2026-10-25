@@ -192,6 +192,45 @@ placement and supervisor renewal are not yet integrated.
 
 ## Concepts
 
+### Externally managed trusted members
+
+An external deployment manager may own a trusted fleet's lifecycle while
+agent-containers supplies sessions against its already running members:
+
+```yaml
+fleets:
+  pilot:
+    lifecycle_owner: external
+    security_profile: trusted
+    exec_user: vscode
+    workspace_folder: /workspaces/project
+```
+
+The manager supplies `agent-containers.fleet=pilot`,
+`agent-containers.security-profile=trusted` and
+`agent-containers.lifecycle-owner=external` on each member. Configuration and
+the live owner label must agree before trusted session use. Existing physical
+instance, repository, lease, authentication and session checks still apply.
+This mode does not enroll a manager, select a remote Docker endpoint, issue
+credentials or establish remote-generation/auth-renewal parity.
+
+`up` (including recreation), fleet start/down/removal, member start/stop/
+unpause/removal and implicit start refuse external ownership. Missing or
+stopped members require the selected deployment manager; no direct-Docker
+fallback is offered. A live external owner label independently prevents
+lifecycle mutation after configuration is changed or removed. Lifecycle
+commands inspect ownership immediately before their effect and address the
+observed full container ID, not a replacement sharing the same name.
+Unlabeled members inherit external ownership by the configured fleet-name
+prefix, including nonnumeric suffixes. An explicit managed fleet label still
+distinguishes overlapping prefixes; an external fleet's numeric slot remains
+protected even when labeled as another fleet.
+
+The default `lifecycle_owner: agent-containers` preserves managed fleets.
+Restricted fleets cannot select external lifecycle ownership. This is an
+ownership contract, not a new security boundary or permission to bypass a
+manager through a raw Docker command.
+
 ### Optional restricted SSH runtime
 
 New installations use the **base** dependency profile: trusted OpenSSH and direct

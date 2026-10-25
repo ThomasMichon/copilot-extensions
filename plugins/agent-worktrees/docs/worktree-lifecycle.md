@@ -140,6 +140,22 @@ If a sibling reopens during a repeated finalize, failed rollback of the old
 finalized state restores an active harness and an active paired obligation.
 The checkout and reopened work remain intact, and reconciliation can retry.
 
+### Finished-session cleanup cadence
+
+The automatic startup/exit sweep excludes archived records and finalized
+tombstones whose `reaped_at` is set and whose checkout is absent. Retained
+history does not repeat session scanning, ownership/configuration checks,
+branch deletion, permission cleanup or tombstone publication on every exit.
+A reaped pair is selected again when its exact reciprocal sibling is also
+finalized and reaped, allowing the existing BOTH-retirement path to finish.
+Missing, unreadable or nonreciprocal siblings leave the tombstone intact.
+
+This is a selection optimization, not cached cleanup authorization. Reopened
+records and recreated checkouts remain candidates for inspection, and every
+selected candidate still receives fresh liveness, identity, responsibility
+and pair checks under the existing cleanup locks. Explicit cleanup retains
+its existing behavior, including retries for residual branch cleanup.
+
 ### Session worktree names
 
 Seeded and unseeded session creation use the same timestamp and four-character
