@@ -32,7 +32,7 @@ permissions:
 jobs:
   promotion-controls:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'
-    name: Promotion control retirement (actual Git)
+    name: Promotion controls and source retention (actual Git)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -53,6 +53,7 @@ jobs:
       - name: Exercise real composition and repeated retirement
         env:
           PYTHONPATH: tools
+          COPILOT_EXTENSIONS_SOURCE_ARCHIVE_INTEGRATION: "1"
         run: >-
           timeout --signal=TERM --kill-after=10s 100s python -m pytest -q
           tools/test_promotion_control.py::test_main_deleted_control_stays_deleted_across_promotions
@@ -61,6 +62,7 @@ jobs:
           tools/test_promotion_control.py::test_trusted_artifact_recomposition_uses_same_control_tree
           tools/test_promotion_control.py::test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci
           tools/test_promotion_control.py::test_manifest_removal_cannot_reactivate_deleted_dev_workflow
+          tools/test_complete_source_native.py
 
   dispatch-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-binding'
