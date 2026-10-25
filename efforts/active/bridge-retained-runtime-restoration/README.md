@@ -335,8 +335,12 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   autonomous timeout bounds at the actual Host launcher. Unselected launches
   preserve requested timeout values, and explicit retirement remains separate.
   The coupled native/idle/Host timer lane passes 165 controls with two collection
-  skips and verified cleanup. Genuine current authority capture and fresh
-  independent review remain owed; no existing Host or runtime is reconfigured.
+  skips and verified cleanup. Genuine write/no-write capture from
+  `49d861c75a16d87807267dee8d781621c09195ed` reproduces all three current
+  Host-authority vectors. The changed-authority/registry cohort passes 106
+  controls with two collection skips and verified cleanup; both contracts and
+  all 814 fixtures validate. Fresh independent review/CI remain owed; no existing
+  Host or runtime is reconfigured.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.
