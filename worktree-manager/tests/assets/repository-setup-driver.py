@@ -35,4 +35,5 @@ engine_client.set_engine_command([sys.executable, "-m", "agent_worktrees"])
 raise SystemExit(cli.cmd_setup([
     "--apply", "--repository", sys.argv[2], "--repository-target", sys.argv[3],
     "--trust-repository-setup",
+    *(["--repository-commit", sys.argv[5]] if len(sys.argv) > 5 else []),
 ], banner="Synthetic consumer"))
