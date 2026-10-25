@@ -13,10 +13,20 @@ from . import config, output, reconcile, update_acquisition, update_events, upda
 TARGET_CONTRACT = 1
 
 
+def _target_scope(payload):
+    manifest = json.loads((payload / "plugin.json").read_text("utf-8"))
+    if not isinstance(manifest, dict):
+        raise ValueError("Plugin manifest must be an object")
+    scope = manifest.get("runtimeScope", "none")
+    if not isinstance(scope, str) or scope not in reconcile.VALID_SCOPES:
+        raise ValueError("Invalid runtimeScope; repair the selected payload")
+    return scope
+
+
 def target_plan(name, target):
     payload = reconcile.core_installed_payload_dir(name)
-    if payload is not None and reconcile.manifest_runtime_scope(payload) is None:
-        raise ValueError("Invalid runtimeScope; repair the selected payload")
+    if payload is not None:
+        _target_scope(payload)
     platform = config.detect_platform()
     if name == reconcile.SELF_PLUGIN:
         payload = reconcile.core_installed_payload_dir(name)
@@ -33,7 +43,7 @@ def target_plan(name, target):
             **step.environment, "AGENT_WORKTREES_TARGETED_UPDATE": "1",
         })
     engine = reconcile.core_installed_payload_dir(reconcile.SELF_PLUGIN)
-    if engine is not None and name in update_options._module_dirs(engine):
+    if engine is not None and name in update_options._module_dirs(engine) and _target_scope(payload) != "none":
         step = update_runtime_plan.plan_module(
             name, payload, platform, force=False, gate_context=target.context,
         )
@@ -50,7 +60,7 @@ def _target(name, targets):
         )
     target = targets.get(name)
     payload = reconcile.core_installed_payload_dir(name)
-    if target is None and payload is not None and reconcile.manifest_runtime_scope(payload) == "none":
+    if target is None and payload is not None and _target_scope(payload) == "none":
         return update_runtime._RegisteredPluginTarget(None, update_runtime._PluginActivation.INACTIVE)
     return target
 
@@ -72,13 +82,12 @@ def inventory():
         if payload is None:
             row["limitation"] = "Payload missing; use setup/enablement before updating"
         else:
-            scope = reconcile.manifest_runtime_scope(payload)
-            row.update(payload=reconcile.payload_version(payload) or "unknown", kind=scope or "unknown")
+            row["payload"] = reconcile.payload_version(payload) or "unknown"
             try:
+                scope = _target_scope(payload)
+                row["kind"] = scope
                 if scope == "none":
                     row.update(selected="not applicable", running="not applicable")
-                elif scope is None:
-                    raise ValueError("Invalid runtimeScope; repair the payload through its source owner")
                 else:
                     resolved = reconcile.resolve_runtime_installation(name, payload)
                     row["selected"] = reconcile.runtime_deployed_version(name, root=resolved.runtime_root) or "missing"
@@ -120,7 +129,7 @@ def update_target(name: str) -> int:
         target = _target(name, targets)
         payload = reconcile.core_installed_payload_dir(name)
         if target is None or (not target.required and (
-            payload is None or reconcile.manifest_runtime_scope(payload) != "none"
+            payload is None or _target_scope(payload) != "none"
         )):
             raise ValueError(f"{name}: not enabled or not registered; use setup/enablement")
         if reconcile.core_installed_payload_dir(name) is None:
@@ -144,7 +153,7 @@ def update_target(name: str) -> int:
         acquired = reconcile.core_installed_payload_dir(name)
         if acquired is None:
             raise ValueError("Acquired payload is unavailable; inspect acquisition and retry")
-        if not target.required and reconcile.manifest_runtime_scope(acquired) != "none":
+        if not target.required and _target_scope(acquired) != "none":
             raise ValueError("Acquired release now requires a runtime; enable through configuration before updating its runtime")
         step = target_plan(name, target)
         if step.blocked:

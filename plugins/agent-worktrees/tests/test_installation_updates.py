@@ -263,6 +263,45 @@ def test_engine_target_preserves_no_install_fallback_acquisition_policy(installe
     assert calls == [["synthetic-copilot", "plugin", "update", "agent-worktrees@copilot-extensions"]]
 
 
+@pytest.mark.parametrize("name", ["efforts", "visions", "customizing-copilot"])
+@pytest.mark.parametrize("enabled", [True, False])
+def test_shipped_payload_only_manifest_without_scope_remains_updatable(
+    installed, monkeypatch, tmp_path, name, enabled,
+):
+    payload = tmp_path / name
+    payload.mkdir()
+    shipped = Path(__file__).resolve().parents[2] / name / "plugin.json"
+    data = json.loads(shipped.read_text())
+    assert "runtimeScope" not in data
+    (payload / "plugin.json").write_text(json.dumps(data))
+    installed[name] = payload
+    activation = update_runtime._PluginActivation
+    target = update_runtime._RegisteredPluginTarget(
+        tmp_path, activation.ACTIVE if enabled else activation.INACTIVE,
+    )
+    monkeypatch.setattr(update_runtime, "_registered_plugin_targets", lambda: {name: target})
+    monkeypatch.setattr(update_runtime_plan, "plan_registered", PLAN_REGISTERED)
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: "OK")
+    monkeypatch.setattr(update_runtime, "_run_human_installer", lambda *a, **k: pytest.fail("payload-only runtime installed"))
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert rows[name]["kind"] == "none" and rows[name]["updatable"]
+    assert rows[name]["selected"] == rows[name]["running"] == "not applicable"
+    assert owner.update_target(name) == 0
+
+
+@pytest.mark.parametrize("scope", [None, 42, "invalid", {}])
+def test_malformed_explicit_runtime_scope_is_not_payload_only(installed, monkeypatch, scope):
+    (installed["guide"] / "plugin.json").write_text(json.dumps({
+        "name": "guide", "version": "2", "runtimeScope": scope,
+    }))
+    monkeypatch.setattr(update_runtime, "_update_one_plugin_payload", lambda *a, **k: pytest.fail("invalid scope acquired"))
+    rows = {row["id"]: row for row in owner.inventory()["entries"]}
+    assert not rows["guide"]["updatable"]
+    assert "Invalid runtimeScope" in rows["guide"]["limitation"]
+    assert rows["guide"]["payload"] == "2"
+    assert owner.update_target("guide") == 1
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX actual-installer fixture; native Windows remains separate")
 def test_real_selected_installer_publishes_version_without_unrelated_effects(installed, monkeypatch, tmp_path):
     name = "agent-example"
