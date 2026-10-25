@@ -919,3 +919,26 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   review. The bounded independent code review above is recorded separately,
   not represented as a passing GitHub verdict. The draft and no-merge/no-rollout
   hold remain in force.
+- The repaired draft's required CI passed at `b77e38d70a` (guard/lint, eligible
+  units and the required PR gate). The explicitly requested GitHub review
+  eventually delivered a `Comment` on the prior candidate, despite the
+  automatic draft-review skip. It identified three valid blockers: synchronous
+  live forwarding can prevent deadline enforcement under an open unread parent
+  pipe; Bash rejects Python's whitespace-bearing reservation header; and a
+  later lease-release EXIT trap replaces native diagnostic completion.
+  Required CI success does not waive those findings or qualify the native lane.
+- Bash reservation now matches JSON field whitespace using a finite, private
+  file read and Bash's own regex, without a bootstrap Python dependency.
+  One early exit function saves the primary exit code, releases an existing
+  lease when that function is available, completes the native writer and
+  explicitly preserves the primary result even if cleanup fails. The later
+  lease-only trap registration was removed.
+- The new native Bash controls execute the actual exit function and every
+  source EXIT registration, with success/failure primary outcomes and both
+  successful/failing lease release. They passed **4 tests, 3 native-POSIX
+  prerequisite skips in 21.93 seconds; 33.43 seconds including preparation and
+  cleanup** on Windows/Git Bash. The three skipped reservation-parser cases
+  cover the canonical Python header, multiline JSON whitespace and a wrong
+  plugin, and still require native POSIX execution. The manual optional lane
+  now includes this file; no existing deadline or portfolio gate changes.
+  The PowerShell backpressure repair remains under native API investigation.

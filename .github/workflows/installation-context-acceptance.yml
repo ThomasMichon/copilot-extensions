@@ -864,6 +864,7 @@ jobs:
         run: >-
           python tools/run_tests_in_devcontainer.py agent-worktrees
           --test-file tests/test_installer_diagnostics.py
+          --test-file tests/test_installer_bash_diagnostics.py
           --test-file tests/test_installer_python_producer.py
           --test-file tests/test_installer_guardian.py
           --max-files-per-sub-suite 1
@@ -891,6 +892,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_installer_diagnostics.py
+          --test-file tests/test_installer_bash_diagnostics.py
           --test-file tests/test_installer_python_producer.py
           --test-file tests/test_installer_guardian.py
           --max-files-per-sub-suite 1

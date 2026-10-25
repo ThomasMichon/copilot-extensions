@@ -42,7 +42,16 @@ else
     export COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING=1
     printf '%s\n' 'WARNING: installer diagnostics unavailable; continuing with missing diagnostics.' >&2 || :
 fi
-trap 'installer_diagnostics_complete "$?"' EXIT
+_installer_exit() {
+    local rc=$?
+    trap - EXIT
+    if declare -F _release_versioned_slot_lease >/dev/null; then
+        _release_versioned_slot_lease || :
+    fi
+    installer_diagnostics_complete "$rc" || :
+    exit "$rc"
+}
+trap '_installer_exit' EXIT
 
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
@@ -1391,13 +1400,14 @@ _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
 # that wrapper entirely (an `exit` terminates the whole script before the
 # caller's next line, let alone `_versioned_activate`, ever runs).
 # `_release_versioned_slot_lease` is already idempotent/safe to call with
-# nothing held, so registering it unconditionally here -- rather than only
+# nothing held, so registering it unconditionally at entry -- rather than only
 # once a lease is actually acquired -- is simplest and cannot double-release
 # anything. The flock/fcntl strengthening layers are released by the kernel
 # on process exit regardless; the universal mkdir gate has no such
 # auto-release, so without this trap a process that exits abnormally here
 # leaves it for a later contender's bounded stale-reclaim to clear instead.
-trap '_release_versioned_slot_lease' EXIT
+# The early _installer_exit trap composes lease release with diagnostic
+# completion and preserves the installer result even when either cleanup fails.
 # Human-readable reason the most recent _acquire_versioned_slot_lease call
 # failed, so callers can tell genuine contention (another live process
 # already holds the lease) apart from a persistent lease-machinery failure

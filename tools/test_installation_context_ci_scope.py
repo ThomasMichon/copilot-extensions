@@ -722,6 +722,7 @@ def test_installer_diagnostics_is_manual_exact_head_and_preserves_test_budgets()
         assert commands == [
             ["python", wrapper, "agent-worktrees",
              "--test-file", "tests/test_installer_diagnostics.py",
+             "--test-file", "tests/test_installer_bash_diagnostics.py",
              "--test-file", "tests/test_installer_python_producer.py",
              "--test-file", "tests/test_installer_guardian.py",
              "--max-files-per-sub-suite", "1"],
