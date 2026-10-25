@@ -81,6 +81,113 @@ def test_ordinary_producer_stays_legacy(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
+@pytest.mark.parametrize("identity_mode", ["legacy", "tuple-v1"])
+@pytest.mark.parametrize("topology_kind", [
+    "empty", "unrelated", "scoped", "unscoped", "later-scoped", "later-unscoped",
+])
+def test_interrupted_local_creation_tail_keeps_original_allocation_without_enrollment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+    identity_mode: str, topology_kind: str,
+) -> None:
+    from agent_worktrees import creation_tail_repair, launch_seed_state, sessions, worktree_creation
+
+    load_config = cfg.load_config
+    initial = _setup(tmp_path, monkeypatch, platform=platform)
+    monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+    entries = {}
+    if topology_kind not in ("empty", "later-scoped", "later-unscoped"):
+        entries["local-space" if topology_kind != "unrelated" else "other-space"] = {
+            "hostname": "raw-host" if topology_kind != "unrelated" else "other-host",
+            "physical_host": "friendly-host",
+            **({"execution_platform": platform} if topology_kind != "unscoped" else {}),
+        }
+    (Path(initial.default_repo.anchor) / "machines.yaml").write_text(
+        yaml.safe_dump({"machines": entries}),
+    )
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / "state")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: cfg.project_dir() / "worktrees")
+    cfg.project_dir().mkdir()
+    config_path = cfg.project_dir() / "config.yaml"
+    config_path.write_text(yaml.safe_dump({
+        "repo_name": initial.repo_name, "repos": {initial.repo_name: {
+            "anchor": initial.default_repo.anchor,
+            "worktree_root": initial.default_repo.worktree_root,
+        }},
+    }))
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "missing.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda _anchor: {})
+    config = load_config(
+        config_path, project=initial.repo_name, include_control_plane_related_pr=False,
+        include_knowledge_preferences=False,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(cfg, "load_project_config", lambda *_a, **_k: config)
+
+    def interrupt(*_a):
+        raise RuntimeError("creation permissions interrupted")
+
+    monkeypatch.setattr(m.permissions, "ensure_trusted_folder", interrupt)
+    with pytest.raises(worktree_creation.LaunchSeedStagingFailure) as failure:
+        m._create_worktree_core(
+            config, pending_seed="retained creation intent", identity_mode=identity_mode,
+        )
+    row = failure.value.worktree
+    path = cfg.tracking_dir() / f"{row['id']}.yaml"
+    seed = launch_seed_state.peek(path)
+    assert seed is not None and seed.kind == "new" and not seed.handoff_id
+    before = path.read_bytes(), launch_seed_state.state_path(path).read_bytes()
+    if topology_kind.startswith("later-"):
+        (Path(config.default_repo.anchor) / "machines.yaml").write_text(yaml.safe_dump({
+            "machines": {"local-space": {
+                "hostname": "raw-host", "physical_host": "friendly-host",
+                **({"execution_platform": platform} if topology_kind == "later-scoped" else {}),
+            }},
+        }))
+        config = load_config(
+            config_path, project=initial.repo_name, include_control_plane_related_pr=False,
+            include_knowledge_preferences=False,
+        )
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a: pytest.fail("must not recreate"))
+    monkeypatch.setattr(
+        sessions, "verify_worktree_active", lambda _record: sessions.LiveVerdict(),
+    )
+    git_checks = []
+    monkeypatch.setattr(
+        creation_tail_repair, "_same_repository",
+        lambda anchor, checkout, **kwargs: git_checks.append((anchor, checkout, kwargs["branch"])),
+    )
+    prepared = False
+
+    def prepare(*_a):
+        nonlocal prepared
+        prepared = True
+
+    monkeypatch.setattr(creation_tail_repair, "_prepare_permissions", prepare)
+    monkeypatch.setattr(
+        creation_tail_repair, "_permission_state",
+        lambda _path: {"trusted": prepared, "facility_approvals": prepared},
+    )
+    monkeypatch.setattr(
+        local_cache_refresh, "prepare_for_launch",
+        lambda _path: local_cache_refresh.RefreshResult("ready"),
+    )
+    args = SimpleNamespace(
+        repair_creation=row["id"], seed_id=seed.seed_id, fix=True, json=True,
+    )
+    with creation_tail_repair.output.capture_json_output() as output:
+        code = creation_tail_repair.targeted_doctor(args)
+    report = json.loads(output.getvalue())
+    assert report["error"] is None, report["error"]
+    assert code == 0 and report["prepared"] and report["repaired"]
+    assert git_checks and all(check == (
+        config.default_repo.anchor, row["path"], row["branch"],
+    ) for check in git_checks)
+    assert (path.read_bytes(), launch_seed_state.state_path(path).read_bytes()) == before
+    assert launch_seed_state.peek(path) == seed
+    assert tracking.load_record(path).creation_nonce
+
+
+@pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("owned", [False, True])
 def test_ordinary_sibling_only_creation_remains_mutable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str, owned: bool,

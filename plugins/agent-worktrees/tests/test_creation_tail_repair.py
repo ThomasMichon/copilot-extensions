@@ -10,10 +10,13 @@ import subprocess
 import sys
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
+from machine_transport import resolve_local_execution_context
 
 from agent_worktrees import config as cfg, creation_tail_repair as repair
 from agent_worktrees import git_ops, installer, launch_seed_state, local_cache_refresh
@@ -40,12 +43,17 @@ def _creation_anchor_seed(tmp_path_factory):
 
 def _creation_fixture(
     tmp_path, monkeypatch, *, anchor_seed=None, native_git=False,
-    tuple_identity=False, suffix="abcd",
+    tuple_identity=False, suffix="abcd", observed_identity=False,
 ):
     native_load_config = cfg.load_config
     platform = cfg.detect_platform()
     machine = "custom-space" if tuple_identity else "host-wsl" if platform == "wsl" else "host"
     physical = "host-wsl" if tuple_identity else machine
+    if observed_identity:
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "raw-host")
+        context = resolve_local_execution_context({}, hostname="raw-host", environment=platform)
+        machine = context.execution_machine
+        physical = context.machine if tuple_identity else machine
     identity_fields = WorktreeMachineIdentity(physical, platform, machine) if tuple_identity else None
     short = "win" if platform == "windows" else platform
     identity = f"{physical}-{short}-20261013-100000-{suffix}"
@@ -56,7 +64,7 @@ def _creation_fixture(
             git_ops.git("remote", "add", "origin", str(anchor), cwd=anchor)
         else:
             anchor.mkdir()
-        if tuple_identity:
+        if tuple_identity and not observed_identity:
             (anchor / "machines.yaml").write_text(
                 f"machines:\n  {machine}: {{physical_host: {physical}, execution_platform: {platform}}}\n",
             )
@@ -96,7 +104,10 @@ def _creation_fixture(
             }},
         }), encoding="utf-8")
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
-    monkeypatch.setattr(cfg, "project_dir", lambda name=None: projects[name or "harness"])
+    monkeypatch.setattr(
+        cfg, "project_dir",
+        lambda name=None: projects.get(name or "harness", tmp_path / f".{name}"),
+    )
     def load_config(config_file=None, *, project=None, **kwargs):
         name = project or (Path(config_file).parent.name.lstrip(".") if config_file else "harness")
         return configs[name]
@@ -344,6 +355,277 @@ def test_creation_reuses_companion_after_parent_stamp_failure(native_creation, m
     code, report = _run(creation, capsys, fix=True)
     assert code == 0 and report["prepared"]
     assert sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml")) == children
+    assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.parametrize("tuple_identity", [False, True])
+@pytest.mark.parametrize("tail", ["missing", "retained", "paired"])
+def test_creation_repairs_original_native_pair_after_optional_naming(
+    tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, tail,
+):
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
+        tuple_identity=tuple_identity, observed_identity=True,
+    )
+    seed_before = launch_seed_state.state_path(creation.record.yaml_path).read_bytes()
+    if tail != "missing":
+        original = worktree_creation._stamp_and_compose_paired_knowledge
+        if tail == "retained":
+            monkeypatch.setattr(
+                worktree_creation, "_stamp_and_compose_paired_knowledge",
+                lambda *a, **kw: (_ for _ in ()).throw(OSError("fixture stamp interrupted")),
+            )
+        code, report = _run(creation, capsys, fix=True)
+        assert code == (1 if tail == "retained" else 0), report["error"]
+        monkeypatch.setattr(worktree_creation, "_stamp_and_compose_paired_knowledge", original)
+        monkeypatch.setattr(
+            worktree_creation, "_carve_paired_knowledge",
+            lambda *a, **kw: pytest.fail("original companion must not be recreated"),
+        )
+    for name, anchor in creation.anchors.items():
+        (anchor / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml").write_text(json.dumps({
+            "machines": {"friendly-space": {
+                "hostname": "raw-host", "physical_host": "friendly-host",
+                "execution_platform": cfg.detect_platform(),
+            }},
+        }))
+        creation.configs[name] = replace(creation.configs[name], machine="friendly-space")
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and report["prepared"], report["error"]
+    child_paths = sorted(creation.projects["knowledge"].joinpath("worktrees").glob("*.yaml"))
+    assert len(child_paths) == 1
+    child = tracking.load_record(child_paths[0])
+    assert child.worktree_id == creation.record.worktree_id + "-k"
+    assert child.machine_identity == creation.record.machine_identity
+    assert child.execution_machine == creation.record.execution_machine
+    assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == seed_before
+
+
+@pytest.mark.parametrize("tuple_identity", [False, True])
+@pytest.mark.parametrize("conflict", [
+    "hostname", "platform", "nonce", "owner", "namespace", "receiving_binding",
+    "companion_binding", "companion_anchor", "companion_platform", "companion_root",
+    "foreign_key", "former_custom",
+])
+def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
+    tmp_path, monkeypatch, capsys, tuple_identity, conflict,
+):
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, tuple_identity=tuple_identity, observed_identity=True,
+    )
+    for name, anchor in creation.anchors.items():
+        (anchor / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml").write_text(json.dumps({
+            "machines": {"friendly-space": {
+                "hostname": "raw-host", "physical_host": "friendly-host",
+                "execution_platform": cfg.detect_platform(),
+            }},
+        }))
+        creation.configs[name] = replace(creation.configs[name], machine="friendly-space")
+    record = tracking.load_record(creation.record.yaml_path)
+    if conflict == "hostname":
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "another-host")
+    elif conflict == "platform":
+        record.platform = "wsl" if cfg.detect_platform() != "wsl" else "windows"
+        if tuple_identity:
+            record.machine_identity = replace(record.machine_identity, environment=record.platform)
+    elif conflict == "nonce":
+        record.creation_nonce = None
+    elif conflict == "owner":
+        record.owner_ref = "foreign-space/another-project/another-parent"
+    elif conflict == "namespace":
+        settings = creation.configs["harness"]
+        creation.configs["harness"] = replace(settings, repos={
+            "harness": replace(settings.default_repo, worktree_root=str(tmp_path / "another-root")),
+        })
+    elif conflict == "receiving_binding":
+        original_load = cfg.load_project_config
+
+        def receive(name, **kwargs):
+            result = original_load(name, **kwargs)
+            return replace(result, configured_machine="different-binding") if name == "harness" else result
+
+        monkeypatch.setattr(cfg, "load_project_config", receive)
+    elif conflict == "companion_binding":
+        creation.configs["knowledge"] = replace(
+            creation.configs["knowledge"], configured_machine="different-binding",
+        )
+    elif conflict == "companion_anchor":
+        settings = creation.configs["knowledge"]
+        creation.configs["knowledge"] = replace(settings, repos={
+            "knowledge": replace(settings.default_repo, anchor=str(tmp_path / "another-anchor")),
+        })
+    elif conflict == "companion_platform":
+        creation.configs["knowledge"] = replace(
+            creation.configs["knowledge"],
+            platform="wsl" if cfg.detect_platform() != "wsl" else "windows",
+        )
+    elif conflict == "companion_root":
+        settings = creation.configs["knowledge"]
+        creation.configs["knowledge"] = replace(settings, repos={
+            "knowledge": replace(settings.default_repo, worktree_root=str(tmp_path / "another-root")),
+        })
+    elif conflict == "foreign_key":
+        topology = creation.anchors["harness"] / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+        mapping = json.loads(topology.read_text())
+        mapping["machines"][record.execution_machine] = {
+            "hostname": "foreign-host", "physical_host": "friendly-host",
+            "execution_platform": cfg.detect_platform(),
+        }
+        topology.write_text(json.dumps(mapping))
+    if conflict in {"platform", "former_custom"}:
+        raw = yaml.safe_load(record.yaml_path.read_text())
+        if conflict == "platform":
+            raw["platform"] = record.platform
+        else:
+            raw["machine"] = "former-friendly-host" if tuple_identity else "former-custom-space"
+            if tuple_identity:
+                raw["execution_machine"] = "former-custom-space"
+        record.yaml_path.write_text(yaml.safe_dump(raw))
+    elif conflict in {"nonce", "owner"}:
+        tracking.save_record(record)
+    before = (
+        record.yaml_path.read_bytes(), launch_seed_state.state_path(record.yaml_path).read_bytes(),
+    )
+    monkeypatch.setattr(
+        repair, "_prepare_permissions", lambda *a: pytest.fail("authority conflict changed permissions"),
+    )
+    monkeypatch.setattr(
+        worktree_creation, "_carve_paired_knowledge",
+        lambda *a, **kw: pytest.fail("authority conflict created a companion"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and report["error"] and not report["repaired"]
+    assert (
+        record.yaml_path.read_bytes(), launch_seed_state.state_path(record.yaml_path).read_bytes(),
+    ) == before
+    assert not creation.projects["knowledge"].joinpath("worktrees").exists()
+
+
+@pytest.mark.parametrize("tuple_identity", [False, True])
+@pytest.mark.parametrize("change", ["binding", "nonce", "seed_text", "owner"])
+def test_creation_rechecks_retained_authority_inside_companion_allocation_lock(
+    tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, change,
+):
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
+        tuple_identity=tuple_identity, observed_identity=True,
+    )
+    for name, anchor in creation.anchors.items():
+        (anchor / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml").write_text(json.dumps({
+            "machines": {"friendly-space": {
+                "hostname": "raw-host", "physical_host": "friendly-host",
+                "execution_platform": cfg.detect_platform(),
+            }},
+        }))
+        creation.configs[name] = replace(creation.configs[name], machine="friendly-space")
+    original_lock = worktree_creation.codename_tracking.allocation_lock
+    changed = []
+
+    @contextmanager
+    def allocation_lock(path, *args, **kwargs):
+        with original_lock(path, *args, **kwargs):
+            assert Path(path) == creation.projects["knowledge"] / "worktrees"
+            if change == "binding":
+                creation.configs["knowledge"] = replace(
+                    creation.configs["knowledge"], configured_machine="different-binding",
+                )
+            elif change == "seed_text":
+                seed_path = launch_seed_state.state_path(creation.record.yaml_path)
+                state = json.loads(seed_path.read_text())
+                state["text"] = "changed retained intent with the same ID"
+                seed_path.write_text(json.dumps(state))
+            else:
+                record = tracking.load_record(creation.record.yaml_path)
+                if change == "nonce":
+                    record.creation_nonce = "another-creation"
+                else:
+                    record.owner_ref = "foreign-space/another-project/another-parent"
+                tracking.save_record(record)
+            changed.append(True)
+            yield
+
+    monkeypatch.setattr(worktree_creation.codename_tracking, "allocation_lock", allocation_lock)
+    monkeypatch.setattr(
+        git_ops, "create_worktree", lambda *a: pytest.fail("changed authority created a companion"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert changed and code == 1 and report["error"] and not report["repaired"]
+    assert not creation.projects["knowledge"].joinpath(
+        "worktrees", creation.record.worktree_id + "-k.yaml",
+    ).exists()
+    assert not tracking.load_record(creation.record.yaml_path).is_paired
+    if change != "seed_text":
+        assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
+
+
+@pytest.mark.parametrize("tuple_identity", [False, True])
+@pytest.mark.parametrize("parent_kind", ["original", "foreign", "same-physical", "missing"])
+def test_creation_repair_preserves_only_proven_local_parent_refs(
+    tmp_path, monkeypatch, capsys, _creation_anchor_seed, tuple_identity, parent_kind,
+):
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, anchor_seed=_creation_anchor_seed,
+        tuple_identity=tuple_identity, observed_identity=True,
+    )
+    parent_checkout = creation.roots["harness"] / "parent"
+    parent_checkout.mkdir()
+    parent_identity = creation.record.machine_identity
+    parent_machine = creation.record.machine
+    platform = cfg.detect_platform()
+    if parent_kind == "foreign":
+        platform = "wsl" if platform != "wsl" else "windows"
+        if parent_identity is not None:
+            parent_identity = replace(parent_identity, environment=platform)
+    elif parent_kind == "same-physical":
+        parent_machine = "foreign-space" if not tuple_identity else parent_machine
+        if parent_identity is not None:
+            parent_identity = replace(parent_identity, execution_machine="foreign-space")
+    parent = tracking.create_new_record(
+        "parent", "worktree/parent", str(parent_checkout), "harness", parent_machine, platform,
+        creation.projects["harness"] / "worktrees", machine_identity=parent_identity,
+    )
+    record = tracking.load_record(creation.record.yaml_path)
+    record.owner_ref = tracking.format_claim_ref(
+        parent.execution_machine, "harness", "missing" if parent_kind == "missing" else "parent",
+    )
+    tracking.save_record(record)
+    parent_before = parent.yaml_path.read_bytes()
+    for name, anchor in creation.anchors.items():
+        (anchor / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml").write_text(json.dumps({
+            "machines": {"friendly-space": {
+                "hostname": "raw-host", "physical_host": "friendly-host",
+                "execution_platform": cfg.detect_platform(),
+            }},
+        }))
+        creation.configs[name] = replace(creation.configs[name], machine="friendly-space")
+    if parent_kind != "original":
+        monkeypatch.setattr(
+            repair, "_prepare_permissions", lambda *a: pytest.fail("foreign parent changed permissions"),
+        )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == (0 if parent_kind == "original" else 1), report["error"]
+    assert launch_seed_state.peek(record.yaml_path) == creation.seed
+    assert parent.yaml_path.read_bytes() == parent_before
+
+
+def test_creation_refuses_retained_companion_with_foreign_parent(creation, monkeypatch, capsys):
+    child_id = creation.record.worktree_id + "-k"
+    checkout = creation.roots["knowledge"] / child_id
+    checkout.mkdir(parents=True)
+    tracking.create_new_record(
+        child_id, f"worktree/{child_id}", str(checkout), "knowledge", creation.record.machine,
+        cfg.detect_platform(), creation.projects["knowledge"] / "worktrees",
+        pair_id="20261013-100000-abcd", pair_role="knowledge",
+        pair_ref=tracking.format_claim_ref(
+            creation.record.execution_machine, "harness", creation.record.worktree_id,
+        ),
+        pair_kind="worktree", owner_ref="foreign-space/knowledge/other-parent",
+    )
+    monkeypatch.setattr(
+        repair, "_prepare_permissions", lambda *a: pytest.fail("foreign companion parent mutated"),
+    )
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 1 and "different parent owner" in report["error"]
     assert launch_seed_state.peek(creation.record.yaml_path) == creation.seed
 
 
@@ -782,7 +1064,7 @@ def test_creation_refuses_companion_removed_before_knowledge_lock(
 def test_creation_uses_companion_machine_config_for_its_native_lifecycle_lock(
     creation, monkeypatch, capsys,
 ):
-    knowledge_root = creation.projects["knowledge"] / "custom-checkouts"
+    knowledge_root = creation.roots["knowledge"] / ".." / creation.roots["knowledge"].name
     config_path = creation.projects["knowledge"] / "config.yaml"
     settings = json.loads(config_path.read_text())
     settings["repos"]["knowledge"]["worktree_root"] = str(knowledge_root)
