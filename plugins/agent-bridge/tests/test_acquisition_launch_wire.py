@@ -52,6 +52,7 @@ async def assert_direct_lifecycle_refused(client: AcpClient, cwd: str) -> None:
     ("new", "close-before-capture"), ("load", "close-before-capture"),
     ("new", "stop-reap-resume"),
     ("new", "shutdown-rehydrate"),
+    ("new", "shutdown-active-reaper"),
 ])
 async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str, mode: str,
@@ -61,6 +62,10 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
     producer = RuntimeProducer("synthetic-frontend", os.getpid(), process_start_time(os.getpid()))
     admission = rig.db.enroll_runtime_producer(identity, epoch.epoch, producer)
     frontend = AcquisitionFrontend.capture(rig.runtime, identity, admission)
+    if mode in ("shutdown-rehydrate", "shutdown-active-reaper"):
+        rig.manager._session_host_active_reap_seconds = (
+            1800.0 if mode == "shutdown-rehydrate" else 0.1
+        )
     audit = tmp_path / "received.jsonl"
     peer = Path(__file__).parent / "fixtures" / "acquisition_launch_peer.py"
     handles, captures = [], []
@@ -190,7 +195,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                     )
                 assert rig.runtime.store.journal.read_launch(continuation)["started_at"] is None
                 assert session._native_turn_transport is retained_owner
-            elif mode == "shutdown-rehydrate":
+            elif mode in ("shutdown-rehydrate", "shutdown-active-reaper"):
                 detach = session.client.session_host_client.detach
                 detach_spy = AsyncMock(wraps=detach)
                 monkeypatch.setattr(session.client.session_host_client, "detach", detach_spy)
@@ -198,7 +203,11 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
                     session.session_id, cancel_turn=False, allow_background_recovery=True,
                 )
                 detach_spy.assert_awaited_once_with(False)
+                await asyncio.sleep(0.4)
                 assert handles[0].proc.poll() is None
+                argv = handles[0].proc.args
+                assert float(argv[argv.index("--active-reap-seconds") + 1]) == 0
+                assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 0
                 stored = rig.db.get_session(session.session_id)
                 assert not stored["background_recovery_enabled"]
                 assert stored["cold_recovery_stop_token"] is None

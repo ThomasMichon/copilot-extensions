@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import os
 import asyncio
+import io
 from dataclasses import replace
 import sys
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from zdd.diagnostics import process_start_time
@@ -22,6 +23,24 @@ from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeProducer
 from agent_bridge.session_manager import Session
 from test_acquisition_foundation import request
 from test_runtime_custody import close, installation
+
+
+def test_acquisition_launch_unselected_host_keeps_requested_reap_timeouts(tmp_path, monkeypatch):
+    from agent_bridge.session_host import launcher
+
+    popen = Mock(return_value=SimpleNamespace(
+        stdout=io.BytesIO(b"expected test exit"), pid=os.getpid(),
+        poll=lambda: 1, returncode=1,
+    ))
+    monkeypatch.setattr(launcher.subprocess, "Popen", popen)
+    with pytest.raises(RuntimeError, match="exited early"):
+        launcher.launch_session_host(
+            [sys.executable, "-c", "pass"], state_dir=tmp_path,
+            active_reap_seconds=1800.0, unexpected_reap_seconds=60.0,
+        )
+    argv = popen.call_args.args[0]
+    assert float(argv[argv.index("--active-reap-seconds") + 1]) == 1800.0
+    assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 60.0
 
 
 @pytest.fixture

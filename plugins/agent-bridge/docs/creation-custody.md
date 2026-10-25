@@ -171,6 +171,11 @@ turn lock. Its internal automatic-stop path rechecks the original live session
 after acquiring the lifecycle lock and at the final Host-retirement boundary;
 late enrollment cannot turn a stale idle snapshot into reaping permission.
 Explicit operator stop/reap behavior is unchanged.
+The actual new local Host launch also sets its existing unexpected-disconnect
+and active-reap timeout arguments to zero for the concrete original owner.
+A graceful `detach(False)` must not arm a quiet-active timeout that later
+retires the retained child. Ordinary unselected Hosts retain their configured
+timeouts; existing Hosts are not retrospectively adopted or reconfigured.
 Native acceptance, first-turn admission, attributed consumption and semantic
 completion remain separate.
 
@@ -212,6 +217,9 @@ and synthetic-process controls. The selected native controls use the actual
 local Host, separate synthetic ACP child and SDK, including original-row
 readback, preference application, unknown native/binding replies, closure
 during binding/capture/first-prompt admission, and no ordinary lifecycle downgrade.
+Selected Host arguments are checked with a nonzero configured active timeout;
+actual graceful-detach controls cover both the production-default bound and a
+short nonzero bound, waiting beyond the latter while the same Host stays alive.
 They are not native performance budgets,
 SDK acceptance, attributed consumption, platform qualification or running
 adoption. The effort's full cohort and installer gates remain open.

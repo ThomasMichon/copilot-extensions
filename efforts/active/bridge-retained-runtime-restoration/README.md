@@ -327,6 +327,16 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   with two collection skips and verified cleanup. Both contracts and all 814
   fixtures pass; independent current-head review/CI remain required.
   No earlier capture is relabeled as that correction.
+- The next independent pass identified the separate Host-side active timer:
+  graceful `detach(False)` still armed a configured nonzero quiet-active
+  timeout. Two actual Host controls reproduce this with the production-default
+  bound and a short nonzero bound; the short-bound child retired before the
+  correction. Selected original local launches now pass zero for both existing
+  autonomous timeout bounds at the actual Host launcher. Unselected launches
+  preserve requested timeout values, and explicit retirement remains separate.
+  The coupled native/idle/Host timer lane passes 165 controls with two collection
+  skips and verified cleanup. Genuine current authority capture and fresh
+  independent review remain owed; no existing Host or runtime is reconfigured.
   No Phase 1/1b or Validation Plan checkbox closes. Ground-child filesystem,
   provider/background/remote, native/platform, compatibility, restoration and
   separately authorized running adoption remain open.

@@ -45,6 +45,7 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
     producer = RuntimeProducer("creation-frontend", os.getpid(), process_start_time(os.getpid()))
     admission = db.enroll_runtime_producer(identity, epoch.epoch, producer)
     frontend = CreationFrontend.capture(manager, identity, admission)
+    manager._session_host_active_reap_seconds = 1800.0
     path = tmp_path / "workspace"
     path.mkdir()
     target = SpawnTarget(type="local", project="fixture", cwd=str(tmp_path))
@@ -199,6 +200,9 @@ async def test_creation_launch_real_host_original_binding_and_first_prompt(
             else ["create", "bind-session"]
         )
         assert len(handles) == 1
+        argv = handles[0].proc.args
+        assert float(argv[argv.index("--active-reap-seconds") + 1]) == 0
+        assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 0
         assert not ordinary_registrations
         received = [json.loads(line) for line in audit.read_text().splitlines()]
         expected = ["session/new"]

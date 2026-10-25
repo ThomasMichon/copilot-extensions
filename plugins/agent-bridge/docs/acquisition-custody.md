@@ -92,6 +92,10 @@ unassociated idle Hosts retain automatic reaping eligibility.
 The idle-TTL sweep also excludes retained custody, rechecking under the turn
 lock, after lifecycle scheduling and immediately before automatic Host retirement.
 Its internal guard does not change explicit operator stop/reap behavior.
+New explicitly selected original local Hosts disable the existing unexpected
+and active-disconnect timeout bounds at the actual launcher. Retained quiet
+custody cannot expire after a graceful `detach(False)`; unselected configured
+Hosts retain their ordinary timeouts and no existing Host is adopted or changed.
 
 One original `AcquisitionLaunchOwner` crosses local preparation and the worker
 thread scheduling boundary into `launch_session_host`. The launcher validates

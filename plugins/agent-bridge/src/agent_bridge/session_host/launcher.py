@@ -233,6 +233,10 @@ def launch_session_host(
     to ``ps``/Task Manager) and the host requires a matching nonce on ATTACH.
     The copilot child never sees it -- ``run_host`` strips it before spawn.
 
+    An explicit original local owner disables autonomous timeout retirement.
+    Its custody cannot expire into an ordinary resumable replacement; STATUS/
+    DETACH retain their custody predicate and explicit retirement is separate.
+
     The host process's own combined stdout/stderr is drained into a small,
     bounded in-memory tail (:class:`_CrashTailCapture`) during bootstrap: if
     it exits early (before reporting ready), the raised ``RuntimeError``
@@ -256,8 +260,9 @@ def launch_session_host(
         host_argv += ["--host-version", host_version]
     if cwd:
         host_argv += ["--cwd", cwd]
-    host_argv += ["--unexpected-reap-seconds", str(unexpected_reap_seconds)]
-    host_argv += ["--active-reap-seconds", str(active_reap_seconds)]
+    retained_host = acquisition_launch is not None
+    host_argv += ["--unexpected-reap-seconds", str(0.0 if retained_host else unexpected_reap_seconds)]
+    host_argv += ["--active-reap-seconds", str(0.0 if retained_host else active_reap_seconds)]
     host_argv += ["--", *child_argv]
 
     child_env = os.environ.copy()
