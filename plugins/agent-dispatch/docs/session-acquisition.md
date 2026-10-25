@@ -228,14 +228,22 @@ agent-dispatch reservations authorize-fresh <task-id> \
 
 The client uses its configured control identity, not the worker credential.
 The coordinator atomically requires the exact generation, queued/unowned/
-unheld task, a handle-less latest deferred/failed created-or-reused allocation,
-and an exclusive-key carry chain whose latest allocation is that exact row,
+unheld task, a handle-less latest deferred/failed created, reused or targeted
+allocation, and an exclusive-key carry chain whose latest allocation is that exact row,
 no pending cleanup, no active same-task reservation and no other task's active
 reservation on that worktree. It advances task generation and marks the exact
 latest allocation's conversation retirement authorization, retaining original
 reservation details, receipts and transcripts and writing a task audit event.
 Stale/replayed authorization refuses. This only grants fresh intent; it neither
 starts a worker nor proves historical absence.
+
+For a targeted allocation, the task's current worktree affinity and any explicit
+worktree target must still name the exact retained worktree. Authorization
+preserves the original targeted ownership and allocation project/path; it does
+not turn an externally supplied worktree into a dispatch-created resource or
+grant teardown permission. The next ordinary reservation reuses that same
+allocation and carries the fresh-conversation authorization. Do not replace the
+task, change its target or manufacture an initial-launch receipt to recover it.
 
 The next reservation carries this retirement authorization through the existing
 owner-verified acquisition boundary. Bridge still independently refuses live

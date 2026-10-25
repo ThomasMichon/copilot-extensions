@@ -578,13 +578,14 @@ async def test_first_conversation_revalidates_authority_after_target_preparation
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("allocation", ["reused", "targeted"])
 @pytest.mark.parametrize("blocker", ["none", "unknown_head", "live_holder", "revoked"])
-async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner(rig, monkeypatch, blocker):
+async def test_explicit_retirement_recovery_still_checks_native_holder_and_owner(rig, monkeypatch, blocker, allocation):
     rig.source["task"]["generation"] = 1
     rig.source["acquisition_reservation"].update(
-        attempt=167, worktree_ownership="reused", conversation_retired=True,
+        attempt=167, worktree_ownership=allocation, conversation_retired=True,
     )
-    request = req(allocation="reused", conversation_retired=True, task_generation=1)
+    request = req(allocation=allocation, conversation_retired=True, task_generation=1)
     if blocker == "unknown_head":
         rig.head["id"] = "unknown-native"
     elif blocker == "live_holder":

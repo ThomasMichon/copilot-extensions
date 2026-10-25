@@ -256,7 +256,9 @@ below used those effective runtime versions, not a source-only patch.
   The earlier #8165 publication and running-version evidence above remains
   settled. The #8405 caller/preflight correction is now published and verified
   in the running controller. The subsequent namespace-identity repair #8715
-  requires its own containing release and authorized rollout.
+  is also published and verified in the active Bridge and Dispatch. The
+  targeted-allocation recovery correction #8796 still requires its containing
+  release and authorized rollout before retained headed acceptance.
 - [ ] Complete the validation matrix below, or explicitly transfer any
   unavailable lane to a named tracked objective.
 - [ ] Reconcile #5286, #5072, and #954 without closing broader unrelated scope.
@@ -308,7 +310,8 @@ below used those effective runtime versions, not a source-only patch.
 - [ ] Static local, SSH, and privileged lanes have equivalent acceptance
   evidence or explicit tracked transfers.
   Installed static-local ACP now passes; genuine headed acquisition is blocked
-  by #8715. SSH and privileged native acceptance remain open.
+  by the targeted-allocation recovery gap #8796 after #8715 activation.
+  SSH and privileged native acceptance remain open.
 - [x] Source-preservation examples agree with executable cases: local
   same-world references retain the original path, remote local sources use
   reflected paths, Git declarations remain Git declarations after installation,
@@ -359,6 +362,40 @@ on malformed configuration. These are reliability details, not new authority
 or a reason to create a daemon.
 
 ## Journal
+
+### 2026-10-25 - Activate the hosting correction and retain targeted recovery
+
+- Natural release run `40141562435` completed qualification, publication/readback
+  and Main merge. Pinned Main `ba67378f9f904e5f210f1b2693b81df19eb41ea4`
+  records admitted Dev `a023a5722f3eb90f6d28f491102331bc45d321db`, which
+  contains #8730. The two changed namespace production modules match the merged
+  correction, admitted Dev and published Main byte-for-byte.
+- Authorized unified adoption completed after the documented serialized
+  fallback and one ordinary retry of a bounded Worktrees installer timeout.
+  Running-state verification then detected an older serving Bridge despite
+  the newer selected marker. The supported unified targeted-runtime reconcile
+  completed its ordinary graceful cutover, without manual activation, shared
+  service restart, forced drain or changed deadlines.
+- Actual Bridge `0.9.153.dev1` is ready, healthy and not draining; actual
+  Dispatch `0.18.93-dev1` is healthy. Both active runtimes import the exact
+  qualified namespace correction. Worktrees selected `1.24.261-dev1`.
+  This establishes #8715 activation, not headed native acceptance.
+- The original headed task remains queued, unowned and deferred with its exact
+  target allocation and no recorded session handle. Missing acquisition history
+  is still unknown, not proof that a conversation never launched.
+- #8796 tracks the remaining control-only recovery restriction: the initial
+  allocation is `targeted`, while explicit fresh-conversation authorization
+  accepted only `created` or `reused`. The bounded source correction admits
+  that exact retained target only while current task targeting still matches.
+  Original ownership, allocation project/path and history remain preserved;
+  existing control, generation, exclusivity, holder and post-preparation
+  revalidation checks remain in force.
+- The actual targeted reservation regression fails before the correction.
+  Source validation covers successful authorization/carry-forward and negative
+  permission, target drift, unknown ownership, active reservation, cleanup and
+  native-holder controls. Publication, authorized adoption and the original
+  headed native acceptance remain open; this is not a replacement test.
+- Container, SSH, privileged and parent issue reconciliation gates remain open.
 
 ### 2026-10-24 - Verify installed local ACP and preserve execution ownership
 
