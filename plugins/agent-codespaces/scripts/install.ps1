@@ -760,6 +760,7 @@ function Install-PackageInto {
         'agent-codespaces' = $PluginDir
     }
     $installArguments = @('--python', $Python)
+    if (-not $Editable) { $installArguments += '--no-editable' }
     foreach ($entry in $sources.GetEnumerator()) {
         if ($Editable) { $installArguments += @('--editable', $entry.Value) }
         else { $installArguments += @('--reinstall-package', $entry.Key, $entry.Value) }

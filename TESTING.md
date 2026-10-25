@@ -584,8 +584,9 @@ absence of pip/setuptools and actual fixture-wheel installation by UV.
 The canonical Codespaces runner selects only the batched closure/retry,
 signed recovery and native cold/warm source-edit cases. Every explicit local
 root and reinstall/editable selection is preserved in one retained transaction;
-the real native case checks all nine installed distributions and refreshed
-same-version source. These are disposable correctness checks, not a
+the real native case checks canonical editable source mappings overridden by
+normal non-editable installation, all nine installed distributions and
+refreshed same-version source. These are disposable correctness checks, not a
 whole-update speedup claim, and do not expand required unit-only PR CI.
 
 `tools/test_installer_wheel_acquisition.py` uses a public test-only localhost TLS

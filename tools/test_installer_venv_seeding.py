@@ -24,9 +24,10 @@ def run(script, tmp_path, shell, *, timeout=30):
         pytest.skip(f"{shell} unavailable")
     path = tmp_path / "fixture.ps1"
     path.write_text("$ErrorActionPreference='Stop'\n" + script, encoding="utf-8")
+    environment = dict(os.environ, PSModulePath=str(Path(executable).parent / "Modules"))
     return subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(path)],
-        cwd=tmp_path, env=dict(os.environ), capture_output=True, text=True, timeout=timeout,
+        cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=timeout,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
 
@@ -71,12 +72,14 @@ def test_uv_owned_callers_select_unseeded_shared_construction(plugin):
 
 @pytest.mark.skipif(os.name != "nt", reason="native signed Windows copies")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
-def test_actual_uv_install_works_in_signed_unseeded_environment(tmp_path, shell):
+def test_actual_uv_install_works_in_signed_unseeded_environment(tmp_path, shell, monkeypatch):
     from wheel_input_fixture import wheel_bytes
 
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("native UV unavailable")
+    if shell == "powershell" and (foreign := shutil.which("pwsh")):
+        monkeypatch.setenv("PSModulePath", str(Path(foreign).parent / "Modules"))
     slot = tmp_path / "slot"
     wheel = tmp_path / "fixture-1.0-py3-none-any.whl"
     wheel.write_bytes(wheel_bytes(

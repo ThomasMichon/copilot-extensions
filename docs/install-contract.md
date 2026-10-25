@@ -3987,7 +3987,9 @@ signed-Python recovery/venv health probes remain plugin-owned; uv acquisition,
 transient retries, and deploy-manifest writing use the shared engine.
 Both installers submit the eight helper roots and plugin root in one retained
 UV transaction, preserving every named `--reinstall-package` selection or all
-nine editable roots. UV resolves their dependency order once; a closure failure
+nine editable roots. Normal installs explicitly pass `--no-editable` so canonical
+development mappings cannot conflict with those non-editable direct roots.
+UV resolves their dependency order once; a closure failure
 still refuses construction. Windows requires UV and omits pip seeding from
 its signed-copy venv as well.
 PowerShell `stamp` materializes both engine files and all declared local

@@ -614,17 +614,18 @@ def attributed_library_sources(tmp_path_factory):
     }
 
 
-def _small_attributed_sources(tmp_path, *, editable):
+def _small_attributed_sources(tmp_path, *, editable, canonical=None):
+    canonical = editable if canonical is None else canonical
     repository = tmp_path / "publisher"
     payload = repository / "plugins" / "agent-codespaces"
-    engine = repository / "libs" / "installer-engine" if editable else payload / "scripts"
+    engine = repository / "libs" / "installer-engine" if canonical else payload / "scripts"
     engine.mkdir(parents=True)
     for name in (
         "installer-engine.sh", "installer-engine.ps1",
         "installer_dependency_policy.py", "installer_dependency_config.py",
     ):
         shutil.copyfile(ENGINE / name, engine / name)
-    library_root = repository / "libs" if editable else payload / "libs"
+    library_root = repository / "libs" if canonical else payload / "libs"
     sources = [library_root / name.removeprefix("agent-") for name in PACKAGES[:-1]] + [payload]
     for name, source in zip(PACKAGES, sources):
         source.mkdir(parents=True, exist_ok=True)
@@ -645,7 +646,7 @@ def _small_attributed_sources(tmp_path, *, editable):
         if source == payload:
             text += "[tool.uv.sources]\n" + "".join(
                 f'{package}={{path={json.dumps(os.path.relpath(path, source).replace(os.sep, "/"))},'
-                f'editable={str(editable).lower()}}}\n'
+                f'editable={str(canonical).lower()}}}\n'
                 for package, path in zip(PACKAGES[:-1], sources[:-1])
             )
         (source / "pyproject.toml").write_text(text, encoding="utf-8")
@@ -654,7 +655,7 @@ def _small_attributed_sources(tmp_path, *, editable):
         "name": "agent-codespaces", "version": "1.0",
         "repository": "https://github.com/ThomasMichon/copilot-extensions",
     }), encoding="utf-8")
-    if editable:
+    if canonical:
         roster = repository / ".github" / "plugin" / "marketplace.json"
         roster.parent.mkdir(parents=True)
         roster.write_text(json.dumps({
@@ -678,7 +679,9 @@ def test_codespaces_library_install_order_retry_and_errors(
     env = _env(tmp_path)
     uv = _fake_uv(tmp_path)
     env["TEST_UV_MODE"] = mode
-    engine, sources = _small_attributed_sources(tmp_path, editable=editable)
+    engine, sources = _small_attributed_sources(
+        tmp_path, editable=editable, canonical=editable or mode == "sre",
+    )
     env["TEST_UV_EXPECTED_SOURCES"] = json.dumps({
         tomllib.loads((source / "pyproject.toml").read_text())["project"]["name"]: str(source)
         for source in sources
@@ -704,6 +707,8 @@ def test_codespaces_library_install_order_retry_and_errors(
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     assert bool(result.returncode) == (mode == "fatal"), result.stdout + result.stderr
     expected = ["pip", "install", "--python", str(python)]
+    if not editable:
+        expected.append("--no-editable")
     for package, source in zip(PACKAGES, sources):
         expected.extend((["--editable"] if editable else ["--reinstall-package", package]) + [str(source)])
     expected.append("--quiet")
@@ -725,7 +730,7 @@ def test_codespaces_native_batch_installs_cold_and_refreshes_warm_local_sources(
     uv = shutil.which("uv")
     if not uv:
         pytest.skip("native UV unavailable")
-    engine, sources = _small_attributed_sources(tmp_path, editable=False)
+    engine, sources = _small_attributed_sources(tmp_path, editable=False, canonical=True)
     backend = """
 import pathlib, tomllib, zipfile
 VALUE = 1
@@ -1081,6 +1086,7 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
         driver = tmp_path / "signed-python.py"
         driver.write_text(
             "import sys\nfrom pathlib import Path\n"
+            "assert '--without-pip' in sys.argv\n"
             "root = Path(sys.argv[-1])\n"
             "(root / 'Scripts').mkdir(parents=True)\n"
             "(root / 'Scripts' / 'python.exe').touch()\n"
@@ -1096,12 +1102,14 @@ def test_codespaces_signed_venv_recovery_keeps_usable_nonzero_result(tmp_path, u
     else:
         signed = tmp_path / "signed-python"
         signed.write_text(
-            '#!/bin/sh\nmkdir -p "$4/Scripts"\ntouch "$4/Scripts/python.exe" "$4/pyvenv.cfg"\n'
+            '#!/bin/sh\nset -eu\n[ "$4" = "--without-pip" ]\n'
+            'for argument in "$@"; do slot="$argument"; done\n'
+            'mkdir -p "$slot/Scripts"\ntouch "$slot/Scripts/python.exe" "$slot/pyvenv.cfg"\n'
             f"exit {signed_rc}\n",
             encoding="utf-8",
         )
         signed.chmod(0o755)
-    # Signed invocation is: -m venv --copies <slot>.
+    # Signed invocation is: -m venv --copies --without-pip <slot>.
     script = (
         _prelude("ps1")
         + _function("ps1", "Deploy-Venv")

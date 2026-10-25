@@ -102,6 +102,11 @@ stdlib `EnvBuilder`, copied interpreters and canonical child ownership:
 The seeded control was terminated with all owned descendants settled.
 This isolates unnecessary seeding as a real cost; it is not a total-update
 speedup measurement or evidence about service-specific post-copy hooks.
+The post-package Bridge spans included 4.4-8.7 seconds of warm-up and
+38.3-60.9 seconds of cutover/drain. Dispatch's coordinator handoff took
+20.6-33.5 seconds, followed by separate supervisor retirement/registration.
+Those costs are not simply file copying; this slice removes no health,
+drain or re-adoption checks.
 Several UV-owned installers still paid that cost, while Codespaces separately
 ran nine retained compiler/install transactions for its nine local roots.
 The targeted source changes opt those known UV callers out of seeding and

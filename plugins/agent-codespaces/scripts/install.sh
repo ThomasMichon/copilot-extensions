@@ -550,6 +550,9 @@ _install_package_into() {
         "$ZDD_DIR" "$VENUE_COPILOT_DIR" "$SESSION_LIVENESS_PROBE_DIR"
         "$SINGLE_INSTANCE_LEASE_DIR" "$REMOTE_LOGIN_SHELL_DIR" "$PLUGIN_DIR")
     local i output install_args=(--python "$py")
+    if [[ "$mode" != "--editable" ]]; then
+        install_args+=(--no-editable)
+    fi
     for i in "${!packages[@]}"; do
         if [[ "$mode" == "--editable" ]]; then
             install_args+=(--editable "${sources[$i]}")
