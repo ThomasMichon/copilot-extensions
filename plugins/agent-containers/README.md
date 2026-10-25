@@ -125,9 +125,9 @@ restricted posture and lifecycle hold without changing task ownership.
 Its `instance_pinned_exec` capability is backed by the expected physical-ID
 and birth-binding fences in the returned execution command; ordinary
 name-based wrappers do not advertise that guarantee.
-The separate internal [original creation storage](docs/creation-custody.md)
-prerequisite retains an explicit new birth and original association; it does
-not enable retained launches or upgrade existing bindings.
+The separate internal [original creation prerequisites](docs/creation-custody.md)
+retain an explicit new birth and original association, with an exact-slot
+retention primitive; they do not enable retained launches or upgrade existing bindings.
 Use Bridge's protocol-36 `create <agent> --creation-key <key>
 --provider-instance` to establish a replay-safe native session without
 inventing a worktree or sending a first prompt. A missing binding or replaced
