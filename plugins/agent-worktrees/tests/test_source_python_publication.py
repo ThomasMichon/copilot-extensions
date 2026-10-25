@@ -241,6 +241,33 @@ def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
             yield governance, lease
 
 
+def test_manifest_binding_preserves_selected_installation_mode(publication_case, monkeypatch):
+    driver, root, _slot, owner, content, _identity = publication_case
+    if not os.environ.get("COPILOT_EXTENSIONS_CONTEXT"):
+        installed = root.parent / ".copilot/installed-plugins/example/agent-worktrees"
+        shutil.copytree(owner, installed)
+        (root.parent / ".copilot/settings.json").write_text(json.dumps({
+            "extraKnownMarketplaces": {
+                "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+            },
+        }), encoding="utf-8")
+        owner = installed
+    raw = b'{"schema_version":3,"service":"agent-worktrees"}'
+    with admitted(driver, root, owner, content, monkeypatch) as (governance, lease):
+        previous = (root / "deploy-manifest.json").read_bytes()
+        with governance.manifest_publication(raw) as bound:
+            assert (root / "deploy-manifest.json").read_bytes() == previous
+            if governance.context:
+                assert bound == raw
+            else:
+                manifest = json.loads(bound)
+                assert Path(manifest["commandBinding"]["payloadRoot"]) == owner
+                assert manifest["commandLifecycle"] == {
+                    "version": 1, "state": "complete", "owner": lease.owner,
+                }
+        assert (root / "deploy-manifest.json").read_bytes() == previous
+
+
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["healthy", "publisher", "full-pin", "invalid-ack"])
 @pytest.mark.timeout(90)

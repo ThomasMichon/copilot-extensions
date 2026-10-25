@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -147,6 +148,41 @@ def _resolve(fixture: dict) -> dict:
     )
     assert _snapshot(fixture["home"]) == before
     return result
+
+
+@pytest.mark.parametrize("borrowed", [False, True])
+@pytest.mark.parametrize("commit", [False, True])
+def test_manifest_publication_binds_before_commit_without_early_write(
+    binding_fixture: dict, borrowed: bool, commit: bool,
+) -> None:
+    fixture = binding_fixture
+    binding, primitive = fixture["binding"], fixture["primitive"]
+    receipt = _publish(fixture)
+    lifecycle = binding._load_lifecycle()
+    authority = (
+        lifecycle.legacy_lifecycle(binding._rules(), primitive, **fixture["arguments"])
+        if borrowed else nullcontext()
+    )
+    path = fixture["legacy"] / "deploy-manifest.json"
+    with authority:
+        previous = path.read_bytes()
+        with binding.legacy_manifest_publication(
+            primitive, {"schema_version": 3, "service": PLUGIN_ID},
+            **fixture["arguments"],
+        ) as (manifest, result, lock):
+            assert path.read_bytes() == previous
+            assert manifest["commandBinding"] == receipt
+            assert result == {"status": "published", "reason": "ownership-validated"}
+            lock.assert_owned()
+            if borrowed:
+                assert manifest["commandLifecycle"]["state"] == "complete"
+            if commit:
+                primitive._atomic_write_json(path, manifest, lock=lock)
+            lock.assert_owned()
+        if commit:
+            assert _resolve(fixture)["status"] == "selected"
+        else:
+            assert path.read_bytes() == previous
 
 
 def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture: dict) -> None:

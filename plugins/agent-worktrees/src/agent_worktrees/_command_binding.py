@@ -7,7 +7,8 @@ import importlib.util
 import json
 import os
 import sys
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping, Protocol
@@ -146,10 +147,11 @@ def publish_legacy_binding(
     return receipt
 
 
-def write_legacy_manifest(
+@contextmanager
+def legacy_manifest_publication(
     primitive: InstallationPrimitive, manifest: dict[str, Any], **arguments: Any
-) -> dict[str, Any]:
-    """Serialize validation and atomic publication at the existing lifecycle."""
+) -> Iterator[tuple[dict[str, Any], dict[str, str], Any]]:
+    """Retain validated command ownership through the caller's manifest commit."""
     root = Path(arguments["legacy_root"])
     if not root.is_absolute() or not root.is_dir():
         raise ValueError("Legacy manifest publication requires an existing absolute runtime root.")
@@ -196,7 +198,19 @@ def write_legacy_manifest(
                 if "commandLifecycle" in incumbent:
                     manifest["commandLifecycle"] = incumbent["commandLifecycle"]
             result = {"status": "published", "reason": "ownership-validated"}
-        primitive._atomic_write_json(root / "deploy-manifest.json", manifest, lock=lock)
+        lock.assert_owned()
+        yield manifest, result, lock
+        lock.assert_owned()
+
+
+def write_legacy_manifest(
+    primitive: InstallationPrimitive, manifest: dict[str, Any], **arguments: Any
+) -> dict[str, Any]:
+    """Serialize validation and atomic publication at the existing lifecycle."""
+    with legacy_manifest_publication(primitive, manifest, **arguments) as (bound, result, lock):
+        primitive._atomic_write_json(
+            Path(arguments["legacy_root"]) / "deploy-manifest.json", bound, lock=lock,
+        )
         return result
 
 

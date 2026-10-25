@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 import time
@@ -128,6 +129,25 @@ class Governance:
                 "marketplaceId", "namespaceGeneration", "generation", "pluginRoot",
             )},
         }
+
+    @contextmanager
+    def manifest_publication(self, content: bytes):
+        if self.context:
+            yield content
+            return
+        import command_binding as binding
+
+        with binding.legacy_manifest_publication(
+            self.helper, json.loads(content), payload_root=self.payload,
+            plugin_id="agent-worktrees", legacy_root=self.root,
+            project_root=self.project_root,
+        ) as (manifest, result, _lock):
+            if result["status"] == "unresolved":
+                print(
+                    f"Command ownership was not published: {result['reason']}",
+                    file=sys.stderr, flush=True,
+                )
+            yield (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
 
     @contextmanager
     def held(self, *, timeout: float = 180):
