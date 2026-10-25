@@ -210,8 +210,12 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
   Final wrapper exits remain unknown without an external return observation. No new
   producer or engine invocation is required, and no admission refusal, crash,
   prompt acceptance or replay permission is inferred. Windows and frozen-source
-  POSIX packets each pass 75 cases, including the real Manager-to-engine reader
-  across 104 receipts in two pages and unchanged synthetic fixture state.
+  POSIX packets each pass 76 cases, including the real Manager-to-engine reader
+  across 105 receipts in two pages and unchanged synthetic fixture state.
+  The actual execution owner also runs a real child after an injected earlier
+  receipt-write failure: its terminal records zero result/child exits with
+  uncertainty, while its real wrapper returns 3. The projection preserves that
+  distinction rather than claiming the wrapper returned zero.
   This qualifies source inspection, not installed conversation delivery.
   Selected-machine protected detail, accepted-turn correlation, release,
   authorized rollout and the original installed acceptance remain open.
