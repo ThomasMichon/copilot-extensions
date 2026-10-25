@@ -2427,6 +2427,54 @@ def test_engine_run_sync_batches_full_reconciliation(tmp_path: Path) -> None:
         ).is_file()
 
 
+def test_interrupted_full_reconciliation_retains_batches_and_retries_remaining_files(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
+    from agent_logger.sync.targets import filesystem
+
+    source = tmp_path / "source"
+    for sid in ("first", "second", "third"):
+        session = source / "session-state" / sid
+        session.mkdir(parents=True)
+        (session / "events.jsonl").write_bytes(b"{}\n")
+    destination = tmp_path / "destination"
+    cfg = _cfg(tmp_path / "home", source, destination)
+    cfg._data["sync"]["change_tracking"] = {"batch_size": 1}
+    real_push = LocalTarget.push
+    calls = 0
+
+    def interrupted(target, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("interrupted before next batch")
+        return real_push(target, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalTarget, "push", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted before next batch"):
+            engine.run_sync(cfg)
+    tracker = ChangeTracker(resolve_db_path(cfg.sync_change_tracking["db_path"], cfg.home))
+    assert tracker.known_session_ids() == {"first"}
+    assert tracker.should_full_sync(24)
+    first = next(destination.iterdir()) / "session-state" / "first" / "events.jsonl"
+    first_revision = first.stat().st_mtime_ns
+    copies = []
+    real_copy = filesystem._copy_replace
+
+    def copied(src, dst):
+        copies.append(src.relative_to(source))
+        return real_copy(src, dst)
+
+    monkeypatch.setattr(filesystem, "_copy_replace", copied)
+    assert engine.run_sync(cfg) == 0
+    assert tracker.known_session_ids() == {"first", "second", "third"}
+    assert not tracker.should_full_sync(24)
+    assert first.stat().st_mtime_ns == first_revision
+    assert {path.parts[1] for path in copies if path.parts[0] == "session-state"} == {"second", "third"}
+
+
 def test_engine_run_sync_forgets_vanished_session_on_full_sync(
     tmp_path: Path,
 ) -> None:

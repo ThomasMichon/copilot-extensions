@@ -545,5 +545,18 @@ catalogs do not replace it in this phase.
 - **Linux/WSL:** `bash plugins/agent-logger/scripts/install.sh install`
   (systemd user timer).
 
+The Windows GUI-root launcher loads process support from the selected installed
+runtime through the canonical installed resolver on each run, rather than pinning
+a collectible registration-time slot. It starts the shell suspended inside a required kill-on-close Job, and
+prohibits descendant breakaway. Cancellation closes that Job; ordinary completion
+also reaps remaining descendants. A 25-minute launcher guard reports exit 124 and
+retains diagnostics before the unchanged 30-minute Scheduler limit. It does not
+turn timeout into successful sync. Linux/WSL retain systemd's existing lifecycle.
+
+Completed filesystem files and batch signatures survive an interrupted pass;
+the next reconciliation retries remaining differences without re-copying landed
+files or claiming a full-sync marker before completion. Transfer retry does not
+change accounting completeness or permit compaction of deferred evidence.
+
 Set `AGENT_LOGGER_SYNC_DISABLED=1` to make a run a no-op (e.g. in automation
 contexts).

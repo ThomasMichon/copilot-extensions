@@ -74,43 +74,43 @@ does not authorize unrelated host changes, destructive cleanup or gate bypass.
 ### Phase 1 - Establish the actual consumer budgets
 
 - [x] Land this proposal through normal automated review before implementation.
-- [ ] Attribute the real timeout to bounded source phases using content-free
+- [x] Attribute the real timeout to bounded source phases using content-free
   timings/counts and the actual scheduled-task result. _(agent-recommended)_
-- [ ] Inventory the relevant reader, ledger, change-tracker, filesystem-transfer,
+- [x] Inventory the relevant reader, ledger, change-tracker, filesystem-transfer,
   task-lifetime and cancellation contracts; identify exact compatibility and
   publication consumers before changing them. _(agent-recommended)_
 
 ### Phase 2 - Make accounting converge over large histories
 
-- [ ] Implement bounded incremental or resumable accounting collection so total
+- [x] Implement bounded incremental or resumable accounting collection so total
   historical size alone does not permanently reject an otherwise valid session.
   Choose the smallest source-grounded design after Phase 1. _(agent-recommended)_
-- [ ] Preserve source identity and revision checks, append/rewrite detection,
+- [x] Preserve source identity and revision checks, append/rewrite detection,
   per-record/line safety, exact multiplicity and idempotence. Partial tails,
   malformed usage, conflicting source records and genuine over-budget individual
   records remain visible; a cursor is never permission to skip unverified bytes.
-- [ ] Keep complete, deferred and failed coverage distinguishable. Only actually
+- [x] Keep complete, deferred and failed coverage distinguishable. Only actually
   preserved accounting may permit cold compaction; interruption cannot discard
   the last good ledger, publish fabricated completeness or lose pending progress.
-- [ ] Avoid re-reading unchanged historical prefixes on every periodic pass.
+- [x] Avoid re-reading unchanged historical prefixes on every periodic pass.
   Keep cached state rebuildable and bounded, and keep conversation content out
   of accounting records. _(agent-recommended)_
 
 ### Phase 3 - Bound and resume the real scheduled operation
 
-- [ ] Fix the phase responsible for the actual timeout, preserving the existing
+- [x] Fix the phase responsible for the actual timeout, preserving the existing
   single-writer lock, repository scope and target publication contract.
-- [ ] Make finite progress and continuation durable when all work cannot finish
+- [x] Make finite progress and continuation durable when all work cannot finish
   in one task lifetime. Do not substitute a silently enlarged deadline, another
   scheduler, unowned process or disabled accounting for a working operation.
-- [ ] Preserve windowlessness, real exit outcomes, diagnostic persistence and
+- [x] Preserve windowlessness, real exit outcomes, diagnostic persistence and
   safe process-tree cleanup on completion, timeout and cancellation.
 - [ ] Land source changes through approved PRs, observe a containing release and
   use the authorized updater; preserve explicit failure if deployment is blocked.
 
 ### Phase 4 - Prove the installed outcome
 
-- [ ] Verify complete accounting for large finite histories, append/catch-up,
+- [x] Verify complete accounting for large finite histories, append/catch-up,
   unchanged repeats and interrupted continuation without double counting.
 - [ ] Run the actual installed scheduled consumer over the real corpus through
   two observed cycles, with explicit accounting/transfer outcomes, no unwanted
@@ -123,19 +123,19 @@ does not authorize unrelated host changes, destructive cleanup or gate bypass.
 
 The following verification design is agent-recommended:
 
-- [ ] Regression first: synthetic histories above the existing total-byte/event
+- [x] Regression first: synthetic histories above the existing total-byte/event
   threshold reproduce the permanent failure before the source correction.
-- [ ] Bounded-work tests measure consumed bytes/records and progress per pass;
+- [x] Bounded-work tests measure consumed bytes/records and progress per pass;
   process a large source with a deliberately small budget through convergence.
-- [ ] Compare one-shot reference evidence with resumed evidence, including exact
+- [x] Compare one-shot reference evidence with resumed evidence, including exact
   multiplicity, append, truncation/replacement, same-size rewrite, partial tails,
   invalid JSON, oversized individual records, missing sources and corrupt cursors.
-- [ ] Verify last-good state and compaction refusal on incomplete/failed evidence;
+- [x] Verify last-good state and compaction refusal on incomplete/failed evidence;
   preserve repository filtering and every affected target's public contract.
-- [ ] Exercise real subprocess/filesystem consumers, timeout/cancellation and
+- [x] Exercise real subprocess/filesystem consumers, timeout/cancellation and
   restart recovery without widening existing safety budgets.
-- [ ] Run focused plugin tests, touched Python lint and install-contract checks.
-- [ ] Exercise fresh-state native fixtures where cursor/installer behavior changes;
+- [x] Run focused plugin tests, touched Python lint and install-contract checks.
+- [x] Exercise fresh-state native fixtures where cursor/installer behavior changes;
   name unavailable external venues instead of claiming unobserved evidence.
 - [ ] Observe the actual released/installed scheduled task and measured whole-run
   outcomes, including two cycles of native window/foreground monitoring.
@@ -184,3 +184,91 @@ existing behavior or permission to change evidence semantics.
   pins its buffer to 8 KiB while retaining its original measured threshold.
 - This increment does not resolve large-transcript accounting, bounded run
   continuation or descendant cleanup. Those gates remain open.
+- #8752 merged as `dc033b6ab3b0a8a92139acaa1b73f2564f08d633`
+  after current-head approval and green CI. Review extended pruning to the
+  protected publication loop as well; all/essential/redacted local and OneDrive
+  scope controls now pass (376 focused tests, two platform skips). Release and
+  installed task qualification are still pending.
+
+### 2026-10-25 - Bounded transcript accounting
+
+- Continuing Phase 2 in managed implementation workspace `spry-gauge`; this
+  README remains the canonical campaign record.
+- A real scheduled-accounting regression above the old 64 MiB source limit
+  reproduces permanent failure before the new collector. Bounded checkpoints
+  now converge without widening that per-pass byte or event budget.
+- Checkpoints contain only validated scalar observations and source revision,
+  offset and event counts. Unchanged completed sources need no transcript reads.
+  Any changed generation, including append, restarts validation at byte zero:
+  sampling a boundary is not proof that an earlier prefix was not rewritten.
+- Deferred work retains the last good ledger and blocks compaction without
+  inventing complete coverage. Invalid/corrupt source evidence remains failed;
+  corrupt disposable progress is visibly rebuilt from the source.
+- Initial accounting/reader/feature tests pass (220), including deliberately
+  small budgets, multiplicity, rewrite/replacement/truncation, partial tails,
+  failed checkpoint replacement, concurrent mutation and unchanged reuse.
+  Further event-threshold and subprocess restart validation precede publication.
+- Expanded accounting/reader/feature/SQLite validation passes (286 tests, one
+  platform skip), including a new-process continuation and both original total
+  byte/event thresholds. Individual limits and one-shot reader APIs are unchanged.
+- A fresh, private disposable cache over ten stable real histories of
+  119,568,078 through 278,316,336 bytes converges in two through five passes,
+  with a measured maximum of 67,108,864 source bytes per pass. All unchanged
+  repeats read zero transcript bytes. The complete probe takes 38.268 seconds,
+  retains no conversation content and does not mutate the source or its ledger.
+- An earlier probe correctly rejected a history that changed during capture.
+  The stable-history proof excludes that moving source rather than treating
+  rejected evidence as successful coverage.
+- Review identified saturated native-replay merge work and starvation behind
+  repeatedly failing/moving early sessions. Regression-first controls reproduce
+  both. Shared keyed observation aggregation and a durable, source-scoped rotating
+  collection position resolve them while retaining the existing merge semantics.
+- The final focused accounting packet passes 291 tests with one platform skip.
+  A production-size synthetic checkpoint with 20,000 observations and 200,000
+  native replays performs 240,000 normalizations in 13.784 seconds, rather than
+  re-merging the entire checkpoint per event.
+- #8767 merged as `c81d898f266825afbc87dc926e8f8b324a6579ab`
+  after current-head approval and green required CI. An unrelated retained
+  Bridge-closure CI blocker was coordinated with its existing owner, not bypassed.
+  Release, runtime selection and actual scheduled qualification remain open.
+
+### 2026-10-25 - Scheduled descendant ownership
+
+- Continuing the existing Phase 3 in `shiny-pedal`. The GUI root now reuses the
+  installed runtime's canonical process primitive: suspended child launch into a
+  required kill-on-close Job with no descendant breakaway.
+- Cancellation, normal completion and a 25-minute launcher guard all settle the
+  owned child tree. The existing Scheduler limit remains 30 minutes; timeout is
+  exit 124 with retained diagnostics, never successful completion.
+- Fresh generated-launcher native tests pass for cancellation and timeout,
+  including shell plus two Python generations. Existing two-cycle window/
+  foreground and exit-code controls pass for both PowerShell generations.
+  The 12 native tests pass; eleven POSIX-only cases skip on this host.
+- The installer declaration generator must now refresh the changed diagnostic
+  surface. The broader installer/transfer packet remains in progress; publication
+  waits for its actual result.
+- The generated installer diagnostic declaration is refreshed; install-contract
+  checks pass (13), as does touched Python lint. The isolated native
+  installer/transfer packet passes 213 tests with fourteen platform skips in
+  613.20 seconds, including cold installation, signed interpreter probing,
+  cancellation, timeout and interrupted full reconciliation. A completed first
+  batch retains its signatures without a premature full-sync marker; retry copies
+  only remaining files. Native timeout/cancellation tests reap both descendant
+  generations, and both PowerShell generations preserve exit codes and focus.
+- Fresh-state Windows fixtures exercise the relevant installed-launcher contract.
+  No separate remote Windows venue is available for this host-specific task;
+  actual released local scheduled-task qualification remains mandatory.
+- Rebased only the two unmerged commits above the already-merged traversal
+  increment. The only remaining conflict was the generated installer entrypoint
+  hash; regeneration preserves upstream's new shared installer dependencies.
+  The combined fresh-install/native/transfer packet passes 215 tests with
+  fourteen platform skips in 744.97 seconds; install contracts and generator
+  consistency also pass.
+- #8808 review found that the GUI root pinned process support to its original
+  runtime slot, which later provisioning could collect without refreshing the
+  Python launcher. Four native upgrade controls reproduce exit 1 after removing
+  that slot. The root now uses the installed canonical runtime resolver on each
+  invocation before loading selected support; it spawns no resolver subprocess
+  and duplicates no selector rules. All twelve native controls pass, including
+  both shell generations, slot collection between cycles and tree cleanup;
+  eleven POSIX cases skip on Windows. Install contracts and touched lint pass.
