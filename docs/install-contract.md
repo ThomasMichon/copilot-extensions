@@ -3718,6 +3718,8 @@ publication custody precedes whole-operation cutover custody and is reused
 through nested settlement. This restoration does not override managed-deployment
 policy, admit unfinished lifecycle evidence, or grant ordinary source publishers
 permission to copy an incumbent receipt.
+Both legacy lock paths forward the caller's remaining wait budget; ordinary
+lifecycle admission consumes that same budget before acquisition.
 
 Reuse also runs an isolated installed-origin health probe under retention. Its
 historical, non-editable local origin remains attributable to this runtime's

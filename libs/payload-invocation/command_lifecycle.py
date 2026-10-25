@@ -8,6 +8,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator
@@ -160,12 +161,15 @@ class LifecycleLease:
             )
 
 
-def _lock(primitive: Any, arguments: dict[str, Any]) -> Any:
+def _lock(
+    primitive: Any, arguments: dict[str, Any], *, timeout_seconds: float | None = None,
+) -> Any:
     root = Path(arguments["legacy_root"]).resolve()
+    budget = {} if timeout_seconds is None else {"timeout_seconds": timeout_seconds}
     return primitive._DirectoryLock(
         root.with_name(root.name + ".command-binding-publication.lock"),
         kind="command-binding-publication", marketplace_id="legacy",
-        plugin_id=arguments["plugin_id"],
+        plugin_id=arguments["plugin_id"], **budget,
     )
 
 
@@ -214,9 +218,13 @@ def borrowed_lease(
 @contextmanager
 def legacy_lifecycle(
     binding: Any, primitive: Any, *, reserve: bool = True, teardown: bool = False,
-    managed_deployment: bool = False, diagnostic: Any = None, **arguments: Any,
+    managed_deployment: bool = False, diagnostic: Any = None,
+    lock_timeout: float | None = None, **arguments: Any,
 ) -> Iterator[LifecycleLease]:
     """Reserve the existing manifest before the first shared-runtime write."""
+    if lock_timeout is not None and (not math.isfinite(lock_timeout) or lock_timeout < 0):
+        raise ValueError("Runtime lifecycle lock timeout must be finite and nonnegative.")
+    deadline = None if lock_timeout is None else time.monotonic() + lock_timeout
     if managed_deployment and teardown:
         raise ValueError("Managed deployment cannot authorize teardown.")
     if teardown and reserve:
@@ -244,7 +252,10 @@ def legacy_lifecycle(
     # admission is repeated after acquisition to close the concurrent-writer race.
     _publication(binding, primitive, arguments, purpose)
     _reservation(binding, primitive, root, _owner(binding, primitive, arguments))
-    with _lock(primitive, arguments) as lock:
+    with _lock(
+        primitive, arguments,
+        timeout_seconds=None if deadline is None else max(0, deadline - time.monotonic()),
+    ) as lock:
         owner = _owner(binding, primitive, arguments)
         manifest = _reservation(binding, primitive, root, owner)
         _publication(binding, primitive, arguments, purpose)

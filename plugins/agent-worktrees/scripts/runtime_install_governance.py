@@ -195,6 +195,7 @@ class Governance:
                 }
                 command_lock = stack.enter_context(binding._load_lifecycle()._lock(
                     self.helper, arguments,
+                    timeout_seconds=max(0, deadline - time.monotonic()),
                 ))
                 ownership = binding.retained_legacy_binding(self.helper, command_lock, **arguments)
             elif receipt is None:
@@ -204,6 +205,7 @@ class Governance:
                     binding._rules(), self.helper, reserve=False,
                     payload_root=self.payload, plugin_id="agent-worktrees",
                     legacy_root=self.root, project_root=self.project_root,
+                    lock_timeout=max(0, deadline - time.monotonic()),
                 ))
                 command_lock = lease.lock
             elif receipt is not None and os.environ.get(self.helper.RUNTIME_PUBLICATION_ENV):
