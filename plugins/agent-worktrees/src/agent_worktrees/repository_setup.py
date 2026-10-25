@@ -264,8 +264,8 @@ def _call(setup: Setup, mode: str) -> Outcome:
             argv = [executable, str(setup.script), "--request-file", str(request)]
         # Inherit handles: a credential owner may need the actual caller terminal.
         environment = repository_identity_env()
-        environment["GIT_TERMINAL_PROMPT"] = os.environ.get(
-            "GIT_TERMINAL_PROMPT", "1" if _terminal() else "0",
+        environment["GIT_TERMINAL_PROMPT"] = (
+            os.environ.get("GIT_TERMINAL_PROMPT", "1") if _terminal() else "0"
         )
         for variable in ("BASH_ENV", "ENV"):
             environment.pop(variable, None)

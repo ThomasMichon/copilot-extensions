@@ -203,6 +203,16 @@ $s = if (Test-Path -LiteralPath $state) { 'ready' } else { 'needed' }
     assert (source.parent / "calls.txt").read_text().splitlines() == ["check", "apply", "check"]
 
 
+def test_redirected_consumer_cannot_inherit_attended_git_prompt(source: Path, monkeypatch) -> None:
+    selected = consumer(source, """
+if ($env:GIT_TERMINAL_PROMPT -ne '0') { throw 'Redirected caller enabled a terminal prompt' }
+[IO.File]::WriteAllText($r.result_file, '{"version":1,"status":"ready","message":"Owner checked"}')
+""")
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
+    assert setup.run(selected, apply=False, trusted=True).status == "ready"
+    assert os.environ["GIT_TERMINAL_PROMPT"] == "1"
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="native Windows PowerShell fallback")
 def test_trusted_windows_powershell_uses_only_process_policy(
     source: Path, tmp_path: Path, monkeypatch,
