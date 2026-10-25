@@ -1,0 +1,9 @@
+{
+  "comment": "Resume bounded transcript accounting without publishing incomplete evidence",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
