@@ -34,7 +34,8 @@ def lifecycle_blocker(
     for key, fleet in config.fleets.items():
         if (fleet.lifecycle_owner == EXTERNAL_LIFECYCLE_OWNER
                 and name.startswith(fleet.prefix(key) + "-")
-                and name[len(fleet.prefix(key)) + 1:].isdigit()):
+                and (not labels.get(FLEET_LABEL)
+                     or name[len(fleet.prefix(key)) + 1:].isdigit())):
             return EXTERNAL_REASON
     return None
 

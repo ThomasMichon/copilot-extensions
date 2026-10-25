@@ -150,6 +150,32 @@ def test_managed_fleet_with_overlapping_prefix_is_not_external(external):
     assert lifecycle_blocker(external, "pilot-tools-1", {FLEET_LABEL: "pilot-tools"}) is None
 
 
+@pytest.mark.parametrize("name", ["pilot-dev", "pilot-dev-one"])
+@pytest.mark.parametrize("action", [lifecycle.cmd_stop, lifecycle.cmd_remove])
+def test_unlabeled_nonnumeric_external_member_frontdoors_refuse(
+    external, monkeypatch, name, action,
+):
+    info = member()
+    info.name = name
+    info.fleet = None
+    info.labels = {SECURITY_PROFILE_LABEL: "trusted"}
+    monkeypatch.setattr("agent_containers.lease.get_lease", lambda name: None)
+    monkeypatch.setattr(lifecycle, "_resolve_member_info", lambda *args: info)
+    monkeypatch.setattr(lifecycle, "_docker", lambda *args, **kwargs: pytest.fail("mutation"))
+    assert action(external, name) != 0
+
+
+@pytest.mark.parametrize("name", ["pilot-dev", "pilot-dev-one"])
+@pytest.mark.parametrize("verb", ["start", "stop", "unpause", "rm"])
+def test_unlabeled_nonnumeric_external_member_mutations_refuse(external, name, verb):
+    info = member()
+    info.name = name
+    info.fleet = None
+    info.labels = {SECURITY_PROFILE_LABEL: "trusted"}
+    with pytest.raises(RuntimeError, match="external lifecycle owner"):
+        pin_lifecycle_command([verb, name], external, lambda _: record(info))
+
+
 @pytest.mark.parametrize(("configured", "observed"), [
     ("external", "agent-containers"), ("agent-containers", "external"),
 ])

@@ -210,6 +210,10 @@ fallback is offered. A live external owner label independently prevents
 lifecycle mutation after configuration is changed or removed. Lifecycle
 commands inspect ownership immediately before their effect and address the
 observed full container ID, not a replacement sharing the same name.
+Unlabeled members inherit external ownership by the configured fleet-name
+prefix, including nonnumeric suffixes. An explicit managed fleet label still
+distinguishes overlapping prefixes; an external fleet's numeric slot remains
+protected even when labeled as another fleet.
 
 The default `lifecycle_owner: agent-containers` preserves managed fleets.
 Restricted fleets cannot select external lifecycle ownership. This is an
