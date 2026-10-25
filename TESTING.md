@@ -3324,6 +3324,10 @@ module belongs to the selected non-editable slot, and the original default-root
 SQLite witness/schema, config/database bytes and file identity are retained.
 Command ownership remains the incumbent's. This is not production-data migration,
 consumer cutover, namespaced repair or host rollout evidence.
+The coupled mode/recovery units additionally check both enabled and disabled
+adopted-Manager recovery through the source-health fallback, CLI parser,
+control-process argv and settlement, alongside the existing adopted-Manager
+recovery controls. The native runtime-only lane keeps that recovery disabled.
 
 The archived normal-updater consumer has its own explicit Windows contract:
 

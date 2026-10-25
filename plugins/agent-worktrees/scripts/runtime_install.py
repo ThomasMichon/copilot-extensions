@@ -540,7 +540,7 @@ def install(
                 root, plugin, payload=payload, uv=uv, base_python=base_python, mode="repair",
                 wait_timeout=wait_timeout, child_timeout=child_timeout,
                 expected_source_identity=runtime_source.manifest_fields(source_identity),
-                frontend=frontend,
+                frontend=frontend, recover_adopted_manager=recover_adopted_manager,
             )
         version = candidate.slot.name
         print(
@@ -830,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
             {"expected_governance": arguments.governance_generation}
             if arguments.mode_owner else {}
         )
+        mode_arguments["recover_adopted_manager"] = arguments.recover_adopted_manager
         if not arguments.mode_owner:
             mode_arguments["expected_source_identity"] = arguments.expected_source_identity
         if arguments.frontend is not None:

@@ -2709,6 +2709,9 @@ original exact source pin; a foreign receipt or incomplete repair does not.
 Source-backed engine construction routes the canonical health-repair-required
 outcome through its existing distinct-generation repair owner rather than
 rewriting the damaged slot. Ordinary package-only behavior is unchanged.
+An ordinary update's requested adopted-Manager recovery survives that fallback,
+its control process and final settlement. Runtime-only callers retain their
+disabled recovery setting; health repair does not silently broaden that scope.
 Completion-probe subprocess failures,
 including timeouts, become explicit receipt failures on the collected step,
 not exceptions that abort the remaining update portfolio. Native candidate construction and

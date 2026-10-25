@@ -195,8 +195,9 @@ def test_source_deployment_uses_exact_verified_snapshot_before_construction(
 
 
 @pytest.mark.parametrize("source_backed", [False, True])
+@pytest.mark.parametrize("recover_manager", [False, True])
 def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody(
-    driver, tmp_path, monkeypatch, source_backed,
+    driver, tmp_path, monkeypatch, source_backed, recover_manager,
 ):
     from types import SimpleNamespace
 
@@ -234,11 +235,15 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
         assert requested == root and selected == plugin
         assert kwargs["payload"] == owner and kwargs["mode"] == "repair"
         assert kwargs["expected_source_identity"] == source.manifest_fields(identity)
+        assert kwargs["recover_adopted_manager"] is recover_manager
         return {"runtime_version": "distinct-repair"}
 
     monkeypatch.setattr(driver.engine, "numbered_candidate", construct)
     monkeypatch.setitem(sys.modules, "runtime_install_modes", SimpleNamespace(run=repair))
-    arguments = dict(payload=owner, uv=tmp_path / "uv", base_python=Path(sys.executable))
+    arguments = dict(
+        payload=owner, uv=tmp_path / "uv", base_python=Path(sys.executable),
+        recover_adopted_manager=recover_manager,
+    )
     if source_backed:
         assert driver.install(root, plugin, **arguments) == {"runtime_version": "distinct-repair"}
     else:
