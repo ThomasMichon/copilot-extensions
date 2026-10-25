@@ -8,7 +8,7 @@ PROVIDER_EXEC_KIND = "provider-exec"
 
 
 def local_key(source: object) -> tuple[str, str] | None:
-    """Selected local source identity, with the historical source fallback."""
+    """Worker-only selected identity; UI consumers use the published tuple."""
     resolve = getattr(source, "local_source_key", None)
     return resolve() if callable(resolve) else getattr(source, "LOCAL", None)
 

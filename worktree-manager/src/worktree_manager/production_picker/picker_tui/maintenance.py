@@ -86,7 +86,8 @@ def _result_ok(op, res):
 
 
 def build_tasks(op, items, src, *, project=None, include_unused=False,
-                include_conversations=False):
+                include_conversations=False,
+                local: tuple[str | None, str | None] | None = None):
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
     *items* are engine record dicts (collision-safe ``selection_id`` +
@@ -95,12 +96,15 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
     remote items call the same project CLI over SSH via
     ``data_ssh.remote_op_argv``. A target that resolves to neither (unknown /
     *not-ready, or no remote argv builder on the source) yields a failed task.
+    UI callers pass their setup-published ``local`` tuple; only worker/legacy
+    callers may resolve the source when that optional argument is absent.
     """
     if project is None:
         project = context.project()
     elif not project.strip():
         raise ValueError("project must not be empty")
-    local = local_key(src)
+    if local is None:
+        local = local_key(src)
     tasks = []
     for w in items:
         wt_id = (w.get("raw") or {}).get("id")

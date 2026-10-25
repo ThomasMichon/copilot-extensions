@@ -13,7 +13,6 @@ from .controller_workspaces import target_row
 from .engine_live_screens import MsgViewScreen
 from .worktree_action_context import build_worktree_action_context
 from .command_transport import parse_action_json
-from .source_identity import local_key
 
 class PickerScreenWorktreeActionsMixin:
     _parse_action_json = staticmethod(parse_action_json)
@@ -555,7 +554,7 @@ class PickerScreenWorktreeActionsMixin:
         aid, never worth failing the overlay over.
         """
         try:
-            if (m, e) == local_key(self.src):
+            if (m, e) == self._src_local():
                 from worktree_manager import engine_client
 
                 from .. import context
@@ -591,7 +590,7 @@ class PickerScreenWorktreeActionsMixin:
         try:
             if not wt_id:
                 payload = {"error": "no worktree id"}
-            elif (m, e) == local_key(self.src):
+            elif (m, e) == self._src_local():
                 from worktree_manager import engine_client
 
                 from .. import context
@@ -837,7 +836,7 @@ class PickerScreenWorktreeActionsMixin:
         task_id = str(ctx.get("task_id") or ctx.get("id") or "").strip()
         machine = str(ctx.get("target_machine") or ctx.get("machine") or "").strip()
         tab = self._current_tab() or {}
-        local = local_key(self.src)
+        local = self._src_local()
         local_env = local[1] if isinstance(local, tuple) and len(local) >= 2 else None
         env = str(ctx.get("env") or tab.get("env") or "").strip()
         source_id = ctx.get("source_id") or tab.get("source_id")

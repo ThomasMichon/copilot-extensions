@@ -39,7 +39,8 @@ def test_setup_new_dialog_and_maintenance_use_selected_local_source(
     assert prepared["local"] == expected.key
     dialogs = []
     screen = SimpleNamespace(
-        src=data_local, create_target=lambda: expected.key, real_ops=False,
+        src=data_local, _src_local=lambda: expected.key,
+        create_target=lambda: expected.key, real_ops=False,
         _local_model_hosts=lambda: set(), _decide=lambda result: None,
         app=SimpleNamespace(push_screen=lambda dialog, callback: dialogs.append(dialog)),
     )

@@ -175,6 +175,11 @@ Setup, New/AHP, maintenance and worktree-detail routing consume the selected
 and compatibility. Known-provenance resolution preserves the full OS hostname,
 preferring full-hostname customization before a matching historical short-name
 customization. No map leaves that full observation intact.
+Worker setup/reload publishes the selected tuple for synchronous UI consumers;
+New, task embodiment and maintenance initiation never resolve configuration on
+the event loop. Expired or invalidated configuration is refreshed only on a
+worker. Action routing keeps the published tuple while actual engine
+project/record admission remains authoritative at execution.
 Older bootstrap responses without provenance retain their historical strict
 roster behavior; their detected `machine` scalar is not promoted to a new
 configured binding.
