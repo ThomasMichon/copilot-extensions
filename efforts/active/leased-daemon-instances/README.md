@@ -739,6 +739,32 @@ caller coverage, not one launcher or one platform passing.
   a passing fresh review, current-head CI and completion archival remain open.
   The effort stays Active; no runtime rollout is authorized.
 
+### 2026-10-25 - Current upstream bootstrap and metadata composition
+
+- Composed the current Manager bootstrap qualification with instance
+  reconciliation: both normal and repair construction retain the newly
+  selected qualified payload and the admitted cleanup callback. The targeted
+  bootstrap/source/repair packet passed 73 tests with two skips.
+- Upstream SSH metadata commands now defer their runtime imports. Fresh
+  process controls proved the module-level admission decorator violated that
+  promise for both help and version. Serving now acquires the same guard
+  inside the foreground callable, before application work, retaining it
+  through original native-relay settlement. Both counterexamples pass, and
+  the declared standalone environment passed all 155 SSH tests with six
+  platform skips, including the actual signal-handoff and distribution tests.
+- Two fresh Linux process checks also pass help/version with every process and
+  runtime backend import refused. The combined census, installer-consumer and
+  finite-worker controls pass 44 tests with one platform skip in the existing
+  dependency-complete environment. The original minimal environment lacked a
+  declared runtime dependency; no passing result is claimed from that attempt.
+- Upstream Bridge bootstrap now hands publication to the existing shared
+  installation driver rather than its removed raw detached spawns. Removed
+  only those two obsolete native census rows; the shared launch/admission
+  owner remains unchanged. No unit nodes, source bindings, native process
+  bytes, fixture/provenance records or runtime policy were weakened.
+- Current-head publication, fresh review/CI and completion archival remain
+  open. No runtime rollout is authorized.
+
 ### 2026-10-25 - Lane event worker and embedding-engine teardown
 
 - A later current-head review found two further shipped owners. The lane

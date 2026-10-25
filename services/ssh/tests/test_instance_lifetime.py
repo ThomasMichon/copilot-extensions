@@ -11,6 +11,41 @@ from agent_ssh_service import hosting
 from agent_ssh_service.__main__ import _foreground
 
 
+@pytest.mark.parametrize("flag", ["--help", "--version"])
+def test_fresh_metadata_does_not_load_process_admission(flag):
+    import sys
+    from pathlib import Path
+
+    from agent_procutil.owned_process import run_caller_owned
+
+    project = Path(__file__).resolve().parents[1]
+    script = """
+import builtins,runpy,sys
+from pathlib import Path
+project=Path(sys.argv[1])
+sys.path[:0]=[str(project/'src'),str(project.parents[1]/'libs/agent-procutil/src')]
+original=builtins.__import__
+def guarded(name,*args,**kwargs):
+    if name.split('.')[0] in {'asyncio','sqlite3','subprocess','fleet_manager','single_instance_lease'}:
+        raise AssertionError('runtime dependency imported for metadata: '+name)
+    return original(name,*args,**kwargs)
+builtins.__import__=guarded
+sys.argv=['agent-ssh-service',sys.argv[2]]
+runpy.run_module('agent_ssh_service',run_name='__main__')
+"""
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", "-c", script, str(project), flag],
+        timeout=10, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stderr
+    if flag == "--help":
+        assert "--config" in result.stdout
+    else:
+        from agent_ssh_service import __version__
+
+        assert result.stdout.strip() == __version__
+
+
 def observe_admission(monkeypatch):
     acquired = []
     admit = instances.admit_daemon_instance

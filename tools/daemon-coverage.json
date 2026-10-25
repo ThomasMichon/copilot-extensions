@@ -365,8 +365,6 @@
       "t:clean-room/scenarios/agent-bridge-concurrent-relay/fixtures/relay_collision_probe.py::_check_live_occupant_ephemeral_fallback::start_server": 1
     },
     "native": {
-      "r:plugins/agent-bridge/scripts/bootstrap-check.ps1::<script>::Start-Process": 2,
-      "r:plugins/agent-bridge/scripts/bootstrap-check.sh::<script>::nohup": 1,
       "r:plugins/agent-bridge/scripts/install.ps1::<script>::Start-Process": 3,
       "r:plugins/agent-bridge/scripts/install.ps1::<script>::New-ScheduledTaskAction": 1,
       "r:plugins/agent-bridge/scripts/install.sh::<script>::ExecStart": 1,
