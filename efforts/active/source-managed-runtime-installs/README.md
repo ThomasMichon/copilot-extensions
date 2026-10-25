@@ -509,7 +509,7 @@ transaction execution from the existing recurring-maintenance assignment.
   Snapshot acceptance, command/bootstrap/explicit-installer adoption, custom
   roots/cells, live service deployment and existing lifetime/publication/
   diagnostic custodians remain separate.
-- [ ] **Agent-recommended bounded semantic prerequisite:** qualify Bridge's
+- [x] **Agent-recommended bounded semantic prerequisite:** qualify Bridge's
   fixed legacy `install` action through the same foundation, canonical queue
   and frozen-input owner before migrating its bootstrap drift path. Preserve
   its direct required-context declaration, exact source/root/project,
@@ -522,6 +522,20 @@ transaction execution from the existing recurring-maintenance assignment.
   isolated registration/start outcomes. Ordinary publishers, selected
   snapshots, cells/custom roots, live service deployment and rollout remain
   separate.
+- [ ] **Agent-recommended bounded bootstrap adoption:** route Bridge's
+  legacy first stamp and drift `install` through the qualified fixed actions,
+  packaged canonical foundation and same queue. Preserve actual selected/
+  completed source-aware readiness, own controls/publication, originating
+  project and independent guidance. Retain Windows bootstrap's existing
+  unattended Bridge logon choice, not merely the shell's noninteractive flag;
+  qualify its S4U/AtStartup task through isolated adapters without changing
+  ordinary installer defaults. The [bounded plan](bridge-bootstrap.md)
+  requires native Python-free hook deadline/output, caller loss/concurrency,
+  actual materialized construction/installed consumers, immutable failure
+  safety and no-write refusal. Remove age/PID reaping, reconcile-status
+  execution custody and direct installer fallback. Commands, explicit
+  installers, selected snapshots, cells/custom roots, live bridge sessions,
+  service deployment, macOS and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
