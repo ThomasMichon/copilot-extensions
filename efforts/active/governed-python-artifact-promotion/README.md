@@ -330,7 +330,7 @@ probe qualification, CI authorization and lifecycle validation remain with
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
 
-#### Bootstrap-safe normal consumer _(agent-recommended; review before implementation)_
+#### Bootstrap-safe normal consumer _(agent-recommended; plan approved in #9009)_
 
 The next implementation stretch closes the gap between the explicit providers
 above and an actual installer. `libs/installer-engine/installer-engine.ps1`

@@ -3484,6 +3484,17 @@ long selected wheel names. The same deadline caps closed-wheel constructor child
 retry waits through installed health; ordinary source child defaults are
 unchanged.
 
+The shared `installer_native_feed.py` captures a caller's retained native UV
+settings using only the standard-library installer resources. It owns parsing,
+captured credential/OS-trust inputs and supported feed-policy refusals, not
+configuration precedence, profile approval, source authentication or resolution.
+Its caller supplies the existing secret-safe keyed identity operation; capture
+does not create a credential key or another approval store. The pure public-index
+rejection policy is shared with the existing build-tool trust owner through
+`installer_feed_policy.py`, without importing network acquisition into that
+owner. Canonical installer synchronization ships both helpers with each Python
+adopter. Their presence does not enable artifact/profile consumption.
+
 The repository-only `runtime_feed_configuration.retain_native_feed_inputs`
 composes an existing release selection with freshly resolved installation
 policy and the canonical retained UV preflight. It does not implement another

@@ -17,6 +17,7 @@ from packaging.markers import default_environment
 import pytest
 
 import runtime_feed_configuration as configuration
+import installer_engine_ref
 from runtime_profile import ProfileError
 from runtime_profile_wheels import profile_wheel_inputs, verify_profile_wheels
 from test_installer_closed_wheels import engine as engine, plugin as plugin
@@ -256,6 +257,116 @@ def test_header_builder_exercises_real_bytes_not_a_mocked_transport():
     value = dict(configuration._basic("fixture-user", "synthetic-secret"))["Authorization"]
     assert base64.b64decode(value.split(" ", 1)[1]) == b"fixture-user:synthetic-secret"
     assert value.split(" ", 1)[0] == "Ba" + "sic"
+
+
+@pytest.mark.parametrize("setting,error", [
+    ("ready", None),
+    ("offline", "AcquisitionUnavailable"),
+    ("unsafe-index", "AcquisitionUnavailable"),
+    ("insecure", "NativeFeedError"),
+])
+def test_native_capture_first_touch_is_stdlib_and_payload_local(
+    adopter, selected, feeds, tmp_path, monkeypatch, setting, error,
+):
+    import installer_native_feed as native
+
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    for name in (*installer_engine_ref.PYTHON_FILES, *installer_engine_ref.SUPPORT_FILES):
+        shutil.copyfile(installer_engine_ref.CANONICAL_DIR / name, payload / name)
+    poison = tmp_path / "foreign"
+    poison.mkdir()
+    for name in ("packaging", "runtime_profile", "governed_feed_trust", "build_toolchain_lock"):
+        (poison / (name + ".py")).write_text("raise AssertionError('ambient import')\n")
+    state = feeds()
+    settings = {
+        "unsafe-index": {"index_strategy": "unsafe-best-match"},
+        "insecure": {"allow_insecure_host": ["127.0.0.1"]},
+    }.get(setting, {})
+    env = environment(adopter, state, tmp_path, authenticate="always", **settings)
+    env.update(UV_INDEX_GOVERNED_USERNAME="fixture-user", UV_INDEX_GOVERNED_PASSWORD="synthetic-secret")
+    if setting == "offline":
+        env["UV_OFFLINE"] = "1"
+    seen = []
+    script = """
+import base64, hashlib, json, pathlib, sys
+from types import SimpleNamespace
+assert sys.flags.isolated and sys.flags.no_site
+source = pathlib.Path(sys.argv[2]).resolve()
+assert all(not pathlib.Path(path).resolve().is_relative_to(source) for path in sys.path)
+sys.path.insert(0, sys.argv[1])
+import installer_native_feed as native
+data = json.load(sys.stdin)
+transaction = SimpleNamespace(
+    argv=tuple(data["argv"]), environment=data["environment"],
+    cwd=pathlib.Path(data["cwd"]),
+    sources={pathlib.Path(key): pathlib.Path(value) for key, value in data["sources"]},
+)
+try:
+    result = native.capture_native_feed_inputs(
+        transaction, data["projection"], data["original"], None, data["policy"],
+        data["uv"], data["deadline"], wheels=data["wheels"],
+        profile_policy=data["profile_policy"],
+        opaque_identity=lambda value: hashlib.sha256(value.encode()).hexdigest(),
+    )
+except (native.NativeFeedError, native.AcquisitionUnavailable) as error:
+    document = {"error": type(error).__name__, "message": str(error)}
+else:
+    value = dict(result.feeds[0].headers)["Authorization"]
+    assert base64.b64decode(value.split(" ", 1)[1]) == b"fixture-user:synthetic-secret"
+    document = {
+        "policy_id": result.policy_id,
+        "feeds": [[feed.identity, feed.index_url] for feed in result.feeds],
+        "cutoffs": {name: value.isoformat() for name, value in result.cutoffs.items()},
+        "download_origins": list(result.download_origins),
+    }
+assert not any(name in sys.modules for name in (
+    "packaging", "runtime_profile", "governed_feed_trust", "build_toolchain_lock",
+))
+assert pathlib.Path(native.__file__).resolve().parent == pathlib.Path(sys.argv[1]).resolve()
+print(json.dumps(document))
+"""
+
+    def first_touch(transaction, projection, original, profile, policy, uv, deadline, **options):
+        data = {
+            "argv": transaction.argv, "environment": transaction.environment,
+            "cwd": str(transaction.cwd),
+            "sources": [(str(key), str(value)) for key, value in transaction.sources.items()],
+            "projection": projection, "original": original, "policy": policy,
+            "uv": uv, "deadline": deadline,
+            "wheels": options["wheels"], "profile_policy": options["profile_policy"],
+        }
+        child = subprocess.run(
+            [sys.executable, "-I", "-S", "-B", "-c", script, str(payload), str(installer_engine_ref.REPO)],
+            input=json.dumps(data), capture_output=True, text=True, check=True,
+            cwd=poison, env={**env, "PYTHONPATH": str(poison)},
+            timeout=min(20, deadline - time.monotonic()),
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        document = json.loads(child.stdout)
+        seen.append(document)
+        result = native.capture_native_feed_inputs(
+            transaction, projection, original, profile, policy, uv, deadline, **options,
+        )
+        assert document == {
+            "policy_id": result.policy_id,
+            "feeds": [[feed.identity, feed.index_url] for feed in result.feeds],
+            "cutoffs": {name: value.isoformat() for name, value in result.cutoffs.items()},
+            "download_origins": list(result.download_origins),
+        }
+        return result
+
+    monkeypatch.setattr(configuration, "capture_native_feed_inputs", first_touch)
+    if error is None:
+        with capture(selected, adopter, env) as inputs:
+            assert inputs.profile == selected.release_selection.selected.profile
+        assert seen and "error" not in seen[0]
+    else:
+        with pytest.raises((ProfileError, AcquisitionUnavailable)):
+            with capture(selected, adopter, env):
+                pytest.fail("unsupported native feed policy was admitted")
+        assert len(seen) == 1 and seen[0]["error"] == error
+    assert state["requests"] == []
 
 
 def test_native_netrc_provider_is_bounded_and_preserved(adopter, selected, feeds, tmp_path):

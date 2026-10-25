@@ -49,6 +49,15 @@ through named environment, embedded URL and netrc credentials. They compare
 the real keyed opaque identities, retain stable unchanged captures, and make
 no feed request or machine credential-key write.
 
+The same file's `test_native_capture_first_touch_is_stdlib_and_payload_local`
+copies only canonical installer resources into an isolated payload and runs
+the actual native capture in a fresh `-I -S` process. Repository and site
+packages are absent; poisoned ambient imports cannot supply Packaging or
+profile/build tools. Real retained UV projections preserve named authentication
+bytes and capture identity, and retain offline, unsafe-index and insecure-TLS
+refusals without an HTTP request. This qualifies the shared capture mechanism,
+not admission-tool installation, normal-consumer enablement or a live feed.
+
 `tools/test_runtime_source_reuse.py` covers bounded persisted evidence admission,
 changed current selections, missing completed receipts, source/receipt corruption, current digest denials
 and consume-time invalidation. Nonordinary selected slots, including dangling

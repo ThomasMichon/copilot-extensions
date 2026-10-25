@@ -33,6 +33,11 @@ import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
+from installer_feed_policy import (  # noqa: F401 -- shared public-feed rejection policy
+    _PUBLIC_PYPI_HOSTS, _is_public_pypi_url, _normalize_hostname,
+)
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - exercised only on Windows
@@ -395,7 +400,6 @@ _BROAD_WINDOWS_PRINCIPAL_SIDS = (
 )
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
-_PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
 #: Affirmative trust policy for `resolve_toolchain_lock`'s governed-feed
 #: gate (see `_governed_feed_configured`'s own docstring): a comma-
 #: separated allowlist of hostnames the MACHINE explicitly asserts are its
@@ -706,27 +710,6 @@ def _opaque_index_identity(url: str) -> str:
     to a credential rotation -- routing it to a fresh alternate slot, the
     correct, more conservative direction for a fail-closed contract)."""
     return hmac.new(_provenance_key(), url.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def _normalize_hostname(host: str) -> str:
-    """Lowercases ``host`` and strips a single trailing root dot -- a
-    fully-qualified hostname may legally end in `.` (e.g. `pypi.org.`),
-    which DNS treats as identical to `pypi.org`, but a raw string/set
-    comparison would not -- letting that spelling bypass both the public-
-    PyPI denylist and the trust allowlist."""
-    host = host.lower()
-    return host[:-1] if host.endswith(".") else host
-
-
-def _is_public_pypi_url(url: str) -> bool:
-    """Whether ``url`` resolves to a public PyPI-family index (production
-    or Test PyPI) -- a feed configuration that NAMES one of these hosts,
-    even explicitly, is never a governed feed."""
-    try:
-        host = urllib.parse.urlsplit(url).hostname
-    except ValueError:
-        return False
-    return _normalize_hostname(host or "") in _PUBLIC_PYPI_HOSTS
 
 
 def _url_host(url: str) -> str | None:

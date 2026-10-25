@@ -1818,7 +1818,7 @@
         "tools/build_toolchain_lock.py": "11efa6396593d97e3ff27e64649113e73b9c52914316d33fea7cd4f205a37e44",
         "libs/installer-engine/installer_engine_process.py": "960bce19c7d9bdb7bb093e67cb69928867ecb55fa1554cc6352d3429f4729345",
         "tools/runtime_source_wheels.py": "6be67c548c0e689d93457023fcc9d50706f7969128dc9dcd3c39159f22263800",
-        "tools/governed_feed_trust.py": "a5c26a2d02d2d13fc36b31528af155fa8d99cab6ba112b91cd2b37197d88a09b",
+        "tools/governed_feed_trust.py": "8779ed48291dbe72842b570c3739f38dea6d3a6f1c2a481bcc1f269cf789cb5b",
         "libs/installer-engine/installer_dependency_policy.py": "dd2f24a3debc524dafb4b901111912058f596e228e7cf9085fc252174e3f83f9",
         "libs/installer-engine/installer_dependency_config.py": "e40a92574854247120baad1d2614a924ba3ee7e1bd9ad89d606c8102d6a71b67",
         "tools/accumulate_bumps.py": "64055cbc51a33c70882ea3e6ed863ec8b34c8bdb8b3b77c297d44e6cd08eecf0",
@@ -2001,7 +2001,8 @@
         "plugins/agent-mcp/src/agent_mcp/home.py": "62c504a90b38853728e6cc5371ca28ffd77668c23abdae61e32b913e191ed108",
         "tools/promotion_unit_tests/test_container_inventory.py": "de099eecae55baf26fbc3fac3ebbcd463b7bf595bbf14fce7b312629c5fb9303",
         "plugins/agent-containers/src/agent_containers/lifecycle.py": "10e0108feed7e4f44c2ad27d1aec29863e1868aa26e614db8bcca552847f020c",
-        "tools/native_daemon_artifacts.py": "206c03069e3ad9cf4836fb0687ecd9dc683825f7e9de579631db0b795b360b6c"
+        "tools/native_daemon_artifacts.py": "206c03069e3ad9cf4836fb0687ecd9dc683825f7e9de579631db0b795b360b6c",
+        "libs/installer-engine/installer_feed_policy.py": "529d45bd6d72cf36ac9b2c75dc56c98d63ad2b0364a26073ed8e355fd02b3c7d"
     },
     "coverage_targets": [
         "plugins/agent-containers/src/agent_containers/lifecycle.py",

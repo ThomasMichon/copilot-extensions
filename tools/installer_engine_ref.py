@@ -33,6 +33,8 @@ PYTHON_FILES = (
     "installer_wheel_inputs.py",
     "installer_wheel_snapshot.py",
     "installer_wheel_acquisition.py",
+    "installer_native_feed.py",
+    "installer_feed_policy.py",
 )
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
