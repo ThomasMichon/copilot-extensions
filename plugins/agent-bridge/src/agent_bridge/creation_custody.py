@@ -72,8 +72,7 @@ class CreationRequest:
 
 def original_creation(row: sqlite3.Row | dict, kind: CreationKind) -> CreationRequest | None:
     association, facts = row["runtime_custody_json"], row["creation_facts_json"]
-    if kind == "workspace":
-        launch_observation(row)
+    launch_observation(row, kind=kind)
     if association is None and facts is None:
         return None
     if association is None or facts is None:

@@ -266,6 +266,30 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
 
 ## Journal
 
+### 2026-10-25 - Provider native-handoff DB prerequisite under validation
+
+- Add nullable prospective native handoff, one-shot launch and immutable
+  acceptance observations to the existing `provider_embodiments` row.
+  Preserve complete provider inputs and original admission/session/consumer
+  without workspace allocation, ground binding or prompt delivery.
+- Schema 38 prepares the three nullable provider fields and guards through
+  normal writable migration. Passive open and existing-only writable adoption
+  validate exact preparation without repairing corruption or enrolling legacy
+  native identities. Strict inventory includes and validates every provider
+  launch state, including inconsistent terminal rows.
+- The focused missing-capability control first refused provider preparation
+  at the existing workspace-only journal boundary. The expanded isolated
+  source selection now passes 405 controls with eight reported skips,
+  including real child exit, concurrent SQLite owners, FULL commits,
+  legacy migration, malformed outcomes and unchanged ordinary creation.
+- This closes stated custody intent, not a new public capability. It is
+  source under validation, not merged, released or deployed. No provider
+  subprocess/Host/native effect selects this DB path; actual provider effect
+  ownership, remote mediation and platform qualification stay open.
+  Continue through genuine changed-source evidence and independent review,
+  then return to the full Plan and Validation Plan before selecting the
+  next effect-owner slice.
+
 ### 2026-10-25 - Original local native creation merged; provider handoff storage next
 
 - #8895 merged as `5468f03f35e7f6e67e722f87ecbba9d8f738498d` at
