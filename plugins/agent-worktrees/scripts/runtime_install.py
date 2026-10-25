@@ -2,6 +2,85 @@
 
 from __future__ import annotations
 
+
+def _load_diagnostics():
+    from contextlib import nullcontext
+    import os
+    import sys
+    import threading
+
+    try:
+        import installer_diagnostics
+
+        return installer_diagnostics
+    except Exception:
+        # Only the optional import is isolated; implementation failures still escape.
+        os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
+        sink = sys.stderr
+
+        def notify():
+            descriptor = None
+            try:
+                descriptor = os.dup(sink.fileno())
+                os.write(descriptor, b"WARNING: installer diagnostics unavailable; "
+                         b"continuing with missing diagnostics.\n")
+            except (OSError, ValueError, AttributeError):
+                pass
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+
+        try:
+            thread = threading.Thread(target=notify, name="installer-missing-diagnostics", daemon=True)
+            thread.start()
+            thread.join(.05)
+        except RuntimeError:
+            pass
+
+        class MissingDiagnostics:
+            @staticmethod
+            def writer(**kwargs):
+                return nullcontext()
+
+            @staticmethod
+            def capture():
+                return nullcontext({})
+
+            @staticmethod
+            def phase(name):
+                pass
+
+            @staticmethod
+            def associate_installed(installation):
+                pass
+
+            @staticmethod
+            def warn():
+                pass
+
+        return MissingDiagnostics()
+
+
+if __name__ == "__main__":
+    # Enter diagnostics before implementation imports and argparse can fail.
+    # Re-enter this same trusted source in-process, not through another child.
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    _entry_diagnostics = _load_diagnostics()
+
+    with _entry_diagnostics.writer(announce=True):
+        import runpy
+
+        if hasattr(_entry_diagnostics, "ordinary"):
+            _entry_diagnostics.ordinary(Path(__file__))
+        _implementation = runpy.run_path(
+            __file__, run_name="__installer_source__",
+            init_globals={"_entry_diagnostics": _entry_diagnostics},
+        )
+        raise SystemExit(_implementation["main"]())
+
 import argparse
 import hashlib
 import importlib.util
@@ -25,6 +104,9 @@ import versioned_runtime as runtime
 import versioned_runtime_source as runtime_source
 import runtime_install_publication as helper_publication
 from runtime_install_governance import Governance, InstallationRefused
+
+
+diagnostics = globals().get("_entry_diagnostics") or _load_diagnostics()
 
 
 def helper_publication_plan(path: Path, digest: str) -> dict:
@@ -479,6 +561,40 @@ def _installed_identity(slot: Path) -> dict:
     return json.loads(result.stdout)
 
 
+def _associate_diagnostics(governance: Governance, slot: Path, identity: dict, manifest: bytes) -> None:
+    """Called only inside existing publication and retained-slot custody."""
+    try:
+        from agent_worktrees import runtime_deployment as deployment
+
+        governance.recheck()
+        if (
+            slot.parent != governance.root / "versions"
+            or runtime.current_version(governance.root) != slot.name
+            or deployment.read_manifest(governance.root) != manifest
+        ):
+            raise InstallationRefused("Diagnostic association requires the validated publication")
+        published = json.loads(manifest)
+        if (
+            published["service"] != "agent-worktrees"
+            or published["runtime_slot"] != slot.name
+            or Path(published["venv"]) != slot
+            or published["source"]["version"] != identity["package_version"]
+            or published["runtime_generation"] != identity["build_info"].get("runtime_generation")
+            or published["payload_hash"] != runtime.read_marker(
+                governance.root, slot.name,
+            )["payload_hash"]
+        ):
+            raise InstallationRefused("Diagnostic association differs from installed identity")
+        diagnostics.associate_installed({
+            "runtime_root": str(governance.root), "runtime_slot": slot.name,
+            "package_version": identity["package_version"],
+            "runtime_generation": identity["build_info"].get("runtime_generation"),
+            "deployment_manifest_sha256": hashlib.sha256(manifest).hexdigest(),
+        })
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError):
+        diagnostics.warn()
+
+
 def install(
     root: Path, plugin: Path, *, payload: Path, uv: Path, base_python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
@@ -508,9 +624,13 @@ def install(
         previous = _selected(root)
         if previous is not None:
             custody.enter_context(runtime.retention_lease(root, previous, timeout=wait_timeout))
+        diagnostics.phase("governance-wait")
         with governance.held(timeout=wait_timeout):
+            diagnostics.phase("governance-acquired")
             if source_identity is not None:
+                diagnostics.phase("publish-source-snapshot")
                 plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
+                diagnostics.phase("source-snapshot-ready")
             candidate = custody.enter_context(engine.numbered_candidate(
                 root, version, plugin=plugin, uv=uv, base_python=base_python,
                 health_module="agent_worktrees.runtime_candidate", health_callable="verify_runtime_candidate",
@@ -520,6 +640,8 @@ def install(
                 reuse_generations=source_identity is None,
                 expected_source_identity=runtime_source.manifest_fields(source_identity),
                 wait_timeout=wait_timeout, child_timeout=child_timeout,
+                progress=diagnostics.phase,
+                diagnostics=True,
             ))
         version = candidate.slot.name
         print(
@@ -550,20 +672,21 @@ def install(
             for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
                 environment.pop(name, None)
             environment["PYTHONDONTWRITEBYTECODE"] = "1"
-            process = subprocess.Popen(
-                argv, env=environment, stdin=subprocess.DEVNULL,
-                executable=argv[0] if os.name == "nt" else None,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-            )
-            try:
-                stdout, stderr = process.communicate()
-            except BaseException:
-                # This child owns both retained generations and cutover authority.
-                # A caller interruption must not turn its unfinished transition
-                # into permission for cleanup.
-                process.communicate()
-                raise
+            with diagnostics.capture() as destinations:
+                process = subprocess.Popen(
+                    argv, env=environment, stdin=subprocess.DEVNULL,
+                    executable=argv[0] if os.name == "nt" else None,
+                    text=True, **destinations,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+                try:
+                    stdout, stderr = process.communicate()
+                except BaseException:
+                    # This child owns both retained generations and cutover authority.
+                    # A caller interruption must not turn its unfinished transition
+                    # into permission for cleanup.
+                    process.communicate()
+                    raise
             if stdout:
                 print(stdout, end="", flush=True)
             if stderr:
@@ -719,10 +842,13 @@ def settle_candidate(
                         helpers.keep()
                     else:
                         helpers.rollback()
+                if committed:
+                    _associate_diagnostics(governance, candidate_slot, identity, manifest)
                 raise
             else:
                 if helpers is not None:
                     helpers.keep()
+                _associate_diagnostics(governance, candidate_slot, identity, manifest)
         return {
             "runtime_version": version,
             "package_version": identity["build_info"]["version"],
@@ -842,4 +968,5 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    with diagnostics.writer(announce=True):
+        raise SystemExit(main())

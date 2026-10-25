@@ -1015,6 +1015,170 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
             shutil.rmtree(sandbox.name)
 
 
+@pytest.mark.parametrize("winerror", [5, 32, 33])
+def test_sandbox_cleanup_retries_only_transient_windows_errors(
+    tmp_path, monkeypatch, capsys, winerror,
+):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    real_cleanup = sandbox.cleanup
+    failure = PermissionError("synthetic transient sharing failure")
+    failure.winerror = winerror
+    calls, sleeps = [], []
+    monkeypatch.setattr(plugin_test_containment.sys, "platform", "win32")
+    monkeypatch.setattr(plugin_test_containment.plugin_test_cleanup, "time", SimpleNamespace(
+        monotonic=lambda: 10, sleep=sleeps.append,
+    ))
+
+    def cleanup():
+        calls.append("cleanup")
+        if len(calls) == 1:
+            raise failure
+        real_cleanup()
+
+    monkeypatch.setattr(sandbox, "cleanup", cleanup)
+    try:
+        with sandbox:
+            pass
+        assert calls == ["cleanup", "cleanup"] and sleeps == [0.05]
+        assert not Path(sandbox.name).exists()
+        assert capsys.readouterr().err.count("[WARN]") == 1
+    finally:
+        real_cleanup()
+
+
+@pytest.mark.parametrize("platform,winerror", [("linux", 5), ("win32", 87)])
+def test_sandbox_cleanup_does_not_retry_other_errors(
+    tmp_path, monkeypatch, capsys, platform, winerror,
+):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    real_cleanup = sandbox.cleanup
+    failure = PermissionError("synthetic persistent access failure")
+    failure.winerror = winerror
+    calls = []
+    monkeypatch.setattr(plugin_test_containment.sys, "platform", platform)
+
+    def cleanup():
+        calls.append("cleanup")
+        raise failure
+
+    monkeypatch.setattr(sandbox, "cleanup", cleanup)
+    try:
+        with pytest.raises(PermissionError) as caught:
+            with sandbox:
+                pass
+        assert caught.value is failure and calls == ["cleanup"]
+        assert "[WARN]" not in capsys.readouterr().err
+        assert Path(sandbox.name).exists()
+    finally:
+        real_cleanup()
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_sandbox_cleanup_retry_expires_without_hiding_failure(
+    tmp_path, monkeypatch, capsys, interrupted,
+):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    real_cleanup = sandbox.cleanup
+    failure = PermissionError("synthetic persistent sharing failure")
+    failure.winerror = 5
+    primary = KeyboardInterrupt("native interruption")
+    calls, sleeps = [], []
+    clock = iter([10, 14.99, 15])
+    monkeypatch.setattr(plugin_test_containment.sys, "platform", "win32")
+    monkeypatch.setattr(plugin_test_containment.plugin_test_cleanup, "time", SimpleNamespace(
+        monotonic=lambda: next(clock), sleep=sleeps.append,
+    ))
+
+    def cleanup():
+        calls.append("cleanup")
+        raise failure
+
+    monkeypatch.setattr(sandbox, "cleanup", cleanup)
+    try:
+        with pytest.raises(
+            KeyboardInterrupt if interrupted else plugin_test_containment.SandboxCleanupError,
+        ) as caught:
+            with sandbox:
+                if interrupted:
+                    raise primary
+        if interrupted:
+            assert caught.value is primary
+        else:
+            assert caught.value.__cause__ is failure
+        assert calls == ["cleanup"] * 3
+        assert sleeps == pytest.approx([0.05, 0.01])
+        assert sandbox.retained and Path(sandbox.name).exists()
+        output = capsys.readouterr().err
+        assert output.count("[WARN]") == 1
+        assert ("[FAIL]" in output) is interrupted
+    finally:
+        real_cleanup()
+
+
+@pytest.mark.parametrize("failure_type", [
+    plugin_test_containment.UnreapedProcessError,
+    plugin_test_containment.SandboxCleanupError,
+])
+def test_sandbox_cleanup_never_retries_retained_or_expired_ownership(
+    tmp_path, monkeypatch, failure_type,
+):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    real_cleanup = sandbox.cleanup
+    primary = failure_type("native files remain owned")
+
+    def cleanup():
+        pytest.fail("unreaped ownership cannot enter cleanup or its retry")
+
+    monkeypatch.setattr(sandbox, "cleanup", cleanup)
+    try:
+        with pytest.raises(failure_type) as caught:
+            with sandbox:
+                raise primary
+        assert caught.value is primary and sandbox.retained
+        assert Path(sandbox.name).exists()
+    finally:
+        real_cleanup()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows delete-sharing failure")
+def test_sandbox_cleanup_retry_recovers_after_its_exact_file_handle_closes(
+    tmp_path, monkeypatch, capsys,
+):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    path = Path(sandbox.name) / "owned-capture"
+    path.write_bytes(b"owned")
+    handle = path.open("rb")
+    release = threading.Event()
+    real_cleanup = sandbox.cleanup
+
+    def release_handle():
+        release.wait(10)
+        handle.close()
+
+    def cleanup():
+        try:
+            real_cleanup()
+        except PermissionError:
+            release.set()
+            raise
+
+    worker = threading.Thread(target=release_handle)
+    monkeypatch.setattr(sandbox, "cleanup", cleanup)
+    worker.start()
+    try:
+        with sandbox:
+            pass
+        assert release.is_set(), "native deletion must fail before the handle closes"
+        assert not Path(sandbox.name).exists()
+        assert "[WARN] Windows sandbox cleanup" in capsys.readouterr().err
+    finally:
+        release.set()
+        worker.join(timeout=10)
+        assert not worker.is_alive()
+        handle.close()
+        real_cleanup()
+
+
 def test_run_contained_detects_and_fails_on_persistent_environment_drift(
     tmp_path, capfd, monkeypatch
 ):

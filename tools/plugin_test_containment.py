@@ -21,6 +21,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 
+if __package__:
+    from . import plugin_test_cleanup
+else:
+    import plugin_test_cleanup
+
+SandboxCleanupError = plugin_test_cleanup.SandboxCleanupError
+cleanup_reaped_directory = plugin_test_cleanup.cleanup_reaped_directory
+
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
 sys.path.insert(
@@ -149,22 +157,32 @@ class TestSandbox(tempfile.TemporaryDirectory):
         super().__init__(*args, **kwargs)
         self.retained = False
 
-    def retain(self) -> None:
+    def retain(self, reason: str = "Unreaped process tree") -> None:
         if not self.retained:
             self._finalizer.detach()
             self.retained = True
             print(
-                f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
+                f"[KEEP] {reason}: sandbox retained at {self.name}",
                 file=sys.stderr,
             )
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if self.retained:
+            return False
         if isinstance(exc_value, UnreapedProcessError):
             self.retain()
             return False
+        if isinstance(exc_value, SandboxCleanupError):
+            self.retain("Cleanup retry exhausted")
+            return False
+        exit_sandbox = super().__exit__
         try:
-            return super().__exit__(exc_type, exc_value, traceback)
+            return plugin_test_cleanup._cleanup_with_windows_retry(
+                lambda: exit_sandbox(exc_type, exc_value, traceback),
+            )
         except OSError as cleanup_error:
+            if isinstance(cleanup_error, SandboxCleanupError):
+                self.retain("Cleanup retry exhausted")
             if not isinstance(exc_value, (KeyboardInterrupt, SystemExit)):
                 raise
             print(f"[FAIL] Sandbox cleanup failed: {cleanup_error}", file=sys.stderr)

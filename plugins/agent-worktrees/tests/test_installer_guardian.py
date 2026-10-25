@@ -17,6 +17,9 @@ import agent_procutil
 from agent_procutil import no_window_kwargs
 
 
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
 @pytest.fixture
 def guardian():
     source = Path(__file__).resolve().parents[3] / "libs" / "installer-engine" / "installer_engine_process.py"
@@ -24,6 +27,106 @@ def guardian():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("with_deadline,with_capture", [
+    (False, False), (False, True), (True, False), (True, True),
+])
+def test_retained_dispatch_preserves_deadline_and_capture_options(
+    guardian, monkeypatch, tmp_path, with_deadline, with_capture,
+):
+    monkeypatch.setattr(guardian, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(guardian.time, "monotonic", lambda: 10)
+    calls = []
+    result = subprocess.CompletedProcess(["owned-child"], 0, "owned output", "")
+
+    def retained(argv, **kwargs):
+        calls.append(kwargs)
+        return result
+
+    monkeypatch.setattr(guardian, "_retained_windows", retained)
+    helper = tmp_path / "installer_diagnostics.py"
+    assert guardian.run_owned(
+        ["owned-child"], cwd=tmp_path, env={}, timeout=30,
+        procutil=SimpleNamespace(), construction_fd=0, runtime_root=tmp_path,
+        runtime_version="probe", runtime_path=tmp_path / "runtime.py",
+        deadline=15 if with_deadline else None,
+        diagnostics_path=helper if with_capture else None,
+    ) is result
+    assert calls[0]["timeout"] == (5 if with_deadline else 30)
+    assert calls[0].get("deadline") == (15 if with_deadline else None)
+    assert calls[0].get("diagnostics_path") == (helper if with_capture else None)
+    assert ("deadline" in calls[0]) is with_deadline
+    assert ("diagnostics_path" in calls[0]) is with_capture
+
+
+@pytest.mark.parametrize("damage", ["syntax", "runtime"])
+def test_optional_capture_import_failure_does_not_catch_native_body(
+    guardian, tmp_path, monkeypatch, capsys, damage,
+):
+    helper = tmp_path / "broken-diagnostics.py"
+    helper.write_text("def invalid(\n" if damage == "syntax" else
+                      "raise RuntimeError('optional import failed')\n", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING", raising=False)
+    primary = RuntimeError("native body failure")
+    with pytest.raises(RuntimeError) as caught:
+        with guardian._diagnostic_capture(helper) as (destinations, warn):
+            assert destinations == {}
+            warn()
+            raise primary
+    assert caught.value is primary
+    assert os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] == "1"
+    assert capsys.readouterr().err.count("continuing with missing diagnostics") == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
+@pytest.mark.parametrize("boundary", ["guardian", "parent"])
+@pytest.mark.parametrize("damage", ["syntax", "runtime"])
+@pytest.mark.timeout(30)
+def test_retained_guardian_optional_import_failure_preserves_native_exit(
+    guardian, tmp_path, monkeypatch, capsys, boundary, damage,
+):
+    valid = SCRIPTS / "installer_diagnostics.py"
+    helper = guardian._load_resource("import_failure_diagnostics_fixture", valid)
+    environment = helper.reserve_launch(dict(os.environ, USERPROFILE=str(tmp_path), HOME=str(tmp_path)))
+    for name in (
+        "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT",
+        "COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY",
+    ):
+        monkeypatch.setenv(name, environment[name])
+    monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING", raising=False)
+    broken = tmp_path / "broken-diagnostics.py"
+    broken.write_text("def invalid(\n" if damage == "syntax" else
+                      "raise RuntimeError('optional import failed')\n", encoding="utf-8")
+    if boundary == "parent":
+        original = guardian._load_resource
+
+        def load(name, path):
+            if name == "installer_parent_diagnostics":
+                raise SyntaxError("invalid helper") if damage == "syntax" else RuntimeError("helper failed")
+            return original(name, path)
+
+        monkeypatch.setattr(guardian, "_load_resource", load)
+        broken.unlink()  # The guardian first reports unavailable capture to its parent.
+    runtime_path = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    runtime = guardian._load_resource("optional_import_runtime", runtime_path)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    slot = runtime.slot(root, "probe")
+    with runtime.construction_lease(root, "probe") as descriptor:
+        with pytest.raises(subprocess.CalledProcessError) as caught:
+            guardian.run_owned(
+                [sys.executable, "-I", "-c", "print('native child entered',flush=True); raise SystemExit(23)"],
+                cwd=slot, env=environment, timeout=3, procutil=agent_procutil,
+                construction_fd=descriptor, runtime_root=root, runtime_version="probe",
+                runtime_path=runtime_path, diagnostics_path=broken,
+            )
+        assert caught.value.returncode == 23 and caught.value.stdout == "native child entered\n"
+        with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
+            assert admitted
+    assert os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] == "1"
+    assert "continuing with missing diagnostics" in capsys.readouterr().err
+    assert helper.launch_reference(environment)["missing_diagnostics"]
 
 
 @pytest.mark.parametrize("state,exited", [("S\n", False), ("Z\n", True), ("Z+\n", True)])
@@ -167,6 +270,169 @@ def test_retained_windows_child_preserves_outcome_and_releases_custody(
                 assert caught.value.returncode == 23
         with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
             assert admitted
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
+@pytest.mark.parametrize("outcome", ["success", "exit", "timeout", "launch", "unavailable"])
+@pytest.mark.timeout(30)
+def test_retained_guardian_archives_child_not_protocol_and_preserves_outcome(
+    guardian, tmp_path, monkeypatch, outcome, capsys,
+):
+    helper_path = SCRIPTS / "installer_diagnostics.py"
+    diagnostics = guardian._load_resource("guardian_capture_fixture", helper_path)
+    environment = dict(os.environ, USERPROFILE=str(tmp_path), HOME=str(tmp_path))
+    environment = diagnostics.reserve_launch(environment)
+    directory = Path(environment["COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY"])
+    runtime_path = (
+        Path(__file__).resolve().parents[3]
+        / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    )
+    runtime = guardian._load_resource("capture_guardian_runtime", runtime_path)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    slot = runtime.slot(root, "probe")
+    credential = "gh" + "p_" + "g" * 24
+    child_error = credential + "\nchild-error\n"
+    script = (
+        "import os,sys,time;"
+        "os.write(1,b'out\\r\\nprogress\\rcomplete\\n'+b'x'*300000+b'\\n');"
+        f"os.write(2,{child_error.encode()!r}+b'y'*300000+b'\\n');"
+        + ("time.sleep(60)" if outcome == "timeout" else
+           "raise SystemExit(23)" if outcome == "exit" else "")
+    )
+    command = ([str(tmp_path / "missing.exe")] if outcome == "launch" else
+               [sys.executable, "-I", "-c", script])
+    if outcome == "unavailable":
+        helper_path = tmp_path / "missing-diagnostics.py"
+        for name in (
+            "HOME", "USERPROFILE", "COPILOT_EXTENSIONS_DIAGNOSTICS_ATTEMPT",
+            "COPILOT_EXTENSIONS_DIAGNOSTICS_DIRECTORY",
+        ):
+            monkeypatch.setenv(name, environment[name])
+        monkeypatch.delenv("COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING", raising=False)
+    errors = {
+        "exit": subprocess.CalledProcessError,
+        "timeout": guardian.ChildTimeoutExpired,
+        "launch": guardian.ChildLaunchError,
+    }
+    with runtime.construction_lease(root, "probe") as descriptor:
+        def run():
+            return guardian.run_owned(
+                command, cwd=slot, env=environment, timeout=3,
+                procutil=agent_procutil, construction_fd=descriptor,
+                runtime_root=root, runtime_version="probe", runtime_path=runtime_path,
+                diagnostics_path=helper_path,
+            )
+
+        if outcome in errors:
+            with pytest.raises(errors[outcome]) as caught:
+                run()
+            result = caught.value
+            if outcome == "exit":
+                assert result.returncode == 23
+        else:
+            result = run()
+            assert result.returncode == 0
+        if outcome != "launch":
+            assert result.stdout == "out\nprogress\ncomplete\n" + "x" * 300000 + "\n"
+            assert result.stderr == child_error + "y" * 300000 + "\n"
+        with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
+            assert admitted
+    if outcome == "unavailable":
+        assert os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] == "1"
+        assert "WARNING: installer diagnostics unavailable" in capsys.readouterr().err
+        assert (directory / "missing-diagnostics.json").exists()
+        assert diagnostics.launch_reference(environment)["missing_diagnostics"]
+        assert not list(directory.glob("*.raw"))
+        return
+    archives = list(directory.glob("*.log"))
+    assert len(archives) == 1
+    archive = archives[0].read_text(encoding="utf-8")
+    assert '"returncode"' not in archive and '"launch_error"' not in archive
+    assert credential not in archive
+    assert len(list(directory.glob("*.pending"))) == 1
+    if outcome != "launch":
+        assert "child-error" in archive and "complete" in archive
+        assert any(credential.encode() in path.read_bytes() for path in directory.glob("*.raw"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows retained Job guardian")
+@pytest.mark.parametrize("inherit_output", [True, False])
+@pytest.mark.timeout(30)
+def test_durable_guardian_keeps_existing_descendant_pipe_completion(
+    guardian, tmp_path, inherit_output,
+):
+    runtime_path = (
+        Path(__file__).resolve().parents[3]
+        / "libs" / "versioned-runtime" / "versioned_runtime.py"
+    )
+    runtime = guardian._load_resource("pipe_contract_runtime", runtime_path)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    slot = runtime.slot(root, "probe")
+    helper = SCRIPTS / "installer_diagnostics.py"
+    diagnostics = guardian._load_resource("pipe_contract_diagnostics", helper)
+    environment = diagnostics.reserve_launch(dict(os.environ, USERPROFILE=str(tmp_path)))
+    redirection = (
+        ",stdout=sys.stdout,stderr=sys.stderr" if inherit_output else
+        ",stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL"
+    )
+    script = (
+        "import subprocess,sys;"
+        "subprocess.Popen([sys.executable,'-I','-c','import time;time.sleep(60)'],"
+        f"creationflags=subprocess.CREATE_NO_WINDOW{redirection});"
+        "print('root complete',flush=True)"
+    )
+    with runtime.construction_lease(root, "probe") as descriptor:
+        def run():
+            return guardian.run_owned(
+                [sys.executable, "-I", "-c", script], cwd=slot, env=environment, timeout=3,
+                procutil=agent_procutil, construction_fd=descriptor,
+                runtime_root=root, runtime_version="probe", runtime_path=runtime_path,
+                diagnostics_path=helper,
+            )
+
+        if inherit_output:
+            with pytest.raises(guardian.ChildTimeoutExpired) as caught:
+                run()
+            assert caught.value.stdout == "root complete\n"
+        else:
+            assert run().stdout == "root complete\n"
+        with runtime._cleanup_lease(root, "probe", allow_construction_owner=True) as admitted:
+            assert admitted
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows owned capture")
+def test_capture_write_failure_still_drains_both_native_streams(guardian):
+    class FailedCapture:
+        writes = 0
+
+        def write(self, data):
+            self.writes += 1
+            if self.writes == 1:
+                return 1
+            raise OSError("capture storage unavailable")
+
+    capture = FailedCapture()
+    warnings = []
+    process, job = agent_procutil.spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-I", "-c",
+         "import os;os.write(1,b'o'*300000);os.write(2,b'e'*300000)"],
+        require_job=True, allow_breakaway=False, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    try:
+        output = guardian._CapturedPipes(
+            process, {"stdout": capture}, lambda: warnings.append("missing"),
+        )
+        stdout, stderr = output.communicate(timeout=10)
+        assert process.returncode == 0
+        assert stdout == "o" * 300000 and stderr == "e" * 300000
+        assert warnings == ["missing"] and capture.writes == 2
+    finally:
+        job.terminate_and_wait(10)
+        process.wait(timeout=10)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows executable-token limit")

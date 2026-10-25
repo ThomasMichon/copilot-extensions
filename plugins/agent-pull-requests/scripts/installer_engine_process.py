@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import importlib.util
+import io
 import json
 import math
 import os
@@ -13,8 +14,13 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
+import threading
 from types import ModuleType
+
+
+_DIAGNOSTICS_WARNED = False
 
 
 class ChildLaunchError(RuntimeError):
@@ -49,6 +55,7 @@ def run_owned(
     runtime_root: Path | None = None, runtime_version: str | None = None,
     runtime_path: Path | None = None,
     deadline: float | None = None,
+    diagnostics_path: Path | None = None,
 ) -> subprocess.CompletedProcess:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("installer child timeout must be finite and positive")
@@ -67,6 +74,7 @@ def run_owned(
                 argv, cwd=cwd, env=env, timeout=timeout, procutil=procutil,
                 root=runtime_root, version=runtime_version, runtime_path=runtime_path,
                 **({"deadline": deadline} if deadline is not None else {}),
+                **({"diagnostics_path": diagnostics_path} if diagnostics_path is not None else {}),
             )
     options = dict(cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -136,7 +144,10 @@ def run_owned(
     return result
 
 
-def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runtime_path, deadline=None):
+def _retained_windows(
+    argv, *, cwd, env, timeout, procutil, root, version, runtime_path,
+    deadline=None, diagnostics_path=None,
+):
     import msvcrt
 
     reader, writer = os.pipe()
@@ -153,6 +164,7 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
                      "--owner-handle", str(handle), "--runtime-root", str(root),
                      "--runtime-version", version, "--runtime-path", str(runtime_path),
                      "--procutil-path", str(Path(procutil.__file__).resolve()),
+                     *(["--diagnostics-path", str(diagnostics_path)] if diagnostics_path is not None else []),
                      "--timeout", str(timeout),
                      *(["--deadline", str(deadline)] if deadline is not None else []), "--", *argv],
                     cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -175,6 +187,19 @@ def _retained_windows(argv, *, cwd, env, timeout, procutil, root, version, runti
             _settle(lambda: process.communicate(timeout=30))
         if process.returncode != 0:
             raise RuntimeError("installer retention guardian did not confirm settlement")
+        if diagnostics_path is not None and (
+            "WARNING: installer diagnostics unavailable; continuing with missing diagnostics."
+            in stderr
+        ):
+            try:
+                diagnostics = _load_resource(
+                    "installer_parent_diagnostics",
+                    Path(__file__).with_name("installer_diagnostics.py"),
+                )
+                diagnostics.warn()
+            except Exception:
+                # Optional diagnostics cannot replace the guardian's native outcome.
+                _diagnostics_warning()
         try:
             outcome = json.loads(stdout)
         except ValueError:
@@ -217,6 +242,111 @@ def _load_resource(name, path):
     return module
 
 
+def _diagnostics_warning():
+    global _DIAGNOSTICS_WARNED
+    os.environ["COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING"] = "1"
+    if _DIAGNOSTICS_WARNED:
+        return
+    _DIAGNOSTICS_WARNED = True
+    sink = sys.stderr
+    message = "WARNING: installer diagnostics unavailable; continuing with missing diagnostics.\n"
+    if isinstance(sink, io.StringIO) or (
+        isinstance(sink, io.TextIOWrapper) and isinstance(sink.buffer, io.BytesIO)
+    ):
+        try:
+            sink.write(message)
+        except (OSError, ValueError):
+            pass
+        return
+
+    def notify():
+        descriptor = None
+        try:
+            descriptor = os.dup(sink.fileno())
+            os.write(descriptor, message.encode("ascii"))
+        except (OSError, ValueError, AttributeError):
+            pass
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    try:
+        thread = threading.Thread(target=notify, name="installer-guardian-notice", daemon=True)
+        thread.start()
+        thread.join(.05)
+    except RuntimeError:
+        pass
+
+
+@contextmanager
+def _diagnostic_capture(path):
+    if path is None:
+        yield {}, _diagnostics_warning
+        return
+    try:
+        diagnostics = _load_resource("installer_guardian_diagnostics", path)
+    except Exception:
+        _diagnostics_warning()
+        yield {}, _diagnostics_warning
+        return
+    with diagnostics.capture() as destinations:
+        yield destinations, diagnostics.warn
+
+
+class _CapturedPipes:
+    """Drain concurrently without changing the child's pipe completion contract."""
+
+    def __init__(self, process, destinations, warn):
+        self.process = process
+        self.buffers = [bytearray(), bytearray()]
+        self.errors = [None, None]
+        self.threads = []
+        for index, channel in enumerate(("stdout", "stderr")):
+            thread = threading.Thread(
+                target=self._read,
+                args=(index, getattr(process, channel), destinations.get(channel), warn),
+                daemon=True,
+            )
+            self.threads.append(thread)
+            thread.start()
+
+    def _read(self, index, source, destination, warn):
+        try:
+            while data := os.read(source.fileno(), 8192):
+                self.buffers[index].extend(data)
+                if destination is not None:
+                    try:
+                        remaining = memoryview(data)
+                        while remaining:
+                            written = destination.write(remaining)
+                            if not written:
+                                raise OSError("diagnostic capture write did not advance")
+                            remaining = remaining[written:]
+                    except (OSError, ValueError, TypeError):
+                        destination = None
+                        warn()
+        except OSError as error:
+            self.errors[index] = error
+        finally:
+            source.close()
+
+    def communicate(self, timeout):
+        deadline = time.monotonic() + timeout
+        for thread in self.threads:
+            thread.join(max(0, deadline - time.monotonic()))
+            if thread.is_alive():
+                raise subprocess.TimeoutExpired(self.process.args, timeout)
+        self.process.wait(timeout=max(0, deadline - time.monotonic()))
+        for error in self.errors:
+            if error is not None:
+                raise error
+        # Match Popen's UTF-8 TextIOWrapper and universal-newline translation.
+        return tuple(
+            bytes(buffer).decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+            for buffer in self.buffers
+        )
+
+
 def _supervise_windows(args, argv):
     import ctypes
     from ctypes import wintypes
@@ -244,7 +374,10 @@ def _supervise_windows(args, argv):
         procutil = _load_resource("installer_guardian_procutil", args.procutil_path)
         if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
             return expired
-        with runtime.retention_lease(Path(args.runtime_root), args.runtime_version):
+        with (
+            runtime.retention_lease(Path(args.runtime_root), args.runtime_version),
+            _diagnostic_capture(getattr(args, "diagnostics_path", None)) as (destinations, warn),
+        ):
             if disconnected():
                 raise RuntimeError("installer caller exited before child execution")
             if absolute_deadline is not None and time.monotonic() >= absolute_deadline:
@@ -264,7 +397,10 @@ def _supervise_windows(args, argv):
             if absolute_deadline is not None:
                 deadline = min(deadline, absolute_deadline)
             timed_out = False
+            output = process
             try:
+                if getattr(args, "diagnostics_path", None) is not None:
+                    output = _CapturedPipes(process, destinations, warn)
                 while True:
                     if disconnected():
                         raise RuntimeError("installer caller exited during child execution")
@@ -273,7 +409,7 @@ def _supervise_windows(args, argv):
                         timed_out = True
                         break
                     try:
-                        stdout, stderr = process.communicate(timeout=min(remaining, 0.1))
+                        stdout, stderr = output.communicate(timeout=min(remaining, 0.1))
                         break
                     except subprocess.TimeoutExpired:
                         continue
@@ -282,7 +418,10 @@ def _supervise_windows(args, argv):
                     _settle(lambda: job.terminate_and_wait(10))
                 finally:
                     _settle(lambda: process.wait(timeout=10))
-            stdout, stderr = process.communicate(timeout=10)
+                if output is not process:
+                    stdout, stderr = output.communicate(timeout=10)
+            if output is process:
+                stdout, stderr = process.communicate(timeout=10)
             return {
                 "returncode": process.returncode, "stdout": stdout,
                 "stderr": stderr, "timed_out": timed_out, "launch_error": None,
@@ -371,6 +510,7 @@ if __name__ == "__main__":
     parser.add_argument("--runtime-version")
     parser.add_argument("--runtime-path")
     parser.add_argument("--procutil-path")
+    parser.add_argument("--diagnostics-path")
     parser.add_argument("--timeout", type=float)
     parser.add_argument("--deadline", type=float)
     parser.add_argument("command", nargs=argparse.REMAINDER)

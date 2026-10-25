@@ -153,12 +153,20 @@ def test_source_execution_revalidates_and_keeps_retry_pin(selected, monkeypatch)
     owner, artifact, runtime, source = selected
     step = plan("module", owner, source)
     captured = []
+    references = []
 
     def run(argv, **kwargs):
         captured.append((argv, kwargs))
-        return SimpleNamespace(status="installer exited 1" if len(captured) == 1 else "OK")
+        return SimpleNamespace(
+            status="installer exited 1" if len(captured) == 1 else "OK",
+            diagnostics={"attempt": f"{len(captured):032x}", "status": "available"},
+        )
 
     monkeypatch.setattr(update_runtime, "_run_human_installer", run)
+    monkeypatch.setattr(
+        update_runtime.update_events, "installer_diagnostics",
+        lambda component, reference: references.append((component, reference)),
+    )
     assert update_runtime._execute_runtime_step(step) == "OK (installed)"
     assert len(captured) == 2
     for argv, kwargs in captured:
@@ -168,9 +176,14 @@ def test_source_execution_revalidates_and_keeps_retry_pin(selected, monkeypatch)
         assert kwargs["cwd"] == artifact
         assert kwargs["env"][PIN_ENV] == source.identity
         assert kwargs["target_version"] == source.version
+        assert kwargs["diagnostics"] is True
         assert kwargs["receipt"]() is None
     assert captured[0][0][-1] == "update"
     assert captured[1][0][-1] == "install"
+    assert references == [
+        ("agent-worktrees@copilot-extensions", {"attempt": f"{index:032x}", "status": "available"})
+        for index in (1, 2)
+    ]
 
 
 def test_source_execution_refuses_changed_inputs_before_launch(selected, monkeypatch):

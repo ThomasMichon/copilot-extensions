@@ -149,7 +149,8 @@ def classify_status(status: str) -> tuple[str, str | None]:
 
 
 def record(phase: str, component: str, status: str, *, required: bool = True,
-           changed: bool | None = None, started: float | None = None) -> None:
+           changed: bool | None = None, started: float | None = None,
+           action: str | None = None) -> None:
     """Record one target's status string as a target event."""
     global _human_phase_failed
     # These are the update owner's own success/skip statuses, independent of
@@ -167,8 +168,9 @@ def record(phase: str, component: str, status: str, *, required: bool = True,
         duration = int((time.monotonic() - started) * 1000) if started is not None else None
         detail = None if status in ("OK", "SKIPPED (current)") else status
         error = {"code": code, "message": status} if code else None
+        options = {"action": action} if action is not None else {}
         _run.target(phase, component, outcome, required=required, changed=changed,
-                    detail=detail, duration_ms=duration, error=error)
+                    detail=detail, duration_ms=duration, error=error, **options)
     except Exception:  # telemetry never affects the update
         pass
 
@@ -216,6 +218,13 @@ def auth_result(summary: dict, *, applied: bool, available: bool = False) -> Non
         _run.emit("auth_report", summary["id"], "info",
                   details={"auth": summary, "fallback_applied": applied,
                            "fallback_available": available or applied})
+
+
+def installer_diagnostics(component: str, reference: dict | None) -> None:
+    """Publish exact discovery evidence separately from installation authority."""
+    if _run is not None and reference is not None:
+        _run.emit("engine_runtime", component, "info",
+                  details={"installer_diagnostics": reference})
 
 
 def auth_used(summary: dict) -> None:

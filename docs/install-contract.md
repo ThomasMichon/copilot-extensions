@@ -2941,6 +2941,196 @@ marketplace payload's command-binding ownership.
 
 ### Captured native human output
 
+#### Persistent installer diagnostics (initial Worktrees boundary)
+
+Worktrees' native entrypoints initialize their packaged
+`installer-diagnostics.ps1` / `.sh` before admission and optional human-output
+initialization. This diagnostic exception permits only private per-user state
+under `~/.copilot-extensions/installer-diagnostics/<attempt-id>/` before
+installation admission. `attempt.json` explicitly records `UNATTRIBUTED`;
+neither this record nor inherited correlation identifiers confer installation,
+publication or cleanup authority. An installation association must follow the
+existing installation owner's validation; discovery alone is not attribution.
+
+The representative engine updater reserves a fresh private attempt before
+spawn and returns its exact reference through `InstallerRun.diagnostics` and
+the existing update event stream. `launch-request.json` is caller evidence,
+not an installer-entered record. Actual correlated writer records and private
+logs establish `installer_entry: observed`; absent or unverifiable evidence
+retains explicit `missing_diagnostics` and `missing`/`unknown` status.
+`launch-result.json` records the caller's native exit and returned, spawn-failed,
+timeout or interrupted outcome without completing inherited writers. Parser,
+signature or policy refusal before native entry therefore never masquerades as
+successful installer logging. Diagnostic presentation uses stderr and does not
+replace protocol stdout or native process ownership.
+Caller announcements and missing-diagnostics warnings are bounded best-effort
+notifications, not synchronous writes on the installer path. At most one raw
+descriptor writer is outstanding per caller module, with a 50 ms presentation
+wait and no queued replay or buffered-stdio lock. A stalled reader may lose the
+notice but cannot withhold launch or interpreter exit; the exact private
+reference and missing/unknown state remain in the result and event stream.
+The canonical Python producer applies the same bounded presentation rule to
+entry announcements, fixed phase labels and missing-diagnostics warnings.
+Phase archival writes occur before optional presentation, so a notice lost to
+backpressure does not erase private producer progress.
+
+The retained Worktrees publication receiver can record `installation.json`
+only inside its existing governance and candidate/rollback retention custody,
+after verifying the published manifest, explicit selection, installed package/
+generation, completion-marker fingerprint and private diagnostic writer/log
+path. Original attempt metadata remains `UNATTRIBUTED`; exact references can
+then carry `VALIDATED_INSTALLATION_RECORDED` and minimal historical publication
+metadata. This is neither current serving proof nor a deployment receipt,
+authorization or new cleanup authority. An association refusal warns and reports
+missing diagnostics without failing installation or changing rollback.
+
+Each native or retained writer has a separate correlated start record.
+PowerShell bootstrap uses filesystem-only path composition and explicitly
+qualified native JSON cmdlets, avoiding provider and broad command discovery
+on the cold child's pre-output path without prewarming its modules.
+Sanitized text archives omit known credential patterns and sensitive context/
+witness records; they never intentionally dump the environment or invocation.
+Private `.raw` files are transport, not sanitized archives or export artifacts.
+Their `.pending` marker is retained because direct-child exit does not prove
+every inherited writer has settled. Recovery must not delete them or claim
+complete archival processing without the existing owner's settlement evidence.
+
+The Worktrees Python entry enters its in-process diagnostic boundary before
+implementation imports and argument parsing. Without inherited correlation it
+creates its own `UNATTRIBUTED` attempt; an inherited attempt must match the
+existing plugin/schema/ID and private filesystem contract. POSIX directories
+require current-user ownership and mode 0700; Windows directories require a
+protected TokenUser-only full-control DACL. Files require ordinary, single-link
+identity and user-only access, including read access. Existing public, foreign
+or linked state is refused rather than repaired or treated as available logging.
+The CLI entry explicitly announces its exact diagnostic directory on stderr.
+Generic in-process writers do not announce by default, preserving their original
+stream bytes. The optional construction progress callback reports fixed labels
+before fingerprinting, authority/lease waits, retained-input preparation,
+construction, preparation and health verification; it does not log inputs,
+change a deadline or alter construction/cutover ownership.
+
+Worktrees also opts its retained Windows construction children into durable
+capture through the existing guardian. The helper comes from the admitted
+frozen plugin's packaged diagnostic closure, never ambient module discovery.
+Concurrent byte drainers preserve both original child streams and write private
+regular-file spools while the child runs. Completion still requires the root
+and both pipes within the original deadline: a descendant retaining a pipe
+still times out, while one closing its pipes does not extend successful root
+completion. This is not a new whole-Job natural-exit requirement.
+The original strict Job owner terminates and verifies every owned writer before
+the final bounded drain and sanitized snapshot, including after caller death.
+The guardian's JSON completion protocol is not an archived child stream.
+Capture setup/write failure continues draining, preserves the native result and
+reports missing diagnostics; private raw/pending files remain conservative
+incomplete evidence rather than gaining automatic retirement permission.
+Optional helper-import failures, including syntax and import-time exceptions,
+are guarded separately in the guardian and parent warning-propagation path.
+Native execution, completion validation and settlement stay outside those
+guards. The helper-unavailable fallback warning is also bounded and once-only.
+Other engine consumers remain opted out.
+
+Python text/binary tees preserve original stream descriptors, encoding,
+`isatty`, flush and protocol output. They sanitize bounded logical records
+before archival writes and never hand the archive descriptor to subprocesses.
+Direct descriptor writes remain with the original stdio owner. Root failures
+record their class and native child exit where available; subprocess exceptions
+do not stringify their command/arguments. Available captured error output is
+sanitized separately. Logging failures warn and report missing diagnostics
+without replacing the original exception or result. Interpreter termination
+outside this boundary remains incomplete evidence, not successful installation.
+The same packaged private-filesystem/redaction closure accompanies source,
+staged and retained/frozen Python entrypaths; no additional Python is introduced
+into the native pre-bootstrap flow.
+If the optional Python helper itself is missing or fails to import, entry and
+implementation reuse one warning-only fallback: capture uses inherited streams,
+diagnostic callbacks do nothing, and missing diagnostics remains explicit.
+The fallback warning has the same bounded raw-write presentation rule.
+Implementation imports, parser results, construction ownership and native
+failures remain outside the optional-helper exception boundary.
+
+An explicit text/binary flush also persists bounded incomplete logical and
+decoder state to a private, non-inheritable `<writer>.producer.pending`
+checkpoint journal. It retains credential/oversize context separately from
+sanitized archives and fsyncs the checkpoint before returning. A conservative
+partial preview omits the final incomplete token, partial credential shapes and
+incomplete URL authorities; exact unfinished state stays private. Recovery
+reads only a bounded, fixed-byte tail and writes a separate sanitized recovery
+log. A torn append can expose an earlier complete checkpoint with explicit
+truncation status; an unknown complete record refuses recovery. Neither active
+writer recovery nor normal completion permits raw deletion or implies tree
+quiescence.
+
+Contextual PowerShell staging retains its existing windowless launch and drains
+currently available bytes from both channels fairly into separate files. Its
+final drain snapshots available bytes instead of awaiting descendant EOF.
+The same drain forwards child progress to its original stdout/stderr channels
+through incremental decoders and the admitted producer writers. Presentation
+does not depend on successful raw capture or sanitized archive publication;
+storage warnings are deferred until a final stream boundary rather than
+inserted into a split character. Native capture setup remains independent of
+whether diagnostic storage initialized successfully.
+Diagnostic forwarding to parent pipes uses checked, scoped nonblocking native writes,
+restoring the original mode shared by aliases before returning to installer
+execution. Each channel has a 256KiB queue and a bounded 16-by-1KiB native write
+batch. Bytes already present in the capture buffer are enqueued directly when
+next in order and within capacity; earlier backlog is replayed in bounded 8KiB
+ranges from the existing private raw file, without a second spool or whole-file
+backlog copy. Replay never reads beyond the recorded range or refreshes the
+single final native-byte snapshot. It uses only the original remaining child
+budget, and cannot turn an already-exited child's success into a timeout.
+Storage failure retains the original direct-presentation path where possible;
+a lost range is reported rather than overtaken by later output.
+Indefinitely blocked or slow parents can still lose optional live presentation.
+`presentation-loss.json` and
+`COPILOT_EXTENSIONS_DIAGNOSTICS_PRESENTATION_MISSING=1` distinguish that loss
+from capture failure and preserve the primary native result. These records do
+not confer cleanup or installation authority.
+Changing the declared human-output writers rebinds diagnostic presentation
+before subsequent output. A new captured child also receives fresh presentation
+state after the previous state settles within its remaining budget; a transient
+cutoff cannot permanently suppress a later child's healthy channel. Prior loss
+snapshots remain in the private `presentation-loss.history.jsonl`, rather than
+being erased by that reset. Canonical shared staging/error-rendering blocks
+retain their existing behavior; this is not a replacement for every installer
+output owner.
+Retained Python-publication children receive explicit separate regular-file
+destinations. Sanitization reads a fixed written-byte snapshot, never descendant
+EOF. Python archival records over
+64 KiB are replaced with an explicit omission marker rather than retaining
+unbounded partial credential-bearing text in memory. Diagnostic I/O failure
+sets `COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING=1`, warns on stderr when possible,
+and preserves the primary native result. It is not a reason to block installation.
+Native host parse/signature/policy failures before entry execution still
+require caller-owned launch diagnostics.
+
+Bash accepts whitespace in caller-reserved JSON correlation without requiring
+bootstrap Python. One early EXIT handler composes available lease release and
+native diagnostic completion, retaining the original exit code and explicitly
+warning about a secondary cleanup failure.
+
+Header redaction consumes folded credential values before replacing their
+`Authorization:` or `http.extraheader=` prefixes. Erasing a scheme on one line
+must not expose its credential on the next; native helpers and the Python
+archive adapter cover LF/CRLF and header/scheme continuations.
+
+Only completed attempts older than 30 days may be pruned. Active/incomplete
+writers, unsettled transport, foreign records, links and reparse points remain
+protected. Completed records are flushed by their writers; this is not a
+hardware power-loss durability guarantee. Worktrees updater events retain the
+exact representative launch reference even on failure, explicitly without
+asserting current installation authority. Caller-reserved attempts remain
+incomplete until the existing native owner can bind positive tree-quiescence
+evidence to complete writer/raw reconciliation; this initial boundary does not
+invent that handoff or prune those attempts from root exit alone.
+
+These helpers are canonical in `libs/installer-engine/`; the initial adoption
+list in `tools/installer_engine_ref.py` is deliberately limited to Worktrees.
+`tools/sync-installer-engine.py` synchronizes helpers, the existing canonical
+redactor projection and native human-output declarations. This initial boundary
+does not assert complete coverage of legacy staging, every diagnostic producer,
+every standalone installer, or all interrupted-capture recovery paths.
+
 Declaring PowerShell installers source their packaged
 `installer-human-output.ps1` after strict error setup and before installer
 output. Only an explicitly requested, redirected child initializes UTF-8;

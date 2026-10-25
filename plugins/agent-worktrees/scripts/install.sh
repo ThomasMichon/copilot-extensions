@@ -33,6 +33,31 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+installer_diagnostics_complete() { :; }
+installer_diagnostics_run() { "$@"; }
+if [[ -f "$SCRIPT_DIR/installer-diagnostics.sh" ]]; then
+    source "$SCRIPT_DIR/installer-diagnostics.sh"
+    installer_diagnostics_init agent-worktrees
+else
+    export COPILOT_EXTENSIONS_DIAGNOSTICS_MISSING=1
+    printf '%s\n' 'WARNING: installer diagnostics unavailable; continuing with missing diagnostics.' >&2 || :
+fi
+_installer_exit() {
+    local rc=$?
+    trap - EXIT
+    if declare -F _release_versioned_slot_lease >/dev/null; then
+        if ! _release_versioned_slot_lease; then
+            if declare -F installer_diagnostics_write >/dev/null; then
+                installer_diagnostics_write 'installer lease cleanup failed' || :
+            fi
+            printf '%s\n' 'WARNING: installer lease cleanup failed; preserving native exit status.' >&2 || :
+        fi
+    fi
+    installer_diagnostics_complete "$rc" || :
+    exit "$rc"
+}
+trap '_installer_exit' EXIT
+
 # A structured caller supplies both the validated context and its exact root.
 # Validate them again before any installer staging or runtime mutation.
 CONTEXTUAL_INSTALL=false
@@ -131,7 +156,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             __aw_admission_operation=publish
             [[ "$__aw_action" != uninstall ]] || __aw_admission_operation=teardown
             if [[ -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" ]]; then
-                "$__aw_admission_python" "${__aw_admission_args[@]}" \
+                installer_diagnostics_run "$__aw_admission_python" "${__aw_admission_args[@]}" \
                     --check-lifecycle --lifecycle-operation "$__aw_admission_operation" || exit $?
             else
                 __aw_admission_bash="$(type -P -- bash)" || exit 1
@@ -144,7 +169,7 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 if [[ "$__aw_action" == install || "$__aw_action" == update ]]; then
                     __aw_admission_args+=(--human-operation "$__aw_action")
                 fi
-                "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
+                installer_diagnostics_run "$__aw_admission_python" "${__aw_admission_args[@]}" --run-lifecycle -- \
                     "$__aw_admission_bash" "$SCRIPT_DIR/install.sh" "${__aw_args[@]}"
                 exit $?
             fi
@@ -1380,13 +1405,14 @@ _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
 # that wrapper entirely (an `exit` terminates the whole script before the
 # caller's next line, let alone `_versioned_activate`, ever runs).
 # `_release_versioned_slot_lease` is already idempotent/safe to call with
-# nothing held, so registering it unconditionally here -- rather than only
+# nothing held, so registering it unconditionally at entry -- rather than only
 # once a lease is actually acquired -- is simplest and cannot double-release
 # anything. The flock/fcntl strengthening layers are released by the kernel
 # on process exit regardless; the universal mkdir gate has no such
 # auto-release, so without this trap a process that exits abnormally here
 # leaves it for a later contender's bounded stale-reclaim to clear instead.
-trap '_release_versioned_slot_lease' EXIT
+# The early _installer_exit trap composes lease release with diagnostic
+# completion and preserves the installer result even when either cleanup fails.
 # Human-readable reason the most recent _acquire_versioned_slot_lease call
 # failed, so callers can tell genuine contention (another live process
 # already holds the lease) apart from a persistent lease-machinery failure

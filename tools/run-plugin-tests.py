@@ -73,8 +73,10 @@ from plugin_test_selection import (
 from plugin_test_containment import (
     ContainmentError,
     Limits,
+    SandboxCleanupError,
     TestSandbox as _TestSandbox,
     UnreapedProcessError as UnreapedProcessError,
+    cleanup_reaped_directory,
     isolated_environment,
     partition,
     run_contained,
@@ -433,7 +435,9 @@ def _test_file_groups(
 
 
 @contextmanager
-def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
+def _group_cleanup_worker(
+    sandbox: _TestSandbox,
+) -> Iterator[tuple[ThreadPoolExecutor, list[Future[None]]]]:
     pool = ThreadPoolExecutor(max_workers=1)
     cleanups: list[Future[None]] = []
     try:
@@ -449,6 +453,8 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                     break
                 except BaseException as exc:
                     print(f"[FAIL] Group sandbox cleanup failed: {exc}", file=sys.stderr)
+                    if isinstance(exc, SandboxCleanupError):
+                        sandbox.retain("Cleanup retry exhausted")
                     if failure is None:
                         failure = exc
                     if cancellation is None and isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -529,7 +535,7 @@ def run_plugin(
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
-    with _TestSandbox(
+    sandbox_owner = _TestSandbox(
         # Deliberately short: this sandbox root sits at the top of a path
         # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
         # build/bdist.win-amd64/wheel/...) can approach Windows' 260-char
@@ -539,7 +545,8 @@ def run_plugin(
         # per-run temp dir, never read by anything outside this process.
         prefix=f"ce-{name[:4]}-",
         dir=sandbox_parent,
-    ) as raw_sandbox, _group_cleanup_worker() as (cleanup_pool, cleanups):
+    )
+    with sandbox_owner as raw_sandbox, _group_cleanup_worker(sandbox_owner) as (cleanup_pool, cleanups):
         sandbox = Path(raw_sandbox)
         basetemp = sandbox / "t"
         env = isolated_environment(
@@ -612,7 +619,7 @@ def run_plugin(
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
-                tempfile.TemporaryDirectory._rmtree, group_temp,
+                cleanup_reaped_directory, group_temp,
             ))
             if returncode == 5 and (guards or kexpr) and not test_files:
                 continue
