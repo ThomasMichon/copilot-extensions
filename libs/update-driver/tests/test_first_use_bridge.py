@@ -310,7 +310,7 @@ def bridge_service_adapter(env):
     return adapter
 
 
-def assert_bridge_registration(installation, adapter):
+def assert_bridge_registration(installation, adapter, *, unattended=False):
     effects = registration_effects(adapter)
     if os.name == "nt":
         task = json.loads((adapter / "task.json").read_text(encoding="utf-8-sig"))
@@ -318,9 +318,10 @@ def assert_bridge_registration(installation, adapter):
         assert task["Actions"][0]["Execute"] == "conhost.exe"
         assert str(installation / "start-agent-bridge.ps1") in task["Actions"][0]["Arguments"]
         assert task["Actions"][0]["WorkingDirectory"] == str(installation)
-        assert task["Trigger"]["AtLogOn"] and not task["Trigger"]["AtStartup"]
+        assert task["Trigger"]["AtLogOn"] is not unattended
+        assert task["Trigger"]["AtStartup"] is unattended
         assert task["Trigger"]["Delay"] == "PT15S"
-        assert task["Principal"]["LogonType"] == "Interactive"
+        assert task["Principal"]["LogonType"] == ("S4U" if unattended else "Interactive")
         assert task["Settings"] == {"LimitSeconds": 0, "MultipleInstances": "IgnoreNew"}
         assert any(item["operation"] == "register" for item in effects)
         assert any(item["operation"] == "start" for item in effects)

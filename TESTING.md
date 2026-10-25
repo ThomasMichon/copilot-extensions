@@ -274,6 +274,28 @@ integer and macOS `seconds:microseconds` birth identities. The native
 companion-lifecycle node above exercises that same lock through concurrent
 creation recovery and launch, rather than replacing it with a test double.
 
+## Optional Bridge bootstrap adoption
+
+The manual `installation-context-full.yml` portfolio `bridge-bootstrap` qualifies
+`test_first_use_bridge_bootstrap.py` on native Windows and Ubuntu. Separate
+bounded runner roots cover materialized foundation/refusals, actual cold hooks,
+and retained fixed-recipe regressions. The hook proof measures the real
+15-second deadline and exact `{}` stdout with no caller Python/UV/Manager,
+caller Job/group loss, concurrent sessions and ordinary durable results.
+Drift selects `install`, not prepared Windows `provision`; native task effects
+assert S4U/AtStartup while ordinary recipe tests retain Interactive/AtLogOn.
+Linux effects inspect the actual unit and intercepted systemctl operations.
+No fixture launches a real bridge or creates a host task/unit.
+
+The portfolio also exercises source-aware selected/completed readiness through
+the actual POSIX hook, read-only healthy controls, malformed/incomplete selection,
+failed-candidate preservation, installed CLI/module/distribution consumers after
+payload removal, historical reconcile-file preservation, and the independent
+45-second guidance/catalog hook. Join acknowledged owners and settle foundation,
+queue and kernel custody before fixture cleanup. Synthetic native effects are
+not live serving, remote-session, deployment or rollout evidence. Exhaustive
+native integration remains explicitly manual, not required PR CI.
+
 ## Optional Logger bootstrap adoption
 
 Logger's corresponding manual `installation-context-full.yml` portfolio

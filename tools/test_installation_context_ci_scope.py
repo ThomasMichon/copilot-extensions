@@ -627,6 +627,50 @@ def test_bridge_recipes_use_explicit_bounded_native_portfolio() -> None:
         ]
 
 
+def test_bridge_bootstrap_uses_explicit_bounded_native_portfolio() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "bridge-bootstrap" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    for name, runner, opt_in in (
+        ("bridge-bootstrap-linux", "ubuntu-latest", "UPDATE_DRIVER_NATIVE_LINUX_GENESIS"),
+        ("bridge-bootstrap-windows", "windows-latest", "UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS"),
+    ):
+        job = workflow["jobs"][name]
+        assert job["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'"
+        )
+        assert job["runs-on"] == runner and job["timeout-minutes"] == 35
+        assert job["env"][opt_in] == "1" and not job.get("continue-on-error")
+        assert job["env"]["UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE"] == "1"
+        checkout = next(step for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+        assert checkout["with"]["persist-credentials"] is False
+        assert [step["run"].split() for step in job["steps"] if "run" in step] == [
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_bootstrap.py",
+             "-k", '"not', 'hook_deadline"', "--test-timeout", "900", "--timeout", "900"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge_bootstrap.py",
+             "-k", "hook_deadline", "--test-timeout", "900", "--timeout", "1080"],
+            ["python", "tools/run-plugin-tests.py", "update-driver",
+             "--test-file", "tests/test_first_use_bridge.py",
+             "-k", '"not', 'native_caller_loss"', "--test-timeout", "900", "--timeout", "900"],
+            ["python", "tools/seasoned_uv.py", "--uv", "uv", "--registry-only",
+             "--", "--system", "pytest", "packaging"],
+            ["python", "-m", "pytest", "-q",
+             "libs/versioned-runtime/tests/test_bootstrap_selected_readiness.py"],
+            ["python", "tools/run-plugin-tests.py", "agent-bridge",
+             "--test-file", "tests/test_bootstrap_driver.py",
+             "--test-file", "tests/test_install_ps1_s4u_recovery.py",
+             "--test-file", "tests/test_install_lifecycle_emit.py",
+             "--test-timeout", "60", "--timeout", "360"],
+            ["python", "tools/run-plugin-tests.py", "payload-invocation", "--allow-explicit-tiers",
+             "--test-file", "tests/test_bootstrap_publication.py", "-k", "agent-bridge",
+             "--test-timeout", "120", "--timeout", "600"],
+        ]
+
+
 def test_ssh_commands_use_explicit_bounded_native_portfolio() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()

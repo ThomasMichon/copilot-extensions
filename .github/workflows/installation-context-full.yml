@@ -24,6 +24,7 @@ on:
           - logger-bootstrap
           - logger-commands
           - bridge-recipes
+          - bridge-bootstrap
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
@@ -35,6 +36,67 @@ permissions:
   contents: read
 
 jobs:
+  bridge-bootstrap-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
+    name: Bridge bootstrap (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-bootstrap-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual materialization, refusal and independent guidance
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_bootstrap.py
+          -k "not hook_deadline" --test-timeout 900 --timeout 900
+      - name: Qualify actual cold hooks within their own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_bootstrap.py
+          -k hook_deadline --test-timeout 900 --timeout 1080
+      - name: Preserve fixed recipes, native lifecycle and hook contracts
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss" --test-timeout 900 --timeout 900
+      - name: Prepare bounded readiness test tooling
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging
+      - name: Qualify source-aware selected readiness
+        run: >-
+          python -m pytest -q libs/versioned-runtime/tests/test_bootstrap_selected_readiness.py
+      - name: Preserve bootstrap and unattended repair boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_install_ps1_s4u_recovery.py
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-timeout 60 --timeout 360
+      - name: Preserve Bridge bootstrap publication admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_bootstrap_publication.py -k agent-bridge
+          --test-timeout 120 --timeout 600
+  bridge-bootstrap-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
+    name: Bridge bootstrap (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-bootstrap-steps
   mux-companion-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mux-companion'
     name: Mux Companion native tmux 3.4 (isolated session)
