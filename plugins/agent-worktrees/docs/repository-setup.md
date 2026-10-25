@@ -8,7 +8,7 @@ from #8545, not first-repository discovery or guided local/remote/skip UI.
 
 ```text
 agent-worktrees repos setup <https-url> [--target <absolute-path>]
-  [--apply] [--trust-repository-setup]
+  [--commit <full-commit-id>] [--apply] [--trust-repository-setup]
 ```
 
 Without `--apply`, inspect an existing source or report an unavailable
@@ -53,6 +53,37 @@ Failed acquisition preserves a partial target and does not register it.
 Successful acquisition/registration is retained if subsequent repository setup
 fails. No reset, stash, clean, implicit refetch, hosted repository creation or
 rollback of someone else's work is performed.
+
+### Optional immutable commit selection
+
+`--commit` accepts a full 40- or 64-hex commit object ID, not a branch, tag,
+abbreviation or revision expression. Invalid input refuses before acquisition.
+Without it, existing remote-HEAD behavior is unchanged.
+
+An existing qualified checkout must already have exactly that HEAD. A mismatch
+refuses without checkout, fetch, reset, registration or setup execution. For a
+new target only, clone without checking out remote HEAD, resolve the requested
+object as that exact commit, then check it out detached with hooks disabled.
+Ordinary source qualification and account revalidation still precede registration.
+If the full clone does not contain the commit (for example an unadvertised or
+pruned object), refuse without an extra fetch; preserve the partial target and
+require owner reconciliation before retry. The command never selects a different
+commit to make setup succeed. Execution trust remains bound to the actual
+qualified commit, declaration and setup entry.
+
+Source qualification and every subsequent revalidation use unreplaced Git
+objects, not the virtual history selected by `refs/replace`. The explicit
+detached checkout does likewise. An existing replacement-tree checkout cannot
+present different setup bytes as a clean approved commit; refusal preserves
+its source and replacement refs rather than rewriting either.
+
+The additive `repos-setup/1` CLI capability is `immutable-commit`.
+The selected executable's strict parser gates the explicit capability request
+before repository effects; an older receiver without `--commit` reports an
+unsupported argument. Callers must retain that failure and may not retry without
+the pin. The old no-pin form remains supported without a deprecation deadline.
+No package-version comparison, newer-payload inference or prerequisite service
+is needed for this opt-in, in-band requirement.
 
 ## Declaration and consent
 

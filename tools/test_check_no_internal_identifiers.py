@@ -182,6 +182,24 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
     }
 
 
+def test_no_live_sweep_keeps_every_configured_input(repo: Path, monkeypatch):
+    module = _load_module(repo)
+    home_list = repo / "configured-identifiers.txt"
+    home_list.write_text("local-token\n", encoding="utf-8")
+    monkeypatch.setattr(module, "HOME_LIST", home_list)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "environment-token")
+    monkeypatch.setenv(module.CI_LIST_ENV, "ci-token|configured CI input")
+    monkeypatch.setattr(
+        module, "_load_live_sweep_identifiers",
+        lambda: pytest.fail("configured-only mode started discovery"),
+    )
+    identifiers, reasons, error = module._load_identifier_data(include_live_sweep=False)
+    assert identifiers == ["environment-token", "local-token", "ci-token"]
+    assert reasons["ci-token"] == "configured CI input"
+    assert error is None
+    assert module.main(["--no-live-sweep"]) == 0
+
+
 # ---------------------------------------------------------------------------
 # Source 4: the live agent-worktrees cross-repo sweep
 # ---------------------------------------------------------------------------

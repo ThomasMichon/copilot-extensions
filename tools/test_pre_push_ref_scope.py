@@ -40,8 +40,7 @@ class Repository:
         self.env.pop("BASH_ENV", None)
         self.env.pop("COPILOT_EXTENSIONS_GUARD_BASE", None)
         (root / "tools" / "hooks").mkdir(parents=True)
-        for name in ("check-no-internal-identifiers.py", "check-large-files.py",
-                     "check-publication.py", "hooks/pre-push"):
+        for name in ("check-no-internal-identifiers.py", "hooks/pre-push"):
             shutil.copyfile(ROOT / "tools" / name, root / "tools" / name)
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.name", "Fixture")
@@ -95,7 +94,7 @@ def test_existing_main_ref_does_not_rescan_unrelated_legacy_tree(tmp_path):
     head = repo.file_commit("change.txt", "public change")
     result = repo.hook((head, repo.base))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "within cap" in result.stdout
+    assert "Internal-identifier guard OK" in result.stdout
     assert "skipping" not in result.stdout.lower()
 
 
@@ -117,14 +116,13 @@ def test_every_ref_is_checked(tmp_path):
     assert "forbidden identifier" in result.stdout
 
 
-@pytest.mark.parametrize("size,accepted", [(1024 * 1024, True), (1024 * 1024 + 1, False)])
-def test_actual_main_range_enforces_exact_blob_cap(tmp_path, size, accepted):
+@pytest.mark.parametrize("size", [1024 * 1024, 1024 * 1024 + 1])
+def test_pre_push_leaves_file_size_enforcement_to_ci(tmp_path, size):
     repo = Repository(tmp_path, unrelated_dev=True)
     head = repo.file_commit("sized.txt", "x" * size)
     result = repo.hook((head, repo.base))
-    assert (result.returncode == 0) is accepted, result.stdout + result.stderr
-    expected = "within cap" if accepted else "sized.txt"
-    assert expected in result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Internal-identifier guard OK" in result.stdout
 
 
 @pytest.mark.parametrize("unrelated", [False, True])
@@ -133,7 +131,7 @@ def test_first_publication_uses_a_related_protected_base(tmp_path, unrelated):
     head = repo.file_commit("public.txt", "public")
     result = repo.hook((head, "0" * len(head)))
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "within cap" in result.stdout
+    assert "Internal-identifier guard OK" in result.stdout
 
 
 def test_deletion_does_not_rescan_the_current_checkout(tmp_path):
@@ -167,8 +165,7 @@ def test_unavailable_pushed_commit_fails_closed(tmp_path):
 
 def test_fallback_base_is_pinned_when_another_worktree_fetches(tmp_path):
     repo = Repository(tmp_path, unrelated_dev=True)
-    head = repo.file_commit("sized.txt", "x" * (1024 * 1024 + 1))
-    repo.env["COPILOT_EXTENSIONS_FORBIDDEN_IDS"] = "absent-fixture-token"
+    head = repo.file_commit("private.txt", PRIVATE)
     guard = tmp_path / "tools" / "check-no-internal-identifiers.py"
     source = guard.read_text(encoding="utf-8")
     source = source.replace(
@@ -181,18 +178,32 @@ def test_fallback_base_is_pinned_when_another_worktree_fetches(tmp_path):
     guard.write_text(source, encoding="utf-8")
     result = repo.hook((head, "0" * len(head)))
     assert result.returncode != 0, result.stdout + result.stderr
-    assert "sized.txt" in result.stdout + result.stderr
+    assert "forbidden identifier" in result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("reuse_published_blob", [True, False])
-def test_rewritten_pr_checks_only_new_blob_objects(tmp_path, reuse_published_blob):
+def test_rewritten_ref_does_not_run_blob_history_checks(tmp_path, reuse_published_blob):
     repo = Repository(tmp_path, unrelated_dev=False)
     old = repo.tree_commit("previously-published.json", "x" * (1024 * 1024 + 1))
     content = ("x" if reuse_published_blob else "y") * (1024 * 1024 + 1)
     head = repo.file_commit("rebased.json", content)
     result = repo.hook((head, old))
-    assert (result.returncode == 0) is reuse_published_blob, result.stdout + result.stderr
-    if reuse_published_blob:
-        assert "0 newly-introduced blob(s)" in result.stdout
-    else:
-        assert "rebased.json" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Internal-identifier guard OK" in result.stdout
+
+
+def test_pre_push_never_invokes_live_cross_repo_discovery(tmp_path):
+    repo = Repository(tmp_path, unrelated_dev=False)
+    repo.env.pop("COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP")
+    guard = tmp_path / "tools" / "check-no-internal-identifiers.py"
+    text = guard.read_text(encoding="utf-8").replace(
+        'if __name__ == "__main__":',
+        'def _load_live_sweep_identifiers():\n'
+        '    raise AssertionError("pre-push started discovery")\n\n'
+        'if __name__ == "__main__":',
+    )
+    guard.write_text(text, encoding="utf-8")
+    head = repo.file_commit("safe.txt", "public")
+    result = repo.hook((head, repo.base))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Internal-identifier guard OK" in result.stdout

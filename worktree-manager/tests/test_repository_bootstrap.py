@@ -47,6 +47,12 @@ def providers(monkeypatch, *, ready: bool = True) -> list[str]:
     ["--repository-target", "somewhere"],
     ["--repository-target", ""],
     ["--trust-repository-setup"],
+    ["--repository-commit", "a" * 40],
+    ["--repository", URL, "--repository-commit", ""],
+    ["--repository", URL, "--repository-commit", "main"],
+    ["--repository", URL, "--repository-commit", "a" * 39],
+    ["--repository", URL, "--repository-commit", "g" * 40],
+    ["--repository", URL, "--repository-commit", "a" * 41],
     ["--repository"], ["--unknown"], ["--repo", URL],
     ["--repository", "file:///local/source"],
     ["--repository", "https://name:secret@example.invalid/source"],
@@ -60,7 +66,8 @@ def test_invalid_intent_is_rejected_before_any_provision(monkeypatch, argv) -> N
     assert cli.cmd_setup(["--apply", *argv], banner="Example") == 2
 
 
-def test_core_then_fresh_readiness_then_repository(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("commit", [None, "A" * 40, "B" * 64])
+def test_core_then_fresh_readiness_then_repository(monkeypatch, tmp_path, commit) -> None:
     events = providers(monkeypatch)
     calls = []
 
@@ -74,10 +81,12 @@ def test_core_then_fresh_readiness_then_repository(monkeypatch, tmp_path) -> Non
     assert cli.cmd_setup([
         "--apply", "--repository", URL, "--repository-target", str(tmp_path / "with spaces"),
         "--trust-repository-setup",
+        *(["--repository-commit", commit] if commit else []),
     ], banner="Example") == 0
     assert events[-3:] == ["core", "readiness", "repository"]
     assert calls == [(None, [
         "repos", "setup", URL, "--apply", "--target", str(tmp_path / "with spaces"),
+        *(["--commit", commit.lower()] if commit else []),
         "--trust-repository-setup",
     ])]
 
@@ -168,6 +177,48 @@ raise SystemExit(repository.run(repository.parse([
         "input": "caller-owned-stdin\n",
     }
     assert dict(os.environ) == before
+
+
+@pytest.mark.parametrize("pinned", [False, True])
+def test_prior_engine_parser_preserves_baseline_and_refuses_pin_without_replay(tmp_path, pinned) -> None:
+    engine = tmp_path / "prior engine.py"
+    calls = tmp_path / "calls.json"
+    effect = tmp_path / "effect"
+    engine.write_text(
+        "import argparse,json,pathlib,sys\n"
+        "with pathlib.Path(sys.argv[1]).open('a') as stream:\n"
+        "    stream.write(json.dumps(sys.argv[3:]) + '\\n')\n"
+        "parser=argparse.ArgumentParser(allow_abbrev=False)\n"
+        "parser.add_argument('verb', choices=['repos'])\n"
+        "parser.add_argument('subcommand', choices=['setup'])\n"
+        "parser.add_argument('repository')\n"
+        "parser.add_argument('--target')\n"
+        "parser.add_argument('--apply', action='store_true')\n"
+        "parser.add_argument('--trust-repository-setup', action='store_true')\n"
+        "parser.parse_args(sys.argv[3:])\n"
+        "pathlib.Path(sys.argv[2]).write_text('baseline accepted')\n",
+        encoding="utf-8",
+    )
+    driver = """
+import sys
+from worktree_manager import engine_client, repository_bootstrap as repository
+engine_client.set_engine_command([sys.executable, sys.argv[1], sys.argv[2], sys.argv[3]])
+raise SystemExit(repository.run(repository.parse([
+    '--apply', '--repository', sys.argv[4], *sys.argv[5:]
+])))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", driver, str(engine), str(calls), str(effect), URL,
+         *(["--repository-commit", "a" * 40] if pinned else [])],
+        capture_output=True, text=True, timeout=120, **no_window_kwargs(),
+    )
+    assert result.returncode == (2 if pinned else 0), result.stdout + result.stderr
+    assert effect.exists() is not pinned
+    invocations = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert len(invocations) == 1
+    if pinned:
+        assert "unrecognized arguments: --commit" in result.stderr
+        assert "--commit" in invocations[0]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native windowless Manager boundary")

@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("failed_guard", ["", "ruff", "check-large-files.py"])
+@pytest.mark.parametrize(
+    "failed_guard", ["", "ruff", "check-skills.py", "check-effort-vision-structure.py"],
+)
 def test_pre_commit_batches_every_staged_path_and_keeps_failures(tmp_path, failed_guard):
     bash = shutil.which("bash")
     if os.name == "nt":
@@ -35,15 +37,15 @@ def test_pre_commit_batches_every_staged_path_and_keeps_failures(tmp_path, faile
     manifests = tmp_path / "manifests"
     manifests.mkdir()
     paths = {
-        "python": [f"plugins/a long path/{index:04d}-{'x' * 80}.py" for index in range(900)],
+        "python": [f"plugins/a long path/{index:04d}-{'x' * 80}.py" for index in range(400)],
         "skills": [f"plugins/skill {index}/SKILL.md" for index in range(70)],
         "docs": [f"efforts/active/effort {index}/README.md" for index in range(70)],
     }
-    paths["all"] = [*paths["python"], *paths["skills"], *paths["docs"], "--all", "a file.txt"]
+    assert len(subprocess.list2cmdline(paths["python"])) > 32767
     for name, values in paths.items():
         (manifests / name).write_bytes(b"".join(value.encode() + b"\0" for value in values))
     git = """#!/usr/bin/env bash
-kind=all
+kind=
 for arg in "$@"; do
     case "$arg" in
         '*.py') kind=python ;;
@@ -51,6 +53,7 @@ for arg in "$@"; do
         'efforts/**/README.md') kind=docs ;;
     esac
 done
+[[ -n "$kind" ]] || exit 96
 cat "$HOOK_MANIFESTS/$kind"
 """
     guard = """#!/usr/bin/env bash
@@ -101,5 +104,4 @@ printf '%s\\0' "$guard" "$#" "$@" >> "$HOOK_LOG"
         "ruff": paths["python"],
         "check-skills.py": paths["skills"],
         "check-effort-vision-structure.py": paths["docs"],
-        "check-large-files.py": paths["all"],
     }
