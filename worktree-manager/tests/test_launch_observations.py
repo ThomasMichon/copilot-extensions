@@ -327,6 +327,8 @@ def test_task_open_observes_embodiment_off_thread_before_resume(attempt, monkeyp
     class Owner(engine_worktree_actions.PickerScreenWorktreeActionsMixin):
         real_ops = True
         src = SimpleNamespace(LOCAL=("fixture-host", "linux"), is_local=lambda *a: True)
+        def _src_local(self):
+            return self.src.LOCAL
         def _current_tab(self):
             return {"env": "linux", "source_kind": "machine-ssh"}
         def _run_bg(self, label, work, done=None, **kwargs):
