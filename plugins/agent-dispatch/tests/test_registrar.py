@@ -88,6 +88,48 @@ def test_inherited_display_title_is_owned_by_recipe_without_changing_runtime(tmp
     assert recipe.read_bytes() == before
 
 
+@pytest.mark.parametrize("intermediate", [False, True])
+def test_inherited_display_title_is_not_an_implicit_runtime_parameter(tmp_path, intermediate):
+    from agent_dispatch.registrar_document import expand_declaration_document
+    from agent_dispatch.registrar_reconcile import declaration_to_registration
+
+    recipe = tmp_path / "source.json"
+    recipe.write_text(json.dumps({
+        "kind": "emitter", "title": "Inherited display label",
+        "spec": {"id": "stable-source", "command": ["discover", "{title}", "{repo}"], "interval_seconds": 60},
+    }), encoding="utf-8")
+    paths = [recipe]
+    if intermediate:
+        alias = tmp_path / "alias.json"
+        alias.write_text(json.dumps({
+            "extends": str(recipe), "title": "Intermediate display label",
+        }), encoding="utf-8")
+        recipe = alias
+        paths.append(alias)
+    before = [path.read_bytes() for path in paths]
+    document = {
+        "name": "stable-source", "extends": str(recipe), "params": {"repo": "example/project"},
+    }
+    first, = expand_declaration_document(
+        {**document, "title": "First display label"}, directory=tmp_path, repo_root=tmp_path,
+    )
+    second, = expand_declaration_document(
+        {**document, "title": "Second display label"}, directory=tmp_path, repo_root=tmp_path,
+    )
+    assert first.title == "First display label" and second.title == "Second display label"
+    assert first.spec["command"] == second.spec["command"] == ["discover", "{title}", "example/project"]
+    assert declaration_to_registration(first, machine="fixture") == declaration_to_registration(
+        second, machine="fixture",
+    )
+    explicit, = expand_declaration_document(
+        {**document, "title": "Display label", "params": {"title": "runtime-value", "repo": "example/project"}},
+        directory=tmp_path, repo_root=tmp_path,
+    )
+    assert explicit.title == "Display label"
+    assert explicit.spec["command"] == ["discover", "runtime-value", "example/project"]
+    assert [path.read_bytes() for path in paths] == before
+
+
 @pytest.mark.parametrize("kind", ["repository-issue-loop", "effort-driver-loop", "reviewer-loop"])
 def test_document_display_title_reaches_loop_components_without_entering_runtime_spec(tmp_path, kind):
     from agent_dispatch.registrar_document import expand_declaration_document

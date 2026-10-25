@@ -133,6 +133,10 @@ unchanged. Omitted titles fall back to the exact existing name; built-in
 templates use friendly labels while retaining their existing template IDs and
 fragment revisions. Provider template titles still come from their own index.
 Clients must not infer capabilities, routing or guidance from these labels.
+Unlike execution-related scalar overrides, a display `title` never supplies
+an implicit recipe parameter. An execution template that intentionally needs
+a `{title}` placeholder must receive its value explicitly through `params.title`,
+independently of the display label.
 
 The shared document expander applies a title to each component of a loop
 after recipe inheritance, without inserting it into the embedded producer
