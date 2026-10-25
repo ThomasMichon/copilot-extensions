@@ -1,6 +1,7 @@
 """Installed Fleet role, real authenticated Gateway and both native local writers."""
 
 import asyncio
+from contextlib import AsyncExitStack
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ import signal
 import subprocess
 import sys
 import sysconfig
+from types import SimpleNamespace
 
 from cryptography.hazmat.primitives import serialization
 from joserfc.jwk import ECKey
@@ -49,7 +51,9 @@ def proof_file(path, key):
     return str(path)
 
 
-@pytest.mark.parametrize("destination", ["config_d", "ssh_config", "authorization_dir"])
+@pytest.mark.parametrize("destination", [
+    "config_d", "ssh_config", "authorization_dir", "source-state", "lock-state",
+])
 def test_installed_cli_rejects_lease_tree_outputs_before_credentials(tmp_path, destination):
     value = {
         "schema": "fleet-manager.ssh-client", "version": 1,
@@ -61,7 +65,13 @@ def test_installed_cli_rejects_lease_tree_outputs_before_credentials(tmp_path, d
             "identity_file", "public_key_file", "authorization_dir", "config_d", "ssh_config",
         )},
     }
-    value[destination] = str(Path(value["state_dir"]) / "nested" / "output")
+    if destination in ("source-state", "lock-state"):
+        from agent_ssh import gateway_profile, ssh_profile
+
+        directory = gateway_profile._SOURCE_DIR if destination == "source-state" else ssh_profile._LOCK_DIR_NAME
+        value["state_dir"] = str(Path(value["config_d"]).parent / directory)
+    else:
+        value[destination] = str(Path(value["state_dir"]) / "nested" / "output")
     selected = tmp_path / "client.json"
     selected.write_text(json.dumps(value), encoding="utf-8")
     result = subprocess.run(
@@ -74,6 +84,40 @@ def test_installed_cli_rejects_lease_tree_outputs_before_credentials(tmp_path, d
     assert "requires a dedicated state directory" in result.stderr
     assert not Path(value["state_dir"]).exists()
     assert not Path(value["proof_key_file"]).exists()
+
+
+async def settle_resources(*, rig, diagnostic, service_owner, process_stop, second_owner):
+    async with AsyncExitStack() as cleanup:
+        cleanup.push_async_callback(rig.close)
+        if diagnostic is not None:
+            cleanup.callback(diagnostic.close)
+        if service_owner is not None:
+            cleanup.push_async_callback(asyncio.wait_for, service_owner, 10)
+        if process_stop is not None:
+            cleanup.push_async_callback(process_stop)
+        if second_owner is not None:
+            cleanup.push_async_callback(asyncio.wait_for, second_owner, 10)
+
+
+async def test_failed_consumer_still_settles_every_other_retained_resource():
+    settled = []
+
+    async def finish(name, *, fail=False):
+        settled.append(name)
+        if fail:
+            raise PermissionError("fixture-second-consumer-refused")
+
+    service = asyncio.create_task(finish("service"))
+    second = asyncio.create_task(finish("second", fail=True))
+    with pytest.raises(PermissionError, match="fixture-second-consumer-refused"):
+        await settle_resources(
+            rig=SimpleNamespace(close=lambda: finish("rig")),
+            diagnostic=SimpleNamespace(close=lambda: settled.append("diagnostic")),
+            service_owner=service, process_stop=lambda: finish("process"), second_owner=second,
+        )
+    assert set(settled) == {"service", "second", "rig", "diagnostic", "process"}
+    assert len(settled) == 5
+    assert service.done() and second.done()
 
 
 def machine_config(root, service, rig, index):
@@ -206,12 +250,7 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
     finally:
         machine_stop.set()
         stop.set()
-        if second_owner is not None:
-            await asyncio.wait_for(second_owner, 10)
-        if process is not None:
-            await stop_process()
-        if service_owner is not None:
-            await asyncio.wait_for(service_owner, 10)
-        if diagnostic is not None:
-            diagnostic.close()
-        await rig.close()
+        await settle_resources(
+            rig=rig, diagnostic=diagnostic, service_owner=service_owner,
+            process_stop=stop_process if process is not None else None, second_owner=second_owner,
+        )

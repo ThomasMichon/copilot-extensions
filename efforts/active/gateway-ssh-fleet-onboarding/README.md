@@ -748,3 +748,20 @@ takeover or implementation completion is asserted.
   The 55-case Fleet/authorization packet and six rebuilt installed-role cases
   pass locally, including real native SID formatting and private ACLs.
   Corrected hosted Windows qualification and fresh review are still required.
+- Exact-head run40187652857 qualified that correction: Windows passed 82 cases
+  with six platform skips; Linux passed 81 with seven platform skips plus two
+  real StrictModes/login cases. Every selected native job/step succeeded.
+  Subsequent reconciliation preserves #8953's independently merged
+  configured-only publication policy: live discovery is now an explicit manual
+  audit and size enforcement stays in CI. This branch does not restore retired
+  push scans or opt out of any current gate. The reconciled identifier packet
+  passed 65 cases with one POSIX-only skip on Windows.
+- Followed through the body-only review observations as well: preflight the
+  exact source/lock directories derived by the canonical local writers, not
+  just the three configured destinations. Fleet calls that adapter-owned check
+  before policy/credentials/lease effects; an older partial adapter refuses
+  before effects. Failure-path test teardown now settles all retained tasks,
+  process, diagnostic and rig even if one owner fails.
+  The 69-case Fleet/authorization/adapter packet and nine rebuilt installed
+  consumer cases pass locally. Final-head native/CI/review remain pending;
+  earlier native success is not substituted for the newer source.

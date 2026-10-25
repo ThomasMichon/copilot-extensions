@@ -3,7 +3,9 @@ import builtins
 from copy import deepcopy
 from importlib.resources import files
 import json
+from pathlib import Path
 import signal
+import sys
 from types import SimpleNamespace
 
 from cryptography.hazmat.primitives import serialization
@@ -106,6 +108,44 @@ def test_output_scope_allows_a_distinct_sibling_with_the_same_prefix(tmp_path):
     value, _, _ = configured(tmp_path)
     value["authorization_dir"] = str(tmp_path / "state-authorization")
     SSHMachineConfig.from_dict(value)
+    assert not (tmp_path / "state").exists()
+
+
+@pytest.mark.parametrize("scope", [
+    "sources", "fragment-locks", "root-locks", "inside-sources",
+    "inside-locks", "inside-fragments", "inside-authorization",
+])
+def test_writer_derived_scope_is_checked_before_credentials_or_lease(tmp_path, scope):
+    from agent_ssh import gateway_profile, ssh_profile
+
+    value, _, _ = configured(tmp_path)
+    value["ssh_config"] = str(tmp_path / "root-ssh" / "config")
+    destinations = {
+        "sources": tmp_path / "ssh" / gateway_profile._SOURCE_DIR,
+        "fragment-locks": tmp_path / "ssh" / ssh_profile._LOCK_DIR_NAME,
+        "root-locks": tmp_path / "root-ssh" / ssh_profile._LOCK_DIR_NAME,
+        "inside-sources": tmp_path / "ssh" / gateway_profile._SOURCE_DIR / "nested",
+        "inside-locks": tmp_path / "ssh" / ssh_profile._LOCK_DIR_NAME / "nested",
+        "inside-fragments": Path(value["config_d"]) / "nested",
+        "inside-authorization": Path(value["authorization_dir"]) / "nested",
+    }
+    value["state_dir"] = str(destinations[scope])
+    value["proof_key_file"] = str(tmp_path / "missing-proof")
+    with pytest.raises(ValueError, match="dedicated state directory outside local writer scopes"):
+        asyncio.run(ssh_machine.run(SSHMachineConfig.from_dict(value)))
+    assert not Path(value["state_dir"]).exists()
+
+
+def test_older_local_adapter_refuses_before_credentials_or_state(tmp_path, monkeypatch, capsys):
+    value, _, _ = configured(tmp_path)
+    path = tmp_path / "client.json"
+    path.write_bytes(canonical(value))
+    monkeypatch.setitem(
+        sys.modules, "agent_ssh.gateway_directory",
+        SimpleNamespace(apply_update=lambda *_a, **_kw: pytest.fail("old adapter was invoked")),
+    )
+    assert ssh_machine.serve(path) == 1
+    assert "requires the ssh-client extra" in capsys.readouterr().err
     assert not (tmp_path / "state").exists()
 
 

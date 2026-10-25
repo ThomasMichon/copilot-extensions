@@ -40,6 +40,10 @@ All output destinations must be outside the entire lease-only `state_dir`
 tree, including normalized path aliases. Equality or nesting refuses before
 credentials or state creation, so a successful first write cannot make the
 same configuration invalid on restart.
+Before policy/credential reads or lease creation, the existing agent-ssh adapter
+also checks the writers' derived source and lock directories. The lease state
+cannot contain or sit inside any profile, authorization, source or lock scope;
+no second copy of those writer-owned path names is maintained by Fleet.
 
 Configuration selects local write scope; Gateway authentication alone does not.
 The fixed code adapter is `agent_ssh.gateway_directory.apply_update`, never an
@@ -124,6 +128,9 @@ some older setup command. An older parser rejects the unknown role without
 reading its configuration. No legacy command is retired by this source change.
 Provider rollback must retain the same pre-effect unsupported outcome rather
 than silently starting another implementation.
+The selected `ssh-client` closure also requires the current agent-ssh adapter's
+local writer-scope preflight. An older partial dependency that lacks it refuses
+this role before policy/credential reads, lease creation or any writer call.
 
 ## Qualification
 
