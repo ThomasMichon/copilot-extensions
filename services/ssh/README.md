@@ -103,7 +103,7 @@ For this selected mode:
 |-----------|----------------------|
 | `POST /enroll` | The authenticated declared requester submits its own public keys under the original request ID; HTTP 202 is durable pending state, not admission |
 | `GET /enrollment/requests/<request_id>` | The requester inspects its original pending/completed outcome |
-| `GET /enrollment/pending` | An admitted peer or configured recovery authority inspects pending public candidates; an unadmitted requester sees only its own |
+| `GET /enrollment/pending?after=<principal>` | An admitted peer or configured recovery authority inspects byte-bounded pages of pending public candidates; an unadmitted requester sees only its own |
 | `POST /enrollment/approve` | An already enrolled, currently configured peer approves exact `requester`, `request_id` and `fingerprint`; self-approval and caller-supplied approver fields refuse |
 | `POST /enrollment/recover` | Only a configured recovery principal may decide the exact candidate, additionally supplying `confirm: true` and a nonempty bounded `reason` |
 
@@ -125,17 +125,29 @@ committed revision; it does not mint another revision. Authentication, admission
 and actual native reach remain distinct.
 
 `agent-ssh.enrollment-result` version 1 reports `pending`, `active`, or
-`superseded`. Pending state has no admission decision or directory. An active
-result includes its original decision and the current directory; a superseded
-completed decision remains inspectable without claiming current admission.
+`superseded`. Pending state has no admission decision. An active result
+identifies current public admission; a superseded completed decision remains
+inspectable without claiming current admission.
 An incumbent admitted before selecting this policy is reported as `retained`,
 not falsely relabeled peer-approved. Selecting the policy does not rotate or
 erase those existing keys. Changed pending bindings/policy refuse stale
 decisions; changing an admitted key still requires a new selected generation.
 
+Enrollment receipts include the decision's original `directory_revision`, not
+an embedded global directory. Read the current directory through its existing
+API. The complete receipt is byte-checked before its transaction commits, and
+later directory growth cannot make that original outcome too large to retrieve.
+Recovery reasons are nonblank and at most 512 characters including padding;
+control characters are refused.
+
 Pending records share the existing bounded original-request journal. Listing
-returns the latest valid unapproved candidate per declared principal, within
-the existing 32 KiB response bound; earlier original IDs remain queryable.
+returns the latest valid unapproved candidate per declared principal in
+principal order, within the existing 32 KiB response bound. A nonnull `next`
+cursor is the last returned principal; pass it as `after` (or
+`PeerEnrollmentClient.pending(after=cursor)`) until `next` is null.
+Each page reflects current authorized state; refresh from the first page for
+concurrent changes. No cursor grants authority or consumes a request, and
+earlier original IDs remain queryable.
 Unavailable approvers, missing credentials, transport errors and locked
 credential owners never trigger recovery automatically. Recovery is a separate
 explicit action, not a fallback in the client.

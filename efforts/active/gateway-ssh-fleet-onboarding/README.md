@@ -478,6 +478,19 @@ takeover or implementation completion is asserted.
 - No live installation, credential access, provider/setup takeover or
   production migration is included. Broader integration and live adoption
   remain with #6681 and its retained owners.
+- Review of #8917 found that an embedded near-limit directory could strand
+  committed outcomes and a maximum-size pending list could exceed its frame.
+  The new unreleased receipt now retains the decision's original directory
+  revision instead of embedding the global catalog, and checks its complete
+  encoded size before commit. Pending inspection uses byte-bounded `after` /
+  `next` pages without dropping candidates or reducing the binding limit.
+- The review-corrected Windows suite passed 120 tests with six explicit skips;
+  four focused wire-limit/transaction controls and the installed CLI's signed
+  paging/restart control also passed. All five changed installed source bodies
+  match the candidate. The earlier exact-head Linux/Windows run
+  [40176923839](https://github.com/ThomasMichon/copilot-extensions/actions/runs/40176923839)
+  passed on `a8e7d19df91f7b8fed0e05541803996d0b83ac6a`; these corrections still
+  require fresh current-head review, required CI and native qualification.
 
 ### 2026-10-16 - Intake and current boundary
 

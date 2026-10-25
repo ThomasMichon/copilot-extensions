@@ -157,7 +157,7 @@ async def test_pending_submission_does_not_wake_directory_or_reconcile_relay(con
     original = bootstrap(store)
     calls = []
     service = SSHService(store, reconcile_relay=lambda: calls.append("active"))
-    revision = original["directory"]["directory"]["revision"]
+    revision = original["decision"]["directory_revision"]
     waiting = asyncio.create_task(service.handle(request(
         "principal-worker-a", "GET", f"/directory?after={revision}&wait=5")))
     try:

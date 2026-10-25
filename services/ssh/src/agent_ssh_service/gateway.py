@@ -105,15 +105,20 @@ class SSHService:
             check(not target.scheme and not target.netloc and not target.fragment, "invalid-target")
             if request.method == "GET" and target.path == "/directory":
                 return await self._directory(request, target.query)
-            if request.method == "GET" and not target.query:
-                if target.path == "/enrollment":
+            if request.method == "GET":
+                if target.path == "/enrollment" and not target.query:
                     return ServiceResponse(200, (), canonical(self.store.approval.contract()))
                 if target.path == "/enrollment/pending":
+                    arguments = parse_qs(target.query, strict_parsing=True, keep_blank_values=True)
+                    check(set(arguments) <= {"after"}
+                          and all(len(values) == 1 for values in arguments.values()),
+                          "invalid-pending-query")
                     result = await self._disk(
-                        self.store.approval.pending, request.context.principal)
+                        self.store.approval.pending, request.context.principal,
+                        after=arguments.get("after", [None])[0])
                     self._checkpoint(request)
                     return ServiceResponse(200, (), canonical(result))
-                if target.path.startswith("/enrollment/requests/"):
+                if target.path.startswith("/enrollment/requests/") and not target.query:
                     result = await self._disk(
                         self.store.approval.status, request.context.principal,
                         target.path.removeprefix("/enrollment/requests/"))

@@ -6,6 +6,7 @@ import base64
 import hashlib
 
 from fleet_manager.gateway_ssh_policy import GatewaySSHPolicy
+from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.planning import canonical, decode, identifier
 
 from .config import check
@@ -80,18 +81,22 @@ class PeerApproval:
         check(active is None or admitted or decision is not None,
               "pending-identity-superseded")
         if admitted and decision is None:
-            decision = {"method": "retained", "principal": None}
-        return {
+            decision = {
+                "method": "retained", "principal": None,
+                "directory_revision": db.execute("SELECT revision FROM metadata WHERE id=1").fetchone()[0],
+            }
+        result = {
             "schema": "agent-ssh.enrollment-result", "version": 1,
             "status": "active" if admitted else "superseded" if decision else "pending",
             "request_id": request_id, "candidate": candidate,
             "fingerprint": fingerprint, "decision": decision,
-            "directory": self.store._snapshot(db) if admitted else None,
         }
+        check(len(canonical(result)) <= BODY_BYTES, "enrollment-response-limit")
+        return result
 
     def submit(self, db, principal: str, request: dict) -> tuple[dict, bool]:
         self._require_policy()
-        self.store._snapshot(db)
+        snapshot = self.store._snapshot(db)
         candidate = self._candidate(principal, request)
         active = self._active(db, principal)
         check(active is None or active == (
@@ -110,7 +115,10 @@ class PeerApproval:
             if active is not None:
                 db.execute(
                     "UPDATE enrollment_pending SET decision=? WHERE principal=? AND request_id=?",
-                    (canonical({"method": "retained", "principal": None}),
+                    (canonical({
+                        "method": "retained", "principal": None,
+                        "directory_revision": snapshot["directory"]["revision"],
+                    }),
                      principal, request["request_id"]),
                 )
         return self._result(db, principal, request["request_id"]), False
@@ -122,8 +130,10 @@ class PeerApproval:
             self.store._snapshot(db)
             return self._result(db, principal, request_id, current=False)
 
-    def pending(self, principal: str) -> dict:
+    def pending(self, principal: str, *, after: str | None = None) -> dict:
         self._require_policy()
+        if after is not None:
+            identifier(after, "SSH pending cursor")
         with self.store._transaction() as db:
             self.store._snapshot(db)
             privileged = principal in self.store.config.recovery_principals
@@ -133,7 +143,7 @@ class PeerApproval:
                 "SELECT principal,request_id,request,candidate,fingerprint "
                 "FROM enrollment_pending WHERE decision IS NULL ORDER BY rowid DESC"
             ).fetchall()
-            pending, seen = [], set()
+            pending, seen = {}, set()
             for requester, request_id, encoded, candidate, fingerprint in rows:
                 if requester in seen or (not privileged and requester != principal):
                     continue
@@ -145,14 +155,26 @@ class PeerApproval:
                 if canonical(current) != candidate or self._active(db, requester) is not None:
                     continue
                 seen.add(requester)
-                pending.append({
+                pending[requester] = {
                     "request_id": request_id, "candidate": current, "fingerprint": fingerprint,
-                })
-            result = {
-                "schema": "agent-ssh.enrollment-pending", "version": 1, "requests": pending,
-            }
-            check(len(canonical(result)) <= 32 * 1024, "pending-response-limit")
-            return result
+                }
+            page = []
+
+            def response(cursor):
+                return {
+                    "schema": "agent-ssh.enrollment-pending", "version": 1,
+                    "requests": page, "next": cursor,
+                }
+
+            for requester, item in sorted(pending.items()):
+                if after is not None and requester <= after:
+                    continue
+                page.append(item)
+                if len(canonical(response(requester))) > BODY_BYTES:
+                    page.pop()
+                    check(bool(page), "pending-item-response-limit")
+                    return response(page[-1]["candidate"]["requester"])
+            return response(None)
 
     def decide(self, principal: str, value: dict, *, recovery=False,
                checkpoint=lambda: None) -> tuple[dict, bool]:
@@ -167,7 +189,7 @@ class PeerApproval:
             check(principal in self.store.config.recovery_principals,
                   "recovery-principal-not-admitted")
             check(value["confirm"] is True and isinstance(value["reason"], str)
-                  and 1 <= len(value["reason"].strip()) <= 512
+                  and bool(value["reason"].strip()) and len(value["reason"]) <= 512
                   and not any(ord(char) < 32 for char in value["reason"]),
                   "explicit-recovery-confirmation-required")
         with self.store._transaction() as db:
@@ -182,9 +204,10 @@ class PeerApproval:
             if decision is not None:
                 result, changed = self._result(db, requester, request_id), False
             else:
-                _, changed = self.store._activate(db, requester, request)
+                snapshot, changed = self.store._activate(db, requester, request)
                 decision = {
                     "method": "recovery" if recovery else "peer", "principal": principal,
+                    "directory_revision": snapshot["directory"]["revision"],
                 }
                 if recovery:
                     decision["reason"] = value["reason"]

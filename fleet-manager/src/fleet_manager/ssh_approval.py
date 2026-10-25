@@ -10,7 +10,7 @@ from .gateway_service_channel import check
 from .gateway_ssh_policy import ENVIRONMENTS
 from .gateway_ssh_provider import public_key
 from .planning import canonical, decode, identifier, integer, record
-from .ssh_directory import DirectoryUpdate, MAX_RESPONSE, SSHDirectoryClient
+from .ssh_directory import MAX_RESPONSE, SSHDirectoryClient
 
 
 def candidate_fingerprint(candidate: dict) -> str:
@@ -51,7 +51,7 @@ class EnrollmentResult:
     def parse(cls, raw: bytes) -> EnrollmentResult:
         value = decode(raw)
         record(value, "agent-ssh.enrollment-result", {
-            "status", "request_id", "candidate", "fingerprint", "decision", "directory",
+            "status", "request_id", "candidate", "fingerprint", "decision",
         })
         identifier(value["request_id"], "SSH enrollment request")
         check(value["fingerprint"] == candidate_fingerprint(value["candidate"]),
@@ -59,28 +59,25 @@ class EnrollmentResult:
         check(value["status"] in ("pending", "active", "superseded"),
               "invalid-ssh-enrollment-status")
         if value["status"] == "pending":
-            check(value["decision"] is None and value["directory"] is None,
+            check(value["decision"] is None,
                   "pending-ssh-enrollment-has-no-admission")
         else:
             decision = value["decision"]
             check(isinstance(decision, dict)
                   and decision.get("method") in ("peer", "recovery", "retained"),
                   "invalid-ssh-enrollment-decision")
-            fields = {"method", "principal"}
+            fields = {"method", "principal", "directory_revision"}
+            integer(decision.get("directory_revision"), "SSH decision directory revision", minimum=1)
             if decision["method"] == "recovery":
                 fields.add("reason")
                 check(isinstance(decision.get("reason"), str)
-                      and 1 <= len(decision["reason"].strip()) <= 512,
+                      and bool(decision["reason"].strip()) and len(decision["reason"]) <= 512,
                       "invalid-ssh-recovery-reason")
             check(set(decision) == fields, "invalid-ssh-enrollment-decision")
             if decision["method"] == "retained":
                 check(decision["principal"] is None, "invalid-retained-ssh-enrollment")
             else:
                 identifier(decision["principal"], "SSH enrollment approver")
-            if value["status"] == "active":
-                DirectoryUpdate.parse(canonical(value["directory"]))
-            else:
-                check(value["directory"] is None, "superseded-ssh-enrollment-is-not-active")
         return cls(canonical(value))
 
     def to_dict(self) -> dict:
@@ -126,16 +123,21 @@ class PeerEnrollmentClient:
               "ssh-enrollment-status-mismatch")
         return result
 
-    async def pending(self) -> dict:
+    async def pending(self, *, after: str | None = None) -> dict:
+        if after is not None:
+            identifier(after, "SSH pending cursor")
         await self._require_policy()
         response = await self.caller.request(
-            "GET", self.namespace + "/enrollment/pending", response_limit=MAX_RESPONSE,
+            "GET", self.namespace + "/enrollment/pending"
+            + ("?after=" + after if after is not None else ""),
+            response_limit=MAX_RESPONSE,
         )
         check(response.status == 200, "ssh-pending-enrollment-refused", response.status)
         value = decode(response.body)
-        record(value, "agent-ssh.enrollment-pending", {"requests"})
+        record(value, "agent-ssh.enrollment-pending", {"requests", "next"})
         check(isinstance(value["requests"], list) and len(value["requests"]) <= 32,
               "invalid-ssh-pending-enrollments")
+        prior = after
         for item in value["requests"]:
             check(isinstance(item, dict) and set(item) == {
                 "request_id", "candidate", "fingerprint",
@@ -143,6 +145,13 @@ class PeerEnrollmentClient:
             identifier(item["request_id"], "SSH enrollment request")
             check(item["fingerprint"] == candidate_fingerprint(item["candidate"]),
                   "invalid-ssh-enrollment-fingerprint")
+            requester = item["candidate"]["requester"]
+            check(prior is None or requester > prior, "invalid-ssh-pending-order")
+            prior = requester
+        if value["next"] is not None:
+            identifier(value["next"], "SSH pending cursor")
+            check(bool(value["requests"]) and value["next"] == prior,
+                  "invalid-ssh-pending-cursor")
         return value
 
     async def status(self, request_id: str) -> EnrollmentResult:
@@ -164,7 +173,7 @@ class PeerEnrollmentClient:
     async def recover(self, requester: str, request_id: str, fingerprint: str, *,
                       confirm: bool, reason: str) -> EnrollmentResult:
         check(confirm is True and isinstance(reason, str)
-              and 1 <= len(reason.strip()) <= 512
+              and bool(reason.strip()) and len(reason) <= 512
               and not any(ord(char) < 32 for char in reason),
               "explicit-ssh-recovery-confirmation-required")
         return await self._decide(

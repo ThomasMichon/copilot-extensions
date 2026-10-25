@@ -114,20 +114,23 @@ async def test_registered_peer_approval_recovery_and_restart(tmp_path):
         second = PeerEnrollmentClient(second_caller, namespace="/api")
         recovery = PeerEnrollmentClient(caller("caller-recovery", 5), namespace="/api")
         pending = (await first.submit(enrollment())).to_dict()
-        assert pending["status"] == "pending" and pending["directory"] is None
+        assert pending["status"] == "pending" and "directory" not in pending
         with pytest.raises(TransportError):
             await first.approve(**decision(pending))
         with pytest.raises(TransportError):
             await first.recover(**decision(pending), confirm=True, reason="first-peer")
         initial = await recovery.recover(
             **decision(pending), confirm=True, reason="first-peer")
-        revision = initial.to_dict()["directory"]["directory"]["revision"]
+        revision = initial.to_dict()["decision"]["directory_revision"]
         waiting = asyncio.create_task(SSHDirectoryClient(
             first_caller, namespace="/api").wait(revision, seconds=10))
         pending = (await second.submit(enrollment(1))).to_dict()
         await asyncio.sleep(0.05)
         assert not waiting.done()
         assert (await first.pending())["requests"][0]["fingerprint"] == pending["fingerprint"]
+        page = await first.pending(after="caller-a")
+        assert page["requests"][0]["fingerprint"] == pending["fingerprint"]
+        assert (await first.pending(after="caller-b"))["requests"] == []
         with pytest.raises(TransportError):
             await first.approve(**decision(pending, fingerprint="SHA256:" + "A" * 43))
         active = await first.approve(**decision(pending))

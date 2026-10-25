@@ -52,7 +52,7 @@ def test_pending_is_durable_but_not_directory_or_relay_admission(config):
     before = store.snapshot()
     pending = submit(store)
     assert pending["status"] == "pending"
-    assert pending["directory"] is None and pending["decision"] is None
+    assert "directory" not in pending and pending["decision"] is None
     assert store.snapshot() == before
     assert store.relay_snapshot() == []
     restarted = DirectoryStore(config)
@@ -68,9 +68,11 @@ def test_explicit_recovery_then_authenticated_peer_approval_and_lost_reply(confi
     second = submit(store, 1)
     active, changed = store.approval.decide("principal-worker-a", decision(second))
     assert changed and active["status"] == "active"
-    assert active["decision"] == {"method": "peer", "principal": "principal-worker-a"}
-    assert active["directory"]["directory"]["revision"] == first["directory"]["directory"]["revision"] + 1
-    assert len(active["directory"]["directory"]["machines"]) == 2
+    assert active["decision"] == {
+        "method": "peer", "principal": "principal-worker-a",
+        "directory_revision": first["decision"]["directory_revision"] + 1,
+    }
+    assert len(store.snapshot()["directory"]["machines"]) == 2
     restarted = DirectoryStore(config)
     assert restarted.approval.decide("principal-worker-a", decision(second)) == (active, False)
     assert restarted.approval.status("principal-worker-b", second["request_id"]) == active
@@ -100,6 +102,7 @@ def test_enrolled_peer_cannot_self_approve(config):
     {"confirm": False, "reason": "first-peer"},
     {"confirm": True, "reason": ""},
     {"confirm": True, "reason": "not\none-operation"},
+    {"confirm": True, "reason": " " * 513 + "first-peer"},
 ])
 def test_recovery_requires_explicit_confirmation_and_reason(config, extra):
     store = DirectoryStore(selected(config))
@@ -199,7 +202,7 @@ def test_completed_decision_survives_a_later_generation_without_claiming_active(
     new["bindings"][0]["generation"] += 1
     current = DirectoryStore(ServiceConfig.from_dict(new))
     history = current.approval.status("principal-worker-a", active["request_id"])
-    assert history["status"] == "superseded" and history["directory"] is None
+    assert history["status"] == "superseded" and "directory" not in history
     assert history["decision"] == active["decision"]
     assert history["fingerprint"] == active["fingerprint"]
     EnrollmentResult.parse(canonical(history))
@@ -233,8 +236,11 @@ def test_enabling_optional_policy_preserves_an_existing_admitted_identity(config
     current = DirectoryStore(ServiceConfig.from_dict(new))
     retained = submit(current, request_id="existing-key-under-selected-policy")
     assert retained["status"] == "active"
-    assert retained["decision"] == {"method": "retained", "principal": None}
-    assert retained["directory"]["directory"]["machines"] == before["directory"]["machines"]
+    assert retained["decision"] == {
+        "method": "retained", "principal": None,
+        "directory_revision": current.snapshot()["directory"]["revision"],
+    }
+    assert current.snapshot()["directory"]["machines"] == before["directory"]["machines"]
     with pytest.raises(SSHServiceError, match="new-generation"):
         submit(current, request_id="different-key", public_key=key(23))
 

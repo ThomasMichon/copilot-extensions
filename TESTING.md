@@ -861,6 +861,11 @@ that native restart instead of weakening proof freshness around a frozen unit
 clock. SDK tests additionally prove old/missing support and policy rollback
 refuse before a required-policy request can admit anything. These remain
 contained standalone/explicit-lane tests, not additions to required unit CI.
+The maximum-binding regressions assert the actual 32 KiB response boundary:
+compact original decisions remain retrievable as the directory grows,
+oversized response construction refuses, capacity failure rolls back the whole
+decision transaction, and every long-identifier candidate remains reachable
+through byte-bounded pending pages.
 
 ## Optional diagnostic telemetry
 
