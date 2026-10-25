@@ -196,10 +196,10 @@ newly overlapping consumer PR rather than modifying its still-open change.
   #8414 merged as `5a2b202b5ae94b9695f04f4a05c4c424731d3ab7`.
 - [x] Land the reviewed [startup-headroom follow-up](startup-headroom.md)
   before its implementation; preserve existing source and control owners.
-- [ ] Execute that follow-up in independently reviewable source slices:
+- [x] Execute that follow-up in independently reviewable source slices:
   omit unused state-root preferences first, then qualify the canonical
   fresh-process evaluator selection without weakening bootstrap admission.
-- [ ] Review the [independent Windows bootstrap contract](trusted-bootstrap.md)
+- [x] Review the [independent Windows bootstrap contract](trusted-bootstrap.md)
   and agree its shared implementation scope with #6812 before changing the
   evaluator or shared selector.
 - [ ] Requalify the remaining installed reader latency after a reviewed
@@ -251,6 +251,31 @@ closes a bounded reliability delta within the existing Bridge vision and
 namespace-provider pattern, without changing architectural ownership.
 
 ## Journal
+
+### 2026-10-24 - Selector and two-adopter source slice merged; parent continues
+
+- #8789 actually merged as `6913ea9c57cb46d02646bd2bfb05869ad5ec44b8`.
+  Current-head review `5641068072` is a clean owner-authored Comment with no
+  remaining concrete Medium/High finding. Both original threads are resolved;
+  the additional home-fallback summary finding is corrected. Required PR
+  gate `40152776429`, source attribution and workflow lockdown all pass.
+- Used the repository-authorized managed Maintainer completion flow. Its
+  provider-confirmed extra-CODEOWNER exception does not waive checks or
+  feedback. Source merge is not a qualified containing Main release or an
+  installed rollout.
+- Re-read the parent and its sub-plans after merge. The reviewed selector
+  assignment and source consumer slice are complete; whole-provider/Bridge
+  eight-second qualification, containing release/control adoption and actual
+  authorized installed consumption remain open. The effort stays Active.
+- The next candidate is separately reviewed startup work, not more scope in
+  the merged selector PR. Refreshed #8601's complete file inventory and the
+  active Worktrees root owners: #8458, #7611 and #6009 touch `__main__.py`;
+  #8786 touches configuration. Preserve their changes and coordinate concrete
+  overlap before choosing a root/import or configuration slice.
+- The routine sync refused the merged PR's already-deleted remote ref before
+  rebasing. Preserved the completed source on a backup, verified the provider's
+  actual merge is in fetched Dev, then advanced the clean worktree with no
+  unmerged commits to replay. No stash, hard reset or finalize was used.
 
 ### 2026-10-24 - Corrected native cost and retained PowerShell home fallback
 

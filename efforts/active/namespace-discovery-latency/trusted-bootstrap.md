@@ -159,6 +159,10 @@ timestamp. Existing OS trust caches are not a new suite authority cache.
 - [x] Integrate only the assigned consumers. Prove the fresh canonical SDK's
   complete typed output and refusal parity, absent-bootstrap native fallback,
   terminal post-selection failures and unchanged ordinary package-site loading.
+- [x] Land the assigned helper and two-adopter source implementation through
+  current-head review and required CI. #8789 merged as
+  `6913ea9c57cb46d02646bd2bfb05869ad5ec44b8`; release and installed acceptance
+  remain separate.
 - [ ] Keep effect-free units separately admitted with full source hashes,
   contextual coverage, effect observation and the existing 300-second budget.
   Native/registry/signature/process cases remain outside required pure units.

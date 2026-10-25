@@ -57,13 +57,13 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 - [x] Land this sub-plan through ordinary review and required CI before code.
 - [x] Refresh current source, relevant open PR files and issue ownership;
   document any actual conflict and retain the existing owner.
-- [ ] Locate the existing independent, attributable bootstrap-interpreter
+- [x] Locate the existing independent, attributable bootstrap-interpreter
   selector usable before installation-mode validation. Prove what authorizes
   that executable and what happens when none is available.
-- [ ] Do not execute an unadmitted selected runtime to validate its own
+- [x] Do not execute an unadmitted selected runtime to validate its own
   ownership. Do not invent an absolute interpreter path, trust ambient PATH,
   provision Python on a read, or infer authority from an executable's presence.
-- [ ] If no existing contract safely supplies that interpreter, keep the
+- [x] If no existing contract safely supplies that interpreter, keep the
   evaluator slice unimplemented until the missing contract is reviewed.
   Continue the independent preference-read slice rather than weakening a gate.
   The preference slice is now merged; its native cohort still exceeds the
@@ -92,26 +92,26 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 
 ### 3. Qualify a lighter canonical evaluator in a fresh process
 
-- [ ] Reuse the canonical Python SDK and the admitted bootstrap selector from
+- [x] Reuse the canonical Python SDK and the admitted bootstrap selector from
   step 1 for read-only installation-mode/status validation at the relevant
   runtime dispatchers. Retain fresh-process isolation.
-- [ ] Use isolated, no-site startup only for this stdlib/payload-owned SDK
+- [x] Use isolated, no-site startup only for this stdlib/payload-owned SDK
   boundary; normal runtime package loading must still initialize its site.
-- [ ] Keep the POSIX bootstrap contract unchanged: this slice addresses the
+- [x] Keep the POSIX bootstrap contract unchanged: this slice addresses the
   measured Windows PowerShell/native-compilation cost. Verify shared protocol
   and refusal parity rather than introducing an unrelated shell rewrite.
-- [ ] Pass the same explicit source, payload, plugin, legacy/cell and expected
+- [x] Pass the same explicit source, payload, plugin, legacy/cell and expected
   receipt-generation inputs, preserving argument fidelity and both streams.
-- [ ] Preserve the native PowerShell bootstrap path when an admitted Python
+- [x] Preserve the native PowerShell bootstrap path when an admitted Python
   bootstrap is genuinely unavailable. Decide that path before evaluation.
   Never retry a validation refusal with a different evaluator to obtain success.
-- [ ] Keep validation before runtime execution, provisioning and publication.
+- [x] Keep validation before runtime execution, provisioning and publication.
   Preserve installation policy, source/cell ownership, pending maintenance,
   stale/foreign receipt refusals and all existing post-provision revalidation.
-- [ ] Avoid editing a shared generator or unrelated adopter without an actual
+- [x] Avoid editing a shared generator or unrelated adopter without an actual
   dependency. If a shared owner must change, obtain its bounded assignment,
   keep dependent consumers consistent and add their required changefiles.
-- [ ] Land the consumer implementation with ordinary review and required CI.
+- [x] Land the consumer implementation with ordinary review and required CI.
   A positive status comparison is not sufficient implementation acceptance.
 
 ### 4. Prove headroom and continue the parent
@@ -134,6 +134,52 @@ launch/ownership patterns. It does not introduce another SDK or state resolver.
 - [ ] Follow the existing owners' containing qualified release, then the
   authorized normal unified updater and actual running complete-roster proof.
   Preserve the parent consumer and broader #5761 obligations.
+
+## Next independently reviewed slice: the existing state-root import closure
+
+#8789 completes the assigned selector/two-adopter implementation, not the
+eight-second objective. The retained actual legacy-frontdoor command still
+takes 9.378 seconds. Its separate runtime profile attributes 1.371 seconds
+to eager imports; that is not all removable work or an additive prediction of
+whole-command savings. For example, an activity import includes configuration
+that state-root genuinely needs.
+
+Review a bounded import-closure slice before implementation:
+
+- Trace the ordinary CLI's existing state-root dispatch and retain its project,
+  CWD, binding, configuration, output, error and conduct decisions. Use the
+  existing lazy-dispatch/full-surface mechanism; do not add another launcher,
+  direct-Python peer route, parser shortcut or runtime-authority bypass.
+- Defer only imports belonging to unrelated command families, at their existing
+  owners. Keep ordinary dispatch and compatibility re-exports/monkeypatch
+  seams working. Do not copy the state-root algorithm or change configuration
+  readers, source/default-branch checks, receipt algorithms or persistent state.
+- Preserve the concrete open ownership boundaries refreshed after #8789:
+  #8458 owns Git observation/cleanup and status-segment-cache behavior;
+  #7611 owns project-config writing; #6009 owns anchor-ledger accounting;
+  #8786 owns optional-map configuration. Coordination comments on the first
+  three PRs identify the proposed noncompeting import work. Their actual
+  implementations/imports are not repair targets; refresh new overlaps before
+  editing and coordinate any genuine conflict rather than pre-patching it.
+- Prove complete state-root JSON/text and bound/unbound/error parity, explicit
+  repo/project behavior, pairing/conduct and unchanged ordinary command
+  dispatch. A deterministic work-count contract should identify the unrelated
+  modules no longer loaded; real fresh subprocesses must prove import and
+  compatibility behavior. Required source/unit admission stays separate from
+  effectful native tests with no coverage/hash/observer exceptions.
+- Rebuild source-independent normal fixtures and use the actual deployed global
+  legacy peer contract, never the slower but different payload frontdoor as a
+  substitute. Measure changed startup and complete discovery separately.
+  Qualify five fresh processes and five warm reads plus the real Bridge native
+  reader only if the first whole-command result meets the unchanged eight-second
+  bound. Retain and diagnose any failure instead of retrying an unchanged cohort.
+- Reject a slice without meaningful measured benefit. If another mechanism is
+  needed, return to separate owner-coordinated review; do not quietly broaden
+  into installer/native-frontdoor, SDK or lifetime work. Source review/CI,
+  containing release and authorized installed consumption remain distinct.
+
+This is a proposal under step 4, not implemented import behavior or another
+implementation assignment to the already-completed selector PR.
 
 ## Validation plan
 
