@@ -942,3 +942,18 @@ Keep necessary lifetime/publication repair as an independently qualified slice.
   plugin, and still require native POSIX execution. The manual optional lane
   now includes this file; no existing deadline or portfolio gate changes.
   The PowerShell backpressure repair remains under native API investigation.
+- Lease-cleanup failure is now explicitly warned and archived when a native
+  writer is available, rather than silently suppressing that secondary result.
+  The four native trap controls also verify that warning/evidence while keeping
+  the original success/failure exit code; they passed in **28.18 seconds;
+  33.02 seconds including preparation and cleanup**.
+- The first PowerShell repair draft is not qualified. An isolated native API
+  proof established anonymous-pipe mode query/set/restore, shared alias state,
+  and zero-progress writes without a deadline extension. Actual repeated
+  scoped presentation then failed: the new eight-case selection failed, and
+  two narrow diagnostic isolations identified Win32 231 after the first
+  1,024 forwarded bytes. Capture, primary results and restored modes survived,
+  but loss on a normally reading channel is unacceptable. No synchronous
+  fallback, deadline increase, native acceptance dispatch or rollout was used.
+  Operation-tagged native diagnosis must distinguish normal write backpressure
+  from a mode/query/restoration failure before further implementation.

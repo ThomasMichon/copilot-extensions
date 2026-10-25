@@ -46,7 +46,12 @@ _installer_exit() {
     local rc=$?
     trap - EXIT
     if declare -F _release_versioned_slot_lease >/dev/null; then
-        _release_versioned_slot_lease || :
+        if ! _release_versioned_slot_lease; then
+            if declare -F installer_diagnostics_write >/dev/null; then
+                installer_diagnostics_write 'installer lease cleanup failed' || :
+            fi
+            printf '%s\n' 'WARNING: installer lease cleanup failed; preserving native exit status.' >&2 || :
+        fi
     fi
     installer_diagnostics_complete "$rc" || :
     exit "$rc"

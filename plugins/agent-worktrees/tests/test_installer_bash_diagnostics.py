@@ -89,9 +89,12 @@ _release_versioned_slot_lease() {
     )
     assert result.returncode == native_exit, result.stderr
     assert json.loads(result.stdout) == {"native": native_exit}
+    assert ("WARNING: installer lease cleanup failed" in result.stderr) is release_failure
     assert release.read_text() == "released\n"
     attempts = list((tmp_path / ".copilot-extensions" / "installer-diagnostics").iterdir())
     assert len(attempts) == 1
     writers = list(attempts[0].glob("*.completed.json"))
     assert len(writers) == 1 and json.loads(writers[0].read_text())["exit"] == native_exit
     assert json.loads((attempts[0] / "completed.json").read_text())["exit"] == native_exit
+    archive = "\n".join(path.read_text() for path in attempts[0].glob("*.log"))
+    assert ("installer lease cleanup failed" in archive) is release_failure
