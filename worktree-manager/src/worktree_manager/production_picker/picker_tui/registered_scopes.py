@@ -58,7 +58,7 @@ def aggregate(runtime, pivot, scopes, *, annotate=True):
                 **entry, "_manager_scope": scope,
                 "_manager_row_key": (scope, str(entry.get(pivot.id_field, ""))),
                 "_manager_scope_state": state,
-            } if annotate or state == "error" else entry)
+            })
         summaries[scope] = runtime.get_summary(scope) if hasattr(runtime, "get_summary") else {}
     summary = dict(summaries[scopes[0]]) if len(scopes) == 1 else {}
     if annotate or len(scopes) > 1:

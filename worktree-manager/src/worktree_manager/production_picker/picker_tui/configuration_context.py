@@ -1,6 +1,7 @@
 """Explicit project/workspace bindings for Configuration provider list queries."""
 
 from .. import context
+from ... import picker_review
 
 
 def list_context(pivot, machine: object) -> dict:
@@ -24,7 +25,7 @@ def run_list(runtime, machine: object, generation: object = None) -> None:
     except RuntimeError as exc:
         runtime._finish(machine, ("error", [], str(exc)), {})
         return
-    if runtime.pivot.stream:
+    if runtime.pivot.stream and not picker_review.active():
         runtime._run_list_stream(machine, ctx)
         return
     state, rows, error, summary = runtime._exec_list(ctx)

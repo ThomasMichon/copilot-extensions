@@ -53,6 +53,9 @@ unsupported flags to simulate another execution space.
 Aggregated rows carry Manager-owned source attribution, displayed in the list
 and row-action header. A contributed `{machine}` action token resolves to that
 row's admitted read scope, not whichever machine tab is selected later.
+Individual-tab and shared-provider rows retain the same read-custody metadata,
+even when no source caption is needed. A menu retained across a source failure
+cannot bypass the current-read check because it was opened before the failure.
 Providers retain responsibility for their declared command's routing,
 revalidation, resource custody and confirmation requirements.
 

@@ -146,6 +146,23 @@ def test_actions_from_a_retained_failed_scope_refuse_until_fresh_read():
     assert "press r to retry" in screen.debug
 
 
+@pytest.mark.parametrize("select_machine,scope", [(True, "machine"), (False, "machine"), (True, "account")])
+def test_individual_and_shared_rows_retain_read_custody_after_menu_open(select_machine, scope):
+    state = {"value": "ready"}
+    runtime = SimpleNamespace(
+        ensure_many=lambda scopes: None,
+        get=lambda key: (state["value"], [{"id": "selected"}], "failed" if state["value"] == "error" else ""),
+    )
+    reg = pivot(machine=select_machine, scope=scope)
+    screen = engine(runtime, reg)
+    screen.machine_idx = 3
+    retained = screen._task_state()[1][0]
+    assert retained["_manager_scope"] == ("host-b" if select_machine and scope == "machine" else "")
+    state["value"] = "error"
+    screen._internal_pivot_action = lambda *args: pytest.fail("retained row cannot execute after source failure")
+    screen._run_task_action(reg, SimpleNamespace(card=None), retained)
+    assert "press r to retry" in screen.debug
+
 def test_r_refreshes_only_active_registered_machine_not_worktree_loader():
     refreshed = []
     runtime = SimpleNamespace(
@@ -468,7 +485,7 @@ def test_unscoped_worker_prefetch_join_and_visible_inventory_share_one_cache(mon
     screen._maybe_refresh_worker_pivots()
     assert ensured == polled == [""]
     screen._pivot_runtimes = {reg.name: runtime}
-    assert screen._task_state()[1] == rows
+    assert [row["id"] for row in screen._task_state()[1]] == ["container"]
     assert pivots.find_supervised_workers(screen.pivots, screen._pivot_runtimes, "host-b", "worktree")[0]["id"] == "container"
 
 

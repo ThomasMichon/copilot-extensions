@@ -371,7 +371,11 @@ def test_post_submit_refresh_keeps_rows_and_selected_identity_until_swap(monkeyp
                             and not app.screen.pending)
                 app.screen.action_close()
                 await pilot.pause()
-                assert scr._task_rows() == rows and scr.sel == ("T", 1)
+                assert scr._task_rows() == [
+                    {**row, "_manager_scope": "", "_manager_row_key": ("", row["id"]),
+                     "_manager_scope_state": "ready"}
+                    for row in rows
+                ] and scr.sel == ("T", 1)
                 release.set()
                 await _wait(pilot, lambda: scr._task_rows()[0]["id"] == "two")
                 assert scr.sel == ("T", 0)

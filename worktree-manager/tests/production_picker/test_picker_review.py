@@ -137,6 +137,44 @@ def test_qualified_catalog_uses_bounded_descendant_owner(review, monkeypatch):
     assert "capture_output" not in seen[0][1]
 
 
+def test_shipped_streaming_workers_manifest_uses_qualified_cancellable_one_shot_in_review(review, monkeypatch):
+    from dataclasses import replace
+    import json
+    from pathlib import Path
+    import threading
+    from worktree_manager import engine_process
+    from worktree_manager.production_picker.picker_tui import pivots
+
+    path = Path(__file__).resolve().parents[3] / "plugins" / "agent-dispatch" / "pivots" / "workers-config.json"
+    reg = replace(
+        pivots.parse_manifest(json.loads(path.read_text(encoding="utf-8")), name="workers", source_path=str(path)),
+        source_owner="agent-dispatch@example",
+    )
+    assert reg.stream
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation",
+                        lambda plugin: (["installed-python", "-m", "agent_dispatch"], review.owner_root))
+    calls = []
+    ready = threading.Event()
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        ready.set()
+        return SimpleNamespace(
+            returncode=0, stdout='{"entries":[{"id":"configured"}],"summary":{"configured":1}}', stderr="",
+        )
+    monkeypatch.setattr(engine_process, "run", run)
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    monkeypatch.setattr(runtime, "_spawn_stream", forbidden)
+    runtime._run_list("", runtime._gen)
+    assert ready.is_set()
+    assert runtime.get("") == ("ready", [{"id": "configured"}], "")
+    assert calls[0][0] == ["installed-python", "-m", "agent_dispatch", "workers", "catalog"]
+    assert calls[0][1]["cancelled"] is review.reads.cancelled
+    assert calls[0][1]["timeout"] == tasks.LIST_TIMEOUT
+    assert calls[0][1]["env"]["AGENT_DISPATCH_NO_AUTOSTART"] == "1"
+    with pytest.raises(picker_review.ReadOnlyError, match="unsupported catalog read"):
+        picker_review.list_command(reg, [*reg.list_cmd, "--stream"])
+
+
 def test_real_list_adapter_selects_read_feed_without_cli(review, monkeypatch):
     rows = [{"id": "example-worktree"}]
     monkeypatch.setattr(engine_client, "_run", forbidden)
