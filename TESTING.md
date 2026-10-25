@@ -1544,6 +1544,8 @@ shell argv bodies and encoded PowerShell bodies in both runtime and source check
 Source checks also recognize literal exec/spawn signatures and PowerShell
 termination aliases. Executable lookups (`command -v`/`-V`) remain harmless
 inspection, not commands to execute.
+Recognized shell state changes invalidate inherited environment or relative-directory
+scope evidence; an explicit absolute private transport can still be verified.
 
 For real mux fixtures, use
 `plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact
@@ -1586,10 +1588,7 @@ The existing optional `installation-context-acceptance.yml` dispatch with
 `interactive_completion=true` qualifies the real mux lifetime fixture on
 disposable Linux and Windows workers, plus the private POSIX pane fixture.
 Windows uses portable PSMux 3.3.5 in runner temp, pinned by archive SHA-256;
-the private fixture selects its documented normal ConPTY translation mode
-(`PSMUX_NO_PASSTHROUGH=1`) rather than the optional passthrough path. This
-qualifies mux/TTY lifetime, not passthrough rendering. It does not install or
-register a host service. This lane remains manual and
+it does not install or register a host service. This lane remains manual and
 outside required unit CI. Do not substitute a shared developer desktop for it.
 
 Agent MCP's focused home-binding lane is:

@@ -33,6 +33,7 @@ _SOURCE_MARKERS = re.compile(
 )
 _ADJACENT_LITERALS = re.compile(r"""['"][^'"\r\n]+['"]\s*[bruBRU]?['"][^'"\r\n]+['"]""")
 _installed = False
+_UNKNOWN_CWD = object()
 
 
 class UnsafeTestCommand(RuntimeError):
@@ -158,7 +159,7 @@ def _command_lookup(parts: list[str]) -> bool:
 
 
 def _launcher_problem(
-    parts: list[str], *, cwd: str | Path | None,
+    parts: list[str], *, cwd: str | Path | object | None,
     environment: Mapping[str, str] | None, sandbox: Path | None,
     check_mux_scope: bool,
 ) -> str | None:
@@ -217,7 +218,10 @@ def _launcher_problem(
                         effective.pop(key)
             elif option in {"-D", "--chdir"} or name == "env" and option in {"-C", "--chdir"}:
                 path = Path(value)
-                cwd = path if path.is_absolute() else Path(cwd or Path.cwd()) / path
+                if path.is_absolute():
+                    cwd = path
+                elif cwd is not _UNKNOWN_CWD:
+                    cwd = (Path(os.fsdecode(cwd)) if cwd is not None else Path.cwd()) / path
             elif name == "env" and option in {"-S", "--split-string"}:
                 try:
                     nested[index:index] = shlex.split(value)
@@ -256,7 +260,7 @@ def _launcher_problem(
 
 
 def _shell_problem(
-    text: str, *, cwd: str | Path | None = None,
+    text: str, *, cwd: str | Path | object | None = None,
     environment: Mapping[str, str] | None = None, sandbox: Path | None = None,
     check_mux_scope: bool = True, powershell: bool = False,
 ) -> str | None:
@@ -283,13 +287,24 @@ def _shell_problem(
     for pattern, reason in patterns:
         if re.search(pattern, text, re.IGNORECASE):
             return reason + " is forbidden in test shell commands"
-    if powershell:
-        for match in re.finditer(
-            r"(?:^|[;\r\n{|&])\s*(?:stop-process|spps|kill)\b([^\r\n;|]*)",
-            text, re.IGNORECASE,
-        ):
-            if not re.search(r"-(?:id|inputobject)\b", match[1], re.IGNORECASE):
-                return "PowerShell termination requires explicit owned -Id/-InputObject targets"
+    termination = r"(?:stop-process|spps|kill)" if powershell else r"(?:stop-process|spps)"
+    for match in re.finditer(
+        r"(?:^|[;\r\n{|&])\s*" + termination + r"\b([^\r\n;|]*)",
+        text, re.IGNORECASE,
+    ):
+        if not re.search(r"-(?:id|inputobject)\b", match[1], re.IGNORECASE):
+            return "PowerShell termination requires explicit owned -Id/-InputObject targets"
+    if re.search(
+        r"(?:^|[\s;{(])(?:cd|chdir|pushd|popd|set-location|sl|push-location|pop-location)\b",
+        text, re.IGNORECASE,
+    ):
+        cwd = _UNKNOWN_CWD
+    if re.search(
+        r"(?:^|[\s;{(])(?:unset|unsetenv|setenv|export|set|declare|typeset|local|readonly)\b"
+        r"|\$env:|\b(?:env|TMUX)\s*=|SetEnvironmentVariable|(?:Remove|Set|Clear)-Item\b[^\r\n;|]*\bEnv:",
+        text, re.IGNORECASE,
+    ):
+        environment = {}
     for segment in re.split(r"[\r\n;|&]+", text):
         if not check_mux_scope and not _SOURCE_MARKERS.search(segment):
             continue
@@ -324,7 +339,7 @@ def command_problem(
 
 
 def _command_problem(
-    command: object, *, cwd: str | Path | None = None,
+    command: object, *, cwd: str | Path | object | None = None,
     environment: Mapping[str, str] | None = None, sandbox: Path | None = None,
     check_mux_scope: bool = True,
 ) -> str | None:
@@ -385,7 +400,10 @@ def _command_problem(
         return None
     if sandbox is None:
         return "real mux commands require the runner's verified private namespace"
-    base = Path(os.fsdecode(cwd)) if cwd is not None else Path.cwd()
+    base = (
+        None if cwd is _UNKNOWN_CWD
+        else Path(os.fsdecode(cwd)) if cwd is not None else Path.cwd()
+    )
     selectors = []
     index = 1
     while index < len(parts):
@@ -409,6 +427,8 @@ def _command_problem(
                 return "Windows mux fixtures require a runner-owned -L namespace"
             socket = Path(value)
             if not socket.is_absolute():
+                if base is None:
+                    return "relative mux scope cannot be verified after a shell directory change"
                 socket = base / socket
             if _within(socket, sandbox):
                 return None
@@ -423,6 +443,8 @@ def _command_problem(
         if socket_name:
             socket = Path(socket_name)
             if not socket.is_absolute():
+                if base is None:
+                    return "relative inherited mux scope requires a verified working directory"
                 socket = base / socket
             if _within(socket, sandbox):
                 return None
@@ -507,7 +529,9 @@ def source_problems(path: Path) -> list[str]:
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 script = node.value.value
-                if "\n" in script and (reason := _shell_problem(script, check_mux_scope=False)):
+                if "\n" in script and (reason := _shell_problem(
+                    script, check_mux_scope=False,
+                )):
                     problems.append(f"{path}:{node.lineno}: {reason}")
         if not isinstance(node, ast.Call):
             continue

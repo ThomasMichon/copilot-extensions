@@ -237,6 +237,10 @@ def test_env_launcher_split_string_and_cwd_are_inspected(monkeypatch, tmp_path):
         ["env", "--split-string=TMUX='" + str(tmp_path / "mux.sock") + "',0,0 tmux has-session"],
         sandbox=tmp_path, environment={},
     ) is None
+    assert safety.command_problem(
+        ["env", "--chdir=.", "tmux", "-S", "mux.sock", "has-session"],
+        sandbox=tmp_path, environment={}, cwd=os.fsencode(tmp_path),
+    ) is None
 
 
 @pytest.mark.parametrize("command", [
@@ -270,6 +274,52 @@ def test_lookup_does_not_hide_a_following_cleanup_command(tmp_path):
     assert safety.command_problem(
         ["sh", "-c", "command -v git; pkill -f fixture"], sandbox=tmp_path,
     )
+
+
+@pytest.mark.parametrize("script", [
+    "unset TMUX; tmux kill-session -t fixture",
+    "export TMUX=/foreign/mux.sock,0,0; tmux kill-session -t fixture",
+    "TMUX=/foreign/mux.sock,0,0; tmux kill-session -t fixture",
+    "cd /foreign; tmux -S mux.sock kill-session -t fixture",
+    "pushd /foreign; tmux -S mux.sock kill-session -t fixture",
+    "Set-Location /foreign; tmux -S mux.sock kill-session -t fixture",
+    "Remove-Item -LiteralPath Env:TMUX; tmux kill-session -t fixture",
+])
+def test_shell_state_changes_invalidate_old_scope_at_classification_and_audit(
+    monkeypatch, tmp_path, script,
+):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    environment = {"TMUX": str(tmp_path / "mux.sock") + ",0,0"}
+    command = ["bash", "-c", script]
+    assert safety.command_problem(
+        command, sandbox=tmp_path, cwd=tmp_path, environment=environment,
+    )
+    hooks = []
+    monkeypatch.setattr(safety, "_installed", False)
+    monkeypatch.setattr(safety.sys, "addaudithook", hooks.append)
+    safety.install_command_guard(tmp_path)
+    with pytest.raises(safety.UnsafeTestCommand):
+        hooks[0]("subprocess.Popen", ("bash", command, tmp_path, environment))
+
+
+def test_shell_mutation_still_allows_an_explicit_absolute_private_transport(monkeypatch, tmp_path):
+    monkeypatch.setattr(safety, "os", SimpleNamespace(
+        name="posix", environ={}, path=os.path, fsdecode=os.fsdecode,
+    ))
+    command = [
+        "bash", "-c",
+        "unset TMUX; cd /foreign; tmux -S '" + str(tmp_path / "mux.sock") + "' has-session",
+    ]
+    assert safety.command_problem(
+        command, sandbox=tmp_path, cwd=tmp_path, environment={},
+    ) is None
+    hooks = []
+    monkeypatch.setattr(safety, "_installed", False)
+    monkeypatch.setattr(safety.sys, "addaudithook", hooks.append)
+    safety.install_command_guard(tmp_path)
+    hooks[0]("subprocess.Popen", ("bash", command, tmp_path, {}))
 
 
 @pytest.mark.parametrize("flag", ["-EncodedCommand", "-enc", "-ec", "-e"])
@@ -317,6 +367,9 @@ def test_source_preflight_rejects_child_cleanup_without_importing_it(tmp_path, b
     ("child.py", "os.system('kill -TERM -1')\n"),
     ("child.sh", "#!/bin/sh\nkill -TERM -1\n"),
     ("child.sh", "#!/bin/sh\nkill -TERM 0\n"),
+    ("child.py", "SCRIPT = '''\nspps fixture -Force\n'''\n"),
+    ("child.py", "SCRIPT = '''\nStop-Process fixture -Force\n'''\n"),
+    ("child.py", "SCRIPT = '''\nspsv fixture\n'''\n"),
 ])
 def test_shell_helpers_and_generated_script_literals_are_checked(tmp_path, name, body):
     (tmp_path / name).write_text(body)
@@ -364,6 +417,17 @@ def test_source_exec_and_spawn_signatures_use_the_actual_executable(tmp_path, bo
 def test_source_exec_spawn_and_lookup_controls_are_not_globally_banned(tmp_path, body):
     source = tmp_path / "child.py"
     source.write_text("# pkill is forbidden; these calls are harmless.\n" + body)
+    assert safety.source_problems(source) == []
+
+
+@pytest.mark.parametrize("script", [
+    "#!/bin/sh\nkill -TERM 123\n",
+    "Stop-Process -Id 123 -Force\n",
+    "spps -InputObject $owned\n",
+])
+def test_generated_script_inspection_preserves_explicit_process_targets(tmp_path, script):
+    source = tmp_path / "child.py"
+    source.write_text("SCRIPT = " + repr(script))
     assert safety.source_problems(source) == []
 
 
@@ -507,6 +571,5 @@ def test_native_fixture_environment_disables_shell_network_side_effects(tmp_path
     environment = namespace["_environment"](tmp_path)
     assert environment["POWERSHELL_TELEMETRY_OPTOUT"] == "1"
     assert environment["POWERSHELL_UPDATECHECK"] == "Off"
-    assert environment["PSMUX_NO_PASSTHROUGH"] == "1"
     assert "AGENT_BRIDGE_TEST_VALUE" not in environment
     assert Path(environment["USERPROFILE"]).is_relative_to(tmp_path)
