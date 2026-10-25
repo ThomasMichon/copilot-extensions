@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import asdict, replace
 
@@ -93,8 +94,15 @@ def test_manager_source_warm_install_in_a_new_process_never_resolves_or_rebuilds
     monkeypatch.setattr(configuration, "_opaque_index_identity", lambda value: hashlib.sha256(value.encode()).hexdigest())
     state = feeds(certificate=CERTIFICATE.with_name("wheel-feed-localhost-leaf.pem"))
     packaging_feed(state)
-    env = environment(adopter, state, tmp_path)
+    env = environment(adopter, state, tmp_path, authenticate="auto")
+    env.update(UV_INDEX_GOVERNED_USERNAME="fixture-user", UV_INDEX_GOVERNED_PASSWORD="synthetic-secret")
     arguments = options(adopter, target, env)
+
+    def install():
+        return builds.install_manager_source_runtime(
+            plan(adopter), **{**arguments, "deadline": time.monotonic() + 120},
+        )
+
     if uv_selection == "absolute":
         path = os.pathsep.join(
             entry for entry in os.environ.get("PATH", "").split(os.pathsep)
@@ -107,7 +115,7 @@ def test_manager_source_warm_install_in_a_new_process_never_resolves_or_rebuilds
         arguments["uv"] = "uv"
         assert shutil.which("uv") is not None
     try:
-        first = builds.install_manager_source_runtime(plan(adopter), **arguments)
+        first = install()
     except subprocess.CalledProcessError as error:
         pytest.fail(error.stderr or str(error))
     assert first.action == "installed", first.reason
@@ -198,7 +206,7 @@ print(json.dumps(asdict(result)))
             path.write_text(content)
             try:
                 with pytest.raises(builds.dependencies.DependencyPolicyError, match="input evidence"):
-                    builds.install_manager_source_runtime(plan(adopter), **arguments)
+                    install()
                 assert builds.engine.runtime.current_version(root) == slot.name
                 assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
                 assert len(state["requests"]) == requests
@@ -214,27 +222,41 @@ print(json.dumps(asdict(result)))
         installed_module.write_text("raise RuntimeError('synthetic installed health failure')")
         try:
             with pytest.raises(RuntimeError, match="genuine installed health needs source admission"):
-                builds.install_manager_source_runtime(plan(adopter), **arguments)
+                install()
         finally:
             installed_module.write_bytes(original_module)
     assert builds.engine.runtime.current_version(root) == slot.name
     assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
     assert len(state["requests"]) == requests
     assert proof.read_bytes() == receipt and origin.read_bytes() == installed_origin
-    environment(adopter, state, tmp_path, resolution="lowest")
+    with monkeypatch.context() as authentication:
+        def changed_account(*args, **kwargs):
+            raise RuntimeError("changed authenticated account requires ordinary source admission")
+
+        authentication.setattr(builds, "retain_source_runtime_inputs", changed_account)
+        env["UV_INDEX_GOVERNED_USERNAME"] = "other-user"
+        try:
+            with pytest.raises(RuntimeError, match="changed authenticated account"):
+                install()
+        finally:
+            env["UV_INDEX_GOVERNED_USERNAME"] = "fixture-user"
+    assert builds.engine.runtime.current_version(root) == slot.name
+    assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
+    assert len(state["requests"]) == requests
+    environment(adopter, state, tmp_path, authenticate="auto", resolution="lowest")
 
     def requires_source(*args, **kwargs):
         raise RuntimeError("changed resolver mode requires ordinary source admission")
 
     monkeypatch.setattr(builds, "retain_source_runtime_inputs", requires_source)
     with pytest.raises(RuntimeError, match="changed resolver mode"):
-        builds.install_manager_source_runtime(plan(adopter), **arguments)
+        install()
     assert builds.engine.runtime.current_version(root) == slot.name
     assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
     marker.write_text("{")
     from runtime_profile import ProfileError
     with pytest.raises(ProfileError, match="completion evidence"):
-        builds.install_manager_source_runtime(plan(adopter), **arguments)
+        install()
     assert builds.engine.runtime.current_version(root) == slot.name
     assert marker.read_text() == "{"
     assert len(state["requests"]) == requests

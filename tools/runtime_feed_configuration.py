@@ -423,7 +423,7 @@ def _capture(
             raw, uv, deadline,
         )
         identity = "sha256:" + _opaque_index_identity(json.dumps(
-            {"name": name, "url": location, "authenticate": index["authenticate"]},
+            {"name": name, "url": location, "authenticate": index["authenticate"], "headers": headers},
             sort_keys=True, separators=(",", ":"),
         ))
         selected.append((index.get("default") == "true", WheelFeed(identity, location, headers)))

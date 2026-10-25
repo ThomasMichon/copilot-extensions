@@ -270,6 +270,48 @@ def test_native_netrc_provider_is_bounded_and_preserved(adopter, selected, feeds
     assert state["requests"] == []
 
 
+@pytest.mark.parametrize("provider", ["named-environment", "retained-url", "netrc"])
+@pytest.mark.parametrize("change", ["account", "password"])
+def test_native_authentication_changes_invalidate_opaque_reuse_identity(
+    adopter, selected, feeds, tmp_path, monkeypatch, provider, change,
+):
+    import governed_feed_trust as trust
+
+    monkeypatch.setattr(trust, "_provenance_key", lambda: b"synthetic-test-provenance-key")
+    monkeypatch.setattr(configuration, "_opaque_index_identity", trust._opaque_index_identity)
+    state = feeds()
+    env = environment(adopter, state, tmp_path, authenticate="always")
+    path = Path(env["UV_CONFIG_FILE"])
+    config = path.read_text()
+
+    def select(user, password):
+        if provider == "named-environment":
+            env.update(UV_INDEX_GOVERNED_USERNAME=user, UV_INDEX_GOVERNED_PASSWORD=password)
+        elif provider == "retained-url":
+            path.write_text(config.replace(
+                state["origin"], state["origin"].replace("https://", "https://" + user + ":" + password + "@"),
+            ))
+        else:
+            netrc_path = tmp_path / "selected-netrc"
+            netrc_path.write_text(f"machine 127.0.0.1 login {user} password {password}\n")
+            env["NETRC"] = str(netrc_path)
+
+    select("fixture-user", "synthetic-secret")
+    with capture(selected, adopter, env) as first:
+        identity, feed = first.policy_id, first.feeds[0].identity
+    with capture(selected, adopter, env) as unchanged:
+        assert (unchanged.policy_id, unchanged.feeds[0].identity) == (identity, feed)
+    select("other-user" if change == "account" else "fixture-user",
+           "other-secret" if change == "password" else "synthetic-secret")
+    with capture(selected, adopter, env) as changed:
+        assert changed.policy_id != identity
+        assert changed.feeds[0].identity != feed
+        assert all(len(value) == 71 and value.startswith("sha256:") for value in (
+            identity, feed, changed.policy_id, changed.feeds[0].identity,
+        ))
+    assert state["requests"] == []
+
+
 def test_native_automatic_no_credentials_is_not_a_new_approval_map(adopter, selected, feeds, tmp_path):
     state = feeds()
     env = environment(adopter, state, tmp_path, authenticate="auto")

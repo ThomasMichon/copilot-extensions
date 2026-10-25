@@ -17,7 +17,7 @@ Manager `self_install`; a fresh Python process reuses its completed generation
 with the feed unavailable and construction forbidden. The completion marker
 and receipt remain unchanged, and the feed observes no additional requests.
 Both invocations test an absolute selected UV with no UV on PATH, and a UV
-command selected from PATH. Changing the native resolver mode subsequently
+command selected from PATH. Changing the authenticated feed account or native resolver mode subsequently
 requires ordinary source admission instead of reuse; corrupt completion
 evidence still refuses before cold admission. The same hosted Manager jobs
 also alter a receipt URL, an installed archive digest and installed origin
@@ -28,6 +28,11 @@ source-profile and repaired generations.
 This does not qualify the production Manager dependency closure, default
 marketplace bootstrap or performance. Fast adapter and self-install
 contracts remain in the ordinary `worktree-manager` suite.
+
+Native feed-capture controls exercise account changes and password rotation
+through named environment, embedded URL and netrc credentials. They compare
+the real keyed opaque identities, retain stable unchanged captures, and make
+no feed request or machine credential-key write.
 
 `tools/test_runtime_source_reuse.py` covers bounded persisted evidence admission,
 changed current selections, missing completed receipts, source/receipt corruption, current digest denials

@@ -3573,6 +3573,9 @@ and installed payload against the completion identity, and compares the
 current authenticated source, owner, native configuration, target, component,
 extras, local package selection, build profile and final profile. Configuration
 identity includes native resolution, prerelease, fork and dependency modes.
+Feed identity also binds the captured authentication headers through the
+existing machine-keyed opaque digest. Account changes and credential rotation
+invalidate reuse without persisting credentials in constructor evidence.
 Obsolete selections are unavailable; missing receipts on completed generations,
 malformed or changed evidence are integrity refusals, not permission to rebuild
 around them.
