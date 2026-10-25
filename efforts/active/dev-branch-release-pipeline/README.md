@@ -1258,6 +1258,16 @@ packet remain validation obligations, not inferred passes. Build/landing
 compatibility, current admission, independently governed Main activation and
 the actual complete promotion remain open.
 
+The first hosted branch proof correctly refused publication. Run `40157795196`
+passed all 1754 assertions but rejected the metadata-only workflow guard for
+having no production call coverage. That guard was moved intact to the optional
+integration packet; the required portfolio retains the 59 production-exercising
+new cases and its unchanged effect/coverage rules. Run `40157824781` exposed a
+fixture no-op: the first Dev edit changed only a preserved workflow, so the
+composer correctly returned no candidate. The fixture now changes ordinary
+payload too and asserts an actual first promotion before advancing fixture Main.
+Both hosted packets must pass the corrected immutable head before PR opening.
+
 ### 2026-10-25 - Complete-source implementation merged; late controls remain
 
 #8790 merged as `28a0ff3911f02d457160dd856b448a8965204931` at

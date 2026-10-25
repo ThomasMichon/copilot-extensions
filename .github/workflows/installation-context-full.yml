@@ -59,6 +59,7 @@ jobs:
           tools/test_promotion_control.py::test_explicit_retirement_returns_path_to_dev_composition
           tools/test_promotion_control.py::test_preservation_uses_pinned_main_not_live_main_or_dev
           tools/test_promotion_control.py::test_trusted_artifact_recomposition_uses_same_control_tree
+          tools/test_promotion_control.py::test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci
 
   dispatch-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'dispatch-binding'

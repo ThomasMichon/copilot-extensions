@@ -1,10 +1,7 @@
 """Pure object-boundary controls for late-Main classification."""
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-import yaml
 
 import promotion_control as control
 import promotion_control_transition as transition
@@ -117,17 +114,3 @@ def test_mutable_or_invalid_input_is_rejected_before_object_access(objects, befo
         transition.inspect_main_transition(repo=objects[0], before=before, after=after)
     assert not objects[-1]
 
-
-def test_real_git_witness_is_manual_bounded_and_outside_required_unit_ci():
-    root = Path(__file__).resolve().parents[2]
-    workflow = yaml.safe_load((root / ".github/workflows/installation-context-full.yml").read_text())
-    job = workflow["jobs"]["promotion-controls"]
-    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'promotion-controls'"
-    assert job["timeout-minutes"] == 5
-    checkout = job["steps"][0]["with"]
-    assert checkout == {"ref": "${{ github.sha }}", "persist-credentials": False}
-    script = job["steps"][-1]["run"]
-    assert "100s python -m pytest" in script and "test_main_deleted_control_stays_deleted_across_promotions" in script
-    assert workflow["permissions"] == {"contents": "read"}
-    ci = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
-    assert "test_promotion_control.py" not in str(ci["jobs"])
