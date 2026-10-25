@@ -69,6 +69,7 @@ from .acp_continuation import IdleAcpTransport, idle_operation
 from .acp_host_streams import AcpHostStreamsMixin
 from .acp_prompts import AcpPromptMixin
 from .privileged_plugins import lifecycle_rpc
+from .runtime_custody import RuntimeCustodyError
 
 if TYPE_CHECKING:
     from .events import EventLog
@@ -559,6 +560,8 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        if self._acquisition_launch is not acquisition_launch:
+            raise RuntimeCustodyError("Session RPC requires its original acquisition owner")
         started = time.monotonic()
         servers = build_mcp_servers(mcp_servers)
         if timing_callback is not None:
@@ -635,6 +638,8 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         """
         if not self._connection:
             raise RuntimeError("ACP connection not initialized")
+        if self._acquisition_launch is not acquisition_launch:
+            raise RuntimeCustodyError("Session RPC requires its original acquisition owner")
         if self._remote_transport is not None and not self._remote_can_load:
             raise PermissionError("Remote agent does not advertise session/load")
         self._cancel_out_of_turn()

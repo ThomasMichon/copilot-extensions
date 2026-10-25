@@ -306,6 +306,11 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
   selection passes 456 controls, including a selected launch, ordinary
   shutdown detach, closed epoch and fresh-manager hydration with no ordinary
   reattachment or prompt. The retained Host remains alive for its real owner.
+- Direct ACP lifecycle entry points now require the retained original launch
+  owner, so omitting it cannot select the raw SDK new/load path. Connected
+  controls try omitted, copied and exhausted original owners after successful
+  startup and failed capture; no extra native request is observed. The focused
+  acquisition/ACP/preference selection passes 129 controls.
 - Retained the original HTTP-50 capture checkpoint unchanged at
   `refs/tags/contract-evidence/http50-d5219b038a431a9579fed66a1c1ea71fdfad7a77`.
   Provider ref and commit-object reads confirm the original identity; the

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ from zdd.diagnostics import process_start_time
 
 from agent_bridge import session_manager as core
 from agent_bridge.acp_client import AcpClient
+from agent_bridge.acquisition_contract import AcquisitionRefused
 from agent_bridge.acquisition_launch_owner import AcquisitionFrontend
 from agent_bridge.models import SessionStatus
 from agent_bridge.runtime_custody import RuntimeCustodyError, RuntimeProducer
@@ -26,6 +28,22 @@ from agent_bridge.session_prompts import _SessionPromptMixin
 from agent_bridge.transport import SpawnTarget
 from test_acquisition_runtime import req, rig as rig
 from test_runtime_custody import close, installation
+
+
+async def assert_direct_lifecycle_refused(client: AcpClient, cwd: str) -> None:
+    owner = client._acquisition_launch
+    assert owner is not None
+    native = client.acp_session_id
+    for candidate in (None, copy.copy(owner)):
+        with pytest.raises(RuntimeCustodyError):
+            await client.new_session(cwd, acquisition_launch=candidate)
+        with pytest.raises(RuntimeCustodyError):
+            await client.load_session(cwd, native, acquisition_launch=candidate)
+    with pytest.raises((RuntimeCustodyError, AcquisitionRefused)):
+        await client.new_session(cwd, acquisition_launch=owner)
+    with pytest.raises((RuntimeCustodyError, AcquisitionRefused)):
+        await client.load_session(cwd, native, acquisition_launch=owner)
+    assert client.acp_session_id == native
 
 
 @pytest.mark.asyncio
@@ -123,6 +141,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
             session = next(s for s in rig.manager.list_sessions() if s.acp_session_id)
             assert session.status == SessionStatus.IDLE
             assert session._native_turn_transport is None
+            await assert_direct_lifecycle_refused(session.client, session.target.cwd)
             with pytest.raises(RuntimeCustodyError, match="prompt"):
                 await rig.manager.submit_prompt(session.session_id, "must not send")
             with pytest.raises(RuntimeCustodyError, match="not been captured"):
@@ -144,6 +163,7 @@ async def test_acquisition_launch_real_local_host_and_original_sdk_delivery(
             assert await rig.runtime.acquire(original) == result
             turn = rig.db.get_turn(result.session_id, 0)
             assert turn["native_accepted_at"] is not None and turn["native_consumed_at"] is None
+            await assert_direct_lifecycle_refused(session.client, session.target.cwd)
             if mode == "stop-reap-resume":
                 retained_owner = session._native_turn_transport
                 await rig.manager.stop_session(session.session_id, reap_host=True)

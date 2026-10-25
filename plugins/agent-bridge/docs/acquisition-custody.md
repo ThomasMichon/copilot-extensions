@@ -105,6 +105,8 @@ custody with an independently owned host.
 The frontend retains the actual Host process handle, Host/child PID births,
 Session, target, ACP client and SDK connection. The native new/load check runs
 inside the actual RPC invocation, after task scheduling and metadata wrapping.
+Direct `new_session` and `load_session` calls on that client require its retained
+original owner; omitting or replacing the owner cannot select the raw SDK path.
 The ordinary invalid-parameter metadata fallback cannot invoke a selected
 new/load twice. Native acceptance is reported on the exact SDK reply, before
 subsequent preference application; each configuration effect rechecks its owner
