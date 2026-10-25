@@ -200,6 +200,52 @@ budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
 
+### 2026-10-25 -- Explicit configured-SSH metadata inspection prepared
+
+- Added an opt-in bounded metadata-list sweep, separating the source-roster
+  project and selected SSH machine identities from existing journal filters.
+  It reads only the selected registered project's files, shares the Picker's
+  additive machine parser, and never discovers provider venues or invokes an
+  engine scalar to resolve configuration. Explicit installation-cell contexts
+  refuse rather than borrowing the legacy machine-global registry.
+- Each configured target uses the existing SSH profile/proxy/process owner and
+  published absolute Manager front door. Source errors and continuation remain
+  independent; limits, deadlines, strict prompt-free response validation and
+  nonzero partial-failure status prevent unavailable targets becoming empty
+  success. No setup, replay, retries or private-input sweep is introduced.
+- A real selected Windows-to-POSIX SSH read reached the installed target reader
+  but returned non-JSON output; the sweep reported an incompatible source
+  without echoing it or changing the installed pair. This is incompatibility
+  evidence, not delivered-source or installed acceptance proof.
+- Qualification: the focused Windows packet passed 208 cases, including three
+  native target-shell/Manager process cases. The frozen POSIX packet passed
+  the same 208 cases. Its first run exposed a Windows-only locality fixture
+  that mocked the hostname but not the execution platform; the fixture now
+  explicitly supplies both, and its 59-case module passes on Windows.
+  Shared SSH profile compatibility tests passed 14 cases. Ruff, installation,
+  changed-module, dependency-age and affected-consumer changefile gates pass.
+  Disposable source, dependency cache and failed-fixture residue were cleaned.
+- Fresh-source construction and missing/incompatible target refusal are
+  covered; full machine provisioning and installed prompt acceptance are not
+  claims of this read-only source lane. The POSIX venue lacked the optional
+  devcontainer CLI, so it used the canonical contained runner.
+- This slice closes neither whole-attempt terminal outcomes nor remote private
+  detail, containing release, authorized rollout, original New/cold Resume
+  conversation/acceptance proof or cleanup. Both parent efforts remain Active.
+
+### 2026-10-25 -- Bounded local positive-evidence summary merged
+
+- #9004 merged as `1d7be74ce1ae9a2ed11087cccac939038d823be3` after genuine
+  current-head Copilot approval, required CI and no open review threads.
+  No parent tracker was included in closing references.
+- Re-read both parent plans after merge. The local projection does not close
+  terminal classification, selected-machine sweeps, containing release,
+  authorized rollout or installed prompt/conversation proof. Continue with
+  bounded inspection of explicitly selected configured machines through their
+  existing transport and runtime owners, without provisioning or replay.
+- Managed synchronization moved the owned source onto the confirmed merge.
+  Both efforts remain Active; this worktree must not finalize a partial slice.
+
 ### 2026-10-25 -- Bounded local positive-evidence summary prepared
 
 - An explicit Manager `launch-attempts <id> --summary` joins up to ten existing

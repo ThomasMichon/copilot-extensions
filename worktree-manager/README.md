@@ -1078,6 +1078,45 @@ Manager observations supersede earlier ones in this boundary projection,
 while the event history retains the earlier evidence. Engine, daemon and
 native observations cannot override the Manager's own boundary.
 
+To inspect explicitly selected configured SSH machines, use:
+
+```text
+worktree-manager launch-attempts --sweep-project example --source-machine worker-linux --source-machine other-wsl --json
+```
+
+`--sweep-project` selects **only the configuration source**, not a journal
+filter; `--project` still filters saved attempts on each target. The reader
+consults that registered project's existing local anchor, additively merges
+its root and canonical machine files (canonical entries win), and uses its
+configured knowledge supplier only when neither file exists. It never
+enumerates every project's files or provider venues. Cell-scoped registry
+selection is currently unavailable and refuses rather than substituting the
+machine-global registry.
+
+Select 1-8 configured machine/environment identities explicitly. The sweep
+reads **one metadata page per source** through its configured SSH profile and
+the target's published absolute `~/.local/bin/worktree-manager` front door
+(`worktree-manager.ps1` on Windows), not a PATH-selected engine or a setup
+command. Only already-known host keys are accepted; forwarding, persistent
+control sockets and SSH local commands are disabled. The shared SSH transport
+owns proxy children and cleanup. A source has a 20-second read deadline, the
+sweep shares a 120-second deadline, and each source stream is limited to 1 MiB.
+Cleanup may add time after a deadline; no read is retried.
+
+The versioned sweep response labels observations non-atomic and retains each
+source's configured identity, status and independent pagination. Identity is
+based on the configured SSH profile, not a newly attested remote hostname or
+service readiness. Re-run with that one source and its `next_before` /
+`next_before_id` to continue; pages are not merged into a misleading global
+cursor. Unconfigured, ambiguous, duplicate, unavailable, incompatible,
+oversized or timed-out sources remain explicit errors, alongside independently
+read pages, and produce a nonzero exit. Remote stderr and unexpected response
+fields are never echoed. `--source-machine` is separate from the existing
+`--machine` journal-venue filter. Sweep is metadata-list-only: it refuses an
+attempt ID, `--summary`, `--include-input` and detail page selectors before
+opening a transport. Use exact local detail on the target for private input;
+remote private-detail retrieval is not implemented by this sweep.
+
 `worktree-manager launch-attempts <attempt-id> --json` reads one protected
 intent and its Manager events, then queries the installed engine once for that
 project's **local** receipts. The selected target in the intent is not evidence
@@ -1129,8 +1168,8 @@ Expired or erased input refuses that request; list and ordinary detail never
 select its text. Resolution, launcher exit, seed claim and original native-session
 observations remain separate evidence. `prompt_acceptance` stays `unknown`,
 including after a zero exit or a qualified native-session join. These commands
-do not launch, repair, expire, retry or sweep other machines. Complete
-terminal-outcome classification and selected-machine sweeps remain separate capabilities;
+do not launch, repair, expire or retry. Only explicit sweep selections contact
+other machines. Complete terminal-outcome classification remains separate;
 local retention maintenance runs through the Picker/confirmation path, not
 these read-only inspection commands.
 
@@ -1146,6 +1185,14 @@ one, while preserving unknown allocation and prompt acceptance. They print
 source-read elapsed time, not a performance-budget verdict.
 It is not a required-unit-CI matrix, a latency qualification, installed
 Copilot acceptance or permission to provision a runtime.
+
+The explicit `tests/native/test_launch_history_sweep_native.py` lane exercises
+the shared transport process owner, real configured native shell and actual
+target Manager list CLI with a synthetic transport executable and isolated
+published launcher. It follows two independent pages and checks unchanged
+Manager journal/launcher bytes, plus missing and incompatible target refusals.
+Native shells may maintain their own OS caches outside Manager state. This
+lane does not claim real SSH authentication or installed target compatibility.
 
 #### SSH admission and pending intent
 

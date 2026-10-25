@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 
 from . import engine_client
@@ -95,6 +96,13 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--before", type=float)
     parser.add_argument("--before-id", help="Tie-breaker returned with next_before for list pagination")
     parser.add_argument("--after", type=float)
+    parser.add_argument(
+        "--sweep-project", help="Configured roster project, separate from the journal --project filter",
+    )
+    parser.add_argument(
+        "--source-machine", action="append",
+        help="Explicit configured SSH machine to inspect (repeat, maximum 8); metadata list only",
+    )
     for name in ("project", "action", "machine", "environment", "provider", "venue"):
         parser.add_argument("--" + name)
     parser.add_argument(
@@ -110,6 +118,20 @@ def main(argv: list[str]) -> int:
         help="Bounded positive local owner evidence across pages; not prompt acceptance or a remote sweep",
     )
     args = parser.parse_args(argv)
+    if args.sweep_project is not None or args.source_machine is not None:
+        from .launch_history_sweep import SweepError, read_sweep
+        try:
+            report = asyncio.run(read_sweep(args))
+        except SweepError:
+            _error(
+                "invalid-query", "Sweep requires a roster project and 1-8 explicit sources; metadata list only.",
+                json_output=args.json,
+            )
+            return 2
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1 if report["errors"] or any(
+            source["status"] != "read" for source in report["sources"]
+        ) else 0
     filters = {
         key: getattr(args, key) for key in (
             "before", "before_id", "after", "project", "action", "machine", "environment", "provider", "outcome",

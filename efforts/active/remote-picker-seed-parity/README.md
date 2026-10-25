@@ -167,6 +167,20 @@ do not establish that later transport fences preserve installed parity.
 
 ## Journal
 
+- **2026-10-25** -- Prepared explicit configured-SSH metadata inspection under
+  #8375, using existing transport and target Manager reader ownership without
+  setup or replay. A selected live SSH target returned incompatible non-JSON
+  reader output, preserved as a sanitized per-source failure rather than empty
+  success. This is not a rollout or proof of target-owned prompt delivery.
+  Original installed New/cold Resume, exact conversation, exactly-once,
+  containing-release and cleanup gates all remain open.
+- **2026-10-25** -- #9004 merged the bounded local positive-evidence summary
+  after genuine current-head approval, required CI and no review findings.
+  Both parent plans were re-read. Proceed to explicitly selected-machine
+  inspection through existing owners; complete terminal outcomes, containing
+  release, authorized rollout and installed local/SSH exact-conversation
+  acceptance remain open. No source summary or native-session observation is
+  proof that Copilot accepted a prompt.
 - **2026-10-25** -- Prepared an opt-in bounded local Manager evidence summary
   using the existing engine v1 reader, with no launch/SSH protocol change.
   Completed New allocation, launcher/backend spawn and qualified original
