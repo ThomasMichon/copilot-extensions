@@ -71,7 +71,8 @@ the new project label is registered. Checkout-local maps keep their precedence.
 Machine-map fallback uses the prospective target configuration and its retained
 knowledge binding, not the ambient project's map. Force drops only settings
 that the project scaffold will actually replace; retained global and drop-in
-knowledge bindings still participate.
+knowledge bindings still participate. The selected source uses the ordinary
+canonical-plus-legacy map merge, including for a knowledge checkout.
 Conflicting platform/profile bindings,
 ambiguous associations, execution-name collisions and invalid declarations
 produce a nonzero diagnostic before state preparation or launcher publication.

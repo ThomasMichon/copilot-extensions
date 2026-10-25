@@ -61,17 +61,28 @@ def config_source_anchors(
         sources.append(ConfigSource(anchor=base, origin="harness"))
     if local := machine_config_root(base, project=config.repo_name):
         sources.append(ConfigSource(anchor=local, origin="machine"))
+    if knowledge := knowledge_config_source(config, base_anchor=base, cwd=cwd):
+        sources.append(knowledge)
+    return sources
+
+
+def knowledge_config_source(
+    config: cfg.Config, *, base_anchor: str | None = None, cwd: str | None = None,
+) -> ConfigSource | None:
+    """Resolve the existing bound knowledge source without choosing a machine root."""
+    from . import state_root
+
     try:
         repo = config.default_repo
     except KeyError:
-        return sources
+        return None
     if not (
         getattr(repo, "requires_external_state_root", False)
         or getattr(repo, "stateless", False)
     ):
-        return sources
+        return None
     res = state_root.resolve_state_root(config, cwd=cwd)
     if res.requires_external and res.bound and res.path:
-        if not base or os.path.abspath(res.path) != os.path.abspath(base):
-            sources.append(ConfigSource(anchor=res.path, origin="knowledge"))
-    return sources
+        if not base_anchor or os.path.abspath(res.path) != os.path.abspath(base_anchor):
+            return ConfigSource(anchor=res.path, origin="knowledge")
+    return None

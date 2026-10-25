@@ -475,9 +475,10 @@ def test_namespaced_registration_checks_prospective_owned_state_before_writes(
 @pytest.mark.parametrize("tier", ["global", "project", "dropin"])
 @pytest.mark.parametrize("foreign", [False, True])
 @pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("canonical", [False, True])
 def test_registration_uses_target_bound_knowledge_map(
     registration, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    platform: str, command: str, tier: str, foreign: bool, force: bool,
+    platform: str, command: str, tier: str, foreign: bool, force: bool, canonical: bool,
 ) -> None:
     from agent_worktrees import state_root
 
@@ -502,6 +503,10 @@ def test_registration_uses_target_bound_knowledge_map(
         "hostname": "raw-host", "physical_host": "friendly-host",
         "execution_platform": other if foreign else platform,
     }}}))
+    if canonical:
+        path = knowledge / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text("machines: {}\n")
     monkeypatch.setattr(state_root, "_checkout_path", lambda name: str(knowledge))
     project_path = cfg.project_dir("registered") / "config.yaml"
     project_path.parent.mkdir(parents=True)

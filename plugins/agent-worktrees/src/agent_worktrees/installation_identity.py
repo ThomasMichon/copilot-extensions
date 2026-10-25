@@ -7,6 +7,7 @@ from pathlib import Path
 from machine_transport import resolve_local_execution_context
 
 from . import config as cfg
+from .config_sources import knowledge_config_source
 from .machine_identity import configured_machine_binding, resolve_execution_machine
 from .machine_config import config_overlay_root
 from .project_adoption import existing_project_state
@@ -52,7 +53,12 @@ def _prospective_config(
 def _registry_root(config: cfg.Config, state: Path | None) -> Path:
     anchor = Path(config.default_repo.anchor)
     overlay = config_overlay_root(str(state), str(anchor)) if state is not None else None
-    for root in (anchor, Path(overlay) if overlay else anchor):
+    roots = [anchor]
+    if overlay:
+        roots.append(Path(overlay))
+    if knowledge := knowledge_config_source(config, base_anchor=str(anchor)):
+        roots.append(Path(knowledge.anchor))
+    for root in roots:
         if any((root / relative).is_file() for relative in (
             Path(cfg.INREPO_CONFIG_DIRNAME) / "machines.yaml", Path("machines.yaml"),
         )):
