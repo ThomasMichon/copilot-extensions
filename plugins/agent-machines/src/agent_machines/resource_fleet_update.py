@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import fleet_update as _fleet_update
+from .automatic_update_ownership import read_update_ownership
 from .resources import (
     ResolvedResource,
     ResourceContext,
@@ -74,6 +75,20 @@ class FleetUpdateResourceHandler(ResourceHandler):
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
     ) -> ResourceResult:
         desired_present = str(resolved.desired.get("state", "present")) != "absent"
+        ownership = read_update_ownership(ctx.home)
+        if desired_present and ownership.blocks_legacy_schedule:
+            detail = (
+                f"{ownership.detail}; refusing legacy fleet schedule registration. "
+                "Inspect legacy update inventory; any existing trigger needs explicit "
+                "retirement and active updates must finish. Nothing was changed."
+            )
+            refused = ownership.state == "refused"
+            return ResourceResult(
+                self.TYPE, resolved.id, False, dry_run,
+                "error" if refused else "blocked",
+                detail=detail,
+                blocked_reason=None if refused else detail,
+            )
 
         def runner(argv: list[str], *, cwd=None, timeout=1800):
             _ = cwd, timeout

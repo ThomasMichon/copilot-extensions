@@ -96,6 +96,7 @@ def ensure_engine_runtime() -> Path:
         "work-coalescing-singleton",
         "dropin-registry",
         "plugin-activation",
+        "worktree-identity",
     ):
         lib_source = libs_root / lib / "src"
         if not lib_source.is_dir():

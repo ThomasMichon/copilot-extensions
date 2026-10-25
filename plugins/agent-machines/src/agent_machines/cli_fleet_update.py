@@ -25,6 +25,8 @@ from . import layout as _layout
 from . import reconcile as _reconcile
 from . import resources as _resources
 from . import validator as _validator
+from .automatic_update_ownership import read_update_ownership
+from .legacy_update_inventory import inventory_legacy_updates
 from .manifest import RequirementPackage
 
 
@@ -172,6 +174,36 @@ def cmd_install(args: argparse.Namespace) -> int:
     return 0 if all(result.ok or result.status == "skipped" for result in results) else 2
 
 
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """Inspect adoption blockers without resolving requirement packages."""
+    ownership = read_update_ownership()
+    artifacts = inventory_legacy_updates()
+    ok = ownership.state != "refused" and all(
+        item.inspection_complete and item.present is not None and item.in_flight is not None
+        for item in artifacts
+    )
+    payload = {
+        "schema": "copilot-extensions.legacy-update-inventory",
+        "version": 1,
+        "ok": ok,
+        "ownership": {
+            "state": ownership.state,
+            "detail": ownership.detail,
+            "path": str(ownership.path),
+        },
+        "legacy_artifacts": [item.to_dict() for item in artifacts],
+        "adoption_ready": ok and not any(item.blocks_adoption for item in artifacts),
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    else:
+        print(ownership.detail)
+        for item in artifacts:
+            print(f"{item.identity}: {item.detail}")
+        print(f"adoption-ready={'yes' if payload['adoption_ready'] else 'no'}")
+    return 0 if ok else 2
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     resolved_state = _resolve_fleet_update_resources(args)
     if resolved_state is None:
@@ -186,14 +218,35 @@ def cmd_status(args: argparse.Namespace) -> int:
                 opted_in=_fleet_update_state.tier_enabled(resource),
             )
         )
+    ownership = read_update_ownership()
+    inventory = (
+        inventory_legacy_updates() if getattr(args, "legacy_inventory", False) else None
+    )
     if args.json:
         print(
             json.dumps(
-                {"ok": True, "tiers": [result.to_dict() for result in results]},
+                {
+                    "ok": ownership.state != "refused",
+                    "tiers": [result.to_dict() for result in results],
+                    "ownership": {
+                        "state": ownership.state, "detail": ownership.detail,
+                        "path": str(ownership.path),
+                    },
+                    **(
+                        {
+                            "legacy_artifacts": [item.to_dict() for item in inventory],
+                            "adoption_ready": ownership.state != "refused" and not any(
+                                item.blocks_adoption for item in inventory
+                            ),
+                        }
+                        if inventory is not None else {}
+                    ),
+                },
                 indent=2,
             )
         )
     else:
+        print(ownership.detail)
         for result in results:
             print(
                 f"{result.tier}: opted-in={'yes' if result.opted_in else 'no'}; "
@@ -205,7 +258,10 @@ def cmd_status(args: argparse.Namespace) -> int:
                 print(f"  last-attempt: {result.last_attempt}")
             if result.last_success:
                 print(f"  last-success: {result.last_success}")
-    return 0
+        if inventory is not None:
+            for item in inventory:
+                print(f"{item.identity}: {item.detail}")
+    return 2 if ownership.state == "refused" else 0
 
 
 def cmd_uninstall(args: argparse.Namespace) -> int:
@@ -255,6 +311,12 @@ def register_parser(sub: argparse._SubParsersAction) -> None:
     fleet_update_run.add_argument("--machine", help="override the target machine name")
     fleet_update_run.add_argument("--json", action="store_true", help="emit JSON")
     fleet_update_run.set_defaults(func=cmd_run)
+    inventory = fleet_update_sub.add_parser(
+        "inventory",
+        help="Read legacy update triggers/in-flight evidence without package validation.",
+    )
+    inventory.add_argument("--json", action="store_true", help="emit JSON")
+    inventory.set_defaults(func=cmd_inventory)
     for subcommand, func, help_text in (
         ("install", cmd_install, "Register opted-in fleet-update Scheduled Tasks."),
         ("status", cmd_status, "Inspect fleet-update opt-in and Scheduled Task state."),
@@ -269,4 +331,9 @@ def register_parser(sub: argparse._SubParsersAction) -> None:
         )
         current.add_argument("--machine", help="override the target machine name")
         current.add_argument("--json", action="store_true", help="emit JSON")
+        if subcommand == "status":
+            current.add_argument(
+                "--legacy-inventory", action="store_true",
+                help="read legacy trigger and in-flight evidence without changing it",
+            )
         current.set_defaults(func=func)
