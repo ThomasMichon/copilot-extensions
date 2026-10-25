@@ -264,6 +264,14 @@ No forced process restart, owner transfer, rollout or new service is authorized.
 
 ## Journal
 
+- 2026-10-25 UTC — The coordinator accepted the proposed API family and
+  configuration boundary for a later bounded implementation: closed immutable
+  role records, owner-bound admitted in-memory keys, separated full-length
+  HMAC-SHA256 tokens, username-free owner lookup, freshly allowlisted shared
+  output, no raw fallback and unchanged callbacks without opt-in. This accepts
+  the design, not execution. Implementation still requires merged source intent,
+  the driver's own intent publication and a separate explicit execution ACK.
+  Shared deployment retains its full identity-separation gate.
 - 2026-10-24 — Reconciled canonical telemetry intent and existing #8377 logging
   ownership against the source baseline above. Proposed user-key-derived owner
   lookup, explicit identity roles and pre-shared-storage allowlisting. No code,

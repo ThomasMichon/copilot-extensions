@@ -781,6 +781,12 @@ See the [source qualification and remaining release/adopter gates](komodo-substr
   policy rather than manually tuning or recreating the pool. No live pool,
   capacity, routing, credential or deployment state changed. Durable adoption,
   its temporary-protection discharge and all broader parent gates remain open.
+- 2026-10-25 UTC — The coordinator accepted the
+  [keyed attribution proposal's](telemetry-attribution.md) API/configuration
+  family for later implementation. This is design acceptance only: reviewed
+  source publication, driver-owned intent publication and a separate execution
+  ACK still precede code. #8377, installer #8370, formatter #6812 and all
+  deployment/privacy acceptance remain open with their existing owners.
 - #8535 merged the published-source preparation and review SDK as
   `b1cd2b1a1712dd4f6b4ac815e050b10fcfd990b1` after exact-head Copilot approval,
   complete resolved-thread review and actual required-source checks. Acquisition
