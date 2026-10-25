@@ -356,14 +356,17 @@ class CredentialRelayServer:
 
     async def stop(self) -> None:
         """Stop the relay server gracefully."""
+        legacy = self._server
+        if legacy:
+            legacy.close()
         try:
             if self.account_relay is not None:
                 await self.account_relay.stop()
         finally:
-            if self._server:
-                self._server.close()
-                await self._server.wait_closed()
-                self._server = None
+            if legacy:
+                await legacy.wait_closed()
+                if self._server is legacy:
+                    self._server = None
                 log.info("Credential relay stopped")
 
     async def _handle_client(

@@ -39,6 +39,40 @@ def configured(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_legacy_admission_is_closed_while_account_shutdown_is_pending(configured, monkeypatch):
+    from credential_relay.server import CredentialRelayServer
+
+    account = AccountRelay(str(configured[0]))
+    relay = CredentialRelayServer(port=0, account_relay=account)
+    await relay.start()
+    port = relay.port
+    close_account = account.stop
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_stop():
+        entered.set()
+        await release.wait()
+        await close_account()
+
+    monkeypatch.setattr(account, "stop", blocked_stop)
+    stopping = asyncio.create_task(relay.stop())
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        try:
+            _, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), 2)
+        except OSError:
+            pass
+        else:
+            writer.close()
+            await writer.wait_closed()
+            pytest.fail("legacy admission remained open after shutdown started")
+        assert not stopping.done()
+    finally:
+        release.set()
+        await asyncio.wait_for(stopping, 5)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", [
     RuntimeError("account-relay-withdrawal-unconfirmed"), TimeoutError(),
 ])

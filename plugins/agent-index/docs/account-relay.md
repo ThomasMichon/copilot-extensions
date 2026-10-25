@@ -75,8 +75,8 @@ Withdrawal first closes admission, cancels tracked acquisitions and conditionall
 removes only its own publication. Shutdown allows at most 20 seconds for task
 settlement, 20 for listener closure and 2 for publication withdrawal; unconfirmed
 withdrawal remains a failure for Bridge's existing bounded takeover/recovery
-owner, not permission to overlap an unknown owner. Legacy admission is closed
-even if account shutdown fails. Process termination remains attributable to the
+owner, not permission to overlap an unknown owner. Legacy admission closes
+before awaiting account shutdown, including its failure paths. Process termination remains attributable to the
 existing Bridge lifecycle, never a port number or process name alone.
 
 After endpoint replacement or crash, the embedding's installed transport owner
