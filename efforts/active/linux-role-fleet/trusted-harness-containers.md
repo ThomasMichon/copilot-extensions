@@ -244,6 +244,43 @@ work; this plan does not record such acceptance. #8352 completion is the tested
 base-image deliverable, not closure of #6030 or the other dependency issues.
 Integration remains open until the actual journey and dependent proofs pass.
 
+## External lifecycle adapter slice — #8787
+
+The campaign owner takes this bounded follow-up to the image slice. It closes
+the "no competing lifecycle writer" prerequisite of Phase 4; it does not claim
+remote transport, manager execution or credential continuity is complete.
+
+**Agent-recommended realization:** add an explicit `lifecycle_owner: external`
+selection for trusted fleets. The default retains agent-containers ownership.
+An external manager declares the same ownership on each created member through
+an agent-containers label. The adapter observes existing members; it does not
+adopt, create, relabel, start or repair a stopped/missing member. A live external
+label independently prevents lifecycle mutations if configuration is missing,
+changed or no longer maps that member. Restricted fleets cannot select this
+mode.
+
+Reserve the agent-containers configuration and lifecycle/fleet boundaries,
+their directly dependent resolver handling, focused tests and documentation,
+and one plugin changefile. Existing roster/auth, credential-relay and
+Gateway/SSH onboarding files remain outside this appointment. No Komodo API,
+manager bootstrap, remote Docker endpoint or new polling process is introduced.
+
+1. Reject invalid ownership selections and restricted/external combinations.
+   Preserve existing trusted/restricted defaults and all credential decisions.
+2. Refuse `up`/reconcile/rebuild, fleet shutdown/removal and explicit or implicit
+   member start/stop/removal before their first lifecycle effect. Configured
+   external ownership and an observed external label each suffice to refuse.
+3. Keep observation and execution against an already running, admitted external
+   trusted member. Do not start stopped members during namespace resolution.
+   Existing physical-instance, repository, lease and session checks still apply.
+4. Test every affected lifecycle front door and the implicit-start path,
+   including removed/changed configuration, missing members, observed external
+   labels, normal managed members and running external execution.
+5. Document the manager-owned label/configuration contract and explicit
+   limitations. Run the plugin's governed tests and existing publication gates;
+   distinguish offline tests from available real-container proof. Remote
+   endpoint/generation and auth delivery qualification remain later work.
+
 ## Validation plan
 
 The following implementation details are **agent-recommended**:

@@ -216,6 +216,23 @@ candidate, environment inventory, platform/profile and package-policy inputs.
 Provider coordinates remain adopter configuration; no public-index fallback or
 policy exception is inferred from a successful build on another host.
 
+### consumer-feed-availability-before-promotion
+
+Promotion must not publish dependency requirements that cannot be admitted
+through its declared consumer-governed feeds. Trusted release validation can
+delegate bounded availability work over an already authenticated transport to
+redundant eligible workers with actual feed access, without exporting their
+credentials. Loss or sleep of one worker must not strand validation or let a
+stale worker authorize publication. This requires neither an agent model nor
+a leader-election platform.
+
+Evidence describes the exact candidate and complete supported dependency
+closure, target/profile, feed policy, probe coverage and freshness. Unknown,
+incomplete or unsupported coverage blocks promotion; successful public
+resolution, metadata discovery or an unrelated warm cache does not establish
+governed artifact admission. Availability validation complements rather than
+replaces configured-feed construction and installed first-launch proof.
+
 ### periodic-integration-and-replacement
 
 Integration assurance remains available through periodic containerized

@@ -226,6 +226,48 @@ unchanged; actually delivered transfers are a separate operational layer,
 not deductions from thematic edges. Six numeric and three existing ROOT
 intakes have now been received through this graph-first campaign.
 
+## Fifth delivered consolidation
+
+Batch 95 considered fourteen serving-reality and state-publication issues.
+Four redundant trackers were superseded only after complete direct numeric
+receiving delivery and full actual-body/discussion readback:
+
+| Unfinished outcome | Superseded tracker | Existing receiving home |
+|--------------------|--------------------|-------------------------|
+| Windows task/start/recovery, retained legacy launcher/worker classification and mode-qualified POSIX native availability | #4048, #5800, #5938 | OPEN #6389 |
+| Ordinary non-mux hook consumer demand and absent-resident recovery | #8388 | OPEN #3761 |
+
+The final #6389 body contains 32,787 bytes and 78 unchecked rows; #3761
+contains 16,554 bytes and 38 unchecked rows. Every original body byte,
+incumbent transfer, checkbox state and existing discussion remains, with a
+prominent disclosure before the original text. New direct Plan rows have
+paired Validation and continuing Coordination. This is planned work, not
+implementation, native qualification, rollout or transferred resource custody.
+No effort ROOT was amended or substituted for this numeric receiving.
+
+**#6274, #6947, #7305, #918, #2619, #6748, #7937 and #7946 remain
+independently OPEN**, as do both receivers. Their actual claims, all
+inherited acceptance, different metrics, finite qualification tiers and
+source-publication holds survive. #5800's explicitly released new-spawn
+slice is not reopened. #5938's original availability and native
+update/rollback contract is not weakened by a new recovery alternative.
+
+All fourteen public bodies/states/reasons, all 86 original comments and
+current custody were audited before the census: **918 whole-queue open
+at 2026-10-24 18:14:24 PDT**, comprising 752 original-cohort and 166 inflow.
+There are 671 eligible open issues and 247 untouched excluded-author issues,
+still 189 above the fixed checkpoint. Four closures did not offset ten
+new arrivals and one unrelated external closure.
+
+The graph now retains **713 historical eligible identities**: 671 currently
+open and 42 closed. Those closures comprise 35 audited graph-scope
+supersessions and seven external changes with no credit. Newly closed #8678
+was confirmed metadata-only; its current body and technical completion were
+not independently admitted. Ten arrivals, #8773-#8781 and #8787, remain
+explicitly metadata-only pending their own author/custody/body admission.
+Eight numeric and three existing ROOT intakes have now been received.
+Initial research layers and discovery provenance remain unchanged.
+
 ## Continuing work
 
 Target capability preparation, declaration composition and the next wider

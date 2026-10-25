@@ -128,6 +128,20 @@ another version within that lock. The installation authority may instead
 select the governed local-source fallback below; if that cannot satisfy
 policy either, the prior healthy generation remains serving.
 
+### release-time-feed-evidence-without-client-authority-transfer
+
+A release's dependency requirements are qualified against the declared
+consumer-feed scopes before promotion, using the same production resolution
+and admission rules consumers enforce. An eligible feed-access worker can
+provide bounded, attributable evidence without transferring feed credentials
+or becoming an installation authority. Evidence for one target, optional
+profile or policy never stands in for another.
+
+Release-time observations do not authorize a later installation or override
+changed feed policy, revoked artifacts, source integrity or local admission.
+Indeterminate availability fails closed, and consumer-side deferred outcomes
+and the separately authorized governed-source fallback remain intact.
+
 ### governed-client-source-fallback
 
 Prebuilt first-party artifacts accelerate installation; their availability

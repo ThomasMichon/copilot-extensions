@@ -140,6 +140,15 @@ availability outcomes, not permission to consume invalid bytes or bypass
 dependency governance. Preserve source-integrity and artifact-integrity
 refusals and the installation authority's explicit path selection.
 
+**2026-10-24 feed-validation direction (public-safe summary):** extend the
+canonical release/admission intent with bounded CI validation through redundant
+eligible signed-in feed-access workers. Reuse authenticated transport and
+production resolver policy, keep credentials local, and require exact, fresh
+closure evidence with durable leases, fencing and original-ID recovery.
+This is a finite documentation-only design slice; implementation, empirical
+probe qualification, CI authorization and lifecycle validation remain with
+#7529/#4876, not implicitly assigned to the design author.
+
 ## Plan
 
 ### Phase 1 - Spike: governed-feed-only install and timing baseline
@@ -238,6 +247,10 @@ refusals and the installation authority's explicit path selection.
 
 ### Phase 3 - Verified consumption with correct fallback
 
+- [x] Specify the documentation-only [feed-availability validation design](feed-availability-validation.md),
+      reconciling release/runtime intent and the earlier promotion/consumer
+      boundary. This records the design deliverable only; implementation and
+      real qualification remain open in Validation Plan under #7529/#4876.
 - [x] Provide the bounded shared wheel-inspection component and complete-set
       actual-byte verification (#8419). Inspection facts do not authenticate
       approval, enable a consumer or replace retained-construction evidence.
@@ -393,10 +406,13 @@ this planning document. Promotion decisions belong to Phase 2; consumer
 feed/admission decisions belong to Phase 3. Each requires a concrete,
 verified answer against its actual repository or machine configuration:
 
-- **Feed model:** promotion runs on public CI and cannot certify
-  installability from any one consumer's private governed feed - the
-  governed-feed check is necessarily a consumer-side, install-time concern,
-  not a promotion-time one.
+- **Feed model:** a public runner's own resolution cannot certify another
+  consumer's governed feed. Trusted promotion may request bounded validation
+  from redundant eligible feed-access workers over the existing authenticated
+  transport. The [feed-availability validation design](feed-availability-validation.md)
+  specifies this proposed extension; it does not establish that a CI identity,
+  durable work API or production worker route is already available.
+  Install-time admission remains independently binding.
 - **Lag-tolerant version selection:** a public version or age floor does not
   establish availability on a particular governed feed.
   **Phase 1 evidence (2026-10-02): lag
@@ -525,6 +541,12 @@ verified answer against its actual repository or machine configuration:
   provenance. The actual promotion job now invokes this mode explicitly.
 
 ## Validation Plan
+
+- [ ] Implement and qualify the [feed-availability validation contract](feed-availability-validation.md#implementation-validation-plan)
+      under #7529 and #4876: exact production-resolver coverage, admitted probe
+      semantics, durable claim/fence recovery, real worker failover and CI
+      routing, and owned installation/update/rollback/stop. This is future
+      implementation, not completed by accepting the documentation-only design.
 
 - [x] Qualify selected source-lock binding with canonical retained inventory,
       copy-time mutation/restoration refusal, native target override refusal,
