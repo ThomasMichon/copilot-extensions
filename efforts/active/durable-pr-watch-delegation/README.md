@@ -373,11 +373,22 @@ fleet-service binding._
 _Delegation driver source validation slice; agent-recommended under the
 existing serving/consumer contract, not a second watcher or evaluator._
 
-- [ ] Qualify actual watch-service observation through the real Gateway and
+- [x] Qualify actual watch-service observation through the real Gateway and
   Dispatch replay/queue consumers: shared targets, unchanged nonevents,
   original identities across restart and one wake per event after lost ACK.
-  This finite source proof does not close live provider credentials, the
+  Source confirmed by #8927. This finite proof does not close live provider credentials, the
   independent evaluator route, image or installed/fleet acceptance.
+- [ ] Review the [scoped replay selection amendment](pr-service-contract.md#scoped-replay-selection-amendment-agent-recommended-proposed)
+  before implementing a parallel opt-in v2 binding contract. Preserve strict v1
+  wire/record compatibility, original identities and default native operation.
+- [ ] Implement and qualify current service/consumer binding at every replay
+  operation, then wire explicit optional coordinator composition through its
+  existing lifetime, active-route and credential owners. No configuration label
+  grants admission or deployment authority.
+- [ ] Exercise the amendment's mixed-version/rollback, remapped-target,
+  malformed binding, restart, credential-loss and ambiguous-response controls
+  through the real Gateway and durable queue/store. Keep live provider, image,
+  independent evaluator and installed/fleet acceptance separate.
 
 ### Phase 3 - Fenced dispatch delegation _(agent-recommended)_
 
@@ -723,6 +734,31 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-10-25 - Merge actual watcher/client source qualification
+
+- #8927 merged as `e1c153dd7c37d64c9ab7ca489951f03a1bead149` from
+  approved head `f81fdff9d5658d53045abc6ebdcf2fc39bebc105`.
+  Copilot review `5642404042` approved with no blocking issues; all reviews,
+  review comments and issue comments were read. The one initial contention
+  finding is fixed and its thread is resolved. Required checks passed.
+- Exact-head native acceptance `40179487266` passed 202 tests on Windows
+  and 201 tests with one explicit skip on Linux. The final transport file
+  passed all ten cases locally. Nonevent and empty-pending assertions require
+  successful replay cycles; blocked transport is not credited as no-wake
+  evidence. Original IDs remain bound through all retry/recovery paths.
+- Re-read the current parent intent, Coordination, Plan, Validation and latest
+  journal after merge. Close only this finite source-validation leaf. Managed
+  sync safely aborted an individual-commit replay conflict after the squash;
+  managed completion then verified the merged head and dropped only its two
+  upstreamed commits, retaining a backup and this continuing worktree.
+- Continue the explicit watcher/client selection contract. The real
+  coordinator front door still does not configure the optional replay
+  factory, and current v1 capabilities do not attest its namespace. Do not
+  turn a configuration label into scope authority or silently enable a
+  backend. Propose and review any missing backwards-compatible binding seam
+  before production selection. Image, provider, independent evaluator,
+  installed and fleet gates remain open.
 
 ### 2026-10-25 - Merge offline PR image inputs and retain real image acceptance
 

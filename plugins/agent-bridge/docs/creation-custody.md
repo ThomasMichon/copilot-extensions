@@ -12,7 +12,32 @@ binding start/acceptance fields on the same `workspace_embodiments` row. It
 does not add a second acquisition attempt or operation ledger. Legacy rows and
 provider rows do not acquire native custody during migration.
 
-`CreationJournal.prepare_launch` retains the original allocation, key and facts
+Schema 38 separately prepares nullable native handoff, launch start and result
+fields on `provider_embodiments`. `CreationJournal` uses the same prospective
+`prepare_launch`, one-shot `begin_launch`, `read_launch` and immutable
+`report_launch` methods, with a provider-specific handoff containing the full
+original provider target, admission, session and consumer incarnation. The
+unchanged full target/options document and its digest remain on that same row;
+the legacy placement projection is not used to shorten original custody.
+Migration does not associate legacy rows or infer a handoff from an existing
+native identity.
+
+Provider acceptance moves the original row to `complete`, meaning only native
+identity acceptance in that creation protocol. It does not imply a first prompt,
+consumption, semantic completion or qualified remote custody. Provider rows have
+no workspace allocation, binding or turn columns; those journal operations
+refuse provider requests. An unknown launch remains outstanding across closure
+and process exit; late acceptance may be retained without another launch grant.
+Strict inventory reads these fields even on terminal rows, while passive opening
+and writable adoption require the exact prepared columns and guards without
+repairing current-schema corruption.
+
+This is an internal DB prerequisite only. No provider subprocess, transport,
+Host or native effect selects these methods yet, and ordinary associated
+provider creation still refuses before launch. Actual provider effect-owner
+mediation and remote custody qualification remain separate gates.
+
+For workspaces, `CreationJournal.prepare_launch` retains the original allocation, key and facts
 digests, session, admission and consumer incarnation before launch preparation.
 An exact retained preparation can be observed after closure; another consumer
 cannot replace it. Separate `begin_launch` and `begin_binding` operations each
@@ -214,6 +239,12 @@ Idle Host-reapability checks without a captured native owner add one existing
 session primary-key association read; busy and captured-owner paths short-circuit.
 The existing expired-candidate idle sweep repeats these bounded checks at its
 lock and final-retirement boundaries, without a new timer, history scan or process.
+
+Provider DB custody adds only bounded same-row reads and short FULL commits on
+explicit journal calls. Ordinary provider execution gains no preflight,
+background work or automatic enrollment. SQLite process-exit and concurrent-owner
+controls qualify storage behavior only; no provider or native timing budget is
+claimed.
 
 Focused controls cover both creation kinds, original inputs and immutable
 history, closure/replay, concurrent SQLite owners, process exit after a committed
