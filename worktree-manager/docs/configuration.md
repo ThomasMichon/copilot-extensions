@@ -6,6 +6,61 @@ provider settings that must not be committed to a project. The existing
 `[source]` update-source, AHP provider and restart-recovery tables coexist in this file;
 `worktree-manager source set/reset` preserves all non-source tables.
 
+## Installation and Updates
+
+Configuration includes a standing **Installation & Updates** list. It combines
+Manager's catalog and the locally available canonical marketplace catalog with
+the selected engine's installation inventory; it never copies a plugin roster
+into the UI. Each row has contextual details and, where supported, **Update
+selected component only**. The confirmation names the component and local
+machine scope. Browsing and refreshing are read-only and run off the UI thread:
+they do not install prerequisites, start services/workers, request credentials
+or enroll automatic maintenance.
+
+The table distinguishes delivered **Payload**, **Selected runtime**, **Observed
+running**, enablement and durable update activity. A deployment marker is not
+running-service proof. Manager's running version describes the querying process,
+not its independently running mux daemon. Unknown, missing, payload-only and
+machine-policy outcomes remain explicit in details. Unavailable catalog or
+engine metadata is a finding, not an empty healthy installation.
+
+Updating submits a durable request through the existing installation driver.
+Acceptance is not completion: return to the list and refresh to see queued,
+running, succeeded, failed, blocked or interrupted owner state, attributable
+progress and the actual resulting versions. Closing the result or Manager
+does not cancel service-owned work. A failed worker launch may leave an
+accepted request; inspect its receipt before retrying. The same queue retains
+exclusive execution, deduplication and recovery; the page adds no queue or
+scheduler. A busy owner queues through that same driver.
+
+Plugin requests enter the selected engine's backend and retain its installation
+identity, even through the Manager CLI; Manager self-update uses the separate
+Manager backend. The workspace transports the selected engine's validated
+installation-cell receipt as well as its exact command. Contributed-command
+environment isolation therefore cannot silently redirect these reads or updates
+to legacy registries. Catalog failures appear in the standing warning banner
+while available rows remain inspectable.
+
+The public update seam is `worktree-manager update --target <plugin>` or
+`--target worktree-manager` for Manager alone. Add `--detach --json` for an
+acceptance receipt and use `update --request-status <id> --json` for owner state.
+Normal untargeted `update` retains its complete suite behavior. Component scope
+cannot be combined with force/reinstallation, repair or module-selection flags.
+The suite-only engine bootstrap acquisition budget is likewise inapplicable:
+component targeting never bootstraps or repairs a missing engine.
+Plugin scope does not bootstrap/repair the engine, update Manager, sync anchors,
+prune unrelated contributions or run the suite's finishing integration.
+
+The selected engine advertises targeted-update contract generation 1 through
+`update --inventory --json`. Older owners leave plugin actions unavailable;
+upgrade through the existing suite command, then refresh. A legacy engine
+installer without scoped finishing support similarly requires a suite update
+before targeting the engine itself. Missing/disabled prerequisites use explicit
+setup/enablement, not implicit broad installation. Configured runtime source
+policies that the current executor cannot realize remain blocked, never silently
+reset to marketplace delivery. Manager self-update retains its independent
+configured source, versioned publication and mux cutover owner.
+
 ## Restart recovery requests
 
 Both new behaviors default off. Existing bounded, report-only evidence sampling

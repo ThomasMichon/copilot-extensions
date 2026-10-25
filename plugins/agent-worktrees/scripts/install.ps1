@@ -2913,7 +2913,7 @@ function Deploy-PythonRuntime {
     Ensure-InstallDir $resultDir
     $resultPath = Join-Path $resultDir ("result-$PID-" + [Guid]::NewGuid().ToString('N') + '.json')
     $modeArgs = @()
-    if ($Action -eq 'update') { $modeArgs += '--recover-adopted-manager' }
+    if ($Action -eq 'update' -and $env:AGENT_WORKTREES_TARGETED_UPDATE -ne '1') { $modeArgs += '--recover-adopted-manager' }
     if ($Action -in @('repair', 'dev', 'dev-release')) { $modeArgs = @('--mode', $Action) }
     $runtimeInputs = if ($Action -in @('repair', 'dev', 'dev-release')) { $RuntimeInputPlugin } else { $PluginDir.ToString() }
     if ($Owner) { $modeArgs += @('--owner', $Owner) }
@@ -4672,6 +4672,12 @@ switch ($Action) {
 
         # -- Shared runtime (venv first: package install targets the venv) --
         Deploy-PythonRuntime
+        if ($env:AGENT_WORKTREES_TARGETED_UPDATE -eq '1') {
+            Deploy-GlobalBinstub
+            Write-V3Manifest
+            Write-ServiceOk "Targeted engine runtime update complete"
+            exit 0
+        }
         Deploy-CopilotPlugin
         Deploy-GlobalBinstub
         Ensure-CopilotExperimental

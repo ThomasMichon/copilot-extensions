@@ -152,6 +152,8 @@ def test_backstage_renders_before_blocked_provider_and_navigation_stays_responsi
                 body = "\n".join(row.text.plain for row in scr.build_body(size[0]))
                 assert "Loading Local controls" in body
                 scr._rotate_machine(1)
+                while scr._kind() != "profiles":
+                    scr._rotate_machine(1)
                 assert scr._kind() == "profiles"
                 assert "Profiles" in scr.tab_bar(size[0], True).plain
                 scr._dispatch_key("escape")

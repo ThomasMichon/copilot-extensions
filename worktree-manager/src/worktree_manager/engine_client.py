@@ -305,7 +305,8 @@ def run_json(project: str | None, args: list[str], *,
 def run_engine_passthrough(project: str | None, args: list[str], *,
                            timeout: int | None = None,
                            environment: dict[str, str] | None = None,
-                           terminal_aware: bool = False) -> int:
+                           terminal_aware: bool = False,
+                           headless: bool = False) -> int:
     """Run an engine verb with **inherited stdio**, returning its exit code.
 
     Unlike :func:`run_json` (which captures + parses), this streams the engine's
@@ -330,11 +331,14 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
 
     handoff = handoff_environment(args)
     child_environment = _engine_environment() if environment is None else _engine_environment(environment)
+    from agent_procutil import no_window_kwargs
+
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
             **{**handoff_launch_options(child_environment, handoff),
-               **(_terminal_aware_launch_options() if terminal_aware else {})},
+               **(_terminal_aware_launch_options() if terminal_aware else {}),
+               **(no_window_kwargs() if headless else {})},
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

@@ -232,6 +232,8 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def manager_handoff(args: argparse.Namespace) -> int | None:
     """Preserve the existing Manager seam without executing a fallback install."""
+    if getattr(args, "target", None) is not None:
+        return None
     if not getattr(args, "no_manager", False):
         mgr = _usable_worktree_manager()
         if mgr:
@@ -298,6 +300,10 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
 
 
 def _update_in_plugin_steps(args: argparse.Namespace) -> int:
+    if getattr(args, "target", None) is not None:
+        from .installation_updates import update_target
+
+        return update_target(args.target)
     if getattr(args, "recreate_venv", False):
         output.warn(
             "--recreate-venv is not supported by the plugin-based "
