@@ -66,7 +66,9 @@ def selected_entries(project: str, *, home_dir: Path | None = None) -> dict[str,
         knowledge = config.get("knowledge_repo")
         if not isinstance(knowledge, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", knowledge):
             raise ValueError("Source project has no configured machine registry")
-        overlay = harness_state.project_anchor_selection(knowledge, home, reader=read_registry)
+        overlay = harness_state.project_anchor_selection(
+            knowledge, home, reader=read_registry, require_project=False,
+        )
         if not overlay.anchor or not Path(overlay.anchor).is_absolute() or not Path(overlay.anchor).is_dir():
             raise ValueError("Configured machine supplier is unavailable")
         root = Path(overlay.anchor)

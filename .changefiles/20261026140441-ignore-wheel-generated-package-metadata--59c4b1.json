@@ -1,0 +1,9 @@
+{
+  "comment": "Ignore wheel-generated package metadata when comparing deployed and marketplace payload fingerprints",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

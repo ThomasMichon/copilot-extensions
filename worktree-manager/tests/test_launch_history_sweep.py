@@ -331,6 +331,7 @@ def test_transport_failure_and_cancellation_close_owned_process(monkeypatch, fai
         get_ssh_config=lambda: SimpleNamespace(port=None, user=None),
     ))
     cleaned = []
+    spawned = asyncio.Event()
     async def spawn(*a, **kw):
         stdout, stderr = asyncio.StreamReader(), asyncio.StreamReader()
         if failure == "too-large":
@@ -340,15 +341,18 @@ def test_transport_failure_and_cancellation_close_owned_process(monkeypatch, fai
             stderr.feed_eof()
         async def wait():
             return 127
+        spawned.set()
         return SimpleNamespace(stdout=stdout, stderr=stderr, wait=wait)
     async def cleanup(process, **kw):
         cleaned.append(process)
     monkeypatch.setattr(sweep, "create_ssh_subprocess", spawn)
     monkeypatch.setattr(sweep, "terminate_ssh_process_tree", cleanup)
     async def run():
-        task = asyncio.create_task(sweep.query_source(entry(), [], timeout=0.05))
+        task = asyncio.create_task(sweep.query_source(
+            entry(), [], timeout=2 if failure == "cancel" else 0.05,
+        ))
         if failure == "cancel":
-            await asyncio.sleep(0.01)
+            await asyncio.wait_for(spawned.wait(), timeout=1)
             task.cancel()
         return await task
     expected = asyncio.CancelledError if failure == "cancel" else sweep.SweepError
@@ -410,8 +414,11 @@ def test_pure_selected_roster_merges_files_without_engine_or_other_project(confi
     assert {item.ssh_environments[0].alias for item in result.values()} == {"new", "legacy"}
 
 
-def test_selected_roster_supplier_preserves_canonical_first_fallback(configured):
+@pytest.mark.parametrize("adopted", [True, False])
+def test_selected_roster_supplier_preserves_canonical_first_fallback(configured, adopted):
     _, overlay, home = configured
+    if not adopted:
+        write(home / ".agent-worktrees" / "projects.yaml", {"projects": {"example": {}}})
     write(overlay / "machines.yaml", {"machines": {"old": machine("old")}})
     write(overlay / ".agent-worktrees" / "machines.yaml", {"machines": {"current": machine("current")}})
     result = machine_roster.selected_entries("example", home_dir=home)
