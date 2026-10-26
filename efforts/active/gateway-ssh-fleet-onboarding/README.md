@@ -383,6 +383,10 @@ onboarded merely because its source is published.
 
 ### Phase 3 - Actual setup and durable convergence
 
+- [x] Implement the allocated public-key receiver/current-policy/journal and
+  normal Manager/engine local-projection consumer; qualify the actual synthetic
+  source/process/TLS path. Installed distribution and native/provider/live
+  acceptance remain open below.
 - [x] Implement the bounded explicit foreground Fleet SSH-directory consumer,
   composing the existing authenticated client and local profile/login-key
   writers with native lease and shutdown custody. This is source capability,
@@ -460,6 +464,10 @@ not installation, credential or live-adoption authority.
   path, including restart/lost replies, current-source revocation and rollback
   floors, private local key custody, mixed-version refusal and unchanged token
   profiles. Installed and live acceptance remain distinct.
+- [x] Qualify the bounded POSIX source path with synthetic delegation, real TLS,
+  original-operation recovery, private-file custody, unchanged active channels,
+  ordered publication, mixed-version refusal and two-harness state isolation.
+  This does not qualify source-denying installed distribution or native providers.
 - [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.
@@ -475,6 +483,25 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-26 - Executable first-touch source merged; installation stays gated
+
+- #9047 merged to `dev` as `528c8b1c53d00ff8c561f78324f5b951339eaf71`.
+  Exact head `33f1782779388e0335605dad5bd23ed1e5651bfa` received a
+  current Copilot Comment with no open findings; required CI passed and all
+  review threads were resolved before the normal managed Maintainer merge.
+- Re-read this full Plan/Validation Plan. Resolve only the bounded source and
+  synthetic qualification items above: 643 affected Fleet cases passed, followed
+  by 57 engine/setup cases with 23 platform skips and eight continuity controls.
+  The normal Manager -> engine -> isolated SDK -> real TLS path is exercised,
+  not replaced by an injected enrollment result.
+- The retained construction/release owner must supply Fleet's service-Gateway
+  SDK closure in the selected engine environment. No unsupported cross-project
+  dependency, private installer, new token issuer or second journal was added.
+  Continue installed source-denying/native qualification and owner-approved
+  provider/human-session/setup/lifecycle integration under the existing trackers.
+  #6681 and #6236 remain open; no runtime update, live enrollment, deployment
+  or predecessor retirement occurred.
 
 ### 2026-10-25 - Public-key enrollment implementation plan reviewed
 
