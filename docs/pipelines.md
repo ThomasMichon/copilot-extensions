@@ -607,6 +607,11 @@ verification remain serial. Only the independent bundle attestations use up
 to four concurrent verifications, with the same pinned identities, read-only
 token and per-subject deadline. Every verification must pass and all workers
 are joined before the caller can publish or emit a success receipt.
+The CLI's exact Public Good verifier-initialization-unavailable error permits
+one explicitly logged retry with identical subject, identity constraints and
+read-only authority, sharing the original 120-second per-subject deadline.
+Signature, identity, policy and other failures are not retried; a second
+initialization failure or exhausted deadline still fails publication closed.
 `promote_release.py --python-artifacts-dir <dir>`
 recomputes composition and refuses missing/corrupt/mis-targeted artifacts
 before pushing a candidate, including repeating the archive-content checks.

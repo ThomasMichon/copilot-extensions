@@ -9,7 +9,8 @@ ordinary-volume amendment reviewed in #9101; finite observations and
 storage-only monitoring merged in #9104; network inventory and static
 volatile checks merged in #9111.**
 Immutable local source staging merged in #9115; image/guest qualification
-remains open.
+remains open. Effective volatile-mount observation source merged in #9124;
+actual guest qualification remains open.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -49,6 +50,24 @@ driver. This choice does not authorize creation, service actions or host changes
 The source controls must change through review; actual provisioning remains
 separately approved. CPU/memory/PID limits and all other isolation, retention,
 custody and pre-effect requirements are unchanged.
+
+### Operator-selected first-case topology
+
+The operator selected:
+
+> single-container-offline
+
+The selected option was:
+
+> One offline container; all synthetic peers on its own loopback (recommended)
+
+Use one `--network none` container for the first actual Dispatch/Bridge case,
+with fake ACP, forge and inference processes on its own loopback. No named
+Docker bridge or separate peer container is needed for that first case.
+The existing internal-bridge path remains available for later separately
+qualified scenarios; its name or `Internal` flag alone is not proof that host
+services are unreachable. The selection does not authorize building, creating
+or starting resources, or retire custody, source/runtime or pre-effect gates.
 
 ## Source-backed boundaries
 
@@ -252,7 +271,7 @@ matches the selected commit. Preflight rejects case/normalization path aliases
 and bounds both the listing and retained prefix-entry/byte inventory.
 The combined selectors passed 339 controls, including two real local-Git cases.
 No image build, guest copy or running-source claim follows.
-The next source adds a finite fixed guest probe and host checks for effective
+#9124 adds a finite fixed guest probe and host checks for effective
 read-only root and private bounded `/tmp`/`/run` posture. Its synthetic tables,
 mocked Docker calls and local descriptor fixtures are not a real container
 qualification or a complete guest mount/runtime/source policy.

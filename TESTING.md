@@ -842,6 +842,16 @@ or host mount table and does not qualify the complete guest mount policy,
 executing source/runtime, egress, custody or persistence. No native lane or
 unconditional CI matrix is added.
 
+`tools/test_reproducer_lab_offline.py` covers the operator-selected single-container
+offline path: compatible v1 internal defaults, explicit `network_mode: "none"`,
+kernel byte/record limits, up/loopback flags, route/address checks and before/after
+configuration drift. Fake sockets require the actual no-route error for both
+families and reject success, refusal, permission errors, timeout or unsupported
+families without fallback. Mocked Docker pins resources around the finite probe.
+Run it with the other pure selectors through the bounded supervisor. No real
+socket, host kernel inventory, bridge, resource creation or service is exercised;
+actual offline qualification and remaining custody/runtime gates remain open.
+
 ## Wheel-input inspection
 
 `tools/test_installer_dependency_compile.py` covers both ordinary metadata-only

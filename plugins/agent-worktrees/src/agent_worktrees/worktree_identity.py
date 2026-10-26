@@ -200,6 +200,21 @@ def _adopt_linked_worktree(
     return worktree_id
 
 
+def reference_machine(
+    config: cfg.Config, worktree_id: str, *, project: str,
+) -> str:
+    """Retain a tracked execution owner; observation only names an absent ledger."""
+    from .execution_spaces import current_execution_context
+
+    try:
+        record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+    except FileNotFoundError:
+        return current_execution_context(config).execution_machine
+    if record.repo != project:
+        raise ValueError("owner record conflicts with the receiving project")
+    return record.execution_machine
+
+
 def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:
     """Legacy fallback: derive the ID from the first path component under the
     configured ``worktree_root``.
@@ -290,7 +305,7 @@ def _infer_worktree_id_from_cwd(
         # never will when agent-worktrees isn't even installed there. Falls
         # through to the pre-existing path-match-or-git_id behavior when
         # adoption isn't possible (no active project, foreign anchor, etc.).
-        adopted_id = _adopt_linked_worktree(cwd)
+        adopted_id = _adopt_linked_worktree(cwd, identity_mode="tuple-v1")
         if adopted_id:
             return adopted_id
         # Tracking YAML briefly missing: prefer a path match if one exists,

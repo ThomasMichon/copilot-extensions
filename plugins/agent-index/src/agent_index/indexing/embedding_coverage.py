@@ -57,7 +57,9 @@ class EmbeddingCoverage:
 
     def missing(
         self, table: VectorTable, chunks: list[Chunk], profile: ModelProfile,
+        *, bounded: bool = False,
     ) -> list[Chunk]:
+        """Select missing pairs; bounded reads require explicit index preparation."""
         receipts: dict[str, tuple[str, str]] = {}
         conn = self.paths._connect()
         try:
@@ -78,9 +80,11 @@ class EmbeddingCoverage:
             and receipts[chunk.chunk_id][0] == input_hash(chunk, profile)
         ]
         stored: dict[str, np.ndarray] = {}
+        read_options = {"bounded": True} if bounded else {}
         for start in range(0, len(candidates), 200):
             stored.update(table.get_vectors(
                 [chunk.chunk_id for chunk in candidates[start:start + 200]], strict=True,
+                **read_options,
             ))
         reusable = {
             cid for cid, vector in stored.items()
@@ -102,15 +106,19 @@ class EmbeddingCoverage:
     def record(
         self, table: VectorTable, chunks: list[Chunk], profile: ModelProfile,
         vectors: np.ndarray,
+        *, bounded: bool = False,
     ) -> None:
+        """Publish receipts only after actual vectors pass the selected read policy."""
         expected = {
             chunk.chunk_id: vector_hash(vector)
             for chunk, vector in zip(chunks, vectors, strict=True)
         }
         actual: dict[str, np.ndarray] = {}
+        read_options = {"bounded": True} if bounded else {}
         for start in range(0, len(chunks), 200):
             actual.update(table.get_vectors(
                 [chunk.chunk_id for chunk in chunks[start:start + 200]], strict=True,
+                **read_options,
             ))
         if any(cid not in actual or vector_hash(actual[cid]) != digest
                for cid, digest in expected.items()):

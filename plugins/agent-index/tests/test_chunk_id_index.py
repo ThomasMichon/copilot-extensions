@@ -230,6 +230,16 @@ def test_actual_content_vector_point_reads_at_scale(
 
     ids = [chunks[0].chunk_id, chunks[-1].chunk_id]
     qualify_reads(ids, set(ids))
+    from agent_index.indexing.embedding_coverage import EmbeddingCoverage
+    from agent_index.indexing.path_index import PathIndex
+
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "coverage.db"))
+    selected = [chunks[0], chunks[-1]]
+    model = config.model_profiles["a"]
+    coverage.record(vector, selected, model, np.ones((2, 2), dtype=np.float32), bounded=True)
+    before = store.projection_snapshot()
+    assert coverage.missing(vector, selected, model, bounded=True) == []
+    assert store.projection_snapshot() == before
     optimize = DatasetOptimizer.optimize_indices
     measured = []
 

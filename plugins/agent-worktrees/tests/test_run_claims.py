@@ -230,18 +230,20 @@ class TestJournalRunClaim:
         # ledger on first use (no pre-existing record).
         import types
         from agent_worktrees import config as cfg
+        adir = tmp_path / "anchors" / "spo-core"
+        adir.mkdir(parents=True)
         config = cfg.Config(
             srcroot=str(tmp_path), machine="anomalous-potato", platform="wsl", repo_name="spo-core",
-            repos={"spo-core": cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))},
+            repos={"spo-core": cfg.RepoConfig(anchor=str(adir), worktree_root=str(tmp_path))},
         )
         monkeypatch.setattr(cfg, "load_project_config", lambda project, **kwargs: config)
         monkeypatch.setattr(cfg, "load_machines_yaml", lambda anchor, **_kwargs: {})
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
-                            lambda: tmp_path)
+                            lambda name=None: tmp_path)
         monkeypatch.setattr("agent_worktrees.config.load_config",
                             lambda *a, **k: config)
-        adir = tmp_path / "anchors" / "spo-core"
-        adir.mkdir(parents=True)
+        monkeypatch.setattr(cfg, "detect_platform", lambda: "wsl")
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "anomalous-potato")
         monkeypatch.setattr(
             "agent_worktrees.repos.find_repo",
             lambda name: types.SimpleNamespace(

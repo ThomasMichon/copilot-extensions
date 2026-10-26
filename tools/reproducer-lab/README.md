@@ -34,6 +34,13 @@ extra or unbounded options refuse. This follows the existing restricted
 provider's explicit tmpfs-flag/budget approach without changing its policy.
 It is Docker configuration evidence, not a guest mount-table or runtime proof.
 
+Version-1 declarations may explicitly set `network_mode` to `"none"` or
+`"internal"`. Omission preserves the existing internal-bridge selection; unknown
+values and fields refuse. The operator-selected first case uses explicit
+`"none"`: actual services and fake peers communicate on that one container's
+loopback. No named bridge or separate peer containers are needed for that case.
+Existing declarations are not silently migrated.
+
 Every static result retains explicit unresolved requirements, even with zero
 violations: fresh usage/backing-free-space measurements, actual internal
 network membership/egress, exclusive resource/driver custody, guest source and
@@ -111,6 +118,8 @@ is supplied. CPU/memory/PID hard limits are unchanged.
 `reader.network_inventory(experiment, subject_id, peers=...)` inspects the full
 selected subject ID and at most three explicitly selected, distinct full peer
 IDs. It does not discover peers or accept names as physical identity.
+This API requires internal mode; offline selections refuse before any Docker
+call rather than inspect an unrelated bridge.
 Each container must be running and attached only to the experiment's exact
 physical internal, local bridge network. The network's endpoint inventory must
 contain exactly those containers; endpoint IDs must agree in both directions.
@@ -132,13 +141,44 @@ resource ownership, and a controlled real egress-refusal experiment remain
 separate prerequisites. This API never clears the static unresolved list or
 admits a case.
 
-Effective egress, exclusive driver/resource custody, full guest/runtime/source
+Real egress, exclusive driver/resource custody, full guest/runtime/source
 qualification, native output ownership and strict pre-effect support remain
-unavailable. Actual provisioning and case execution remain blocked until those
-requirements and separate approval are satisfied.
+unqualified. Provisioning needs separate exact resource approval and an owning
+bounded lifecycle path; observations alone never authorize it. Case execution
+remains blocked until the remaining requirements are qualified.
 Restricted-provider policy and ephemeral tests remain unchanged. Real resource
 creation, guest lifecycle/fault actions and deletion need separate authorization
 through the normal owner. No production credentials, state or network are used.
+
+## Offline-first network observation
+
+`reader.offline_network(experiment, retained_resources)` requires explicit
+`network_mode: "none"` and checks the same physical container/volume selection
+before and after one fixed non-root Linux probe. It uses five calls through the
+existing process owner, at most 10 seconds each within one 30-second envelope.
+It does not inspect/create a Docker bridge or discover peers.
+
+`offline.py` observes the network namespace inode, the sole interface and its
+up/loopback flags, IPv4 main routes, IPv6 routes and IPv6 addresses. Each fixed
+kernel file is limited to 8 KiB and each table to 32 records. Before making any
+connection attempt, it requires only `lo`, no IPv4 main routes and only supported
+loopback IPv6 routes/addresses. It then makes one one-second TCP attempt each to
+the reserved documentation addresses `192.0.2.1` and `2001:db8::1`, port 9.
+Both must actually return `ENETUNREACH`; success, refusal, timeout, permission
+errors and unsupported families do not become a passing no-route observation.
+There is no DNS, proxy, production endpoint or external receiver.
+
+The probe compares namespace/interface/address/route configuration before and
+afterward, ignoring only volatile IPv6 route reference/use counters. A local
+five-second timer and elapsed check bound it. The host checks its exact result
+shape and final deadline without retrying or starting a missing container.
+Synthetic controls never run these socket attempts or inspect host kernel state.
+
+This is point-in-time evidence, not permanent egress enforcement, exclusive
+custody or a complete guest/source/runtime qualification. It does not clear the
+static unresolved list, start a case or establish native START/review. Recheck
+selected resources and boundaries before further separately authorized work;
+host-client cleanup still does not prove a daemon-side exec settled.
 
 ## Immutable local source input
 
@@ -236,11 +276,15 @@ read-only root, exact tmpfs flags/capacities/owner/mode/device checks, duplicate
 nested mounts, fixed probe/physical selection, failed commands and final expiry.
 Local file-descriptor fixtures exercise the probe without querying host mount
 state or invoking Docker; they are not real container qualification.
+`tools/test_reproducer_lab_offline.py` covers compatible/explicit mode selection,
+kernel observation bounds, loopback-only refusal, actual-error classification,
+before/after drift, fixed probe/resource selection and host/guest deadlines.
+All sockets, namespace and kernel inputs are synthetic.
 Run it with the repository's selected Python/pytest environment through the
 caller's bounded test supervisor:
 
 ```text
-<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py
+<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py tools/test_reproducer_lab_offline.py
 ```
 
 These tests do not run Docker, open a socket, install dependencies, exercise native
