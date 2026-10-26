@@ -832,6 +832,16 @@ default discovery and does not join required PR/promotion CI.
 Neither lane builds an image, creates Docker resources, installs dependencies
 or qualifies an executing guest's source or service runtime.
 
+`tools/test_reproducer_lab_mounts.py` covers the opt-in effective volatile-mount
+reader using synthetic tables, mocked Docker and local directory-descriptor
+fixtures. It checks bounded table bytes/records, read-only root, exact private
+tmpfs capacity/flags/owner/mode, distinct devices, nested/shadowed mount refusal,
+retained physical selections and failed/expired observations. Run it with the
+other pure selectors through the bounded supervisor. It queries no real guest
+or host mount table and does not qualify the complete guest mount policy,
+executing source/runtime, egress, custody or persistence. No native lane or
+unconditional CI matrix is added.
+
 ## Wheel-input inspection
 
 `tools/test_installer_dependency_compile.py` covers both ordinary metadata-only
