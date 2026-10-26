@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-14
+- **Last revised:** 2026-10-25
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -98,6 +98,24 @@ guidance file remains authoritative.
 
 An operator should be able to carry personal policy across target repositories
 without copying it into each repository or erasing repository-owned overrides.
+
+### maintenance-aware-tool-unavailability
+
+Normally projected `agent-conduct-guidance` should tell an agent to inspect the
+retained local maintenance banner when a command advertised by an `agent-*`
+catalog appears missing. An explained active hold means preserve work and
+obligations, report its responsible session, and refrain from self-repair,
+repeated missing-tool retries or replacement workers.
+
+The banner should be readable through native filesystem facilities even when
+all supporting services, binstubs and plugin payloads are gone. Applicable
+guidance should remain available through that outage rather than requiring the
+missing tool to explain itself. A held agent should use one low-frequency native
+scheduled prompt to observe updates until applicable clearance and capability
+readiness; unavailable native scheduling is an explicit limitation, never a
+reason to invent another daemon. The maintenance owner continues only its
+separately authorized work. See
+[Disposable Supporting Runtimes](../plugin-services/disposable-runtimes/README.md).
 
 ### attributable-context-budget
 

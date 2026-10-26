@@ -321,6 +321,14 @@ an alternative to Manager-owned maintenance, not a concurrent updater.
 Ownership changes preserve the existing installation and update authorities;
 general machine/dependency convergence remains independent.
 
+The [shared local maintenance banner](../plugin-services/disposable-runtimes/README.md#shared-maintenance-banner)
+vetoes automatic updates, including Manager self-update and already queued
+background work at effect admission. Manager and an external controller consume
+that same hold; neither keeps a competing banner or bypasses it by calling an
+installer directly. Clearing it does not enroll maintenance or override an
+independent disable. Manager itself remains disposable while the retained banner,
+configuration and durable work survive.
+
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update
 transaction: acquisition, runtime construction, activation and integration.
@@ -552,6 +560,9 @@ one-line bootstrap and its own auto-update — **out-of-band from any Copilot
 session and from the plugin pipe**. It never relies on a session, an agent, or a
 plugin to install or refresh the launcher; a plugin, conversely, never relies on
 the app to keep *itself* current.
+
+Out-of-band self-maintenance still honors the shared maintenance hold. It is not
+an exemption that recreates Manager during an operator's intentional removal.
 
 ## Non-Goals / Boundaries
 

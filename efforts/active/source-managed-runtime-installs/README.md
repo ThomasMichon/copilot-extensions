@@ -166,6 +166,21 @@ the maintenance owner, with native Copilot 30-minute standby polling and no
 supporting-service dependency. This does not activate a hold, replace native
 survival evidence or authorize host restart/removal.
 
+**Disposable-service alignment (2026-10-25), summary:** all supporting services,
+including Manager, must be disposable while durable work and independently
+hosted Copilot sessions survive. One retained per-machine **YAML** maintenance
+banner both vetoes automatic updates/reprovisioning and explains missing
+`agent-*` catalog tools to agents. Normally projected conduct guidance prohibits
+self-repair during an explained hold and uses one native scheduled prompt every
+30 minutes until applicable clearance. This extends the earlier JSON-only
+source companion; it is not an already-implemented updater veto. The
+[reviewed-contract proposal](maintenance-banner.md) carries binding details,
+compatibility and consumer validation under #9040, preserving the existing
+maintenance, driver and #8669 survival owners. The
+[verbatim request](inception-transcript.md#disposable-services-and-yaml-maintenance-banner)
+is the authoritative capture; filename and parser/admission safeguards marked
+agent-recommended are proposed realization, not additional operator requests.
+
 **Execution follow-through summary:** the requested outcome covers all installed
 services and tools, including their management tools, rather than ending at a
 successful canary. A regular flow must keep the dedicated merged-dev source
@@ -295,7 +310,9 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] **Agent-recommended bounded source-owner SDK readiness:** ship the existing canonical lifecycle SDK in every current required-context Python runtime payload and qualify actual materialization plus the installed owner's source validator. Preserve command/catalog bytes and legacy compatibility; this finite prerequisite does not close whole-portfolio execution or adoption.
 - [x] **Agent-recommended bounded service-less execution witness:** qualify actual collected prepared-source updates through SSH's native install/update and Machines' native init frontends, retaining their original command owner, default fixture root/state, installed consumers, selected-source currentness, healthy reuse and source-unavailable global dispatch. Preserve Machines' CMD-only Windows contract and actual persistent-environment containment; this pair does not close the complete eligible portfolio or production adoption.
 - [x] **Agent-recommended bounded MCP execution witness:** qualify native construction and collected prepared-source updates while retaining its original global command owner, default fixture state, exact installed source/currentness and completion-preserving reuse. Explicitly disable cutover and version reaping in the fixture; do not infer live daemon replacement, serving readiness or whole-portfolio completion from construction/publication evidence.
-- [ ] Qualify the bounded #9022 maintenance-standby conduct projection and owner-attributed per-machine notice, retaining native 30-minute polling and explicit unsupported/missing-notice outcomes without a service dependency. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
+- [x] Qualify the bounded #9022 JSON maintenance-standby source projection and owner-attributed per-machine notice, retaining the native 30-minute polling instruction and explicit unsupported/missing-notice outcomes without a service dependency. This is static source delivery, not native polling or the subsequent YAML/update-veto contract. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
+- [ ] Align the disposable-service visions and review the [shared YAML maintenance-banner contract](maintenance-banner.md), tracked by #9040, before consumer implementation.
+- [ ] Realize that single banner across automatic-update admission and normally projected conduct standby; qualify the actual consumer matrix, legacy notice transition and native 30-minute hold behavior. Preserve #8645/#7694/#7496/#7758 implementation ownership and #8669/#8864 session/removal acceptance.
 
 ### Phase 4a - Manager-owned opt-in background maintenance
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
@@ -869,6 +886,8 @@ implementation, rollout or parent completion is declared.
   service/process/credential or configuration action through this intake.
 
 ## Validation Plan
+
+- [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
 
 - [ ] **Wholesale same-installation cutover:** every inventoried global binstub and applicable serving process executes its selected immutable merged-Dev slot while retaining the Main installation's existing runtime data/configuration identity. Prove actual installed/serving code identity and continuity of representative existing state; a new cell, copied database, changed data root or synthetic fresh profile does not satisfy this gate. Qualify data-format compatibility and supported recovery before a rollback; do not assume that sharing data makes arbitrary older code compatible.
 

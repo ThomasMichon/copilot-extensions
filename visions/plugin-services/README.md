@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -178,6 +178,11 @@ resource fencing, or existing standalone-service defaults.
   one admission path for every entry point. See the
   [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) child
   vision.
+- **Disposable supporting runtimes** — all supporting services, including
+  Manager, are replaceable while durable work and independently hosted sessions
+  survive. One retained local maintenance banner explains intentional absence
+  and vetoes automatic recreation. See
+  [Disposable Supporting Runtimes](disposable-runtimes/README.md).
 - **Per-plugin visions** — concrete leaves under `visions/plugins/<name>/` refine
   this model for a specific service. Linked from here as they are authored.
 - **Vault service** - the [credential and authentication authority](../vault/README.md)
@@ -393,6 +398,11 @@ and true-up alignment**, but a plugin **provisions and reconciles itself — and
 supervises its own daemon (see *platform-native-lifecycle*) — with that app
 entirely absent**.
 
+Self-provisioning is conditional on current deployment authority and the absence
+of an applicable [maintenance hold](disposable-runtimes/README.md#maintenance-aware-automatic-admission).
+Enabling a plugin does not override an intentional outage or authorize automatic
+recreation of a deliberately removed runtime.
+
 This is the contract of a **standalone addon**, where the plugin's own
 installer is the installer. On a host that adopts the integrated profile, the
 same layered entry points (first-use binstub, session stamp, skill readiness
@@ -433,6 +443,13 @@ automatic expiry, so turning it back off is the operator's own responsibility.
 It changes *when* self-reconcile is allowed to run, never *whether* an enabled
 runtime's payload-vs-deployed drift is itself detected or resolved once
 reconcile resumes.
+
+That narrow bootstrap switch is not the suite's
+[shared maintenance banner](disposable-runtimes/README.md#shared-maintenance-banner).
+The latter combines an explained operator hold with automatic-update admission
+across its explicitly addressed local suite scope, including Manager. A
+bootstrap-switch default or namespaced-installation exception cannot bypass an
+applicable maintenance hold; unrelated marketplace ownership stays independent.
 
 ### delegated-heavy-companion-runtime
 The self-provisioning contract has one narrow exception: an explicitly
@@ -1105,6 +1122,7 @@ an incomplete change, the same way an undocumented behavior change is.
   [Vault](../vault/README.md) ·
   [Marketplace Installation Cells](installation-cells/README.md) ·
   [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) ·
+  [Disposable Supporting Runtimes](disposable-runtimes/README.md) ·
   per-plugin service visions live under `visions/plugins/<name>/`
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) (install
   topology, the ports table, communication paths) ·

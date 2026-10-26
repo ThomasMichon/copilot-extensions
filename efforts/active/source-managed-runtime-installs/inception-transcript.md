@@ -7,6 +7,18 @@ The implementation plan is a separate interpretation, not part of these quotes.
 Assistant design responses are summarized separately below; they are not
 additional operator instructions.
 
+## Disposable services and YAML maintenance banner
+
+Operator direction, 2026-10-25:
+
+> Okay, focus on getting the upstream vision alignment to support the notion of all copilot-extensions services being properly "disposable", with support for a yaml "maintenance banner" file that simultaneously acts as a killswitch against auto-update, and a notification to all agents about what is going on. We'll need to pair that with an instructions file in agent-conduct-guidance which informs agents that if the tools they need to invoke from the agent-* catalogs appear to be missing, they need to look at the provided yaml file for instructions, polling every 30 minutes via scheduled prompt until the blockage clears. Agents are not to attempt their own self-repair if the maintenance banner is up and has an explanation for the outage.
+
+The [alignment contract](maintenance-banner.md) distinguishes this requested
+shared YAML control from the earlier JSON-only source companion. Its proposed
+filename, compatibility ordering and parser/admission safeguards are
+agent-recommended implementation detail. No activation or host teardown is
+authorized by this request capture.
+
 ## Initial request
 
 > We have a general problem that when we try to stabilize copilot-extensions in main, we have no good way of uniformly validating the suite against live usage. Presently, our installation package is coupled to `copilot plugin update`, and the sessionStart hooks in the various plugins bootstrap the version-slot install folders for the payload.
