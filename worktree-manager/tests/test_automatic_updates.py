@@ -321,6 +321,51 @@ def test_targeted_updates_share_automatic_admission_and_preserve_trigger(
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+def test_public_targeted_executor_applies_policy_and_consumes_manager_only_flags(
+    tmp_path: Path, monkeypatch, enabled: bool,
+) -> None:
+    import update_driver
+    from worktree_manager import engine_client, update_driver_cli as boundary
+
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
+    monkeypatch.setattr(cli, "default_root", lambda: tmp_path)
+    policy.configure(
+        tmp_path, owner="manager" if enabled else "disabled", provenance="user",
+        project="example" if enabled else None,
+    )
+    arguments = ["--target", "agent-bridge", "--automatic-trigger", "manager", "--project", "example"]
+    request = SimpleNamespace(
+        state="running",
+        spec=update_driver.RequestSpec(
+            backend="manager", argv=tuple(arguments), project="example", cwd=str(tmp_path),
+            source=boundary._source_key(), context=tuple(boundary.request_context().items()),
+        ),
+    )
+
+    class Custody:
+        request_id = "targeted-executor"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+    calls = []
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *a, **k: request)
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", lambda project, args:
+        calls.append((project, args)) or 0)
+    assert boundary.cmd_update_request(arguments) == (0 if enabled else 3)
+    assert calls == ([("example", ["update", "--no-manager", "--target", "agent-bridge"])] if enabled else [])
+
+
 def test_health_proves_live_worker_and_rejects_wrong_cookie(tmp_path: Path) -> None:
     async def exercise() -> None:
         worker = runtime.Worker(tmp_path)

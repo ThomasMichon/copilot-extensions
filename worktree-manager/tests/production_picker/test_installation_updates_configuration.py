@@ -404,6 +404,7 @@ def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_
 
 @pytest.mark.parametrize("operation", ["update", "doctor"])
 def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch, operation):
+    import update_driver
     from _installation_context_fixtures import namespaced_fixture, write_json
     from worktree_manager import engine_client
     from worktree_manager.production_picker.picker_tui import pivot_list_command
@@ -420,6 +421,7 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     write_json(legacy, {"version": "legacy", "enabled": "inactive"})
     write_json(cell, {"version": "cell", "enabled": "active"})
     engine = tmp_path / "engine.py"
+    observation = tmp_path / "engine-observation.json"
     engine.write_text(
         "import json,os,pathlib,sys\n"
         "pointer=os.environ.get('COPILOT_EXTENSIONS_CONTEXT')\n"
@@ -432,11 +434,11 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
         "'source':str(root),'updatable':True,'limitation':''}]}))\n"
         "else:\n"
         " assert '--target' in sys.argv and pointer\n"
-        " print(json.dumps({'request_id':'cell-request','state':'pending','exit_code':None,'context':pointer}))\n"
+        f" pathlib.Path({str(observation)!r}).write_text(json.dumps({{'context':pointer,'arguments':sys.argv[1:],'has_custody':bool(os.environ.get('UPDATE_DRIVER_WITNESS'))}}))\n"
     )
     wrapper = tmp_path / "inventory.py"
     wrapper.write_text(
-        "import json,os\n"
+        "import json,os,sys,update_driver\n"
         "from pathlib import Path\n"
         "from worktree_manager import agent_plugin_runtime as apr,doctor_cli,installation_updates as ui\n"
         f"apr._canonical_os_profile=lambda environment:Path({str(home)!r})\n"
@@ -450,6 +452,14 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
         " print(json.dumps({'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT')}))\n"
         " return 0\n"
         "doctor_cli.cmd_doctor=diagnostic\n"
+        "original=update_driver.runtime_command\n"
+        "def command(module,args=()):\n"
+        " if module=='worktree_manager': return (sys.executable,str(Path(__file__).resolve()),'execute',*args),{}\n"
+        " return original(module,args)\n"
+        "update_driver.runtime_command=command\n"
+        "if sys.argv[1:2]==['execute']:\n"
+        " from worktree_manager import __main__ as manager\n"
+        " raise SystemExit(manager.main(sys.argv[2:]))\n"
         "raise SystemExit(ui.main())\n"
     )
     monkeypatch.setenv("HOME", str(home))
@@ -483,11 +493,19 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     argv = [sys.executable, "-B", str(wrapper), *argv[4:]]
     ok, message = runtime.run_resolved(argv, preserve_output=True)
     assert ok, message
-    expected = {"context": str(install)}
-    if operation == "update":
-        expected.update(request_id="cell-request", state="pending", exit_code=None)
-    assert json.loads(message) == expected
-    assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    if operation == "doctor":
+        assert json.loads(message) == {"context": str(install)}
+        assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+        return
+    receipt = json.loads(message.splitlines()[0])
+    request = update_driver.wait(
+        receipt["request_id"], root=home / ".copilot-extensions/update-driver", timeout=30,
+    )
+    assert request.state == "completed" and request.exit_code == 0
+    seen = json.loads(observation.read_text())
+    assert seen["context"] == str(install) and seen["has_custody"] is True
+    assert seen["arguments"] == ["update", "--no-manager", "--target", "guide"]
+    assert all(path.read_bytes() == body for path, body in before.items())
 
 
 def test_catalog_failure_uses_production_warning_banner(monkeypatch):

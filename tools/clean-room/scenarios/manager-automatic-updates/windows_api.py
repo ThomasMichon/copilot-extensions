@@ -361,9 +361,9 @@ class WinAPI:
         return result
 
     def foreground(self) -> int:
-        foreground = self.user.GetForegroundWindow()
-        self._check(foreground, "GetForegroundWindow during observation")
-        return int(foreground)
+        # Win32 permits NULL during activation transitions; last-error is not
+        # this API's failure contract. The observer must retain that transition.
+        return int(self.user.GetForegroundWindow() or 0)
 
     def close(self) -> None:
         for handle in self.handles.values():
@@ -377,8 +377,11 @@ class WindowObserver:
         api.refresh_processes()
         self.baseline = {window.key for window in api.windows().values()}
         self.foreground = api.foreground()
+        if not self.foreground:
+            raise NativeBlocked("foreground-unavailable", "no foreground window at observation start")
         self.roots = {api.process(os.getpid()).key}
         self.events: dict[tuple[str, int, int, int], WindowInfo] = {}
+        self.unobservable_foreground_transitions = 0
         self.samples = 0
         self.max_gap = 0.0
         self.started = self.previous = time.monotonic()
@@ -407,11 +410,12 @@ class WindowObserver:
         if foreground != self.foreground:
             window = windows.get(foreground)
             if window is None:
-                raise NativeBlocked("foreground-unobservable", "foreground identity disappeared")
-            self.events.setdefault(("foreground", *window.key), window)
+                self.unobservable_foreground_transitions += 1
+            else:
+                self.events.setdefault(("foreground", *window.key), window)
             self.foreground = foreground
         self.samples += 1
-        if len(self.events) > 4096:
+        if len(self.events) + self.unobservable_foreground_transitions > 4096:
             raise NativeBlocked("window-event-overflow", "observation exceeded its bounded event packet")
 
     def _run(self) -> None:
@@ -436,6 +440,12 @@ class WindowObserver:
 
     def packet(self) -> dict:
         violations = []
+        if self.unobservable_foreground_transitions:
+            violations.append({
+                "kind": "foreground-unobservable", "pid": None, "image": None,
+                "attribution": "ambiguous-desktop-foreground",
+                "count": self.unobservable_foreground_transitions,
+            })
         for (kind, *_key), window in self.events.items():
             attributable = bool(set(window.lineage) & self.roots)
             ambiguous_console = window.process.image in CONSOLE_IMAGES
