@@ -1,0 +1,9 @@
+{
+  "comment": "Verify current canonical embedding input before bounded vector writes",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

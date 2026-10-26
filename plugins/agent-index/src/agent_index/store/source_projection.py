@@ -78,14 +78,22 @@ def sync_content_projection(db, chunks) -> None:
 
 def projection_records(
     db: Any, content_name: str, chunks: list[Chunk],
-    *, bounded_content: ContentStore | None = None,
+    *, bounded_content: ContentStore | None = None, require_current_input: bool = False,
 ) -> dict[str, dict[str, Any]]:
+    from .content_mutations import content_record
+
+    if require_current_input and bounded_content is None:
+        raise ValueError("Current embedding input requires a bounded canonical owner")
     if bounded_content is not None:
         from .chunk_id_index import indexed_chunk_rows
 
+        columns = (
+            list(content_record(chunks[0])) if require_current_input and chunks
+            else ["chunk_id", "source", "language"]
+        )
         rows = indexed_chunk_rows(
             bounded_content, [chunk.chunk_id for chunk in chunks],
-            columns=["chunk_id", "source", "language"],
+            columns=columns,
         )
         result = {row["chunk_id"]: row for row in rows}
     else:
@@ -107,4 +115,6 @@ def projection_records(
         row = result.get(chunk.chunk_id)
         if row is None or row["source"] != chunk.source or row["language"] != chunk.language:
             raise SourceLayoutError("missing or mismatched canonical provenance")
+        if require_current_input and row != content_record(chunk):
+            raise SourceLayoutError("missing or mismatched current canonical embedding input")
     return result
