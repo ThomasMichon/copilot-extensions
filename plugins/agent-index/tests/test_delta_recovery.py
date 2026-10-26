@@ -214,6 +214,29 @@ def test_failed_forced_rewrite_revokes_old_compatible_checkpoint(
     assert state.total_chunks == 2
 
 
+def test_recreated_file_after_failed_tombstone_is_not_reused(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    paths, state, connector, _store, run = setup_round(monkeypatch, tmp_path)
+    item = FileEntry("one.md", "unchanged", "markdown", "forge:repo")
+    connector.delta = SourceDelta(upserts=[item], commit="original")
+    run()
+    connector.delta = SourceDelta(
+        deletions=[DeletedFile(item.source, item.path)], commit="deleted",
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(paths, "remove", fail)
+        with pytest.raises(RuntimeError, match="fixture"):
+            run()
+    assert state.sources["alias"].last_commit == "original"
+    assert paths.get_entry(item.source, item.path) is not None
+    assert paths.get_content_hash(item.source, item.path) is None
+    connector.delta = SourceDelta(upserts=[item], commit="recreated")
+    assert run()[0] == 2
+    assert state.sources["alias"].last_commit == "recreated"
+    assert state.total_chunks == 2
+
+
 def test_chunking_failure_does_not_advance_delta_cursor(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

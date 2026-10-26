@@ -657,6 +657,7 @@ def _index_source(
         if progress_cb:
             progress_cb.check_cancelled()
         try:
+            path_index.invalidate_batch([(deleted.source, deleted.path)])
             # Multi-model store (content + vectors)
             multi_store.delete_by_file(deleted.source, deleted.path)
             # Path index
