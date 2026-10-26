@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -43,6 +44,11 @@ def selected(setup: protocol.Setup, name: str) -> protocol.ContinuityContext:
     return context
 
 
+def _state_root(setup: protocol.Setup, name: str) -> Path:
+    identity = json.dumps([setup.source.url, name], separators=(",", ":")).encode("utf-8")
+    return Path.home() / (".fleet-continuity-" + hashlib.sha256(identity).hexdigest())
+
+
 def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
     """Verify the trusted selection and actual executable before source/key access."""
     context = selected(setup, name)
@@ -57,7 +63,7 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
         raise protocol.SetupError("Installed Fleet executable does not support this selected context.")
     command = [
         "bootstrap", "--source", str(Path(context.source).expanduser()),
-        "--harness", context.name, "--state-root", str(Path.home() / (".fleet-continuity-" + name)),
+        "--harness", context.name, "--state-root", str(_state_root(setup, name)),
     ]
     result = _invoke(command)
     protocol._fields(result, {"status", "stage"})

@@ -147,6 +147,10 @@ selected Python runtime with isolation, not an ambient executable on `PATH`.
 That selected engine environment needs the Fleet SDK and its service-Gateway
 dependency supplied by its normal construction owner. Capability discovery,
 bounded native process custody and check/apply preserve the original operation.
+Retained machine state is namespaced by the canonical qualified harness repository
+URL and context name, not the checkout path or commit. Two harnesses may reuse a
+context name without sharing keys/operations; later revisions of the same harness
+retain the original state and its strict source-binding checks.
 Missing support, source access, authentication or an unknown result refuses the
 optional stage without undoing repository/core readiness. Neither context
 selection nor authenticated connection authorizes SSH or another lifecycle.

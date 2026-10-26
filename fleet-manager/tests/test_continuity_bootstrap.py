@@ -83,7 +83,6 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                     pytest.skip("selected engine test environment needs its Fleet service-Gateway SDK")
                 home = tmp_path / "home"
                 home.mkdir(mode=0o700)
-                state = home / ".fleet-continuity-harness-a"
                 harness = tmp_path / "harness"
                 harness.mkdir()
                 (harness / ".agent-worktrees").mkdir()
@@ -163,6 +162,9 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                 assert json.loads(stdout) == {"status": "ready", "stage": "connected"}
             else:
                 assert b"authenticated outbound Gateway access" in stdout
+                states = list(home.glob(".fleet-continuity-*"))
+                assert len(states) == 1
+                state = states[0]
             retained = (state / "machine.json").read_bytes()
             assert GRANT.encode() not in retained
             if os.name != "nt":

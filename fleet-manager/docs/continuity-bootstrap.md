@@ -165,6 +165,9 @@ A trusted harness's version-two setup declaration names
 the [engine contract](../../plugins/agent-worktrees/docs/repository-setup.md)
 owns selection and trust. The engine uses the Fleet SDK in **its own selected
 interpreter**, with Python isolation, not an executable discovered on `PATH`.
+Its state namespace hashes the canonical harness repository URL and selected
+context name, remaining stable across checkout moves and source revisions while
+separating different repositories that reuse the same context name.
 The existing construction/release owner must supply the Fleet SDK and its
 service-Gateway dependency closure in that selected engine environment.
 This source slice does not add a cross-project path dependency to the plugin's
