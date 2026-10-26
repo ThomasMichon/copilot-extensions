@@ -106,6 +106,7 @@ def run_targeted_update(rest: list[str], *, trigger: str = "manual") -> int:
 
 def _operations(*, engine_source=None):
     import update_driver
+    from .agent_plugin_runtime import resolve_installed_plugin_invocation
     from .update_driver_cli import _source_key
 
     operations = {}
@@ -120,6 +121,23 @@ def _operations(*, engine_source=None):
         )
         if expected_source is None or request.spec.source != expected_source:
             continue
+        if request.spec.backend == "manager" and target != "worktree-manager":
+            try:
+                if not engine_source:
+                    raise ValueError("selected engine did not report its installation identity")
+                invocation = resolve_installed_plugin_invocation(
+                    "agent-worktrees", environment=dict(request.spec.context),
+                )
+                if invocation is None:
+                    raise ValueError("saved engine installation context is unavailable or invalid")
+                if str(invocation[1].resolve()) != engine_source:
+                    continue
+            except (OSError, ValueError, RuntimeError) as error:
+                operations[target] = {
+                    "state": "unknown", "request_id": request.id,
+                    "error": f"Durable update attribution unavailable: {error}; refresh after repairing its saved context",
+                }
+                continue
         state, error = request.state, request.error
         if state == "completed":
             state = "succeeded" if request.exit_code == 0 else "failed"

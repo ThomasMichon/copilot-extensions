@@ -162,7 +162,7 @@ def case(
             windows_session.start()
         elif native_startup:
             unit = native.unit_name(root)
-            native.registration(root)
+            native.registration(root, instance_environment=instance_environment)
         else:
             handles.append(launcher(root, env))
         old = ready(process, root, version=fixtures.OLD)
@@ -274,6 +274,7 @@ def case(
                 if int(native_after["NRestarts"]) <= int(native_before["NRestarts"]):
                     raise AssertionError("native worker did not restart through its failure sentinel")
                 result["native_mainpid_direct"] = True
+                result["native_mainpid_disposable_instance_verified"] = True
                 result["native_restart_observed"] = True
             if cycles == 2:
                 until(lambda: read_event(root / "probe/cycle-002-end.json"), bool,
@@ -343,7 +344,7 @@ def signal_drain_case(
         "cycle_kind": "finite-guarded-command-fixture", "real_installation_cycles": False,
     }
     try:
-        native.registration(root)
+        native.registration(root, instance_environment=instance_environment)
         worker = ready(process, root, version=fixtures.OLD)
         pin_worker(root, worker, pins)
         before = native.assert_mainpid(unit, worker, root)

@@ -13,9 +13,11 @@ expiry rather than a competing fixture registry. Production has no expiry.
 
 ## Evidence boundary
 
-The copied Manager main changes only its update-step implementation (and, in
-the negative case, fails worker startup while leaving `--version` usable). Its public update guard,
-telemetry and Worker are unchanged. The finite command waits on a fixture-owned
+The copied Manager main substitutes its update-step implementation and imports
+fixture-only telemetry, private-home and native disposable-lifecycle bindings
+(in the negative case it fails worker startup while leaving `--version` usable).
+Its public update guard, telemetry implementation and Worker are unchanged.
+The finite command waits on a fixture-owned
 file, holds the genuine update transaction, and writes per-version witnesses.
 Telemetry uses the supported private update-home override.
 Native supervision retains the actual user home only for its owned startup
@@ -104,6 +106,12 @@ successful exit and no failure restart. Retirement removes the exact-owned unit 
 the worker drains and exits. No linger, elevated service or live Manager root
 is used. Plain mode has an isolated HOME, config and unavailable session bus;
 native mode necessarily addresses the current user's fixture-only unit.
+Because systemd does not inherit the client's environment, the immutable fixture
+loads its exact qualification-owned disposable declaration from a private
+fixture binding before Worker admission. The real MainPID's shared instance
+record must match this qualification's owner/run and finite lease. Production
+unit bytes and ownership receipts are unchanged; no drop-in or user-manager
+environment mutation is used.
 
 ### Windows native packet from a normal unelevated console
 
