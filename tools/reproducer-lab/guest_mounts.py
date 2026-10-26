@@ -13,7 +13,7 @@ MAX_TABLE_BYTES = 32 * 1024
 MAX_SECONDS = 5
 
 
-def _table() -> str:
+def read_mount_table() -> str:
     with open("/proc/self/mountinfo", "rb") as source:
         data = source.read(MAX_TABLE_BYTES + 1)
     if len(data) > MAX_TABLE_BYTES:
@@ -23,7 +23,7 @@ def _table() -> str:
 
 def observe() -> dict[str, object]:
     started = time.monotonic()
-    before = _table()
+    before = read_mount_table()
     roots: list[dict[str, object]] = []
     for path in ("/tmp", "/run"):
         descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -42,7 +42,7 @@ def observe() -> dict[str, object]:
             })
         finally:
             os.close(descriptor)
-    if before != _table() or time.monotonic() - started >= MAX_SECONDS:
+    if before != read_mount_table() or time.monotonic() - started >= MAX_SECONDS:
         raise ValueError("guest mount observation changed or expired")
     return {"uid": os.geteuid(), "gid": os.getegid(), "mountinfo": before, "roots": roots}
 
