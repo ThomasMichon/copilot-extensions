@@ -5,7 +5,7 @@
 - **Branch(es):** serial, independently reviewed slices targeting `dev`
 - **Created:** 2026-10-24
 - **Status:** Active
-- **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
+- **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/disposable-runtimes/README.md` - shared-maintenance-banner and service-independent-agent-standby; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
 - **Umbrella issue:** #8669
 - **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall)
 
@@ -22,6 +22,13 @@ Completion means production implementation plus actual same-process,
 interactive survival and correct final lifecycle handling across real
 uninstall/reinstall and update, not a copied-fixture demonstration or a merged
 source change alone.
+
+During an intentional maintenance window, the surviving agent can understand
+why its tools disappeared without invoking those tools. It preserves progress
+and obligations, pauses affected operations, reads the local-machine banner
+through native facilities, waits for the window to clear, and resumes against
+the restored capabilities. Maintenance-aware standby complements process
+survival; neither substitutes for the other.
 
 ## Participants
 
@@ -48,6 +55,10 @@ source change alone.
 - No host uninstall, shared-daemon restart or installed rollout is authorized
   merely by this plan. Destructive tests use explicitly disposable roots and
   owned processes. Installed acceptance uses the target's normal approval flow.
+- Reuse #9022's conduct-guidance companion and #9040's reviewed shared YAML
+  banner contract, including their retained automatic-maintenance owners.
+  This effort integrates standby with session survival; it does not introduce
+  a second banner, scheduler, updater or maintenance authority.
 
 ## Context
 
@@ -91,6 +102,20 @@ The operator confirmed the slug `installation-independent-sessions`.
 The selected contract and its explicitly agent-recommended refinements are in
 [manager-uninstall.md](manager-uninstall.md). This adds a prerequisite, not a
 replacement for the continuing installation-survival objective.
+
+**2026-10-25 priority and maintenance-window direction (summary):** prioritize
+this isolation work and extend the vision so an agent whose supporting tools
+disappear can pause, read a local-machine maintenance banner without those
+tools, wait while the YAML window is active, and resume once it clears.
+The [literal follow-up](inception-transcript.md#operator---priority-and-maintenance-window)
+is retained without converting the priority statement into permission for a
+host update, removal or rollout.
+
+The standing intent already includes this extension through reviewed #9042.
+The existing [shared YAML banner contract](../source-managed-runtime-installs/maintenance-banner.md)
+is the implementation-contract owner. Its explicit same-window completion and
+native 30-minute standby policy are **agent-recommended bindings**, not extra
+literal requirements added to this request.
 
 The detailed fencing, negative controls and rollout admission below are
 **agent-recommended implementation/validation refinements**, not additional
@@ -153,6 +178,24 @@ verbatim operator requirements.
 - [ ] Fix failures found in the touched contract; transfer only genuinely
   independent work to named tracked objectives without dropping acceptance.
 
+### Phase 4b - Maintenance-aware session standby
+
+- [x] Reconcile the expanded request with the already reviewed disposable-runtime
+  vision and shared YAML-banner proposal; retain #9022/#9040 and existing
+  maintenance implementation ownership rather than opening a competing design.
+- [ ] Coordinate the YAML reader/guidance migration with those owners before
+  exercising it. The earlier JSON-only source guidance is not YAML capability
+  or evidence of delivery to an already-running session.
+- [ ] Integrate the normal conduct projection and native-tool banner read with
+  the actual surviving Copilot session; no runtime, service, command, network
+  path or credential broker under maintenance may be needed to enter standby.
+- [ ] Preserve progress, exact launch identity, claims and pending effects while
+  affected operations pause. Do not reinstall, reprovision, repeatedly retry
+  missing commands, launch replacement agents or take over the maintenance.
+- [ ] Exercise the reviewed native standby/all-clear contract, then refresh
+  selected invocation/capability evidence before resuming. Clearing the banner
+  does not replay unknown mutations or enable independently disabled policy.
+
 ### Phase 5 - Release, installed acceptance and closure
 
 - [ ] Verify containing normal Main release and exact released behavior.
@@ -194,7 +237,20 @@ operator's installation-survival contract.
 - [ ] Removing the containing wrapper genuinely tears down its owned children
   where required; survival is not achieved by discarding kernel containment.
 - [ ] Measure persistent process ancestry and boundary latency; no new resident
-  waiter, polling loop or unowned detached process replaces the removed coupling.
+  waiter, helper polling loop or unowned detached process replaces the removed
+  coupling. Sparse native agent standby prompts are a separate maintenance
+  behavior, not a resident session-lifetime dependency.
+- [ ] The same running agent receives usable guidance before an intentional
+  outage, detects missing tools, reads the retained YAML banner natively, pauses
+  affected operations and waits without repair or dependency on the removed
+  payload, service, binstub or credential broker.
+- [ ] In isolated Windows/Linux maintenance controls, the reviewed single native
+  standby poll reports material changes without a helper daemon or busy loop.
+  Unavailable native scheduling is explicit rather than silently substituted.
+- [ ] An active, stale, malformed, unreadable or replaced window cannot
+  accidentally release an established hold. Applicable clearance ends only the
+  owned standby poll; restored capability is verified before continuation,
+  independent disables stay disabled, and unknown effects are not replayed.
 - [ ] Existing exit-noise controls still pass: successful finalization stays
   quiet, cleanup remains a bounded summary and updated batch tails remain valid.
 - [ ] Normal release, explicitly approved selected-host installed validation,
@@ -212,6 +268,12 @@ ownership and reclamation, supported-handler compatibility and affirmative
 end semantics. The actual uninstall test decides whether the mux executable,
 wrapper or inherited process resources still depend on removable installations.
 Keeping a version directory alive is not an acceptable substitute.
+
+The maintenance strategy consumes the existing shared banner and normally
+projected conduct guidance. Its outage explanation and hold remain readable
+outside removable supporting installations. It adds no new execution authority,
+and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
+notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
 
@@ -409,3 +471,39 @@ Keeping a version directory alive is not an acceptable substitute.
   and qualify supported Manager removal, then resume the same real interactive
   two-product baseline and production copied-wrapper/current-handler work.
   The parent effort, release and approved installed validation remain open.
+
+### 2026-10-25 - Native argument prerequisite merged
+
+- #8906 merged as `bea4d7bb70c2ec727b2f38caeff9ec84eaca26c2` after
+  exact-head approval without findings and required green CI. The fresh
+  Windows run `40173234492` exercised published source
+  `cbd2966ed527b29cc37579685e8e6d2b0a4993d6`: all three real PSMux
+  controls passed without skips, including both file-based producers and
+  owned teardown. The rebased ordinary pane packet also passed 53 tests;
+  both workflow-contract checks and the install-contract guard passed.
+- Re-read the parent plan after merge. This closes only the literal Windows
+  argument-delivery prerequisite. It does not implement the copied shell,
+  current start/end handlers, actual two-product removal, update survival,
+  release or approved selected-host validation.
+- The first supported Manager uninstall implementation is under integration
+  review. Its focused ownership/custody controls pass, but real installed
+  removal on Linux/Windows, mixed-version controls and full assembly
+  validation are still required before returning to the interactive baseline.
+
+### 2026-10-25 - Priority resumed with maintenance-window intent
+
+- The operator prioritized installation-independent sessions and added
+  local-machine maintenance notification, native standby and resumption after
+  the YAML window clears. The literal follow-up is in the inception transcript.
+- Reconciled the canonical source workspace through guarded sync, preserving
+  the committed parent journal. Found #9036's already merged JSON-only conduct
+  guidance and #9042's reviewed disposable-runtime/shared-YAML vision and plan.
+  Reuse those owners and contracts; do not create another banner or protocol.
+- The expanded Plan and Validation Plan connect actual process survival to
+  tool-independent banner reading, preserved obligations, sparse native standby
+  and safe capability revalidation after clearance. Normal guidance delivery
+  and native behavior still need proof; reviewed intent alone is not acceptance.
+- Supported Manager uninstall remains a prerequisite. Its three review fixes
+  are committed locally but unpublished; the Windows synthetic-payload fixture
+  timeout and revised native qualification remain unresolved. This update
+  neither declares them passing nor authorizes host maintenance or rollout.

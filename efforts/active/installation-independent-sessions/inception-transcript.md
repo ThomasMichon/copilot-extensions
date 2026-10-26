@@ -74,3 +74,7 @@ The effort README labels subsequent agent-recommended controls separately.
 The operator confirmed the proposed slug:
 
 > installation-independent-sessions
+
+## Operator - Priority and maintenance window
+
+> I have quiesced nearly all other sessions across all machines. Your work, which isolated Copilot sessions from updates to copilot-extensions tools and services, has priorty. I'm expanding the vision to include the concept of a "maintenance window and notification", where if the agent-* tols suddenly disappear out from under a running agent, then agent need to have a strategy to "pause", read a local-machine banner with instructions, and wait out the maintenance window. Once the maintenance window ends (the yaml file clears), then agents can resume.
