@@ -375,7 +375,10 @@ and after the queue call.
 The gate reads the original services' existing history, without an active-state,
 latest-attempt or repository filter. Any retained task, reservation, wake,
 attachment, acquisition, session, turn, message or supported creation/recovery
-history refuses the initial case. Even terminal or refused rows are not a
+history refuses the initial case. This includes independent acquisition
+markers/receipts, accepted producer requests, fallback attempts, launch gates
+and retired conversation bindings, not just rows joinable to current tasks or
+sessions. Even terminal or refused rows are not a
 descendant-settlement certificate. Orphaned operation history is checked
 independently of task/session joins; missing tables and read failures propagate.
 Dispatch uses its existing connection owner with a five-second SQLite progress
@@ -424,9 +427,15 @@ The explicitly selected local-owner lane is:
 
 It uses the actual source `TaskQueue`, read-only Bridge `Database` and
 `AcquisitionJournal`, `DiagnosticLog` and shared `OperationLock` on temporary
-local SQLite/JSONL files. It checks both successful file/directory syncs precede
+local SQLite/JSONL files. Before opening the read-only reader, the actual
+writable `AcquisitionStore` prepares its additional launch-gate/binding schema;
+the gate itself does not initialize or repair those tables.
+It checks both successful file/directory syncs precede
 the real queue create, injected sync failure leaves the real queue empty, and
 a lost create reply retains one task and refuses a second initial create.
+Orphan-only fixtures use the actual queue/store schemas independently of the
+production history lists; schema-key coverage checks catch omitted task,
+reservation, assignment, delivery, worktree or session tables.
 Only guest path/mount admission is synthetic in this lane. The filename is
 outside default test discovery; no real container, mounted volume, backend
 spawn, crash/power-loss or running-service qualification is claimed.

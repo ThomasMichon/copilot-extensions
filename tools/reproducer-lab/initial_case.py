@@ -29,12 +29,19 @@ MAX_OBSERVATION_SECONDS = 5.0
 DISPATCH_HISTORY = (
     "tasks", "spawn_reservations", "task_events", "task_attachments",
     "wake_outbox", "run_waiter_wakes", "execution_send_custody",
+    "task_progress", "task_steer", "run_waiters", "verification_requests",
+    "routing_assignments", "routing_assignment_events", "resource_reservations",
+    "schedule_leases", "acquisition_markers", "acquisition_receipts",
+    "producer_create_requests", "producer_claim_rejections", "handoff_fallback_attempts",
+    "execution_admission_closures",
 )
 BRIDGE_HISTORY = (
     "acquisition_attempts", "acquisition_effects", "sessions", "turns", "events",
     "live_sessions", "live_messages", "pending_prompts", "worktree_ownership",
     "cli_mode_reservations", "cold_outages", "workspace_embodiments",
     "provider_embodiments", "remote_acp_relationships", "bridge_inbox_consumers",
+    "acquisition_launch_gates", "acquisition_bindings", "delivery_cursors",
+    "delivery_cursor_invalidations", "live_session_aliases",
 )
 
 

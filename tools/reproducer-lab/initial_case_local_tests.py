@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,6 +23,7 @@ import initial_case
 @pytest.fixture
 def owners(tmp_path: Path, monkeypatch: Any) -> Any:
     from agent_bridge.acquisition_journal import AcquisitionJournal
+    from agent_bridge.acquisition_store import AcquisitionStore
     from agent_bridge.db import Database
     from agent_dispatch.queue import TaskQueue
     from process_telemetry.diagnostic_logs import DiagnosticLog
@@ -32,6 +34,7 @@ def owners(tmp_path: Path, monkeypatch: Any) -> Any:
     queue = TaskQueue(dispatch_path)
     bridge_path = tmp_path / "bridge" / "bridge.db"
     writable = Database(bridge_path)
+    AcquisitionStore(writable)
     writable.close()
     database = Database(bridge_path, read_only=True)
     journal = AcquisitionJournal(database)
@@ -139,3 +142,96 @@ def test_actual_lost_create_reply_uses_existing_task_history(owners: Any, monkey
     with pytest.raises(ValueError, match="Dispatch work"):
         submit(owners)
     assert calls == 1 and len(owners.queue.list(limit=2)) == 1
+
+
+@pytest.mark.parametrize("table,statement,values", [
+    (
+        "acquisition_markers",
+        "INSERT INTO acquisition_markers VALUES (?)",
+        ("orphan-reservation",),
+    ),
+    (
+        "acquisition_receipts",
+        "INSERT INTO acquisition_receipts VALUES (?,?,?,?,?,?,?,?)",
+        ("orphan-reservation", "orphan-task", 1, "synthetic-worktree",
+         "synthetic-session", "synthetic-native", "acp", "synthetic-delivery"),
+    ),
+    (
+        "producer_create_requests",
+        "INSERT INTO producer_create_requests VALUES (?,?,?,?,?,?,?,?)",
+        (initial_case.LANE, "synthetic-source", 1, "synthetic-request",
+         "0" * 64, "synthetic-producer", "orphan-task", 1.0),
+    ),
+    (
+        "handoff_fallback_attempts",
+        "INSERT INTO handoff_fallback_attempts VALUES (?,?,?,?,?)",
+        ("orphan-task", 1.0, "pending", None, 1.0),
+    ),
+])
+def test_actual_queue_orphan_history_refuses_without_task_or_reservation(
+    owners: Any, table: str, statement: str, values: tuple[object, ...],
+) -> None:
+    with owners.queue._connect() as connection:
+        connection.execute(statement, values)
+        assert connection.execute("SELECT 1 FROM tasks LIMIT 1").fetchone() is None
+        assert connection.execute("SELECT 1 FROM spawn_reservations LIMIT 1").fetchone() is None
+    with pytest.raises(ValueError, match="Dispatch work"):
+        submit(owners)
+    assert not owners.log.path.exists() and owners.queue.list(limit=1) == []
+    with owners.queue._connect() as connection:
+        assert connection.execute(f"SELECT 1 FROM {table}").fetchone() is not None
+
+
+@pytest.mark.parametrize("table,values", [
+    ("acquisition_launch_gates", (
+        "orphan-worktree", "synthetic-delivery", "acp", None, None, "synthetic-driver",
+    )),
+    ("acquisition_bindings", (
+        "synthetic-session", "synthetic-native", "orphan-task", 1,
+        "orphan-worktree", "acp", "local", 1, 1.0,
+    )),
+])
+def test_actual_store_orphan_gate_or_retired_binding_refuses(
+    owners: Any, table: str, values: tuple[object, ...],
+) -> None:
+    with sqlite3.connect(owners.journal.db.db_path) as connection:
+        connection.execute(
+            f"INSERT INTO {table} VALUES ({','.join('?' for _ in values)})", values,
+        )
+        assert connection.execute("SELECT 1 FROM sessions LIMIT 1").fetchone() is None
+        assert connection.execute("SELECT 1 FROM acquisition_attempts LIMIT 1").fetchone() is None
+    with pytest.raises(ValueError, match="Bridge work"):
+        submit(owners)
+    assert not owners.log.path.exists() and owners.queue.list(limit=1) == []
+    assert len(owners.journal.db.execute_read(f"SELECT 1 FROM {table}")) == 1
+
+
+def test_actual_queue_task_keyed_schema_is_covered_independently(owners: Any) -> None:
+    with owners.queue._connect() as connection:
+        tables = [row[0] for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'",
+        )]
+        task_history = {
+            table for table in tables
+            if {"task_id", "reservation_key", "assignment_id"} & {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+        }
+    assert task_history <= set(initial_case.DISPATCH_HISTORY)
+    assert {"acquisition_markers", "acquisition_receipts", "producer_create_requests",
+            "handoff_fallback_attempts"} <= task_history
+
+
+def test_actual_bridge_operation_keyed_schema_is_covered_independently(owners: Any) -> None:
+    database = owners.journal.db
+    tables = [row[0] for row in database.execute_read(
+        "SELECT name FROM sqlite_master WHERE type='table'",
+    )]
+    operation_history = {
+        table for table in tables
+        if {"session_id", "worktree_id", "delivery_id", "alias_session_id", "target_session_id"} & {
+            row[1] for row in database.execute_read(f"PRAGMA table_info({table})")
+        }
+    }
+    assert operation_history <= set(initial_case.BRIDGE_HISTORY)
+    assert {"acquisition_launch_gates", "acquisition_bindings"} <= operation_history
