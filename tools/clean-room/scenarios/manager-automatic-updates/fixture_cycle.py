@@ -16,6 +16,18 @@ if "WORKTREE_MANAGER_ROOT" in os.environ:
     os.environ["COPILOT_EXTENSIONS_UPDATE_HOME"] = str(
         fixture_root / "probe" / "update-telemetry"
     )
+    if os.environ.get("WORKTREE_MANAGER_AUTOMATIC_UPDATES_UNIT"):
+        from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+        from .automatic_updates_startup import checked_path
+
+        binding = checked_path(fixture_root / "probe" / "native-lifecycle.json")
+        overlay = json.loads(binding.read_text(encoding="utf-8"))
+        if (
+            not isinstance(overlay, dict) or set(overlay) != {TEST_CONTEXT_ENV}
+            or not isinstance(overlay[TEST_CONTEXT_ENV], str) or not overlay[TEST_CONTEXT_ENV]
+        ):
+            raise RuntimeError("native fixture has no exact disposable lifecycle declaration")
+        os.environ.update(overlay)
     if sys.argv[1:2] == ["update"]:
         # Native supervision retains its real home; installation admission must not.
         execution_home = fixture_root / "home"

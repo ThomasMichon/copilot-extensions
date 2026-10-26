@@ -67,6 +67,7 @@ def update_environment(root: Path) -> dict[str, str]:
         "WORKTREE_MANAGER_ENGINE_CMD", "WORKTREE_MANAGER_ENGINE_ARGV",
         "WORKTREE_MANAGER_AGENT_WORKTREES_SRC", "COPILOT_EXTENSIONS_CONTEXT",
         "COPILOT_PLUGIN_ROOT", "CE_UPDATE_AUTH",
+        "AGENT_WORKTREES_UPDATE_CONTEXT", "AGENT_WORKTREES_PAYLOAD_ROOT",
     ):
         env.pop(key, None)
     env.update({
