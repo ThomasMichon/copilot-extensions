@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import sqlite3
 from collections.abc import Callable
 from contextlib import closing
 from dataclasses import asdict
@@ -57,19 +58,23 @@ class PendingCrawls:
             )
 
     def assert_family_available(self, source: str, family: str) -> None:
+        with closing(self._paths._connect()) as conn:
+            self._assert_family_available(conn, source, family)
+
+    @staticmethod
+    def _assert_family_available(conn: sqlite3.Connection, source: str, family: str) -> None:
         expression = (
             "COALESCE(json_extract(payload, '$.manifest.accounting_family'), "
             "json_extract(payload, '$.manifest.stored_family'), source)"
         )
         ancestors = [family[:i] for i, char in enumerate(family) if char == ":"] + [family]
         placeholders = ", ".join("?" for _ in ancestors)
-        with closing(self._paths._connect()) as conn:
-            row = conn.execute(
-                f"SELECT source FROM pending_crawls WHERE source != ? AND "
-                f"({expression} IN ({placeholders}) OR "
-                f"({expression} >= ? AND {expression} < ?)) LIMIT 1",
-                (source, *ancestors, family + ":", family + ";"),
-            ).fetchone()
+        row = conn.execute(
+            f"SELECT source FROM pending_crawls WHERE source != ? AND "
+            f"({expression} IN ({placeholders}) OR "
+            f"({expression} >= ? AND {expression} < ?)) LIMIT 1",
+            (source, *ancestors, family + ":", family + ";"),
+        ).fetchone()
         if row is not None:
             raise PendingCrawlConflict(
                 f"Complete pending crawl {row['source']!r} with its original configuration "
@@ -130,6 +135,11 @@ class PendingCrawls:
         self._validate(manifest)
         payload = json.dumps({"version": 1, "full": full, "manifest": asdict(manifest)})
         with closing(self._paths._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._assert_family_available(
+                conn, manifest.source,
+                manifest.accounting_family or manifest.stored_family or manifest.source,
+            )
             conn.execute(
                 "INSERT INTO pending_crawls (source, scope, payload) VALUES (?, ?, ?)",
                 (manifest.source, scope, payload),

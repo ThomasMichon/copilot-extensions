@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 from types import SimpleNamespace
 
 import httpx
@@ -422,3 +424,43 @@ def test_legacy_reconciliation_uses_canonical_not_requested_prefix(
     journal = PendingCrawls(paths)
     journal.save(manifest, scope="scope", full=full)
     assert journal.load("forge", "scope") == (manifest, full)
+
+
+def test_overlapping_journal_admission_is_atomic_and_winner_can_recover(tmp_path: Path) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    barrier = Barrier(2)
+
+    def admit(source: str) -> tuple[str, bool]:
+        manifest = CrawlManifest(
+            source=source, accounting_family="forge:repo",
+            upserts=[item("one.md", source)], commit="middle",
+        )
+        journal.assert_family_available(source, "forge:repo")
+        barrier.wait(timeout=10)
+        try:
+            journal.save(manifest, scope="scope", full=False)
+        except PendingCrawlConflict:
+            return source, False
+        return source, True
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(admit, ("alias-one", "alias-two")))
+    assert sum(admitted for source, admitted in results) == 1
+    winner = next(source for source, admitted in results if admitted)
+    assert journal.sources() == [winner]
+    applied: list[str] = []
+    state = IndexState()
+
+    def apply(*, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]:
+        applied.extend(entry.content for entry in manifest.upserts)
+        state.mark_source_indexed(winner, manifest.commit, 1)
+        return len(manifest.upserts), 0, len(manifest.upserts)
+
+    recover_source(
+        winner, scope="scope", family="forge:repo", state=state,
+        state_file=tmp_path / "state.json", paths=paths, full=False, apply=apply,
+        acquire=lambda: CrawlManifest(source=winner, commit="latest"),
+    )
+    assert applied == [winner]
+    assert journal.sources() == []
