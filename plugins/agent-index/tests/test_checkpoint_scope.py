@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from copy import deepcopy
+from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 
 import pytest
@@ -14,7 +15,7 @@ from agent_index.indexing import engine
 from agent_index.indexing.manifest import CrawlManifest
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls, recovery_scope
-from agent_index.indexing.state import IndexState
+from agent_index.indexing.state import IndexState, SourceState
 from agent_index.sources.providers import CliSourceConnector, ProviderError, ProviderManifest
 from agent_index.sources.base import FileEntry
 
@@ -223,4 +224,89 @@ def test_corrupt_persisted_checkpoint_scope_is_not_accepted(tmp_path, value):
     path = tmp_path / "state.json"
     path.write_text(json.dumps({"sources": {"alias": {"acquisition_scope": value}}}))
     with pytest.raises(ValueError, match="acquisition"):
+        IndexState.load(path)
+
+
+@dataclass
+class LegacySourceState:
+    """Constructor shape used before acquisition identities were introduced."""
+
+    last_commit: str | None = None
+    last_indexed_at: float | None = None
+    chunk_count: int = 0
+
+
+def test_new_checkpoint_preserves_legacy_reader_and_refuses_identity_loss(tmp_path):
+    path = tmp_path / "state.json"
+    state = IndexState(
+        sources={
+            "alias": SourceState("commit-a", 123.0, 2, "scope-a"),
+            "empty": SourceState(None, 124.0, 0),
+        },
+        total_chunks=2, last_full_reindex=100.0,
+        stored_families={"alias": "forge"},
+    )
+    state.save(path)
+    data = json.loads(path.read_text())
+    assert data["acquisition_scopes"] == {"alias": "scope-a"}
+    assert all("acquisition_scope" not in source for source in data["sources"].values())
+    legacy_sources = {
+        name: LegacySourceState(**source) for name, source in data["sources"].items()
+    }
+    assert legacy_sources["alias"] == LegacySourceState("commit-a", 123.0, 2)
+    assert legacy_sources["empty"] == LegacySourceState(None, 124.0, 0)
+    assert IndexState.load(path) == state
+
+    legacy_sources["alias"].last_commit = "commit-b"
+    path.write_text(json.dumps({
+        "sources": {name: asdict(source) for name, source in legacy_sources.items()},
+        "total_chunks": data["total_chunks"],
+        "last_full_reindex": data["last_full_reindex"],
+    }))
+    before = path.read_bytes()
+    resumed = IndexState.load(path)
+    assert resumed.sources["alias"].last_commit == "commit-b"
+    assert resumed.total_chunks == 2 and resumed.last_full_reindex == 100.0
+    with pytest.raises(ValueError, match="acquisition identity"):
+        resumed.require_acquisition_scope("alias", "scope-a", full=False)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("nested", [None, "scope-a"])
+def test_published_nested_scope_loads_and_saves_in_compatible_encoding(tmp_path, nested):
+    path = tmp_path / "state.json"
+    data = {"sources": {"alias": {"last_commit": "commit-a", "acquisition_scope": nested}}}
+    if nested is not None:
+        data["acquisition_scopes"] = {"alias": nested}
+    path.write_text(json.dumps(data))
+    state = IndexState.load(path)
+    assert state.sources["alias"].acquisition_scope == nested
+    state.save(path)
+    saved = json.loads(path.read_text())
+    assert "acquisition_scope" not in saved["sources"]["alias"]
+    assert saved.get("acquisition_scopes", {}) == ({"alias": nested} if nested else {})
+    assert IndexState.load(path) == state
+
+
+@pytest.mark.parametrize("scopes", [None, [], "", 3, {"alias": None}, {"alias": ""},
+                                    {"alias": 3}, {"alias": []}, {"orphan": "scope-a"}])
+def test_malformed_or_orphaned_additive_checkpoint_scope_refuses(tmp_path, scopes):
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({
+        "sources": {"alias": {"last_commit": "commit-a"}},
+        "acquisition_scopes": scopes,
+    }))
+    before = path.read_bytes()
+    with pytest.raises(ValueError, match="acquisition"):
+        IndexState.load(path)
+    assert path.read_bytes() == before
+
+
+def test_conflicting_checkpoint_encodings_refuse(tmp_path):
+    path = tmp_path / "state.json"
+    path.write_text(json.dumps({
+        "sources": {"alias": {"acquisition_scope": "scope-a"}},
+        "acquisition_scopes": {"alias": "scope-b"},
+    }))
+    with pytest.raises(ValueError, match="conflicting"):
         IndexState.load(path)

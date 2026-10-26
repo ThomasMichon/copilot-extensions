@@ -750,3 +750,25 @@ source-owner coordination rather than one large rewrite.
   own escaping failure. Changed Python lint and the two storage-owner type
   checks pass; existing search-filter kwargs prevent claiming a clean full
   facade type check and are outside this write-path change.
+- PR #9138 merged as `819499980328cf7ec64ea6d25bbfbe0656c8a98b` after
+  exact-head approval with no active findings and successful required checks.
+  Reconciled the source worktree and re-read this effort's Plan and Validation
+  Plan. Continue shared backfill and checkpoint compatibility qualification;
+  this source merge does not close release, adoption or the full effort gate.
+
+### 2026-10-26 - Compatible completed-checkpoint encoding
+
+- Continue the admitted compatibility slice on #9023 without closing #4222's
+  failed-content retry gap. Persist accepted acquisition scopes in an additive
+  top-level map, leaving the legacy three-field source constructor unchanged.
+- Preserve loading of already-published nested scopes and matching dual
+  encodings; conflicting, malformed and orphaned identities refuse.
+  A legacy writer that drops the new map cannot grant incremental authority.
+- The focused checkpoint, delta recovery, source-family and batch-resume packet
+  passes 69 tests. A separately retained old reader reproduces the published
+  nested-field failure and loads the candidate encoding with cursor, timestamp,
+  counts and full-reindex time intact. Its actual save drops identity, after
+  which the new incremental scope check refuses without changing the file.
+- This qualifies serialization and retained-reader behavior only. Scheduled
+  full-run admission, identity repair, consumer migration, release and rollout
+  remain open; neither existing source-lock nor coverage authority is replaced.
