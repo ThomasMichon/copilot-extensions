@@ -109,8 +109,13 @@ def legacy_triggers() -> list[str]:
                 blockers.append(f"{task.get('TaskPath', '')}{name} ({state})")
         return blockers
     config = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
-    directory = config / "systemd" / "user"
-    paths = [directory / f"{LEGACY_NAME}.{suffix}" for suffix in ("timer", "service")]
+    directories = dict.fromkeys((
+        config / "systemd" / "user", Path.home() / ".config" / "systemd" / "user",
+    ))
+    paths = [
+        directory / f"{LEGACY_NAME}.{suffix}"
+        for directory in directories for suffix in ("timer", "service")
+    ]
     installed = [str(path) for path in paths if path.exists() or path.is_symlink()]
     if installed:
         return installed

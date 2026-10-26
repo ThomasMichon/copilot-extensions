@@ -241,7 +241,7 @@ def test_environment_clears_session_and_run_identity(tmp_path: Path, monkeypatch
                 "COPILOT_EXTENSIONS_CONTEXT", "GIT_DIR", "GIT_CONFIG_COUNT",
                 "PYTHONEXECUTABLE", "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__",
                 "UV_PROJECT_ENVIRONMENT", "AGENT_WORKTREES_UPDATE_CONTEXT",
-                "AGENT_WORKTREES_PAYLOAD_ROOT"):
+                "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_HOME"):
         monkeypatch.setenv(key, "old-session")
     monkeypatch.setenv("SSH_ASKPASS_REQUIRE", "force")
     monkeypatch.setenv("DISPLAY", ":fixture")
@@ -253,6 +253,23 @@ def test_environment_clears_session_and_run_identity(tmp_path: Path, monkeypatch
     assert "SSH_ASKPASS" not in env and "GIT_SSH_COMMAND" not in env
     assert env["GH_PROMPT_DISABLED"] == "1"
     assert env["WORKTREE_MANAGER_ROOT"] == str(tmp_path)
+
+
+def test_worker_engine_root_does_not_depend_on_a_prior_session_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from worktree_manager.agent_plugin_runtime import legacy_plugin_root
+
+    home = tmp_path / "account"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path / "session-only"))
+    immediate = process.update_environment(tmp_path / "manager")
+    monkeypatch.delenv("AGENT_HOME")
+    later = process.update_environment(tmp_path / "manager")
+    assert legacy_plugin_root("agent-worktrees", environment=immediate) == (
+        legacy_plugin_root("agent-worktrees", environment=later)
+    ) == home / ".agent-worktrees"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="detached POSIX OpenSSH control; Windows environment contract is shared")
@@ -368,6 +385,8 @@ def test_public_targeted_executor_applies_policy_and_consumes_manager_only_flags
 
 
 def test_health_proves_live_worker_and_rejects_wrong_cookie(tmp_path: Path) -> None:
+    from agent_procutil._daemon_instance_identity import birth_identity
+
     async def exercise() -> None:
         worker = runtime.Worker(tmp_path)
         server = await asyncio.start_server(worker.health, "127.0.0.1", 0, limit=16384)
@@ -377,6 +396,7 @@ def test_health_proves_live_worker_and_rejects_wrong_cookie(tmp_path: Path) -> N
             status = await asyncio.to_thread(process.worker_status, tmp_path)
             assert status["running"]
             assert status["worker_id"] == worker.snapshot["worker_id"]
+            assert status["birth"] == birth_identity(os.getpid())
             assert "cookie" not in status
             assert await asyncio.to_thread(
                 process.probe, {**worker.snapshot, "cookie": "0" * 64},

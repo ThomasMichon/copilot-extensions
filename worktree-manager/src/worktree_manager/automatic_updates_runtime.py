@@ -17,6 +17,7 @@ from typing import Any
 from agent_procutil import DaemonSpawnError
 from agent_procutil.daemon_broker import WindowsDaemonProcess
 from agent_procutil.daemon_instances import daemon_entrypoint
+from agent_procutil._daemon_instance_identity import birth_identity
 from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
 from . import automatic_updates_process as process
@@ -37,7 +38,8 @@ class Worker:
             raise PolicyError("WORKTREE_MANAGER_AUTOMATIC_UPDATES_SELF_CYCLE must be 0 or 1")
         self.snapshot: dict[str, Any] = {
             "worker_id": secrets.token_hex(16), "cookie": secrets.token_hex(32),
-            "pid": os.getpid(), "runtime": process.runtime_identity(),
+            "pid": os.getpid(), "birth": birth_identity(os.getpid()),
+            "runtime": process.runtime_identity(),
             "state": "starting", "next_due": time.time(), "failures": 0,
             "self_cycle_enabled": self_cycle == "1",
         }
