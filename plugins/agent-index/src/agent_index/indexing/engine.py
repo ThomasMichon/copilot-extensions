@@ -31,6 +31,8 @@ _utf8_sys.stdout.reconfigure(encoding="utf-8")
 _utf8_sys.stderr.reconfigure(encoding="utf-8")
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from agent_index.chunking.base import Chunk
     from agent_index.engine.client import EngineClient
     from agent_index.index_config import IndexConfig, ModelProfile
@@ -279,8 +281,8 @@ def run_reindex(
             already stored at the same content hash **within this task's window**
             (``path_index.indexed_at >= resume_since``) are skipped — so an
             interrupted reindex resumes mid-source instead of restarting. ``None``
-            (a fresh run) re-embeds everything the crawl selected, preserving
-            full-rebuild semantics.
+            (a fresh incremental run) also reuses compatible file checkpoints.
+            ``full=True`` forces rebuilding files outside a resumed task window.
 
     Returns:
         Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
@@ -331,6 +333,16 @@ def run_reindex(
     # ensuring engines (or the migration) fails partway.
     started_engines: list[ModelProfile] = []
     ensure_engines = os.environ.get("AGENT_INDEX_INDEX_ENSURE_ENGINES", "1") != "0"
+    engines_ready = False
+
+    def prepare_embedding() -> None:
+        nonlocal engines_ready
+        if engines_ready or not ensure_engines:
+            return
+        for profile in config.model_profiles.values():
+            if ensure_engine(profile, multi_clients[profile.model_id]):
+                started_engines.append(profile)
+        engines_ready = True
 
     sources_to_index: list[SourceSpec]
     if source is None:
@@ -350,18 +362,6 @@ def run_reindex(
     start = time.monotonic()
 
     try:
-        # Ensure embedding engines are running BEFORE the embed phase. The
-        # code engine (8421) is on-demand and is left stopped by deploy, so
-        # without this a reindex would silently skip code embedding -- chunks
-        # get content-stored but never vectorised (#775). Fail loudly here
-        # (before the expensive crawl) rather than stalling silently mid-run.
-        # Inside the try so the finally always stops engines we started, even
-        # if a later ensure_engine or the migration below raises.
-        if ensure_engines:
-            for profile in config.model_profiles.values():
-                if ensure_engine(profile, multi_clients[profile.model_id]):
-                    started_engines.append(profile)
-
         for spec in sources_to_index:
             src_name = spec.name
             if progress_cb:
@@ -381,6 +381,7 @@ def run_reindex(
                     progress_cb=progress_cb,
                     resume_since=resume_since,
                     connector_kwargs=connector_kwargs,
+                    before_store=prepare_embedding,
                 )
                 total_chunks += stored
                 total_deleted += deleted
@@ -569,6 +570,7 @@ def _index_source(
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
     connector_kwargs: dict[str, object] | None = None,
+    before_store: Callable[[], None] | None = None,
 ) -> tuple[int, int, int]:
     """Index a single data source using the four-phase pipeline.
 
@@ -634,6 +636,9 @@ def _index_source(
             stream_batch_size=config.stream_batch_size,
             progress_cb=progress_cb,
             resume_since=resume_since,
+            force=full,
+            before_store=before_store,
+            chunker_revision=getattr(config, "chunker_revision", "1"),
         )
         # NOTE: ``upserted_files`` holds only files this run actually (re)stored;
         # files SKIPPED on resume are excluded, so Phase 3b stale-cleanup (which
@@ -681,7 +686,12 @@ def _index_source(
         print(f"  Reconciled: {total_deleted} files deleted, {stale_cleaned} stale chunks cleaned")
 
     # ── Phase 4: Commit state ───────────────────────────────
-    state.mark_source_indexed(source_name, manifest.commit, total_stored)
+    previous = state.sources.get(source_name)
+    indexed_count = (
+        total_stored if upserted_files or manifest.deletions
+        else previous.chunk_count if previous else 0
+    )
+    state.mark_source_indexed(source_name, manifest.commit, indexed_count)
     if manifest.stored_family is not None:
         state.stored_families[source_name] = manifest.stored_family
 
@@ -700,86 +710,13 @@ def _crawl_source(
     progress_cb: ProgressCallback | None = None,
     connector_kwargs: dict[str, object] | None = None,
 ) -> CrawlManifest:
-    """Phase 1: Crawl a source and produce a CrawlManifest.
+    """Compatibility entrypoint for the separately owned crawl phase."""
+    from agent_index.indexing.crawl import collect_source_changes
 
-    For full crawls: discover all files, diff paths against stored for deletions.
-    For incremental: list current paths (cheap), diff for deletions,
-    then discover changed files for upserts.
-    """
-    from agent_index.indexing.manifest import CrawlManifest, CrawlStats, DeletedFile
-    from agent_index.sources import get_connector
-
-    connector = get_connector(source_name, **(connector_kwargs or {}))
-    canonical = connector.source_name if selected_layout() else None
-    if selected_layout() and (not isinstance(canonical, str) or not canonical):
-        raise RuntimeError("connector has no canonical stored family")
-    commit = connector.current_commit()
-
-    # Build a cancel checker from the progress callback
-    cancel_check = progress_cb.check_cancelled if progress_cb else None
-
-    # Get what's currently in our index for deletion detection
-    stored_by_source = (
-        path_index.get_paths_by_family(canonical) if canonical is not None
-        else path_index.get_paths_by_prefix(source_name)
-    )
-
-    if full:
-        # Full crawl: discover everything
-        upserts = connector.discover(cancel_check=cancel_check)
-
-        if progress_cb:
-            progress_cb.check_cancelled()
-
-        # Build current path set from discovered files
-        current_by_source: dict[str, set[str]] = {}
-        for entry in upserts:
-            current_by_source.setdefault(entry.source, set()).add(entry.path)
-    else:
-        # Incremental: get current path set cheaply for deletion detection
-        current_by_source = connector.list_paths(cancel_check=cancel_check)
-
-        if progress_cb:
-            progress_cb.check_cancelled()
-
-        # Get changed files for upserts
-        src_state = state.sources.get(source_name)
-        last_commit = src_state.last_commit if src_state else None
-        if canonical is not None and state.stored_families.get(source_name) != canonical:
-            last_commit = None
-        upserts = connector.discover_changed(last_commit, cancel_check=cancel_check)
-
-        if progress_cb:
-            progress_cb.check_cancelled()
-
-    # Compute deletions: stored paths not in current paths
-    deletions: list[DeletedFile] = []
-    all_stored_sources = set(stored_by_source.keys())
-
-    for src in all_stored_sources:
-        stored_paths = stored_by_source[src]
-        current_paths = current_by_source.get(src, set())
-        for path in stored_paths - current_paths:
-            deletions.append(DeletedFile(source=src, path=path))
-
-    # Note: sources that no longer exist at all are already fully handled by
-    # the loop above -- their current path set is empty, so every stored path
-    # falls into (stored - current) and is queued for deletion.
-
-    stats = CrawlStats(
-        files_scanned=sum(len(p) for p in current_by_source.values()),
-        files_changed=len(upserts),
-        files_deleted=len(deletions),
-        files_unchanged=sum(len(p) for p in current_by_source.values()) - len(upserts),
-    )
-
-    return CrawlManifest(
-        source=source_name,
-        upserts=upserts,
-        deletions=deletions,
-        commit=commit,
-        stats=stats,
-        stored_family=canonical,
+    return collect_source_changes(
+        source_name, state=state, path_index=path_index, full=full,
+        source_aware=bool(selected_layout()), progress_cb=progress_cb,
+        connector_kwargs=connector_kwargs,
     )
 
 
@@ -793,31 +730,30 @@ def _embed_and_store_files(
     stream_batch_size: int = STREAM_BATCH_SIZE,
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
+    force: bool = False,
+    before_store: Callable[[], None] | None = None,
+    chunker_revision: str = "1",
 ) -> tuple[int, set[tuple[str, str]]]:
     """Phase 2: Chunk files, embed via the engine, upsert to stores.
 
     Checkpoints ``path_index`` after EACH batch flush (with content hashes) so an
-    interruption leaves a crash-consistent record of what is stored. When
-    ``resume_since`` is set, files already stored at the same content hash within
-    the task window (``indexed_at >= resume_since``) are skipped, so a resumed run
-    continues mid-source instead of restarting.
+    interruption leaves a crash-consistent record of what is stored. Compatible
+    file checkpoints are reused on normal rounds. An explicit full rebuild
+    forces writes, except for compatible work committed in its retry window.
 
     Returns ``(total_chunks_stored, stored_files)`` where ``stored_files`` is the
     set of ``(source, path)`` this run actually (re)stored — excluding skipped
     files, so Phase 3 stale-cleanup does not delete their still-valid chunks.
     """
     from agent_index.chunking import get_chunker
+    from agent_index.indexing.fingerprints import file_fingerprint
 
     batch: list[Chunk] = []
     total_chunks = 0
     total_stored = 0
     stored_files: set[tuple[str, str]] = set()
     skipped = 0
-    # Bulk-load the stored-file map ONCE for resume lookups (avoids opening a
-    # SQLite connection per file on large sources).
-    resume_index: dict[tuple[str, str], tuple[str | None, float]] = (
-        path_index.get_all_entries() if resume_since is not None else {}
-    )
+    resume_index = path_index.get_entries([(entry.source, entry.path) for entry in files])
     # Files whose chunks are in the current (not-yet-flushed) batch, with their
     # content hash + chunk count — checkpointed to path_index on each flush. A
     # file's chunks never straddle a flush (a whole file is added before the
@@ -827,9 +763,14 @@ def _embed_and_store_files(
     def _flush() -> None:
         nonlocal batch, total_stored, pending
         if not batch:
+            if pending:
+                path_index.mark_indexed_batch(pending)
+                pending = []
             return
         if progress_cb:
             progress_cb.check_cancelled()
+        if before_store:
+            before_store()
         total_stored += _embed_and_store_batch(
             batch, multi_store, multi_clients,
             model_profiles,
@@ -846,14 +787,14 @@ def _embed_and_store_files(
         if progress_cb:
             progress_cb.check_cancelled()
 
-        chash = _content_hash(entry.content)
+        chash = file_fingerprint(entry, model_profiles, chunker_revision=chunker_revision)
 
-        # Resume-skip: already stored at this hash within THIS task's window.
-        if resume_since is not None:
-            prior = resume_index.get((entry.source, entry.path))
-            if prior is not None and prior[0] == chash and prior[1] >= resume_since:
-                skipped += 1
-                continue
+        prior = resume_index.get((entry.source, entry.path))
+        if prior is not None and prior[0] == chash and (
+            not force or (resume_since is not None and prior[1] >= resume_since)
+        ):
+            skipped += 1
+            continue
 
         chunker, _lang = get_chunker(entry.path)
         try:
@@ -880,7 +821,7 @@ def _embed_and_store_files(
 
     msg = f"  Embedded: {total_chunks} chunks generated, {total_stored} stored"
     if skipped:
-        msg += f" ({skipped} files skipped -- already stored this run)"
+        msg += f" ({skipped} compatible file checkpoints reused)"
     print(msg)
     return (total_stored, stored_files)
 

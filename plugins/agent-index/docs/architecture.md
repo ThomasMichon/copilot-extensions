@@ -26,6 +26,37 @@ requiring explicit `[stdio-mcp]` opt-in on either role (absent from base and hos
 That means the old "Phase 1 service shell only" description is stale. Future
 work still exists, but indexing and retrieval are present in the shipped code.
 
+## Incremental connector and reuse contracts
+
+An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
+returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
+`DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
+The engine validates the result and canonical source family before writes.
+Incomplete/incompatible deltas fail the source; they are not converted into
+an empty success or inferred whole-corpus deletion.
+
+This path does not call `current_commit()`, `list_paths()` or read all stored
+paths: the connector owns coherent base-to-target coverage. Full reindexing and
+legacy connectors retain the existing snapshot/discovery path. The opt-in Python
+protocol does not change the external provider CLI wire format; provider
+capability negotiation and durable event/task payloads remain separate work.
+
+Presented files use bounded, exact checkpoint lookups. A normal round reuses
+only complete file fingerprints covering text, language, metadata, chunker
+policy and configured embedding profiles. `IndexConfig.chunker_revision` and
+`ModelProfile.revision` are explicit programmatic invalidation inputs; a chunker
+or model change that preserves its name must advance the corresponding revision.
+Legacy content-only fingerprints deliberately miss once when a file is next
+presented. Full reindexing still forces work, while its retries can reuse
+compatible writes committed within the task window.
+
+Engine readiness is deferred until the first nonempty embedding batch; an empty
+delta or wholly reused file set does not start embedding engines. Reused files
+are excluded from timestamp-based stale cleanup. Metadata/model changes are
+currently conservative whole-file invalidations: selective chunk/model reuse,
+coverage backfill and metadata-only vector preservation remain subsequent
+slices, not guarantees of the file-level checkpoint path.
+
 ## Process model
 
 ```mermaid

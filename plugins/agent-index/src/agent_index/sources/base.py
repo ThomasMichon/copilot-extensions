@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from agent_index.sources.delta import SourceDelta
+
 
 @dataclass(frozen=True)
 class FileEntry:
@@ -84,4 +86,21 @@ class SourceConnector(Protocol):
 
     def current_commit(self) -> str | None:
         """Return the current HEAD commit SHA, or None if not git-tracked."""
+        ...
+
+
+class DeltaSourceConnector(SourceConnector, Protocol):
+    """Opt-in complete-delta acquisition; legacy connectors remain supported."""
+
+    def discover_delta(
+        self,
+        last_commit: str | None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        """Return versioned changes/tombstones without whole-corpus enumeration.
+
+        A successful result owns its target checkpoint and complete change
+        coverage. Unsupported or incomplete acquisition must fail explicitly,
+        never masquerade as an empty delta.
+        """
         ...

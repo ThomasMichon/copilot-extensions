@@ -74,6 +74,7 @@ class ModelProfile:
     engine_mode: str = field(
         default_factory=lambda: os.environ.get("AGENT_INDEX_ENGINE_MODE", "external")
     )
+    revision: str = field(default="", kw_only=True)
 
     @property
     def engine_url(self) -> str:
@@ -271,6 +272,7 @@ class IndexConfig:
     # and bounds per-batch embed time. Capability-aware default (#115): 500 on
     # GPU, 64 on CPU; override with AGENT_INDEX_STREAM_BATCH_SIZE.
     stream_batch_size: int = field(default_factory=_default_stream_batch_size)
+    chunker_revision: str = field(default="1", kw_only=True)
 
     # Query-time embedding. All embedding routes through the durable engine
     # daemon by default (the service venv is torch-free), so query embedding is

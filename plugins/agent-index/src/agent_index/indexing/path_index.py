@@ -260,6 +260,33 @@ class PathIndex:
         finally:
             conn.close()
 
+    def get_entries(
+        self, identities: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], tuple[str | None, float]]:
+        """Read only selected file checkpoints, in bounded SQLite batches."""
+        identities = list(dict.fromkeys(identities))
+        if not identities:
+            return {}
+        result: dict[tuple[str, str], tuple[str | None, float]] = {}
+        conn = self._connect()
+        try:
+            for offset in range(0, len(identities), 100):
+                batch = identities[offset:offset + 100]
+                predicate = " OR ".join("(source = ? AND file_path = ?)" for _ in batch)
+                params = [value for identity in batch for value in identity]
+                rows = conn.execute(
+                    "SELECT source, file_path, content_hash, indexed_at "
+                    f"FROM indexed_files WHERE {predicate}",
+                    params,
+                )
+                for row in rows:
+                    result[(row["source"], row["file_path"])] = (
+                        row["content_hash"], row["indexed_at"],
+                    )
+            return result
+        finally:
+            conn.close()
+
     def get_all_entries(self) -> dict[tuple[str, str], tuple[str | None, float]]:
         """Return ``{(source, file_path): (content_hash, indexed_at)}`` for all files.
 
