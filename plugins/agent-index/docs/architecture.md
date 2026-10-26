@@ -235,6 +235,11 @@ compatibility and verification requirements. No CLI/provider negotiation is
 implied by these in-process seams, and custom callable wrappers must not claim
 hint support they do not actually preserve.
 
+Retrieval facades retaining another canonical source naming scheme can override
+the pure `ContentStore.repo_filter_sql` method. The shared FTS/currentness path
+still executes that escaped prefilter before limiting candidates; the consumer
+migration recipe covers matching its vector-side policy.
+
 ```mermaid
 flowchart LR
   Agent[Any Copilot agent] --> CLI[agent-index read CLI]

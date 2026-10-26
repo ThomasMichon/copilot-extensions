@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment proposed before implementation | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |
 | [Instruction Source Resolution](active/instruction-source-resolution/README.md) | Draft; review the compatibility repair before implementation | #9097; effective enabled-source verification, exact generated output, unchanged trust/maintenance boundaries; no rollout |
 | [Incremental Indexing Delta Pipeline](active/incremental-indexing-delta-pipeline/README.md) | Active; shared delta seam and normal-round reuse slice, complete acquisition/store/adoption gates open | #9023; preserves #4222/#4220/#8733/#5302 correctness owners; generic engine first, consumer adoption separate |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
@@ -146,7 +147,6 @@ that pattern to this repository.
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
 | [Repository PR Fleet Sweep](2026/10/25%20repository-pr-fleet-sweep/README.md) | Done; complete one-shot census, selected original-root observations and bounded publication repair merged in #8855 with approval, required CI and native Windows/Linux proof | #8802; source-only delivery, no runtime rollout; broader #7039 ownership retained |
-| [Leased Daemon Instances](2026/10/25%20leased-daemon-instances/README.md) | Done; complete shared/native instance custody, finite disposable lifetimes and normal installer cleanup merged in #8720; Windows/Linux qualification recorded | #8403; production cutover and existing custody preserved; no runtime rollout |
 | [Native Mux Launch Contract](2026/10/23%20native-mux-launch-contract/README.md) | Done for bounded source delivery; terminal custody, connected status and selected-directory repairs merged in #8031 | #7962 retains human/native qualification, release and authorized rollout; no installed changes |
 | [Generation-Bound Guidance](2026/10/23%20generation-bound-guidance/README.md) | Done for bounded source delivery; generation reuse, protected partial publication and late notices merged in #8045 | #7943 retains full native entry, cold-bootstrap, release and installed acceptance; no rollout |
 | [Telemetry Measurement Contract](2026/10/22%20telemetry-measurement-contract/README.md) | Done; QoS/Engagement contract, 58-entry catalog and future instrumentation plan merged; no runtime adoption | #8102; existing Performance Telemetry and production owners retain implementation/rollout |

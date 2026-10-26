@@ -6,7 +6,8 @@ Complements the merged [first causal-record source](dispatch-spawn-causal-loggin
 
 **Status: plan reviewed in #9069; first pure controls merged in #9071;
 ordinary-volume amendment reviewed in #9101; finite observations and
-storage-only monitoring merged in #9104.**
+storage-only monitoring merged in #9104; network inventory and static
+volatile checks merged in #9111.**
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -236,11 +237,17 @@ on missing/stale/failed measurements, thresholds, reserve or lifetime expiry.
 Its 206 synthetic controls do not close real boundary qualification,
 native capture or any persistence/fault gate.
 
-The next source adds finite, repeated internal-network/endpoint observations
+#9111 adds finite, repeated internal-network/endpoint observations
 for explicit subject/peer IDs and exact static `/tmp`/`/run` configuration
 checks. Those observations remain non-atomic and do not establish egress,
 exclusive custody, peer posture or guest mount/runtime qualification.
-Implement those remaining prerequisites before a provisioning path.
+The next source prepares a shallow immutable local source input using native
+Git through the existing bounded process owner, without copying dirty/index
+bytes, source credentials/configuration/hooks or older history.
+Synthetic controls and an explicitly selected local-Git lane cover that
+preparation; no image build, guest copy or running-source claim follows.
+Implement the remaining source-to-image/guest qualification, controlled egress,
+resource and interrupted-driver custody prerequisites before provisioning.
 Reuse existing finite process, source and service owners;
 this remains ordinary integration-test tooling, not a new runtime or fleet.
 Keep persistent provisioning blocked until the exact resources, thresholds,

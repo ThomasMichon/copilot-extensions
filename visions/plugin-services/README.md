@@ -195,6 +195,27 @@ resource fencing, or existing standalone-service defaults.
 
 ## Features
 
+### compiler-free-first-party-execution
+
+The suite's own implementation is interpreted code, not custom native source
+or suite-owned compiled binaries. Development, release construction,
+installation, repair and ordinary execution do not require native compilation,
+an end-user compiler or on-demand compilation of embedded helper code. Moving
+that compilation to a release worker or shipping a prebuilt custom helper is
+not an alternative to this boundary.
+
+Thin shell entrypoints and shared Python implementations use existing operating
+system interfaces while preserving process identity, lifetime, containment,
+filesystem custody and explicit uncertain outcomes. Bootstrap dependencies are
+declared and qualified rather than hidden behind a compiler or runtime code
+generation. Missing capability produces an attributable refusal, never a
+weaker process-identity or cleanup fallback.
+
+Existing operating-system facilities, supported interpreters and admitted
+third-party binary distributions remain external dependencies; this boundary
+does not require replacing their implementations. Their acquisition does not
+silently fall back to compiling native dependencies.
+
 ### attributed-daemon-instances
 
 Every shipped resident-service launch has attributable instance custody,
