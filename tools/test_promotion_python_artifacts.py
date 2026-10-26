@@ -756,7 +756,10 @@ def resolve_toolchain_lock(*args, **kwargs):
         Path(artifacts.__file__).parents[1] / "libs" / "installer-engine" / inspector.name,
         inspector,
     )
-    for name in ("artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py"):
+    for name in (
+        "artifact_source_build.py", "standalone_python_artifacts.py", "standalone_consumers.py",
+        "plugin_runtime_resources.py",
+    ):
         shutil.copy(Path(artifacts.__file__).with_name(name), driver / name)
     shutil.copy(Path(promotion.__file__), driver / "promote_release.py")
     shutil.copy(Path(promotion.__file__).with_name("promotion_candidate.py"), driver / "promotion_candidate.py")
