@@ -203,3 +203,26 @@ def test_health_404_cannot_masquerade_as_missing_owner(http, monkeypatch):
             io.BytesIO(json.dumps({"detail": "no live session for handle"}).encode()))
     monkeypatch.setattr(bridge_remote.urllib.request, "urlopen", urlopen)
     assert tracking.liveness_verdict("wt", owner_session_id="s") == tracking.UNKNOWN
+
+
+@pytest.mark.parametrize("stage", ["health", "metadata"])
+def test_truncated_read_is_unknown_and_enrichment_degrades(http, monkeypatch, stage, caplog):
+    from http.client import IncompleteRead
+
+    original = Response.read
+
+    def read(response):
+        health = isinstance(response.data, dict) and "protocol_version" in response.data
+        if health == (stage == "health"):
+            raise IncompleteRead(b"partial", 10)
+        return original(response)
+
+    monkeypatch.setattr(Response, "read", read)
+    assert tracking.liveness_verdict("wt", owner_session_id="s") == tracking.UNKNOWN
+    requests = 1 if stage == "health" else 2
+    assert len(http["calls"]) == requests
+    tasks = [{"id": str(i), "status": "started", "owner": "local/wt"} for i in range(12)]
+    assert tracking.enrich_tasks(tasks) == tasks
+    assert len(http["calls"]) == requests * 2
+    assert all(response.closed for response in http["responses"])
+    assert "liveness unknown" in caplog.text

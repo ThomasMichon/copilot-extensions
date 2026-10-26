@@ -5,10 +5,14 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
+
 from agent_dispatch import tracking
 
 
-def test_private_http_rendezvous_and_stale_service(tmp_path, monkeypatch):
+@pytest.mark.parametrize("truncate", [None, "health", "metadata"],
+                         ids=["normal", "truncated-health", "truncated-metadata"])
+def test_private_http_rendezvous_and_stale_service(tmp_path, monkeypatch, truncate):
     from zdd.routing import publish_active
 
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_BRIDGE_BASE_URL"):
@@ -29,7 +33,8 @@ def test_private_http_rendezvous_and_stale_service(tmp_path, monkeypatch):
             self.send_response(200)
             self.send_header("Content-Length", str(len(data)))
             self.end_headers()
-            self.wfile.write(data)
+            stage = "health" if self.path == "/health" else "metadata"
+            self.wfile.write(data[:-3] if truncate == stage else data)
 
         def log_message(self, *args):
             pass
@@ -39,12 +44,16 @@ def test_private_http_rendezvous_and_stale_service(tmp_path, monkeypatch):
     thread.start()
     try:
         publish_active(tmp_path, bind="127.0.0.1", port=server.server_port)
-        assert tracking.liveness_verdict("wt", owner_session_id="session") == tracking.LIVE
-        assert paths == ["/health", "/api/v1/live-sessions/resolve?handle=wt"]
+        expected = tracking.LIVE if truncate is None else tracking.UNKNOWN
+        assert tracking.liveness_verdict("wt", owner_session_id="session") == expected
+        expected_paths = ["/health"]
+        if truncate != "health":
+            expected_paths.append("/api/v1/live-sessions/resolve?handle=wt")
+        assert paths == expected_paths
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
     assert not thread.is_alive()
     assert tracking.liveness_verdict("wt", owner_session_id="session") == tracking.UNKNOWN
-    assert len(paths) == 2
+    assert paths == expected_paths

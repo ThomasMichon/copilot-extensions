@@ -34,6 +34,7 @@ import shlex
 import shutil
 import subprocess
 import time
+from http.client import HTTPException
 from typing import Any
 
 from . import bridge_remote, remote_dispatch
@@ -95,6 +96,7 @@ def _resolve_local_owner(worktree: str, *, timeout: float) -> dict[str, Any] | N
         bridge_remote.RemoteBridgeUnavailable,
         bridge_remote.RemoteBridgeOperationError,
         OSError,
+        HTTPException,
     ) as exc:
         logging.getLogger(__name__).warning(
             "Local Bridge owner-session read unavailable (%s); liveness unknown",
