@@ -163,6 +163,10 @@ use the retained record's execution owner, not the detected machine scalar.
 An absent ledger uses validated local execution context; an existing legacy
 ledger is never relabeled to admit a tuple child. Explicit/env foreign owners
 retain precedence and their normal receiving-record fences.
+After locality is established, coordination readiness is loaded from the
+qualified owner's project, even when its tuple execution owner differs from
+the caller's detected scalar. A ready caller project cannot substitute for an
+owner requiring an unbound knowledge repository.
 Creation also checks the child's execution owner against the independently
 loaded parent project's context under the parent record lock. A prospective
 claim that the receiving project cannot later settle refuses before writing.
