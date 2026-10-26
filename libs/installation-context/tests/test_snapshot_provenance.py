@@ -11,6 +11,7 @@ import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from functools import cache
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
@@ -821,6 +822,8 @@ def _run_exemplar_slot_action(
     environment["USERPROFILE"] = str(home)
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
+    environment.pop("COPILOT_PLUGIN_INSTALL_STAGED", None)
+    environment.pop("COPILOT_PLUGIN_STAGED_FROM", None)
     if environment_overrides:
         environment.update(environment_overrides)
     command = [*command_prefix]
@@ -872,6 +875,17 @@ def _run_exemplar_slot_action(
     )
 
 
+@cache
+def _release_materializer() -> Any:
+    source = LIB.parents[1] / "tools" / "materialize_main.py"
+    spec = importlib.util.spec_from_file_location("snapshot_fixture_materializer", source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _installed_exemplar(
     exemplar: tuple[str, tuple[str, ...], str],
     tmp_path: Path,
@@ -899,6 +913,21 @@ def _installed_exemplar(
                 "dist",
             ),
         )
+        materializer = _release_materializer()
+        entries = materializer.materialize_file_pointers(
+            installed_plugin, canonical_root=LIB.parents[1],
+        )
+        for operation in (
+            materializer.materialize_uv_editable_ref_into,
+            materializer.materialize_installer_engine_ref_into,
+            materializer.materialize_launch_wrapper_assets_into,
+        ):
+            entries.extend(operation(
+                source_consumer_dir=source_plugin,
+                dest_consumer_dir=installed_plugin,
+                canonical_root=LIB.parents[1],
+            ))
+        assert not any(entry.startswith("SKIP ") for entry in entries), entries
     installed_script = installed_plugin / source_script.relative_to(source_plugin)
     return (*prefix[:-1], str(installed_script)), installed_plugin, home
 
@@ -974,6 +1003,25 @@ def _function_source(
     return source[begin:end].rstrip() + "\n"
 
 
+def _source_runtime_functions(script: Path, plugin_id: str, style: str) -> str:
+    if plugin_id == "agent-machines":
+        return _function_source(
+            script,
+            "function Get-SourceRuntimeIdentity {" if style == "powershell"
+            else "_source_python() {",
+            "\nfunction Get-GitInfo {" if style == "powershell"
+            else "\nPACKAGE_VERSION=",
+        )
+    source = script.with_name(
+        "source-runtime.ps1" if style == "powershell" else "source-runtime.sh"
+    ).read_text(encoding="utf-8")
+    return source.split(
+        "\nfunction Publish-SourceSnapshot {" if style == "powershell"
+        else "\n_source_snapshot() {",
+        1,
+    )[0]
+
+
 def _run_agent_machines_snapshot_harness(
     exemplar: tuple[str, tuple[str, ...], str],
     installed_plugin: Path,
@@ -1045,6 +1093,8 @@ exit 1
                     f"$PluginDir = '{ps(installed_plugin)}'",
                     f"$snapshotsRoot = '{ps(layout['snapshots'])}'",
                     f"$SrcVersion = '{ps(version)}'",
+                    "$SourceRuntimeIdentity = $null",
+                    "$PackageVersion = $SrcVersion",
                     f"$ExpectedMarketplaceId = '{ps(layout['marketplace_id'])}'",
                     f"$Context = '{ps(layout['install'])}'",
                     "$cellNamespaceGeneration = '1'",
@@ -1052,6 +1102,9 @@ exit 1
                     f"$DurableHome = '{ps(layout['durable'])}'",
                     f"$slotRunner = '{ps(fake_runner)}'",
                     "$probeHost = (Get-Process -Id $PID).Path",
+                    _source_runtime_functions(
+                        source_script, "agent-machines", style,
+                    ).rstrip(),
                     _function_source(
                         source_script,
                         "function Get-CellSnapshotOwnerText {",
@@ -1103,6 +1156,8 @@ esac
                     f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
                     f"SNAPSHOTS_ROOT={shlex.quote(str(layout['snapshots']))}",
                     f"SRC_VERSION={shlex.quote(version)}",
+                    "SOURCE_RUNTIME_IDENTITY=''",
+                    'PACKAGE_VERSION="$SRC_VERSION"',
                     f"EXPECTED_MARKETPLACE_ID={shlex.quote(str(layout['marketplace_id']))}",
                     f"CONTEXT={shlex.quote(str(layout['install']))}",
                     "CELL_NAMESPACE_GENERATION=1",
@@ -1110,6 +1165,9 @@ esac
                     f"DURABLE_HOME={shlex.quote(str(layout['durable']))}",
                     f"SLOT_RUNNER={shlex.quote(str(fake_runner))}",
                     "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                    _source_runtime_functions(
+                        source_script, "agent-machines", style,
+                    ).rstrip(),
                     _function_source(
                         source_script,
                         "_cell_snapshot_owner_text() {",
@@ -1246,24 +1304,36 @@ def test_agent_machines_snapshot_publication_preserves_unowned_final_state(
     ).exists()
 
 
+def _reserve_exemplar_completion_slot(
+    installed_plugin: Path,
+    layout: dict[str, Path | str],
+    version: str,
+) -> None:
+    snapshot_root = Path(layout["snapshot_root"])
+    (snapshot_root / "payload-content.txt").unlink()
+    shutil.copytree(installed_plugin, snapshot_root, dirs_exist_ok=True)
+    _stamp_with_python(layout, snapshot_id=version)
+    provisioned = _run(
+        ALL_RUNNERS[0],
+        "slot-provision",
+        layout,
+        snapshot_id=version,
+        runtime_version=version,
+        expected_payload_root=installed_plugin,
+        expected_payload_version=version,
+    )
+    assert provisioned.returncode == 0, provisioned.stderr
+
+
 def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
     source = script.read_text(encoding="utf-8")
-    if style == "powershell":
-        call = source.rindex("Invoke-VersionedMarkComplete\n")
-        following = (
-            "\n    Write-Ok "
-            if plugin_id == "agent-machines"
-            else "\n    Write-Manifest"
-        )
-    else:
-        call = source.rindex("_versioned_mark_complete\n")
-        following = (
-            "\n    _ok "
-            if plugin_id == "agent-machines"
-            else "\n    _write_manifest"
-        )
-    start = source.rfind("\n", 0, call) + 1
-    return source[start : source.index(following, start)].rstrip() + "\n"
+    guard = (
+        "if (-not (Invoke-VersionedMarkComplete)) { exit 1 }"
+        if style == "powershell"
+        else "_versioned_mark_complete || exit 1"
+    )
+    assert source.count(guard) == 1, plugin_id
+    return guard + "\n"
 
 
 def _run_exemplar_mark_complete(
@@ -1273,7 +1343,7 @@ def _run_exemplar_mark_complete(
     tmp_path: Path,
     *,
     runtime_version: str,
-    python_executable: str | None = None,
+    fail_mark_complete: bool = False,
     activation_sentinel: Path | None = None,
     environment_overrides: dict[str, str] | None = None,
     powershell_preamble: str = "",
@@ -1286,6 +1356,42 @@ def _run_exemplar_mark_complete(
         if installed_plugin.name == "agent-machines"
         else ("install.ps1" if style == "powershell" else "install.sh")
     )
+    runtime_script = installed_plugin / "scripts" / "versioned_runtime.py"
+    runtime_entry = producer / "versioned_runtime.py"
+    runtime_entry.write_text(
+        "\n".join(
+            (
+                "import importlib.util",
+                "import sys",
+                "from pathlib import Path",
+                "sys.dont_write_bytecode = True",
+                f"spec = importlib.util.spec_from_file_location('fixture_runtime', {str(runtime_script)!r})",
+                "runtime = importlib.util.module_from_spec(spec)",
+                "sys.modules[spec.name] = runtime",
+                "spec.loader.exec_module(runtime)",
+                (
+                    "def fail_completion(*args, **kwargs):\n"
+                    f"    Path({str(producer / 'completion-writer-attempt')!r}).write_text('attempted', encoding='utf-8')\n"
+                    "    raise OSError('injected completion writer failure')\n"
+                    "runtime.mark_complete = fail_completion"
+                    if fail_mark_complete else ""
+                ),
+                "raise SystemExit(runtime.main())",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    helpers = subprocess.check_output(
+        [
+            sys.executable, "-I", "-B", str(runtime_script),
+            "--root", str(layout["plugin_root"]),
+            "construction-shell", "--shell", "ps1" if style == "powershell" else "sh",
+        ],
+        text=True,
+        encoding="utf-8",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     powershell_sentinel = (
         str(activation_sentinel).replace("'", "''")
         if activation_sentinel is not None
@@ -1293,10 +1399,6 @@ def _run_exemplar_mark_complete(
     )
     if style == "powershell":
         harness = producer / "producer.ps1"
-        shutil.copyfile(
-            installed_plugin / "scripts" / "versioned_runtime.py",
-            producer / "versioned_runtime.py",
-        )
         harness.write_text(
             "\n".join(
                 (
@@ -1312,30 +1414,26 @@ def _run_exemplar_mark_complete(
                     "$InstallDir = $RuntimeRoot",
                     "$LinkDir = Join-Path $InstallDir '.venv'",
                     "$SrcVersion = $RuntimeVersion",
+                    "$PackageVersion = $SrcVersion",
+                    "$SourceRuntimeIdentity = $null",
                     "$VersionedRuntime = $true",
                     "$VenvPython = $Python",
                     "$VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'",
                     "function Get-BootstrapPython { return $Python }",
                     "function Write-Fail([string]$Message) { throw $Message }",
                     "function Write-Ok([string]$Message) {}",
-                    (
-                        "function Invoke-VersionedActivate { "
-                        f"[IO.File]::WriteAllText('{powershell_sentinel}', 'activated'); "
-                        "return $true }"
-                        if activation_sentinel is not None
-                        and installed_plugin.name == "agent-index"
-                        else ""
-                    ),
+                    _source_runtime_functions(
+                        source_script, installed_plugin.name, style,
+                    ).rstrip(),
+                    helpers,
                     _function_source(
                         source_script,
                         "function Get-PayloadHash(",
-                        "\nfunction Invoke-VersionedSlotClean",
-                    ).rstrip(),
-                    _function_source(
-                        source_script,
-                        "function Invoke-VersionedMarkComplete {",
                         "\n# === end install-contract:v4 marker/toss helpers",
                     ).rstrip(),
+                    "$completionError = $null",
+                    "try {",
+                    "Invoke-VersionedSlotClean",
                     powershell_preamble,
                     (
                         _activation_tail_source(
@@ -1346,6 +1444,16 @@ def _run_exemplar_mark_complete(
                         if activation_sentinel is not None
                         else "Invoke-VersionedMarkComplete"
                     ),
+                    (
+                        f"[IO.File]::WriteAllText('{powershell_sentinel}', 'activated')"
+                        if activation_sentinel is not None else ""
+                    ),
+                    "} catch { $completionError = $_; throw } finally {",
+                    "    try { Stop-RuntimeConstruction } catch {",
+                    "        if ($null -eq $completionError) { throw }",
+                    "        [Console]::Error.WriteLine($_)",
+                    "    }",
+                    "}",
                     "",
                 )
             ),
@@ -1363,7 +1471,7 @@ def _run_exemplar_mark_complete(
             "-RuntimeVersion",
             runtime_version,
             "-Python",
-            python_executable or sys.executable,
+            sys.executable,
         ]
     else:
         harness = producer / "producer.sh"
@@ -1373,40 +1481,31 @@ def _run_exemplar_mark_complete(
                     "#!/usr/bin/env bash",
                     "set -euo pipefail",
                     f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
-                    f"SCRIPT_DIR={shlex.quote(str(installed_plugin / 'scripts'))}",
+                    f"SCRIPT_DIR={shlex.quote(str(producer))}",
                     f"INSTALL_DIR={shlex.quote(str(layout['plugin_root']))}",
                     'LINK_DIR="$INSTALL_DIR/.venv"',
                     f"SRC_VERSION={shlex.quote(runtime_version)}",
+                    'PACKAGE_VERSION="$SRC_VERSION"',
+                    "SOURCE_RUNTIME_IDENTITY=''",
                     "VERSIONED_RUNTIME=1",
-                    f"PYTHON={shlex.quote(python_executable or sys.executable)}",
+                    f"PYTHON={shlex.quote(sys.executable)}",
                     'VENV_PYTHON="$PYTHON"',
-                    'VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"',
+                    f"VR_SCRIPT={shlex.quote(str(runtime_entry))}",
                     "_fail() { printf '%s\\n' \"$1\" >&2; }",
                     "_ok() { :; }",
                     "_bootstrap_python() { printf '%s\\n' \"$PYTHON\"; }",
-                    (
-                        "_versioned_activate() { "
-                        f"printf activated >{shlex.quote(str(activation_sentinel))}; }}"
-                        if activation_sentinel is not None
-                        and installed_plugin.name == "agent-index"
-                        else ""
-                    ),
+                    _source_runtime_functions(
+                        source_script, installed_plugin.name, style,
+                    ).rstrip(),
+                    helpers,
                     _function_source(
                         source_script,
                         "_payload_hash() {",
-                        "\n_versioned_slot_clean()",
+                        "\n# --- self-provisioning"
+                        if installed_plugin.name == "agent-machines"
+                        else "\n# === install-contract:v4 source-kind",
                     ).rstrip(),
-                    _function_source(
-                        source_script,
-                        "_versioned_mark_complete() {",
-                        "\necho ''",
-                    ).rstrip()
-                    if installed_plugin.name == "agent-machines"
-                    else _function_source(
-                        source_script,
-                        "_versioned_mark_complete() {",
-                        "\n# === install-contract:v4 source-kind",
-                    ).rstrip(),
+                    "_versioned_slot_clean",
                     (
                         _activation_tail_source(
                             source_script,
@@ -1416,6 +1515,10 @@ def _run_exemplar_mark_complete(
                         if activation_sentinel is not None
                         else "_versioned_mark_complete"
                     ),
+                    (
+                        f"printf activated >{shlex.quote(str(activation_sentinel))}"
+                        if activation_sentinel is not None else ""
+                    ),
                     "",
                 )
             ),
@@ -1424,6 +1527,7 @@ def _run_exemplar_mark_complete(
         harness.chmod(0o755)
         command = ("bash", str(harness))
     environment = os.environ.copy()
+    environment["COPILOT_EXTENSIONS_CONTEXT"] = str(layout["install"])
     if environment_overrides:
         environment.update(environment_overrides)
     return subprocess.run(
@@ -1457,6 +1561,7 @@ def _run_exemplar_payload_hash(
                     "param([string]$PayloadRoot)",
                     "$ErrorActionPreference = 'Stop'",
                     "$PluginDir = $PayloadRoot",
+                    "$SourceRuntimeIdentity = $null",
                     _function_source(
                         source_script,
                         "function Get-PayloadHash(",
@@ -1528,8 +1633,10 @@ def _payload_file_bytes(root: Path) -> dict[str, bytes]:
     EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
-def test_exemplar_marker_writer_failure_prevents_activation_tail(
+@pytest.mark.parametrize("fail_mark_complete", (False, True))
+def test_exemplar_completion_writer_gates_activation_tail(
     exemplar: tuple[str, tuple[str, ...], str],
+    fail_mark_complete: bool,
     tmp_path: Path,
 ) -> None:
     plugin_id, prefix, _ = exemplar
@@ -1547,55 +1654,32 @@ def test_exemplar_marker_writer_failure_prevents_activation_tail(
         snapshot_id=version,
         payload_root=installed_plugin,
     )
+    _reserve_exemplar_completion_slot(installed_plugin, layout, version)
     slot = Path(layout["plugin_root"]) / "versions" / version
-    slot.mkdir(parents=True)
     activation_sentinel = tmp_path / "activation-reached"
-    dispatcher_source = tmp_path / "completion-writer-dispatch.py"
-    dispatcher_source.write_text(
-        "\n".join(
-            (
-                "from pathlib import Path",
-                "import sys",
-                f"sentinel = Path({str(activation_sentinel)!r})",
-                "if 'activate' in sys.argv:",
-                "    sentinel.write_text('activated', encoding='utf-8')",
-                "    raise SystemExit(0)",
-                "if 'mark-complete' in sys.argv:",
-                "    raise SystemExit(23)",
-                "raise SystemExit(0)",
-                "",
-            )
-        ),
-        encoding="utf-8",
-    )
-    if os.name == "nt":
-        failing_writer = tmp_path / "completion-writer.cmd"
-        failing_writer.write_text(
-            f'@"{sys.executable}" "{dispatcher_source}" %*\r\n',
-            encoding="utf-8",
-        )
-    else:
-        failing_writer = tmp_path / "completion-writer"
-        failing_writer.write_text(
-            f"#!{sys.executable}\n"
-            + dispatcher_source.read_text(encoding="utf-8"),
-            encoding="utf-8",
-        )
-        failing_writer.chmod(0o755)
-
     result = _run_exemplar_mark_complete(
         exemplar,
         installed_plugin,
         layout,
         tmp_path,
         runtime_version=version,
-        python_executable=str(failing_writer),
+        fail_mark_complete=fail_mark_complete,
         activation_sentinel=activation_sentinel,
     )
 
-    assert result.returncode != 0
-    assert not activation_sentinel.exists()
-    assert not (slot / ".install-complete.json").exists()
+    if fail_mark_complete:
+        assert result.returncode != 0
+        attempt = (
+            tmp_path / f"producer-{plugin_id}-{exemplar[2]}"
+            / "completion-writer-attempt"
+        )
+        assert attempt.read_text(encoding="utf-8") == "attempted"
+        assert not activation_sentinel.exists()
+        assert not (slot / ".install-complete.json").exists()
+    else:
+        assert result.returncode == 0, result.stderr
+        assert activation_sentinel.read_text(encoding="utf-8") == "activated"
+        assert (slot / ".install-complete.json").is_file()
     assert not (Path(layout["plugin_root"]) / "current-version").exists()
     assert not (Path(layout["plugin_root"]) / "last-known-good").exists()
     assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
@@ -1630,7 +1714,8 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested payload\n")
     (nested / "\u00e9.txt").write_bytes(b"unicode path\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    payload_name = "space name.txt" if os.name == "nt" else "line\nbreak.txt"
+    (nested / payload_name).write_bytes(b"platform filename\n")
     (nested / "empty").mkdir()
     snapshot_root = Path(layout["snapshot_root"])
     (snapshot_root / "payload-content.txt").unlink()
@@ -1974,8 +2059,8 @@ def test_exemplar_payload_hash_rejects_tree_membership_change(
         snapshot_id=version,
         payload_root=installed_plugin,
     )
+    _reserve_exemplar_completion_slot(installed_plugin, layout, version)
     slot = Path(layout["plugin_root"]) / "versions" / version
-    slot.mkdir(parents=True)
     target = installed_plugin / "plugin.json"
     environment_overrides: dict[str, str] | None = None
     powershell_preamble = ""
@@ -2161,12 +2246,14 @@ def test_powershell_exemplar_wide_payload_rejects_small_limit(
     "action",
     ("slot-provision", "slot-validate", "slot-complete", "slot-completion-validate"),
 )
-def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
+@pytest.mark.parametrize("prestaged", (False, True))
+def test_exemplar_slot_actions_release_installed_payload_cwd_without_legacy_staging(
     exemplar: tuple[str, tuple[str, ...], str],
     action: str,
+    prestaged: bool,
     tmp_path: Path,
 ) -> None:
-    _, _, style = exemplar
+    plugin_id, _, style = exemplar
     _, installed_plugin, home = _installed_exemplar(exemplar, tmp_path)
     runner = installed_plugin / "scripts" / "installation-context"
     if style == "powershell":
@@ -2204,10 +2291,13 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
         action,
         layout,
         tmp_path,
-        environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"},
+        environment_overrides=(
+            {"COPILOT_PLUGIN_INSTALL_STAGED": "1"} if prestaged else {}
+        ),
     )
 
     assert result.returncode == 0, result.stderr
+    assert not (home / f".{plugin_id}").exists()
     cwd = json.loads(result.stdout)
     if style == "powershell":
         assert Path(cwd["provider"]) == home
@@ -3698,7 +3788,8 @@ def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
     nested = snapshot_root / "nested"
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested sidecar name\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    payload_name = "space name.txt" if os.name == "nt" else "line\nbreak.txt"
+    (nested / payload_name).write_bytes(b"platform filename\n")
     (nested / "z.txt").write_bytes(b"last\n")
     (snapshot_root / "\u03a9.txt").write_bytes(b"unicode path\n")
     (snapshot_root / "empty").mkdir()
@@ -3776,6 +3867,7 @@ def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
     ).exists()
 
 
+@pytest.mark.skipif(BASH is None, reason="supported POSIX Bash required")
 def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     tmp_path: Path,
 ) -> None:
@@ -3803,7 +3895,7 @@ def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     fake_find.chmod(0o755)
 
     result = _run_completion(
-        ALL_RUNNERS[1],
+        next(runner for runner in ALL_RUNNERS if runner[0] == "posix"),
         "slot-complete",
         layout,
         environment_overrides={
@@ -4013,6 +4105,7 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
         environment={},
     )
     marker = Path(published["completion"])
+    original_bytes = marker.read_bytes()
     replacement = marker.with_name(".replacement-completion.json")
     replacement_bytes = b'{"replaced":true}\n'
     replacement.write_bytes(replacement_bytes)
@@ -4020,6 +4113,7 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
     original_read = module.os.read
     marker_descriptor: int | None = None
     replaced = False
+    replacement_error: PermissionError | None = None
 
     def racing_open(
         path: str | os.PathLike[str],
@@ -4038,19 +4132,22 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
         return descriptor
 
     def racing_read(descriptor: int, length: int) -> bytes:
-        nonlocal replaced
+        nonlocal replaced, replacement_error
         if descriptor == marker_descriptor and not replaced:
             replaced = True
-            os.replace(replacement, marker)
+            try:
+                os.replace(replacement, marker)
+            except PermissionError as error:
+                if os.name != "nt" or error.winerror not in (5, 32):
+                    raise
+                replacement_error = error
         return original_read(descriptor, length)
 
     monkeypatch.setattr(module.os, "open", racing_open)
     monkeypatch.setattr(module.os, "read", racing_read)
-    with pytest.raises(
-        module.InstallationContextError,
-        match="changed while it was being read",
-    ):
-        module.validate_runtime_slot_completion(
+
+    def validate() -> dict[str, Any]:
+        return module.validate_runtime_slot_completion(
             context=layout["install"],
             expected_marketplace_id=layout["marketplace_id"],
             expected_plugin_id=layout["plugin_id"],
@@ -4062,6 +4159,19 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
             environment={},
         )
 
+    if os.name == "nt":
+        assert validate()["receipt"] == published["receipt"]
+        assert replacement_error is not None
+        assert marker.read_bytes() == original_bytes
+        assert replacement.read_bytes() == replacement_bytes
+        os.replace(replacement, marker)
+    else:
+        with pytest.raises(
+            module.InstallationContextError,
+            match="changed while it was being read",
+        ):
+            validate()
+        assert replacement_error is None
     assert replaced
     assert marker.read_bytes() == replacement_bytes
 
@@ -4799,25 +4909,47 @@ def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receip
     )
     build_path.write_bytes(candidate_bytes[0])
     stop = Event()
+    first_replacement = Event()
+    replacements = 0
 
     def rewrite() -> None:
+        nonlocal replacements
         index = 1
         staging = build_path.with_name(".install-complete.next")
         while not stop.is_set():
             staging.write_bytes(candidate_bytes[index])
-            os.replace(staging, build_path)
+            try:
+                os.replace(staging, build_path)
+            except PermissionError as error:
+                if os.name != "nt" or error.winerror not in (5, 32):
+                    raise
+                stop.wait(0.001)
+                continue
+            replacements += 1
+            first_replacement.set()
             index = 1 - index
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(rewrite)
         try:
-            published = json.loads(
-                _run_completion(runner, "slot-complete", layout).stdout
-            )
+            assert first_replacement.wait(timeout=5)
+            result = _run_completion(runner, "slot-complete", layout, check=False)
         finally:
             stop.set()
             future.result(timeout=10)
 
+    assert replacements > 0
+    if os.name == "nt" and result.returncode != 0:
+        assert result.returncode == 1
+        assert "Cannot read build completion evidence" in result.stderr
+        assert any(
+            code in result.stderr
+            for code in ("[Errno 13]", "[WinError 5]", "[WinError 32]")
+        )
+        assert not (build_path.parent / ".runtime-slot-completion.json").exists()
+        result = _run_completion(runner, "slot-complete", layout)
+    assert result.returncode == 0, result.stdout + result.stderr
+    published = json.loads(result.stdout)
     recorded = published["receipt"]["build"]
     matched = [
         candidate

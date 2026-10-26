@@ -199,6 +199,7 @@ if ($Action -eq 'stamp-binstub' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
     $env:COPILOT_PLUGIN_INSTALL_STAGED = 'stamp-binstub-fast-path'
 }
 
+if (-not $cellSlotAction) {
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -330,6 +331,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     }
 }
 # === end install-contract:v4 self-stage ===
+}
 if ($cellSlotDirect) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===

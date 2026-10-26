@@ -57,6 +57,27 @@ $script:SnapshotMaxPathBytes = 4096
 $script:SnapshotMaxContentBytes = 4294967296
 $nativeTypeDefinitions = @()
 
+if (-not ('CeWindowsPath' -as [type])) {
+    $nativeTypeDefinitions += @'
+using System;
+using System.IO;
+
+public static class CeWindowsPath {
+    public static string ForHandle(string path, int limit = 260) {
+        // P/Invoke must not depend on the host executable's MAX_PATH manifest.
+        if (path == null || path.Length < limit ||
+                path.StartsWith(@"\\?\", StringComparison.Ordinal)) {
+            return path;
+        }
+        string absolute = Path.GetFullPath(path);
+        return absolute.StartsWith(@"\\", StringComparison.Ordinal)
+            ? @"\\?\UNC\" + absolute.Substring(2)
+            : @"\\?\" + absolute;
+    }
+}
+'@
+}
+
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not ('CeFinalPath' -as [type])) {
     $nativeTypeDefinitions += @'
 using System;
@@ -85,7 +106,7 @@ public static class CeFinalPath {
 
     public static string Resolve(string path) {
         using (SafeFileHandle handle = CreateFile(
-            path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            CeWindowsPath.ForHandle(path), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             IntPtr.Zero, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS,
             IntPtr.Zero)) {
             if (handle.IsInvalid) {
@@ -174,7 +195,7 @@ public static class CeDirectoryState {
 
     public static string[] Inspect(string path) {
         using (SafeFileHandle handle = CreateFile(
-            path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            CeWindowsPath.ForHandle(path), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             IntPtr.Zero, OPEN_EXISTING,
             FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
             IntPtr.Zero)) {
@@ -617,7 +638,7 @@ public sealed class CeSafeFile : IDisposable {
     public static CeSafeFile Open(string path) {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
             SafeFileHandle handle = CreateFile(
-                path, GENERIC_READ,
+                CeWindowsPath.ForHandle(path), GENERIC_READ,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                 IntPtr.Zero, OPEN_EXISTING,
                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
@@ -977,7 +998,8 @@ public static class CeAtomicDirectory {
     private static extern int RenameExclusive(string oldPath, string newPath, uint flags);
 
     public static int CreateWindows(string path) {
-        if (CreateDirectoryW(path, IntPtr.Zero)) {
+        // CreateDirectory reserves twelve MAX_PATH units for an 8.3 child name.
+        if (CreateDirectoryW(CeWindowsPath.ForHandle(path, 248), IntPtr.Zero)) {
             return 1;
         }
         int error = Marshal.GetLastWin32Error();
@@ -1005,7 +1027,8 @@ public static class CeAtomicDirectory {
     }
 
     public static int MoveWindows(string source, string destination) {
-        if (MoveFileExW(source, destination, MOVEFILE_WRITE_THROUGH)) {
+        if (MoveFileExW(CeWindowsPath.ForHandle(source),
+                CeWindowsPath.ForHandle(destination), MOVEFILE_WRITE_THROUGH)) {
             return 1;
         }
         int error = Marshal.GetLastWin32Error();
