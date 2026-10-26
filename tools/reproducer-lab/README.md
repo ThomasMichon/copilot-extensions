@@ -329,11 +329,16 @@ propagation through synthetic lock seams and local directory-descriptor
 fixtures. It never reads host mount tables or invokes the guest lock against
 real resources. These controls do not qualify real inter-process/shared-volume
 exclusion or crash settlement.
+`tools/test_reproducer_lab_initial_case.py` exercises the initial-task gate with
+synthetic service seams and local SQLite rows: all retained states/attempts,
+orphaned history, missing tables, strict-write failure, changed journals,
+lost-create replies and exact observation deadlines. It does not execute the
+actual service queue, start a guest or qualify persistence.
 Run it with the repository's selected Python/pytest environment through the
 caller's bounded test supervisor:
 
 ```text
-<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py tools/test_reproducer_lab_offline.py tools/test_reproducer_lab_operation.py
+<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py tools/test_reproducer_lab_offline.py tools/test_reproducer_lab_operation.py tools/test_reproducer_lab_initial_case.py
 ```
 
 These tests do not run Docker, open a socket, install dependencies, exercise native
@@ -352,3 +357,90 @@ hooks and older history, and leaves the source checkout untouched. It does not
 use Docker, a remote forge, production credentials or service processes.
 The filename is intentionally outside default pytest discovery; no required
 PR/promotion matrix is expanded.
+
+## Initial task pre-effect gate
+
+`initial_case.submit_initial_task(custody, queue, journal, diagnostics)` is an
+explicit synchronous guest-only source seam for the first offline synthetic
+task. It accepts already prepared runtime-owned `TaskQueue` and read-only
+`AcquisitionJournal` objects; it never constructs, initializes or migrates
+either database. The fixed selections are `/lab/state/dispatch/queue.db` and
+`/lab/state/bridge/bridge.db`. Their existing directories must be private
+`1000:1000`, mode `0700`, on the observed state device; database files must be
+regular, single-linked, mode `0600`, with the same identity. The Bridge reader
+must still address the file it opened. The existing `GuestOperation` checks
+mount/lock custody before observations, again immediately before submission,
+and after the queue call.
+
+The gate reads the original services' existing history, without an active-state,
+latest-attempt or repository filter. Any retained task, reservation, wake,
+attachment, acquisition, session, turn, message or supported creation/recovery
+history refuses the initial case. This includes independent acquisition
+markers/receipts, accepted producer requests, fallback attempts, launch gates
+and retired conversation bindings, not just rows joinable to current tasks or
+sessions. Dispatch's lazily prepared `cleanup_recoveries` table is checked
+when present, without creating it; an empty fresh queue need not already have
+that table. A same-named view or unreadable existing table refuses.
+Even terminal or refused rows are not a
+descendant-settlement certificate. Orphaned operation history is checked
+independently of task/session joins; missing tables and read failures propagate.
+Dispatch uses its existing connection owner with a five-second SQLite progress
+deadline. Each combined Dispatch/Bridge observation checks its five-second
+elapsed boundary before and after the Bridge read; these are refusal deadlines,
+not a hard kernel-I/O or SQLite-connection cancellation guarantee.
+
+Only after that observation does the existing
+`DiagnosticLog.write_event_strict` synchronously persist an
+`initial_task_create_entry` in `/lab/evidence/diagnostics/reproducer.jsonl`.
+The record names the synthetic case, not a prompt, credential, process ID,
+native identity or readiness claim. Malformed records, unavailable strict
+support, append/sync errors and lost custody prevent the queue call. The gate
+rechecks the histories and file identities after sync, then invokes the existing
+`TaskQueue.create_outcome` with a fixed synthetic lane, original dedup key, seed
+and `agent:reproducer-lab` requirement. A deduplicated/replayed result refuses;
+the actual queue remains the only task ledger. A lost create reply propagates
+and leaves any committed task in that ledger, preventing an automatic second
+initial task. No row is retired, rewritten, cleared or inferred complete.
+
+This first seam deliberately supports **initial task creation only**, not replay
+or admission of another case after prior work. Resume inspects existing records
+through their original owners; extending safe case/replay support requires
+actual joined execution and settlement evidence, not a new task/operation
+ledger, PID test or a diagnostic entry used as authority. Empty tables after
+history loss, replacement or external deletion are not proof that an old effect
+never occurred. Resource selection/history retention, absence of other
+producers, actual service configuration, source/image identity, fresh host
+storage monitoring and all boundary qualifications remain caller prerequisites.
+The reads are not an atomic transaction across both services and do not fence
+their autonomous writers. This seam cannot authorize an unqualified lab.
+
+Run the entire operation context and submission on the same synchronous
+execution owner, outside an event loop. An async owner must await that whole
+worker operation; enqueuing a callback or moving an already held operation
+context between threads is not supported. Actual runtime fixture wiring,
+native output, downstream backend calls, mounted-volume/crash behavior and
+separate exact resource authorization remain open. There is no provisioning
+CLI, new scheduler/controller, production default or required-CI expansion.
+
+The explicitly selected local-owner lane is:
+
+```text
+<bounded-test-supervisor> -- <python-with-Bridge/Dispatch-dependencies> -m pytest -q tools/reproducer-lab/initial_case_local_tests.py
+```
+
+It uses the actual source `TaskQueue`, read-only Bridge `Database` and
+`AcquisitionJournal`, `DiagnosticLog` and shared `OperationLock` on temporary
+local SQLite/JSONL files. Before opening the read-only reader, the actual
+writable `AcquisitionStore` prepares its additional launch-gate/binding schema;
+the gate itself does not initialize or repair those tables.
+It checks both successful file/directory syncs precede
+the real queue create, injected sync failure leaves the real queue empty, and
+a lost create reply retains one task and refuses a second initial create.
+Orphan-only fixtures use the actual queue/store schemas independently of the
+production history lists; schema-key coverage checks catch omitted task,
+reservation, assignment, delivery, worktree or session tables.
+The cleanup-recovery fixture prepares its receipt through the actual existing
+owner's preview/apply flow before simulating orphaned rows in the temporary DB.
+Only guest path/mount admission is synthetic in this lane. The filename is
+outside default test discovery; no real container, mounted volume, backend
+spawn, crash/power-loss or running-service qualification is claimed.

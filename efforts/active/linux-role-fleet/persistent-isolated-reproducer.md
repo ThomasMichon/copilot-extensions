@@ -16,6 +16,8 @@ no actual offline case or resource provisioning has been qualified.
 Fixed guest-state operation exclusion source merged in #9134 through the existing
 shared primitive; real shared-volume and crash qualification remains open.
 Its API and limitations live in the [tool guide](../../../tools/reproducer-lab/README.md#fixed-guest-operation-exclusion).
+Explicit strict writer source merged in #9139; actual case wiring and
+persistent-volume/crash qualification remain open.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -290,7 +292,7 @@ this remains ordinary integration-test tooling, not a new runtime or fleet.
 Keep persistent provisioning blocked until the exact resources, thresholds,
 case lifetime and actions receive separate approval.
 
-The next strict-write source slice reuses
+The #9139 strict-write source reuses
 [`DiagnosticLog.write_event_strict`](../../../libs/process-telemetry/README.md#explicit-strict-pre-effect-write)
 and the existing append/custody owners. Its direct Linux file-plus-directory sync
 API propagates failure and refuses malformed, expired or oversized records;
@@ -300,3 +302,14 @@ or an actual backend call. Wire it at the selected case's pre-effect boundary,
 then qualify storage failure before any backend action on separately approved
 resources. Missing executing-runtime capability refuses rather than substituting
 queue acceptance or later readback. No parent validation checkbox closes here.
+
+The next initial-task source seam in `tools/reproducer-lab/initial_case.py`
+checks fixed guest journal selection and existing operation custody, rejects
+all retained Dispatch/Bridge operation history, and synchronously writes the
+entry through that strict owner before invoking the existing task create API.
+It supports only the first synthetic task; completed/refused records never
+authorize another case or replay. Local SQLite/synthetic controls do not
+qualify the actual runtime graph, guest storage, history retention or an
+ordinary backend invocation. Continue actual fixture/source-image/runtime
+wiring and existing-owner recovery before separately authorized provisioning.
+No runtime default, extra operation ledger or parent checkbox changes.
