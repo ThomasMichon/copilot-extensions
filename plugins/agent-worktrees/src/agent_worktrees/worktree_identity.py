@@ -290,7 +290,7 @@ def _infer_worktree_id_from_cwd(
         # never will when agent-worktrees isn't even installed there. Falls
         # through to the pre-existing path-match-or-git_id behavior when
         # adoption isn't possible (no active project, foreign anchor, etc.).
-        adopted_id = _adopt_linked_worktree(cwd)
+        adopted_id = _adopt_linked_worktree(cwd, identity_mode="tuple-v1")
         if adopted_id:
             return adopted_id
         # Tracking YAML briefly missing: prefer a path match if one exists,

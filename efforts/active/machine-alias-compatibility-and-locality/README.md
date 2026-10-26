@@ -476,8 +476,8 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       machine maps customize rather than admit ordinary local use.
       The intent and corrective plan passed review in #7773. Registration/load source proof merged
       in #8898 and Manager source/entry proof in #8929; qualified release and
-      installed opt-in acceptance are recorded above. The remaining read-only
-      guidance correction and separately reviewed ordinary activation remain open.
+      installed opt-in acceptance are recorded above. The read-only guidance
+      correction is delivered; separately reviewed ordinary activation remains open.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
@@ -487,10 +487,16 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       matching-manifest precondition without changing deployment policy or
       enabling ordinary tuple producers.
       That source follow-up merged in #9110 after current-head approval and
-      required CI; qualified delivery and installed guidance remain open.
+      required CI, qualified in natural `40378983487`, and reached Main #9116.
+      Actual selected installed guidance agrees across all eight native/guest
+      project contexts. Ordinary call-site activation remains separate below.
 - [ ] Review and execute the [ordinary call-site activation proposal](ordinary-callsite-activation.md)
       separately. Preserve omitted-mode legacy APIs and all retained
       allocations; live activation requires its own explicit authorization.
+      The proposal passed review in #9114. Ordinary source call-site selection,
+      receiving-anchor configuration propagation and contained entry regressions
+      are implemented; source review, qualified publication and separately
+      authorized installed activation remain pending.
 - [ ] Preserve existing IDs, paths, refs, records, queued work and live sessions;
       retain supported legacy lookup and allocation replay. No automatic
       relabel, rename, policy widening or data migration.

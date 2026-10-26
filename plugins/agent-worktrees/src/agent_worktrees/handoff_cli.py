@@ -285,6 +285,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     no_mux=True,
                     kind="session",
                     recovery=getattr(args, "recovery", False),
+                    identity_mode="tuple-v1",
                 )
         except LaunchSeedStagingFailure as exc:
             return exc.emit(json_out=True)

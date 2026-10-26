@@ -7,6 +7,7 @@ Covers ``_carve_paired_knowledge`` (the carve-both helper wired into
 from __future__ import annotations
 
 import types
+from pathlib import Path
 
 import pytest
 
@@ -489,6 +490,7 @@ class TestCarvePairedKnowledgeAttributionPolicy:
 
         def _create_worktree(*a, **k):
             create_worktree_calls.append((a, k))
+            Path(a[1]).mkdir(parents=True)
             state["harness_created"] = True
 
         monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
@@ -694,9 +696,14 @@ class TestOriginDoesNotSkipPairing:
         )
         monkeypatch.setattr(m.cfg, "load_config", lambda project=None: knowledge_config)
         create_worktree_calls: list[object] = []
+
+        def create_checkout(*args, **kwargs):
+            create_worktree_calls.append((args, kwargs))
+            Path(args[1]).mkdir(parents=True)
+
         monkeypatch.setattr(
             m.git_ops, "create_worktree",
-            lambda *a, **k: create_worktree_calls.append((a, k)),
+            create_checkout,
         )
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
         return create_worktree_calls

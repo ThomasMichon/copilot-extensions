@@ -156,8 +156,19 @@ Installed entry observation subsequently passed every registered native/guest
 project through the real Manager preparation/bootstrap and optional-map
 readers. Local sources remain ready without SSH, Profiles and row identity
 agree, and current publication IDs are preserved. The
-[current journal](journal/2026/10.25%20progress.md) separates these results and
-read-only lookup observations from the still-open actual allocation/Resume gate.
+[installed-acceptance journal](journal/2026/10.25%20progress.md) separately records
+these results, existing-record lookup and the later actual allocation/Resume
+packet, without inferring ordinary activation.
+
+The remaining read-only guidance consumers merged in #9110. Both structured
+session guidance and the legacy command now use the shared local context,
+including actual explicit-binding provenance and visible invalid-map refusals.
+Natural qualification `40378983487` and Main #9116 deliver the exact source.
+Both supported updates complete successfully, and actual selected Worktrees
+`1.24.297-dev1` guidance agrees across all eight registered native/guest
+project contexts without changing their tracking bytes. All four low-level
+omitted-mode APIs remain legacy. The separately reviewed ordinary-selection
+proposal #9114 does not activate those call sites or authorize live rollout.
 
 ## Validation Plan
 
@@ -173,9 +184,13 @@ read-only lookup observations from the still-open actual allocation/Resume gate.
   the corrected boundary, retaining physical/environment/one-term agreement.
   Source matrix merged in #8886; installed native/guest acceptance remains a
   separate gate below, not inferred from contained metadata cases.
-- [ ] Preserve custom names and execution keys without losing uncustomized local
+- [x] Preserve custom names and execution keys without losing uncustomized local
   operation; retain explicit ambiguity, malformed declaration, platform,
   foreign-guest, receiving-project and namespace refusals.
+  The reviewed local-context/configuration/creation/Manager source matrices and
+  #9110's actual guidance readers retain these controls. Installed guidance
+  covers matching and map-free registered contexts; no live invalid map is
+  introduced merely to exercise a source refusal.
 - [x] Replay admitted legacy and tuple allocations unchanged, including when
   optional customization is added later; no implicit relabel or owner transfer.
   Bounded source replay/repair merged in #8852, #8857 and #8865; installed

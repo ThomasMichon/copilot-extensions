@@ -79,16 +79,20 @@ structured physical metadata.
 
 ## Ordered implementation and acceptance
 
-- [ ] Land this proposal through independent review and required source checks.
-- [ ] Verify #9110's natural qualification, exact promoted source and actual
+- [x] Land this proposal through independent review and required source checks.
+  #9114 merged after exact-head approval and passing required provider checks.
+- [x] Verify #9110's natural qualification, exact promoted source and actual
   installed guidance in native/guest contexts; preserve refusal diagnostics.
-- [ ] Add failing-first ordinary-entry cases proving fresh tuple records while
+  Natural `40378983487`, Main #9116 and eight actual selected-runtime guidance
+  observations close this prerequisite. The current journal records the
+  qualification, actual installation and preserved legacy-default boundaries.
+- [x] Add failing-first ordinary-entry cases proving fresh tuple records while
   the four omitted-mode low-level APIs remain legacy.
-- [ ] Implement explicit selection at the inventoried boundaries and consistent
+- [x] Implement explicit selection at the inventoried boundaries and consistent
   prospective New preflight/dry-run naming, without changing existing Resume.
-- [ ] Complete receiving-anchor configuration propagation and visible
+- [x] Complete receiving-anchor configuration propagation and visible
   refusal handling before activating that adoption boundary.
-- [ ] Exercise actual new-record adoption and paired flows; retain original
+- [x] Exercise actual new-record adoption and paired flows; retain original
   legacy/tuple replay and competing if-absent winners unchanged.
 - [ ] Pass affected bounded tests, unchanged admitted unit-only packet, source
   guards, documentation/install-contract and independent current-head review.

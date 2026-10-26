@@ -376,6 +376,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 pending_seed=getattr(args, "seed", None),
                 creation_key=getattr(args, "creation_key", None),
                 build_launch_plan=False,
+                identity_mode="tuple-v1",
             )
         except CreationRequestFailure as exc:
             if args.json:
@@ -501,32 +502,29 @@ def _ensure_anchor_ledger(
     tracking_dir,
 ) -> tracking.WorktreeRecord | None:
     """Lazily materialize a singleton project's ``@anchor`` claim ledger."""
-    try:
-        from . import repos as _repos
+    from types import SimpleNamespace
 
-        config = cfg.load_config()
-    except Exception:
-        return None
-    project = parsed.project or getattr(config, "repo_name", None)
+    from . import execution_spaces, repos as _repos
+
+    project = parsed.project or cfg.project_name()
     if not project:
-        return None
-    anchor = None
-    try:
-        entry = _repos.find_repo(project)
-        anchor = entry.local_path() if entry else None
-    except Exception:
-        anchor = None
-    if not anchor:
-        try:
-            anchor = config.default_repo.anchor
-        except Exception:
-            return None
-    try:
-        return tracking.load_or_create_anchor_record(
-            anchor, project, config.machine, config.platform, tracking_dir
+        raise execution_spaces.ExecutionSpaceError("anchor requires a receiving project")
+    config = execution_spaces.project_record_config(SimpleNamespace(repo=project))
+    anchor = config.default_repo.anchor
+    entry = _repos.find_repo(project)
+    registered_anchor = entry.local_path() if entry else None
+    if registered_anchor and Path(registered_anchor).resolve() != Path(anchor).resolve():
+        raise execution_spaces.ExecutionSpaceError(
+            "registered anchor conflicts with the receiving project configuration",
         )
-    except Exception:
-        return None
+    if parsed.machine and not execution_spaces.require_owner_identity(parsed.machine, config):
+        raise execution_spaces.ExecutionSpaceError(
+            "anchor owner belongs to a different execution space",
+        )
+    return tracking.load_or_create_anchor_record(
+        anchor, project, config.machine, config.platform, tracking_dir,
+        identity_mode="tuple-v1", config=config,
+    )
 
 
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
@@ -537,7 +535,10 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    tdir = cfg.tracking_dir()
+    tdir = (
+        cfg.tracking_dir(parsed.project)
+        if parsed.is_anchor and parsed.project else cfg.tracking_dir()
+    )
     rec_path = tdir / f"{parsed.worktree_id}.yaml"
     if not rec_path.exists():
         if parsed.is_anchor:

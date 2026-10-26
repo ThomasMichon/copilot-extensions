@@ -16,7 +16,7 @@ from . import config as cfg
 from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
-from .worktree_naming import session_worktree_id
+from .worktree_naming import prospective_session_worktree_id
 
 if TYPE_CHECKING:
     from .__main__ import LaunchPreflight
@@ -707,10 +707,18 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     repo = config.default_repo
-    platform_name = cfg.detect_platform()
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     suffix = secrets.token_hex(2)
-    worktree_id = session_worktree_id(config.machine, platform_name, timestamp, suffix)
+    from .creation_identity import new_machine_identity
+
+    try:
+        identity = new_machine_identity(config, "tuple-v1")
+        assert identity is not None
+        worktree_id = prospective_session_worktree_id(identity, timestamp, suffix)
+    except (ValueError, RuntimeError) as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
@@ -766,6 +774,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             recovery=getattr(args, "recovery", False),
             pending_seed=getattr(args, "seed", None),
             defer_projections=getattr(args, "defer_projections", False),
+            identity_mode="tuple-v1",
         )
     except LaunchSeedStagingFailure as exc:
         output.err(str(exc))
@@ -783,6 +792,10 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
         )
         return 3
     except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
+    except (ValueError, RuntimeError) as exc:
         output.err(str(exc))
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
