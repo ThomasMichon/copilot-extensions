@@ -799,6 +799,9 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
         "test_launch_attempts_native.py", "test_mux_discovery_native.py",
         "test_psmux_home_directory.py", "test_warm_picker_lifetime.py",
         "test_companion_pane_native.py", "test_companion_pane_tmux.py",
+        "test_manager_engine_source.py", "test_launch_retention_native.py",
+        "test_manager_source_update.py", "test_launch_history_sweep_native.py",
+        "test_launch_history_cli_native.py", "test_manager_source_install.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native

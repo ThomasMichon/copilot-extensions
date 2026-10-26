@@ -51,7 +51,6 @@ import math
 import os
 import shutil
 import shlex
-import stat
 import subprocess
 import sys
 import tempfile
@@ -64,7 +63,7 @@ from pathlib import Path
 
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
-from plugin_test_cache import dependency_fingerprint, ordinary_cache_root
+from plugin_test_cache import clear_cache_contents, dependency_fingerprint, ordinary_cache_root
 # Preserve the runner's existing public map as an explicit re-export.
 from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import (
@@ -311,20 +310,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     if reinstall or drifted or fresh:
         # The held lease is keyed by this directory's filesystem identity.
         # Remove only contents, never the directory (including on partial rebuild).
-        for child in venv.iterdir():
-            if child.is_symlink():
-                child.unlink()
-            elif (
-                callable(getattr(child, "is_junction", None)) and child.is_junction()
-            ) or (
-                os.name == "nt"
-                and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
-            ):
-                child.rmdir()
-            elif child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
+        clear_cache_contents(venv)
         fresh = True
     if fresh:
         before = venv.stat()
@@ -613,7 +599,7 @@ def run_plugin(
             # Only this group's pytest files are disposable after verified
             # reaping; shared seeds and environment roots outlive every group.
             cleanups.append(cleanup_pool.submit(
-                tempfile.TemporaryDirectory._rmtree, group_temp,
+                _TestSandbox._rmtree, group_temp,
             ))
             if returncode == 5 and (guards or kexpr) and not test_files:
                 continue

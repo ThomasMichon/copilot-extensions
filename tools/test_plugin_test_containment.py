@@ -6,13 +6,39 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
 
 from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
+
+
+@pytest.mark.parametrize("mode", ["package", "script"])
+def test_fresh_stdlib_caller_imports_native_cleanup_in_both_modes(tmp_path, mode):
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+if sys.argv[2] == "package":
+    import tools.coverage_guided_selection.baseline
+    from tools import plugin_test_containment as containment
+    assert containment.native_test_path.__module__ == "tools.native_test_paths"
+else:
+    sys.path.insert(0, str(root / "tools"))
+    import plugin_test_containment as containment
+    import plugin_test_cache
+    assert containment.native_test_path.__module__ == "native_test_paths"
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(root), mode],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+        **plugin_test_containment.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeypatch):
@@ -1104,6 +1130,66 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
     finally:
         if Path(sandbox.name).exists():
             shutil.rmtree(sandbox.name)
+
+
+def _overlong_sandbox_marker(root):
+    return root / ("nested-" * 25) / ("snapshot-" * 8) / "preserved.txt"
+
+
+def _native_sandbox_paths(root):
+    return (
+        plugin_test_containment.native_test_path(root),
+        plugin_test_containment.native_test_path(_overlong_sandbox_marker(root)),
+    )
+
+
+@pytest.mark.parametrize("root", [
+    r"\\server\share\cache", r"\\?\C:\cache", r"\\?\UNC\server\share\cache",
+])
+def test_sandbox_fixture_preserves_unc_and_native_root_spelling(monkeypatch, root):
+    helper = plugin_test_containment.native_test_path
+    monkeypatch.setattr(sys.modules[helper.__module__], "os", SimpleNamespace(name="nt"))
+    logical = PureWindowsPath(root)
+    native, marker = _native_sandbox_paths(logical)
+    assert str(native) == str(helper(logical))
+    assert str(marker) == str(helper(_overlong_sandbox_marker(logical)))
+
+
+@pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
+def test_sandbox_fixture_exceeds_max_path_with_minimal_root(root):
+    marker = _overlong_sandbox_marker(PureWindowsPath(root))
+    assert len(str(marker)) > 260
+    assert all(len(part) <= 255 for part in marker.parts[1:])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows sandbox paths")
+@pytest.mark.parametrize("unreaped", [False, True])
+def test_windows_long_path_sandbox_cleanup_preserves_unreaped_retention(tmp_path, unreaped):
+    sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
+    native, marker = _native_sandbox_paths(Path(sandbox.name).absolute())
+    assert len(str(marker)) > 260
+
+    def execute():
+        with sandbox:
+            marker.parent.mkdir(parents=True)
+            marker.write_text("owned")
+            if unreaped:
+                raise plugin_test_containment.UnreapedProcessError("synthetic custody remains")
+
+    try:
+        if unreaped:
+            with pytest.raises(plugin_test_containment.UnreapedProcessError):
+                execute()
+        else:
+            execute()
+        assert sandbox.retained is unreaped
+        if unreaped:
+            assert marker.read_text() == "owned"
+        else:
+            assert not native.exists()
+    finally:
+        if native.exists():
+            shutil.rmtree(native)
 
 
 def test_run_contained_detects_and_fails_on_persistent_environment_drift(
