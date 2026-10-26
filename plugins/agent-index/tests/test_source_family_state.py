@@ -133,6 +133,45 @@ def test_queued_removed_shared_alias_and_incremental_readd_restore_content(queue
     assert IndexState.load(config.state_file).sources["git:alias"].last_commit == cursor
 
 
+@pytest.mark.timeout(180)
+def test_retired_pending_alias_restores_without_losing_unchanged_files(queued_source, monkeypatch):
+    from agent_index.indexing import engine
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    repository, configure, run, config = queued_source
+    repo, anchor = repository("repo"), repository("anchor")
+    (repo / "unchanged.md").write_text("Retained through source retirement\n", encoding="utf-8")
+    run_git(repo, "add", "unchanged.md")
+    run_git(repo, "commit", "--quiet", "-m", "fixture unchanged file")
+    configure(repo, extra=[("git:anchor", anchor)])
+    assert run(full=True)[1].status == "complete"
+    (repo / "one.md").write_text("Pending changed content\n", encoding="utf-8")
+    run_git(repo, "add", "one.md")
+    run_git(repo, "commit", "--quiet", "-m", "fixture acquired update")
+    with monkeypatch.context() as patch:
+        def interrupt(*args, **kwargs):
+            raise RuntimeError("fixture acquisition interrupted before apply")
+
+        patch.setattr(engine, "_apply_source_manifest", interrupt)
+        assert run(source="git:alias")[1].status == "partial"
+    paths = PathIndex(config.data_dir / "path_index.db")
+    assert PendingCrawls(paths).sources() == ["git:alias"]
+    configure(anchor, name="git:anchor")
+    code, task = run(full=True)
+    assert code == 0 and task.status == "partial"
+    assert task.result_stats["source_gc_deferred"] == ["git:alias"]
+    state = IndexState.load(config.state_file)
+    assert "git:alias" in state.sources
+    store = initialize_source_store(config)
+    assert store.get_document("git:repo", "unchanged.md") is not None
+    configure(repo, extra=[("git:anchor", anchor)])
+    assert run()[1].status == "complete"
+    assert PendingCrawls(paths).sources() == []
+    assert store.get_document("git:repo", "unchanged.md") is not None
+    assert any("Pending changed content" in row.content for row in
+               store.content_store.get_chunks_for_file("git:repo", "one.md"))
+
+
 @pytest.mark.parametrize(
     "failure", ["source-scan", "before-delete", "after-one-delete", "path-delete", "path-scan"],
 )
