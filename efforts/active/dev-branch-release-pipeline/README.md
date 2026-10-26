@@ -1016,18 +1016,24 @@ late-control reconciliation, Main activation and live acceptance remain open.)_
 
 _(Agent-recommended realization of the 2026-10-26 operator direction.
 Participant: Release implementation coherence contributor; bounded tracker:
-#8983. Status: Active; plan #9054 merged, implementation and Main activation
-remain open.)_
+#8983. Status: Done for this bounded slice; plan #9054, source implementation
+#9061 and independent Main bootstrap #9078 merged; real release #9080 and
+authorized local selected/running-state proof passed. Wider phases retain
+their existing owners and open gates.)_
 
 - [x] Review the [source-coherent implementation plan](source-coherent-release-implementations.md)
       before changing implementation authority or Main execution: #9054,
       `c4868a1bbaab3f822aacc3a2b57d5ad5417a9851`.
-- [ ] Implement coherent immutable source selection and PR-time compatibility
-      checks, preserving privilege isolation and the existing unit portfolio.
-- [ ] Drive the independently reviewed Main workflow transaction and one actual
-      frozen-source release through artifact publication, Main merge and tag.
-- [ ] Complete the authorized local rollout and running-state proof, journal
-      any remaining gates under their existing owners.
+- [x] Implement coherent immutable source selection and PR-time compatibility
+      checks, preserving privilege isolation and the existing unit portfolio:
+      #9061, `3e1dba5cf3d84c9809eb74e1d99caaf89fb94637`.
+- [x] Drive the independently reviewed Main workflow transaction and one actual
+      frozen-source release through artifact publication, Main merge and tag:
+      #9078 and #9080, natural run `40315448433`.
+- [x] Complete the authorized local rollout and running-state proof, journal
+      any remaining gates under their existing owners: unified updater exit 0;
+      selected manager and live monitor `1.24.293-dev1`, live Bridge
+      `0.9.174.dev1`, coordinator `0.18.112-dev1` and MCP `0.2.96-dev1`.
 
 ## Validation Plan
 
@@ -1266,6 +1272,23 @@ The separately governed control-preservation policy is not changed by this
 proposal.
 
 ## Journal
+
+### 2026-10-26 - Qualified release and local rollout; bounded Phase 9e complete
+
+Source implementation #9061 and workflow-only Main bootstrap #9078 passed
+current-head review and required CI. Natural run `40315448433` then completed
+all qualification, build, attestation and complete-source publication/readback
+gates before normal nonadministrator landing #9080 and immutable tagging,
+in twelve minutes including queueing. The queued manual run correctly
+skipped duplicate promotion.
+
+The authorized unified updater exited 0. Independent checks confirm selected
+manager/live monitor `1.24.293-dev1`, ready Bridge `0.9.174.dev1`, healthy
+coordinator `0.18.112-dev1` and actual MCP serving interpreter `0.2.96-dev1`.
+The [Phase 9e subplan and journal](source-coherent-release-implementations.md)
+retain the complete source, asset, landing and rollout evidence. All bounded
+Plan/Validation items are resolved; the wider effort remains Active under its
+existing Phase 7/9, control, portfolio and runtime owners.
 
 ### 2026-10-25 - Trusted control retirement and transition classification
 
