@@ -11,7 +11,10 @@ from test_pr_complete import _git, _squash_merge_upstream
 
 
 def _refs(path):
-    return _git("for-each-ref", "--format=%(refname)", "refs/pre-complete", cwd=path)
+    return _git(
+        "for-each-ref", "--format=%(refname)",
+        "refs/pre-complete-backups/", "refs/pre-complete-backup", cwd=path,
+    )
 
 
 def test_linked_worktrees_retain_branch_named_backups_and_legacy_ref(pr_repo):
@@ -72,10 +75,13 @@ def test_repeated_completion_retains_each_original_tip(pr_repo):
 def test_dry_run_and_noop_do_not_create_backups(pr_repo):
     config, wid, path, _ = pr_repo
     anchor = Path(config.default_repo.anchor)
+    legacy = _git("rev-parse", "origin/master", cwd=path)
+    _git("update-ref", "refs/pre-complete-backup", legacy, cwd=path)
     _squash_merge_upstream(
         anchor, files={"a.txt": "one\n", "b.txt": "two\n"}, msg="squash",
     )
     before = _refs(path)
+    assert before == "refs/pre-complete-backup"
     preview = pr_complete.complete_worktree(wid, config, dry_run=True)
     assert preview["success"], preview
     assert "backup_ref" not in preview
@@ -83,6 +89,7 @@ def test_dry_run_and_noop_do_not_create_backups(pr_repo):
     result = pr_complete.complete_worktree(wid, config)
     assert result["success"], result
     retained = _refs(path)
+    assert set(retained.splitlines()) == {"refs/pre-complete-backup", result["backup_ref"]}
     noop = pr_complete.complete_worktree(wid, config)
     assert noop["success"] and noop["action"] == "up-to-date", noop
     assert "backup_ref" not in noop

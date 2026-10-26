@@ -38,6 +38,8 @@ import subprocess
 import tempfile
 import uuid
 
+from agent_procutil import no_window_kwargs
+
 from . import git_ops, pr_ops, tracking
 from .config import Config
 
@@ -59,7 +61,7 @@ def _is_exact_squash_result(
                 "git", "diff", "--binary", "--full-index",
                 effective_base, pr_head,
             ],
-            cwd=cwd, env=env, capture_output=True, timeout=30,
+            cwd=cwd, env=env, capture_output=True, timeout=30, **no_window_kwargs(),
         )
         if patch.returncode != 0 or not patch.stdout:
             return False
@@ -68,7 +70,7 @@ def _is_exact_squash_result(
             read = subprocess.run(
                 ["git", "read-tree", parent.stdout.strip()],
                 cwd=cwd, env=env, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=30,
+                encoding="utf-8", errors="replace", timeout=30, **no_window_kwargs(),
             )
             if read.returncode != 0:
                 return False
@@ -78,14 +80,14 @@ def _is_exact_squash_result(
                     "--whitespace=nowarn",
                 ],
                 cwd=cwd, env=env, input=patch.stdout, capture_output=True,
-                timeout=30,
+                timeout=30, **no_window_kwargs(),
             )
             if apply.returncode != 0:
                 return False
             written = subprocess.run(
                 ["git", "write-tree"],
                 cwd=cwd, env=env, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=30,
+                encoding="utf-8", errors="replace", timeout=30, **no_window_kwargs(),
             )
     except (OSError, subprocess.SubprocessError):
         return False
