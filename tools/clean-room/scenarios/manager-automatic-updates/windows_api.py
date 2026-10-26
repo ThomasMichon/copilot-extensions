@@ -8,9 +8,9 @@ from dataclasses import asdict, dataclass
 import os
 from pathlib import Path, PureWindowsPath
 import threading
-import time
+from typing import Callable
 
-from native import UnsupportedNative
+from windows_observation import HookPump, NativeBlocked, WindowObserver  # noqa: F401
 
 CONSOLE_IMAGES = {
     "python.exe", "pythonw.exe", "uv.exe", "cmd.exe", "powershell.exe", "pwsh.exe",
@@ -25,12 +25,6 @@ class ProcessEntry(ct.Structure):
         ("parent", wt.DWORD), ("priority", wt.LONG), ("flags", wt.DWORD),
         ("exe", wt.WCHAR * 260),
     ]
-
-
-class NativeBlocked(UnsupportedNative):
-    def __init__(self, code: str, message: str) -> None:
-        self.code = code
-        super().__init__(f"{code}: {message}")
 
 
 @dataclass(frozen=True)
@@ -149,6 +143,8 @@ class WindowInfo:
 
 
 class WinAPI:
+    console_images = CONSOLE_IMAGES
+
     def __init__(self) -> None:
         if os.name != "nt":
             raise NativeBlocked("win32-unavailable", "native Windows APIs are unavailable")
@@ -366,103 +362,41 @@ class WinAPI:
         # this API's failure contract. The observer must retain that transition.
         return int(self.user.GetForegroundWindow() or 0)
 
+    def window_identity(self, hwnd: int) -> tuple[int, int]:
+        pid = wt.DWORD()
+        thread = self.user.GetWindowThreadProcessId(hwnd, ct.byref(pid))
+        self._check(thread and pid.value, "direct window PID/TID")
+        return int(pid.value), int(thread)
+
+    def raw_windows(self) -> dict[int, tuple[int, int]]:
+        result, failure = {}, []
+
+        @self.callback
+        def visit(hwnd: int, _data: int) -> bool:
+            if self.user.IsWindowVisible(hwnd):
+                try:
+                    result[int(hwnd)] = self.window_identity(hwnd)
+                except Exception as exc:
+                    failure.append(NativeBlocked(
+                        "visible-window-identity-failed", f"HWND {int(hwnd)}: {type(exc).__name__}: {exc}",
+                    ))
+                    return False
+            return True
+
+        enumerated = self.user.EnumWindows(visit, 0)
+        if failure:
+            raise failure[0]
+        self._check(enumerated, "raw EnumWindows")
+        return result
+
+    def require_desktop(self) -> None:
+        require_desktop(self.facts())
+
+    def event_hooks(self, receive: Callable, on_error: Callable[[Exception], None]) -> HookPump:
+        from windows_events import WinEventHooks
+        return WinEventHooks(self.user, self.kernel, receive, on_error)
+
     def close(self) -> None:
         for handle in self.handles.values():
             self.kernel.CloseHandle(handle)
         self.handles.clear()
-
-
-class WindowObserver:
-    def __init__(self, api: WinAPI) -> None:
-        self.api = api
-        api.refresh_processes()
-        self.baseline = {window.key for window in api.windows().values()}
-        self.foreground = api.foreground()
-        if not self.foreground:
-            raise NativeBlocked("foreground-unavailable", "no foreground window at observation start")
-        self.roots = {api.process(os.getpid()).key}
-        self.events: dict[tuple[str, int, int, int], WindowInfo] = {}
-        self.unobservable_foreground_transitions = 0
-        self.samples = 0
-        self.max_gap = 0.0
-        self.started = self.previous = time.monotonic()
-        self.error: str | None = None
-        self.stop = threading.Event()
-        self.thread = threading.Thread(target=self._run, daemon=True)
-
-    def add_pid(self, pid: int) -> None:
-        info = self.api.process(pid)
-        if info.session != self.api.session(os.getpid()):
-            raise NativeBlocked("fixture-session-mismatch", "fixture child left the interactive session")
-        if self.api.elevated(self.api.handles[pid]):
-            raise NativeBlocked("fixture-elevated", "fixture child unexpectedly has an elevated token")
-        self.roots.add(info.key)
-
-    def sample(self) -> None:
-        now = time.monotonic()
-        self.max_gap = max(self.max_gap, now - self.previous)
-        self.previous = now
-        self.api.refresh_processes()
-        windows = self.api.windows()
-        for window in windows.values():
-            if window.key not in self.baseline:
-                self.events.setdefault(("visible", *window.key), window)
-        foreground = self.api.foreground()
-        if foreground != self.foreground:
-            window = windows.get(foreground)
-            if window is None:
-                self.unobservable_foreground_transitions += 1
-            else:
-                self.events.setdefault(("foreground", *window.key), window)
-            self.foreground = foreground
-        self.samples += 1
-        if len(self.events) + self.unobservable_foreground_transitions > 4096:
-            raise NativeBlocked("window-event-overflow", "observation exceeded its bounded event packet")
-
-    def _run(self) -> None:
-        try:
-            while not self.stop.wait(0.02):
-                if self.samples % 50 == 0:
-                    require_desktop(self.api.facts())
-                self.sample()
-        except Exception as exc:
-            # A dead observer must never look like a successful zero-window trace.
-            self.error = f"{type(exc).__name__}: {exc}"
-
-    def __enter__(self) -> WindowObserver:
-        self.thread.start()
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        self.stop.set()
-        self.thread.join(timeout=5)
-        if self.thread.is_alive():
-            self.error = "window observer did not quiesce"
-
-    def packet(self) -> dict:
-        violations = []
-        if self.unobservable_foreground_transitions:
-            violations.append({
-                "kind": "foreground-unobservable", "pid": None, "image": None,
-                "attribution": "ambiguous-desktop-foreground",
-                "count": self.unobservable_foreground_transitions,
-            })
-        for (kind, *_key), window in self.events.items():
-            attributable = bool(set(window.lineage) & self.roots)
-            ambiguous_console = window.process.image in CONSOLE_IMAGES
-            if attributable or ambiguous_console or kind in {"visible", "foreground"}:
-                violations.append({
-                    "kind": kind, "pid": window.process.pid, "image": window.process.image,
-                    "attribution": (
-                        "fixture" if attributable else
-                        "ambiguous-console-host" if ambiguous_console else f"ambiguous-desktop-{kind}"
-                    ),
-                })
-        return {
-            "baseline_visible_windows": len(self.baseline), "samples": self.samples,
-            "observed_seconds": time.monotonic() - self.started,
-            "poll_interval_seconds": 0.02, "maximum_observation_gap_seconds": self.max_gap,
-            "observation_policy": "no new visible windows or foreground transitions",
-            "violations": violations, "observer_error": self.error,
-            "passed": not violations and self.error is None and self.max_gap <= 0.5 and self.samples > 0,
-        }
