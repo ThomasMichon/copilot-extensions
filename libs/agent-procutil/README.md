@@ -830,8 +830,29 @@ if the native operation fails after its caller was cancelled.
 The caller can boundedly await `asyncio.wrap_future(holder)` at shutdown without
 claiming native completion from a cancelled coroutine. The sampling thread is
 daemon-scoped to its owning process and cannot outlive that process.
-psutil may inspect system process tables internally; the identity cap alone
-does not prove host-independent constant sampling cost.
+Each uncached attempt shares one psutil parent-table snapshot across retained
+identities and newly discovered descendants, including reparented survivors.
+Edges are only discovery candidates: fresh PID/birth and parent checks still
+validate adoption. A failed snapshot remains explicitly unavailable/denied;
+partial results never become a successful empty topology. The snapshot is not
+reused between attempts. Its host-wide enumeration remains proportional to the
+system process table; the identity cap alone does not prove host-independent
+constant sampling cost.
+
+The one-snapshot count covers discovery, not every native parent-table read.
+Fresh child-parent validation still calls each candidate's ppid(); on Windows
+psutil 7.2.2 this performs another global parent-table enumeration. Thus a cold
+attempt discovering D children performs one discovery enumeration plus D fresh
+validation enumerations for a stable tree. An unchanged warm attempt performs
+one enumeration regardless of retained identity count, and cached reuse performs
+none. New candidates can add validation work on later attempts too. The native
+Windows regression profiles the underlying C enumeration entrypoint (including
+all Python aliases), checking cold counts of one plus newly retained descendants
+and exactly one warm enumeration for both one- and four-child fixture trees
+(including their real interpreter/console descendants). It preserves fresh
+validation rather than treating
+snapshot edges as ancestry authority. These are work counts, not aggregate CPU
+or latency qualification.
 
 Each actual attempt has immutable `SampleAccounting`: a random 32-character
 sampler instance, a bounded sequence, `pending`/`succeeded`/`failed` state,
