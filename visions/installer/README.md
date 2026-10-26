@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -327,7 +327,11 @@ background work at effect admission. Manager and an external controller consume
 that same hold; neither keeps a competing banner or bypasses it by calling an
 installer directly. Clearing it does not enroll maintenance or override an
 independent disable. Manager itself remains disposable while the retained banner,
-configuration and durable work survive.
+configuration and durable work survive, except for any actual critical
+machine-management transport closure that must remain independently available.
+Complete, forced and purge removal/reinstall exclude that closure rather than
+sever the SSH or Gateway path used to manage the host. Agent credential relays
+may be removed; they are not automatically protected transport.
 
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update

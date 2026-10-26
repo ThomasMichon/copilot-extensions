@@ -5,7 +5,7 @@
   Copilot execution.
 - **Scope:** leaf (cross-cutting capability within the agent fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`plugins/agent-bridge/docs/architecture.md`](../../plugins/agent-bridge/docs/architecture.md) ·
   [`plugins/agent-worktrees/docs/architecture.md`](../../plugins/agent-worktrees/docs/architecture.md)
 
@@ -149,13 +149,19 @@ and the fabric retains honest uncertainty about undelivered notification.
 Installation independence preserves host-owned containment and retirement
 authority rather than escaping them.
 
-The guarantee includes complete intentional removal of the supporting suite,
+The guarantee includes complete intentional removal of the noncritical supporting suite,
 its command surfaces and plugin payloads, not only a rolling replacement with
 some old installation retained. The Copilot process, terminal host and durable
 session/work records stay outside that removal scope. A maintenance banner and
 native agent standby remain usable while support services are absent; the
 session is not retired merely because its coordination tools disappear. See
 [Disposable Supporting Runtimes](../plugin-services/disposable-runtimes/README.md).
+
+Critical machine-to-machine connectivity is also outside that removal scope.
+Its real SSH host/client, proxy, tunnel or Gateway dependencies survive so an
+operator's existing management connection and reconnection path remain usable.
+This does not protect disposable agent credential relays or all functionality
+of a plugin that happens to provision the transport.
 
 ### interchangeable-session-hosts
 

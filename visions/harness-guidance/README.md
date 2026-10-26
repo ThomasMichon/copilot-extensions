@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-10-26
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -108,7 +108,7 @@ obligations, report its responsible session, and refrain from self-repair,
 repeated missing-tool retries or replacement workers.
 
 The banner should be readable through native filesystem facilities even when
-all supporting services, binstubs and plugin payloads are gone. Applicable
+noncritical supporting services, binstubs and plugin payloads are gone. Applicable
 guidance should remain available through that outage rather than requiring the
 missing tool to explain itself. A held agent should use one low-frequency native
 scheduled prompt to observe updates until applicable clearance and capability
@@ -116,6 +116,10 @@ readiness; unavailable native scheduling is an explicit limitation, never a
 reason to invent another daemon. The maintenance owner continues only its
 separately authorized work. See
 [Disposable Supporting Runtimes](../plugin-services/disposable-runtimes/README.md).
+
+Critical machine-management connectivity remains outside that removal scope.
+Credential relays are disposable; their absence is not permission for an agent
+to rebuild the supporting suite or take over the retained transport.
 
 ### attributable-context-budget
 

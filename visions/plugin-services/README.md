@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -178,10 +178,12 @@ resource fencing, or existing standalone-service defaults.
   one admission path for every entry point. See the
   [Runtime Assembly & Artifact Admission](runtime-assembly/README.md) child
   vision.
-- **Disposable supporting runtimes** — all supporting services, including
-  Manager, are replaceable while durable work and independently hosted sessions
-  survive. One retained local maintenance banner explains intentional absence
-  and vetoes automatic recreation. See
+- **Disposable supporting runtimes** — noncritical supporting services,
+  including Manager's replaceable tooling, can be removed while durable work,
+  independently hosted sessions and critical machine-management connectivity
+  survive. Credential relays are disposable, not a transport exemption. One
+  retained local maintenance banner explains absence and vetoes automatic
+  recreation. See
   [Disposable Supporting Runtimes](disposable-runtimes/README.md).
 - **Per-plugin visions** — concrete leaves under `visions/plugins/<name>/` refine
   this model for a specific service. Linked from here as they are authored.

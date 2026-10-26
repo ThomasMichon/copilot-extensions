@@ -4,18 +4,25 @@
   with durable state and an independently readable maintenance hold.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`docs/install-contract.md`](../../../docs/install-contract.md),
   [`docs/architecture.md`](../../../docs/architecture.md)
 
 ## Purpose & Intent
 
 Every copilot-extensions supporting service and runtime, including Manager and
-the update/control plane, should be disposable. An operator can intentionally
+the update/control plane, should be disposable **outside the critical
+connectivity and session substrate**. An operator can intentionally
 stop and remove the executable installation, then reconstruct it from an
 approved source without losing durable work or needing the removed service to
 authorize its own recovery. Disposable means replaceable, not permission to
 delete anything.
+
+Machine-to-machine management access is protected like the Copilot process,
+multiplexer and session host. Removing the rest of the suite must not sever the
+SSH, proxy, tunnel or Gateway path used to manage the machine, or leave it
+impossible to reconnect. A remote operator must not uninstall their own access
+path through a blanket or forced removal.
 
 An intentional outage should stay quiet and legible. One retained, local
 maintenance banner both explains the outage to agents and vetoes automatic
@@ -35,16 +42,43 @@ Neither purpose depends on the services being maintained.
 - **Independent session substrate:** the Copilot process and essential terminal
   host of an independently hosted session do not rely on a supporting suite
   runtime remaining installed merely to stay interactive.
+- **Critical connectivity substrate:** the actual host/client transport,
+  access-bearing Gateway, proxy or tunnel and their required executable,
+  supervision, routing, configuration and authentication material. Provisioning
+  a transport does not make every provisioner part of its live dependency chain.
+- **Disposable credential relays:** agent credential/token brokerage may be
+  removed with the supporting suite. It is not a protected machine-management
+  transport merely because it forwards credentials.
 
 ## Features
 
 ### complete-supporting-runtime-disposability
 
 No supporting service is exempt because it installs, updates, supervises or
-coordinates the others. Individual or complete suite removal preserves durable
+coordinates the others. The critical access-bearing dependency closure is
+explicitly excluded; classification follows its actual role, not a plugin name.
+Individual or complete removal of the remaining suite preserves durable
 state, accepted work and independently hosted running sessions. Reconstruction
 uses the ordinary installation and state-compatibility contracts rather than
 requiring a backup copy of the removed runtime to remain alive.
+
+### connectivity-survives-supporting-suite-removal
+
+Normal removal, purge, force and reinstall paths preserve both established
+machine-management channels and the capability to reconnect through the
+declared transport. Protection includes an essential helper or runtime even if
+it was shipped beside disposable tooling. Coupled packaging must be separated
+or its critical closure retained; an unqualified mixed runtime cannot be
+deleted merely because its package is called a supporting service.
+
+### provisioning-is-not-serving
+
+Transport setup, profile emission and key positioning have different lifetimes
+from the OpenSSH host/client, proxy process, tunnel keeper or Gateway that
+actually carries management traffic. Removing a provisioner should not remove
+its independently owned working transport or durable access configuration.
+Where a connection invokes provisioner-owned code on every request or
+reconnect, that dependency is explicit rather than assumed absent.
 
 ### shared-maintenance-banner
 
@@ -81,6 +115,25 @@ disabled update policy. The responsible session may continue separately
 authorized maintenance through the existing manual ownership and safety gates.
 Read-only inspection remains available where its dependencies exist.
 
+The hold does not stop or withdraw critical connectivity. Transport maintenance
+has its own scoped authority; a general suite-removal or force request is not
+permission to retire that substrate.
+
+### protected-access-is-not-a-force-option
+
+A supporting-suite uninstall or reinstall cannot override connectivity retention
+with a broad force or purge flag. It excludes the protected dependency closure
+and refuses an operation whose effect on required access remains unknown.
+An existing shell alone does not establish that future authentication,
+reconnection or a client-side proxy will survive.
+
+### credential-brokerage-is-not-connectivity-custody
+
+Removing credential relays is allowed while native machine-management access
+continues independently. A component that mixes credential brokerage with
+access-bearing transport must expose and separate those roles; the relay label
+does not exempt every broker from removal or excuse losing management access.
+
 ### no-self-repair-during-explained-maintenance
 
 Agents do not reinstall tools, provision replacement runtimes, repeatedly retry
@@ -109,6 +162,8 @@ Maintenance notices remain informational data, never executable instructions.
 - No automatic deletion, process termination, service restart or blanket repair
   authority from a banner, a missing command or this disposability guarantee.
 - No change of ownership for retained data, credentials, sessions or resources.
+- No blanket exemption for a whole plugin, every Gateway feature or credential
+  relays; protect the actual management-transport dependency closure.
 - No implicit cross-user, cross-environment or unrelated-marketplace control.
 - No file schema, polling interval or command-line protocol specified here;
   binding details belong in the reviewed implementation contract.
@@ -120,3 +175,5 @@ Maintenance notices remain informational data, never executable instructions.
 - [Installer](../../installer/README.md#consented-background-maintenance)
 - [Harness Guidance](../../harness-guidance/README.md#maintenance-aware-tool-unavailability)
 - [Marketplace Installation Cells](../installation-cells/README.md)
+- [SSH connectivity](../../plugins/agent-ssh/README.md)
+- [Fleet Gateway](../../machine-fleet/gateway/README.md)

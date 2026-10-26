@@ -14,8 +14,13 @@ banner, schedule, update, removal or session restart is enabled here.
 The operator requires YAML, one notice serving both machine-enforced automatic
 update inhibition and agent-facing outage explanation, and normal
 `agent-conduct-guidance` delivery with native 30-minute standby polling.
-All supporting services, including Manager, are disposable; retained
-configuration, databases, work, claims and the live Copilot/Mux substrate are not.
+Noncritical supporting services, including Manager's replaceable tooling, are
+disposable; retained configuration, databases, work, claims, the live Copilot/Mux
+substrate and actual machine-management connectivity are not. The
+[critical-connectivity audit and retention contract](connectivity-retention.md)
+qualifies "complete uninstall": preserve real SSH host/client/proxy/tunnel/
+Gateway dependencies and reconnectability, not every component that provisions
+them. Credential relays are explicitly fair game for removal.
 
 **Agent-recommended binding:** use
 `~/.copilot-extensions/maintenance.yaml` in the current OS user's home.
@@ -94,7 +99,7 @@ and follow existing error-response rules rather than inventing maintenance.
 
 ## Implementation and validation sequence
 
-- [ ] Review and merge the vision/contract alignment before implementing it.
+- [x] Review and merge the vision/contract alignment before implementing it.
 - [ ] Coordinate consumer changes with #8645, #7694, #7028/#7496 and #7758;
   preserve their implementation owners and #8669/#8864 survival/removal scope.
 - [ ] Implement one YAML decision contract in those existing boundaries and
@@ -109,8 +114,11 @@ and follow existing error-response rules rather than inventing maintenance.
   missing/stale notice and applicable all-clear, unavailable scheduling and no
   self-repair. Static text assertions alone do not establish native behavior.
 - [ ] Consume #8669's actual supported uninstall/reinstall and same-process
-  survival evidence; extend complete-suite disposability through the relevant
+  survival evidence; extend noncritical-suite disposability through the relevant
   service owners without taking over their resources or hiding interrupted work.
+- [ ] Resolve the [critical-connectivity retention gates](connectivity-retention.md)
+  before complete removal/reinstall, including force/purge, current channel and
+  fresh connection, while proving credential relays may disappear.
 - [ ] Record source, containing release and installed consumer capability
   separately. Obtain exact adopter approval before any real banner activation,
   session migration, shutdown, runtime removal or update.

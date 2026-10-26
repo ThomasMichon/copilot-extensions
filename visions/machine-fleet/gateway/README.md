@@ -3,7 +3,7 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-25
+- **Last revised:** 2026-10-26
 
 ## Purpose & Intent
 
@@ -134,6 +134,20 @@ authorized terminal-only channel can present the same target-owned session;
 a lightweight browser renderer need not implement a full remote shell or
 become another session host. Input, observation and lifecycle control remain
 separate permissions. No terminal capability is inferred from service routing.
+
+### management-transport-survives-supporting-removal
+
+Where the Gateway or an outbound connector actually carries machine-management
+access, its required process, helper, supervision, routing and authentication
+closure is critical connectivity substrate. Removing or reinstalling other
+suite services preserves both current access and reconnection; a blanket force
+or purge request cannot withdraw that route.
+
+This is role-specific protection, not an exemption for every Gateway route or
+every agent service. Credential relays remain disposable. A design that couples
+their lifetime to direct machine-management access must separate those roles
+or expose a concrete removal blocker instead of silently losing access. See
+[Disposable Supporting Runtimes](../../plugin-services/disposable-runtimes/README.md#connectivity-survives-supporting-suite-removal).
 
 ### nearly-all-configuration-is-live
 
