@@ -757,12 +757,14 @@ def _embed_and_store_files(
         nonlocal batch, total_stored, pending
         if not batch:
             if pending:
+                path_index.invalidate_batch([(s, p) for s, p, _h, _n in pending])
                 _checkpoint()
             return
         if progress_cb:
             progress_cb.check_cancelled()
         if before_store:
             before_store()
+        path_index.invalidate_batch([(s, p) for s, p, _h, _n in pending])
         total_stored += _embed_and_store_batch(
             batch, multi_store, multi_clients,
             model_profiles,
@@ -791,10 +793,8 @@ def _embed_and_store_files(
         try:
             chunks = chunker.chunk(entry.content, entry.path, source=entry.source)
         except Exception:
-            if selected_layout():
-                raise
-            logger.warning("Failed to chunk %s, skipping", entry.path)
-            continue
+            logger.warning("Failed to chunk %s", entry.path, exc_info=True)
+            raise
 
         if getattr(entry, "metadata", None):
             chunks = [replace(c, metadata=entry.metadata) for c in chunks]

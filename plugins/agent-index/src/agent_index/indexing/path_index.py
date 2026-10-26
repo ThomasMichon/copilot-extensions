@@ -147,6 +147,20 @@ class PathIndex:
         finally:
             conn.close()
 
+    def invalidate_batch(self, identities: list[tuple[str, str]]) -> None:
+        """Revoke reuse before mutations that might only partially succeed."""
+        if not identities:
+            return
+        conn = self._connect()
+        try:
+            conn.executemany(
+                "UPDATE indexed_files SET content_hash = NULL WHERE source = ? AND file_path = ?",
+                identities,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
     def remove(self, source: str, file_path: str) -> None:
         """Remove a single file entry."""
         conn = self._connect()

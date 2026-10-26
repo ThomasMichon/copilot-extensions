@@ -183,7 +183,7 @@ def test_interrupted_cleanup_retries_real_stale_content_and_vectors(
         patch.setattr(store, "delete_stale_by_file", fail)
         with pytest.raises(RuntimeError, match="fixture"):
             run()
-    assert paths.get_content_hash(old.source, old.file_path) == "old"
+    assert paths.get_content_hash(old.source, old.file_path) is None
     assert state.sources["alias"].last_commit == "old"
     assert set(store.content_store.get_chunk_ids_by_file(old.source, old.file_path)) == {
         old.chunk_id, new.chunk_id,
@@ -192,6 +192,41 @@ def test_interrupted_cleanup_retries_real_stale_content_and_vectors(
     assert store.content_store.get_chunk_ids_by_file(old.source, old.file_path) == [new.chunk_id]
     assert store.get_vector_table("fixture").get_vectors([old.chunk_id]) == {}
     assert state.total_chunks == 1
+
+
+def test_failed_forced_rewrite_revokes_old_compatible_checkpoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    paths, state, connector, store, run = setup_round(monkeypatch, tmp_path)
+    item = FileEntry("one.md", "unchanged", "markdown", "forge:repo")
+    connector.delta = SourceDelta(upserts=[item], commit="next")
+    run()
+    assert paths.get_content_hash(item.source, item.path)
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, "_embed_and_store_batch", fail)
+        with pytest.raises(RuntimeError, match="fixture"):
+            engine._embed_and_store_files(
+                [item], multi_store=store, multi_clients={}, model_profiles={},
+                path_index=paths, reconcile_file=lambda *a: None, force=True,
+            )
+    assert paths.get_content_hash(item.source, item.path) is None
+    assert run()[0] == 2
+    assert state.total_chunks == 2
+
+
+def test_chunking_failure_does_not_advance_delta_cursor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    _paths, state, connector, _store, run = setup_round(monkeypatch, tmp_path)
+    connector.delta = SourceDelta(
+        upserts=[FileEntry("one.md", "new", "markdown", "forge:repo")], commit="next",
+    )
+    monkeypatch.setattr(
+        "agent_index.chunking.get_chunker", lambda path: (SimpleNamespace(chunk=fail), "text"),
+    )
+    with pytest.raises(RuntimeError, match="fixture"):
+        run()
+    assert state.sources["alias"].last_commit == "old"
 
 
 @pytest.mark.parametrize("stale", [False, True])

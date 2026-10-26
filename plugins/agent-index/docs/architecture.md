@@ -50,8 +50,10 @@ Legacy content-only fingerprints deliberately miss once when a file is next
 presented. Full reindexing still forces work, while its retries can reuse
 compatible writes committed within the task window.
 
-Each file checkpoint is published only after all its content/vector writes and
-stale-chunk cleanup succeed. Deletion failures retain the source cursor for
+Existing file reuse is revoked before mutations begin, including forced rewrites
+at an unchanged fingerprint. Each file checkpoint is published only after all
+its content/vector writes and stale-chunk cleanup succeed. Chunking and deletion
+failures retain the source cursor for
 idempotent replay; legacy vector deletion precedes content deletion so retry can
 still discover canonical chunk IDs. Transactional SQLite triggers maintain
 per-source chunk totals as file checkpoints change, including deletions and
