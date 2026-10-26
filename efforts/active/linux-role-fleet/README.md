@@ -279,6 +279,10 @@ mutation follows from this amendment.
   and container-owned logging; preserve explicit incomplete-attempt protection.
 - [ ] Validate concurrent writers, native Windows/POSIX handles, protocol
   output/privacy and truthful failed/rolled-back/committed outcomes.
+- [ ] Deliver the [persistent isolated spawn reproducer](persistent-isolated-reproducer.md)
+  through a reviewed source plan, bounded synthetic implementation and separately
+  approved real persistence/fault qualification. Existing restricted-provider
+  invariants, ephemeral tests and native/installer/deployment owners stay unchanged.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -438,6 +442,10 @@ All entries are **agent-recommended implementation gates**.
   protected incomplete-attempt handling; size/count-only rotation is not proof.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
+- [ ] Reproducer acceptance follows its [isolation and fault matrix](persistent-isolated-reproducer.md#validation-plan):
+  actual bounded persistent storage, no production reach, literal unknown
+  outcomes and independently retained evidence. Fake peers do not qualify native
+  CLI, actual task START, review completion or released/running adoption.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
   Komodo/database, host daemon, worker mutation or local secret issuer; API
   credentials are supplied through the existing provider custody contract.
@@ -476,6 +484,17 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9044 merged the bounded Dispatch spawn-causal-logging source as
+  `649c58cce494f0703c86e580647d7c0ad3b37880` after exact-head Copilot
+  approval, resolved feedback and required checks. Actual worker-lane stages,
+  scheduling decisions, ordinary Bridge caller outcomes, legacy-message
+  filtering and standalone quiet maintenance reuse existing owners.
+  Isolated controls passed 898 (35 explicit platform/native skips), and the
+  admitted in-process packet passed 1,853. Re-read this complete Plan and
+  Validation Plan after merge; the broader logging, native, container,
+  release/install and live-fleet gates remain open. The next logging stretch
+  specifies the minimal persistent isolated reproducer and remaining
+  owner-specific capture/timeline boundaries, without production activation.
 - #9041 merged the bounded Dispatch spawn-causal-logging source plan after
   exact-head Copilot approval and required checks. This accepts the first
   implementation scope, not its logging or running-state validation. The next

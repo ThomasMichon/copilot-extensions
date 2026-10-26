@@ -3,7 +3,7 @@
 Back to the [logging integration plan](logging-conventions.md) and
 [Linux role fleet effort](README.md). Tracker: [#8377](https://github.com/ThomasMichon/copilot-extensions/issues/8377).
 
-**Status: implementation under review.** This adds causal records
+**Status: source merged in #9044; release/running qualification remains open.** This adds causal records
 through existing Dispatch logging owners, not a new collector, allocation
 ledger, delivery protocol or complete fleet-logging qualification.
 
@@ -34,30 +34,30 @@ owner-specific work. No source record claims those unobserved stages completed.
 
 ## Implementation plan
 
-- [ ] Verify that the actual worker-lane entry point has a configured existing
+- [x] Verify that the actual worker-lane entry point has a configured existing
       application sink, not only its supervising daemon. Reuse that handler
       and its discovery; no new permanent log directory or service.
-- [ ] Emit a cycle/stage entry before each potentially blocking reconciliation,
+- [x] Emit a cycle/stage entry before each potentially blocking reconciliation,
       selection, capacity, reservation, preparation, backend and bookkeeping
       call, then a result/error with elapsed monotonic time. A missing end is
       outstanding observation, not confirmed absence.
-- [ ] Correlate existing supervisor, task/generation and reservation/creation
+- [x] Correlate existing supervisor, task/generation and reservation/creation
       identities as they become available. A cycle/call identifier is diagnostic
       grouping only; it never supplies execution or retry authority.
-- [ ] Explain bounded scheduling outcomes: exhausted retry budget, local
+- [x] Explain bounded scheduling outcomes: exhausted retry budget, local
       concurrency limit, no fleet capacity, governance refusal and reservation
       contention. Do not dump the whole task or environment or log an
       ever-growing candidate corpus each tick.
-- [ ] At ordinary Bridge calls record the operation, existing reservation,
+- [x] At ordinary Bridge calls record the operation, existing reservation,
       entry, exit/timeout and useful causal diagnostics. Preserve original
       arguments, prompts, results, exception behavior and launch count.
       Use targeted credential removal, not blanket suppression of benign
       operation identities and errors. Do not add raw prompt/envelope capture
       to general application logs.
-- [ ] Keep the large supervisor module within its existing size guard. If
+- [x] Keep the large supervisor module within its existing size guard. If
       extraction is needed, move only the cohesive cycle orchestration behind
       the existing public method; do not redesign lifecycle or allocation.
-- [ ] Update the existing diagnostic/spawn guides with event coverage and
+- [x] Update the existing diagnostic/spawn guides with event coverage and
       remaining gaps. Default application records and opt-in raw-call
       observation must not be described as the same facility.
 
@@ -69,25 +69,25 @@ imposed on ordinary callers here.
 
 ## Validation plan
 
-- [ ] Actual configured application output contains parseable, correlated
+- [x] Actual configured application output contains parseable, correlated
       entry/result records with existing timestamp/process/runtime attribution.
-- [ ] A blocked fake stage has an entry visible before it is released.
+- [x] A blocked fake stage has an entry visible before it is released.
       A failing stage has a causal error and no invented successful end.
-- [ ] Capacity/refusal/contended reservation controls explain why no backend
+- [x] Capacity/refusal/contended reservation controls explain why no backend
       was called; an admitted synthetic task still spawns and records once.
-- [ ] Existing original-key replay, retained/pending creation, startup
+- [x] Existing original-key replay, retained/pending creation, startup
       completion, bookkeeping failure and allocation tests preserve behavior.
-- [ ] Known credential values remain absent while synthetic benign IDs and
+- [x] Known credential values remain absent while synthetic benign IDs and
       causal messages remain useful; malformed/full task envelopes are not
       copied into application output.
-- [ ] Existing handler-degradation behavior stays visible and does not change
+- [x] Existing handler-degradation behavior stays visible and does not change
       the primary operation result. No new remote collector or retries.
-- [ ] Required CI uses focused synthetic/unit contracts. Real child/crash,
+- [x] Required CI uses focused synthetic/unit contracts. Real child/crash,
       persistent-container and native CLI qualification remain in their bounded
       isolated lanes, not a new required promotion matrix.
-- [ ] Independent source review and required checks pass before merge.
-      Release, authorized installation and newly observed running records
-      remain separate acceptance gates.
+- [x] Independent source review and required checks pass before merge.
+- [ ] Release, authorized installation and newly observed running records
+      pass their separate acceptance gates.
 
 ## Completion and integration
 
@@ -98,6 +98,13 @@ registrar or production configuration to demonstrate these records.
 
 ## Journal
 
+- #9044 merged as `649c58cce494f0703c86e580647d7c0ad3b37880` after
+  exact-head Copilot approval, no open findings and all required checks.
+  Re-read the full parent Plan and Validation Plan after merge. Only this
+  bounded source slice's implementation and synthetic validation gates close.
+  #8377 and the parent remain open. Native/first-prompt capture, full timeline
+  export, a persistent isolated reproducer and released/running acceptance
+  remain separate work; no installation, activation or live state changed.
 - 2026-10-25: #9041 accepted this bounded source plan. The implementation uses
   the existing application handler in the actual lane process and preserves
   the supervisor's ordered lifecycle behind a cohesive cycle module. Focused

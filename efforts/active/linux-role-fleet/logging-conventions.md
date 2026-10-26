@@ -106,6 +106,11 @@ adds the next failure-stage correlation plan through these existing application
 owners. It does not replace native capture, installer diagnostics, telemetry
 attribution or their accepted source and running evidence.
 
+The next [persistent isolated reproducer proposal](persistent-isolated-reproducer.md)
+specifies credential-free synthetic qualification without borrowing production
+state, weakening restricted-container policy or changing the ephemeral test
+runner. It is a source plan, not provisioning or native/running acceptance.
+
 `spinning-sprocket` takes only the Dispatch application-handler and local
 discovery slice. Reconciliation confirmed #8370's independent installer capture
 and #6812's progress presentation ownership; neither shared implementation is
