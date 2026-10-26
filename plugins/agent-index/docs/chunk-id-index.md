@@ -71,6 +71,34 @@ Existing calls without the keyword remain unchanged. This opt-in is a
 backfill prerequisite, not a resumable backfill operation or a new cursor,
 source-lock, reader-currentness or coverage authority.
 
+### Canonical provenance before vector writes
+
+`VectorTable.upsert(..., bounded_provenance=True)` and
+`MultiModelStore.upsert_vectors(..., bounded_provenance=True)` opt into the
+prepared canonical point-read path for the existing source/language provenance
+check. They require a participating source store and a prepared canonical
+chunk-ID index. Defaults retain the existing writer.
+
+The opt-in validates input vectors and unique chunk IDs, checks canonical
+provenance before entering the writer, then rechecks under the existing writer
+exclusion. Known missing-preparation or provenance refusals before vector
+effects preserve the current clean receipt, including an intervening committed
+content write. Unexpected errors and errors after the vector effect begins
+retain the existing dirty/uncertain recovery semantics. Empty selected input
+performs no write. Successful calls write only the vector table, never canonical
+content or its FTS index.
+
+If a caller already owns an outer writer context, that caller still owns
+failure disposition. This method never marks an enclosing transaction clean
+or clears its uncertainty merely because its own vector effect did not begin.
+
+This keyword bounds **canonical provenance reads**, not the whole native
+delete/add transaction. It does not certify raw-text/profile currentness,
+prepare indices, or publish embedding coverage/cursors. Following a vector
+write, explicit tail preparation is still required before bounded vector reads.
+A backfill caller must retain its source/account/profile binding and revalidate
+the full current embedding input before publishing vectors and progress.
+
 ## Qualification and limits
 
 `tests/test_chunk_id_index.py` exercises actual content/vector stores at 100,
@@ -81,6 +109,12 @@ in both layouts, retained old native versions, prohibited combined maintenance
 and bounded append work at the same three corpus sizes.
 These belong to the existing bounded native integration lane, not required
 unit-only CI.
+
+`tests/test_bounded_vector_provenance.py` covers actual vector writes,
+pre-effect refusal, intervening content commits, retry, post-effect uncertainty
+and legacy exclusion. The scale fixture also routes real vector writes through
+this provenance opt-in while retaining the canonical table version. This does
+not claim that native vector mutation I/O has been fully qualified.
 
 The qualified native dependency composition is LanceDB 0.40.0, pylance 13.0.0
 and lance-namespace 0.11.1 on Linux x86-64. SDK wheels also exist for Linux ARM64,

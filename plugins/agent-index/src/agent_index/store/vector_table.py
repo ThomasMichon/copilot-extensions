@@ -84,8 +84,9 @@ class VectorTable:
 
     # -- write ---------------------------------------------------------------
 
-    @source_write
-    def upsert(self, chunks: list[Chunk], vectors: np.ndarray) -> int:
+    def upsert(
+        self, chunks: list[Chunk], vectors: np.ndarray, *, bounded_provenance: bool = False,
+    ) -> int:
         """Insert or update vectors by chunk_id.
 
         Args:
@@ -95,7 +96,48 @@ class VectorTable:
         Returns:
             Number of rows written.
         """
+        if not bounded_provenance:
+            return self._upsert(chunks, vectors)
+        from .chunk_id_index import ChunkIdIndexPreparationRequired
+        from .content_store import ContentStore
+        from .source_projection import projection_records
+
+        domain = self._source_domain
+        if domain is None:
+            raise ChunkIdIndexPreparationRequired(
+                "Bounded vector provenance requires a participating source store",
+            )
         self._validate(chunks, vectors)
+        if not chunks:
+            return 0
+        if len({chunk.chunk_id for chunk in chunks}) != len(chunks):
+            raise ValueError("Bounded vector provenance requires unique chunk IDs")
+        content = ContentStore(domain.path, table_name=self._content_table)
+        with domain.read(self._db):
+            projection_records(
+                self._db, self._content_table, chunks, bounded_content=content,
+            )
+        refusal: ChunkIdIndexPreparationRequired | SourceLayoutError
+        with domain.write(self._db):
+            try:
+                canonical = projection_records(
+                    self._db, self._content_table, chunks, bounded_content=content,
+                )
+            except (ChunkIdIndexPreparationRequired, SourceLayoutError) as exc:
+                refusal = exc
+            else:
+                return self._write_vectors(chunks, vectors, canonical=canonical)
+        raise refusal
+
+    @source_write
+    def _upsert(self, chunks: list[Chunk], vectors: np.ndarray) -> int:
+        self._validate(chunks, vectors)
+        return self._write_vectors(chunks, vectors)
+
+    def _write_vectors(
+        self, chunks: list[Chunk], vectors: np.ndarray,
+        *, canonical: dict[str, dict[str, object]] | None = None,
+    ) -> int:
         table = self._get_or_create_table()
         now = time.time()
 
@@ -110,7 +152,8 @@ class VectorTable:
         if self._source_domain is not None:
             from .source_projection import projection_records
 
-            canonical = projection_records(self._db, self._content_table, chunks)
+            if canonical is None:
+                canonical = projection_records(self._db, self._content_table, chunks)
             for record in records:
                 provenance = canonical[record["chunk_id"]]
                 record.update(source=provenance["source"], language=provenance["language"])

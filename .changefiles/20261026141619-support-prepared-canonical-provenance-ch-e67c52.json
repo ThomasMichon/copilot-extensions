@@ -1,0 +1,9 @@
+{
+  "comment": "Support prepared canonical provenance checks before vector writes",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
