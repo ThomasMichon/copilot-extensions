@@ -57,6 +57,7 @@ def test_source_tree_aggregate_input_ceilings(monkeypatch: Any) -> None:
     ("module", "MODULE/child.py"),
     ("module/child.py", "MODULE"),
     ("\u00e9.py", "e\u0301.py"),
+    ("\u03b1\u0345\u0301.py", "\u03ac\u0345.py"),
     ("Stra\u00dfe/a.py", "STRASSE/b.py"),
     (".GIT/config",),
     ("package/.GiT/config",),
@@ -82,6 +83,50 @@ def test_shared_exact_directory_prefixes_remain_supported() -> None:
         for name in ("Package/a.py", "Package/b.py", "other/Package/a.py")
     )
     assert source.inspect_tree(COMMIT, TREE, listing).files == 3
+
+
+def test_prefix_entry_and_utf8_byte_ceilings_are_enforced_before_insertion(monkeypatch: Any) -> None:
+    prefixes: dict[str, tuple[str, bool]] = {}
+    monkeypatch.setattr(source, "MAX_PREFIXES", 2)
+    monkeypatch.setattr(source, "MAX_PREFIX_BYTES", 28)
+    used = source._check_path_aliases("shared/a", prefixes, 0)
+    assert used == 28 and len(prefixes) == 2
+    with pytest.raises(source.SourceError, match="prefix inventory"):
+        source._check_path_aliases("shared/b", prefixes, used)
+    assert len(prefixes) == 2
+    monkeypatch.setattr(source, "MAX_PREFIXES", 3)
+    monkeypatch.setattr(source, "MAX_PREFIX_BYTES", 43)
+    with pytest.raises(source.SourceError, match="prefix inventory"):
+        source._check_path_aliases("shared/b", prefixes, used)
+    assert len(prefixes) == 2
+    monkeypatch.setattr(source, "MAX_PREFIX_BYTES", 44)
+    assert source._check_path_aliases("shared/b", prefixes, used) == 44
+    assert len(prefixes) == 3
+
+
+def test_deep_zero_byte_paths_cannot_expand_preflight_memory_without_bound() -> None:
+    listing = "".join(
+        f"100644 blob {BLOB} 0\tfile-{index}/{'a/' * 480}end\0" for index in range(128)
+    )
+    assert len(listing.encode("utf-8")) < source.MAX_LISTING_BYTES
+    with pytest.raises(source.SourceError, match="prefix inventory"):
+        source.inspect_tree(COMMIT, TREE, listing)
+
+
+@pytest.mark.parametrize("limit", [len(LISTING.encode("utf-8")) - 1, 1])
+def test_direct_tree_inspection_also_bounds_listing_bytes(monkeypatch: Any, limit: int) -> None:
+    monkeypatch.setattr(source, "MAX_LISTING_BYTES", limit)
+    with pytest.raises(source.SourceError, match="listing exceeds"):
+        source.inspect_tree(COMMIT, TREE, LISTING)
+
+
+def test_listing_limit_counts_utf8_bytes_and_accepts_the_exact_ceiling(monkeypatch: Any) -> None:
+    listing = LISTING.replace("module.py", "\u00e9.py")
+    monkeypatch.setattr(source, "MAX_LISTING_BYTES", len(listing))
+    with pytest.raises(source.SourceError, match="listing exceeds"):
+        source.inspect_tree(COMMIT, TREE, listing)
+    monkeypatch.setattr(source, "MAX_LISTING_BYTES", len(listing.encode("utf-8")))
+    assert source.inspect_tree(COMMIT, TREE, listing).files == 1
 
 
 def test_exact_tree_and_blob_input_ceilings(monkeypatch: Any) -> None:

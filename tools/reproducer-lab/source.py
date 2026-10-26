@@ -18,6 +18,9 @@ from process import run as _run
 MAX_FILES = 16_000
 MAX_SOURCE_BYTES = 256 * 1024**2
 MAX_BLOB_BYTES = 8 * 1024**2
+MAX_LISTING_BYTES = 4 * 1024**2
+MAX_PREFIXES = 32_000
+MAX_PREFIX_BYTES = 8 * 1024**2
 _OID = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
@@ -33,18 +36,29 @@ class SourceTree:
     logical_bytes: int
 
 
-def _check_path_aliases(name: str, prefixes: dict[str, tuple[str, bool]]) -> None:
+def _path_key(name: str) -> str:
+    return unicodedata.normalize("NFD", unicodedata.normalize("NFD", name).casefold())
+
+
+def _check_path_aliases(
+    name: str, prefixes: dict[str, tuple[str, bool]], prefix_bytes: int,
+) -> int:
     parts = name.split("/")
     for length in range(1, len(parts) + 1):
         original = "/".join(parts[:length])
-        key = unicodedata.normalize("NFD", original.casefold())
+        key = _path_key(original)
         entry = (original, length == len(parts))
         if (
-            unicodedata.normalize("NFD", parts[length - 1].casefold()) == ".git"
+            _path_key(parts[length - 1]) == ".git"
             or key in prefixes and (prefixes[key] != entry or entry[1])
         ):
             raise SourceError("source tree contains filesystem path aliases")
-        prefixes[key] = entry
+        if key not in prefixes:
+            prefix_bytes += len(original.encode("utf-8")) + len(key.encode("utf-8"))
+            if len(prefixes) >= MAX_PREFIXES or prefix_bytes > MAX_PREFIX_BYTES:
+                raise SourceError("source path-prefix inventory exceeds its supported ceiling")
+            prefixes[key] = entry
+    return prefix_bytes
 
 
 def inspect_tree(commit: str, tree: str, listing: str) -> SourceTree:
@@ -56,7 +70,10 @@ def inspect_tree(commit: str, tree: str, listing: str) -> SourceTree:
         raise SourceError("source commit or tree identity is incomplete")
     seen: set[str] = set()
     prefixes: dict[str, tuple[str, bool]] = {}
+    prefix_bytes = 0
     total = 0
+    if len(listing) > MAX_LISTING_BYTES or len(listing.encode("utf-8")) > MAX_LISTING_BYTES:
+        raise SourceError("source tree listing exceeds its supported byte ceiling")
     if not listing.endswith("\0"):
         raise SourceError("source tree listing is incomplete")
     for record in listing[:-1].split("\0"):
@@ -78,7 +95,7 @@ def inspect_tree(commit: str, tree: str, listing: str) -> SourceTree:
             raise SourceError("source blob size is unavailable") from error
         if size < 0 or size > MAX_BLOB_BYTES:
             raise SourceError("source blob exceeds its supported byte ceiling")
-        _check_path_aliases(name, prefixes)
+        prefix_bytes = _check_path_aliases(name, prefixes, prefix_bytes)
         seen.add(name)
         total += size
         if len(seen) > MAX_FILES or total > MAX_SOURCE_BYTES:
@@ -149,7 +166,7 @@ class SourceReader:
             try:
                 result = self.run(
                     [*prefix, "-C", str(root), *arguments], timeout=min(15, remaining),
-                    env=env, max_stdout_bytes=4 * 1024**2,
+                    env=env, max_stdout_bytes=MAX_LISTING_BYTES,
                 )
             except (OSError, subprocess.SubprocessError, RuntimeError, UnicodeError) as error:
                 raise SourceError(f"source command unavailable ({type(error).__name__})") from error

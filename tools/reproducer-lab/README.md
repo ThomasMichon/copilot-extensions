@@ -156,7 +156,12 @@ working-tree bytes. Preflight refuses symlinks, submodules, malformed paths,
 case-folded or Unicode-normalization path aliases (including directory prefixes
 and reserved Git metadata components), even on case-sensitive hosts,
 more than 16,000 files, any blob over 8 MiB or logical source content over
-256 MiB. A shallow local-file fetch produces one detached commit and its tree
+256 MiB. Canonical caseless comparison normalizes before and after folding.
+The listing is at most 4 MiB; the prefix inventory admits at most 32,000 entries
+and 8 MiB of combined original/key UTF-8 bytes, checked before retaining a new
+entry. Deep zero-byte trees cannot grow that inventory without bound; these
+are input/retention ceilings, not a hard process-memory quota.
+A shallow local-file fetch produces one detached commit and its tree
 without copying the source's config, hooks, refs, reflogs, index or object store.
 No remote URL is configured and no fetch-head source-path record is written.
 The subprocess environment is a fixed synthetic baseline: ambient credentials,
