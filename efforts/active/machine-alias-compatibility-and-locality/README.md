@@ -486,6 +486,11 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       merged. The current guidance follow-up removes the remaining
       matching-manifest precondition without changing deployment policy or
       enabling ordinary tuple producers.
+      That source follow-up merged in #9110 after current-head approval and
+      required CI; qualified delivery and installed guidance remain open.
+- [ ] Review and execute the [ordinary call-site activation proposal](ordinary-callsite-activation.md)
+      separately. Preserve omitted-mode legacy APIs and all retained
+      allocations; live activation requires its own explicit authorization.
 - [ ] Preserve existing IDs, paths, refs, records, queued work and live sessions;
       retain supported legacy lookup and allocation replay. No automatic
       relabel, rename, policy widening or data migration.

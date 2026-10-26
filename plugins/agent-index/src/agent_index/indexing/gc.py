@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
 from agent_index.store.source_layout import selected_layout
@@ -47,6 +49,20 @@ if TYPE_CHECKING:
     from agent_index.store.multi_model_store import MultiModelStore
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SourceRetirementPolicy:
+    """Caller-owned source inventory; collection still uses shared guards.
+
+    A crawl selection need not describe push-ingested sources. A pure predicate
+    can classify legacy naming generations without replacing the GC algorithm.
+    """
+
+    configured_snapshot: bool = True
+    stale_generations: bool = True
+    is_live_source: Callable[[str], bool] | None = None
+    live_crawl_keys: frozenset[str] = frozenset()
 
 
 class GCSummary(TypedDict):
@@ -258,6 +274,7 @@ def gc_stale_sources(
     state: IndexState,
     *,
     dry_run: bool = False,
+    policy: SourceRetirementPolicy | None = None,
 ) -> GCSummary:
     """Delete all chunks whose ``source`` is not in the live registry.
 
@@ -265,13 +282,20 @@ def gc_stale_sources(
     index, and IndexState. Does NOT compact -- callers should compact after.
     Live IndexState crawl markers are preserved.
     """
+    policy = policy if policy is not None else SourceRetirementPolicy()
+    if not policy.stale_generations:
+        return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": dry_run}
     extra_keep = _extra_keep_sources()
     counts = multi_store.source_counts()
 
     purged: dict[str, int] = {}
     kept: list[str] = []
     for source, count in counts.items():
-        if is_live_source(source, extra_keep=extra_keep):
+        live = source in extra_keep or (
+            policy.is_live_source(source) if policy.is_live_source is not None
+            else is_live_source(source)
+        )
+        if live:
             kept.append(source)
         else:
             purged[source] = count
@@ -290,7 +314,8 @@ def gc_stale_sources(
                 # (e.g. stale stored "forge:code" chunks vs. the live
                 # "forge:code" crawl cursor).
                 if (not selected_layout() and source in state.sources
-                        and source not in _LIVE_CRAWL_STATE_KEYS):
+                        and source not in _LIVE_CRAWL_STATE_KEYS
+                        and source not in policy.live_crawl_keys):
                     del state.sources[source]
                 total_deleted += removed
                 log.info(
