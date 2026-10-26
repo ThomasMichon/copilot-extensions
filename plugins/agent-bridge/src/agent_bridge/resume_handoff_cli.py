@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import sys
+from http.client import HTTPException
 from typing import Any
 
-from .client import BridgeClientError
+from .client import BridgeClientError, BridgeConnectionError
 from .singleton_anchor import (
     SingletonRepo,
     anchor_session_key,
@@ -78,6 +79,7 @@ def run_resume(
     startup_request_timeout,
     strict: bool = False,
     cli: bool = False,
+    worktree_only: bool = False,
 ) -> None:
     """Implementation of ``agent-bridge resume`` with singleton fallback.
 
@@ -127,6 +129,42 @@ def run_resume(
                 file=sys.stderr,
             )
         raise SystemExit(1)
+
+    if worktree_only:
+        from .resume_cli_contract import confirmed_resume, exact_worktree_id
+
+        exact_worktree_id(target)
+        try:
+            result = client.resume_worktree(
+                target, reclaim=reclaim, strict=strict,
+                **({"mode": "cli"} if cli else {}),
+                allow_retry=False,
+                request_timeout=startup_request_timeout(resume=True, fresh_fallback=True),
+            )
+        except BridgeClientError as exc:
+            _worktree_conflict(exc, "Worktree", target)
+        except (BridgeConnectionError, HTTPException, OSError, ValueError) as exc:
+            _fail(
+                f"Exact worktree resume outcome is unconfirmed: {exc}. "
+                "The request may have started; it was not replayed.",
+                reason="resume_outcome_unknown",
+            )
+        else:
+            if not confirmed_resume(result, target, cli=cli):
+                _fail(
+                    "Exact worktree resume returned unproven session/native identity. "
+                    "The request may have started; it was not replayed.",
+                    reason="resume_response_unconfirmed",
+                )
+            verb = "took over" if reclaim else "loaded"
+            if as_json:
+                json_out({**result, "verb": verb})
+            else:
+                print(
+                    f"[OK] Worktree {target} {verb} as session "
+                    f"{result['session_id']} ({result.get('status', '')})",
+                )
+            return
 
     if not reclaim and not cli:
         try:

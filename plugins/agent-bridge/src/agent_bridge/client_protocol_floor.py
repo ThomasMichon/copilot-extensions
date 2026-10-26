@@ -49,6 +49,7 @@ def _request_with_floor(
 
     resolve = getattr(client, "_reresolve", None)
     deadline = time.monotonic() + getattr(client, "_connect_grace", 0.0)
+    allow_retry = kwargs.get("allow_retry", True)
 
     def attempt(*a: Any, **k: Any) -> dict[str, Any] | None:
         # Native retries cannot bypass the fresh protocol check between attempts.
@@ -95,7 +96,7 @@ def _request_with_floor(
         try:
             return attempt(method, path, *args, **kwargs)
         except BridgeConnectionError as exc:
-            if time.monotonic() >= deadline or (
+            if not allow_retry or time.monotonic() >= deadline or (
                 method not in ("GET", "HEAD") and not connection_refused(exc)
             ):
                 raise
@@ -106,7 +107,7 @@ def _request_with_floor(
                 "drain" in detail or "initializing" in detail
                 or (method in ("GET", "HEAD") and "merging" in detail)
             )
-            if exc.status != 503 or not retryable \
+            if not allow_retry or exc.status != 503 or not retryable \
                     or time.monotonic() >= deadline:
                 raise
             retrying, last_error = True, exc
