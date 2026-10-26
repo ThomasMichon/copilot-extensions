@@ -33,6 +33,10 @@ The shared engine exposes additive, round-local
 embedding, primary row-upsert and maintenance work. Unmeasured provider work
 remains explicitly unavailable; these counters are not coverage authorities.
 
+Participating source stores can explicitly prepare
+[bounded chunk-ID point reads](chunk-id-index.md). This additive Python path
+does not change ordinary-round defaults or migrate legacy stores automatically.
+
 An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
 returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
 `DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
