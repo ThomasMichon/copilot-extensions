@@ -114,6 +114,15 @@ The [amendment](compiler-free-execution.md) preserves the safety contract and
 separates this required subtraction from agent-recommended implementation
 sequencing. It does not authorize installed changes.
 
+The operator clarified the prerequisite owner:
+
+> Installing Python is a prereq of the whole harness, which is installed by agent-machines
+
+Use that existing machine-provisioning boundary, not a second embedded-Python
+download or interpreter installer in each helper. The amendment's
+[Python prerequisite boundary](compiler-free-execution.md#python-prerequisite-boundary)
+defines the resulting Windows ordering and qualification.
+
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
@@ -187,8 +196,9 @@ sequencing. It does not authorize installed changes.
   its existing registry, lifecycle protocol and safety guarantees.
 - [ ] Replace executable embedded Windows helper compilation and runtime code
   emission through their existing installation-context, operation-lock,
-  update-driver, process and session-host owners. Qualify genuinely pre-Python
-  bootstrap paths before changing their dependency boundary.
+  update-driver, process and session-host owners. Establish the existing
+  Agent Machines Python prerequisite before these helpers, and qualify its
+  interpreter handoff rather than introduce another acquisition path.
 - [ ] Remove first-party native sources, generated copies, custom compiled
   artifacts, compiler build hooks and release construction/verification
   compilation; retain normal integrity and source admission.
@@ -199,10 +209,12 @@ sequencing. It does not authorize installed changes.
   actual evidence. A source merge does not authorize rollout or close their
   independent acceptance.
 
-Current candidate: the leased-daemon owner's
-[Linux implementation journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-candidate)
-records compiler-absent construction and lifecycle qualification. Source review
-and the Windows bootstrap/embedded-code replacement remain open.
+The Linux slice merged in #9129. The leased-daemon owner's
+[implementation journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-merged)
+records compiler-absent construction, installed lifecycle qualification and
+namespace-bound monotonic leases. Windows bootstrap/embedded-code replacement,
+whole-campaign acceptance, release attribution and authorized rollout remain
+open.
 
 ## Validation Plan
 
@@ -244,10 +256,10 @@ Shared reuse is a design investigation; neither one global ZDD process nor one
 shared mutable venv is presumed acceptable.
 
 The compiler-free Phase 7 amendment merged in #9120 after current-head approval
-with no findings and successful required CI. Its next source slice replaces
-shared compiled instance custody with Python while preserving the complete
-bootstrap and safety gates. This closes only review of the amendment, not its
-implementation, qualification, release or adoption.
+with no findings and successful required CI. The Linux shared-instance
+replacement subsequently merged in #9129; the next source slice qualifies the
+Windows interpreter boundary before replacing embedded compilation. Neither
+merge closes the complete bootstrap, platform, release or adoption gates.
 
 ### Current execution boundary
 
@@ -307,6 +319,16 @@ from #6767: no rejected routing broker or shared mutable venv, and no claimed
 transfer without acceptance by a named tracked objective.
 
 ## Journal
+
+### 2026-10-26 - Linux compiler-free slice merged
+- #9129 merged to `dev` as `1ad9ecc02cb99a1ceed9e03462033f6e2eddeb1d`
+  after current-head independent review, resolved findings and required green
+  CI. [The shared owner journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-merged)
+  records the exact implementation and qualification boundary.
+- Phase 7 remains open. Next: qualify genuinely pre-Python Windows interpreter
+  admission/acquisition, then replace the existing process, context, lock and
+  update-driver helpers without a compiler or emitted interop types. No
+  installed runtime or automatic-maintenance enrollment was changed.
 
 ### 2026-10-11 - Audit and operator direction
 - Preserved the dependency audit as motivation and captured the operator's

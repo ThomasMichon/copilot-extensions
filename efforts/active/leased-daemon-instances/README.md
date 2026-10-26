@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Original scope completed:** 2026-10-25
 - **Source:** #8720 (original implementation merged); compiler-free amendment
-  reviewed in #9120, replacement implementation open
+  reviewed in #9120; Linux replacement merged in #9129, Windows replacement open
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
@@ -154,12 +154,12 @@ replacement.
 - [x] Review the governing compiler-free vision and
   [complete amendment](../lean-runtime-dependencies/compiler-free-execution.md)
   through the existing #8403 owner (#9120).
-- [ ] Reuse shared Python reservation, schema, locks and identity operations;
+- [x] Reuse shared Python reservation, schema, locks and identity operations;
   replace Linux C supervise/cleanup and preserve owner-loss, lease/hard maximum,
   subreaper descendant settlement and exact-artifact behavior.
 - [ ] Migrate thin shell and PowerShell instance entrypoints through a qualified
   interpreter boundary; preserve Windows process/Job and uncertainty contracts.
-- [ ] Remove canonical C, all distributed copies and native build/export hooks,
+- [x] Remove canonical C, all distributed copies and native build/export hooks,
   regenerating consumers through their normal owner.
 - [ ] Complete actual compiler-free construction and lifecycle qualification,
   update current docs and journal reviewed merged results.
@@ -196,7 +196,8 @@ replacement.
 
 Proposal #8433 and implementation #8720 completed the original shared ownership
 and caller/installer integration. The compiler-free amendment cleared review
-and merged in #9120; replacement implementation and requalification remain open.
+and merged in #9120; the Linux replacement merged in #9129. Windows replacement
+and full compiler-free requalification remain open.
 The journal distinguishes actual supported-lane proof from unavailable
 hardware, dependency and production-venue lanes; those are not claimed as
 exercised. Release promotion and installed rollout are separate, and no
