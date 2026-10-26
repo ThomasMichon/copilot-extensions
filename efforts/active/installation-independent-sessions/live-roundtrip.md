@@ -44,6 +44,15 @@ the operator's literal direction in the inception transcript.
 8. Prove continuation and final lifecycle handling, then record results in the
    canonical effort. Keep working until the complete parent gate is satisfied.
 
+The operator subsequently authorized controlled closure and relaunch of the
+selected host's legacy muxed sessions **only after verified backups and fixed
+launcher qualification**, preserving resumable session state. Resolve their
+current identities and custody before a managed graceful closure; do not kill
+old PID numbers, discard pending work or replay unknown mutations.
+This migration is not same-process survival evidence. Record the legacy
+baseline separately; the qualified replacement launch must retain its own
+identities throughout the later actual uninstall/reinstall experiment.
+
 ## Acceptance
 
 - Backups are verified restorable before the first removal. Durable identities,
