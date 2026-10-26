@@ -19,6 +19,13 @@ contract does not advertise acquisition hints. Providers retain legacy syntax
 through the consumer upgrade and provider rollback window; retirement requires
 a separate contract revision.
 
+Once v1 is negotiated, the legacy-shaped ``content-discover``,
+``content-discover-changed`` and ``content-list-paths`` responses also require
+this additive echo. Full snapshots, changed entries and path listings must not
+cross the negotiated account/target fence. Their argv and baseline fields remain
+unchanged; old callers ignore the echo. A direct acquisition on an unnegotiated
+connector retains the legacy baseline without requiring another metadata call.
+
 Example additive metadata (``commit`` retains its legacy meaning)::
 
     {"commit": "tip", "source_delta": {
@@ -111,6 +118,19 @@ def parse_declaration(data: dict[str, Any], requested: str) -> DeltaDeclaration 
     return DeltaDeclaration(tuple(versions), family, account, target)
 
 
+def validate_scope_echo(data: object, declaration: DeltaDeclaration) -> None:
+    """Bind any negotiated acquisition response to its original effective scope."""
+    if not isinstance(data, dict):
+        raise ValueError("source_delta scope echo requires an acquisition response object")
+    echo = parse_declaration(data, declaration.family)
+    if echo is None or not echo.available or (
+        echo.family, echo.account, echo.target
+    ) != (
+        declaration.family, declaration.account, declaration.target
+    ):
+        raise ValueError("source_delta scope echo must match negotiated v1 family/account/target")
+
+
 def parse_delta(
     data: object,
     declaration: DeltaDeclaration,
@@ -122,13 +142,7 @@ def parse_delta(
         raise ValueError(
             "source delta response requires version/upserts/deletions/commit/complete/source_delta",
         )
-    echo = parse_declaration(data, declaration.family)
-    if echo is None or not echo.available or (
-        echo.family, echo.account, echo.target
-    ) != (
-        declaration.family, declaration.account, declaration.target
-    ):
-        raise ValueError("source delta scope echo must match negotiated v1 family/account/target")
+    validate_scope_echo(data, declaration)
     raw_deletions = data["deletions"]
     if not isinstance(raw_deletions, list):
         raise ValueError("source delta deletions must be an array")

@@ -48,13 +48,16 @@ captures one metadata/cursor snapshot for one crawl; instantiate a fresh
 connector when selecting a new provider generation or starting another crawl.
 Negotiation fixes the canonical family before recovery or acquisition. V1
 recovery includes the command, requested subtree, declared family/account and
-effective target. Each v1 acquisition response must echo its actual executing
-``source_delta`` scope, still support v1 and exactly match the cached
+effective target. Every negotiated acquisition response (including full
+``content-discover``, legacy-shaped ``content-discover-changed`` and
+``content-list-paths``) must echo its actual executing ``source_delta`` scope,
+still support v1 and exactly match the cached
 family/account/target before any entries are returned; missing or mismatched
 echoes fail without a legacy retry. Legacy recovery retains its command-based
 identity. Providers must declare stable nonsecret identities, never credentials
 or rotating tokens. Full reconciliation retains old syntax and may return
-canonical descendant sources inside the requested subtree.
+canonical descendant sources inside the requested subtree. Direct acquisition
+on an unnegotiated connector retains the old behavior without a metadata probe.
 
 A response's own ``"source"`` field(s) (in ``entries`` or ``content-list-
 paths``' keys) are **verified against the requested ``--source``** -- an
@@ -100,6 +103,7 @@ from agent_index.sources.provider_delta import (
     DeltaDeclaration,
     parse_declaration,
     parse_delta,
+    validate_scope_echo,
 )
 
 log = logging.getLogger(__name__)
@@ -482,6 +486,7 @@ class CliSourceConnector:
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         data = self._run("content-discover", "--source", self._source, cancel_check=cancel_check)
+        self._validate_acquisition_scope(data)
         return self._entries(data, "content-discover")
 
     def discover_changed(
@@ -493,7 +498,17 @@ class CliSourceConnector:
         data = self._run(
             "content-discover-changed", "--source", self._source, *args, cancel_check=cancel_check,
         )
+        self._validate_acquisition_scope(data)
         return self._entries(data, "content-discover-changed")
+
+    def _validate_acquisition_scope(self, data: object) -> None:
+        declaration = self._declaration
+        if not self._negotiated or declaration is None or not declaration.available:
+            return
+        try:
+            validate_scope_echo(data, declaration)
+        except ValueError as exc:
+            raise ProviderError(f"content-domain provider invalid acquisition scope: {exc}") from exc
 
     def discover_delta(
         self,
@@ -525,6 +540,7 @@ class CliSourceConnector:
         data = self._run(
             "content-list-paths", "--source", self._source, cancel_check=cancel_check,
         )
+        self._validate_acquisition_scope(data)
         if not isinstance(data, dict) or not isinstance(data.get("paths"), dict):
             raise ProviderError(
                 f"content-domain provider {self._manifest.source_name!r} "

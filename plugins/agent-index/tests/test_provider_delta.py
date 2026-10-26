@@ -63,12 +63,16 @@ elif getattr(args, "delta_version", None) is not None:
         print('{"version": 1, "upserts": [')
         sys.exit(0)
     response = config["delta"]
-    if isinstance(response, dict) and config.get("echo_scope", True):
-        response = {**response, "source_delta": config.get("delta_scope", declaration)}
 else:
     response = {"entries": [{
         "source": canonical, "path": "old.md", "content": "old", "language": "markdown",
     }]}
+if args.verb != "content-current-commit" and isinstance(response, dict) and config["new"]:
+    delta = getattr(args, "delta_version", None) is not None
+    if config.get("echo_scope" if delta else "echo_snapshot_scope", True):
+        response = {**response, "source_delta": config.get(
+            "delta_scope" if delta else "snapshot_scope", declaration,
+        )}
 print(json.dumps(response))
 '''
 
@@ -195,6 +199,7 @@ def test_collection_and_journal_preserve_canonical_family(tmp_path, mode, full):
     receiver = Receiver(tmp_path, new=mode != "legacy")
     if mode == "future":
         receiver.config["metadata"]["source_delta"]["versions"] = [2]
+        receiver.config["echo_snapshot_scope"] = False
     connector = receiver.connector()
     canonical = FAMILY if mode == "v1" else "forge"
     entry_source = FAMILY if mode != "legacy" else "forge"
@@ -234,6 +239,99 @@ def test_collection_and_journal_preserve_canonical_family(tmp_path, mode, full):
             *(["--delta-version", "1"] if delta else []),
         ])
     assert receiver.calls() == expected
+
+
+@pytest.mark.parametrize("field", ["account", "target"])
+def test_full_crawl_retargeting_cannot_accept_tombstones_or_journal(tmp_path, field, monkeypatch):
+    from agent_index.indexing.crawl import collect_source_changes
+    from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.pending_crawl import PendingCrawls, recovery_scope
+    from agent_index.indexing.state import IndexState, SourceState
+
+    receiver = Receiver(tmp_path)
+    connector = receiver.connector()
+    assert connector.source_name == FAMILY
+    scope = recovery_scope("configuration", connector)
+    paths = PathIndex(tmp_path / "paths.db")
+    paths.mark_indexed(FAMILY, "gone.md", chunk_count=1)
+    journal = PendingCrawls(paths)
+    state = IndexState(sources={"alias": SourceState(last_commit="base")})
+    receiver.config["metadata"]["source_delta"][field] += ":retargeted"
+    receiver.save()
+    parsed = []
+    original_parser = connector._entries
+
+    def record_entries(data, verb):
+        parsed.append(data)
+        return original_parser(data, verb)
+
+    monkeypatch.setattr(connector, "_entries", record_entries)
+    with pytest.raises(ProviderError, match="scope"):
+        manifest = collect_source_changes(
+            "alias", state=state, path_index=paths, full=True,
+            source_aware=True, connector=connector,
+        )
+        journal.save(manifest, scope=scope, full=True)
+    assert parsed == []
+    assert journal.sources() == []
+    assert paths.get_entry(FAMILY, "gone.md") is not None
+    assert state.sources["alias"].last_commit == "base"
+    assert receiver.calls() == [
+        ["content-current-commit", "--source", "forge"],
+        ["content-discover", "--source", "forge"],
+    ]
+
+
+def _snapshot_operation(connector, operation):
+    method = getattr(connector, operation)
+    return method("base") if operation == "discover_changed" else method()
+
+
+@pytest.mark.parametrize("operation", ["discover", "discover_changed", "list_paths"])
+@pytest.mark.parametrize("echo", [
+    "missing", {"versions": [2]}, {"contract": "other"},
+    {"family": "forge:repo:other"}, {"account": "principal-b"},
+    {"target": "https://other.example.invalid/api"},
+])
+def test_negotiated_snapshot_operations_require_matching_echo(tmp_path, operation, echo):
+    receiver = Receiver(tmp_path)
+    if echo == "missing":
+        receiver.config["echo_snapshot_scope"] = False
+    else:
+        receiver.config["snapshot_scope"] = {**DECLARATION, **echo}
+    connector = receiver.connector()
+    assert connector.delta_available
+    with pytest.raises(ProviderError):
+        _snapshot_operation(connector, operation)
+    assert len(receiver.calls()) == 2
+    assert receiver.calls()[-1][0] == "content-" + operation.replace("_", "-")
+    assert all("--delta-version" not in args for args in receiver.calls())
+
+
+@pytest.mark.parametrize("operation", ["discover", "discover_changed", "list_paths"])
+def test_matching_negotiated_snapshot_echo_preserves_old_syntax(tmp_path, operation):
+    receiver = Receiver(tmp_path)
+    connector = receiver.connector()
+    assert connector.source_name == FAMILY
+    result = _snapshot_operation(connector, operation)
+    if operation == "list_paths":
+        assert result == {FAMILY: {"old.md"}}
+    else:
+        assert result[0].source == FAMILY
+    assert len(receiver.calls()) == 2
+    assert all("--delta-version" not in args for args in receiver.calls())
+
+
+@pytest.mark.parametrize("operation", ["discover", "discover_changed", "list_paths"])
+@pytest.mark.parametrize("new", [True, False])
+def test_unnegotiated_snapshot_calls_do_not_probe_or_require_echo(tmp_path, operation, new):
+    receiver = Receiver(tmp_path, new=new)
+    receiver.config["echo_snapshot_scope"] = False
+    connector = receiver.connector()
+    assert _snapshot_operation(connector, operation)
+    assert len(receiver.calls()) == 1
+    assert receiver.calls()[0][0] == "content-" + operation.replace("_", "-")
+    assert "--delta-version" not in receiver.calls()[0]
 
 
 @pytest.mark.parametrize("field", ["account", "target"])

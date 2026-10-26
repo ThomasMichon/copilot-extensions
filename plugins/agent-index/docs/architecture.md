@@ -60,8 +60,14 @@ The delta's own cursor owns coverage; metadata cursors and incomplete output
 never authorize tombstones. Invalid replies or process failures do not trigger
 an effectful legacy retry.
 Full reconciliation retains the old syntax and accepts canonical descendant
-sources within the invoked subtree. Old callers can ignore additive metadata;
-new callers handle supported rollback without guessing new syntax. Provider
+sources within the invoked subtree. Once v1 is negotiated, full
+`content-discover`, legacy-shaped `content-discover-changed` and
+`content-list-paths` responses must also include the same executing-scope echo.
+It is checked before entries or paths are returned, protecting snapshot-derived
+tombstones as well as explicit deltas. These calls introduce neither new flags
+nor additional metadata probes; direct non-negotiated calls retain the legacy
+baseline. Old callers can ignore the additive echo and metadata; new callers
+handle supported rollback without guessing new syntax. Provider
 hint consumption remains unadvertised. These providers must retain the baseline
 through the consumer-upgrade and provider-rollback window; retirement requires
 a separate contract revision.
