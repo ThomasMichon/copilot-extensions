@@ -129,18 +129,13 @@ def _run_request(
     except (driver.DriverError, driver.ParticipantError, OSError, ValueError) as error:
         print(f"Update driver: {error}", file=sys.stderr)
         failure = {"ok": False, "reason": "update-driver", "message": str(error)}
+        # Stage's lease has unwound here; never publish an unleased stage record.
         try:
             if verb == "reconcile-plugins":
                 repo = getattr(args, "repo", None) or update_cli.worktree_identity._find_repo_dir()
                 update_cli.write_reconcile_status(
                     getattr(args, "status", None),
                     {**failure, "repo": str(Path(repo).resolve()) if repo else None, "failed": []},
-                )
-            elif verb == "stage-update":
-                update_cli.write_reconcile_status(
-                    getattr(args, "status", None) or update_stage.status_path(),
-                    {**failure, "stage_done": False, "plugin_changed": False,
-                     "runtime_apply_blocked": "update-driver"},
                 )
         except (OSError, ValueError) as status_error:
             print(f"Update failure status could not be written: {status_error}", file=sys.stderr)

@@ -84,7 +84,9 @@ def test_protocol_output_limit_fails_without_silent_truncation():
 
 
 @pytest.mark.parametrize("emit_json", [False, True])
-def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, capsys, emit_json):
+def test_early_stage_failure_preserves_unleased_status_and_stdout_contract(
+    tmp_path, monkeypatch, capsys, emit_json,
+):
     import update_driver
 
     def refuse():
@@ -92,6 +94,7 @@ def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, cap
 
     status = tmp_path / "stage.json"
     status.write_text('{"stage_done":true,"plugin_changed":true}')
+    original = status.read_bytes()
     monkeypatch.setattr(boundary.update_stage, "status_path", lambda: status)
     monkeypatch.setattr(update_driver, "borrowed_custody", refuse)
     assert boundary.cmd_stage_request(_args(json=emit_json)) == 1
@@ -101,9 +104,77 @@ def test_early_stage_failure_respects_stdout_contract(tmp_path, monkeypatch, cap
         assert json.loads(result.out)["reason"] == "update-driver"
     else:
         assert result.out == ""
-    failed = json.loads(status.read_text())
-    assert failed["stage_done"] is False and failed["plugin_changed"] is False
-    assert failed["runtime_apply_blocked"] == "update-driver"
+    assert status.read_bytes() == original
+
+
+@pytest.mark.parametrize("publication", ["in-progress", "completion"])
+@pytest.mark.parametrize("emit_json", [False, True])
+def test_stage_error_reporting_cannot_overwrite_successor_completion(
+    tmp_path, monkeypatch, capsys, publication, emit_json,
+):
+    from contextlib import nullcontext
+    import update_driver
+
+    stage = boundary.update_stage
+    status, lock = tmp_path / "stage.json", tmp_path / "stage.lock"
+    successor = {"stage_done": True, "plugin_changed": True, "fingerprint": "successor"}
+    publish, release = stage._write_status, stage.release_lock
+    events = []
+
+    class Custody:
+        root = tmp_path
+        request_id = "fixture"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+        def execution_scope(self):
+            return nullcontext()
+
+    def fail_publication(path, record):
+        if path != status:
+            return publish(path, record)
+        phase = "completion" if record["stage_done"] else "in-progress"
+        if phase == publication:
+            events.append("publication-failed")
+            raise OSError("synthetic status publication failure")
+        publish(path, record)
+
+    def release_then_complete(*args, **kwargs):
+        release(*args, **kwargs)
+        events.append("released")
+        assert stage.acquire_lock(lock), "successor must acquire the released kernel lease"
+        try:
+            publish(status, successor)
+            events.append("successor-completed")
+        finally:
+            release(lock)
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: SimpleNamespace(
+        state="running", spec=SimpleNamespace(backend="engine", context=()),
+    ))
+    monkeypatch.setattr(boundary.update_driver_cli, "_execution_context", lambda _context: nullcontext())
+    monkeypatch.setattr(stage, "lock_path", lambda: lock)
+    monkeypatch.setattr(stage, "discover_plugin_dir", lambda _home: (None, "unavailable"))
+    monkeypatch.setattr(stage, "_write_status", fail_publication)
+    monkeypatch.setattr(stage, "release_lock", release_then_complete)
+
+    assert boundary.cmd_stage_request(_args(status=str(status), json=emit_json)) == 1
+    output = capsys.readouterr()
+    assert "synthetic status publication failure" in output.err
+    if emit_json:
+        assert json.loads(output.out)["reason"] == "update-driver"
+    else:
+        assert output.out == ""
+    assert events == ["publication-failed", "released", "successor-completed"]
+    assert json.loads(status.read_text()) == successor
 
 
 @pytest.mark.parametrize("phase", ["custody", "enqueue", "launch"])
@@ -155,9 +226,13 @@ def test_status_publication_failure_retains_original_json_error(tmp_path, monkey
     failure = json.loads(result.out)
     assert failure["reason"] == "update-driver"
     assert failure["message"] == "synthetic custody refusal"
-    assert failure["status_error"]
     assert "synthetic custody refusal" in result.err
-    assert "Update failure status could not be written" in result.err
+    if verb == "reconcile-plugins":
+        assert failure["status_error"]
+        assert "Update failure status could not be written" in result.err
+    else:
+        assert "status_error" not in failure
+        assert "Update failure status could not be written" not in result.err
     assert blocked.read_text() == "unrelated"
 
 
