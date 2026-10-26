@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,12 +11,14 @@ import pytest
 
 from agent_index.chunking.base import Chunk
 from agent_index.index_config import IndexConfig, ModelProfile
+from agent_index.indexing.embedding_batch import embed_and_store_batch, embed_and_store_pairs
 from agent_index.indexing.embedding_coverage import EmbeddingCoverage, input_hash, vector_hash
 from agent_index.indexing.engine import _embed_and_store_batch, _embed_and_store_files
 from agent_index.indexing.path_index import PathIndex
 from agent_index.sources.base import FileEntry
 from agent_index.store.multi_model_store import MultiModelStore
-from agent_index.store.source_layout import LAYOUT, initialize_source_store
+from agent_index.store.source_layout import LAYOUT, SourceLayoutError, initialize_source_store
+from agent_index.store.vector_table import VectorTable
 
 
 def chunk(text: str = "unchanged text", *, path: str = "one.md", source: str = "git:a") -> Chunk:
@@ -414,3 +417,191 @@ def test_cleanup_failure_retries_without_reembedding_and_empty_file_prunes_recei
     output = []
     index(replace(entry, content=""))
     assert EmbeddingCoverage(paths).missing(store.tables["a"], [item], models["a"]) == [item]
+
+
+@pytest.mark.parametrize("writer", [embed_and_store_batch, embed_and_store_pairs])
+@pytest.mark.parametrize("size", [0, -1])
+def test_pair_batch_size_refuses_before_any_effect(
+    tmp_path: Path, writer: Callable[..., int], size: int,
+) -> None:
+    models = {"a": profile()}
+    store = Store(models)
+    client = Client()
+    with pytest.raises(ValueError, match="batch size"):
+        writer([chunk()], store, {"a": client}, models, stream_batch_size=size)
+    assert store.writes == client.calls == []
+
+
+def test_pairs_share_routing_counts_and_never_write_content(tmp_path: Path) -> None:
+    from agent_index.indexing.work_counts import measure_reindex
+
+    models = {
+        "a": profile(content_types=frozenset({"text"})),
+        "b": profile("b", content_types=frozenset({"function"})),
+    }
+    store = Store(models)
+    clients = {key: Client() for key in models}
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "paths.db"))
+    items = [
+        replace(chunk(kind, path=f"{kind}.md"), chunk_type=kind)
+        for kind in ("text", "function", "custom")
+    ]
+    ready: list[bool] = []
+    store.upsert_content = lambda *a, **kw: pytest.fail("pairs must not rewrite content")
+
+    @measure_reindex
+    def write() -> dict[str, object]:
+        return {"written": embed_and_store_pairs(
+            [*items, items[0]], store, clients, models, coverage=coverage,
+            stream_batch_size=2, before_embed=lambda: ready.append(True),
+        )}
+
+    result = write()
+    assert result["written"] == 4
+    counts = result["work_counts"]
+    assert counts["content_rows_upserted"] == 0
+    for value in counts["models"].values():
+        assert value == {
+            "candidate_chunks": 2, "reused_chunks": 0, "embed_calls": 2,
+            "chunks_submitted": 2, "chunks_embedded": 2, "vector_rows_upserted": 2,
+        }
+    assert clients["a"].calls == [["text"], ["custom"]]
+    assert clients["b"].calls == [["function"], ["custom"]]
+    assert len(ready) == 4
+    assert write()["written"] == 0
+    assert len(ready) == 4
+    with pytest.raises(ValueError, match="Conflicting canonical"):
+        embed_and_store_pairs(
+            [items[0], replace(items[0], metadata={"changed": True})],
+            store, clients, models, coverage=coverage,
+        )
+    assert len(ready) == 4
+
+
+@pytest.mark.parametrize("selected", [False, True])
+def test_native_pair_writer_does_not_rewrite_stored_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool,
+) -> None:
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT if selected else "")
+    models = {"a": profile()}
+    config = IndexConfig(data_dir=tmp_path, model_profiles=models)
+    store = initialize_source_store(config) if selected else MultiModelStore(config.lance_dir)
+    if not selected:
+        store.register_model(models["a"])
+    items, client = [chunk()], Client()
+    store.upsert_content(items)
+    content = store.content_store._get_or_create_table()
+    before = (content.version, content.to_arrow().to_pylist())
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "paths.db"))
+    assert embed_and_store_pairs(items, store, {"a": client}, models, coverage=coverage) == 1
+    assert embed_and_store_pairs(items, store, {"a": client}, models, coverage=coverage) == 0
+    assert (content.version, content.to_arrow().to_pylist()) == before
+    assert client.calls == [[items[0].content]]
+
+
+def test_native_bounded_pairs_prepare_only_after_write_and_reject_stale_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.store.chunk_id_index import (
+        ChunkIdIndexPreparationRequired, prepare_chunk_id_index,
+    )
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    models, items = {"a": profile()}, [chunk("hello\r\n")]
+    store = initialize_source_store(IndexConfig(data_dir=tmp_path, model_profiles=models))
+    store.upsert_content(items)
+    content = store.content_store._get_or_create_table()
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "paths.db"))
+    client, ready, preparations = Client(), [], []
+
+    def prepare(table: VectorTable, rows: int) -> None:
+        assert table.get_vectors([items[0].chunk_id], strict=True)
+        preparations.append(rows)
+        prepare_chunk_id_index(table, max_rows=rows)
+
+    def write() -> int:
+        return embed_and_store_pairs(
+            items, store, {"a": client}, models, coverage=coverage, bounded=True,
+            before_embed=lambda: ready.append(True), after_store=prepare,
+        )
+
+    with pytest.raises(ChunkIdIndexPreparationRequired, match="missing"):
+        write()
+    assert client.calls == ready == preparations == []
+    assert store._source_domain.receipt()["state"] == "clean"
+    prepare_chunk_id_index(store.content_store, max_rows=1)
+    before = (content.version, content.to_arrow().to_pylist())
+    assert write() == 1
+    assert write() == 0
+    assert client.calls == [[items[0].content]]
+    assert len(ready) == 1 and preparations == [1]
+    assert (content.version, content.to_arrow().to_pylist()) == before
+
+    def intervening_change() -> None:
+        store.upsert_content([replace(items[0], content="hello\n")])
+        prepare_chunk_id_index(store.content_store, max_rows=1)
+
+    with pytest.raises(SourceLayoutError, match="current canonical embedding input"):
+        embed_and_store_pairs(
+            items, store, {"a": client}, models, coverage=coverage, bounded=True,
+            force=True, before_embed=intervening_change, after_store=prepare,
+        )
+    table = store.get_vector_table("a")
+    assert coverage.missing(table, items, models["a"], bounded=True) == []
+    assert preparations == [1]
+    assert store._source_domain.receipt()["state"] == "clean"
+    with pytest.raises(SourceLayoutError, match="current canonical embedding input"):
+        write()
+    assert len(ready) == 1
+
+
+def test_bounded_pairs_require_explicit_coverage_profiles_and_preparation(tmp_path: Path) -> None:
+    models = {"a": profile()}
+    store = Store(models)
+    client = Client()
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "paths.db"))
+    for kwargs in (
+        {}, {"coverage": coverage}, {"coverage": coverage, "after_store": lambda *a: None},
+    ):
+        with pytest.raises(ValueError, match="Bounded pairs require"):
+            embed_and_store_pairs([chunk()], store, {"a": client}, bounded=True, **kwargs)
+    assert store.writes == client.calls == []
+
+
+def test_native_bounded_pair_failure_does_not_publish_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.store.chunk_id_index import prepare_chunk_id_index
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    models, items = {"a": profile()}, [chunk()]
+    store = initialize_source_store(IndexConfig(data_dir=tmp_path, model_profiles=models))
+    store.upsert_content(items)
+    prepare_chunk_id_index(store.content_store, max_rows=1)
+    content = store.content_store._get_or_create_table()
+    before = (content.version, content.to_arrow().to_pylist())
+    table = store.get_vector_table("a")
+    coverage = EmbeddingCoverage(PathIndex(tmp_path / "paths.db"))
+    client = Client()
+    fail = True
+
+    def prepare(table: VectorTable, rows: int) -> None:
+        prepare_chunk_id_index(table, max_rows=rows)
+        if fail:
+            raise RuntimeError("interrupted before receipt publication")
+
+    def write() -> int:
+        return embed_and_store_pairs(
+            items, store, {"a": client}, models, coverage=coverage,
+            bounded=True, after_store=prepare,
+        )
+
+    with pytest.raises(RuntimeError, match="interrupted before receipt"):
+        write()
+    assert coverage.missing(table, items, models["a"], bounded=True) == items
+    assert (content.version, content.to_arrow().to_pylist()) == before
+    fail = False
+    assert write() == 1
+    assert write() == 0
+    assert len(client.calls) == 2
+    assert coverage.missing(table, items, models["a"], bounded=True) == []
