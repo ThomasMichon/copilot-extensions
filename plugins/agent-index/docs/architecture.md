@@ -82,7 +82,9 @@ that token's identity API, so a rotated installation token refuses an existing
 journal rather than guessing that repository ownership proves the same principal.
 Complete pending crawls before rotation; no token bytes are persisted or logged.
 Authentication failures never become anonymous identity. Azure DevOps binds its effective
-endpoint, authenticated account and resolved work-item/pull-request queries.
+HTTP-client endpoint, authenticated account and resolved work-item/pull-request queries.
+Expected permission-only `/user` denials do not incur retry backoff; quota,
+secondary-rate-limit and transient failures retain bounded HTTP retries.
 Legacy CLI providers bind their registered command. Providers remain responsible
 for stable backend identity.
 Credential-bearing URL components are excluded, except SSH usernames remain

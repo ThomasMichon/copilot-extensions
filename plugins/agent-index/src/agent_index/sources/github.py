@@ -30,6 +30,16 @@ _DEFAULT_PER_PAGE = 100
 _DEFAULT_MIN_INTERVAL_S = 0.2
 
 
+def _retry_identity_probe(response: httpx.Response) -> bool:
+    """Permission-only 403s are expected for installations, not transient."""
+    return response.status_code != 403 or (
+        "retry-after" in response.headers
+        or response.headers.get("x-ratelimit-remaining", "").strip() == "0"
+        or "rate limit" in response.text.lower()
+        or "abuse detection" in response.text.lower()
+    )
+
+
 class GitHubConnector:
     """Source connector for GitHub issues and pull requests."""
 
@@ -99,9 +109,13 @@ class GitHubConnector:
 
     def _authenticated_recovery_account(self) -> str:
         try:
-            data = self._http.get_json("/user", etag=False).data
+            data = self._http.get_json(
+                "/user", etag=False, retry_status=_retry_identity_probe,
+            ).data
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code not in (403, 404):
+            if exc.response.status_code not in (403, 404) or (
+                exc.response.status_code == 403 and _retry_identity_probe(exc.response)
+            ):
                 raise
             # Installation tokens have no /user principal endpoint. Verify their
             # installation API access, then fence this opaque credential rather

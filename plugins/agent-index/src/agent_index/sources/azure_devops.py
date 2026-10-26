@@ -104,7 +104,7 @@ class AzureDevOpsConnector:
     def recovery_identity(self) -> tuple[str, ...]:
         """Fence replay by effective endpoint, authenticated account and query scope."""
         return (
-            nonsecret_target(self.api_base), self.org, self.project,
+            nonsecret_target(str(self._http.client.base_url).rstrip("/")), self.org, self.project,
             self._get_authenticated_user_id(),
             json.dumps(self._work_item_queries, sort_keys=True),
             json.dumps(self._pull_request_queries, sort_keys=True),

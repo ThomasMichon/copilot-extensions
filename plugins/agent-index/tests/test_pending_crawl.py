@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -361,8 +362,11 @@ def test_github_effective_scope_change_refuses_pending_replay(tmp_path: Path, ch
         journal.load(before.source_name, recovery_scope("same-spec", after))
 
 
-def test_github_installation_credentials_can_crawl_and_fence_recovery(tmp_path: Path) -> None:
+def test_github_installation_credentials_can_crawl_and_fence_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     probes: list[httpx.Request] = []
+    monkeypatch.setattr(time, "sleep", lambda delay: pytest.fail("permission denial retried"))
 
     def transport(request: httpx.Request) -> httpx.Response:
         probes.append(request)
@@ -379,7 +383,6 @@ def test_github_installation_credentials_can_crawl_and_fence_recovery(tmp_path: 
             "github:org/repo", token=token, min_interval_s=0,
             transport=httpx.MockTransport(transport),
         )
-        value._http._max_retries = 0
         return value
 
     before = connector("installation-fixture")
@@ -472,6 +475,74 @@ def test_github_installation_identity_rejects_malformed_success() -> None:
     )
     with pytest.raises(ValueError, match="repositories"):
         recovery_scope("spec", connector)
+
+
+@pytest.mark.parametrize("status,headers,message", [
+    (403, {"Retry-After": "1"}, "Temporarily limited"),
+    (403, {"X-RateLimit-Remaining": "0"}, "API rate limit exceeded"),
+    (403, {}, "You have exceeded a secondary rate limit"),
+    (403, {}, "Abuse detection mechanism"),
+    (429, {"Retry-After": "1"}, "Slow down"),
+    (503, {}, "Unavailable"),
+])
+def test_github_identity_probe_retains_throttle_and_transient_retries(
+    monkeypatch: pytest.MonkeyPatch, status: int, headers: dict[str, str], message: str,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    probes: list[str] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        probes.append(request.url.path)
+        if len(probes) == 1:
+            return httpx.Response(status, headers=headers, json={"message": message})
+        return httpx.Response(200, json={"id": 1})
+
+    source = GitHubConnector(
+        "github:org/repo", token="fixture", min_interval_s=0,
+        transport=httpx.MockTransport(transport),
+    )
+    assert source.recovery_identity[3] == "1"
+    assert probes == ["/user", "/user"]
+    assert sleeps and all(delay > 0 for delay in sleeps)
+
+
+def test_github_exhausted_throttle_does_not_probe_installation_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(time, "sleep", lambda delay: None)
+    probes: list[str] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        probes.append(request.url.path)
+        return httpx.Response(403, headers={"Retry-After": "1"}, json={})
+
+    source = GitHubConnector(
+        "github:org/repo", token="fixture", min_interval_s=0,
+        transport=httpx.MockTransport(transport),
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        recovery_scope("spec", source)
+    assert probes == ["/user"] * 5
+    assert source._recovery_account is None
+
+
+def test_ado_injected_client_endpoint_is_in_recovery_fence() -> None:
+    def connector(endpoint: str) -> AzureDevOpsConnector:
+        client = httpx.Client(
+            base_url=endpoint,
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"authenticatedUser": {"id": "account-a"}}),
+            ),
+        )
+        return AzureDevOpsConnector(
+            "ado:org/project", api_base="https://configured.test", client=client,
+            token="fixture", work_item_queries=[], pull_request_queries=[], min_interval_s=0,
+        )
+
+    assert recovery_scope("spec", connector("https://first.test")) != recovery_scope(
+        "spec", connector("https://second.test"),
+    )
 
 
 @pytest.mark.parametrize("stale", [False, True])
