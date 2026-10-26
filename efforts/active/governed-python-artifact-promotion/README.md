@@ -379,6 +379,12 @@ Use the following ordered implementation and acceptance gates:
       executing a fetched repository's tooling. Run semantic profile validation
       under the admitted tooling interpreter, never via ambient `packaging`.
       Keep public first-party artifacts free of third-party dependency bytes.
+      The narrow configuration-root and wheel-inspection owners are separated
+      in #9021; complete first-party packaging remains this unchecked gate.
+      The current candidate adds opt-in SDK packaging with full internal
+      resources, repository-adapter separation, copied-payload native construction
+      and semantic validation under the actually admitted Packaging seed.
+      Required review and both native-platform qualifications remain open.
 - [ ] Connect Worktrees' real installation lifecycle first, preserving its
       `agent-worktrees` owner and runtime root separately from Manager's
       `worktree-manager` component. Carry the actual installed owner through
@@ -641,6 +647,14 @@ verified answer against its actual repository or machine configuration:
 
 ## Validation Plan
 
+- [x] Qualify the narrow admission import owners (#9021). All 1,836 admitted
+      pure units pass under the unchanged effect rules and 300-second bound;
+      30 focused native contracts preserve source acquisition, copied-tool
+      export, materialization and isolated imports with unrelated owners refused.
+      The shared-root fixture correction passes 98 Manager inventory/update/
+      configuration tests. All 29 selected hosted native jobs pass on unchanged
+      production code. This does not qualify complete toolkit packaging or
+      semantic execution under the admitted tooling interpreter.
 - [x] Qualify the restricted dependency-free Packaging seed (#9015).
       All 29 selected native jobs pass,
       including Linux/Windows seed compilation, controlled TLS acquisition,
@@ -910,6 +924,33 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-25 - Canonical toolkit candidate and admitted-interpreter witness
+
+- The existing payload-invocation generator now has an inert, required-context
+  `runtimeAdmissionToolkit` option. It delivers first-party code/resources in
+  one self-contained internal layout; no ordinary consumer opts in yet.
+  Packaging remains the exact governed tooling dependency, not vendored bytes.
+- Extracted the repository's Manager lifecycle adapter and the publication-only
+  native exporter. Source acquisition now uses the actual payload-owned lease
+  library without importing its installer. The pinned hosted attestation
+  implementation is shared with publication rather than reimplemented.
+- Windows copied-payload controls pass for all toolkit entry imports, trusted
+  native templates, source configuration, actual source authentication/native
+  admission/building, offline construction, installed health and immutable
+  completed-generation reuse. The separate actual Packaging-seed witness
+  imports every entry and semantically accepts a complete profile while refusing
+  an incomplete closure, with no other installed tooling distributions.
+- The broader regression packet exceeded its existing wall limit and is being
+  split into focused bounded packets; that timeout is not qualification.
+  All 1,836 admitted units pass with coverage inside the unchanged 300-second
+  bound. Focused packets pass 105 owner/acquisition contracts, 31 SDK controls,
+  47 retained-source controls and five export/materialization/acquisition
+  regressions. A complete Manager command-selection witness also passes
+  separately; its measured duration explains why the combined local packet
+  exceeded its cap. Both hosted native platforms, review and merge remain open.
+  Do not close the toolkit or ordinary-consumer gates from these local
+  witnesses. The parent remains **Active**.
 
 ### 2026-10-25 - Explicit source preparation merged; real installation next
 

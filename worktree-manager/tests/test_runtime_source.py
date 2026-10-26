@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -15,6 +16,39 @@ from worktree_manager import runtime_source as source
 from worktree_manager import runtime_source_config as config
 from worktree_manager import source_config
 from worktree_manager.__main__ import main
+
+
+def test_acquisition_lease_and_refusal_need_no_manager_installer(tmp_path):
+    script = """
+import importlib.abc, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+sys.path[:0] = [
+    str(root / "worktree-manager" / "src"),
+    str(root / "libs" / "agent-procutil" / "src"),
+]
+class RejectInstaller(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {"worktree_manager.self_install", "worktree_manager.__main__"}:
+            raise AssertionError("acquisition imported the Manager installer")
+sys.meta_path.insert(0, RejectInstaller())
+from worktree_manager.runtime_source import acquire, SourceAcquisitionError
+from worktree_manager.runtime_source_config import RuntimeSource
+try:
+    with acquire(RuntimeSource("marketplace"), root=pathlib.Path(sys.argv[2])):
+        raise AssertionError("marketplace source acquired an independent checkout")
+except SourceAcquisitionError:
+    pass
+assert "versioned_runtime" in sys.modules
+assert "worktree_manager.self_install" not in sys.modules
+print("acquisition-lease-without-installer-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script,
+         str(Path(__file__).resolve().parents[2]), str(tmp_path / "owner")],
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "acquisition-lease-without-installer-ok"
 
 
 def git(path: Path, *arguments: str) -> str:

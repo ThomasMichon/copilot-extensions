@@ -4082,6 +4082,7 @@
         "tools/promotion_unit_tests/test_typecheck.py": "11041bb55c64477edde098224e93225e0eff5b9d2cc7b610332159e230a32023",
         "tools/accumulate_bumps.py": "8e669617f4cd77418fd49da6928775dd3dc558f0d64ae36dde94f8836da15136",
         "tools/artifact_builder_cli.py": "876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
+        "tools/artifact_attestation.py": "b65357070515cfe45ead993994999f9ec415c3e4ea964bd29a312e04c2f58be6",
         "tools/artifact_source_build.py": "ff444dfa9bc770c63d9931d61e64cf1eafba9d8a41af70e8e01ef92ed018ed8d",
         "tools/build_python_artifacts.py": "b5e8ae982a7d02526cc7df2b0da68e1a1b14961c970a1a789495c552a3653ba3",
         "tools/build_toolchain_lock.py": "11efa6396593d97e3ff27e64649113e73b9c52914316d33fea7cd4f205a37e44",
@@ -4128,7 +4129,7 @@
         "tools/promotion_dispatch.py": "2055ff12c13a7b976dd4882be1473f9dc103a5072af1cfedf07c667353ddca56",
         "tools/promotion_frozen_candidate.py": "4f1401d36c9e432928815788cb21e8991f2da543e4c92030cb6e826df6bc072e",
         "tools/promotion_lifecycle.py": "8492254aaaf02f227d83d2882fe96d01e50c8161b3d94476b8870dd4501f42d4",
-        "tools/promotion_python_artifacts.py": "75165af24b7085a6121aeea9b2437e4cdf749b81488350e1a36490b9ba8e565b",
+        "tools/promotion_python_artifacts.py": "9e6d39cf112effb33f5576f0094818d860407206ee10b57a33787ab705295511",
         "tools/promotion_release_evidence.py": "d034995538104f96e66095c7bebe5f2edcaaa23ea55b701b2f98f08660c6a94a",
         "tools/promotion_release_helpers.py": "b110cec1f135e59027f07e159e18663eaf232c864542016758a1efeb7ae65990",
         "tools/promotion_source_alias.py": "efefb7b81cc8993fb0d296ca3e9c0590064e55d548fe3c87c598cab86247c88a",
@@ -4219,7 +4220,7 @@
         "tools/promotion_unit_tests/test_worktree_identity.py": "667c4cb239d7254cb4af7fa77faf4d1a711e1b01441bac48c3a01edcf279cecf",
         "tools/promotion_unit_tests/test_test_environment.py": "03e9b44952472c30b993b02fd193d8343f435a194dc8b97b6b71f5dc975b73dd",
         "tools/public_toolchain_source.py": "a381855e01131577662f7ece2c80ab6942da3a90f3ced242ffc80cc95e14a62f",
-        "tools/publish_python_artifacts.py": "ec2ff45131a49b0d58b080af7526cc522301b6e8f208d4b197610f53ed3a49a2",
+        "tools/publish_python_artifacts.py": "f9cb3c785acbfce5ea36d98d36b66ea07f147dd31edc60222912075d28e3a8fe",
         "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
         "tools/release_controller_contract.py": "41f8a3c5908fa26f1cefca86c81d2d7d1fe22cef2631e61fe6d500104b8f4799",
         "tools/release_controller_shell.py": "4753af55971f20782ace481dd8fb94e2fed53d0deac021b70494c0427b62d96a",
@@ -4228,7 +4229,7 @@
         "tools/run-promotion-unit-tests.py": "55ca139a83228cb2b2fae3d3423aff7e716203c141c671d2372e866a6a2ef931",
         "tools/runtime_profile.py": "d55ed6a4263e6349d452364e3abb4fb39c232d558efd384e0f1898fffbe080e5",
         "tools/runtime_profile_policy.py": "3534c89ee067231bb75fe6d74eab0816c2a2bed77653b2a66a21ff602426ca22",
-        "tools/runtime_profile_release.py": "5c6933c4928ecdabf461d0d50809348f47fba0c6d1098e20b3bc14e19a1cb4a3",
+        "tools/runtime_profile_release.py": "ffad6703e9a76a4e2492a6b1c3284bd4640fb52e39cf485889e99212e0de7ae7",
         "tools/runtime_profile_wheels.py": "aefc19e0d18e85fc037fffe11708d0830a27101fb854353e9e4e079961257659",
         "tools/runtime_source_lock.py": "9671393010b41107b0003f8ce2941addffd2f7df336649ec07c46e333f2b39a4",
         "tools/runtime_source_wheels.py": "2207ebc4e104ce642a305e248a91f39f88bee5770221d3cb960d7ea0929c057d",
@@ -4546,7 +4547,8 @@
         "tools/promotion_build_source.py",
         "libs/installer-engine/installer_retained_content.py",
         "plugins/agent-worktrees/src/agent_worktrees/pr_publish.py",
-        "tools/bundle_lock.py"
+        "tools/bundle_lock.py",
+        "tools/artifact_attestation.py"
     ],
     "max_seconds": 300
 }

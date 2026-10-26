@@ -8,7 +8,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -20,6 +19,8 @@ from promotion_python_artifacts import (
 from verify_promotion_workflows import VerificationError
 from standalone_python_artifacts import artifact_label
 from release_controller_contract import required_mode_arguments
+from artifact_attestation import _check, _gh, verify_attestation_subject as _verify_subject
+from artifact_attestation import time as time
 
 CONTROLLER_REQUIRED_ARGUMENTS = (
     (("publish",), (), ("--merged-commit", "--candidate-commit", "--dev-head")),
@@ -35,33 +36,6 @@ CONTROLLER_REQUIRED_ARGUMENTS = (
 SOURCE_CANDIDATE_REQUIRED_ARGUMENTS = (
     (("publish-candidate",), ("source-units-v2", "candidate-units-v3"), ("--complete-source-dir",)),
 )
-_ATTESTATION_TIMEOUT = 120
-_PUBLIC_GOOD_INIT_ERROR = (
-    "Error: failed to choose verifier based on provided bundle issuer: "
-    "public good verifier is not available (initialization may have failed)"
-)
-
-
-def _gh(
-    argv: list[str], *, verification: bool = False, binary: bool = False,
-    timeout: float = _ATTESTATION_TIMEOUT,
-) -> subprocess.CompletedProcess:
-    env = os.environ.copy()
-    if verification and "ARTIFACT_VERIFY_TOKEN" in env:
-        env["GH_TOKEN"] = env["ARTIFACT_VERIFY_TOKEN"]
-    env.pop("ARTIFACT_VERIFY_TOKEN", None)
-    return subprocess.run(
-        ["gh", *argv], capture_output=True, text=not binary, env=env, timeout=timeout,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-
-
-def _check(result: subprocess.CompletedProcess) -> str:
-    if result.returncode:
-        raise PromotionArtifactError(
-            f"gh failed ({result.returncode}):\n{result.stdout}\n{result.stderr}"
-        )
-    return result.stdout
 
 
 def _is_not_found(result: subprocess.CompletedProcess) -> bool:
@@ -75,36 +49,11 @@ def verify_attestation_subject(
     path: Path, *, repository: str, signer_digest: str, source_digest: str,
     source_ref: str,
 ) -> None:
-    """Authenticate one immutable subject against the pinned hosted Main producer."""
-    if (
-        not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
-        or not re.fullmatch(r"[0-9a-f]{40}", signer_digest)
-        or not re.fullmatch(r"[0-9a-f]{40}", source_digest)
-        or not re.fullmatch(r"refs/heads/[A-Za-z0-9_./-]+", source_ref)
-    ):
-        raise PromotionArtifactError("invalid expected attestation identity")
-    if path.is_symlink() or not path.is_file():
-        raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
-    argv = [
-        "attestation", "verify", str(path), "--repo", repository,
-        "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
-        "--signer-digest", signer_digest, "--source-digest", source_digest,
-        "--source-ref", source_ref, "--deny-self-hosted-runners",
-    ]
-    deadline = time.monotonic() + _ATTESTATION_TIMEOUT
-    result = _gh(argv, verification=True)
-    if result.returncode == 1 and result.stderr.strip().splitlines()[-1:] == [
-        _PUBLIC_GOOD_INIT_ERROR,
-    ]:
-        remaining = deadline - time.monotonic()
-        if remaining > 0:
-            print(
-                "gh attestation: Public Good verifier initialization unavailable; "
-                "retrying once with unchanged policy and remaining deadline",
-                file=sys.stderr,
-            )
-            result = _gh(argv, verification=True, timeout=remaining)
-    _check(result)
+    """Retain the publisher API over the shared, pinned subject verifier."""
+    _verify_subject(
+        path, repository=repository, signer_digest=signer_digest,
+        source_digest=source_digest, source_ref=source_ref, runner=_gh,
+    )
 
 
 def verify_attestations(

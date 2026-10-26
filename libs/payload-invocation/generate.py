@@ -264,6 +264,11 @@ def load_manifest(path: Path) -> dict[str, object]:
     installer_lifecycle = data.get("installerLifecycle", False)
     if not isinstance(installer_lifecycle, bool):
         raise ValueError(f"{path}: installerLifecycle must be a boolean")
+    runtime_admission = data.get("runtimeAdmissionToolkit", False)
+    if not isinstance(runtime_admission, bool):
+        raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
+    if runtime_admission and installation_context != "required":
+        raise ValueError(f"{path}: runtimeAdmissionToolkit requires installation context")
     if installer_lifecycle and (
         (manifest_version != LEGACY_VERSION and installation_context != "required")
         or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
@@ -304,6 +309,7 @@ def load_manifest(path: Path) -> dict[str, object]:
     data["catalogBinding"] = catalog_binding
     data["inProcessCatalog"] = in_process_catalog
     data["installerLifecycle"] = installer_lifecycle
+    data["runtimeAdmissionToolkit"] = runtime_admission
     data["catalogBindingModule"] = binding_module
     data["plugin"] = plugin
     data["commands"] = commands
@@ -852,6 +858,20 @@ def expected_files(manifest: Path) -> dict[Path, str]:
                 if asset in generated or asset in protected_paths:
                     raise ValueError(f"{manifest}: generated path collision: {asset}")
                 generated[asset] = source.read_text(encoding="utf-8")
+    if data["runtimeAdmissionToolkit"]:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_payload_runtime_admission", TEMPLATES.parent / "runtime_admission.py",
+        )
+        assert spec and spec.loader
+        toolkit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(toolkit)
+        for relative, content in toolkit.expected_files(REPO).items():
+            path = manifest.parent / "scripts" / "_runtime_admission" / relative
+            if path in generated or path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            generated[path] = content
     return generated
 
 
@@ -865,7 +885,10 @@ def display_path(path: Path) -> str:
 def process_manifest(manifest: Path, *, check: bool) -> list[str]:
     errors: list[str] = []
     for path, expected in expected_files(manifest).items():
-        executable = path.suffix == "" or path.name == "emit-command-catalog.sh"
+        executable = (
+            path.suffix == "" or path.name == "emit-command-catalog.sh"
+            or "_runtime_admission" in path.parts and path.suffix == ".sh"
+        )
         if check:
             try:
                 actual = path.read_text(encoding="utf-8")

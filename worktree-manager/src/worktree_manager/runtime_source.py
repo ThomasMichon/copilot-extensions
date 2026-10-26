@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -22,7 +23,7 @@ import time
 from agent_procutil import no_window_kwargs
 
 from .runtime_source_config import RuntimeSource
-from .source_config import absolute_local_source
+from .source_config import absolute_local_source, default_root
 
 _GIT_ROUTING_ENV = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
@@ -141,7 +142,9 @@ def acquire(
     selection: RuntimeSource, *, root: Path | None = None, deadline: float | None = None,
     environment: dict[str, str] | None = None,
 ) -> Iterator[ResolvedSource]:
-    from .self_install import _runtime_installer, default_root
+    # The payload owns the lease library; acquisition needs no installer or CLI.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from versioned_runtime import construction_lease
 
     _remaining(deadline)
     git_command = _git if deadline is None and environment is None else partial(
@@ -157,7 +160,7 @@ def acquire(
     checkout = source_root / digest / "checkout"
     owner = {"schema": "worktree-manager.runtime-source", "repo": repo}
     source_root.mkdir(parents=True, exist_ok=True)
-    with _runtime_installer().runtime.construction_lease(source_root, digest, timeout=_remaining(deadline, 60)):
+    with construction_lease(source_root, digest, timeout=_remaining(deadline, 60)):
         _ordinary(checkout)
         if not checkout.exists():
             checkout.parent.mkdir(parents=True, exist_ok=True)
