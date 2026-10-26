@@ -90,6 +90,10 @@ and `sources_failed` → `PARTIAL`. A consumer may wrap the result to persist it
 own maintenance accounting, but must preserve failures rather than report
 success after partial writes.
 
+Preserve the additive nested [`work_counts`](work-counts.md) result when
+adapting statistics. It distinguishes logical processing from measured primary
+row writes; unavailable provider measurements must not be rendered as zeros.
+
 Hint capability belongs to the exact selected callable. A wrapper or partial
 does not inherit it just because the underlying function supports it. Advertise
 only versions the wrapper actually accepts, validates and forwards unchanged;

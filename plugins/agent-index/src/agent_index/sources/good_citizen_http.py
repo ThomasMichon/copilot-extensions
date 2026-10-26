@@ -126,6 +126,9 @@ class GoodCitizenSession:
         retry_status: Callable[[httpx.Response], bool] | None = None,
     ) -> ApiResult:
         """Request JSON with bounded retries and upstream-directed backoff."""
+        from agent_index.indexing.work_counts import observe_http
+
+        counts = observe_http()
         params = {key: value for key, value in (params or {}).items() if value is not None}
         retries = 0
         while True:
@@ -141,6 +144,9 @@ class GoodCitizenSession:
                 redirect_policy = (
                     {"follow_redirects": False} if self._request_headers is not None else {}
                 )
+                if counts is not None:
+                    counts.attempts += 1
+                    counts.retries += int(retries > 0)
                 response = self.client.request(
                     method,
                     url_path,
@@ -156,8 +162,13 @@ class GoodCitizenSession:
                 retries += 1
                 continue
             self._last_request_at = time.monotonic()
+            if counts is not None:
+                counts.responses += 1
+                counts.response_bytes += len(response.content)
 
             if response.status_code == httpx.codes.NOT_MODIFIED:
+                if counts is not None:
+                    counts.not_modified += 1
                 return ApiResult(
                     data=None, headers=response.headers, not_modified=True, request=response.request,
                 )
@@ -182,7 +193,10 @@ class GoodCitizenSession:
             if etag and (response_etag := response.headers.get("ETag")):
                 self._etag_cache[cache_key] = response_etag
             self._respect_rate_limit(response)
-            return ApiResult(data=response.json(), headers=response.headers, request=response.request)
+            data = response.json()
+            if counts is not None:
+                counts.json_results += 1
+            return ApiResult(data=data, headers=response.headers, request=response.request)
 
     def paginate_continuation(
         self,
