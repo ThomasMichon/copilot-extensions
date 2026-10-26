@@ -590,3 +590,36 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   interactive baseline and current launch-contract inventory, preserving
   #5579's forwarding ownership. Do not treat this merged prerequisite as
   completion or retire the continuing parent worktree.
+
+### 2026-10-26 - Real interactive baseline and read-only probe repair
+
+- The supported Manager uninstaller from #8955 is merged. A disposable ARM64
+  Linux container installed Manager and Worktrees non-editably at merged
+  source `e4dcb7226c2b928d53f4cd0ba184b1f1619d7ee5`, then ran the actual
+  installed Manager launch script with a terminal attachment. The observed
+  mux server, installed pane shell and native Copilot remained live while a
+  literal no-tools witness answered the initial readiness prompt.
+- The uninstall preview refused before reaching quiescence. The launch-time
+  maintenance policy probe had created three bytecode files and their cache
+  directory inside the sealed Manager payload. Original file bytes and
+  inventory identities were unchanged. Do not weaken the inventory check,
+  delete the cache manually, or label that refusal a survival pass.
+- The bounded repair disables bytecode writes in the probe before its first
+  Manager import. Four subprocess controls exercise absent, enabled, disabled
+  and malformed policy twice with the runner's bytecode environment ignored.
+  They preserve payload bytes and the existing exit codes and diagnostics.
+- Extended native uninstall acceptance executes the real installed probe
+  with an external base interpreter and no bytecode-disable flag, compares
+  the sealed slot, and continues through actual removal and reinstall.
+  The native Windows cycle passed, including daemon start/stop, configuration
+  listing, unchanged durable data and idempotent repeated removal; the
+  combined bounded assertion run passed 32 tests.
+- The initial source-install clean-room failed because its base image lacked
+  the C compiler required by the native process helper. Providing the
+  explicitly recorded build prerequisites inside that disposable fixture
+  allowed the real installation. That is not pristine-image acceptance.
+- Actual removal of both systems around the interactive session, a copied
+  installation-independent shell, replacement-handler exit, the full suite,
+  shared YAML standby, native Windows survival and released/installed
+  acceptance remain open. The next slice resumes that same real-removal
+  baseline after the read-only probe repair.

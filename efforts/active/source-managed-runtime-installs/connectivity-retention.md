@@ -100,7 +100,7 @@ native removal is impossible or that it necessarily kills SSH.
 
 ## Retention and validation gates
 
-- [ ] Review this source audit and intent correction before changing removal
+- [x] Review this source audit and intent correction before changing removal
   behavior; retain #63/#7206, #8669/#8864 and existing service/installer owners.
 - [ ] Enumerate the selected management route and its actual executable,
   process/supervision, config, identity/authorization, endpoint and reconnect

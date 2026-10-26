@@ -33,7 +33,8 @@ print(json.dumps({
     'distribution': str(pathlib.Path(dist.locate_file('')).resolve()),
     'version': dist.version,
     'files': {name: hashlib.sha256((slot / 'payload' / name).read_bytes()).hexdigest()
-              for name in ('scripts/runtime_install.py', 'scripts/runtime_uninstall.py',
+              for name in ('bin/check-automatic-maintenance.py',
+                           'scripts/runtime_install.py', 'scripts/runtime_uninstall.py',
                            'scripts/versioned_runtime.py', 'scripts/versioned_runtime_leases.py',
                            'src/worktree_manager/runtime_candidate.py',
                            'src/worktree_manager/self_install.py',
@@ -261,6 +262,14 @@ def _exercise(directory):
     )).stdout)
     assert listing["manager_listed"]
     assert _snapshot([slot]) == sealed, "Configuration list changed the sealed installed runtime"
+    print("Manager uninstall native: actual launch-time maintenance policy probe", flush=True)
+    policy_probe = _run(
+        [base, "-I", slot / "payload" / "bin" / "check-automatic-maintenance.py"],
+        env, directory,
+    )
+    assert policy_probe.returncode == 1, policy_probe.stdout + policy_probe.stderr
+    assert "Automatic maintenance disabled" in policy_probe.stderr
+    assert _snapshot([slot]) == sealed, "Maintenance probe changed the sealed installed runtime"
     roots = [root, bin_dir, provider.parent, directory / "state"]
     before = _snapshot(roots)
     preview = json.loads(_success(_run([*external, "--uninstall", "--json"], env, directory)).stdout)
@@ -305,6 +314,7 @@ def _exercise(directory):
         "preview": preview["status"], "installed_self": self_result["status"],
         "daemon": daemon,
         "installation_list": listing,
+        "maintenance_probe_preserved_runtime": True,
         "removal": removed["status"], "repeat": absent["status"],
         "removed_runtime_and_frontdoors_confirmed": True,
         "durable_bytes_preserved": True,
@@ -322,6 +332,7 @@ def test_real_installed_manager_removal_and_reinstall():
     assert evidence["durable_bytes_preserved"]
     assert evidence["daemon"]["started"] and evidence["daemon"]["stopped"]
     assert evidence["installation_list"]["manager_listed"]
+    assert evidence["maintenance_probe_preserved_runtime"]
     assert evidence["origin"]["files"] == evidence["reinstalled"]["files"] == evidence["source_files"]
     assert Path(evidence["reinstalled"]["module"]).is_file()
     assert not Path(evidence["base_python"]).is_relative_to(Path(evidence["root"]))

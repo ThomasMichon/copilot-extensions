@@ -498,6 +498,8 @@ configuration blocks automatic work with a diagnostic; strings such as
 The Picker reports a disabled policy without blocking ordinary browsing.
 This switch is a veto, not installation consent: `true` does not bypass the
 updater's existing opt-in, publication, or ownership checks.
+The launch-time policy probe suppresses bytecode writes before importing the
+installed payload, preserving its sealed construction inventory.
 
 The policy vetoes Manager-initiated automatic launch update/reconciliation
 submissions, background staging, anchor healing, orphan/managed/finished-session

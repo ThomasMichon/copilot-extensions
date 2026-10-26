@@ -324,7 +324,7 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [x] Qualify the bounded #9022 JSON maintenance-standby source projection and owner-attributed per-machine notice, retaining the native 30-minute polling instruction and explicit unsupported/missing-notice outcomes without a service dependency. This is static source delivery, not native polling or the subsequent YAML/update-veto contract. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
 - [x] Align the disposable-service visions and review the [shared YAML maintenance-banner contract](maintenance-banner.md), tracked by #9040, before consumer implementation.
 - [ ] Realize that single banner across automatic-update admission and normally projected conduct standby; qualify the actual consumer matrix, legacy notice transition and native 30-minute hold behavior. Preserve #8645/#7694/#7496/#7758 implementation ownership and #8669/#8864 session/removal acceptance.
-- [ ] Audit and align [critical connectivity retention](connectivity-retention.md) under #9048, separating source observations from unqualified native removal behavior.
+- [x] Audit and align [critical connectivity retention](connectivity-retention.md) under #9048, separating source observations from unqualified native removal behavior.
 - [ ] Enforce that contract for active and reconnectable machine access through normal/force/purge/reinstall, while leaving credential relays disposable; qualify actual platform consumers before removing the rest of the suite.
 
 ### Phase 4a - Manager-owned opt-in background maintenance
