@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-25
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -177,6 +177,31 @@ remains with its provider, including a genuine interactive opportunity when
 needed; access failure is not permission to substitute another account or source.
 An unfinished repository stage remains explicit without discarding a completed
 core installation or claiming full adoption.
+
+### harness-selected-continuity-bootstrap
+
+A harness README can compose the standard upstream setup with a portable
+selection of its harness/worktree configuration context. That context declares
+the expected user-owned continuity source; an adopter does not need a copied
+installer or machine-specific setup command to express the arrangement.
+Standalone installation remains available without a harness, continuity store
+or Gateway.
+
+For a selected integrated fleet, setup consumes the user's already-established
+authenticated access to that source to obtain Gateway discovery and the
+delegated authority needed to provision this machine. Source/provider selection,
+current credentials and enrollment remain with their existing owners.
+Access to public configuration or a similarly named local folder is not
+bootstrap authority. An already-authorized source does not trigger a redundant
+human ceremony; an actual provider or enrollment challenge stays explicit.
+
+Cloud synchronization, private repositories and other protected user-state
+providers compose through the same contract without a mandatory storage or
+identity vendor. A managed machine can authenticate outbound to its Gateway
+before SSH is available; an existing authorized SSH provisioning path remains
+usable. Initial reach, source access, enrollment and complete connectivity have
+separate, truthful outcomes. Setup does not create a session or expand fleet
+administration merely because it selected a harness.
 
 ### prerequisite-provisioning
 Detects and installs the foundational prerequisites, and **prompts to restart**

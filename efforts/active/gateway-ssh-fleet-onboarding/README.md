@@ -127,6 +127,12 @@ The following contract decomposition and validation techniques are
 
 ## Proposed Contract
 
+The [continuity-backed first-touch amendment](continuity-bootstrap.md) adds
+README/harness-context selection, already-authenticated user continuity,
+scoped Gateway enrollment before SSH and separate ordinary human sessions.
+It preserves the retained owners below and the separately selected
+[peer-approval policy](peer-approval.md); it is not delivered setup behavior.
+
 ### Portable setup modules and operation ownership
 
 Gateway and Vault setup are Fleet Manager modules composed through normal
@@ -343,6 +349,9 @@ onboarded merely because its source is published.
   release/source/proof seam before privileged publication or setup wiring.
 - [x] Review the coherent integration-contract amendment against retained
   lifecycle, routing, authentication, credential and Chat scopes.
+- [ ] Review and implement the [continuity/bootstrap contract](continuity-bootstrap.md)
+  through the retained installer, credential/enrollment and human-session
+  adapters; preserve existing machine-proof and peer-approval requirements.
 
 ### Phase 2 - Driver and directional policy
 
@@ -369,6 +378,8 @@ onboarded merely because its source is published.
   not managed setup, enrollment or an adopted installation.
 - [ ] Wire the accepted role setup entry point to admitted target-local
   lifecycle/enrollment/authorization/profile effects.
+- [ ] Consume the harness-selected continuity source and delegated first-touch
+  or confirmation path before assuming a Gateway connection or SSH transport.
 - [ ] Persist stage outcomes, desired/applied digests, owner generation and
   uncertain-operation reconciliation through the existing authorities.
 - [ ] Implement owner-managed startup/reconnect catch-up, no-op repeat,
@@ -431,6 +442,9 @@ not installation, credential or live-adoption authority.
 - [ ] Clean-room and available live lanes; mark synthetic versus real evidence
   explicitly, including unexercised suspend/logout and channel-close cases.
 - [ ] Verify private policy is not embedded in public examples, tests or docs.
+- [ ] Qualify the [continuity bootstrap validation](continuity-bootstrap.md#validation-obligations),
+  including source/account/grant refusal, Gateway-first targets, pairing
+  recovery and the separate normal human-session boundary.
 - [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.

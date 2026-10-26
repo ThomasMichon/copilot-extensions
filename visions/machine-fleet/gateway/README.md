@@ -3,7 +3,7 @@
 - **Subject:** A reusable, live-configured Gateway for declared services and outbound role channels
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-25
 
 ## Purpose & Intent
 
@@ -158,6 +158,28 @@ Gateway caller authentication, edge authentication, service-connector identity,
 route permission and fleet administration remain separate grants. Proxy and external-origin
 handling preserve authenticated target identity rather than trusting
 caller-supplied forwarding headers.
+
+### human-sessions-and-machine-enrollment
+
+Ordinary human UX access composes the selected identity provider's normal
+authenticated session with Gateway route and capability authorization.
+Page navigation, assets and application requests do not require the browser to
+hold a separately enrolled signing key unless an explicitly selected stronger
+profile requires it. Trusted identity handling, protected backend reach and
+request-forgery protection remain part of that boundary.
+
+Machine onboarding and service connectors use their own explicit credential,
+enrollment and current-grant contracts. A harness-selected, authenticated user
+continuity source can provide discovery and delegated bootstrap authority before
+the new machine has Gateway credentials or SSH. Any required new-device
+confirmation is attributable to the actual requester and scope; a short code or
+discovered endpoint alone grants nothing.
+
+These are distinct admitted authentication modes, not a silent fallback between
+them. A human-session adapter cannot feed an ordinary cookie or caller-supplied
+identity header into a machine proof verifier. Selecting normal human SSO does
+not weaken an existing machine profile, grant service identity or confer fleet
+administration.
 
 ### thin-hosting-wrappers
 
