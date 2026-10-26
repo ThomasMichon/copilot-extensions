@@ -132,6 +132,10 @@ core of the principles above; a reviewer checks a change against these.
   with embodiment or accepts an existing sessionless workspace. Queue lanes
   and code targets do not replace its selected execution repository. Logical
   creation identity survives retries separately from prompt-delivery identity.
+  Owned remote allocation is coordinated from the originating worktree;
+  success requires the receiving workspace and the origin's matching claim.
+  SSH and adopted Gateway routes share this owner boundary, without mandatory
+  reverse connectivity or a second Bridge/Dispatch allocator.
   See [workspace allocation and session acquisition](workspace-allocation-and-session-acquisition.md).
 
 - **No shared-infrastructure dependency by default.** A plugin service is
