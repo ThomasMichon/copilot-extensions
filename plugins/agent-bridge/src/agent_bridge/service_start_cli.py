@@ -464,9 +464,14 @@ def _ask_user_fields(schema: Any) -> str:
     return "  ".join(parts)
 
 
-def _cmd_version(_args: argparse.Namespace) -> None:
+def _cmd_version(args: argparse.Namespace) -> None:
     from . import __version__
 
+    if getattr(args, "contracts_json", False):
+        from .resume_cli_contract import cli_contracts
+
+        print(json.dumps(cli_contracts(), indent=2))
+        return
     print(f"agent-bridge {__version__}")
 
 
@@ -756,6 +761,7 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
     readiness_p.set_defaults(func=_cmd_installer_readiness)
 
     ver_p = sub.add_parser("version", help="Print version")
+    ver_p.add_argument("--contracts-json", action="store_true", help="Emit this executing CLI's local contract support as JSON; no daemon request")
     ver_p.set_defaults(func=_cmd_version)
 
     carrier_p = sub.add_parser("carrier", help="Run the framed remote Agent Bridge carrier endpoint")

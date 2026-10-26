@@ -114,13 +114,20 @@ def _cmd_end(args: argparse.Namespace) -> None:
 def _cmd_resume(args: argparse.Namespace) -> None:
     from .resume_handoff_cli import run_resume
     from .hosting_admission_cli import configure_client
+    from .resume_cli_contract import resume_target
 
+    try:
+        target, worktree_only = resume_target(args)
+    except argparse.ArgumentTypeError as error:
+        print(f"[FAIL] {error}", file=sys.stderr)
+        raise SystemExit(2) from error
     core = _core()
     client = core._get_client()
     configure_client(client, args)
     run_resume(
         client=client,
-        target=args.session_id,
+        target=target,
+        worktree_only=worktree_only,
         reclaim=bool(getattr(args, "force", False)),
         strict=bool(getattr(args, "strict", False)),
         cli=bool(getattr(args, "cli", False)),
@@ -472,7 +479,10 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     resume_p = sub.add_parser("resume", help="Resume a stopped session, or load/take-over a worktree by handle")
     from .hosting_admission_cli import add_argument as add_hosting_argument
     add_hosting_argument(resume_p)
-    resume_p.add_argument("session_id", metavar="target", help="Session ID (owned ACP session) or worktree handle to load")
+    from .resume_cli_contract import exact_worktree_id
+    resume_target = resume_p.add_mutually_exclusive_group(required=True)
+    resume_target.add_argument("session_id", nargs="?", metavar="target", help="Session ID (owned ACP session) or worktree handle to load")
+    resume_target.add_argument("--worktree-id", type=exact_worktree_id, help="Resume only this exact worktree; never select a session alias or singleton alternative")
     resume_p.add_argument("--force", "--reclaim", dest="force", action="store_true", help="Break-glass take-over: adopt the worktree even if a live interactive CLI holds it (stop that CLI first)")
     resume_p.add_argument("--strict", action="store_true", help="Identity-preserving contract: refuse (409) rather than silently start a fresh replacement conversation when the worktree has no existing session or its resume fails")
     resume_p.add_argument("--cli", action="store_true", help="Resume the exact native head in a headed/muxed CLI instead of headless ACP")

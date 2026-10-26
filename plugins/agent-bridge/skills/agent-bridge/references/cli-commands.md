@@ -8,8 +8,9 @@ boundaries remain literal global-wrapper invocations.
 
 Full command catalog for the `agent-bridge` CLI. See [SKILL.md](../SKILL.md)
 for the overview, when to use the bridge vs internal sub-agents, and common
-patterns. All commands connect to the local agent-bridge HTTP API; the service
-must be running (the `start` management operation).
+patterns. Client commands connect to the local agent-bridge HTTP API; the service
+must be running (the `start` management operation). `version`, including its
+contract-disclosure mode, is local and needs no daemon.
 
 `agent-bridge` is a logical command name throughout this reference. Replace each
 leading token with the exact `argv[0]` from the agent-bridge session command
@@ -26,8 +27,8 @@ catalog; never resolve it through ambient `PATH`.
 ---
 ## CLI Commands
 
-All commands connect to the local agent-bridge HTTP API. The service must
-be running (the `start` management operation) for client commands to work.
+The service must be running (the `start` management operation) for HTTP client
+commands to work. Local version/contract disclosure does not contact it.
 
 ### List Available Agents
 
@@ -393,14 +394,33 @@ be discarded (or the cancel signature *persists* across sends). See the
 # creates replacement history, including when --force was supplied.
 <agent-bridge catalog argv[0]> resume <session-id|worktree-handle|repo-or-agent>
 <agent-bridge catalog argv[0]> resume <worktree-handle|repo-or-agent> --cli
+
+# Select exactly one managed worktree, without session-alias or singleton lookup.
+<agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --strict
+<agent-bridge catalog argv[0]> --json resume --worktree-id <worktree-id> --cli
 ```
+
+`--worktree-id` and the positional target are mutually exclusive. The exact
+selector accepts one owner-record ID, not a path or `<repo>@anchor` key; invalid
+or empty input exits 2 before client discovery. It sends only the worktree
+resume request, retaining `--strict`, `--force`/`--reclaim`, `--cli` and existing
+hosting admission. It never probes an owned-session alias, substitutes a singleton,
+creates replacement history or retries a failed POST. A 404/409/426 is not a
+reason to switch targets or weaken strictness.
 
 With global `--json`, resume preserves the server's complete session response,
 including its actual session/native identity, project/path, state and liveness
 metadata. The CLI adds its `verb` and, for singleton aliases, `requested_target`;
-missing legacy identity/status fields retain their existing CLI fallbacks.
+the positional form retains its existing missing-field fallbacks. Exact selection
+instead requires the returned worktree, selected mode and nonblank native/session
+identities to agree: ACP uses matching ACP/durable IDs, while CLI also returns
+that native ID as its session ID. Missing or inconsistent identity exits 1 with
+`resume_response_unconfirmed`; a lost response reports `resume_outcome_unknown`.
+Either request may have started: no failure establishes absence or authorizes
+replacement, cleanup or another POST. The CLI does not synthesize project/path,
+native identity, allocation provenance or readiness.
 Returned null, false and zero values are preserved, not converted into readiness.
-Human-readable output and resume admission/refusal behavior are unchanged.
+Legacy positional routing and human-readable output retain their meaning.
 
 The client requires HTTP protocol 40 and uses
 `POST /api/v1/worktrees/{id}/resume/{mode}` (`mode`: `acp` or `cli`). The mode-qualified route is
@@ -522,7 +542,33 @@ agent-bridge start --port 9280 --bind 127.0.0.1 # pin a fixed port (default is d
 
 # Version
 <agent-bridge catalog argv[0]> version
+
+# Purely local executing-CLI contract support, separate from daemon HTTP support.
+<agent-bridge catalog argv[0]> version --contracts-json
 ```
+
+`version` keeps its plain `agent-bridge <package-version>` output, even with
+global `--json`. Only `version --contracts-json` emits the version-one
+`agent-bridge.cli-contracts` declaration:
+
+```json
+{"schema":"agent-bridge.cli-contracts","version":1,"contracts":{"agent-bridge.resume":{"version":1,"capabilities":["exact-worktree-target"]}}}
+```
+
+Select this metadata from the same executable/runtime used for resume, not a
+newer payload, a package-version comparison or the resident daemon. It declares
+local selector support, not native admission or daemon compatibility; the
+existing HTTP capability checks remain mandatory. Discovery allocates nothing
+and is not a mandatory per-resume subprocess.
+
+This is provider-first additive support. Existing positional callers remain
+supported without migration or deprecation. An older CLI may reject
+`--contracts-json` or `--worktree-id` as unknown syntax before dispatch; absent,
+invalid or unrecognized contract metadata means unknown exact-selector support.
+Callers requiring exact selection must obtain positive support from their
+selected CLI or report the unsupported requirement, including after rollback.
+They must not silently use positional routing or replay an effectful failure
+with older syntax. No ordinary automated caller is migrated by this expansion.
 
 ### Remote Venue Parity Acceptance
 
