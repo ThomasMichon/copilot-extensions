@@ -55,7 +55,8 @@ def test_logon_launcher_preserves_argv_and_uses_durable_logged_spawn(monkeypatch
         "cwd": str(runtime), "timeout": 30, "max_stdout_bytes": 512 * 1024,
         "max_stderr_bytes": 65536,
     })]
-    assert calls == [(([sys.executable, *description["arguments"]],), {
+    assert calls == [(([sys.executable, "-X", "agent_dispatch_install_dir=" + str(runtime),
+                        *description["arguments"]],), {
         "cwd": str(runtime), "log_path": description["log_path"],
         "env_overrides": {"PYTHONUTF8": "1", "AGENT_DISPATCH_INSTALL_DIR": str(runtime)},
         "console_children": True,

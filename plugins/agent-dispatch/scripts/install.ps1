@@ -2414,9 +2414,9 @@ function Retire-SupervisorProcessesFallback {
                     )
                 } catch { }
             }
-            $dispatchArgv = @()
-            if ($underRoot) { $dispatchArgv = @(Get-SupervisorDispatchArguments -CommandLine $cmd) }
-            $isSupervisor = $underRoot -and $dispatchArgv.Count -gt 0 -and (
+            $dispatchArgv = @(Get-SupervisorDispatchArguments -CommandLine $cmd)
+            $ownedRuntime = $underRoot -or (Test-SupervisorInstallMarker -Executable $exe -CommandLine $cmd -Root $InstallDir)
+            $isSupervisor = $ownedRuntime -and $dispatchArgv.Count -gt 0 -and (
                 $dispatchArgv[0] -eq 'supervise'
             ) -and (
                 $dispatchArgv.Count -eq 1 -or $dispatchArgv[1] -eq 'serve' -or $dispatchArgv[1].StartsWith('-')
@@ -3225,7 +3225,8 @@ if (
 ):
     raise ValueError('Invalid supervisor launch description v1')
 spawn_daemon(
-    [description['executable'], *description['arguments']], cwd=sys.argv[1],
+    [description['executable'], '-X', 'agent_dispatch_install_dir=' + sys.argv[1],
+     *description['arguments']], cwd=sys.argv[1],
     log_path=description['log_path'],
     env_overrides={'PYTHONUTF8': '1', 'AGENT_DISPATCH_INSTALL_DIR': sys.argv[1]},
     console_children=True,
@@ -3463,6 +3464,11 @@ function Resolve-WritableLog([string]`$primary, [string]`$slot) {
     return `$alt
 }
 `$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
+try {
+    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
+        Move-Item -Force `$logFile "`$logFile.1"
+    }
+} catch { }
 if (`$DescribeLaunch) {
     `$description = @{
         version = 1
@@ -3473,11 +3479,6 @@ if (`$DescribeLaunch) {
     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$description))
     exit 0
 }
-try {
-    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
-        Move-Item -Force `$logFile "`$logFile.1"
-    }
-} catch { }
 try {
     "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval log=`$logFile)" |
         Out-File -FilePath `$logFile -Append -Encoding utf8

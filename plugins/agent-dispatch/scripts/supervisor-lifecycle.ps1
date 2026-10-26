@@ -60,6 +60,21 @@ public static class DispatchSupervisorCommandLine {
     return @()
 }
 
+function Test-SupervisorInstallMarker {
+    param([string]$Executable, [string]$CommandLine, [string]$Root)
+    if (-not $Executable -or [IO.Path]::GetFileName($Executable) -notin @('python.exe', 'pythonw.exe')) { return $false }
+    $tokens = [DispatchSupervisorCommandLine]::Split($CommandLine)
+    if ($tokens.Count -lt 5 -or $tokens[1] -ne '-X') { return $false }
+    $marker = 'agent_dispatch_install_dir='
+    if (-not $tokens[2].StartsWith($marker, [StringComparison]::Ordinal)) { return $false }
+    $declared = $tokens[2].Substring($marker.Length)
+    if (-not [IO.Path]::IsPathRooted($declared)) { return $false }
+    try {
+        return [IO.Path]::GetFullPath($tokens[0]).Equals($Executable, [StringComparison]::OrdinalIgnoreCase) -and
+            [IO.Path]::GetFullPath($declared).Equals([IO.Path]::GetFullPath($Root), [StringComparison]::OrdinalIgnoreCase)
+    } catch { return $false }
+}
+
 function Stop-SupervisorSnapshotProcess {
     param($Snapshot)
     $process = $null

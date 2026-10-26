@@ -28,6 +28,8 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
     python = slot / "python.exe"
     python.touch()  # Description must never try to execute this sentinel.
     (runtime / "current-version").write_text("fixture")
+    log = runtime / "supervise-service.log"
+    log.write_bytes(b"x" * (1024 * 1024 + 1))
     profile = runtime / "custom profile.env"
     profile.write_text(
         "AGENT_DISPATCH_SUPERVISE_INTERVAL=41\n"
@@ -84,4 +86,5 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
         assert args[3] == "--all-repos"
         assert [args[i + 1] for i, arg in enumerate(args) if arg == "--label"] == ["one", "two"]
         assert args[args.index("--headless-agent") + 1] == "fixture-agent"
-    assert (runtime / "supervise-service.log").read_bytes() == b""
+    assert not log.exists()
+    assert log.with_suffix(".log.1").stat().st_size == 1024 * 1024 + 1

@@ -133,7 +133,8 @@ def test_logon_application_argv_reaches_canonical_provenance(tmp_path, resolutio
     observed = json.loads(witness.read_text(encoding="utf-8"))
     actual = observed.pop("argv")
     assert Path(actual[0]).samefile(sys.executable)
-    assert actual[1:] == ["-m", "agent_dispatch", "supervise", "serve"]
+    assert actual[1:] == ["-X", "agent_dispatch_install_dir=" + str(runtime),
+                          "-m", "agent_dispatch", "supervise", "serve"]
     command = json.loads(Path(str(witness) + ".preflight").read_text())
     assert Path(command[0]).is_absolute()
     assert Path(command[0]).samefile(expected)
