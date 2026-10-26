@@ -492,6 +492,8 @@ not to the vision. This effort does not acquire or migrate live capacity.
   `1aabdbd663b4b2b5a2c32a37fbdabd2dc9051c2e` after exact-head Copilot
   approval, resolved feedback and all required checks. The bounded selectors
   passed 339 controls, including two explicitly selected real local-Git cases.
+  Review corrections excluded host attributes, matched the source object format,
+  rejected filesystem path aliases and bounded retained path-prefix inventory.
   Re-read this complete Plan and Validation Plan. This supplies bounded
   source inputs, not an image build, guest-source qualification or lab admission.
   Continue the existing-owner custody and guest/runtime prerequisites; actual

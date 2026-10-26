@@ -247,9 +247,9 @@ exclusive custody, peer posture or guest mount/runtime qualification.
 Git through the existing bounded process owner, without copying dirty/index
 bytes, source credentials/configuration/hooks or older history.
 Synthetic controls and an explicitly selected local-Git lane cover that
-preparation. Independent review found system-attribute leakage, object-format
-mismatch, case/normalization aliases and unbounded path-prefix retention;
-all were corrected before exact-head approval and required checks.
+preparation. Host system/user attributes are excluded; destination object format
+matches the selected commit. Preflight rejects case/normalization path aliases
+and bounds both the listing and retained prefix-entry/byte inventory.
 The combined selectors passed 339 controls, including two real local-Git cases.
 No image build, guest copy or running-source claim follows.
 The next source adds a finite fixed guest probe and host checks for effective
