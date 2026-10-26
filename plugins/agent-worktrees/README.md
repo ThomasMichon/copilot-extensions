@@ -314,6 +314,28 @@ reached over a process boundary. The small `packaging` dependency is explicit
 so reconciliation preserves version ordering and downgrade protection without
 relying on UI dependencies.
 
+## Background Update Staging
+
+The launch path stages marketplace payload updates separately from runtime
+installation. One stage holds an OS lease for its entire download, fingerprint
+and completion-publication transaction. Its `updater.lock.guard` file remains
+in place after release so concurrent callers always arbitrate the same file;
+the kernel releases ownership when the staging process exits or crashes.
+
+The separate `updater.lock` record contains diagnostic PID, process birth and
+attempt identity. Age never authorizes taking a live lease. A live legacy
+PID-only owner is preserved during migration; malformed ownership metadata and
+I/O failures refuse staging explicitly. A contending stage returns
+`skipped: locked` without replacing the owner's shared completion result.
+Acquisition failures likewise leave shared status untouched; stderr, the
+caller's JSON result and its nonzero exit report the failure.
+Lock and status records publish atomically, and the picker stops reporting
+`checking` once no live owner remains. This is a staging-only lease, not the
+installer's slot-admission lock or a machine-wide update-writer protocol.
+The standalone session-start hook also recognizes live stages regardless of
+age and verifies a recorded process birth identity before deferring its own
+reconciliation; it does not load or invoke the stale installed runtime.
+
 ## Authoritative Repository Roots
 
 Consumers requiring authoritative repository roots use

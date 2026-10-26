@@ -240,6 +240,15 @@ def test_actual_content_vector_point_reads_at_scale(
     before = store.projection_snapshot()
     assert coverage.missing(vector, selected, model, bounded=True) == []
     assert store.projection_snapshot() == before
+    content_version = content._get_or_create_table().version
+    assert store.upsert_vectors(
+        "a", selected, np.array([[42, 1], [43, 1]], dtype=np.float32),
+        bounded_provenance=True,
+    ) == 2
+    assert content._get_or_create_table().version == content_version
+    assert store._source_domain.receipt()["state"] == "clean"
+    prepare_chunk_id_index(vector, max_rows=2)
+    assert coverage.missing(vector, selected, model, bounded=True) == selected
     optimize = DatasetOptimizer.optimize_indices
     measured = []
 

@@ -190,15 +190,18 @@ class MultiModelStore(_ItemRepresentationMixin):
         """Store chunk content in the global content table."""
         return self._content.upsert(chunks, skip_identical=skip_identical)
 
-    @source_write
     def upsert_vectors(
         self,
         model_id: str,
         chunks: list[Chunk],
         vectors: np.ndarray,
+        *,
+        bounded_provenance: bool = False,
     ) -> int:
         """Store vectors for a specific model."""
         vt = self.get_vector_table(model_id)
+        if bounded_provenance:
+            return vt.upsert(chunks, vectors, bounded_provenance=True)
         return vt.upsert(chunks, vectors)
 
     @source_write

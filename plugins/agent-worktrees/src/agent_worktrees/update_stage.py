@@ -27,10 +27,11 @@ to run concurrently with the Picker. The *apply* (installer: payload->runtime +
 pip) runs through the canonical execution owner, never inside this acquisition
 function. Blocking launch wrappers may still wait on that owner.
 
-Single-flight: a lockfile (PID + start epoch, with stale reclaim) ensures two
+Single-flight: an OS-held lease ensures two
 near-simultaneous launches never both hit the marketplace / race the payload
-write. A second launch whose stage finds the lock held simply records
-``skipped: locked`` and exits -- the in-flight stage's result is authoritative.
+write. PID/start-time records are diagnostics, never permission to reclaim a
+live lease. A contending stage returns ``skipped: locked`` without replacing the
+owner's shared status. The kernel releases the lease if its owner crashes.
 
 The heavier, order-sensitive steps (the ``pre-launch`` self-update installers
 and the two-pass ``reconcile-plugins``) stay in the shell apply step; this
@@ -40,14 +41,20 @@ redundant spawn when nothing is stale.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
 import sys
+import tempfile
+import threading
 import time
+import uuid
 from pathlib import Path
 
-from . import config as cfg
+from single_instance_lease import AlreadyRunningError, SingleInstance
+
+from . import config as cfg, locks
 
 # ── Well-known paths (under the runtime dir ~/.agent-worktrees) ────────────
 _STATUS_NAME = "updater-status.json"
@@ -63,11 +70,11 @@ _FINGERPRINT_FILES = (
     "scripts/install.sh",
 )
 
-# A stage older than this (seconds) is considered abandoned and its lock is
-# reclaimed -- covers a crashed stage that never released.
-_LOCK_TTL_SECS = 120
 # Upper bound on the marketplace download itself.
 _COPILOT_UPDATE_TIMEOUT = 90
+_HELD_LOCKS: dict[Path, tuple[SingleInstance, dict]] = {}
+_LOCK_MUTEX = threading.Lock()
+_LOCK_PROTOCOL = "kernel-lease-v1"
 
 
 def status_path() -> Path:
@@ -78,90 +85,83 @@ def lock_path() -> Path:
     return cfg.install_dir() / _LOCK_NAME
 
 
-# ── PID liveness (portable; never uses os.kill on Windows) ─────────────────
 def _pid_alive(pid: int) -> bool:
-    """Best-effort: is a process with this PID currently running?"""
-    if pid <= 0:
-        return False
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            STILL_ACTIVE = 259
-            kernel32 = ctypes.windll.kernel32
-            handle = kernel32.OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-            )
-            if not handle:
-                return False
-            try:
-                code = wintypes.DWORD()
-                if kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                    return code.value == STILL_ACTIVE
-                return True
-            finally:
-                kernel32.CloseHandle(handle)
-        except Exception:
-            # If we can't tell, assume alive so we don't stomp a live lock.
-            return True
-    # POSIX: signal 0 probes existence without delivering a signal.
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except Exception:
-        return True
-    return True
+    return locks.pid_alive(pid)
 
 
 def acquire_lock(lock: Path | None = None, *, pid: int | None = None) -> bool:
     """Acquire the single-flight update lock.
 
-    Returns True if acquired. Reclaims a lock whose owner is dead or whose age
-    exceeds the TTL. Best-effort and race-tolerant: two racers may both think
-    they won in a tight window, which is acceptable here (the loser's stage is a
-    redundant, idempotent no-op guarded by the marketplace itself).
+    False means contention only. Filesystem/metadata failures raise explicitly.
+    Preserve a live legacy PID-only owner during migration, regardless of age.
     """
-    lock = lock or lock_path()
-    pid = os.getpid() if pid is None else pid
-    now = time.time()
-    if lock.exists():
-        try:
-            data = json.loads(lock.read_text(encoding="utf-8"))
-            owner = int(data.get("pid", -1))
-            started = float(data.get("started", 0.0))
-        except Exception:
-            owner, started = -1, 0.0
-        fresh = (now - started) < _LOCK_TTL_SECS
-        if fresh and _pid_alive(owner):
-            return False  # a live stage owns it
-        # else: stale -- fall through and reclaim
-    try:
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        lock.write_text(
-            json.dumps({"pid": pid, "started": now}), encoding="utf-8"
+    lock = (lock or lock_path()).resolve()
+    with _LOCK_MUTEX:
+        if lock in _HELD_LOCKS:
+            return False
+        if pid is not None and pid != os.getpid():
+            raise ValueError("A stage lease must be owned by the calling process")
+        lease = SingleInstance(
+            lock.parent, service="agent-worktrees-update-stage",
+            lock_name=f"{lock.name}.guard",
         )
+        try:
+            lease.acquire()
+        except AlreadyRunningError as error:
+            cause = error.__cause__
+            if isinstance(cause, OSError) and cause.errno in (errno.EACCES, errno.EAGAIN):
+                return False
+            if isinstance(cause, OSError):
+                raise cause from None
+            raise
+        try:
+            try:
+                previous = json.loads(lock.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                previous = None
+            if previous is not None:
+                if not isinstance(previous, dict) or type(previous.get("pid")) is not int:
+                    raise ValueError("Unrecognized update-stage lock metadata")
+                if previous.get("protocol") not in (None, _LOCK_PROTOCOL):
+                    raise ValueError("Unsupported update-stage lock protocol")
+                if previous.get("protocol") != _LOCK_PROTOCOL and locks.lock_is_live(previous):
+                    lease.release()
+                    return False
+            record = {
+                "protocol": _LOCK_PROTOCOL,
+                "pid": os.getpid(),
+                "started": time.time(),
+                "start_time": locks.process_start_time(os.getpid()),
+                "token": uuid.uuid4().hex,
+            }
+            _write_status(lock, record)
+        except BaseException:
+            lease.release()
+            raise
+        _HELD_LOCKS[lock] = (lease, record)
         return True
-    except Exception:
-        return False
 
 
 def release_lock(lock: Path | None = None, *, pid: int | None = None) -> None:
-    """Release the lock if we (this pid) still own it."""
-    lock = lock or lock_path()
-    pid = os.getpid() if pid is None else pid
-    try:
-        if lock.exists():
-            data = json.loads(lock.read_text(encoding="utf-8"))
-            if int(data.get("pid", -1)) == pid:
+    """Release only a lease acquired by this process; never unlink its guard."""
+    lock = (lock or lock_path()).resolve()
+    with _LOCK_MUTEX:
+        held = _HELD_LOCKS.get(lock)
+        if held is None or (pid is not None and pid != os.getpid()):
+            return
+        lease, record = held
+        try:
+            try:
+                current = json.loads(lock.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                current = None
+            if current is not None:
+                if current != record:
+                    raise ValueError("Update-stage lock metadata changed while its lease was held")
                 lock.unlink()
-    except Exception:
-        # Best-effort; a stale lock is reclaimed by age/PID next round.
-        pass
+        finally:
+            del _HELD_LOCKS[lock]
+            lease.release()
 
 
 # ── Plugin payload discovery + fingerprint ─────────────────────────────────
@@ -320,7 +320,7 @@ def stage(
     """Perform one background staging pass and write the status file.
 
     Steps (all safe w.r.t. the running Picker's venv):
-      1. Single-flight: acquire the lock, else record ``skipped: locked``.
+      1. Single-flight: acquire the lock, else return ``skipped: locked``.
       2. Discover the marketplace payload dir (else ``skipped``).
       3. Fingerprint (reusing the prior run's AFTER-hash when trustworthy --
          see :func:`_resolve_before_fingerprint`) -> ``copilot plugin
@@ -333,15 +333,21 @@ def stage(
     """
     status = status or status_path()
     lock = lock or lock_path()
-    prior = read_status(status)
     result: dict = {"stage_done": False, "ts": time.time()}
 
-    if not acquire_lock(lock):
+    try:
+        acquired = acquire_lock(lock)
+    except (OSError, ValueError) as error:
+        result["stage_error"] = f"Update-stage lock unavailable: {error}"
+        print(result["stage_error"], file=sys.stderr)
+        return result
+    if not acquired:
         result.update(stage_done=True, skipped="locked", plugin_changed=False)
-        _write_status(status, result)
         return result
 
     try:
+        prior = read_status(status)
+        _write_status(status, result)
         plugin_dir, layout = discover_plugin_dir(home)
         if plugin_dir is None:
             result.update(
@@ -444,11 +450,16 @@ def stage(
 
 
 def _write_status(status: Path, data: dict) -> None:
+    """Publish a complete record atomically; never hide publication failures."""
+    status.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{status.name}.", suffix=".tmp", dir=status.parent)
     try:
-        status.parent.mkdir(parents=True, exist_ok=True)
-        status.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:
+            json.dump(data, stream, indent=2)
+            stream.write("\n")
+        os.replace(temporary, status)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def read_status(status: Path | None = None) -> dict:
@@ -469,9 +480,7 @@ def indicator_state(
 
     Returns one of:
       "paused"    -- this launch explicitly disabled updates;
-      "checking"  -- a background stage is in flight (live, fresh lock, or the
-                     last stage recorded ``skipped: locked`` because a peer
-                     stage owns the lock);
+      "checking"  -- a background stage has live owner metadata;
       "available" -- the stage finished and the marketplace payload changed
                      (an update is staged, ready to apply on launch/refresh);
       "current"   -- the stage finished and nothing changed (up to date);
@@ -482,21 +491,11 @@ def indicator_state(
     if os.environ.get("WORKTREE_NO_UPDATE") == "1":
         return "paused"
 
-    lk = lock or lock_path()
-    try:
-        if lk.exists():
-            data = json.loads(lk.read_text(encoding="utf-8"))
-            started = float(data.get("started", 0.0))
-            owner = int(data.get("pid", -1))
-            if (time.time() - started) < _LOCK_TTL_SECS and _pid_alive(owner):
-                return "checking"
-    except Exception:
-        pass
+    if locks.lock_is_live(locks.read_lock(lock or lock_path())):
+        return "checking"
     st = read_status(status)
     if not st or not st.get("stage_done"):
         return "idle"
-    if st.get("skipped") == "locked":
-        return "checking"
     if st.get("skipped"):
         return "idle"
     return "available" if st.get("plugin_changed") else "current"
@@ -520,4 +519,4 @@ def cmd_stage_update(args) -> int:
     result = stage(status=Path(st) if st else None)
     if getattr(args, "json", False):
         print(json.dumps(result))
-    return 0
+    return 1 if result.get("stage_error") else 0

@@ -693,28 +693,13 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
     return result
 
 
-def _update_driver_image(helper, pid: int) -> str | None:
-    image = helper._pid_image_path(pid)
-    if image or sys.platform != "darwin":
-        return image
-    import ctypes
-
-    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
-    probe = libproc.proc_pidpath
-    probe.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
-    probe.restype = ctypes.c_int
-    buffer = ctypes.create_string_buffer(4096)
-    if probe(pid, buffer, len(buffer)) <= 0:
-        return None
-    return os.fsdecode(buffer.value) or None
-
-
 def _external_update_driver_active(home: Path, python: Path) -> bool:
     """Defer only to a live update stage, not an installed Manager.
 
     Manager's launch wrapper drives ``stage-update`` through the engine. Its
-    ``update_stage.acquire_lock`` records pid/started in ``updater.lock`` for
-    at most 120 seconds and releases it in ``finally``. Read that ownership
+    ``update_stage.acquire_lock`` records PID/birth identity in ``updater.lock``
+    while it holds the native lease and removes the record before release.
+    Read that ownership
     signal directly, without invoking the stale runtime or a provider command.
     A completed stage or a cached ``skipped: locked`` status owns no work.
     """
@@ -731,14 +716,25 @@ def _external_update_driver_active(home: Path, python: Path) -> bool:
         or pid <= 0
         or type(started) not in (int, float)
         or (type(started) is float and not math.isfinite(started))
-        or not now - 120 < started <= now
+        or not 0 <= started <= now
     ):
         return False
     helper = _load_sibling("versioned_runtime.py")
     if helper is None:
         return False
     try:
-        image = _update_driver_image(helper, pid)
+        recorded = lock.get("start_time")
+        if recorded:
+            identity = _load_file(
+                Path(__file__).resolve().parents[1]
+                / "src" / "agent_worktrees" / "locks.py"
+            )
+            if identity is None:
+                return False
+            current = identity.process_start_time(pid)
+            if current is None or str(recorded) != current:
+                return False
+        image = _RUNTIME.update_driver_image(helper, pid)
         return bool(
             image
             and Path(image).resolve() == python.resolve()
@@ -800,9 +796,12 @@ def _fallback_session_end(payload: dict, home: Path) -> dict:
     return helper.run_end(python, payload, timeout=_SESSION_END_TIMEOUT_S)
 
 
-@cache
 def _load_sibling(name: str):
-    path = Path(__file__).resolve().with_name(name)
+    return _load_file(Path(__file__).resolve().with_name(name))
+
+
+@cache
+def _load_file(path: Path):
     try:
         spec = importlib.util.spec_from_file_location(
             f"_agent_worktrees_hook_{path.stem}", path
