@@ -7,6 +7,31 @@ import stat
 from .planning import PlanError
 
 
+def validate_private_file(path: Path) -> None:
+    """Check one explicitly selected private file without repairing permissions."""
+    if not path.is_absolute() or ".." in path.parts:
+        raise PlanError("private input requires an absolute ordinary path")
+    for component in (path, *path.parents):
+        info = component.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise PlanError("private input cannot traverse indirection")
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise PlanError("private input is not a regular file")
+    if os.name == "nt":
+        windows_private(path)
+    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise PlanError("private input is not private to its owner")
+
+
+def read_private_file(path: Path, maximum: int) -> bytes:
+    """Read a bounded, stable private file through the maintained regular-file reader."""
+    from .artifact_staging import _bytes
+
+    validate_private_file(path)
+    return _bytes(path, maximum)
+
+
 def _windows_identity():
     import ctypes as c
     from ctypes import wintypes as w

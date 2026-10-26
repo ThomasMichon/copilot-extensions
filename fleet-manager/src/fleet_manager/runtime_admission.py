@@ -14,6 +14,7 @@ from .operations import COMMAND_FIELDS, OperationIntent
 from .planning import PlanError, digest, identifier
 from .runtime_identity import VerifiedIdentity
 from .enrolled_identity import EnrolledIdentity, PROFILE as ENROLLED_PROFILE
+from .machine_identity import MachineIdentity, PROFILE as MACHINE_PROFILE
 
 MAX_ENROLLMENTS = 64
 MAX_GRANTS = 256
@@ -181,8 +182,10 @@ class AuthoritySnapshot:
             _time(value)
         if not self.valid_from < self.valid_until:
             raise AdmissionError("invalid-record")
-        if self.identity_profile not in ("jwt-pop-v1", ENROLLED_PROFILE):
+        if self.identity_profile not in ("jwt-pop-v1", ENROLLED_PROFILE, MACHINE_PROFILE):
             raise AdmissionError("unsupported-profile")
+        if self.identity_profile == MACHINE_PROFILE and self.issuer != MACHINE_PROFILE:
+            raise AdmissionError("invalid-record")
         _items(self.enrollments, Enrollment, MAX_ENROLLMENTS)
         keys, actors = set(), {}
         grants = 0
@@ -347,8 +350,12 @@ class AdmissionAuthority:
         ordinary = type(identity) is VerifiedIdentity and identity.profile == "jwt-pop-v1"
         enrolled = (type(identity) is EnrolledIdentity and identity.profile == ENROLLED_PROFILE
                     and identity.kind == "caller")
-        if not (ordinary or enrolled):
+        machine = (type(identity) is MachineIdentity and identity.profile == MACHINE_PROFILE
+                   and identity.kind == "caller")
+        if not (ordinary or enrolled or machine):
             raise AdmissionError("invalid-identity")
+        if machine:
+            _name(identity.resource)
         for value, bound in ((identity.issuer, 2048), (identity.subject, 256),
                              (identity.audience, 512), (identity.proof_key, 43)):
             _text(value, bound)

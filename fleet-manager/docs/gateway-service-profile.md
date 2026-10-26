@@ -14,6 +14,10 @@ The command is a foreground service. The selected external deployment manager
 owns its supervision, storage and eventual lifecycle; CLI invocation does not
 install dependencies, enroll machines or open provider policies.
 
+The separate opt-in [machine-key and delegated continuity
+profile](continuity-bootstrap.md) adds same-owner first-touch caller enrollment
+and a normal setup consumer. It does not broaden the token profiles below.
+
 ## In-process deployment owners
 
 An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
@@ -137,9 +141,13 @@ its channel across unrelated updates; changed slots or caller grants lose their
 old handles. Changed issuer trust replaces its nonce epoch and invalidates
 previous handles/proofs rather than resetting replay state under old authority.
 
-Revision custody remains process-local. The source/lifecycle owner must retain
+Without the enrollment envelope, revision custody remains process-local.
+The source/lifecycle owner must retain
 accepted revision authority across restart; this implementation does not claim
 a durable publication fence or automatic accepted-operation recovery.
+The opt-in [enrollment envelope](continuity-bootstrap.md#same-owner-enrollment-producer)
+instead retains its accepted floors and exact public bindings in the existing
+operation journal.
 
 ### Code-registered identity-provider trust adapter
 

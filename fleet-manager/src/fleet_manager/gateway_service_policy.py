@@ -12,16 +12,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import NoReturn
+import sqlite3
 
 from .enrolled_identity import EnrolledIdentity, EnrolledIdentityVerifier, PROFILE
 from .gateway_manifest import ServiceSlot
 from .gateway_identity_provider import IdentityProvider
 from .gateway_service_context import (
-    ServiceContext, ServicePolicyError, identifier, parse_context, require,
+    ServiceContext, ServicePolicyError, ServiceVerifier, identifier, parse_context, require,
 )
+from .machine_identity import MachineIdentity, MachineIdentityVerifier, PROFILE as MACHINE_PROFILE
 from .runtime_identity import IdentityError, IdentityVerifier, VerifiedIdentity
 from .operations import OperationIntent
 from .runtime_admission import AdmissionAuthority, Permit
+from . import planning
+from .gateway_enrollment import EnrollmentPolicy, SCHEMA as ENROLLMENT_SCHEMA
+from .ledger import OperationLedger
 
 MAX_CALLER_GRANTS = 256
 MAX_SERVICE_CANDIDATES = 64
@@ -103,7 +108,7 @@ class CallerScope:
 class _Record:
     grant: ServiceCandidate | ServiceGrant | CallerGrant
     identity: VerifiedIdentity = field(repr=False)
-    verifier: IdentityVerifier = field(repr=False)
+    verifier: ServiceVerifier = field(repr=False)
     slot_fingerprint: str
     slot: str
     caller_fingerprint: str | None = None
@@ -116,22 +121,28 @@ class ServiceAuthority:
 
     Source callbacks are trusted embedding inputs, not cryptographic provenance.
     The embedding transport supplies method/HTTPS target, bounds concurrent
-    handshakes and matches actual route prefixes; this owner performs no I/O.
+    handshakes and matches actual route prefixes. An opt-in enrollment producer
+    uses the existing journal; transports offload its bounded synchronous I/O.
     """
 
     def __init__(self, *, fleet: str, gateway: str, source: Callable[[], bytes],
                  clock: Callable[[], int],
-                 identity_provider: IdentityProvider | None = None) -> None:
+                 identity_provider: IdentityProvider | None = None,
+                 enrollment_journal: OperationLedger | None = None) -> None:
         self._fleet, self._gateway = identifier(fleet), identifier(gateway)
         require(callable(source), "invalid-source")
         require(callable(clock), "invalid-clock")
         require(identity_provider is None or type(identity_provider) is IdentityProvider,
                 "invalid-identity-provider")
+        require(enrollment_journal is None or type(enrollment_journal) is OperationLedger,
+                "invalid-enrollment-journal")
         self._identity_provider = identity_provider
+        self._journal = enrollment_journal
+        self._enrollment: EnrollmentPolicy | None = None
         self._source, self._clock = source, clock
         self._lock = RLock()
         self._snapshot: ServiceSnapshot | None = None
-        self._verifier: IdentityVerifier | None = None
+        self._verifier: ServiceVerifier | None = None
         self._services: dict[str, _Record] = {}
         self._candidates: dict[int, _Record] = {}
         self._callers: dict[int, _Record] = {}
@@ -151,12 +162,12 @@ class ServiceAuthority:
         self._last_time = now
         return now
 
-    def _current(self) -> tuple[ServiceContext, IdentityVerifier]:
+    def _current(self) -> tuple[ServiceContext, ServiceVerifier]:
         require(self._snapshot is not None and self._verifier is not None, "not-configured")
         assert self._snapshot is not None and self._verifier is not None
         return self._snapshot.context, self._verifier
 
-    def _active(self) -> tuple[ServiceContext, IdentityVerifier, int]:
+    def _active(self) -> tuple[ServiceContext, ServiceVerifier, int]:
         context, verifier = self._current()
         now = self._time()
         require(now < context.trust_valid_until, "authority-unavailable")
@@ -172,18 +183,44 @@ class ServiceAuthority:
                                  self._last_error)
 
     def reload(self) -> ServicePublication:
-        """Validate off-lock, then recheck revision and atomically publish."""
+        """Read off-lock; serialize only the enrollment journal/publication boundary."""
         try:
             raw = self._source()
         except OSError:
             self._fail("source-unavailable")
         try:
-            context, candidate_verifier = parse_context(
-                raw, self._clock, identity_provider=self._identity_provider)
+            decoded = planning.decode(raw)
+        except planning.PlanError:
+            self._fail("invalid-json")
+        if self._journal is not None:
+            with self._lock:
+                return self._reload_candidate(raw, decoded)
+        return self._reload_candidate(raw, decoded)
+
+    def _reload_candidate(self, raw: bytes, decoded: object) -> ServicePublication:
+        try:
+            enrollment = None
+            if isinstance(decoded, dict) and decoded.get("schema") == ENROLLMENT_SCHEMA:
+                require(self._journal is not None, "enrollment-journal-required")
+                assert self._journal is not None
+                enrollment = self._enrollment
+                if enrollment is None or planning.digest(decoded) != enrollment.digest:
+                    enrollment = EnrollmentPolicy(decoded, self._journal, self._clock)
+                require((enrollment.fleet, enrollment.gateway) == (self._fleet, self._gateway),
+                        "owner-mismatch")
+                require(self._time() < enrollment.trust_valid_until, "authority-unavailable")
+                context, candidate_verifier = enrollment.publication()
+            else:
+                require(self._enrollment is None and self._journal is None,
+                        "enrollment-rollback-refused")
+                context, candidate_verifier = parse_context(
+                    raw, self._clock, identity_provider=self._identity_provider)
             require(context.manifest.fleet == self._fleet
                     and context.manifest.gateway == self._gateway, "owner-mismatch")
         except ServicePolicyError as exc:
             self._fail(exc.code)
+        except (planning.PlanError, sqlite3.Error):
+            self._fail("enrollment-journal-refused")
         with self._lock:
             current = self._snapshot
             if current:
@@ -192,6 +229,8 @@ class ServiceAuthority:
                 if context.manifest.revision == current.revision:
                     if context.digest != current.context.digest:
                         self._fail("revision-conflict")
+                    if enrollment is not None:
+                        self._reconcile_enrollment(enrollment, context)
                     self._last_error = None
                     return ServicePublication(False, current)
             try:
@@ -201,10 +240,50 @@ class ServiceAuthority:
                 self._fail(exc.code)
             if not current or current.context.trust_digest != context.trust_digest:
                 self._verifier = candidate_verifier
+            self._enrollment = enrollment
             self._snapshot = ServiceSnapshot(context, current.generation + 1 if current else 1)
             self._prune(context, now)
+            if enrollment is not None:
+                self._reconcile_enrollment(enrollment, context)
             self._last_error = None
             return ServicePublication(True, self._snapshot)
+
+    def _reconcile_enrollment(self, enrollment: EnrollmentPolicy, context: ServiceContext) -> None:
+        try:
+            enrollment.reconcile_publication(context)
+        except (planning.PlanError, sqlite3.Error):
+            self._fail("enrollment-journal-refused")
+
+    def enrollment_challenge(self) -> str:
+        with self._lock:
+            self.reload()
+            require(self._enrollment is not None, "unsupported-enrollment")
+            assert self._enrollment is not None
+            self._active()
+            return self._enrollment.nonce
+
+    def enroll(self, raw: bytes, *, grant: str, proof: str,
+               target_uri: str, destination: str) -> dict[str, object]:
+        """Authenticate delegation/possession, persist original operation and publish."""
+        with self._lock:
+            self.reload()
+            producer = self._enrollment
+            require(producer is not None, "unsupported-enrollment")
+            assert producer is not None
+            self._active()
+            try:
+                intent, fingerprint = producer.enroll(
+                    raw, grant=grant, proof=proof, target_uri=target_uri, destination=destination)
+                self.reload()
+                require(self._enrollment is producer, "enrollment-policy-changed")
+            except IdentityError as exc:
+                self._fail(exc.code)
+            except (planning.PlanError, sqlite3.Error):
+                self._fail("enrollment-journal-refused")
+            return {
+                "profile": MACHINE_PROFILE, "operation": intent.to_dict()["operation"],
+                "enrollment": fingerprint, "state": "published",
+            }
 
     def challenge(self) -> str:
         """Return the current verifier nonce, not desired inventory."""
@@ -212,12 +291,42 @@ class ServiceAuthority:
             _, verifier, _ = self._active()
             return verifier.nonce
 
+    def machine_profile(self) -> bool:
+        """Selected runtime capability, never inferred from a presented credential."""
+        with self._lock:
+            _, verifier, _ = self._active()
+            return type(verifier) is MachineIdentityVerifier
+
+    def connect_machine(self, principal: str, proof: str, *, slot: str,
+                        target_uri: str, content_digest: str) -> dict[str, str]:
+        """Authenticate current outbound access without invoking a service or SSH."""
+        identity, verifier = self._verify(
+            principal, proof, "POST", target_uri, "caller", slot, content_digest)
+        require(type(identity) is MachineIdentity, "unsupported-profile")
+        with self._lock:
+            context, _ = self._verified_current(identity, verifier)
+            caller = context.caller(identity.subject)
+            context.slot(slot)
+            require(slot in caller.slots
+                    and context.key(caller.key_source).thumbprint == identity.proof_key,
+                    "caller-denied")
+            return {"profile": MACHINE_PROFILE, "state": "connected", "principal": principal}
+
     def _verify(self, access: str, proof: str, method: str,
-                target_uri: str, kind: str) -> tuple[VerifiedIdentity, IdentityVerifier]:
+                target_uri: str, kind: str, resource: str,
+                content_digest: str | None = None) -> tuple[VerifiedIdentity, ServiceVerifier]:
         with self._lock:
             _, verifier, _ = self._active()
         try:
-            if type(verifier) is EnrolledIdentityVerifier:
+            if type(verifier) is MachineIdentityVerifier:
+                require(content_digest is not None, "content-binding-required")
+                identity = verifier.verify(
+                    access, proof, method=method, target_uri=target_uri, kind=kind,
+                    resource=resource, content_digest=content_digest)
+                require(type(identity) is MachineIdentity and identity.profile == MACHINE_PROFILE
+                        and identity.kind == kind and identity.resource == resource,
+                        "invalid-credential")
+            elif type(verifier) is EnrolledIdentityVerifier:
                 identity = verifier.verify(
                     access, proof, method=method, target_uri=target_uri, kind=kind)
                 require(type(identity) is EnrolledIdentity and identity.profile == PROFILE
@@ -231,7 +340,7 @@ class ServiceAuthority:
             raise ServicePolicyError(exc.code) from None
         return identity, verifier
 
-    def _verified_current(self, identity: VerifiedIdentity, verifier: IdentityVerifier
+    def _verified_current(self, identity: VerifiedIdentity, verifier: ServiceVerifier
                           ) -> tuple[ServiceContext, int]:
         context, current, now = self._active()
         require(verifier is current, "trust-changed")
@@ -262,15 +371,17 @@ class ServiceAuthority:
         return self._serial
 
     def authenticate_service(self, access: str, proof: str, *, target_uri: str,
-                             slot: str) -> ServiceGrant:
+                             slot: str, content_digest: str | None = None) -> ServiceGrant:
         """Immediately promote a verified service, for non-ticket embeddings."""
-        candidate = self.prepare_service(access, proof, target_uri=target_uri, slot=slot)
+        candidate = self.prepare_service(
+            access, proof, target_uri=target_uri, slot=slot, content_digest=content_digest)
         return self.promote_service(candidate)
 
     def prepare_service(self, access: str, proof: str, *, target_uri: str,
-                        slot: str) -> ServiceCandidate:
+                        slot: str, content_digest: str | None = None) -> ServiceCandidate:
         """Prepare attachment without withdrawing a healthy active generation."""
-        identity, verifier = self._verify(access, proof, "POST", target_uri, "service")
+        identity, verifier = self._verify(
+            access, proof, "POST", target_uri, "service", slot, content_digest)
         with self._lock:
             context, now = self._verified_current(identity, verifier)
             selected = context.slot(slot)
@@ -362,7 +473,8 @@ class ServiceAuthority:
             return True
 
     def authenticate_caller(self, access: str, proof: str, *, method: str,
-                            target_uri: str, slot: str, request_method: str) -> CallerGrant:
+                            target_uri: str, slot: str, request_method: str,
+                            content_digest: str | None = None) -> CallerGrant:
         """Admit only an actual method present in both explicit caller and slot.
 
         No method translation is implied: request_method must equal the
@@ -370,7 +482,8 @@ class ServiceAuthority:
         remains the runtime's obligation, including at the effect checkpoint.
         """
         require(method == request_method, "method-denied")
-        identity, verifier = self._verify(access, proof, method, target_uri, "caller")
+        identity, verifier = self._verify(
+            access, proof, method, target_uri, "caller", slot, content_digest)
         with self._lock:
             context, now = self._verified_current(identity, verifier)
             selected, caller = context.slot(slot), context.caller(identity.subject)

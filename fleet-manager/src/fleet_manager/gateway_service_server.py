@@ -8,9 +8,11 @@ from agent_procutil.daemon_instances import (
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 import secrets
+import sqlite3
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -35,10 +37,16 @@ from .gateway_service_handler import PROFILE
 from .gateway_service_handler import CallerContext, RequestLifetime, ServiceRequest, ServiceResponse
 from .gateway_local_handler import LocalHandlerBinding, LocalServiceRequest, settled
 from .gateway_service_policy import CallerGrant
+from .machine_identity import PROFILE as MACHINE_PROFILE
+from .ledger import OperationLedger
+from .planning import PlanError
+from .private_state import create_private_file, private_directory, validate_private_file
 
 LOG = logging.getLogger(__name__)
 STATE = web.AppKey("fleet-service-state", object)
 DISPATCHED = web.RequestKey("fleet-service-dispatched", bool)
+BUFFERED_BODY = web.RequestKey("fleet-service-buffered-body", bytes)
+AUTH_URI = web.RequestKey("fleet-service-auth-uri", str)
 
 
 @dataclass(frozen=True)
@@ -190,20 +198,70 @@ class ServiceRuntime:
         return web.json_response({"nonce": self.authority.challenge()},
                                  headers={"Cache-Control": "no-store"})
 
+    async def machine_challenge(self, request: web.Request) -> web.Response:
+        self.control_budget()
+        check(request.method == "GET", "method-denied", 405)
+        check(self.authority.machine_profile(), "unsupported-profile", 409)
+        return web.json_response(
+            {"profile": MACHINE_PROFILE, "nonce": self.authority.challenge()},
+            headers={"Cache-Control": "no-store"})
+
+    async def enrollment_challenge(self, request: web.Request) -> web.Response:
+        self.control_budget()
+        check(request.method == "GET", "method-denied", 405)
+        nonce = await settled(self.authority.enrollment_challenge)
+        return web.json_response(
+            {"profile": "delegated-machine-enrollment-v1", "nonce": nonce},
+            headers={"Cache-Control": "no-store"})
+
+    async def enroll(self, request: web.Request) -> web.Response:
+        self.control_budget()
+        check(request.method == "POST", "method-denied", 405)
+        grant = request.headers.getall("Fleet-Enrollment-Grant", [])
+        proofs = request.headers.getall("Fleet-Machine-Proof", [])
+        check(len(grant) == len(proofs) == 1 and len(grant[0]) == 43
+              and len(proofs[0]) <= 4096 and "Authorization" not in request.headers,
+              "authentication-required", 401)
+        payload = await body(request, 16384)
+        result = await settled(
+            lambda: self.authority.enroll(
+                payload, grant=grant[0], proof=proofs[0],
+                target_uri=self.origin + request.path, destination=self.origin))
+        await self.reload()
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
+    async def machine_connect(self, request: web.Request) -> web.Response:
+        self.control_budget()
+        check(request.method == "POST", "method-denied", 405)
+        check(self.authority.machine_profile(), "unsupported-profile", 409)
+        principal, proof = credentials(request, machine=True)
+        payload = await body(request, 4096)
+        value = unpack(payload.decode("utf-8"))
+        shape(value, {"slot"})
+        check(isinstance(value["slot"], str), "invalid-slot")
+        result = self.authority.connect_machine(
+            principal, proof, slot=value["slot"], target_uri=self.origin + request.path,
+            content_digest=hashlib.sha256(payload).hexdigest())
+        return web.json_response(result, headers={"Cache-Control": "no-store"})
+
     async def admit(self, request: web.Request) -> web.Response:
         self.control_budget()
         check(request.method == "POST", "method-denied", 405)
-        value = unpack((await body(request, 16384)).decode("utf-8"))
+        payload = await body(request, 16384)
+        value = unpack(payload.decode("utf-8"))
+        machine = self.authority.machine_profile()
         caller_context = "profile" in value
-        shape(value, {"slot", "access", "proof", "profile"} if caller_context
-              else {"slot", "access", "proof"})
+        fields = {"slot"} if machine else {"slot", "access", "proof"}
+        shape(value, fields | {"profile"} if caller_context else fields)
         check(not caller_context or value["profile"] == PROFILE, "unsupported-profile")
         check(all(isinstance(v, str) for v in value.values()), "invalid-admission")
         self.expire_tickets()
         check(len(self.tickets) < 64, "ticket-limit", 429)
+        access, proof = credentials(request, machine=True) if machine else (
+            value["access"], value["proof"])
         candidate = self.authority.prepare_service(
-            value["access"], value["proof"], target_uri=self.origin + request.path,
-            slot=value["slot"])
+            access, proof, target_uri=self.origin + request.path, slot=value["slot"],
+            content_digest=hashlib.sha256(payload).hexdigest() if machine else None)
         if value["slot"] in self.local_handlers:
             self.authority.release_candidate(candidate)
             raise TransportError("slot-locally-owned", 409)
@@ -283,11 +341,16 @@ class ServiceRuntime:
         slot, route = self.route(path, request.method)
         check("response-stream" not in route.capabilities or request.version >= HttpVersion11,
               "stream-http-version-required", 505)
-        access, proof = credentials(request)
-        uri = self.origin + path
+        machine = self.authority.machine_profile()
+        access, proof = credentials(request, machine=machine)
+        uri = self.origin + path + (query if machine else "")
+        request[AUTH_URI] = uri
+        digest = None
+        if machine:
+            digest = hashlib.sha256(await body(request, BODY_BYTES)).hexdigest()
         grant = self.authority.authenticate_caller(
             access, proof, method=request.method, request_method=request.method,
-            target_uri=uri, slot=slot.name)
+            target_uri=uri, slot=slot.name, content_digest=digest)
         channel = None
         pending = None
         response = None
@@ -384,7 +447,7 @@ class ServiceRuntime:
             selected, current_route = self.route(path, request.method)
             check(current.slot == selected == binding.slot and current_route == route
                   and current.method == request.method
-                  and current.target_uri == self.origin + path,
+                  and current.target_uri == request[AUTH_URI],
                   "local-owner-changed", 403)
             check(request.transport is not None and not request.transport.is_closing(),
                   "request-disconnected", 503)
@@ -438,17 +501,27 @@ class ServiceRuntime:
 
 
 async def body(request: web.Request, maximum: int) -> bytes:
+    if BUFFERED_BODY in request:
+        payload = request[BUFFERED_BODY]
+        check(len(payload) <= maximum, "body-limit", 413)
+        return payload
     result = bytearray()
     async for chunk in request.content.iter_chunked(min(maximum + 1, 16384)):
         check(len(result) + len(chunk) <= maximum, "body-limit", 413)
         result.extend(chunk)
-    return bytes(result)
+    payload = bytes(result)
+    request[BUFFERED_BODY] = payload
+    return payload
 
 
-def credentials(request: web.Request) -> tuple[str, str]:
-    values, proofs = request.headers.getall("Authorization", []), request.headers.getall("DPoP", [])
+def credentials(request: web.Request, *, machine: bool = False) -> tuple[str, str]:
+    values = request.headers.getall("Authorization", [])
+    header = "Fleet-Machine-Proof" if machine else "DPoP"
+    proofs = request.headers.getall(header, [])
     check(len(values) == len(proofs) == 1, "authentication-required", 401)
-    scheme = "DP" + "oP "
+    check(not request.headers.getall("DPoP" if machine else "Fleet-Machine-Proof", []),
+          "authentication-required", 401)
+    scheme = ("Fleet-" + "Machine ") if machine else ("DP" + "oP ")
     check(values[0].startswith(scheme) and 0 < len(values[0]) - len(scheme) <= 8192
           and 0 < len(proofs[0]) <= 4096, "authentication-required", 401)
     return values[0][len(scheme):], proofs[0]
@@ -508,6 +581,7 @@ def outcome(request: web.Request, code: str) -> str:
 async def build_app(listener: Listener, policy_path: Path, *, reload_interval: float = 1,
                     clock: Callable[[], int] = lambda: int(time.time()),
                     identity_provider: IdentityProvider | None = None,
+                    enrollment_journal: OperationLedger | None = None,
                     local_handlers: tuple[LocalHandlerBinding, ...] = ()) -> web.Application:
     """Build without binding; the policy file is the sole explicit runtime source."""
     policy_path = Path(os.path.abspath(policy_path))
@@ -515,7 +589,7 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
     authority = ServiceAuthority(
         fleet=listener.fleet, gateway=listener.gateway,
         source=lambda: read_bounded(policy_path), clock=clock,
-        identity_provider=identity_provider)
+        identity_provider=identity_provider, enrollment_journal=enrollment_journal)
     state = ServiceRuntime(authority, listener, reload_interval, local_handlers)
     await state.reload()
     app = web.Application(middlewares=[guarded], client_max_size=BODY_BYTES, handler_args={
@@ -525,6 +599,10 @@ async def build_app(listener: Listener, policy_path: Path, *, reload_interval: f
     app[STATE] = state
     app.on_response_prepare.append(no_store_response)
     app.router.add_route("*", "/_fleet/challenge", state.challenge)
+    app.router.add_route("*", "/_fleet/machine-challenge", state.machine_challenge)
+    app.router.add_route("*", "/_fleet/enrollment-challenge", state.enrollment_challenge)
+    app.router.add_route("*", "/_fleet/enroll", state.enroll)
+    app.router.add_route("*", "/_fleet/machine-connect", state.machine_connect)
     app.router.add_route("*", "/_fleet/service-admit", state.admit)
     app.router.add_route("*", "/_fleet/service-channel", state.attach)
     app.router.add_route("*", "/{tail:.*}", state.public)
@@ -622,19 +700,32 @@ async def start(listener: Listener, policy_path: Path, **kwargs: Any) -> Serving
 
 @daemon_entrypoint(
     "fleet-manager-service-gateway", source=__file__, purpose="production",
-    runtime_root=lambda policy_path, tls_path: Path(os.path.abspath(policy_path)).parent,
+    runtime_root=lambda policy_path, tls_path, **kwargs: Path(os.path.abspath(policy_path)).parent,
 )
-def serve(policy_path: Path, tls_path: Path) -> int:
+def serve(policy_path: Path, tls_path: Path, *, operation_journal: Path | None = None,
+          operation_authority: str | None = None, operation_installation: str | None = None) -> int:
     """Foreground runner; the external service manager owns process lifetime."""
     policy_path = Path(os.path.abspath(policy_path))
     try:
         listener = Listener.load(tls_path)
         check(listener.port != 0, "ephemeral-listener-sdk-only")
         context = listener.tls()
-        web.run_app(build_app(listener, policy_path), host=listener.host,
+        journal = None
+        if operation_journal is not None:
+            check(operation_journal.is_absolute() and operation_authority is not None
+                  and operation_installation is not None, "invalid-enrollment-journal")
+            private_directory(operation_journal.parent)
+            if not operation_journal.exists():
+                descriptor = create_private_file(operation_journal)
+                os.close(descriptor)
+            validate_private_file(operation_journal)
+            journal = OperationLedger(
+                operation_journal, authority=operation_authority,
+                installation=operation_installation, enable_enrollment=True)
+        web.run_app(build_app(listener, policy_path, enrollment_journal=journal), host=listener.host,
                     port=listener.port, ssl_context=context, access_log=None,
                     print=None, shutdown_timeout=5, handler_cancellation=True)
         return 0
-    except (TransportError, ServicePolicyError, OSError):
+    except (TransportError, ServicePolicyError, OSError, PlanError, sqlite3.Error):
         LOG.error("service-start-refused code=invalid-bootstrap-or-policy")
         return 1

@@ -359,7 +359,7 @@ onboarded merely because its source is published.
 - [ ] Review and implement the [continuity/bootstrap contract](continuity-bootstrap.md)
   through the retained installer, credential/enrollment and human-session
   adapters; preserve existing machine-proof and peer-approval requirements.
-- [ ] Review the [selected executable slice](continuity-bootstrap.md#selected-executable-slice):
+- [x] Review the [selected executable slice](continuity-bootstrap.md#selected-executable-slice):
   explicit public-key machine authentication, a real current-policy producer
   and original-operation enrollment in the existing journal, followed by the
   normal Manager/engine setup consumer. No new issuer or parallel registry.
@@ -475,6 +475,19 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-10-25 - Public-key enrollment implementation plan reviewed
+
+- #9039 merged the selected executable slice to `dev` as
+  `f1f5a3862c3a5ee30969a147349eda354357dab2`, after exact-head Copilot
+  approval with no open findings and required successful CI.
+- Re-read the full Plan and Validation Plan and resolve only the selected
+  executable-plan review item. Public-key authentication, actual enrollment
+  publication/journal recovery and normal Manager/engine setup consumption
+  remain to implement and qualify; no runtime or installed gate closes.
+- Continue the allocated receiver and current-policy/operation integration
+  before migrating its normal setup caller. No live credential, enrollment,
+  installation, service, network or deployment effect occurred.
 
 ### 2026-10-25 - Continuity bootstrap and human-session contract source
 

@@ -139,6 +139,12 @@ SQLite/storage exceptions propagate explicitly. Paths and underlying files
 must remain under a trusted deployment owner's control on supported local
 storage; this is not hostile-client or network-filesystem isolation.
 
+The opt-in [delegated enrollment producer](continuity-bootstrap.md#same-owner-enrollment-producer)
+adds an explicit schema-five migration, `machine.enroll` claims and durable
+accepted-policy floors to this same journal. Default construction and unrelated
+schema-four operations retain the behavior above; generic admission cannot
+substitute for that producer's exclusive transaction.
+
 The separate explicit [node journal](node-journal.md) now owns local acceptance,
 cooperative effect receipts and a result spool; it does not share this database.
 

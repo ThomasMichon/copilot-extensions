@@ -1,0 +1,182 @@
+"""Actual finite Fleet CLI processes against the real synthetic TLS receiver."""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import hashlib
+import json
+import os
+from pathlib import Path
+import sqlite3
+import sys
+import shlex
+import subprocess
+
+from agent_procutil import no_window_kwargs
+import pytest
+
+from fleet_manager import planning
+from fleet_manager.continuity_bootstrap import bootstrap
+from gateway_service_transport_fixtures import Rig
+from test_gateway_enrollment import EnrollmentHarness, GRANT
+
+
+@pytest.mark.parametrize("consumer", ["fleet-cli", "manager-engine"])
+def test_real_cli_first_touch_check_restart_and_same_private_key(
+    tmp_path: Path, consumer: str,
+) -> None:
+    async def scenario() -> None:
+        rig = Rig(tmp_path)
+        enrollment = EnrollmentHarness(tmp_path)
+        enrollment.h.clock.value = rig.h.clock.value
+        enrollment.scope["expires_at"] = rig.h.clock.value + 600
+        enrollment.delegation["grant_expires_at"] = rig.h.clock.value + 300
+        enrollment.document["policy"]["manifest"]["revision"] += 1
+        rig.h.document = enrollment.document
+        projection_directory = tmp_path / "projection"
+        projection_directory.mkdir(mode=0o700)
+        source = projection_directory / "selected.json"
+        state = tmp_path / "machine-state"
+        try:
+            await rig.start(enrollment_journal=enrollment.ledger)
+            enrollment.scope["destination"] = rig.origin
+            enrollment.document["policy"]["manifest"]["revision"] += 1
+            rig.save()
+            await rig.state.reload()
+            projection = {
+                "schema": "fleet-manager.continuity-projection", "version": 1,
+                "provider": "local-projection-v1", "authority": "authority-a",
+                "audience": "example-gateway", "delegation": enrollment.delegation,
+                "grant": GRANT, "gateway_ca": rig.ca}
+            source.write_bytes(planning.canonical(projection))
+            source.chmod(0o600)
+            assert await bootstrap(
+                source, harness="harness-a", state_root=state, apply=False,
+            ) == {"status": "needed", "stage": "enrollment"}
+            assert not state.exists()
+
+            async def process(*arguments: str) -> tuple[int, bytes, bytes]:
+                package = Path(__file__).parents[1] / "src"
+                environment = dict(os.environ)
+                environment["PYTHONPATH"] = str(package) + os.pathsep + environment.get("PYTHONPATH", "")
+                child = await asyncio.create_subprocess_exec(
+                    sys.executable, "-m", "fleet_manager", "bootstrap",
+                    "--source", str(source), "--harness", "harness-a",
+                    "--state-root", str(state), *arguments,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    env=environment, **no_window_kwargs())
+                stdout, stderr = await asyncio.wait_for(child.communicate(), 20)
+                return child.returncode, stdout, stderr
+
+            if consumer == "manager-engine":
+                repository = Path(__file__).parents[2]
+                engine_python = repository / ".test-venvs/linux/agent-worktrees/bin/python"
+                if os.name == "nt" or not engine_python.is_file():
+                    pytest.skip("source qualification requires the prepared POSIX engine test environment")
+                installed = await asyncio.create_subprocess_exec(
+                    str(engine_python), "-I", "-c",
+                    "import importlib.util;raise SystemExit(importlib.util.find_spec('fleet_manager') is None)",
+                    **no_window_kwargs())
+                if await installed.wait():
+                    pytest.skip("selected engine test environment needs its fleet-onboarding extra")
+                home = tmp_path / "home"
+                home.mkdir(mode=0o700)
+                state = home / ".fleet-continuity-harness-a"
+                harness = tmp_path / "harness"
+                harness.mkdir()
+                (harness / ".agent-worktrees").mkdir()
+                (harness / ".agent-worktrees/repository-setup.json").write_text(json.dumps({
+                    "version": 2, "entrypoints": {
+                        "posix": {"runtime": "bash", "script": "setup.sh"}},
+                    "contexts": {"harness-a": {
+                        "provider": "local-projection-v1", "source": str(source)}},
+                }))
+                writer = (
+                    "import json,pathlib,sys;"
+                    "r=json.loads(pathlib.Path(sys.argv[1]).read_text());"
+                    "pathlib.Path(r['result_file']).write_text(json.dumps("
+                    "{'version':1,'status':'ready','message':'Synthetic core ready'}))")
+                (harness / "setup.sh").write_text(
+                    "#!/bin/sh\nexec " + shlex.quote(sys.executable) + " -c "
+                    + shlex.quote(writer) + ' "$2"\n')
+                def git(*arguments: str) -> None:
+                    subprocess.run(
+                        ["git", "-C", str(harness), *arguments], check=True,
+                        capture_output=True, **no_window_kwargs())
+                await asyncio.to_thread(git, "init", "-q")
+                await asyncio.to_thread(git, "remote", "add", "origin",
+                                        "https://example.invalid/team/harness.git")
+                await asyncio.to_thread(git, "add", ".")
+                await asyncio.to_thread(
+                    git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "commit.gpgsign=false", "commit", "-qm", "Synthetic harness", "--no-verify")
+                executables = tmp_path / "bin"
+                executables.mkdir()
+                launcher = executables / "fleet-manager"
+                launcher.write_text(
+                    "#!/bin/sh\nexit 99\n")
+                launcher.chmod(0o700)
+                engine_driver = (
+                    "import sys;sys.path[:0]=" + repr([
+                        str(repository / "plugins/agent-worktrees/src"),
+                        str(repository / "libs/agent-procutil/src")])
+                    + ";from pathlib import Path;"
+                    "import fleet_manager,hashlib;"
+                    "package=Path(fleet_manager.__file__).parent;"
+                    "expected=" + repr({
+                        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in (repository / "fleet-manager/src/fleet_manager").glob("*.py")})
+                    + ";assert all(hashlib.sha256((package/name).read_bytes()).hexdigest()==value "
+                    "for name,value in expected.items()),'selected test SDK differs from current source';"
+                    "from agent_worktrees import repos,repository_bootstrap;"
+                    "repos._repos_yaml_path=lambda:Path(sys.argv[1]);"
+                    "assert sys.argv[2:4]==['repos','setup'];"
+                    "raise SystemExit(repository_bootstrap.command(sys.argv[4:]))")
+                manager_driver = (
+                    "import sys;sys.path.insert(0," + repr(str(repository / "worktree-manager/src"))
+                    + ");from worktree_manager import engine_client,repository_bootstrap;"
+                    "engine_client.set_engine_command([sys.argv[1],'-c',sys.argv[2],sys.argv[3]]);"
+                    "raise SystemExit(repository_bootstrap.run(repository_bootstrap.parse(sys.argv[4:])))")
+                environment = dict(os.environ)
+                environment.update({
+                    "HOME": str(home), "USERPROFILE": str(home),
+                    "PATH": str(executables) + os.pathsep + environment.get("PATH", ""),
+                    "PYTHONPATH": os.pathsep.join(str(repository / path) for path in (
+                        "fleet-manager/src", "worktree-manager/src", "plugins/agent-worktrees/src",
+                        "libs/agent-procutil/src"))})
+                child = await asyncio.create_subprocess_exec(
+                    str(engine_python), "-c", manager_driver, str(engine_python), engine_driver,
+                    str(home / "repos.yaml"), "--apply",
+                    "--repository", "https://example.invalid/team/harness.git",
+                    "--repository-target", str(harness), "--trust-repository-setup",
+                    "--context", "harness-a",
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    env=environment, **no_window_kwargs())
+                stdout, stderr = await asyncio.wait_for(child.communicate(), 60)
+                status = child.returncode
+            else:
+                status, stdout, stderr = await process("--apply")
+            assert status == 0, (stdout, stderr)
+            if consumer == "fleet-cli":
+                assert json.loads(stdout) == {"status": "ready", "stage": "connected"}
+            else:
+                assert b"authenticated outbound Gateway access" in stdout
+            retained = (state / "machine.json").read_bytes()
+            assert GRANT.encode() not in retained
+            if os.name != "nt":
+                assert (state / "machine.json").stat().st_mode & 0o077 == 0
+            assert (await process())[0] == 0
+            assert (await process("--apply"))[0] == 0
+            assert (state / "machine.json").read_bytes() == retained
+            with sqlite3.connect(enrollment.ledger.path) as connection:
+                assert connection.execute("SELECT count(*) FROM machine_enrollments").fetchone() == (1,)
+                assert connection.execute("SELECT count(*) FROM operations").fetchone() == (1,)
+            projection["delegation"] = copy.deepcopy(projection["delegation"])
+            projection["delegation"]["scope"]["container"] = "changed-container"
+            source.write_bytes(planning.canonical(projection))
+            assert (await process("--apply"))[0] != 0
+            assert (state / "machine.json").read_bytes() == retained
+        finally:
+            await rig.close()
+    asyncio.run(scenario())

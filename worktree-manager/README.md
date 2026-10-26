@@ -159,7 +159,7 @@ and core stages:
 ```text
 worktree-manager setup --apply --repository <https-git-url>
   [--repository-target <absolute-path>] [--repository-commit <full-commit-id>]
-  [--trust-repository-setup]
+  [--trust-repository-setup] [--context <declared-name>]
 ```
 
 Without `--apply`, this remains a plan. The target, commit and trust options require a
@@ -175,6 +175,12 @@ with remote HEAD if that selected engine refuses it. Existing targets must
 already match; only a new checkout may select the requested commit. Unavailable
 commits and unsupported older receivers retain completed core work and refuse
 the repository stage without an unpinned retry.
+
+`--context` selects the trusted harness's optional
+[engine-owned continuity context](../plugins/agent-worktrees/docs/repository-setup.md#optional-selected-continuity-context).
+The engine/Fleet runtime owns source selection, original-operation enrollment
+and authenticated outbound connection; Manager does not implement a private
+installer or read grants. Missing/older support retains completed core work.
 
 The existing bootstrap forwards the same `setup` argument array. Selecting a
 repository does not change the Manager's installation/update source, enroll
