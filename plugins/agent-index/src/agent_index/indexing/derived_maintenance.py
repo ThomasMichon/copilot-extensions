@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from agent_index.store.projection_snapshot import ProjectionSnapshotUnavailable, cluster_signature
 from agent_index.store.source_layout import selected_layout
+from agent_index.indexing.work_counts import current_counts
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
@@ -20,6 +21,8 @@ def refresh_clusters(
 ) -> dict[str, int | float] | None:
     if not config.cluster_enabled:
         return None
+    counts = current_counts()
+    attempted = False
     try:
         from agent_index.indexing.cluster_pass import run_clustering_pass
         from agent_index.store.cluster_store import ClusterStore
@@ -33,15 +36,24 @@ def refresh_clusters(
         if not force and signature is not None:
             cached = store.covered_stats(signature)
             if cached is not None and cluster_signature(multi_store, config) == signature:
+                if counts is not None:
+                    counts.cluster_cache_hits += 1
                 return cached
         print("\nRefreshing similarity clusters...")
+        attempted = True
+        if counts is not None:
+            counts.cluster_pass_attempts += 1
         stats = run_clustering_pass(multi_store, store, config, coverage_signature=signature)
+        if counts is not None:
+            counts.cluster_pass_completed += 1
         print(
             f"  {stats['clusters']} clusters across {stats['slices']} slices "
             f"({stats['items']} items, {stats['elapsed_ms']}ms)",
         )
         return stats
     except Exception:
+        if attempted and counts is not None:
+            counts.cluster_pass_failures += 1
         if selected_layout():
             raise
         log.warning("Clustering pass failed", exc_info=True)

@@ -22,6 +22,7 @@ from .worktrees_projection_index import (
 CONTRACT_VERSION = 1
 READ_ACTION = "worktrees-read"
 CAPABILITY = "worktrees-current-v1"
+_DEMAND_LINGER_SECONDS = 30.0
 _FIELDS = frozenset(
     {
         "contract_version",
@@ -103,6 +104,7 @@ class WorktreesRuntime:
         self._error: str | None = None
         self._publication_errors: dict[str, str] = {}
         self._demand: dict[str, float] = {}
+        self._unready_demand: set[str] = set()
         self._wake = wake
         self._now = now
         self._elected = elected
@@ -147,6 +149,7 @@ class WorktreesRuntime:
                 self._admitting = True
                 self._reason = "ready"
                 self._error = None
+                self._unready_demand.clear()
             self.feed.activate()
             if self._wake is not None:
                 self._wake.set()
@@ -212,15 +215,22 @@ class WorktreesRuntime:
                 return self._failure(
                     self._reason, self._error or "current-roster admission closed"
                 )
-            self._demand[project] = self._now()
+            now = self._now()
+            previous = self._demand.get(project)
+            if previous is None or previous < now - _DEMAND_LINGER_SECONDS:
+                self._unready_demand.discard(project)
+            self._demand[project] = now
             publication_error = self._publication_errors.get(project)
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
             )
         except ProjectionUnavailable as exc:
-            if self._wake is not None:
-                self._wake.set()
+            with self._lock:
+                if self._admitting and project not in self._unready_demand:
+                    self._unready_demand.add(project)
+                    if self._wake is not None:
+                        self._wake.set()
             return self._failure("unready", publication_error or str(exc))
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
@@ -239,10 +249,11 @@ class WorktreesRuntime:
             "generation": self.store.generation,
         }
 
-    def demand_projects(self, *, linger: float = 30.0) -> set[str]:
+    def demand_projects(self, *, linger: float = _DEMAND_LINGER_SECONDS) -> set[str]:
         with self._lock:
             cutoff = self._now() - linger
             self._demand = {p: at for p, at in self._demand.items() if at >= cutoff}
+            self._unready_demand.intersection_update(self._demand)
             projects = set(self._demand)
         return projects | self.feed.projects()
 
@@ -263,6 +274,7 @@ class WorktreesRuntime:
                 raise
         with self._lock:
             self._publication_errors.pop(project, None)
+            self._unready_demand.discard(project)
         self.feed.changed(project)
 
     def publication_failed(self, project: str, error: Exception) -> None:

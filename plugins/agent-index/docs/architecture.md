@@ -28,6 +28,11 @@ work still exists, but indexing and retrieval are present in the shipped code.
 
 ## Incremental connector and reuse contracts
 
+The shared engine exposes additive, round-local
+[work counts](work-counts.md) for measured acquisition, chunk/checkpoint,
+embedding, primary row-upsert and maintenance work. Unmeasured provider work
+remains explicitly unavailable; these counters are not coverage authorities.
+
 An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
 returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
 `DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
