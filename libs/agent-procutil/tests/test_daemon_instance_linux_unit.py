@@ -108,6 +108,49 @@ def test_inconclusive_descendant_capability_never_publishes_settlement(
     assert linux._settle(123) is False
 
 
+def test_settlement_drains_six_hundred_ready_children_without_per_child_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = SimpleNamespace(now=0.0, reaped=0)
+
+    def reap(_pid: int, _flags: int) -> tuple[int, int]:
+        if clock.reaped == 600:
+            raise ChildProcessError()
+        clock.reaped += 1
+        return 1000 + clock.reaped, 0
+
+    def sleep(seconds: float) -> None:
+        clock.now += seconds
+
+    pause = Mock(side_effect=sleep)
+    monkeypatch.setattr(linux, "os", SimpleNamespace(killpg=Mock(), waitpid=reap, WNOHANG=1))
+    monkeypatch.setattr(linux, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=pause))
+    monkeypatch.setattr(linux, "_retire_children", Mock())
+    assert linux._settle(123) is True
+    assert clock.reaped == 600
+    pause.assert_not_called()
+
+
+def test_immediately_waitable_children_cannot_extend_the_settlement_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = SimpleNamespace(now=0.0)
+
+    def reap(_pid: int, _flags: int) -> tuple[int, int]:
+        clock.now += 1
+        return 1000, 0
+
+    wait = Mock(side_effect=reap)
+    pause = Mock()
+    monkeypatch.setattr(linux, "os", SimpleNamespace(killpg=Mock(), waitpid=wait, WNOHANG=1))
+    monkeypatch.setattr(linux, "time", SimpleNamespace(monotonic=lambda: clock.now, sleep=pause))
+    monkeypatch.setattr(linux, "_retire_children", Mock())
+    assert linux._settle(123) is False
+    assert clock.now == 5
+    assert wait.call_count == 5
+    pause.assert_not_called()
+
+
 @pytest.fixture
 def monitored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     receipt = DaemonInstanceReceipt("a" * 32, tmp_path)

@@ -157,12 +157,17 @@ def _settle(child: int) -> bool:
         except (OSError, RuntimeError, ValueError, IndexError) as error:
             store._log.error("daemon descendant custody unavailable: %s", error)
             custody_valid = False
-        try:
-            os.waitpid(-1, os.WNOHANG)
-        except ChildProcessError:
-            return custody_valid
-        except InterruptedError:
-            continue
+        while True:
+            if time.monotonic() >= end:
+                return False
+            try:
+                reaped, _status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return custody_valid
+            except InterruptedError:
+                continue
+            if reaped == 0:
+                break
         if time.monotonic() >= end:
             return False
         time.sleep(.01)
