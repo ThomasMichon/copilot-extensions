@@ -88,14 +88,48 @@ def require_registered_project(name: str) -> None:
         raise PolicyError(f"automatic update project {name!r} is not registered")
 
 
+def _os_account_home() -> Path:
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        library = ctypes.WinDLL("shell32", winmode=0x800)
+        resolve = library.SHGetFolderPathW
+        resolve.argtypes = [
+            wintypes.HWND, ctypes.c_int, wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+        ]
+        resolve.restype = wintypes.LONG
+        buffer = ctypes.create_unicode_buffer(32768)
+        if resolve(None, 40, None, 0, buffer) != 0:
+            raise PolicyError("cannot determine the operating-system account profile")
+        home = Path(buffer.value)
+    else:
+        import pwd
+
+        try:
+            home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except (KeyError, OSError) as exc:
+            raise PolicyError(f"cannot determine the operating-system account home: {exc}") from exc
+    if not home.is_absolute():
+        raise PolicyError("operating-system account profile must be absolute")
+    return home
+
+
 def require_legacy_root_binding(root: Path) -> None:
-    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    home = _os_account_home()
     standard = home / ".worktree-manager"
     if root.resolve() != standard.resolve():
         raise PolicyError(
             "automatic enrollment requires the standard user-local Manager root; "
             "alternate roots need a durable binding shared with legacy update controllers"
         )
+    for variable in ("HOME", "USERPROFILE"):
+        value = os.environ.get(variable)
+        if value and (not Path(value).is_absolute() or Path(value).resolve() != home.resolve()):
+            raise PolicyError(
+                f"{variable} differs from the operating-system account profile; "
+                "automatic enrollment requires a durable binding shared with legacy controllers"
+            )
     for binding in ("COPILOT_EXTENSIONS_CONTEXT", "AGENT_HOME"):
         if os.environ.get(binding):
             raise PolicyError(

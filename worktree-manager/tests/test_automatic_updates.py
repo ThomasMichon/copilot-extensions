@@ -39,6 +39,9 @@ def test_default_off_read_has_no_side_effect(tmp_path: Path) -> None:
 def test_cli_preview_and_ownership_are_read_only(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(cli, "_os_account_home", lambda: tmp_path)
+    monkeypatch.delenv("AGENT_HOME", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     root = tmp_path / ".worktree-manager"
     assert cli.main(["enable", "--project", "example", "--root", str(root), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "planned"

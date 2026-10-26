@@ -23,6 +23,7 @@ def enrollment(tmp_path: Path, monkeypatch) -> Path:
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(cli, "_os_account_home", lambda: home)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("AGENT_HOME", raising=False)
     monkeypatch.setattr(process, "selected_slot", lambda root: tmp_path / "selected")
@@ -54,6 +55,70 @@ def test_unpersisted_installation_binding_blocks_before_any_write(
     assert not enrollment.exists()
     register.assert_not_called()
     ensure.assert_not_called()
+
+
+@pytest.mark.parametrize("variable", ["HOME", "USERPROFILE"])
+@pytest.mark.parametrize("use_redirected_root", [False, True])
+def test_process_profile_override_cannot_hide_enrollment_from_legacy_controllers(
+    enrollment: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+    variable: str, use_redirected_root: bool,
+) -> None:
+    redirected = tmp_path / "process-only-home"
+    monkeypatch.setenv(variable, str(redirected))
+    root = redirected / ".worktree-manager" if use_redirected_root else enrollment
+    register, ensure = Mock(), Mock()
+    monkeypatch.setattr(startup, "register_autostart", register)
+    monkeypatch.setattr(process, "ensure_worker", ensure)
+    assert cli.main(_enable(root, harness=True)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "blocked"
+    assert "durable binding" in result["reason"]
+    assert not root.exists()
+    register.assert_not_called()
+    ensure.assert_not_called()
+
+
+@pytest.mark.skipif(process.os.name == "nt", reason="passwd-database profile")
+def test_posix_enrollment_profile_comes_from_account_not_process_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pwd
+    from types import SimpleNamespace
+
+    account = tmp_path / "account"
+    monkeypatch.setenv("HOME", str(tmp_path / "process-only"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "other-process-only"))
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: SimpleNamespace(pw_dir=str(account)))
+    assert cli._os_account_home() == account
+
+
+@pytest.mark.parametrize("status", [0, -1])
+def test_windows_account_profile_uses_existing_shell_api_without_environment_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int,
+) -> None:
+    import ctypes
+    from types import SimpleNamespace
+
+    account = tmp_path / "account"
+
+    def resolve(window, folder, token, flags, buffer):
+        assert (window, folder, token, flags) == (None, 40, None, 0)
+        buffer.value = str(account)
+        return status
+
+    native = Mock(side_effect=resolve)
+    load = Mock(return_value=SimpleNamespace(SHGetFolderPathW=native))
+    monkeypatch.setattr(cli, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(ctypes, "WinDLL", load, raising=False)
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "process-only"))
+    if status:
+        with pytest.raises(policy.PolicyError, match="operating-system account profile"):
+            cli._os_account_home()
+    else:
+        assert cli._os_account_home() == account
+    load.assert_called_once_with("shell32", winmode=0x800)
+    assert native.restype == ctypes.wintypes.LONG
+    assert len(native.argtypes) == 5
 
 
 def test_user_disable_still_precedes_unsupported_setup_binding(
