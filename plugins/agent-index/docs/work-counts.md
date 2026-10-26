@@ -30,7 +30,8 @@ cancellation and exceptions reset the scope.
 All row counts describe the engine batch writer's primary API operations,
 **not storage-engine I/O,
 fragments, transaction counts or secondary provenance/metadata updates**.
-No-op primary upserts can still perform bounded comparison reads.
+No-op primary upserts can still perform selected-ID comparison reads; these
+counts do not establish their physical I/O cost.
 
 The optional `http` object covers only the shared `GoodCitizenSession` boundary:
 `attempts` counts client request calls, `retries` counts additional calls after

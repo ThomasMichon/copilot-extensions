@@ -549,3 +549,65 @@ source-owner coordination rather than one large rewrite.
   or the 100/10,000/100,000 acceptance matrix. Remaining provider-semantic,
   GC/derived physical-work and unchanged-item model-backfill qualification
   stays explicit; both Plan and Validation Plan remain open.
+
+### 2026-10-26 - Work counts reviewed and merged; native reads qualified
+
+- PR #9081 merged as `c54163c707b1ed6de8af621dcc9a106c7e68fccb`
+  after current-head Copilot approval with no open findings and green CI.
+  Reconciled the existing worktree; no release or consumer adoption is implied.
+  The Plan and Validation Plan above remain the completion gate.
+- Next, qualify bounded native reads for unchanged-item profile backfill before
+  implementing a cursor. The installed backend supports native asynchronous
+  `take_offsets` and pinned read-only table versions without the optional
+  dataset dependency. Synthetic 100/10,000/100,000-row witnesses read two
+  selected offsets after independent current-table deletion and reopening the
+  pinned version. Native metrics reported two scanned rows/two requests for
+  each size, with small but nonidentical payload reads; this is not proof of
+  concurrent writer, retention or whole-backfill correctness.
+- Also qualify actual selected-ID lookup I/O rather than inferring bounded
+  storage work from a short predicate or small result. Keep physical-read and
+  scalar-index preparation obligations explicit in the remaining matrix.
+- Filed and claimed #9082 after public duplicate checks. A native two-ID query
+  scanned the entire unindexed ID column at all three sizes; a prepared scalar
+  index reduced selected data-row reads, but a subsequent append remained
+  unindexed. The current native optimizer combines indexing with compaction
+  and version pruning, so it is not used as an index-only updater.
+- The separate Lance Python SDK exposes index-only `optimize_indices` with
+  delta-index controls, but is not currently a store dependency. Qualify its
+  compatibility, seasoning, platform support and bounded work before adoption;
+  no dependency or live-state change is implied by this finding.
+
+### 2026-10-26 - Budgeted native point-read implementation slice
+
+- Under #9082, added explicit source-domain-owned scalar preparation and opt-in
+  strict content/vector point reads. Ordinary calls retain their defaults;
+  unprepared legacy stores are not silently migrated. This prepares a shared
+  primitive for current-row backfill validation, not a second indexing loop.
+- The caller budgets physical unindexed rows, including deleted rows. Existing
+  indices receive only a new delta segment; a 32-segment ceiling requests
+  explicit consolidation. Reads refuse missing/tail coverage and never build.
+  Preparation preserves current source FTS coverage without refreshing stale
+  FTS or changing existing retention. Manifest/index metadata costs remain real.
+- Added seasoned host-only `pylance>=13.0.0,<14`; the selected composition is
+  LanceDB 0.40.0, pylance 13.0.0 and lance-namespace 0.11.1. Linux native
+  qualification is not Windows/macOS/ARM runtime qualification merely because
+  wheels exist. Client/base dependency scope is unchanged.
+- Native content/vector fixtures at 100/10,000/100,000 rows cover cold/warm
+  point plans, append/update/delete and strict current records. Two requested
+  IDs scan at most two data rows; per-tail SDK updates read less than 256 KiB
+  in fewer than 32 operations at each size. Retained prior versions remain
+  readable; forbidden combined compaction/pruning calls do not run.
+- Bounded native integration selection passes 167 tests, including existing
+  content, maintenance, source-domain, pair-reuse, consumer and count contracts.
+  Lint, helper typing, module-size, documentation and install-contract guards
+  pass. Python dependency seasoning passes all 387 declarations; the unrelated
+  local npm audit cannot run without its Node/npm prerequisite.
+- Review follow-up closes a preflight/writer-entry race: a known pre-effect
+  refusal exits the writer normally before rethrowing, preserving an intervening
+  committed append and a clean receipt. Initial-build/tail race regressions and
+  post-effect failure controls retain existing dirty/uncertain recovery behavior.
+- [Prepared chunk-ID documentation](../../../plugins/agent-index/docs/chunk-id-index.md)
+  owns the API, limits and reproduction tests. Ordinary-round adoption,
+  budgeted unchanged-item model backfill, logical mutation generations,
+  hosted acquisition recovery and the full effort matrix remain open.
+  No release, consumer consumption or live rollout is asserted.

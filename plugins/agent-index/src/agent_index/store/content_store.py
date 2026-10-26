@@ -461,23 +461,30 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
     # -- read ----------------------------------------------------------------
 
     @source_read
-    def get_by_ids(self, chunk_ids: list[str]) -> dict[str, ChunkRecord]:
-        """Fetch chunk records by ID for hydrating search results."""
+    def get_by_ids(
+        self, chunk_ids: list[str], *, bounded: bool = False,
+    ) -> dict[str, ChunkRecord]:
+        """Hydrate IDs; bounded mode requires a prepared participating source store."""
         if not chunk_ids:
             return {}
-        table = self._get_or_create_table()
-        id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-        try:
-            rows = (
-                table.search()
-                .where(f"chunk_id IN ({id_list})")
-                .limit(len(chunk_ids))
-                .to_list()
-            )
-        except Exception:
-            if self._source_domain is not None:
-                raise
-            return {}
+        if bounded:
+            from .chunk_id_index import indexed_chunk_rows
+
+            rows = indexed_chunk_rows(self, chunk_ids)
+        else:
+            table = self._get_or_create_table()
+            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+            try:
+                rows = (
+                    table.search()
+                    .where(f"chunk_id IN ({id_list})")
+                    .limit(len(chunk_ids))
+                    .to_list()
+                )
+            except Exception:
+                if self._source_domain is not None:
+                    raise
+                return {}
 
         return {
             r["chunk_id"]: ChunkRecord(
