@@ -353,7 +353,9 @@ eligible for incremental maintenance and the existing failure/retry path.
 Similarity clusters persist their coverage key and result counts in the same
 SQLite transaction as the artifact. The key covers refreshed versions of the
 configured content/vector tables, qualified local dataset identity, the existing
-source-domain identity and clustering policy. A covered ordinary round checks
+source-domain identity and clustering policy. Database triggers revoke coverage
+on artifact-row mutations, including writes by workers from before the coverage
+schema was introduced. A covered ordinary round checks
 metadata without enumerating items, rewriting the artifact or starting an FTS
 child. Changing inputs or policy invalidates coverage; computation verifies its
 input key again before publishing. Explicit full indexing forces clustering.

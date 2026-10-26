@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS cluster_coverage (
     clusters INTEGER NOT NULL
 );
 """
+_SCHEMA += "\n".join(
+    f"CREATE TRIGGER IF NOT EXISTS cluster_coverage_{table}_{event.lower()} "
+    f"AFTER {event} ON {table} BEGIN DELETE FROM cluster_coverage; END;"
+    for table in ("clusters", "cluster_members")
+    for event in ("INSERT", "UPDATE", "DELETE")
+)
 
 
 @dataclass(frozen=True)

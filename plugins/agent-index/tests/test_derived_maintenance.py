@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -148,6 +149,52 @@ def test_cluster_rows_and_coverage_roll_back_together(tmp_path, monkeypatch):
         assert conn.execute("SELECT count(*) FROM cluster_members").fetchone()[0] == 2
     store.replace_all([])
     assert store.covered_stats(old.signature) is None
+
+
+def test_precoverage_writer_invalidates_newer_artifact_coverage(corpus):
+    config, store, _selected = corpus
+    assert engine._refresh_clusters(store, config)["clusters"] == 1
+    signature = cluster_signature(store, config)
+    artifact = ClusterStore(config.clusters_db)
+    assert artifact.covered_stats(signature) is not None
+    domain = store._source_domain
+    with domain.write(store.content_store.db) if domain else nullcontext():
+        if domain:
+            domain.effect("cluster-replace")
+        with sqlite3.connect(config.clusters_db) as conn:
+            conn.execute("BEGIN")
+            conn.execute("DELETE FROM cluster_members")
+            conn.execute("DELETE FROM clusters")
+    assert artifact.covered_stats(signature) is None
+    assert cluster_signature(store, config) == signature
+    repaired = engine._refresh_clusters(store, config)
+    assert repaired is not None and "maintenance_skipped" not in repaired
+    assert repaired["clusters"] == 1
+
+
+@pytest.mark.parametrize("sql", [
+    "DELETE FROM clusters",
+    "DELETE FROM cluster_members",
+    "UPDATE clusters SET avg_score = 0.5",
+    "UPDATE cluster_members SET score = 0.5",
+    "INSERT INTO clusters SELECT cluster_id || '-copy', bucket, model_id, size, "
+    "rep_source, rep_file_path, has_exact_dupes, avg_score, created_at FROM clusters",
+    "INSERT INTO cluster_members SELECT cluster_id, source, file_path || '-copy', "
+    "score, is_exact_dupe, member_rank FROM cluster_members",
+])
+def test_artifact_row_mutations_revoke_coverage_at_database_boundary(tmp_path, monkeypatch, sql):
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    artifact = ClusterStore(tmp_path / "clusters.db")
+    clusters = build_clusters([
+        ClusterEntry("git:sample", path, np.array([1, 0], np.float32), path)
+        for path in ("one.md", "two.md")
+    ], bucket="git", model_id="small", threshold=0.8, min_size=2)
+    coverage = ClusterCoverage("a" * 64, 2, 1, 1)
+    artifact.replace_all(clusters, coverage=coverage)
+    assert artifact.covered_stats(coverage.signature) is not None
+    with sqlite3.connect(tmp_path / "clusters.db") as conn:
+        conn.execute(sql)
+    assert artifact.covered_stats(coverage.signature) is None
 
 
 def test_native_fts_coverage_survives_restart_and_becomes_due_after_write(corpus, monkeypatch):

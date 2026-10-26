@@ -295,6 +295,11 @@ source-owner coordination rather than one large rewrite.
 - Cluster rows and coverage publish atomically; computation-time mutation,
   failed passes, policy/model changes and same-name/version table reincarnation
   cannot validate stale coverage. Existing source-domain authority is retained.
+- Review identified surviving older workers as a separate artifact writer.
+  Database triggers now revoke coverage on row mutations even when the writer
+  predates the coverage schema. The exact old empty-replacement SQL and all six
+  artifact insert/update/delete boundaries pass regression tests (39-test
+  focused maintenance/API packet).
 - Native fixtures with 100, 10,000 and 100,000 content rows in both layouts
   measured the same metadata-only work for two covered rounds: 12 legacy or 24
   source-aware table-refresh calls, zero enumeration, builder, index recreation
