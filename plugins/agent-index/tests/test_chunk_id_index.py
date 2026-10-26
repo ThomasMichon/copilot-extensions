@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -281,3 +283,62 @@ def test_duplicate_canonical_rows_are_not_truncated_to_a_success(corpus) -> None
     prepare_chunk_id_index(content, max_rows=6)
     with pytest.raises(RuntimeError, match="duplicate"):
         content.get_by_ids([chunks[0].chunk_id], bounded=True)
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+def test_intervening_committed_append_refuses_without_dirtying_domain(
+    corpus, monkeypatch: pytest.MonkeyPatch, prepared: bool,
+) -> None:
+    store, _chunks = corpus
+    content = store.content_store
+    domain = store._source_domain
+    budget = 5
+    if prepared:
+        prepare_chunk_id_index(content, max_rows=5)
+        store.upsert_content([chunk(10)])
+        budget = 1
+    write = domain.write
+    appended = False
+
+    @contextmanager
+    def intervening_write(db) -> Iterator[None]:
+        nonlocal appended
+        if not appended:
+            appended = True
+            store.upsert_content([chunk(20)])
+        with write(db):
+            yield
+
+    monkeypatch.setattr(domain, "write", intervening_write)
+    with pytest.raises(ChunkIdIndexPreparationRequired, match="budget"):
+        prepare_chunk_id_index(content, max_rows=budget)
+    assert appended
+    receipt = domain.receipt()
+    assert receipt["state"] == "clean" and not receipt.get("uncertain_effect")
+    assert receipt["versions"][content._table_name] == content._table.version
+    assert content.get_by_ids([chunk(20).chunk_id])
+    store.upsert_content([chunk(21)])
+    assert content.get_by_ids([chunk(21).chunk_id])
+    assert domain.receipt()["state"] == "clean"
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, ChunkIdIndexPreparationRequired])
+def test_post_effect_failure_keeps_existing_uncertain_receipt(
+    corpus, monkeypatch: pytest.MonkeyPatch, failure: type[RuntimeError],
+) -> None:
+    from lance.dataset import DatasetOptimizer
+
+    store, _chunks = corpus
+    content = store.content_store
+    prepare_chunk_id_index(content, max_rows=5)
+    store.upsert_content([chunk(10)])
+
+    def fail_after_effect(*_args: object, **_kwargs: object) -> None:
+        raise failure("fixture index write failure")
+
+    monkeypatch.setattr(DatasetOptimizer, "optimize_indices", fail_after_effect)
+    with pytest.raises(RuntimeError, match="fixture index write failure"):
+        prepare_chunk_id_index(content, max_rows=1)
+    receipt = store._source_domain.receipt()
+    assert receipt["state"] == "dirty" and receipt["uncertain_effect"] is True
+    assert receipt["operation"] == "scalar-index:" + content._table_name

@@ -26,8 +26,12 @@ cleanup or an FTS rebuild. At most 32 index segments are accepted; exhaustion
 requests separately budgeted owner-coordinated consolidation, never an implicit
 merge of large old segments. A covered no-op performs no index write.
 
-Expected budget/missing-index failures occur before a dirty writer transaction.
-The writer rechecks under the existing exclusion before changing the index.
+Known preflight failures occur before a dirty writer transaction. The writer
+rechecks under the existing exclusion before changing the index. If an
+intervening committed writer changed that budget/coverage, a known pre-effect
+refusal exits the write context normally before being re-raised, preserving the
+current clean receipt and intervening commit. Errors after the index effect
+begins retain the existing dirty/uncertain recovery semantics.
 Pure index-only writes carry forward previously current source FTS coverage
 without claiming that a stale FTS index became current. Existing physical-version
 cluster coverage remains conservatively invalidated.

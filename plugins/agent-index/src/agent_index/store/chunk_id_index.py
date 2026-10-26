@@ -97,34 +97,41 @@ def prepare_chunk_id_index(
         _budget(state, max_rows)
         if state.prepared and state.physical_unindexed_rows == 0:
             return state
+    refusal: ChunkIdIndexPreparationRequired
     with domain.write(owner._db):
-        table = owner._get_or_create_table()
-        state, dataset = _inspect(table)
-        _budget(state, max_rows)
-        if state.prepared and state.physical_unindexed_rows == 0:
-            return state
-        covered_fts = domain.receipt().get("fts_coverage", {}).get(owner._table_name) == state.version
-        domain.effect("scalar-index:" + owner._table_name)
-        if state.prepared:
-            dataset.optimize.optimize_indices(
-                index_names=[INDEX_NAME], num_indices_to_merge=0, retrain=False,
-            )
+        try:
+            table = owner._get_or_create_table()
+            state, dataset = _inspect(table)
+            _budget(state, max_rows)
+        except ChunkIdIndexPreparationRequired as exc:
+            # A concurrent commit can change the preflight; no index effect began.
+            refusal = exc
         else:
-            from lancedb.index import BTree
+            if state.prepared and state.physical_unindexed_rows == 0:
+                return state
+            covered_fts = domain.receipt().get("fts_coverage", {}).get(owner._table_name) == state.version
+            domain.effect("scalar-index:" + owner._table_name)
+            if state.prepared:
+                dataset.optimize.optimize_indices(
+                    index_names=[INDEX_NAME], num_indices_to_merge=0, retrain=False,
+                )
+            else:
+                from lancedb.index import BTree
 
-            table.create_index("chunk_id", config=BTree(), name=INDEX_NAME, replace=False)
-        table.checkout_latest()
-        after, _ = _inspect(table)
-        if not after.prepared or after.physical_unindexed_rows:
-            raise RuntimeError("Chunk-ID index preparation did not cover the current table")
-        _budget(after, 0)
-        if covered_fts:
-            domain.cover_fts(owner)
-        log.info(
-            "Prepared chunk-ID index for %s: %d physical rows, %d segments",
-            owner._table_name, state.physical_unindexed_rows, after.segments,
-        )
-        return after
+                table.create_index("chunk_id", config=BTree(), name=INDEX_NAME, replace=False)
+            table.checkout_latest()
+            after, _ = _inspect(table)
+            if not after.prepared or after.physical_unindexed_rows:
+                raise RuntimeError("Chunk-ID index preparation did not cover the current table")
+            _budget(after, 0)
+            if covered_fts:
+                domain.cover_fts(owner)
+            log.info(
+                "Prepared chunk-ID index for %s: %d physical rows, %d segments",
+                owner._table_name, state.physical_unindexed_rows, after.segments,
+            )
+            return after
+    raise refusal
 
 
 def indexed_chunk_rows(

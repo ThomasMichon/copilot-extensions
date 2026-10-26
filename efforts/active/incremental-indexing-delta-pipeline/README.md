@@ -597,11 +597,15 @@ source-owner coordination rather than one large rewrite.
   IDs scan at most two data rows; per-tail SDK updates read less than 256 KiB
   in fewer than 32 operations at each size. Retained prior versions remain
   readable; forbidden combined compaction/pruning calls do not run.
-- Bounded native integration selection passes 163 tests, including existing
+- Bounded native integration selection passes 167 tests, including existing
   content, maintenance, source-domain, pair-reuse, consumer and count contracts.
   Lint, helper typing, module-size, documentation and install-contract guards
   pass. Python dependency seasoning passes all 387 declarations; the unrelated
   local npm audit cannot run without its Node/npm prerequisite.
+- Review follow-up closes a preflight/writer-entry race: a known pre-effect
+  refusal exits the writer normally before rethrowing, preserving an intervening
+  committed append and a clean receipt. Initial-build/tail race regressions and
+  post-effect failure controls retain existing dirty/uncertain recovery behavior.
 - [Prepared chunk-ID documentation](../../../plugins/agent-index/docs/chunk-id-index.md)
   owns the API, limits and reproduction tests. Ordinary-round adoption,
   budgeted unchanged-item model backfill, logical mutation generations,
