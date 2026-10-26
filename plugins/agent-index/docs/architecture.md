@@ -555,8 +555,37 @@ The intake DTO and transport additions retain the declared Python 3.10 floor,
 using postponed concrete annotations rather than newer `typing` exports.
 
 Deploy receivers before producers, and enable hinted execution only with a
-qualified capable engine. This transport expansion does not itself add engine
-acquisition support; without that implementation hinted rows remain parked.
+qualified capable engine. The shared engine now advertises v1 execution and
+preflights one exact configured source, the actual connector's
+`discover_hints` callable capability, and its explicit
+`hint_scope == (canonical_family, account_id)` before opening stores or embedding
+clients. Aliases, synthesized sources and unsupported connectors are refused;
+there is no source-only polling fallback. The same connector supplies recovery
+identity and acquisition. Hinted failures propagate to a failed retryable task,
+not terminal partial success. Acquired manifests retain existing replay and
+store-before-checkpoint ordering.
+
+An in-process connector opts in by advertising `change_hints_versions = (1,)`
+on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.
+It must return a complete validated `SourceDelta` and preserve `last_commit`
+exactly, including `None`: targeted events do not prove coverage of intervening
+poll changes. An unchanged or changed polling cursor is not inferred from event
+IDs. Existing unadvertised workers still park hinted tasks after rollback.
+External CLI providers and Git ref-range hint acquisition remain unsupported.
+
+GitHub implements targeted positive canonical decimal issue/PR numbers, unioned
+from `item_ids` and `metadata_revisions.item_id`. For this connector, metadata
+revisions are timezone-qualified API `updated_at` timestamps; an older item
+response fails retryably. Event IDs are retained delivery annotations, not
+fetch identities. Ref ranges and event-only envelopes with no resolvable item
+are refused. The effective account uses the existing recovery identity probe;
+anonymous access has the explicit key `anonymous`. Every unique selected item
+and its complete issue-comment pages are fetched fresh, without ETag-only
+304 suppression. Repository/item identity, comment counts and distinct comment
+IDs must agree before the delta is usable. A 404 is not deletion authority.
+This does not enumerate repository paths or history. A changed item may still
+require all its comments; resumable hosted page acquisition remains separate
+work, not a claim of this event-targeting contract.
 
 The storage migration atomically installs durable SQLite triggers with the new
 column. The triggers preserve `queued_hints` even when an older runtime's

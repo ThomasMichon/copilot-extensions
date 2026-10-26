@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
     from agent_index.engine.client import EngineClient
     from agent_index.index_config import IndexConfig, ModelProfile
+    from agent_index.indexing.change_hints import ChangeHints
     from agent_index.indexing.embedding_coverage import EmbeddingCoverage
     from agent_index.indexing.embedding_runtime import EmbeddingRuntime
     from agent_index.indexing.manifest import CrawlManifest
@@ -277,6 +278,7 @@ def run_reindex(
     config: IndexConfig | None = None,
     source_specs: list[SourceSpec] | None = None,
     embedding_runtime: EmbeddingRuntime | None = None,
+    change_hints: ChangeHints | None = None,
 ) -> dict[str, object]:
     """Run the four-phase indexing pipeline.
 
@@ -295,6 +297,7 @@ def run_reindex(
             still use the supported registry and existing recovery identity.
         embedding_runtime: Optional owned client/lifecycle policy. Clients are
             closed on exit and readiness remains deferred until embedding.
+        change_hints: Required exact-source acquisition identities; never a poll fallback.
 
     Returns:
         Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
@@ -315,13 +318,22 @@ def run_reindex(
     from agent_index.store.multi_model_store import MultiModelStore
 
     config = config if config is not None else IndexConfig()
-    config.ensure_dirs()
     runtime = embedding_runtime if embedding_runtime is not None else default_embedding_runtime()
     configured = list(source_specs) if source_specs is not None else configured_source_specs()
     sources_to_index = (
         configured if source is None else
         [_resolve_explicit_source_spec(source, {spec.name: spec for spec in configured})]
     )
+    hinted_connector = None
+    if change_hints is not None:
+        from agent_index.indexing.hinted_crawl import prepare_hint_connector
+
+        if progress_cb:
+            progress_cb.check_cancelled()
+        hinted_connector = prepare_hint_connector(
+            source, full, change_hints, configured, _connector_kwargs,
+        )
+    config.ensure_dirs()
 
     print(f"Data directory: {config.data_dir}")
     print(f"Model: {config.model_name}")
@@ -375,7 +387,7 @@ def run_reindex(
                 progress_cb.source_started(src_name)
 
             try:
-                connector_kwargs = _connector_kwargs(spec)
+                connector_kwargs = {} if hinted_connector is not None else _connector_kwargs(spec)
                 stored, deleted, crawled = _index_source(
                     src_name,
                     config=config,
@@ -391,6 +403,7 @@ def run_reindex(
                     source_scope=hashlib.sha256(
                         json.dumps(asdict(spec), sort_keys=True).encode(),
                     ).hexdigest(),
+                    connector=hinted_connector, change_hints=change_hints,
                 )
                 total_chunks += stored
                 total_deleted += deleted
@@ -398,6 +411,8 @@ def run_reindex(
             except IndexingCancelled:
                 raise
             except Exception as exc:
+                if change_hints is not None:
+                    raise
                 logger.exception("Failed to index source: %s", src_name)
                 print(f"  ERROR: {src_name} failed - continuing with next source")
                 # Record the failure so it is surfaced in the result instead of
@@ -547,6 +562,9 @@ def run_reindex(
     return result
 
 
+setattr(run_reindex, "change_hints_versions", (1,))
+
+
 def _refresh_clusters(
     multi_store: MultiModelStore, config: IndexConfig, *, force: bool = False,
 ) -> dict[str, int | float] | None:
@@ -575,19 +593,22 @@ def _index_source(
     connector_kwargs: dict[str, object] | None = None,
     before_store: Callable[[], None] | None = None,
     source_scope: str | None = None,
+    connector: SourceConnector | None = None,
+    change_hints: ChangeHints | None = None,
 ) -> tuple[int, int, int]:
     """Replay pinned partial acquisition before observing newer source changes."""
     from agent_index.indexing.pending_crawl import recover_source, recovery_scope
     from agent_index.sources import get_connector
 
-    connector = get_connector(source_name, **(connector_kwargs or {}))
+    if connector is None:
+        connector = get_connector(source_name, **(connector_kwargs or {}))
     return recover_source(
         source_name, scope=recovery_scope(source_scope or source_name, connector), state=state,
         state_file=config.state_file, paths=path_index, full=full, family=connector.source_name,
         acquire=partial(
             _crawl_source, source_name, config=config, state=state, path_index=path_index,
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
-            connector=connector, source_scope=source_scope,
+            connector=connector, source_scope=source_scope, change_hints=change_hints,
         ),
         apply=partial(
             _apply_source_manifest, source_name, config=config, state=state,
@@ -719,6 +740,7 @@ def _crawl_source(
     connector_kwargs: dict[str, object] | None = None,
     connector: SourceConnector | None = None,
     source_scope: str | None = None,
+    change_hints: ChangeHints | None = None,
 ) -> CrawlManifest:
     """Compatibility entrypoint for the separately owned crawl phase."""
     from agent_index.indexing.crawl import collect_source_changes
@@ -729,7 +751,7 @@ def _crawl_source(
         source_name, state=state, path_index=path_index, full=full,
         source_aware=bool(selected_layout()), progress_cb=progress_cb,
         connector_kwargs=connector_kwargs,
-        connector=connector, source_scope=source_scope,
+        connector=connector, source_scope=source_scope, change_hints=change_hints,
     )
 
 

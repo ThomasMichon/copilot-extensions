@@ -448,6 +448,47 @@ source-owner coordination rather than one large rewrite.
   Controls cover both layouts, raw-text normalized-hash collisions, metadata,
   original timestamp/version preservation, new model pairs, retained/new chunks,
   empty files, failed reads, source/path isolation and partial vector cleanup.
+
+### 2026-10-26 - Content reconciliation reviewed and merged
+
+- PR #9070 merged as `c1ebf534ed4683d32e97b694a6702ee7d247be49`
+  after current-head Copilot approval with no open findings and green CI.
+  Final qualification passed 241 composed tests, 34 strict content/source
+  integrity tests and 156 checkpoint-policy/recovery/reuse tests.
+- Review corrections coalesce identical same-line chunks and exact historical
+  stored copies while rejecting conflicting copies. The `file-v2` fingerprint
+  policy requalifies an older file checkpoint only when that file is presented;
+  valid chunk/model receipts remain reusable without a corpus-wide scan.
+- The identical-content/vector-write and explicit keep-ID cleanup gate is
+  resolved. Logical mutation counters, bounded unchanged-item profile backfill,
+  hosted acquisition/recovery and local maintenance remain open.
+- Continue actual scoped hint acquisition through the engine and connector.
+  Published-source qualification and downstream adoption remain separate from
+  this reviewed source merge; the existing release-repair owner remains intact.
+
+### 2026-10-26 - Actual scoped hint acquisition implementation
+
+- Expanded the existing engine's actual-callable v1 capability and preflighted
+  exact configured source, connector acquisition support and effective account
+  before opening stores or embedding clients. The original typed envelope
+  reaches the selected connector unchanged; unsupported paths fail visibly
+  rather than becoming polls or terminal partial successes.
+- Built-in GitHub hints fetch only unique requested issue/PR identities and
+  their complete fresh comment pages. Metadata revisions require API timestamps;
+  wrong targets, stale revisions, incomplete comments, ref ranges and delivery
+  annotations without item identities refuse rather than losing information.
+- Event acquisition preserves the prior ordinary polling cursor, including
+  null, and reuses existing pending-manifest recovery and queue retry authority.
+  Native tests in both store layouts cover unchanged writes, engine readiness,
+  duplicate/trailing bursts and failed-worker restart. Scoped acquisition at
+  100, 10,000 and 100,000 unrelated path entries reads no unchanged paths.
+- The initial provider/engine packet passed 98 tests; the expanded retained
+  queue, transport, recovery, credentials and consumer packet passed 262.
+  Final qualification and review follow. Git ref-range hints, external-provider
+  hint acquisition, hosted page recovery and the full matrix remain open.
+- Final acquisition/store compatibility qualification passed 242 tests,
+  including cancellation before connector construction. Helper types, changed
+  Python lint, runtime install contracts and documentation consistency pass.
 - Phase 4's content/vector write-avoidance item is resolved. Exact hinted
   acquisition, hosted pagination recovery, unchanged-item model backfill,
   per-stage counters and logical/sliced maintenance remain next work; no

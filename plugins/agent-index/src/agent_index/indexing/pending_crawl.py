@@ -30,7 +30,9 @@ def recovery_scope(config_scope: str, connector: SourceConnector) -> str:
     """Bind stable account configuration to the same resolved connector used to crawl."""
     identity = getattr(connector, "recovery_identity", None)
     if identity is None:
-        if callable(getattr(connector, "discover_delta", None)):
+        if any(
+            callable(getattr(connector, name, None)) for name in ("discover_delta", "discover_hints")
+        ):
             raise ValueError("Delta connector must declare its effective recovery_identity")
         identity = (connector.source_name,)
     if not isinstance(identity, tuple) or not identity or any(

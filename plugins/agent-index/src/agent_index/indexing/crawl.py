@@ -9,6 +9,7 @@ from agent_index.sources.delta import SourceDelta
 
 if TYPE_CHECKING:
     from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.change_hints import ChangeHints
     from agent_index.indexing.runner import ProgressCallback
     from agent_index.indexing.state import IndexState
     from agent_index.sources.base import SourceConnector
@@ -25,6 +26,7 @@ def collect_source_changes(
     connector_kwargs: dict[str, object] | None = None,
     connector: SourceConnector | None = None,
     source_scope: str | None = None,
+    change_hints: ChangeHints | None = None,
 ) -> CrawlManifest:
     """Prefer explicit deltas; retain full reconciliation for legacy providers."""
     from agent_index.sources import get_connector
@@ -41,14 +43,29 @@ def collect_source_changes(
     cancel_check = progress_cb.check_cancelled if progress_cb else None
     src_state = state.sources.get(source_name)
     last_commit = src_state.last_commit if src_state else None
-    if canonical is not None and state.stored_families.get(source_name) != canonical:
+    if (
+        change_hints is None and canonical is not None
+        and state.stored_families.get(source_name) != canonical
+    ):
         last_commit = None
 
     discover_delta = getattr(connector, "discover_delta", None)
-    if not full and callable(discover_delta) and getattr(connector, "delta_available", True):
+    if change_hints is not None:
+        from agent_index.indexing.change_hints_contract import validate_scope
+        from agent_index.indexing.hinted_crawl import require_hint_connector
+
+        validate_scope(source_name, full, change_hints)
+        discover = require_hint_connector(connector, change_hints)
+        delta = discover(change_hints, last_commit, cancel_check=cancel_check)
+        if not isinstance(delta, SourceDelta) or delta.commit != last_commit:
+            raise ValueError("Hinted acquisition must preserve the polling cursor")
+    elif not full and callable(discover_delta) and getattr(connector, "delta_available", True):
         delta = discover_delta(last_commit, cancel_check=cancel_check)
         if not isinstance(delta, SourceDelta):
             raise ValueError("Connector returned an incompatible delta result")
+    else:
+        delta = None
+    if delta is not None:
         delta.validate(connector.source_name)
         if cancel_check:
             cancel_check()

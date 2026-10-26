@@ -8,7 +8,7 @@ import os
 import hashlib
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -23,6 +23,10 @@ from agent_index.sources.good_citizen_http import (
 )
 
 log = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from agent_index.indexing.change_hints import ChangeHints
+    from agent_index.sources.delta import SourceDelta
 
 _DEFAULT_API_BASE = "https://api.github.com"
 _DEFAULT_TIMEOUT = 20.0
@@ -95,6 +99,17 @@ class GitHubConnector:
 
     @property
     def recovery_identity(self) -> tuple[str, ...]:
+        return (
+            nonsecret_target(str(self._client.base_url).rstrip("/")), self.owner, self.repo,
+            self._effective_account(), json.dumps(self._default_since),
+        )
+
+    @property
+    def hint_scope(self) -> tuple[str, str]:
+        """Explicit nonsecret family/account scope, independent of tuple layouts."""
+        return self.source_name, self._effective_account()
+
+    def _effective_account(self) -> str:
         if self._recovery_account is None:
             if self._token or self._token_provider is not None or (
                 self._client.auth is not None or "authorization" in self._client.headers
@@ -102,10 +117,16 @@ class GitHubConnector:
                 self._recovery_account = self._authenticated_recovery_account()
             else:
                 self._recovery_account = "anonymous"
-        return (
-            nonsecret_target(str(self._client.base_url).rstrip("/")), self.owner, self.repo,
-            self._recovery_account, json.dumps(self._default_since),
-        )
+        return self._recovery_account
+
+    def discover_hints(
+        self, hints: ChangeHints, last_commit: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        """Acquire v1 work-item identities without advancing ordinary polling."""
+        from agent_index.sources.github_hints import acquire_hints
+
+        return acquire_hints(self, hints, last_commit, cancel_check=cancel_check)
 
     def _authenticated_recovery_account(self) -> str:
         try:
@@ -358,6 +379,9 @@ class GitHubConnector:
         if dt is None:
             return None
         return (dt - timedelta(seconds=60)).astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+setattr(GitHubConnector.discover_hints, "change_hints_versions", (1,))
 
 
 def _env_token() -> str | None:
