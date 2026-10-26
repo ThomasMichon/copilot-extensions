@@ -1513,6 +1513,21 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+`tools/promotion_unit_tests/test_namespace_contract.py` joins the actual
+Containers `namespace-list` CLI and `ContainerResolver.list_specs` output to
+Bridge's `CliNamespaceResolver._enumerate_once` and `NamespaceAgentInfo`.
+Synthetic inventory/configuration/lease/hold inputs and substituted thread and
+process transport keep both production endpoints in the same no-actor unit
+execution; unrelated command integrations are not exercised. The cases protect
+field fidelity, ordered multi-agent and empty rosters, repository fallbacks,
+ready/stopped/unknown/draining states, and visible refusal of malformed,
+partially invalid or schema-drifted JSON and failed provider enumeration.
+The actual CLI must emit no success JSON on failure; Bridge must neither cache
+nor accept that result as an empty roster. These exact nodes and their source
+closure are positively admitted by `tools/promotion-unit-manifest.json`.
+This does not qualify native process transport, task/join ownership, Docker,
+installed runtime compatibility or either provider's other operations.
+
 Complete-source units in `test_complete_source.py`,
 `test_complete_source_publication.py` and `test_source_objects.py` under
 `tools/promotion_unit_tests/` use synthetic blobs, Git protocol responses and

@@ -1836,7 +1836,21 @@
         "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[bytes-inspect_wheel0]",
         "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[bytes-inspect_wheel1]",
         "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[deadline-inspect_wheel0]",
-        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[deadline-inspect_wheel1]"
+        "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py::test_both_owners_preserve_byte_and_metadata_refusals[deadline-inspect_wheel1]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_namespace_output_reaches_bridge[running]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_namespace_output_reaches_bridge[stopped-leased]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_namespace_output_reaches_bridge[unknown]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_namespace_output_reaches_bridge[held-restricted]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_namespace_output_reaches_bridge[ready-restricted]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_empty_provider_is_an_authoritative_empty_roster",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_preserves_multiple_agents_and_repository_fallbacks",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[renamed-name]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[extra-field]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[object-root]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[invalid-row]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[truncated-json]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_wire_drift_is_incomplete_not_empty[partial]",
+        "tools/promotion_unit_tests/test_namespace_contract.py::test_actual_provider_failure_cannot_publish_an_empty_roster"
     ],
     "sources": {
         "tools/build_python_artifacts.py": "681155f69ab15bf8c385a34419d86bfb467703336087b7e30f69d035c9c3199c",
@@ -2044,7 +2058,13 @@
         "libs/installer-engine/installer_wheel_acquisition.py": "b9c4e670fa7d10106469827a847a64b31e017c6c2a7f75ab5930d15da24f31f2",
         "tools/promotion_unit_tests/test_packaging_seed.py": "898e0bfa4a1bb4851a615d5ce0b9e31b1d29b653c6e82637335e5fef31f24da4",
         "tools/promotion_unit_tests/test_runtime_wheel_inspection_owner.py": "eb6029b02b7bf12842a24a668334a2d0bd501b8cff69cb464fbb90ff4c9e3a40",
-        "tools/runtime_wheel_inspection.py": "403031eea565b4f96c2e5a13e24044206096e77962454fb55619c50c106fd8ad"
+        "tools/runtime_wheel_inspection.py": "403031eea565b4f96c2e5a13e24044206096e77962454fb55619c50c106fd8ad",
+        "tools/promotion_unit_tests/test_namespace_contract.py": "3aec928f88a510e72883a8f791658ed7789c1548c841f8a419397ef1bfdb1bbc",
+        "plugins/agent-containers/src/agent_containers/__main__.py": "5c02a29f0e71cb8b22cc1ce3512b4d1445b3a9507fc1c464572c18c6b71b8937",
+        "plugins/agent-containers/src/agent_containers/resolver.py": "9850607dc718a5218e5a87016630aa3001569645040fd47e3ff0ab55acaceb8f",
+        "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py": "73de7083d14afe3d31b96702efc137fb15f7a948bc97e3b915f5547a82898d40",
+        "plugins/agent-bridge/src/agent_bridge/reader_admission.py": "3114cdb53c6f11f82f2c01e1cf4d46b4afaeebd28aa34e2d7f8459bb7fcc23c3",
+        "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py": "7a2aea050cddaffeb6bb6c58f78d12f30caed19e74c375df68171baddd78a41a"
     },
     "coverage_targets": [
         "libs/installer-engine/installer_packaging_seed.py",
@@ -2129,7 +2149,12 @@
         "tools/runtime_source_lock.py",
         "tools/build_python_artifacts.py",
         "tools/build_toolchain_lock.py",
-        "tools/runtime_wheel_inspection.py"
+        "tools/runtime_wheel_inspection.py",
+        "plugins/agent-containers/src/agent_containers/__main__.py",
+        "plugins/agent-containers/src/agent_containers/resolver.py",
+        "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py",
+        "plugins/agent-bridge/src/agent_bridge/reader_admission.py",
+        "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py"
     ],
     "max_seconds": 300
 }
