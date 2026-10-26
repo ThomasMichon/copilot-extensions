@@ -120,6 +120,11 @@ activation blocker. The resident's runtime identity names that retained slot,
 not its payload subdirectory. It clears ephemeral session/runtime overrides and uses noninteractive
 authentication. Missing credentials defer visibly instead of starting a login
 ceremony. Canonical update telemetry retains the installation's actual result.
+Automatic runs use the shared `schedule` trigger; a `run`/`info` event with
+action `automatic_trigger` records the requesting owner (`manager`, `external`
+or `legacy-agent-machines`) in `details.automatic_trigger`. Admission refusals
+retain the same attribution and use the shared `lock` phase with action
+`update_admission`, without extending the published telemetry vocabulary.
 Worker logs and status live under `<Manager root>/automatic-updates/`.
 
 The non-TTY worker explicitly prohibits OpenSSH askpass, including an inherited
