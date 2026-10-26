@@ -3,16 +3,22 @@
 from __future__ import annotations
 
 import copy
+import asyncio
+from contextlib import contextmanager
 import hashlib
 from pathlib import Path
 import sqlite3
+from threading import Event, Thread
+import time
 
 from joserfc.jwk import ECKey
 import pytest
 
 from fleet_manager import planning
 from fleet_manager.gateway_enrollment import SCHEMA
+from fleet_manager.gateway_enrollment import EnrollmentPolicy
 from fleet_manager.gateway_service_policy import ServiceAuthority, ServicePolicyError
+from fleet_manager.gateway_service_server import Listener, ServiceRuntime
 from fleet_manager.ledger import OperationLedger
 from fleet_manager.operations import OperationIntent
 from fleet_manager.machine_identity import make_machine_proof
@@ -243,3 +249,119 @@ def test_expired_candidate_cannot_poison_accepted_policy_floor(tmp_path: Path) -
     h.document = original
     h.owner = h.restart()
     assert h.enroll()["state"] == "published"
+
+
+def test_clock_crossing_publication_rolls_back_floor_and_withdrawal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    h = EnrollmentHarness(tmp_path)
+    h.enroll()
+    original = copy.deepcopy(h.document)
+    h.document["policy"]["manifest"]["revision"] += 1
+    h.document["policy"]["identity"]["trust_valid_until"] = NOW + 1
+    h.document["delegations"] = []
+    compose = EnrollmentPolicy._compose
+
+    def crossing(owner, records):
+        candidate = compose(owner, records)
+        h.h.clock.value = NOW + 1
+        return candidate
+
+    with monkeypatch.context() as patch:
+        patch.setattr(EnrollmentPolicy, "_compose", crossing)
+        with pytest.raises(ServicePolicyError, match="^authority-unavailable$"):
+            h.owner.reload()
+    with sqlite3.connect(h.ledger.path) as connection:
+        assert connection.execute("SELECT revision FROM enrollment_floors").fetchone() == (1,)
+        assert connection.execute("SELECT withdrawn_revision FROM machine_enrollments").fetchone() == (None,)
+    h.document = original
+    h.owner = h.restart()
+    assert any(c.principal == "new-caller" for c in h.owner._current()[0].callers)
+
+
+def test_settlement_failure_delivers_installed_context_and_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def run() -> None:
+        h = EnrollmentHarness(tmp_path)
+        h.enroll()
+        listener = Listener("fleet-a", "gateway-a", "127.0.0.1", 0, DESTINATION, "", "")
+        runtime = ServiceRuntime(h.owner, listener, 1)
+        await runtime.reload()
+        previous = runtime.context
+        h.document["policy"]["manifest"]["revision"] += 1
+        h.document["delegations"] = []
+
+        def failed(*args) -> None:
+            raise sqlite3.OperationalError("synthetic receipt storage failure")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(EnrollmentPolicy, "reconcile_publication", failed)
+            await runtime.reload()
+        assert runtime.context is h.owner._current()[0]
+        assert runtime.context.digest != previous.digest
+        assert runtime.last_error == h.owner.status().last_error == "enrollment-settlement-pending"
+        assert "service-enrollment-settlement-pending" in caplog.text
+        await runtime.reload()
+        assert runtime.last_error is h.owner.status().last_error is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation", ["reload", "challenge", "enroll"])
+def test_contended_journal_does_not_hold_serving_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    async def run() -> None:
+        h = EnrollmentHarness(tmp_path)
+        raw = h.request()
+        proof = make_machine_proof(
+            h.key, principal="new-caller", audience=AUDIENCE, kind="caller",
+            resource="enrollment", method="POST", target_uri=DESTINATION + "/_fleet/enroll",
+            nonce=h.owner.enrollment_challenge(), body=raw, now=NOW)
+        entered, done = Event(), Event()
+        transaction = h.ledger._transaction
+
+        @contextmanager
+        def observed(*args, **kwargs):
+            entered.set()
+            with transaction(*args, **kwargs) as connection:
+                yield connection
+
+        monkeypatch.setattr(h.ledger, "_transaction", observed)
+        failures = []
+
+        def blocked() -> None:
+            try:
+                if operation == "reload":
+                    h.owner.reload()
+                elif operation == "challenge":
+                    h.owner.enrollment_challenge()
+                else:
+                    h.owner.enroll(
+                        raw, grant=GRANT, proof=proof,
+                        target_uri=DESTINATION + "/_fleet/enroll", destination=DESTINATION)
+            except Exception as exc:
+                failures.append(exc)
+            finally:
+                done.set()
+
+        with sqlite3.connect(h.ledger.path) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            worker = Thread(target=blocked)
+            worker.start()
+            try:
+                assert await asyncio.to_thread(entered.wait, 1)
+                start = time.monotonic()
+                for _ in range(3):
+                    assert h.owner.challenge()
+                    await asyncio.sleep(0.01)
+                assert time.monotonic() - start < 0.5
+                assert not done.is_set()
+            finally:
+                connection.rollback()
+                await asyncio.to_thread(worker.join, 6)
+        assert done.is_set()
+        assert not failures
+
+    asyncio.run(run())

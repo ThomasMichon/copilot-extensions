@@ -88,11 +88,18 @@ class EnrollmentPolicy:
     def nonce(self) -> str:
         return self._proofs.nonce
 
-    def publication(self) -> tuple[ServiceContext, ServiceVerifier]:
+    def publication(self, eligible: Callable[[ServiceContext], None] | None = None
+                    ) -> tuple[ServiceContext, ServiceVerifier]:
         """Validate then durably accept floors in the same journal transaction."""
+        def validate(records: tuple[dict, ...]) -> tuple[ServiceContext, ServiceVerifier]:
+            candidate = self._compose(records)
+            if eligible is not None:
+                eligible(candidate[0])
+            return candidate
+
         return enrollment_journal.publish(
             self._ledger, gateway=self.gateway, revision=self.revision,
-            fingerprint=self.digest, validate=self._compose, included=self._included)
+            fingerprint=self.digest, validate=validate, included=self._included)
 
     def _compose(self, records: tuple[dict, ...]) -> tuple[ServiceContext, ServiceVerifier]:
         require(len(records) <= 128, "enrollment-limit")

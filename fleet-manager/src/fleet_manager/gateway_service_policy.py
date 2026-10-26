@@ -48,6 +48,7 @@ class ServiceSnapshot:
 class ServicePublication:
     changed: bool
     snapshot: ServiceSnapshot
+    settlement_error: str | None = None
 
     @property
     def revision(self) -> int:
@@ -141,6 +142,7 @@ class ServiceAuthority:
         self._enrollment: EnrollmentPolicy | None = None
         self._source, self._clock = source, clock
         self._lock = RLock()
+        self._publication_lock = RLock()
         self._snapshot: ServiceSnapshot | None = None
         self._verifier: ServiceVerifier | None = None
         self._services: dict[str, _Record] = {}
@@ -193,13 +195,27 @@ class ServiceAuthority:
         except planning.PlanError:
             self._fail("invalid-json")
         if self._journal is not None:
-            with self._lock:
+            with self._publication_lock:
                 return self._reload_candidate(raw, decoded)
         return self._reload_candidate(raw, decoded)
+
+    def _eligible(self, context: ServiceContext) -> int:
+        with self._lock:
+            require(context.manifest.fleet == self._fleet
+                    and context.manifest.gateway == self._gateway, "owner-mismatch")
+            current = self._snapshot
+            if current:
+                require(context.manifest.revision >= current.revision, "stale-revision")
+                if context.manifest.revision == current.revision:
+                    require(context.digest == current.context.digest, "revision-conflict")
+            now = self._time()
+            require(now < context.trust_valid_until, "authority-unavailable")
+            return now
 
     def _reload_candidate(self, raw: bytes, decoded: object) -> ServicePublication:
         try:
             enrollment = None
+            eligible_at = None
             if isinstance(decoded, dict) and decoded.get("schema") == ENROLLMENT_SCHEMA:
                 require(self._journal is not None, "enrollment-journal-required")
                 assert self._journal is not None
@@ -208,8 +224,11 @@ class ServiceAuthority:
                     enrollment = EnrollmentPolicy(decoded, self._journal, self._clock)
                 require((enrollment.fleet, enrollment.gateway) == (self._fleet, self._gateway),
                         "owner-mismatch")
-                require(self._time() < enrollment.trust_valid_until, "authority-unavailable")
-                context, candidate_verifier = enrollment.publication()
+                def eligible(candidate: ServiceContext) -> None:
+                    nonlocal eligible_at
+                    eligible_at = self._eligible(candidate)
+
+                context, candidate_verifier = enrollment.publication(eligible)
             else:
                 require(self._enrollment is None and self._journal is None,
                         "enrollment-rollback-refused")
@@ -222,55 +241,53 @@ class ServiceAuthority:
         except (planning.PlanError, sqlite3.Error):
             self._fail("enrollment-journal-refused")
         with self._lock:
-            current = self._snapshot
-            if current:
-                if context.manifest.revision < current.revision:
-                    self._fail("stale-revision")
-                if context.manifest.revision == current.revision:
-                    if context.digest != current.context.digest:
-                        self._fail("revision-conflict")
-                    if enrollment is not None:
-                        self._reconcile_enrollment(enrollment, context)
-                    self._last_error = None
-                    return ServicePublication(False, current)
+            # Enrollment eligibility already ran inside the committed journal
+            # transaction. Do not reject its durable publication after commit.
             try:
-                now = self._time()
-                require(now < context.trust_valid_until, "authority-unavailable")
+                now = self._eligible(context) if enrollment is None else eligible_at
             except ServicePolicyError as exc:
                 self._fail(exc.code)
-            if not current or current.context.trust_digest != context.trust_digest:
-                self._verifier = candidate_verifier
-            self._enrollment = enrollment
-            self._snapshot = ServiceSnapshot(context, current.generation + 1 if current else 1)
-            self._prune(context, now)
-            if enrollment is not None:
-                self._reconcile_enrollment(enrollment, context)
+            assert now is not None
+            current = self._snapshot
+            changed = current is None or context.manifest.revision != current.revision
+            if changed:
+                if not current or current.context.trust_digest != context.trust_digest:
+                    self._verifier = candidate_verifier
+                self._enrollment = enrollment
+                self._snapshot = ServiceSnapshot(context, current.generation + 1 if current else 1)
+                self._prune(context, now)
+            assert self._snapshot is not None
+            installed = self._snapshot
             self._last_error = None
-            return ServicePublication(True, self._snapshot)
-
-    def _reconcile_enrollment(self, enrollment: EnrollmentPolicy, context: ServiceContext) -> None:
-        try:
-            enrollment.reconcile_publication(context)
-        except (planning.PlanError, sqlite3.Error):
-            self._fail("enrollment-journal-refused")
+        settlement_error = None
+        if enrollment is not None:
+            try:
+                enrollment.reconcile_publication(context)
+            except (planning.PlanError, sqlite3.Error):
+                settlement_error = "enrollment-settlement-pending"
+                with self._lock:
+                    self._last_error = settlement_error
+        return ServicePublication(changed, installed, settlement_error)
 
     def enrollment_challenge(self) -> str:
-        with self._lock:
+        with self._publication_lock:
             self.reload()
-            require(self._enrollment is not None, "unsupported-enrollment")
-            assert self._enrollment is not None
-            self._active()
-            return self._enrollment.nonce
+            with self._lock:
+                require(self._enrollment is not None, "unsupported-enrollment")
+                assert self._enrollment is not None
+                self._active()
+                return self._enrollment.nonce
 
     def enroll(self, raw: bytes, *, grant: str, proof: str,
                target_uri: str, destination: str) -> dict[str, object]:
         """Authenticate delegation/possession, persist original operation and publish."""
-        with self._lock:
+        with self._publication_lock:
             self.reload()
-            producer = self._enrollment
-            require(producer is not None, "unsupported-enrollment")
-            assert producer is not None
-            self._active()
+            with self._lock:
+                producer = self._enrollment
+                require(producer is not None, "unsupported-enrollment")
+                assert producer is not None
+                self._active()
             try:
                 intent, fingerprint = producer.enroll(
                     raw, grant=grant, proof=proof, target_uri=target_uri, destination=destination)

@@ -107,6 +107,10 @@ The serving owner composes desired grants with admitted public bindings and
 validates the complete prospective policy **inside admission's transaction**.
 Unpublishable keys, generated identifiers, aggregate limits and conflicts roll
 back intent, claim, outbox and audit together.
+Final owner/revision/trust-deadline eligibility also runs inside the publication
+transaction, before accepted floors or withdrawal markers commit. Journal-writer
+serialization is separate from the short serving-state lock; SQLite contention
+must not block synchronous request authentication or the event loop.
 
 Use the existing operation journal explicitly:
 
@@ -140,6 +144,10 @@ receipts. Reload/startup reconciles receipt-less exact admitted bindings after
 publication, even when their original bootstrap grant has expired. A lost reply
 therefore resumes the original operation, not a new identity. Revoked or
 superseded bindings are not falsely settled as newly published.
+Receipt-storage failure does not undo or conceal an installed publication:
+the transport receives the installed context and reports
+`enrollment-settlement-pending` in status/logs. A later reload retries settlement
+against that same exact installed context; it does not invent a new operation.
 Claims/floors are retained; there is no automatic rotation, reclamation or
 re-enrollment under another generation. Such recovery requires its owner's
 explicit future recovery contract.

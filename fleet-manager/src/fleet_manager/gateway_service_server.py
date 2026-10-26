@@ -143,7 +143,9 @@ class ServiceRuntime:
     async def reload(self) -> None:
         publication = await settled(self.authority.reload)
         self.context = publication.snapshot.context
-        self.last_error = None
+        self.last_error = publication.settlement_error
+        if self.last_error is not None:
+            LOG.warning("service-enrollment-settlement-pending code=%s", self.last_error)
         await self.sweep()
 
     async def sweep(self) -> None:
