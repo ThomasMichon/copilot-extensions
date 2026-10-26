@@ -10,10 +10,26 @@ See ``test_resident_push.py`` for the bridge module's own unit tests, and
 
 from __future__ import annotations
 
+import argparse
 import threading
 import time
 
+import pytest
+
 from agent_worktrees import status_monitor_cli as smc
+
+
+@pytest.mark.parametrize("override,expected", [(None, 30), (2, 2), (15, 15), (60, 60)])
+def test_status_monitor_backstop_default_and_explicit_overrides(override, expected):
+    parser = argparse.ArgumentParser()
+    smc.add_parsers(parser.add_subparsers(dest="command", required=True))
+    argv = ["status-monitor"]
+    if override is not None:
+        argv.extend(["--interval", str(override)])
+
+    args = parser.parse_args(argv)
+
+    assert args.interval == expected
 
 
 def test_wake_interruptible_wait_returns_early_and_clears_the_event():

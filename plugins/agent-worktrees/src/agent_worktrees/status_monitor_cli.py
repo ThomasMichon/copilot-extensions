@@ -11,6 +11,8 @@ import sys
 from . import config as cfg
 from .sessions_pane_args import sweep_mux_pane_args
 
+_DEFAULT_SWEEP_INTERVAL_S = 30
+
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
 #: an in-flight tracking-write compute to finish before closing the
@@ -140,7 +142,10 @@ def add_parsers(sub) -> None:
         "(one process instead of one per session; mandatory, always-on "
         "infrastructure -- not operator-configurable)",
     )
-    p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
+    p.add_argument(
+        "--interval", type=int, default=_DEFAULT_SWEEP_INTERVAL_S,
+        help="Correctness backstop in seconds (default 30, min 2); pushes wake immediately",
+    )
     p.add_argument("--passive", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--control-port", type=int, default=None, help=argparse.SUPPRESS)
 
@@ -173,7 +178,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     core = _core()
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
-    interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
+    interval = (
+        args.interval
+        if getattr(args, "interval", None) and args.interval >= 2
+        else _DEFAULT_SWEEP_INTERVAL_S
+    )
     passive_mode = bool(getattr(args, "passive", False))
 
     # Stage D (agent-cli-lazy-dispatch): these six are owned by
