@@ -55,7 +55,9 @@ def test_entry_precedes_work_and_return_preserves_correlation(diagnostics) -> No
     )
     with trace.stage("prepare") as result:
         assert [e["outcome"] for e in events(records)] == ["entered"]
+        assert module.current_inputs() is trace.secrets
         result["prepared"] = True
+    assert module.current_inputs() == {}
     entered, returned = events(records)
     assert returned["prepared"] is True
     assert returned["outcome"] == "returned"
@@ -74,6 +76,7 @@ def test_causal_exception_is_same_object_without_false_return(diagnostics, monke
         with module.SpawnDiagnostics().stage("reserve"):
             raise error
     assert caught.value is error
+    assert module.current_inputs() == {}
     entered, failed = events(records)
     assert failed["call_id"] == entered["call_id"]
     assert failed["outcome"] == "error" and failed["error_type"] == "ValueError"

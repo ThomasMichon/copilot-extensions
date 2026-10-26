@@ -31,6 +31,12 @@ are escaped inside the same JSON record. Only explicitly supplied `operation_id`
 environment, tokens and ownership receipts are not serialized. The handler does
 not infer a serving generation from a version marker or turn diagnostics into
 activation evidence. Call-site redaction/content restrictions still apply.
+The Dispatch adapter also filters known credentials and scoped caller inputs
+from legacy application messages and exception fields before handing a cloned
+LogRecord to the shared writer. It does not mutate the original record or
+exception. Causal exception text precedes bounded stack context so a long stack
+cannot displace the cause. This final filter is not a general private-data
+classifier or permission to log arbitrary task content.
 
 ### Spawn causal records
 
@@ -101,8 +107,9 @@ Only files with expired records are rewritten, and custody is yielded between
 segments. Restart scans establish fresh information rather than trusting a
 persisted index. Strictly recognized abandoned prune copies are reclaimed under
 the component lock, which excludes an active participating pruner.
-Startup forces maintenance. The existing coordinator liveness-GC loop and
-supervisor iteration boundary also invoke maintenance, even when no new messages
+Startup forces maintenance. The existing coordinator liveness-GC loop,
+supervisor daemon and standalone worker-lane iteration boundaries also invoke
+maintenance, even when no new messages
 arrive and before governance backoff. Quiet-service cleanup therefore follows the
 owner's configured maintenance cadence; a stopped service cleans up on restart.
 The existing lifespan-owned coordinator loop stays armed on a 60-second

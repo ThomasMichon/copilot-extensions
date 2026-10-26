@@ -3575,8 +3575,11 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         fixed-interval reconciliation as the correctness floor.
         """
         event_wake = self.event_wake
+        from .diagnostic_logs import maintain_file_logging
+
         try:
             while True:
+                maintain_file_logging()
                 boundary = self._recheck_governance("iteration-boundary")
                 if boundary is not None and boundary.get("status") != "ready":
                     log.warning(

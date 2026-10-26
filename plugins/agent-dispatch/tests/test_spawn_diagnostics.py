@@ -6,12 +6,14 @@ import argparse
 import json
 import logging
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
 from agent_dispatch import logging_setup, supervise_cli
+from agent_dispatch.client import DispatchError
 from agent_dispatch.ordinary_bridge_diagnostics import run
 from agent_dispatch.spawn_diagnostics import SpawnDiagnostics
 from agent_dispatch.supervisor import Supervisor
@@ -192,6 +194,54 @@ def test_serve_does_not_reintroduce_unfiltered_cycle_traceback(sink, monkeypatch
     assert "launch allocation-a" in text and "supervision cycle failed (RuntimeError)" in text
     assert "sensitive-fixture-value" not in text and "synthetic private prompt" not in text
     assert str(error) == "launch allocation-a sensitive-fixture-value synthetic private prompt"
+
+
+def test_internally_caught_reservation_error_is_filtered_by_application_owner(sink, monkeypatch) -> None:
+    monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
+    supervisor = lane(monkeypatch)
+    error = DispatchError(503, "reservation-read allocation-a sensitive-fixture-value")
+    supervisor.client.list_reservations.side_effect = error
+    assert supervisor._list_reservations_safe() == []
+    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    assert "reservation-read allocation-a" in text
+    assert "sensitive-fixture-value" not in text
+    assert "sensitive-fixture-value" in str(error)
+
+
+def test_internally_caught_cold_resume_traceback_keeps_cause_not_credential(sink, monkeypatch) -> None:
+    monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
+    supervisor = lane(monkeypatch)
+    monkeypatch.setattr(supervisor, "_pool_reservations", lambda **_: [{
+        "key": "reservation-a", "task_id": "task-a", "startup_complete": True,
+        "session_handle": "local-body:body-a",
+    }])
+    supervisor.client.get.return_value = {"id": "task-a", "owner": "worker-a", "status": "suspended"}
+    supervisor.local_body_target_dir_fn = lambda _: None
+    error = RuntimeError("resume allocation-a sensitive-fixture-value")
+    supervisor.local_resume_fn = Mock(side_effect=error)
+    assert Supervisor.release_resumed_cold_tasks(supervisor, now=1000) == 0
+    assert supervisor._resume_retry_after["reservation-a"] > 1000
+    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    assert "RuntimeError: resume allocation-a" in text
+    assert "sensitive-fixture-value" not in text
+    assert "sensitive-fixture-value" in str(error)
+
+
+@pytest.mark.parametrize("backoff", [False, True])
+def test_standalone_lane_maintains_expired_logs_before_work_or_backoff(sink, monkeypatch, backoff) -> None:
+    supervisor = lane(monkeypatch)
+    handler = logging.getLogger("agent-dispatch").handlers[0]
+    now = datetime.now(timezone.utc)
+    handler.clock = lambda: now
+    logging.getLogger("agent-dispatch.worker").info("expired synthetic evidence")
+    assert "expired synthetic evidence" in handler.path.read_text(encoding="utf-8")
+    now += timedelta(days=31)
+    if backoff:
+        monkeypatch.setattr(supervisor, "_recheck_governance", lambda _: {"status": "refused"})
+    monkeypatch.setattr(supervisor, "wait_for_turn_end", Mock(side_effect=KeyboardInterrupt))
+    supervisor.serve()
+    assert handler._last_maintenance == now
+    assert "expired synthetic evidence" not in handler.path.read_text(encoding="utf-8")
 
 
 def test_sink_degradation_is_visible_without_changing_stage_result(sink, monkeypatch, capsys) -> None:

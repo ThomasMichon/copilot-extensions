@@ -91,7 +91,8 @@ def _poll(self: Supervisor, *, now: float, trace: SpawnDiagnostics) -> list[str]
             generation=task.get("generation") if type(task.get("generation")) is int else None,
             secrets={"TASK_PROMPT_SECRET": task["prompt"] if isinstance(task.get("prompt"), str) else ""},
         )
-        trace.secrets = task_trace.secrets
+        trace.secrets.clear()
+        trace.secrets.update(task_trace.secrets)
         if task["id"] in dead_lettered:
             # The existing signature-based warning bounds per-task dead-letter output.
             continue

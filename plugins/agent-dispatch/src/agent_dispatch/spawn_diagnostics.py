@@ -10,6 +10,7 @@ import time
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 
 from agent_procutil.diagnostics import (
@@ -21,6 +22,11 @@ from agent_procutil.diagnostics import (
 log = logging.getLogger("agent-dispatch.spawn")
 _OPAQUE = re.compile(r"""["'](?:env|environment|prompt|startup_invocation)["']\s*:""")
 _OS_ERROR = re.compile(r"^\[(?:Errno|WinError) -?\d+\]")
+_INPUTS: ContextVar[Mapping[str, str]] = ContextVar("dispatch_diagnostic_inputs", default={})
+
+
+def current_inputs() -> Mapping[str, str]:
+    return _INPUTS.get()
 
 
 def _without_inputs(text: str, secrets: Mapping[str, str]) -> str:
@@ -85,25 +91,29 @@ class SpawnDiagnostics:
 
     @contextmanager
     def stage(self, name: str) -> Iterator[dict[str, object]]:
-        call_id = uuid.uuid4().hex
-        started = time.monotonic()
-        self.event(name, "entered", call_id=call_id)
-        result: dict[str, object] = {}
+        token = _INPUTS.set(self.secrets)
         try:
-            yield result
-        except Exception as exc:
-            if isinstance(exc, subprocess.TimeoutExpired):
-                detail = f"subprocess timed out after {exc.timeout} seconds"
+            call_id = uuid.uuid4().hex
+            started = time.monotonic()
+            self.event(name, "entered", call_id=call_id)
+            result: dict[str, object] = {}
+            try:
+                yield result
+            except Exception as exc:
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    detail = f"subprocess timed out after {exc.timeout} seconds"
+                else:
+                    detail = diagnostic_text(str(exc), self.secrets)
+                self.event(
+                    name, "error", call_id=call_id,
+                    elapsed_seconds=time.monotonic() - started,
+                    error_type=type(exc).__name__, error=detail,
+                )
+                raise
             else:
-                detail = diagnostic_text(str(exc), self.secrets)
-            self.event(
-                name, "error", call_id=call_id,
-                elapsed_seconds=time.monotonic() - started,
-                error_type=type(exc).__name__, error=detail,
-            )
-            raise
-        else:
-            self.event(
-                name, "returned", call_id=call_id,
-                elapsed_seconds=time.monotonic() - started, **result,
-            )
+                self.event(
+                    name, "returned", call_id=call_id,
+                    elapsed_seconds=time.monotonic() - started, **result,
+                )
+        finally:
+            _INPUTS.reset(token)

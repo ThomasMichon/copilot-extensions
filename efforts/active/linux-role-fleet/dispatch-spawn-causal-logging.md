@@ -119,3 +119,13 @@ registrar or production configuration to demonstrate these records.
   The affected isolated cohort passed 188 controls, including serving-loop
   privacy and original Bridge caller/timeout behavior. The same three admitted
   unit nodes cover errno and long-input privacy without new effect permissions.
+- Follow-up review exposed internally caught lifecycle messages/tracebacks that
+  never propagate to a stage error, and standalone lanes without the outer
+  daemon's quiet-maintenance loop. The Dispatch logging adapter now filters
+  cloned records and cause-first exception text through the existing diagnostic
+  owner; scoped caller inputs reset on stage exit. No shared retention policy
+  changes. The standalone lane invokes existing debounced maintenance before
+  each iteration, including governance backoff. Actual configured-file controls
+  cover caught reservation reads, caught cold-resume exceptions and 31-day
+  clock advancement with and without backoff. The full affected isolated cohort
+  passed 896 controls, with the same 35 explicit platform/native skips.
