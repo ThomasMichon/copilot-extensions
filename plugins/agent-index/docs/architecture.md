@@ -40,8 +40,31 @@ paths: the connector owns coherent base-to-target coverage. Full reindexing and
 legacy connectors retain the snapshot/discovery path, with stored-path
 reconciliation limited to the connector's exact canonical family in either
 storage layout. The opt-in Python
-protocol does not change the external provider CLI wire format; provider
-capability negotiation and durable event/task payloads remain separate work.
+protocol is independent of the external provider CLI wire format. External
+providers can opt into the separately negotiated contract below.
+
+An external provider's existing `content-current-commit --source SOURCE` reply
+may add `source_delta` with contract `agent-index.source-delta`, explicit
+`versions`, canonical `family`, stable nonsecret `account` and effective
+`target`. One connector instance captures one negotiation snapshot from the
+actual executed provider; package or manifest versions do not imply support.
+Missing or valid future-only declarations retain logged legacy reconciliation
+with unchanged verbs and flags. Malformed declarations fail visibly.
+Only advertised version 1 enables
+`content-discover-changed --source SOURCE [--last-commit CURSOR] --delta-version 1`.
+Its response requires `version`, `upserts`, `deletions`, `commit`, `complete`
+and a `source_delta` echo of the acquisition process's actual scope. The echo
+must still support v1 and exactly match the negotiated family/account/target,
+so retargeting between metadata and acquisition cannot cross a recovery fence.
+The delta's own cursor owns coverage; metadata cursors and incomplete output
+never authorize tombstones. Invalid replies or process failures do not trigger
+an effectful legacy retry.
+Full reconciliation retains the old syntax and accepts canonical descendant
+sources within the invoked subtree. Old callers can ignore additive metadata;
+new callers handle supported rollback without guessing new syntax. Provider
+hint consumption remains unadvertised. These providers must retain the baseline
+through the consumer-upgrade and provider-rollback window; retirement requires
+a separate contract revision.
 
 Git revision sources use this seam for pinned base-to-target raw diffs and
 bounded new-commit history, without listing unchanged tracked paths, stored
