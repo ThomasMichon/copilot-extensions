@@ -27,6 +27,12 @@ their actual service selection is not implemented or qualified here.
 Supported declaration ceilings are 8 GiB memory (equal swap limit), four CPUs,
 256 PIDs, 4 GiB persistent storage, 512 MiB `/tmp`, 64 MiB `/run` and 64 MiB
 native output. These are tool-side input ceilings, **not enforced storage**.
+Static inspection also requires exactly two `HostConfig.Tmpfs` destinations:
+`/tmp` and `/run`, each with `rw,nosuid,nodev,uid=1000,gid=1000,mode=0700`
+and exactly one `size=<declared bytes>` option. Missing, duplicate, conflicting,
+extra or unbounded options refuse. This follows the existing restricted
+provider's explicit tmpfs-flag/budget approach without changing its policy.
+It is Docker configuration evidence, not a guest mount-table or runtime proof.
 
 Every static result retains explicit unresolved requirements, even with zero
 violations: fresh usage/backing-free-space measurements, actual internal
@@ -100,6 +106,32 @@ can also change immediately after a sample. Missing/partial/error outcomes
 refuse further work; no automatic deletion, truncation, growth or replacement
 is supplied. CPU/memory/PID hard limits are unchanged.
 
+## Finite network inventory
+
+`reader.network_inventory(experiment, subject_id, peers=...)` inspects the full
+selected subject ID and at most three explicitly selected, distinct full peer
+IDs. It does not discover peers or accept names as physical identity.
+Each container must be running and attached only to the experiment's exact
+physical internal, local bridge network. The network's endpoint inventory must
+contain exactly those containers; endpoint IDs must agree in both directions.
+Custom bridge options, attachable/ingress networks, shared network namespaces,
+external attachments and missing observations refuse.
+
+The reader repeats the container/network inspections and compares the network
+ID, creation timestamp and each endpoint identity within its existing
+30-second deadline (four calls, at most 10 seconds each). Pass `expected` on
+resume to compare a retained observation; a missing or replaced selection
+refuses, without automatic creation or repair. All calls use the same bounded
+process owner as storage observations.
+
+These are point-in-time, non-atomic observations, not exclusive-resource
+custody or effective-egress proof. An attachment can change between/after
+observations, and a peer ID does not establish its synthetic image, environment,
+service or privilege posture. Actual peer qualification, exclusive driver and
+resource ownership, and a controlled real egress-refusal experiment remain
+separate prerequisites. This API never clears the static unresolved list or
+admits a case.
+
 Effective egress, exclusive driver/resource custody, guest/runtime/source
 qualification, native output ownership and strict pre-effect support remain
 unavailable. Actual provisioning and case execution remain blocked until those
@@ -116,11 +148,14 @@ mount/environment isolation and retained unavailable prerequisites.
 `tools/test_reproducer_lab_monitoring.py` covers mocked finite-reader seams,
 physical-resource mismatch, failure invalidation, exact threshold/cadence/
 lifetime edges, monitor loss/resume and local synthetic traversal fixtures.
+`tools/test_reproducer_lab_network.py` covers exact subject/peer membership,
+foreign attachments, physical endpoint replacement, retained selections,
+malformed/missing observations and final-settlement deadline refusal.
 Run it with the repository's selected Python/pytest environment through the
 caller's bounded test supervisor:
 
 ```text
-<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py
+<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py
 ```
 
 These tests do not run Docker, open a socket, install dependencies, exercise native

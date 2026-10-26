@@ -488,6 +488,14 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9104 merged finite reproducer observations and storage-only monitoring as
+  `482fe0b0f553067d5ca095410cfc60f616385246` after exact-head Copilot approval,
+  resolution of both full-volume/deadline findings and required checks.
+  The bounded synthetic selectors passed 206 controls. Re-read this complete
+  Plan and Validation Plan; no actual isolation/persistence, native-output,
+  strict-write or running acceptance gate closes. Implement the remaining
+  network/custody and guest/runtime prerequisites next, without creating
+  resources or altering the restricted provider or ephemeral test path.
 - #9101 merged the operator-selected ordinary-volume amendment as
   `512b9d46371b1e698f73f4305dd8148adc4b21ef` after exact-head Copilot approval
   and required checks. Re-read this Plan and Validation Plan. Implement the
