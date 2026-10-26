@@ -61,13 +61,14 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 #: capabilities and Linux/WSL units), ``power-setting`` (Windows power
 #: schemes), ``self-update`` (machine-local unattended tier opt-in),
 #: ``fleet-update`` (machine-local unattended worktree-manager update
-#: sweep opt-in), and ``copilot-cli-update`` (the Copilot CLI's own
+#: sweep opt-in), ``gh-account`` (read-only account prerequisites), and
+#: ``copilot-cli-update`` (the Copilot CLI's own
 #: built-in self-updater: disable it and/or pin the installed binary to a
 #: known-good version -- Windows only for now). See ``resources.py`` for the
 #: handlers.
 KNOWN_RESOURCE_TYPES = (
     "package", "file", "registry", "feature", "power-setting", "self-update",
-    "fleet-update", "copilot-cli-update",
+    "fleet-update", "copilot-cli-update", "gh-account",
 )
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -80,6 +81,7 @@ REQUIRED_FIELDS = {
     "self-update": ("tier",),
     "fleet-update": ("tier",),
     "copilot-cli-update": (),
+    "gh-account": ("host", "login", "credential_source"),
 }
 
 #: Accepted values for a resource's ``state`` / ``strategy`` selectors.
@@ -440,6 +442,36 @@ def load_package(
             if not res.get(req_key):
                 raise ManifestError(
                     f"{path}: resource type {rtype!r} is missing required field '{req_key}'"
+                )
+        if rtype == "gh-account":
+            allowed = {
+                "type", "id", "host", "login", "credential_source",
+                "authority", "platforms", "gate", "owner", "maintenance_safe",
+            }
+            if set(res) - allowed:
+                raise ManifestError(
+                    f"{path}: gh-account has unsupported fields; "
+                    "credentials and mutation selectors are not accepted"
+                )
+            host, login = res["host"], res["login"]
+            if (
+                not isinstance(host, str)
+                or len(host) > 253
+                or not all(
+                    re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+                    for label in host.split(".")
+                )
+            ):
+                raise ManifestError(f"{path}: gh-account host must be a DNS hostname")
+            if (
+                not isinstance(login, str)
+                or not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,99}", login)
+            ):
+                raise ManifestError(f"{path}: gh-account login must be an account name")
+            if res["credential_source"] not in ("stored", "environment"):
+                raise ManifestError(
+                    f"{path}: gh-account credential_source must explicitly select "
+                    "'stored' or 'environment'"
                 )
         state = res.get("state")
         if state is not None and state not in RESOURCE_STATES:

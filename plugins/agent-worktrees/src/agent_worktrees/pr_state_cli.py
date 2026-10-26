@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 
@@ -610,12 +611,12 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         return 0 if result.get("success") else 1
     if result.get("success"):
         output.ok(result.get("message", f"pr-complete: {result.get('action')}"))
-        if result.get("action") == "reset-past-squash" and result.get("backup_ref"):
-            print(
-                f"  recover the pre-complete state with: git reset --hard {result['backup_ref']}"
-            )
     else:
         output.err(result.get("error", "pr-complete failed."))
+    if result.get("backup_ref"):
+        print(
+            f"  revisit the pre-complete state with: git switch --detach {shlex.quote(result['backup_ref'])}"
+        )
     return 0 if result.get("success") else 1
 
 

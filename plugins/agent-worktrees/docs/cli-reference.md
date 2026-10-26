@@ -707,6 +707,13 @@ parent; a merged label or a patch-ID match alone never authorizes dropping
 commits. Stored publication patch IDs retain their existing format.
 Missing or conflicting proof retains the ordinary rebase/refusal path, and a
 durable pre-completion backup remains required before history changes.
+Each operation creates a new recovery ref named
+`refs/pre-complete-backups/<branch>/<operation-id>`, retaining the complete
+branch name, including slash-separated components. Linked worktrees and repeated
+completions retain independent backups; an existing ref is never replaced.
+The legacy `refs/pre-complete-backup` is left untouched. JSON reports the exact
+`backup_ref`, including after a replay failure; human output prints
+`git switch --detach <backup_ref>` to revisit the retained state.
 
 
 

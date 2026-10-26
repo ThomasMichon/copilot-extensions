@@ -1528,6 +1528,21 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+`tools/promotion_unit_tests/test_gh_account_prerequisite.py` exercises the
+canonical Machines account-prerequisite evaluator with synthetic CLI responses
+and a substituted owned-process boundary. It checks explicit stored/environment
+sources, healthy inactive accounts, malformed/ambiguous/unhealthy evidence,
+safe error projection, `--no-refresh`, execution/output bounds and preservation
+of unconfirmed native custody. The exact nodes, source and production coverage
+target are admitted by `tools/promotion-unit-manifest.json`.
+The separate Machines `test_resource_gh_account.py` covers actual manifest,
+authority, resource, restore and JSON integration. Its native companion runs
+the real CLI against an empty isolated configuration and contained synthetic
+CLIs for argument fidelity, deadline and output limits. These development
+witnesses require no live account or profile and do not expand required CI.
+They are not sign-in, policy application, two-machine or installed-updater
+qualification.
+
 `tools/promotion_unit_tests/test_resume_cli_contract.py` exercises the real
 Bridge resume/version declarations, target dispatch and HTTP client against
 retained prior parser declarations and synthetic current/prior daemon responses.
