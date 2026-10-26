@@ -488,16 +488,17 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
-- Prepared explicit strict pre-effect records through the existing shared
-  diagnostic writer, append primitive and participating operation custody.
-  The direct Linux capability checks a complete bounded JSONL record and
-  file-plus-directory sync before successful return; failures propagate
-  without permitting a backend call. Ordinary logging, buffering, legacy
-  append and diagnostic retention stay unchanged. Synthetic syscall/caller
-  controls and an explicitly selected Linux local-file lane are source
-  evidence, not mounted-volume readiness or actual case/crash settlement.
-  Continue independent source review and the existing-owner case prerequisite
-  wiring; no image, container, volume or guest was provisioned.
+- #9139 merged explicit strict pre-effect writer source as
+  `62535d65c08d326a937a7233b2f0447f633eb4c2` after exact-head Copilot
+  approval, resolved numeric/type/mutation/portable-fixture feedback and all
+  required checks. The bounded selectors passed 73 controls: 63 synthetic
+  syscall/caller controls and 10 explicitly selected Linux local-file cases.
+  Ordinary logging, buffering, legacy append and diagnostic retention stay
+  unchanged. Re-read this complete Plan and Validation Plan; actual case
+  wiring, mounted-volume/crash qualification, complete guest/runtime/source,
+  native output and running adoption remain open. Continue existing-owner
+  source/runtime and operation-journal prerequisites for the selected offline
+  case. No image, container, volume or guest was provisioned.
 - #9134 merged fixed guest-state operation exclusion as
   `8999e89ab263b270a7ca78063ea5d48af87cfb15` after passing current-head
   Copilot review, resolved mount and documentation feedback, and all required
