@@ -44,7 +44,11 @@ installation at the standard per-user Manager root**. Alternate roots and
 explicit marketplace installation contexts and `AGENT_HOME` overrides require durable bindings shared
 with legacy controllers, so enrollment refuses them rather than hiding an
 owner from those controllers or silently updating another cell.
-The refusal precedes enrollment writes. A worker for the supported legacy
+The standard profile comes from the operating-system account, not process-only
+`HOME` or `USERPROFILE` values. A redirected profile refuses enrollment even
+when an explicit root names the real installation, so its update child cannot
+silently address another profile. The refusal precedes enrollment writes.
+A worker for the supported legacy
 installation clears `AGENT_HOME` from its child environment so later logon
 settings cannot redirect the engine selected by that enrollment.
 Source-backed recurring deployment remains subject to
