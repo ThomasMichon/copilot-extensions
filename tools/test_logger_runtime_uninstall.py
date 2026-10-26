@@ -934,3 +934,31 @@ def test_native_logger_default_root_alias_uses_default_task_and_commands(tmp_pat
     for name in names:
         for extension in ("ps1", "cmd"):
             assert (commands / f"{name}.{extension}").exists() is refused
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_logger_removes_case_aliased_runtime_entries_before_ownership(tmp_path, host):
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip("native Windows shell required")
+    root, durable, env = _fixture(tmp_path, "owned")
+    for name in DERIVED:
+        path = root / name
+        temporary = root / "case-stage"
+        path.rename(temporary)
+        temporary.rename(root / name.upper())
+    wrapper = tmp_path / "case-aliased.ps1"
+    wrapper.write_text(
+        "param($Installer,$Root)\n$ErrorActionPreference='Stop'\n"
+        "function Get-ScheduledTask { param($TaskName,$ErrorAction) }\n"
+        "& $Installer uninstall -InstallDir $Root\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(wrapper),
+         str(INSTALLERS / "install.ps1"), str(root)],
+        capture_output=True, text=True, timeout=90, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_state(root, durable, removed=True)

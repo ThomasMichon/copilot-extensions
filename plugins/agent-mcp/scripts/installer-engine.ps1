@@ -150,11 +150,21 @@ function Remove-InstallRuntimeContent {
             throw 'Refusing to purge a user home'
         }
     }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)) {
+    if ($EntryNames.Count -gt 0) {
+        $entries = @(
+            foreach ($name in $EntryNames) {
+                try {
+                    Get-Item -LiteralPath (Join-Path $full $name) -Force -ErrorAction Stop
+                } catch [System.Management.Automation.ItemNotFoundException] {
+                    continue
+                }
+            }
+        )
+    } else {
+        $entries = @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)
+    }
+    foreach ($entry in $entries) {
         if ($entry.Name -in @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
-            continue
-        }
-        if ($EntryNames.Count -gt 0 -and $entry.Name -cnotin $EntryNames) {
             continue
         }
         Remove-InstallRuntimeEntry -Entry $entry

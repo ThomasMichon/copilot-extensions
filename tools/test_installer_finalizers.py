@@ -217,6 +217,36 @@ Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames @('versions', '.venv
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("case", ["lower", "upper", "mixed"])
+def test_native_selective_removal_uses_filesystem_name_lookup(tmp_path, host, case):
+    root, outside = _purge_fixture(tmp_path)
+    spelling = {
+        "lower": ("versions", ".venv", "deploy-manifest.json"),
+        "upper": ("VERSIONS", ".VENV", "DEPLOY-MANIFEST.JSON"),
+        "mixed": ("VerSiOnS", ".VeNv", "Deploy-Manifest.Json"),
+    }[case]
+    versions, link, manifest = spelling
+    if versions != "versions":
+        (root / "versions").rename(root / "case-stage")
+        (root / "case-stage").rename(root / versions)
+    (root / manifest).write_text("reconstructible ownership", encoding="utf-8")
+    result = _purge_ps(tmp_path, host, root, rf"""
+New-Item -ItemType Junction -Path (Join-Path $Root '{link}') -Target (Join-Path $Root '{versions}\old') | Out-Null
+Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames @('versions', '.venv', 'deploy-manifest.json')
+Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames @('versions', '.venv', 'deploy-manifest.json')
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (root / versions).exists()
+    assert not os.path.lexists(root / link)
+    assert not (root / manifest).exists()
+    assert (root / ".hidden-state").read_text() == "state"
+    assert (root / "a[1]").read_text() == "state"
+    assert (root / ".install.lock").read_text() == "coordination"
+    assert (root / ".install-stage" / "owner" / "running.ps1").read_text() == "active"
+    assert (outside / "sentinel").read_text() == "outside"
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize("selection", ["@()", "$null"])
 def test_native_empty_selection_never_becomes_a_purge(tmp_path, host, selection):
     root, _ = _purge_fixture(tmp_path)
