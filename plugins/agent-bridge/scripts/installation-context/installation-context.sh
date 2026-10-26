@@ -12,7 +12,30 @@ if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); 
     esac
 fi
 
-SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+path_output_into() {
+    local __installation_capture_target="$1" __installation_capture_output
+    shift
+    # The suffix preserves every trailing linefeed without masking failure.
+    __installation_capture_output="$("$@" && printf 'x')" || return
+    printf -v "$__installation_capture_target" '%s' "${__installation_capture_output%x}"
+}
+
+dirname_into() {
+    local __installation_dirname_output
+    path_output_into __installation_dirname_output dirname -- "$2" || return
+    printf -v "$1" '%s' "${__installation_dirname_output%$'\n'}"
+}
+
+basename_into() {
+    local __installation_basename_output
+    path_output_into __installation_basename_output basename -- "$2" || return
+    printf -v "$1" '%s' "${__installation_basename_output%$'\n'}"
+}
+
+dirname_into SCRIPT_DIR "${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(cd -P -- "$SCRIPT_DIR" && pwd -P && printf 'x')"
+SCRIPT_DIR="${SCRIPT_DIR%x}"
+SCRIPT_DIR="${SCRIPT_DIR%$'\n'}"
 JSON_QUERY="$SCRIPT_DIR/json-query.awk"
 SEP=$'\034'
 TEMP_FILES=()
@@ -335,10 +358,12 @@ random_token() {
 }
 
 atomic_write_json() {
-    local path="$1" content="$2" skip_lock="${3:-false}" directory temporary
-    directory="$(dirname -- "$path")"
+    local path="$1" content="$2" skip_lock="${3:-false}" directory temporary name
+    dirname_into directory "$path" || return
     mkdir -p -- "$directory"
-    temporary="$(mktemp "$directory/.$(basename -- "$path").tmp.XXXXXX")"
+    basename_into name "$path" || return
+    path_output_into temporary mktemp "$directory/.$name.tmp.XXXXXX" || return
+    temporary="${temporary%$'\n'}"
     TEMP_FILES+=("$temporary")
     printf '%s\n' "$content" >"$temporary"
     if ((${#HELD_LOCK_DIRS[@]} > 0)) && [[ "$skip_lock" != true ]]; then
@@ -351,10 +376,12 @@ atomic_write_json() {
 }
 
 atomic_write_text() {
-    local path="$1" content="$2" directory temporary
-    directory="$(dirname -- "$path")"
+    local path="$1" content="$2" directory temporary name
+    dirname_into directory "$path" || return
     mkdir -p -- "$directory"
-    temporary="$(mktemp "$directory/.$(basename -- "$path").tmp.XXXXXX")"
+    basename_into name "$path" || return
+    path_output_into temporary mktemp "$directory/.$name.tmp.XXXXXX" || return
+    temporary="${temporary%$'\n'}"
     TEMP_FILES+=("$temporary")
     printf '%s\n' "$content" >"$temporary"
     if ((${#HELD_LOCK_DIRS[@]} > 0)); then
@@ -404,12 +431,13 @@ acquire_lock() {
     local path="$1" kind="$2" marketplace_id="$3" plugin_id="${4-}"
     local timeout_seconds="${5:-5}"
     local deadline owner owner_snapshot owner_host owner_pid host token owner_schema owner_version
-    local owner_kind owner_marketplace owner_plugin owner_token
+    local owner_kind owner_marketplace owner_plugin owner_token directory
     host="$(hostname)"
     host="${host%%.*}"
     host="$(lowercase "$host")"
     token="$(random_token)"
-    mkdir -p -- "$(dirname -- "$path")"
+    dirname_into directory "$path" || return
+    mkdir -p -- "$directory"
     deadline=$((SECONDS + timeout_seconds))
     while ((SECONDS < deadline)); do
         if mkdir -- "$path" 2>/dev/null; then
@@ -559,30 +587,18 @@ canonical_missing_path() {
             if ((link_depth > CANONICAL_PATH_MAX_LINK_DEPTH)); then
                 fail "Too many levels of symbolic links: $value"
             fi
-            # Prefer `realpath` while the target still exists: it resolves the
-            # component completely and, unlike `readlink`, its output preserves
-            # a trailing newline in the resolved path. The sentinel keeps that
-            # newline through command substitution.
+            # Existing targets can be fully resolved in one call.
             if command -v realpath >/dev/null 2>&1 &&
                 target="$(realpath "$out/$part" 2>/dev/null && printf 'x')"; then
                 target="${target%x}"
                 out="${target%$'\n'}"
                 continue
             fi
-            # Dangling target: only `readlink` can report it. On a BSD userland
-            # `readlink` prints a target that ends in a newline identically to
-            # one that does not, so a trailing newline cannot be recovered here
-            # -- the platform's own `readlink -f` loses it the same way.
             command -v readlink >/dev/null 2>&1 ||
                 fail "Cannot resolve path: $value"
-            # `readlink` is invoked without `--`: the operand is always absolute
-            # here, so it can never be mistaken for an option, and not every
-            # BSD `readlink` is guaranteed to accept the separator.
-            target="$(
-                readlink "$out/$part" 2>/dev/null && printf 'x'
-            )" || fail "Cannot resolve path: $value"
-            target="${target%x}"
-            target="${target%$'\n'}"
+            # Both GNU and BSD support -n; avoid their differing newline rules.
+            path_output_into target readlink -n "$out/$part" 2>/dev/null ||
+                fail "Cannot resolve path: $value"
             CANONICAL_PATH_PARTS=()
             canonical_split_path "$target"
             if [[ "$target" == /* ]]; then
@@ -600,6 +616,12 @@ canonical_missing_path() {
     printf '%s' "${out:-/}"
 }
 
+canonical_path_into() {
+    local __installation_canonical_target="$1"
+    shift
+    path_output_into "$__installation_canonical_target" canonical_path "$@"
+}
+
 canonical_path() {
     local value="$1" must_exist="${2:-false}" result have_tool=false
     [[ -n "${value//[[:space:]]/}" ]] || fail "A required path is empty."
@@ -609,14 +631,14 @@ canonical_path() {
     fi
     if command -v realpath >/dev/null 2>&1; then
         have_tool=true
-        if result="$(realpath -m -- "$value" 2>/dev/null)"; then
-            printf '%s' "$result"
+        if path_output_into result realpath -m -- "$value" 2>/dev/null; then
+            printf '%s' "${result%$'\n'}"
             return
         fi
     fi
     if command -v readlink >/dev/null 2>&1; then
         have_tool=true
-        if result="$(readlink -f -- "$value" 2>/dev/null)"; then
+        if path_output_into result readlink -fn -- "$value" 2>/dev/null; then
             printf '%s' "$result"
             return
         fi
@@ -627,13 +649,22 @@ canonical_path() {
 }
 
 paths_equal() {
-    [[ "$(canonical_path "$1")" == "$(canonical_path "$2")" ]]
+    local left right
+    canonical_path_into left "$1" || return
+    canonical_path_into right "$2" || return
+    [[ "$left" == "$right" ]]
+}
+
+parent_paths_equal() {
+    local __installation_parent
+    dirname_into __installation_parent "$1" || return
+    paths_equal "$__installation_parent" "$2"
 }
 
 path_is_within() {
     local child parent
-    child="$(canonical_path "$1")"
-    parent="$(canonical_path "$2")"
+    canonical_path_into child "$1" || return
+    canonical_path_into parent "$2" || return
     [[ "$child" == "$parent" || "$child" == "$parent/"* ]]
 }
 
@@ -1028,7 +1059,7 @@ snapshot_tree_index() {
     local root="$1" index_path="$2" state_path="$3"
     local max_entries="$4" max_path_bytes="$5" max_content_bytes="$6"
     local unsorted_index unsorted_state find_fd find_pid path relative encoded
-    local metadata kind size root_metadata entry_count=0 total_content_bytes=0
+    local metadata kind size root_metadata canonical_entry entry_count=0 total_content_bytes=0
     local LC_ALL=C
     command -v sort >/dev/null 2>&1 ||
         fail "Cannot sort snapshot contents because the sort utility is unavailable."
@@ -1062,7 +1093,8 @@ snapshot_tree_index() {
         encoded="$(hex_utf8 "$relative")"
         if metadata_is_directory "$metadata"; then
             kind=D
-            paths_equal "$(canonical_path "$path" true)" "$path" ||
+            canonical_path_into canonical_entry "$path" true || return
+            paths_equal "$canonical_entry" "$path" ||
                 fail "Snapshot content may not traverse symbolic links or reparse points: '$relative'."
             printf '%s\t%s\n' "$encoded" "$kind" >>"$unsorted_index"
             printf '%s\t%s\t%s\n' "$kind" "$encoded" "$metadata" >>"$unsorted_state"
@@ -1077,7 +1109,8 @@ snapshot_tree_index() {
         ((size <= max_content_bytes - total_content_bytes)) ||
             fail "Snapshot content exceeds the $max_content_bytes-byte regular-file limit."
         total_content_bytes=$((total_content_bytes + size))
-        paths_equal "$(canonical_path "$path" true)" "$path" ||
+        canonical_path_into canonical_entry "$path" true || return
+        paths_equal "$canonical_entry" "$path" ||
             fail "Snapshot content may not traverse symbolic links or reparse points: '$relative'."
         printf '%s\t%s\n' "$encoded" "$kind" >>"$unsorted_index"
         printf '%s\t%s\n' "$kind" "$encoded" >>"$unsorted_state"
@@ -1407,7 +1440,8 @@ normalize_source() {
                     SOURCE_CANONICAL="directory-id:$receipt_id"
                 elif [[ "$canonical_input" == directory:* ]]; then
                     directory_path="${canonical_input#directory:}"
-                    SOURCE_CANONICAL="directory:$(canonical_path "$directory_path" "$([[ "$from_receipt" == true ]] && printf false || printf true)")"
+                    canonical_path_into directory_path "$directory_path" "$([[ "$from_receipt" == true ]] && printf false || printf true)" || return
+                    SOURCE_CANONICAL="directory:$directory_path"
                 else
                     fail "Invalid canonical directory source '$canonical_input'."
                 fi
@@ -1422,7 +1456,8 @@ normalize_source() {
                         fail "A relative directory source requires a declaration base directory."
                     directory_path="$base_directory/$directory_path"
                 fi
-                SOURCE_CANONICAL="directory:$(canonical_path "$directory_path" true)"
+                canonical_path_into directory_path "$directory_path" true || return
+                SOURCE_CANONICAL="directory:$directory_path"
             fi
             ;;
         *) fail "Unsupported source kind '$kind'." ;;
@@ -1514,7 +1549,7 @@ resolve_installed_evidence() {
     local installed relative key plugin first_identity="" source_identity settings_path declaration_prefix prefix type
     local -a settings_paths=() labels=() bases=()
     EVIDENCE_FOUND=false
-    installed="$(canonical_path "$copilot_home/installed-plugins")"
+    canonical_path_into installed "$copilot_home/installed-plugins" || return
     [[ "$payload" == "$installed/"* ]] || return 0
     relative="${payload#"$installed/"}"
     [[ "$relative" != */*/* && "$relative" == */* ]] ||
@@ -1591,8 +1626,8 @@ resolve_legacy_snapshot_evidence() {
     assert_json_type "$receipt" version number 'legacy snapshot source version'
     version="$(json_optional_path "$receipt" version)"
     [[ "$version" == 1 || "$version" == 2 ]] || fail 'Legacy snapshot source has an unsupported version.'
-    snapshots="$(dirname -- "$payload")"
-    root="$(dirname -- "$snapshots")"
+    dirname_into snapshots "$payload" || return
+    dirname_into root "$snapshots" || return
     [[ "${snapshots##*/}" == snapshots && -f "$receipt" && ! -L "$receipt" ]] ||
         fail 'Legacy snapshot source must be an ordinary snapshot-local file.'
     [[ -f "$root/payload-dir" && ! -L "$root/payload-dir" ]] ||
@@ -1670,7 +1705,7 @@ resolve_directory_evidence() {
                         if [[ -n "$plugin_root" ]]; then
                             ! is_absolute "$plugin_root" || fail "Marketplace metadata.pluginRoot must be relative in '$manifest'."
                             [[ "/$plugin_root/" != */../* ]] || fail "Marketplace metadata.pluginRoot may not escape '$cursor'."
-                            source_base="$(canonical_path "$cursor/$plugin_root")"
+                            canonical_path_into source_base "$cursor/$plugin_root" || return
                             path_is_within "$source_base" "$cursor" ||
                                 fail "Marketplace metadata.pluginRoot escapes '$cursor'."
                         fi
@@ -1681,7 +1716,7 @@ resolve_directory_evidence() {
                         [[ -n "$source_path" ]] || continue
                         ! is_absolute "$source_path" || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
                         [[ "/$source_path/" != */../* ]] || fail "Marketplace plugin source must be relative and remain beneath '$cursor'."
-                        candidate="$(canonical_path "$source_base/$source_path")"
+                        canonical_path_into candidate "$source_base/$source_path" || return
                         path_is_within "$candidate" "$cursor" ||
                             fail "Marketplace plugin source escapes '$cursor'."
                         if [[ -e "$candidate" ]] && paths_equal "$candidate" "$payload"; then
@@ -1698,17 +1733,17 @@ resolve_directory_evidence() {
             ((matches == 1)) ||
                 fail "Marketplace manifest '$manifest' does not contain exactly one plugin entry resolving to '$payload'."
             SOURCE_KIND=directory
-            SOURCE_CANONICAL="directory:$(canonical_path "$cursor" true)"
+            canonical_path_into LOCATOR_MARKETPLACE_ROOT "$cursor" true || return
+            SOURCE_CANONICAL="directory:$LOCATOR_MARKETPLACE_ROOT"
             SOURCE_REF=""
             EVIDENCE_PLUGIN_ID="$matched_name"
             EVIDENCE_READABLE_NAME="$manifest_name"
             LOCATOR_KIND=directory
-            LOCATOR_MARKETPLACE_ROOT="$(canonical_path "$cursor" true)"
             EVIDENCE_FOUND=true
             return 0
         done
         [[ "$cursor" != / ]] || break
-        cursor="$(canonical_path "$cursor/..")"
+        canonical_path_into cursor "$cursor/.." || return
     done
     return 0
 }
@@ -1725,24 +1760,24 @@ validate_namespace_receipt() {
     lexical_marketplaces="$durable_home/marketplaces"
     [[ ! -L "$lexical_marketplaces" ]] ||
         fail "The marketplaces root may not be a symbolic link or reparse point."
-    marketplaces_root="$(canonical_path "$lexical_marketplaces")"
-    paths_equal "$(dirname -- "$marketplaces_root")" "$durable_home" ||
+    canonical_path_into marketplaces_root "$lexical_marketplaces" || return
+    parent_paths_equal "$marketplaces_root" "$durable_home" ||
         fail "The marketplaces root escapes the durable installation home."
-    lexical_cell="$(dirname -- "$receipt_path")"
+    dirname_into lexical_cell "$receipt_path" || return
     [[ ! -L "$lexical_cell" ]] ||
         fail "The marketplace cell root may not be a symbolic link or reparse point."
-    cell_root="$(canonical_path "$lexical_cell")"
-    paths_equal "$(dirname -- "$cell_root")" "$marketplaces_root" ||
+    canonical_path_into cell_root "$lexical_cell" || return
+    parent_paths_equal "$cell_root" "$marketplaces_root" ||
         fail "Namespace receipt '$receipt_path' is outside the durable marketplaces root."
     [[ ! -L "$receipt_path" ]] ||
         fail "namespace.json may not be a symbolic link or reparse point."
-    actual="$(canonical_path "$receipt_path" true)"
-    paths_equal "$(dirname -- "$actual")" "$cell_root" ||
+    canonical_path_into actual "$receipt_path" true || return
+    parent_paths_equal "$actual" "$cell_root" ||
         fail "namespace.json escapes its canonical marketplace cell."
-    receipt_id="$(basename -- "$cell_root")"
+    basename_into receipt_id "$cell_root" || return
     [[ ! -L "$cell_root/namespace.json" ]] ||
         fail "namespace.json may not be a symbolic link or reparse point."
-    canonical_receipt="$(canonical_path "$cell_root/namespace.json")"
+    canonical_path_into canonical_receipt "$cell_root/namespace.json" || return
     paths_equal "$actual" "$canonical_receipt" ||
         fail "namespace.json is not at its exact canonical receipt location '$canonical_receipt'."
     capture_json_for_validation document "$actual" "namespace.json"
@@ -1784,7 +1819,7 @@ resolve_relative_root() {
     segments="/${relative//\\//}/"
     [[ "$segments" != */../* && "$segments" != */./* ]] ||
         fail "roots.$name may not escape or use dot segments."
-    resolved="$(canonical_path "$plugin_root/$relative")"
+    canonical_path_into resolved "$plugin_root/$relative" || return
     path_is_within "$resolved" "$plugin_root" || fail "roots.$name escapes pluginRoot."
     printf '%s' "$resolved"
 }
@@ -1823,7 +1858,7 @@ validate_context_receipt() {
         fail "expected cell root must be absolute."
     [[ ! -L "$receipt_path" ]] ||
         fail "install.json may not be a symbolic link or reparse point."
-    actual="$(canonical_path "$receipt_path" true)"
+    canonical_path_into actual "$receipt_path" true || return
     capture_json_for_validation document "$actual" "install.json"
     json_optional_string_into schema "$document" schema
     version="$(json_optional_path "$document" version)"
@@ -1840,30 +1875,30 @@ validate_context_receipt() {
     lexical_marketplaces="$durable_home/marketplaces"
     [[ ! -L "$lexical_marketplaces" ]] ||
         fail "The marketplaces root may not be a symbolic link or reparse point."
-    marketplaces_root="$(canonical_path "$lexical_marketplaces")"
-    paths_equal "$(dirname -- "$marketplaces_root")" "$durable_home" ||
+    canonical_path_into marketplaces_root "$lexical_marketplaces" || return
+    parent_paths_equal "$marketplaces_root" "$durable_home" ||
         fail "The marketplaces root escapes the durable installation home."
     lexical_cell="$marketplaces_root/$marketplace_id"
     [[ ! -L "$lexical_cell" ]] ||
         fail "The marketplace cell root may not be a symbolic link or reparse point."
-    cell_root="$(canonical_path "$lexical_cell")"
-    paths_equal "$(dirname -- "$cell_root")" "$marketplaces_root" ||
+    canonical_path_into cell_root "$lexical_cell" || return
+    parent_paths_equal "$cell_root" "$marketplaces_root" ||
         fail "The marketplace cell root escapes the marketplaces root."
     lexical_plugins="$cell_root/plugins"
     [[ ! -L "$lexical_plugins" ]] ||
         fail "The cell plugins root may not be a symbolic link or reparse point."
-    plugins_root="$(canonical_path "$lexical_plugins")"
-    paths_equal "$(dirname -- "$plugins_root")" "$cell_root" ||
+    canonical_path_into plugins_root "$lexical_plugins" || return
+    parent_paths_equal "$plugins_root" "$cell_root" ||
         fail "The cell plugins root escapes the marketplace cell."
     lexical_plugin="$plugins_root/$plugin_id"
     [[ ! -L "$lexical_plugin" ]] ||
         fail "The plugin root may not be a symbolic link or reparse point."
-    plugin_root="$(canonical_path "$lexical_plugin")"
-    paths_equal "$(dirname -- "$plugin_root")" "$plugins_root" ||
+    canonical_path_into plugin_root "$lexical_plugin" || return
+    parent_paths_equal "$plugin_root" "$plugins_root" ||
         fail "The plugin root escapes the cell plugins root."
     [[ ! -L "$plugin_root/install.json" ]] ||
         fail "install.json may not be a symbolic link or reparse point."
-    canonical_receipt="$(canonical_path "$plugin_root/install.json")"
+    canonical_path_into canonical_receipt "$plugin_root/install.json" || return
     paths_equal "$actual" "$canonical_receipt" ||
         fail "install.json is not at its exact canonical receipt location '$canonical_receipt'."
     json_optional_string_into receipt_plugin_root "$document" pluginRoot
@@ -1883,7 +1918,7 @@ validate_context_receipt() {
     assert_receipt_state "$state" "install.json state"
     [[ ! -L "$cell_root/namespace.json" ]] ||
         fail "namespace.json may not be a symbolic link or reparse point."
-    namespace_path="$(canonical_path "$cell_root/namespace.json")"
+    canonical_path_into namespace_path "$cell_root/namespace.json" || return
     json_optional_string_into namespace_receipt "$document" namespaceReceipt
     paths_equal "$namespace_receipt" "$namespace_path" ||
         fail "install.json namespaceReceipt is not the exact namespace receipt in the same cell."
@@ -1906,7 +1941,7 @@ validate_context_receipt() {
         is_absolute "$payload_origin_receipt" ||
             fail "payload.originReceipt must be absolute."
     fi
-    payload_root="$(canonical_path "$payload_root")"
+    canonical_path_into payload_root "$payload_root" || return
     [[ -z "$expected_payload" ]] || paths_equal "$payload_root" "$expected_payload" ||
         fail "Expected payload '$expected_payload', receipt names '$payload_root'."
     inherited_payload="${COPILOT_PLUGIN_ROOT:-}"
@@ -1917,7 +1952,7 @@ validate_context_receipt() {
     fi
     for name in versions snapshots state run logs cache launchers; do
         json_optional_string_into value "$document" "$(path_join roots "$name")"
-        resolved="$(resolve_relative_root "$plugin_root" "$value" "$name")"
+        path_output_into resolved resolve_relative_root "$plugin_root" "$value" "$name" || return
         if [[ "$name" == versions ]]; then
             versions_root="$resolved"
         fi
@@ -1929,6 +1964,8 @@ validate_context_receipt() {
         )"
         delimiter=,
     done
+    local repos_root
+    canonical_path_into repos_root "$cell_root/repos" || return
     CONTEXT_JSON="{
         \"action\":\"validate\",
         \"marketplaceId\":$(json_quote "$marketplace_id"),
@@ -1944,7 +1981,7 @@ validate_context_receipt() {
         \"cellRoot\":$(json_quote "$cell_root"),
         \"pluginRoot\":$(json_quote "$plugin_root"),
         $roots_json,
-        \"reposRoot\":$(json_quote "$(canonical_path "$cell_root/repos")"),
+        \"reposRoot\":$(json_quote "$repos_root"),
         \"namespaceReceipt\":$(json_quote "$namespace_path"),
         \"installReceipt\":$(json_quote "$actual"),
         \"namespaceGeneration\":$NS_GENERATION,
@@ -2001,7 +2038,7 @@ EXISTING_JSON="[]"
 
 find_existing_source() {
     local durable_home="$1" desired_fingerprint="$2" desired_id="$3" marketplaces
-    local cell receipt same_id locator_match delimiter="" entries="" receipt_id receipt_fingerprint
+    local cell receipt same_id locator_match delimiter="" entries="" receipt_id receipt_fingerprint cell_name
     local saved_kind="$SOURCE_KIND" saved_canonical="$SOURCE_CANONICAL" saved_ref="$SOURCE_REF"
     local saved_record="$SOURCE_RECORD" saved_sha="$SOURCE_SHA256" saved_fingerprint="$SOURCE_FINGERPRINT"
     local saved_marketplace_id="$MARKETPLACE_ID"
@@ -2014,7 +2051,8 @@ find_existing_source() {
         validate_namespace_receipt "$receipt" "$durable_home"
         receipt_id="$NS_MARKETPLACE_ID"
         receipt_fingerprint="$NS_FINGERPRINT"
-        if [[ "$(basename -- "$cell")" == "$desired_id" && "$receipt_fingerprint" != "$desired_fingerprint" ]]; then
+        basename_into cell_name "$cell" || return
+        if [[ "$cell_name" == "$desired_id" && "$receipt_fingerprint" != "$desired_fingerprint" ]]; then
             fail "Marketplace id '$desired_id' is already occupied by a different full source fingerprint."
         fi
         [[ "$receipt_fingerprint" == "$desired_fingerprint" ]] || continue
@@ -2026,9 +2064,10 @@ find_existing_source() {
         elif locator_matches_namespace "$receipt" "$LOCATOR_KIND"; then
             locator_match=true
         fi
+        canonical_path_into receipt "$receipt" true || return
         entries+="$delimiter{
             \"marketplaceId\":$(json_quote "$receipt_id"),
-            \"namespaceReceipt\":$(json_quote "$(canonical_path "$receipt" true)"),
+            \"namespaceReceipt\":$(json_quote "$receipt"),
             \"sameId\":$same_id,
             \"locatorMatch\":$locator_match
         }"
@@ -2127,12 +2166,12 @@ stamp_context() {
         "$EXPECTED_INSTALL_GENERATION" install.json
     if [[ -n "$PAYLOAD_ORIGIN_RECEIPT" ]]; then
         is_absolute "$PAYLOAD_ORIGIN_RECEIPT" || fail "payload origin receipt must be absolute."
-        PAYLOAD_ORIGIN_RECEIPT="$(canonical_path "$PAYLOAD_ORIGIN_RECEIPT" true)"
+        canonical_path_into PAYLOAD_ORIGIN_RECEIPT "$PAYLOAD_ORIGIN_RECEIPT" true || return
         origin_receipt_json=",\"originReceipt\":$(json_quote "$PAYLOAD_ORIGIN_RECEIPT")"
     fi
 
-    cell_root="$(canonical_path "$DURABLE_HOME/marketplaces/$MARKETPLACE_ID")"
-    plugin_root="$(canonical_path "$cell_root/plugins/$EVIDENCE_PLUGIN_ID")"
+    canonical_path_into cell_root "$DURABLE_HOME/marketplaces/$MARKETPLACE_ID" || return
+    canonical_path_into plugin_root "$cell_root/plugins/$EVIDENCE_PLUGIN_ID" || return
     namespace="$cell_root/namespace.json"
     install="$plugin_root/install.json"
     genesis_lock="$DURABLE_HOME/marketplaces/.locks/$MARKETPLACE_ID.genesis"
@@ -2191,7 +2230,7 @@ stamp_context() {
         install_generation="$(json_optional_path "$install" generation)"
         json_optional_string_into install_state_existing "$install" state
         json_optional_string_into current_payload_root "$install" "$(path_join payload root)"
-        current_payload_root="$(canonical_path "$current_payload_root")"
+        canonical_path_into current_payload_root "$current_payload_root" || return
         json_optional_string_into current_payload_version "$install" "$(path_join payload version)"
         json_optional_string_into current_payload_origin "$install" "$(path_join payload origin)"
         current_origin_type="$(json_optional_type_path "$install" "$(path_join payload originReceipt)")"
@@ -2226,13 +2265,14 @@ stamp_context() {
                 delimiter=,
             done
         fi
+        canonical_path_into namespace "$namespace" || return
         install_json="{
   \"schema\":\"copilot-extensions.plugin-installation\",
   \"version\":1,
   \"marketplaceId\":$(json_quote "$MARKETPLACE_ID"),
   \"pluginId\":$(json_quote "$EVIDENCE_PLUGIN_ID"),
   \"pluginRoot\":$(json_quote "$plugin_root"),
-  \"namespaceReceipt\":$(json_quote "$(canonical_path "$namespace")"),
+  \"namespaceReceipt\":$(json_quote "$namespace"),
   \"payload\":{
     \"root\":$(json_quote "$PAYLOAD_ROOT"),
     \"version\":$(json_quote "$PAYLOAD_VERSION"),
@@ -2294,7 +2334,7 @@ load_payload_identity() {
     local install="$1" origin_type origin_json=null
     json_optional_string_into PAYLOAD_IDENTITY_ROOT "$install" "$(path_join payload root)"
     is_absolute "$PAYLOAD_IDENTITY_ROOT" || fail "payload.root must be absolute."
-    PAYLOAD_IDENTITY_ROOT="$(canonical_path "$PAYLOAD_IDENTITY_ROOT")"
+    canonical_path_into PAYLOAD_IDENTITY_ROOT "$PAYLOAD_IDENTITY_ROOT" || return
     json_optional_string_into PAYLOAD_IDENTITY_VERSION "$install" "$(path_join payload version)"
     [[ -n "${PAYLOAD_IDENTITY_VERSION//[[:space:]]/}" ]] ||
         fail "payload.version must be a non-empty string."
@@ -2309,7 +2349,7 @@ load_payload_identity() {
         json_optional_string_into PAYLOAD_IDENTITY_ORIGIN_RECEIPT "$install" "$(path_join payload originReceipt)"
         is_absolute "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT" ||
             fail "payload.originReceipt must be absolute."
-        PAYLOAD_IDENTITY_ORIGIN_RECEIPT="$(canonical_path "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT")"
+        canonical_path_into PAYLOAD_IDENTITY_ORIGIN_RECEIPT "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT" || return
         origin_json="$(json_quote "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT")"
     fi
     PAYLOAD_IDENTITY_JSON="{
@@ -2333,23 +2373,25 @@ SNAPSHOT_INSTALL_GENERATION=""
 
 resolve_snapshot_paths() {
     local snapshots_root="$1" snapshot_id="$2" lexical_root lexical_provenance
-    local entries=() entry materialized=false
+    local entries=() entry entry_name materialized=false
     assert_snapshot_id "$snapshot_id"
     lexical_root="$snapshots_root/$snapshot_id"
     [[ ! -L "$lexical_root" ]] ||
         fail "Snapshot root may not be a symbolic link or reparse point."
     [[ -d "$lexical_root" ]] ||
         fail "Snapshot root must be an existing materialized directory."
-    SNAPSHOT_ROOT="$(canonical_path "$lexical_root" true)"
-    paths_equal "$(dirname -- "$SNAPSHOT_ROOT")" "$snapshots_root" ||
+    canonical_path_into SNAPSHOT_ROOT "$lexical_root" true || return
+    parent_paths_equal "$SNAPSHOT_ROOT" "$snapshots_root" ||
         fail "Snapshot root must be one direct child of snapshotsRoot."
-    [[ "$(basename -- "$SNAPSHOT_ROOT")" == "$snapshot_id" ]] ||
+    basename_into entry_name "$SNAPSHOT_ROOT" || return
+    [[ "$entry_name" == "$snapshot_id" ]] ||
         fail "Snapshot root does not retain the requested snapshot id."
     shopt -s nullglob dotglob
     entries=("$SNAPSHOT_ROOT"/*)
     shopt -u nullglob dotglob
     for entry in ${entries[@]+"${entries[@]}"}; do
-        if [[ "$(basename -- "$entry")" != snapshot-provenance.json ]]; then
+        basename_into entry_name "$entry" || return
+        if [[ "$entry_name" != snapshot-provenance.json ]]; then
             materialized=true
             break
         fi
@@ -2359,7 +2401,7 @@ resolve_snapshot_paths() {
     lexical_provenance="$SNAPSHOT_ROOT/snapshot-provenance.json"
     [[ ! -L "$lexical_provenance" ]] ||
         fail "Snapshot provenance may not be a symbolic link or reparse point."
-    SNAPSHOT_PROVENANCE="$(canonical_path "$lexical_provenance")"
+    canonical_path_into SNAPSHOT_PROVENANCE "$lexical_provenance" || return
     path_is_within "$SNAPSHOT_PROVENANCE" "$snapshots_root" ||
         fail "Snapshot provenance path escapes snapshotsRoot."
 }
@@ -2385,7 +2427,7 @@ validate_snapshot_provenance() {
     if [[ -n "$expected_payload_root" ]]; then
         is_absolute "$expected_payload_root" ||
             fail "Expected snapshot payload root must be absolute."
-        expected_payload_root="$(canonical_path "$expected_payload_root")"
+        canonical_path_into expected_payload_root "$expected_payload_root" || return
     fi
     if [[ -n "$expected_payload_version" ]]; then
         [[ -n "${expected_payload_version//[[:space:]]/}" ]] ||
@@ -2394,7 +2436,7 @@ validate_snapshot_provenance() {
     COPILOT_PLUGIN_ROOT="" validate_context_receipt \
         "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" "" ""
     resolve_snapshot_paths "$CTX_SNAPSHOTS_ROOT" "$snapshot_id"
-    actual_provenance="$(canonical_path "$SNAPSHOT_PROVENANCE" true)"
+    canonical_path_into actual_provenance "$SNAPSHOT_PROVENANCE" true || return
     paths_equal "$actual_provenance" "$SNAPSHOT_PROVENANCE" ||
         fail "Snapshot provenance is not at its exact canonical location '$SNAPSHOT_PROVENANCE'."
     capture_json_for_validation provenance "$actual_provenance" "Snapshot provenance"
@@ -2483,7 +2525,7 @@ validate_snapshot_provenance() {
         fail "Snapshot provenance payload identity is missing."
     json_optional_string_into payload_root "$provenance" "$(path_join payload root)"
     is_absolute "$payload_root" || fail "Snapshot provenance payload.root must be absolute."
-    payload_root="$(canonical_path "$payload_root")"
+    canonical_path_into payload_root "$payload_root" || return
     json_optional_string_into payload_version "$provenance" "$(path_join payload version)"
     [[ -n "${payload_version//[[:space:]]/}" ]] ||
         fail "Snapshot provenance payload.version must be a non-empty string."
@@ -2500,7 +2542,7 @@ validate_snapshot_provenance() {
         json_optional_string_into payload_origin_receipt "$provenance" "$(path_join payload originReceipt)"
         is_absolute "$payload_origin_receipt" ||
             fail "Snapshot provenance payload.originReceipt must be absolute."
-        payload_origin_receipt="$(canonical_path "$payload_origin_receipt")"
+        canonical_path_into payload_origin_receipt "$payload_origin_receipt" || return
         payload_origin_receipt_json="$(json_quote "$payload_origin_receipt")"
     fi
     if [[ -n "$expected_payload_root" ]]; then
@@ -2525,6 +2567,8 @@ validate_snapshot_provenance() {
     [[ -n "$created_epoch" ]] ||
         fail "Snapshot provenance createdAt must be RFC3339 UTC."
 
+    canonical_path_into SNAPSHOT_NAMESPACE_RECEIPT "$namespace_path" || return
+    canonical_path_into SNAPSHOT_INSTALL_RECEIPT "$install_path" || return
     SNAPSHOT_JSON="{
         \"action\":\"snapshot-validate\",
         \"status\":\"ready\",
@@ -2535,8 +2579,8 @@ validate_snapshot_provenance() {
         \"marketplaceId\":$(json_quote "$marketplace_id"),
         \"pluginId\":$(json_quote "$plugin_id"),
         \"sourceFingerprint\":$(json_quote "$fingerprint"),
-        \"namespaceReceipt\":$(json_quote "$(canonical_path "$namespace_path")"),
-        \"installReceipt\":$(json_quote "$(canonical_path "$install_path")"),
+        \"namespaceReceipt\":$(json_quote "$SNAPSHOT_NAMESPACE_RECEIPT"),
+        \"installReceipt\":$(json_quote "$SNAPSHOT_INSTALL_RECEIPT"),
         \"namespaceGeneration\":$namespace_generation,
         \"installGeneration\":$install_generation,
         \"payload\":{
@@ -2550,8 +2594,6 @@ validate_snapshot_provenance() {
     SNAPSHOT_MARKETPLACE_ID="$marketplace_id"
     SNAPSHOT_PLUGIN_ID="$plugin_id"
     SNAPSHOT_SOURCE_FINGERPRINT="$fingerprint"
-    SNAPSHOT_NAMESPACE_RECEIPT="$(canonical_path "$namespace_path")"
-    SNAPSHOT_INSTALL_RECEIPT="$(canonical_path "$install_path")"
     SNAPSHOT_NAMESPACE_GENERATION="$namespace_generation"
     SNAPSHOT_INSTALL_GENERATION="$install_generation"
 }
@@ -2662,7 +2704,9 @@ resolve_runtime_slot_paths() {
     json_optional_string_into relative "$install" "$roots"
     RUNTIME_VERSIONS_RELATIVE="$relative"
     cursor="$CTX_PLUGIN_ROOT"
-    IFS='/' read -r -a parts <<<"$relative"
+    CANONICAL_PATH_PARTS=()
+    canonical_split_path "$relative"
+    parts=(${CANONICAL_PATH_PARTS[@]+"${CANONICAL_PATH_PARTS[@]}"})
     for part in ${parts[@]+"${parts[@]}"}; do
         [[ -n "$part" ]] || continue
         cursor="$cursor/$part"
@@ -2675,7 +2719,7 @@ resolve_runtime_slot_paths() {
     if [[ "$require_existing" == true && ! -d "$cursor" ]]; then
         fail "Versions root must be an existing directory."
     fi
-    RUNTIME_VERSIONS_ROOT="$(canonical_path "$cursor")"
+    canonical_path_into RUNTIME_VERSIONS_ROOT "$cursor" || return
     paths_equal "$RUNTIME_VERSIONS_ROOT" "$CTX_VERSIONS_ROOT" ||
         fail "Versions root does not match the validated install receipt."
     ! paths_equal "$RUNTIME_VERSIONS_ROOT" "$CTX_PLUGIN_ROOT" &&
@@ -2691,10 +2735,12 @@ resolve_runtime_slot_paths() {
     if [[ "$require_existing" == true && ! -d "$slot_root" ]]; then
         fail "Runtime slot must be an existing directory."
     fi
-    RUNTIME_SLOT_ROOT="$(canonical_path "$slot_root")"
-    paths_equal "$(dirname -- "$RUNTIME_SLOT_ROOT")" "$RUNTIME_VERSIONS_ROOT" ||
+    canonical_path_into RUNTIME_SLOT_ROOT "$slot_root" || return
+    parent_paths_equal "$RUNTIME_SLOT_ROOT" "$RUNTIME_VERSIONS_ROOT" ||
         fail "Runtime slot must be one direct child of versionsRoot."
-    [[ "$(basename -- "$RUNTIME_SLOT_ROOT")" == "$runtime_version" ]] ||
+    local slot_name
+    basename_into slot_name "$RUNTIME_SLOT_ROOT" || return
+    [[ "$slot_name" == "$runtime_version" ]] ||
         fail "Runtime slot does not retain the requested runtime version."
     RUNTIME_OWNERSHIP_PATH="$RUNTIME_SLOT_ROOT/.runtime-slot-ownership.json"
     [[ ! -L "$RUNTIME_OWNERSHIP_PATH" ]] ||
@@ -2711,7 +2757,9 @@ resolve_runtime_slot_completion_paths() {
 ensure_versions_root_chain() {
     local cursor="$CTX_PLUGIN_ROOT" part
     local parts=()
-    IFS='/' read -r -a parts <<<"$RUNTIME_VERSIONS_RELATIVE"
+    CANONICAL_PATH_PARTS=()
+    canonical_split_path "$RUNTIME_VERSIONS_RELATIVE"
+    parts=(${CANONICAL_PATH_PARTS[@]+"${CANONICAL_PATH_PARTS[@]}"})
     for part in ${parts[@]+"${parts[@]}"}; do
         [[ -n "$part" ]] || continue
         cursor="$cursor/$part"
@@ -2787,7 +2835,7 @@ validate_runtime_slot_ownership() {
         fail "Runtime slot retains unfinished reservation evidence."
     fi
     [[ -e "$ownership" ]] || fail "Runtime slot ownership must exist."
-    actual="$(canonical_path "$ownership" true)"
+    canonical_path_into actual "$ownership" true || return
     paths_equal "$actual" "$ownership" ||
         fail "Runtime slot ownership is not at its exact canonical location '$ownership'."
     [[ -f "$actual" && ! -L "$actual" ]] ||
@@ -2869,8 +2917,10 @@ validate_runtime_slot_ownership() {
     shopt -s nullglob dotglob
     entries=("$RUNTIME_SLOT_ROOT"/*)
     shopt -u nullglob dotglob
+    local entry_name
     for entry in ${entries[@]+"${entries[@]}"}; do
-        if [[ "$(basename -- "$entry")" != .runtime-slot-ownership.json ]]; then
+        basename_into entry_name "$entry" || return
+        if [[ "$entry_name" != .runtime-slot-ownership.json ]]; then
             slot_empty=false
             break
         fi
@@ -3013,7 +3063,7 @@ COMPLETION_RECEIPT_JSON=""
 
 validate_build_completion() {
     local runtime_version="$1"
-    local version completed_at pid payload_hash capture pid_length smallest
+    local version completed_at pid payload_hash capture pid_length smallest canonical_build
 
     [[ -e "$RUNTIME_BUILD_PATH" ]] ||
         fail "Build completion evidence must exist."
@@ -3021,7 +3071,8 @@ validate_build_completion() {
         fail "Build completion evidence may not be a symbolic link or reparse point."
     [[ -f "$RUNTIME_BUILD_PATH" ]] ||
         fail "Build completion evidence must be an ordinary file."
-    paths_equal "$(canonical_path "$RUNTIME_BUILD_PATH" true)" "$RUNTIME_BUILD_PATH" ||
+    canonical_path_into canonical_build "$RUNTIME_BUILD_PATH" true || return
+    paths_equal "$canonical_build" "$RUNTIME_BUILD_PATH" ||
         fail "Build completion evidence is not at its exact canonical location '$RUNTIME_BUILD_PATH'."
     capture="$(mktemp "$RUNTIME_SLOT_ROOT/.install-complete.capture.XXXXXX")" ||
         fail "Cannot capture build completion evidence beneath '$RUNTIME_SLOT_ROOT'."
@@ -3154,7 +3205,7 @@ validate_runtime_slot_completion() {
         fail "Runtime slot completion must exist."
     [[ -f "$RUNTIME_COMPLETION_PATH" && ! -L "$RUNTIME_COMPLETION_PATH" ]] ||
         fail "Runtime slot completion must be an ordinary file."
-    actual="$(canonical_path "$RUNTIME_COMPLETION_PATH" true)"
+    canonical_path_into actual "$RUNTIME_COMPLETION_PATH" true || return
     paths_equal "$actual" "$RUNTIME_COMPLETION_PATH" ||
         fail "Runtime slot completion is not at its exact canonical location '$RUNTIME_COMPLETION_PATH'."
     capture_json_for_validation actual_document "$actual" "Runtime slot completion"
@@ -3380,19 +3431,20 @@ lifecycle_path_evidence() {
 
 resolve_reservation_target() {
     resolve_runtime_slot_paths "$RUNTIME_VERSION" false
-    local digest parent name
+    local digest parent name canonical_reservation
     digest="$(digest_record "$RUNTIME_SLOT_ROOT")"
     digest="${digest:0:16}"
-    parent="$(dirname -- "$RUNTIME_VERSIONS_ROOT")"
-    name="$(basename -- "$RESERVATION_ROOT")"
+    dirname_into parent "$RUNTIME_VERSIONS_ROOT" || return
+    basename_into name "$RESERVATION_ROOT" || return
     is_absolute "$RESERVATION_ROOT" && [[ ! -L "$RESERVATION_ROOT" ]] ||
         fail "Reservation root must be absolute and may not be linked."
     if ! paths_equal "$RESERVATION_ROOT" "$RUNTIME_SLOT_ROOT"; then
-        paths_equal "$(dirname -- "$RESERVATION_ROOT")" "$parent" &&
+        parent_paths_equal "$RESERVATION_ROOT" "$parent" &&
             matches "$name" "^\\.runtime-slot-$digest-([0-9a-f]{16}|[0-9a-f]{32})$" ||
             fail "Reservation root must be the exact slot or its attributable hidden sibling."
     fi
-    [[ "$(canonical_path "$RESERVATION_ROOT")" == "$RESERVATION_ROOT" ]] ||
+    canonical_path_into canonical_reservation "$RESERVATION_ROOT" || return
+    [[ "$canonical_reservation" == "$RESERVATION_ROOT" ]] ||
         fail "Reservation root must retain its exact canonical spelling."
     RESERVATION_MARKER_ROOT="$parent"
 }
@@ -3479,7 +3531,7 @@ read_runtime_marker_into() {
     fi
     [[ -f "$path" && ! -L "$path" ]] ||
         fail "$label may not be a symbolic link or reparse point."
-    actual="$(canonical_path "$path" true)"
+    canonical_path_into actual "$path" true || return
     paths_equal "$actual" "$path" ||
         fail "$label is not at its exact canonical location '$path'."
     byte_count="$(wc -c <"$actual" | tr -d '[:space:]')"
@@ -3553,7 +3605,7 @@ cutover_runtime_slot() {
         "$EXPECTED_PLUGIN_ID" "" "$CTX_CELL_ROOT"
     actual_namespace_generation="$CTX_NAMESPACE_GENERATION"
     actual_install_generation="$CTX_INSTALL_GENERATION"
-    runtime_root="$(dirname -- "$CTX_VERSIONS_ROOT")"
+    dirname_into runtime_root "$CTX_VERSIONS_ROOT" || return
     read_runtime_marker_into actual_current \
         "$runtime_root/current-version" "Current version marker"
     read_runtime_marker_into actual_lkg \
@@ -3734,9 +3786,16 @@ emit_locator() {
 }
 
 emit_resolved_context() {
-    local payload="$1" durable_home="$2" cell_root plugin_root
-    cell_root="$(canonical_path "$durable_home/marketplaces/$MARKETPLACE_ID")"
-    plugin_root="$(canonical_path "$cell_root/plugins/$EVIDENCE_PLUGIN_ID")"
+    local payload="$1" durable_home="$2" cell_root plugin_root name
+    local versions_root snapshots_root state_root run_root logs_root cache_root launchers_root repos_root namespace_receipt install_receipt
+    canonical_path_into cell_root "$durable_home/marketplaces/$MARKETPLACE_ID" || return
+    canonical_path_into plugin_root "$cell_root/plugins/$EVIDENCE_PLUGIN_ID" || return
+    for name in versions snapshots state run logs cache launchers; do
+        canonical_path_into "${name}_root" "$plugin_root/$name" || return
+    done
+    canonical_path_into repos_root "$cell_root/repos" || return
+    canonical_path_into namespace_receipt "$cell_root/namespace.json" || return
+    canonical_path_into install_receipt "$plugin_root/install.json" || return
     printf '{'
     printf '"action":"resolve",'
     printf '"source":{"kind":%s,"canonical":%s,"ref":%s,"record":%s},' \
@@ -3749,16 +3808,16 @@ emit_resolved_context() {
         "$(json_quote "$EVIDENCE_PLUGIN_ID")" "$(json_quote "$payload")"
     printf '"cellRoot":%s,"pluginRoot":%s,' \
         "$(json_quote "$cell_root")" "$(json_quote "$plugin_root")"
-    printf '"versionsRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/versions")")"
-    printf '"snapshotsRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/snapshots")")"
-    printf '"stateRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/state")")"
-    printf '"runRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/run")")"
-    printf '"logsRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/logs")")"
-    printf '"cacheRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/cache")")"
-    printf '"launchersRoot":%s,' "$(json_quote "$(canonical_path "$plugin_root/launchers")")"
-    printf '"reposRoot":%s,' "$(json_quote "$(canonical_path "$cell_root/repos")")"
-    printf '"namespaceReceipt":%s,' "$(json_quote "$(canonical_path "$cell_root/namespace.json")")"
-    printf '"installReceipt":%s,' "$(json_quote "$(canonical_path "$plugin_root/install.json")")"
+    printf '"versionsRoot":%s,' "$(json_quote "$versions_root")"
+    printf '"snapshotsRoot":%s,' "$(json_quote "$snapshots_root")"
+    printf '"stateRoot":%s,' "$(json_quote "$state_root")"
+    printf '"runRoot":%s,' "$(json_quote "$run_root")"
+    printf '"logsRoot":%s,' "$(json_quote "$logs_root")"
+    printf '"cacheRoot":%s,' "$(json_quote "$cache_root")"
+    printf '"launchersRoot":%s,' "$(json_quote "$launchers_root")"
+    printf '"reposRoot":%s,' "$(json_quote "$repos_root")"
+    printf '"namespaceReceipt":%s,' "$(json_quote "$namespace_receipt")"
+    printf '"installReceipt":%s,' "$(json_quote "$install_receipt")"
     printf '"locator":'
     emit_locator
     printf ',"existingCells":%s,"rebindRequired":false,"operative":false}\n' "$EXISTING_JSON"
@@ -3905,7 +3964,7 @@ resolve_current_environment() {
     fi
     [[ -n "$home_path" ]] ||
         fail "Cannot determine the current account home from the account database."
-    CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"
+    canonical_path_into CURRENT_PROFILE_HOME "$home_path" true || return
     guest_resolve_distribution "$CURRENT_PROFILE_HOME"
 }
 
@@ -4174,7 +4233,7 @@ activation_snapshot() {
     [[ "$(json_type_path "$file" context)" == string ]] || fail "Activation context must be a string."
     json_optional_string_into context "$file" context
     is_absolute "$context" || fail "Activation context must be absolute."
-    cell_root="$(canonical_path "$durable_home/marketplaces/$marketplace_id")"
+    canonical_path_into cell_root "$durable_home/marketplaces/$marketplace_id" || return
     paths_equal "$context" "$plugin_root/install.json" ||
         fail "Activation context is not the canonical install receipt."
     [[ "$(json_type_path "$file" namespaceGeneration)" == number ]] ||
@@ -4260,16 +4319,16 @@ activation_cas() {
     resolve_current_environment
 
     is_absolute "$context" || fail "Activation context must be absolute."
-    context="$(canonical_path "$context" true)"
-    cell_root="$(canonical_path "$DURABLE_HOME/marketplaces/$EXPECTED_MARKETPLACE_ID")"
-    plugin_root="$(canonical_path "$cell_root/plugins/$EXPECTED_PLUGIN_ID")"
+    canonical_path_into context "$context" true || return
+    canonical_path_into cell_root "$DURABLE_HOME/marketplaces/$EXPECTED_MARKETPLACE_ID" || return
+    canonical_path_into plugin_root "$cell_root/plugins/$EXPECTED_PLUGIN_ID" || return
     paths_equal "$context" "$plugin_root/install.json" ||
         fail "Activation context is not the canonical install receipt."
     if [[ -n "$LEGACY_ROOT" ]]; then
         is_absolute "$LEGACY_ROOT" || fail "--legacy-root must be absolute."
-        LEGACY_ROOT="$(canonical_path "$LEGACY_ROOT")"
+        canonical_path_into LEGACY_ROOT "$LEGACY_ROOT" || return
     else
-        LEGACY_ROOT="$(canonical_path "$CURRENT_PROFILE_HOME/.$EXPECTED_PLUGIN_ID")"
+        canonical_path_into LEGACY_ROOT "$CURRENT_PROFILE_HOME/.$EXPECTED_PLUGIN_ID" || return
     fi
     activation="$plugin_root/installation-activation.json"
     genesis_lock="$DURABLE_HOME/marketplaces/.locks/$EXPECTED_MARKETPLACE_ID.genesis"
@@ -4308,7 +4367,11 @@ activation_cas() {
         release_lock
         printf '{'
         printf '"action":"activation-cas","status":"revalidation-required","reason":"generation-changed",'
-        printf '"activation":%s,' "$(json_string_or_null "$([[ -e "$activation" ]] && printf '%s' "$(canonical_path "$activation")")")"
+        local activation_result=""
+        if [[ -e "$activation" ]]; then
+            canonical_path_into activation_result "$activation" || return
+        fi
+        printf '"activation":%s,' "$(json_string_or_null "$activation_result")"
         printf '"activationChanged":false,'
         printf '"activationGeneration":%s,' "$actual_activation_generation"
         printf '"namespaceGeneration":%s,' "$actual_namespace_generation"
@@ -4379,9 +4442,10 @@ activation_cas() {
         fail "Published activation receipt did not validate as current."
     release_lock
     release_lock
+    canonical_path_into activation "$activation" || return
     printf '{'
     printf '"action":"activation-cas","status":"ready","reason":"activation-published",'
-    printf '"activation":%s,"activationChanged":true,' "$(json_quote "$(canonical_path "$activation")")"
+    printf '"activation":%s,"activationChanged":true,' "$(json_quote "$activation")"
     printf '"activationGeneration":%s,' "$next_generation"
     printf '"namespaceGeneration":%s,' "$actual_namespace_generation"
     printf '"installGeneration":%s,' "$actual_install_generation"
@@ -4394,6 +4458,7 @@ activation_cas() {
 tombstone_snapshot() {
     local file="$1" durable_home="$2" current_marketplace_id="$3" current_plugin_id="$4"
     local schema version owner_marketplace_id owner_plugin_id activation_path activation_generation disposition activation_info activation_status activation_mode activation_state
+    local owner_plugin_root legacy_parent
     [[ "$(json_type_path "$file" "")" == object ]] ||
         fail "Tombstone must be a JSON object."
     [[ "$(json_type_path "$file" schema)" == string ]] || fail "Tombstone schema must be a string."
@@ -4445,10 +4510,12 @@ tombstone_snapshot() {
             "$owner_marketplace_id" "$activation_path"
         return 0
     fi
+    canonical_path_into owner_plugin_root "$durable_home/marketplaces/$owner_marketplace_id/plugins/$owner_plugin_id" || return
+    dirname_into legacy_parent "$file" || return
+    canonical_path_into legacy_parent "$legacy_parent" || return
     if ! capture_output activation_info activation_snapshot \
         "$activation_path" "$durable_home" "$owner_marketplace_id" "$owner_plugin_id" \
-        "$(canonical_path "$durable_home/marketplaces/$owner_marketplace_id/plugins/$owner_plugin_id")" \
-        "$(canonical_path "$(dirname -- "$file")")"; then
+        "$owner_plugin_root" "$legacy_parent"; then
         printf 'status\torphaned-transfer\ndisposition\torphaned-transfer\nownerMarketplaceId\t%s\nactivation\t%s\n' \
             "$owner_marketplace_id" "$activation_path"
         return 0
@@ -4523,7 +4590,7 @@ resolve_policy_result() {
         policy_entry="$POLICY_PATH"
         POLICY_AUTHORITATIVE=false
     fi
-    POLICY_RESOLVED_PATH="$(canonical_path "$policy_entry")"
+    canonical_path_into POLICY_RESOLVED_PATH "$policy_entry" || return
     POLICY_STATE=missing
     POLICY_SCOPE=default
     POLICY_ENABLED=false
@@ -4644,7 +4711,7 @@ resolve_activation_result() {
     ACTIVATION_RUNTIME_ROOT=""
     [[ -n "$plugin_root" ]] || return 0
     activation_entry="$plugin_root/installation-activation.json"
-    ACTIVATION_PATH="$(canonical_path "$activation_entry")"
+    canonical_path_into ACTIVATION_PATH "$activation_entry" || return
     if [[ ! -e "$activation_entry" && ! -L "$activation_entry" ]]; then
         ACTIVATION_PATH=""
         return 0
@@ -4678,7 +4745,7 @@ resolve_tombstone_result() {
     LEGACY_OWNER_MARKETPLACE_ID=""
     TOMBSTONE_STATUS=missing
     tombstone_entry="$legacy_root/.installation-ownership.json"
-    LEGACY_TOMBSTONE_PATH="$(canonical_path "$tombstone_entry")"
+    canonical_path_into LEGACY_TOMBSTONE_PATH "$tombstone_entry" || return
     if [[ ! -e "$tombstone_entry" && ! -L "$tombstone_entry" ]]; then
         LEGACY_TOMBSTONE_PATH=""
         return 0
@@ -4709,7 +4776,7 @@ RESOLVED_PLUGIN_ROOT=""
 RESOLVED_CELL_ROOT=""
 
 resolve_status_identity() {
-    local snapshot message
+    local snapshot message context_name context_parent context_grandparent context_grandparent_name
     PROVENANCE_BLOCKED=false
     INVALID_CONTEXT=false
     RESOLVED_MARKETPLACE_ID=""
@@ -4719,7 +4786,7 @@ resolve_status_identity() {
     if [[ -n "$CONTEXT" ]]; then
         is_absolute "$CONTEXT" ||
             fail "The installation-context receipt pointer must be absolute."
-        CONTEXT="$(canonical_path "$CONTEXT")"
+        canonical_path_into CONTEXT "$CONTEXT" || return
         if capture_output snapshot validate_context_receipt \
             "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "${PLUGIN_ID:-$EXPECTED_PLUGIN_ID}" \
             "${EXPECTED_PAYLOAD_ROOT:-${PAYLOAD_ROOT:-}}" "$EXPECTED_CELL_ROOT"; then
@@ -4728,11 +4795,15 @@ resolve_status_identity() {
         else
             INVALID_CONTEXT=true
             RESOLVED_PLUGIN_ID="${PLUGIN_ID:-$EXPECTED_PLUGIN_ID}"
-            if [[ "$(basename -- "$CONTEXT")" == install.json &&
-                "$(basename -- "$(dirname -- "$(dirname -- "$CONTEXT")")")" == plugins ]]; then
-                RESOLVED_PLUGIN_ID="$(basename -- "$(dirname -- "$CONTEXT")")"
-                RESOLVED_CELL_ROOT="$(dirname -- "$(dirname -- "$(dirname -- "$CONTEXT")")")"
-                RESOLVED_MARKETPLACE_ID="$(basename -- "$RESOLVED_CELL_ROOT")"
+            basename_into context_name "$CONTEXT" || return
+            dirname_into context_parent "$CONTEXT" || return
+            dirname_into context_grandparent "$context_parent" || return
+            basename_into context_grandparent_name "$context_grandparent" || return
+            if [[ "$context_name" == install.json &&
+                "$context_grandparent_name" == plugins ]]; then
+                basename_into RESOLVED_PLUGIN_ID "$context_parent" || return
+                dirname_into RESOLVED_CELL_ROOT "$context_grandparent" || return
+                basename_into RESOLVED_MARKETPLACE_ID "$RESOLVED_CELL_ROOT" || return
             fi
         fi
     else
@@ -4752,7 +4823,7 @@ resolve_status_identity() {
                     PROVENANCE_BLOCKED=true
                     RESOLVED_PLUGIN_ID="${PLUGIN_ID:-$EXPECTED_PLUGIN_ID}"
                     if [[ -z "$RESOLVED_PLUGIN_ID" && -n "$PAYLOAD_ROOT" ]]; then
-                        RESOLVED_PLUGIN_ID="$(basename -- "$PAYLOAD_ROOT")"
+                        basename_into RESOLVED_PLUGIN_ID "$PAYLOAD_ROOT" || return
                     fi
                     return 0
                     ;;
@@ -4762,8 +4833,8 @@ resolve_status_identity() {
         RESOLVED_PLUGIN_ID="$(snapshot_value "$snapshot" pluginId || true)"
     fi
     if [[ -n "$RESOLVED_MARKETPLACE_ID" && -n "$RESOLVED_PLUGIN_ID" ]]; then
-        RESOLVED_CELL_ROOT="$(canonical_path "$DURABLE_HOME/marketplaces/$RESOLVED_MARKETPLACE_ID")"
-        RESOLVED_PLUGIN_ROOT="$(canonical_path "$RESOLVED_CELL_ROOT/plugins/$RESOLVED_PLUGIN_ID")"
+        canonical_path_into RESOLVED_CELL_ROOT "$DURABLE_HOME/marketplaces/$RESOLVED_MARKETPLACE_ID" || return
+        canonical_path_into RESOLVED_PLUGIN_ROOT "$RESOLVED_CELL_ROOT/plugins/$RESOLVED_PLUGIN_ID" || return
     fi
 }
 
@@ -4866,11 +4937,11 @@ deployment_policy_snapshot() {
     if [[ ! -e "$path" && ! -L "$path" ]]; then
         # A failed existence test also covers EACCES and ENOTDIR. Only accept
         # absence after finding a searchable ordinary directory above it.
-        ancestor="$(dirname -- "$path")"
+        dirname_into ancestor "$path" || return
         while [[ ! -e "$ancestor" && ! -L "$ancestor" ]]; do
             [[ "$ancestor" != / ]] ||
                 fail "Cannot inspect runtime deployment policy ancestors."
-            ancestor="$(dirname -- "$ancestor")"
+            dirname_into ancestor "$ancestor" || return
         done
         ancestor_metadata="$(stat_file_metadata "$ancestor")" ||
             fail "Cannot inspect runtime deployment policy ancestor '$ancestor'."
@@ -4963,7 +5034,7 @@ deployment_policy_snapshot() {
     [[ -n "$PAYLOAD_ROOT" ]] ||
         fail "resolve requires --payload-root or COPILOT_PLUGIN_ROOT."
     is_absolute "$PAYLOAD_ROOT" || fail "The payload root must be absolute."
-    PAYLOAD_ROOT="$(canonical_path "$PAYLOAD_ROOT" true)"
+    canonical_path_into PAYLOAD_ROOT "$PAYLOAD_ROOT" true || return
     [[ -d "$PAYLOAD_ROOT" ]] ||
         fail "The payload root must be an existing directory: $PAYLOAD_ROOT"
     if [[ -n "${COPILOT_PLUGIN_ROOT:-}" ]]; then
@@ -5412,7 +5483,7 @@ if [[ -n "$SOURCE_JSON" ]]; then
     fi
 fi
 if [[ -n "$LEGACY_PROBE_FILE" ]]; then
-    LEGACY_PROBE_FILE="$(canonical_path "$LEGACY_PROBE_FILE" true)"
+    canonical_path_into LEGACY_PROBE_FILE "$LEGACY_PROBE_FILE" true || exit $?
 elif [[ "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication || "$ACTION" == probe-legacy || "$ACTION" == activation-cas ]]; then
     LEGACY_PROBE_FILE="@LEGACY_PROBE_JSON"
 fi
@@ -5420,14 +5491,14 @@ fi
 if ! is_absolute "$COPILOT_HOME" || ! is_absolute "$DURABLE_HOME"; then
     fail "--copilot-home and --durable-home must be absolute."
 fi
-COPILOT_HOME="$(canonical_path "$COPILOT_HOME")"
-DURABLE_HOME="$(canonical_path "$DURABLE_HOME")"
+canonical_path_into COPILOT_HOME "$COPILOT_HOME" || exit $?
+canonical_path_into DURABLE_HOME "$DURABLE_HOME" || exit $?
 if [[ -n "$PROJECT_ROOT" ]]; then
-    PROJECT_ROOT="$(canonical_path "$PROJECT_ROOT" true)"
+    canonical_path_into PROJECT_ROOT "$PROJECT_ROOT" true || exit $?
 fi
 if [[ -n "$POLICY_PATH" ]]; then
     is_absolute "$POLICY_PATH" || fail "--policy-path must be absolute."
-    POLICY_PATH="$(canonical_path "$POLICY_PATH")"
+    canonical_path_into POLICY_PATH "$POLICY_PATH" || exit $?
 fi
 
 if [[ "$ACTION" == source-id ]]; then
@@ -5511,12 +5582,12 @@ fi
 if [[ "$ACTION" == status || "$ACTION" == deployment-status || "$ACTION" == probe-plugin-publication || "$ACTION" == probe-legacy ]]; then
     [[ -n "$LEGACY_ROOT" ]] || fail "$ACTION requires --legacy-root."
     is_absolute "$LEGACY_ROOT" || fail "--legacy-root must be absolute."
-    LEGACY_ROOT="$(canonical_path "$LEGACY_ROOT")"
+    canonical_path_into LEGACY_ROOT "$LEGACY_ROOT" || exit $?
     if [[ -z "$CONTEXT" ]]; then
         PAYLOAD_ROOT="${PAYLOAD_ROOT:-${COPILOT_PLUGIN_ROOT:-}}"
         [[ -n "$PAYLOAD_ROOT" ]] || fail "$ACTION requires --payload-root, --context, or COPILOT_PLUGIN_ROOT."
         is_absolute "$PAYLOAD_ROOT" || fail "The payload root must be absolute."
-        PAYLOAD_ROOT="$(canonical_path "$PAYLOAD_ROOT" true)"
+        canonical_path_into PAYLOAD_ROOT "$PAYLOAD_ROOT" true || exit $?
         [[ -d "$PAYLOAD_ROOT" ]] || fail "The payload root must be an existing directory: $PAYLOAD_ROOT"
         if [[ -n "${COPILOT_PLUGIN_ROOT:-}" ]]; then
             is_absolute "$COPILOT_PLUGIN_ROOT" || fail "COPILOT_PLUGIN_ROOT must be absolute."
@@ -5551,7 +5622,7 @@ fi
 PAYLOAD_ROOT="${PAYLOAD_ROOT:-${COPILOT_PLUGIN_ROOT:-}}"
 [[ -n "$PAYLOAD_ROOT" ]] || fail "$ACTION requires --payload-root or COPILOT_PLUGIN_ROOT."
 is_absolute "$PAYLOAD_ROOT" || fail "The payload root must be absolute."
-PAYLOAD_ROOT="$(canonical_path "$PAYLOAD_ROOT" true)"
+canonical_path_into PAYLOAD_ROOT "$PAYLOAD_ROOT" true || exit $?
 [[ -d "$PAYLOAD_ROOT" ]] || fail "The payload root must be an existing directory: $PAYLOAD_ROOT"
 if [[ -n "${COPILOT_PLUGIN_ROOT:-}" ]]; then
     is_absolute "$COPILOT_PLUGIN_ROOT" || fail "COPILOT_PLUGIN_ROOT must be absolute."

@@ -565,6 +565,108 @@ def test_source_profile_acceptance_uses_existing_opt_in_and_unchanged_native_bud
         ]
 
 
+def test_path_capture_diagnostics_leave_full_portfolio_unchanged() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "path-captures" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    full = workflow["jobs"]["exhaustive"]
+    assert full["timeout-minutes"] == 90
+    assert full["if"] == "github.event_name != 'workflow_dispatch' || inputs.portfolio == 'context'"
+    diagnostic = workflow["jobs"]["path-captures"]
+    assert diagnostic["runs-on"] == "ubuntu-latest"
+    assert diagnostic["strategy"] == {
+        "fail-fast": False,
+        "matrix": {
+            "phase": ["paths", "producers", "slots"],
+        },
+    }
+    assert diagnostic["timeout-minutes"] == 20
+    assert diagnostic["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'path-captures'"
+    )
+    windows = workflow["jobs"]["path-captures-windows"]
+    assert windows["runs-on"] == "windows-latest"
+    for key in ("strategy", "timeout-minutes", "if", "steps"):
+        assert windows[key] == diagnostic[key]
+    execution = [step for step in diagnostic["steps"] if "python -m pytest" in step.get("run", "")]
+    assert len(execution) == 5
+    assert execution[0]["if"] == "matrix.phase == 'paths' && runner.os == 'Linux'"
+    assert [step["if"] for step in execution[1:]] == [
+        "always() && matrix.phase == 'paths'",
+        "always() && matrix.phase == 'paths'",
+        "always() && matrix.phase == 'producers'",
+        "always() && matrix.phase == 'slots'",
+    ]
+    assert all(not step.get("continue-on-error", False) for step in execution)
+    assert all(step["env"]["INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS"] == "1" for step in execution)
+    assert "test_posix_path_capture.py" in execution[1]["run"]
+    assert "test_bootstrap_context_selection.py" in execution[2]["run"]
+    assert "test_digest_cache_hardening.py" in execution[3]["run"]
+    assert "test_exemplar_completion_writer_gates_activation_tail" in execution[3]["run"]
+    assert "git archive" in execution[0]["run"]
+    assert "--durations=1" in execution[0]["run"]
+    selectors = [
+        token for step in execution[1:] for token in step["run"].split()
+        if token.startswith("libs/installation-context/tests/")
+    ]
+    assert len(selectors) == len(set(selectors))
+    assert set(selectors) == {
+        "libs/installation-context/tests/test_json_query_bytes.py",
+        "libs/installation-context/tests/test_posix_path_capture.py",
+        "libs/installation-context/tests/test_installation_context_posix.py",
+        "libs/installation-context/tests/test_directory_evidence_cost.py",
+        "libs/installation-context/tests/test_vendoring.py",
+        "libs/installation-context/tests/test_bootstrap_context_selection.py",
+        "libs/installation-context/tests/test_digest_cache_hardening.py",
+        *(
+            "libs/installation-context/tests/test_snapshot_provenance.py::" + name
+            for name in (
+                "test_runtime_slot_serializes_concurrent_publishers",
+                "test_agent_machines_snapshot_publication_failure_is_retryable",
+                "test_exemplar_completion_writer_gates_activation_tail",
+                "test_exemplar_producer_evidence_is_accepted_without_activation_mutation",
+                "test_agent_machines_fixed_identity_cutover_adapter",
+                "test_exemplar_producer_hash_failure_does_not_omit_payload_hash",
+                "test_exemplar_payload_hash_rejects_tree_membership_change",
+                "test_exemplar_slot_actions_release_installed_payload_cwd_without_legacy_staging",
+                "test_exemplar_slot_actions_do_not_adopt_ambient_context",
+                "test_exemplar_slot_actions_reject_foreign_snapshot_payload",
+                "test_exemplar_slot_actions_reject_spoofed_staging_payload_identity",
+            )
+        ),
+    }
+    assert all("-n 2 --dist=load" in step["run"] for step in execution[1:])
+    assert all("-k " not in step["run"] and "--maxfail" not in step["run"] for step in execution)
+
+
+def test_complete_native_platform_qualification_keeps_scope_and_deadline() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "context-windows" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    windows = workflow["jobs"]["exhaustive-windows"]
+    assert windows["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'context-windows'"
+    )
+    assert windows["runs-on"] == "windows-latest"
+    for name in ("exhaustive", "exhaustive-windows"):
+        job = workflow["jobs"][name]
+        assert job["timeout-minutes"] == 90
+        assert not job.get("continue-on-error", False)
+        tooling = [step["run"] for step in job["steps"] if "seasoned_uv.py" in step.get("run", "")]
+        assert len(tooling) == 1 and "pytest-xdist==3.8.0" in tooling[0]
+        execution = [step for step in job["steps"] if "python -m pytest" in step.get("run", "")]
+        assert len(execution) == 1
+        assert execution[0]["env"]["INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS"] == "1"
+        command = execution[0]["run"]
+        assert command.strip().endswith("libs/installation-context/tests")
+        assert "-n 2 --dist=load" in command
+        assert "-k " not in command and "--maxfail" not in command
+
+
 def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
@@ -585,6 +687,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     }
     assert inputs["watch_owner"]["type"] == "boolean"
     assert inputs["watch_owner"]["default"] is False
+    assert inputs["ssh_service"]["type"] == "boolean"
+    assert inputs["ssh_service"]["default"] is False
     routes = {
         "derived-diagnostics-posix": "ubuntu-latest",
         "derived-diagnostics-windows": "windows-latest",

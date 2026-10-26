@@ -10,6 +10,8 @@ on:
         type: choice
         options:
           - context
+          - context-windows
+          - path-captures
           - foundation
           - mux-companion
           - pull-requests-commands
@@ -40,6 +42,116 @@ permissions:
   contents: read
 
 jobs:
+  exhaustive-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'context-windows'
+    name: exhaustive adapters (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-xdist==3.8.0
+      - name: Run exhaustive installation-context portfolio
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short --durations=50 -n 2 --dist=load
+          libs/installation-context/tests
+  path-captures:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'path-captures'
+    name: Path and exemplar diagnostics (ubuntu-latest, ${{ matrix.phase }})
+    runs-on: ubuntu-latest
+    strategy: &path-capture-strategy
+      fail-fast: false
+      matrix:
+        phase: [paths, producers, slots]
+    timeout-minutes: 20
+    steps: &path-capture-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-xdist==3.8.0
+      - name: Compare POSIX validation cost with the contribution base
+        if: matrix.phase == 'paths' && runner.os == 'Linux'
+        shell: bash
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: |
+          baseline="$(git merge-base HEAD origin/dev)"
+          baseline_root="$(mktemp -d "$RUNNER_TEMP/context-base.XXXXXXXX")"
+          git archive "$baseline" | tar -x -C "$baseline_root"
+          printf 'baseline=%s current=%s\n' "$baseline" "$(git rev-parse HEAD)"
+          node='libs/installation-context/tests/test_snapshot_provenance.py::test_runtime_slot_completion_rejects_invalid_immutable_receipt_pid[boolean-True-posix]'
+          status=0
+          for tree in "$baseline_root" "$GITHUB_WORKSPACE"; do
+            if ! (cd "$tree" && python -m pytest -q --tb=short --durations=1 "$node"); then
+              status=1
+            fi
+          done
+          exit "$status"
+      - name: Qualify native path bytes against the reference
+        if: always() && matrix.phase == 'paths'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_json_query_bytes.py
+          libs/installation-context/tests/test_posix_path_capture.py
+          libs/installation-context/tests/test_installation_context_posix.py
+          libs/installation-context/tests/test_directory_evidence_cost.py
+          libs/installation-context/tests/test_vendoring.py
+          libs/installation-context/tests/test_snapshot_provenance.py::test_runtime_slot_serializes_concurrent_publishers
+      - name: Diagnose the earliest exhaustive bootstrap failures
+        if: always() && matrix.phase == 'paths'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_bootstrap_context_selection.py
+      - name: Qualify native digest and exemplar failure families
+        if: always() && matrix.phase == 'producers'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_digest_cache_hardening.py
+          libs/installation-context/tests/test_snapshot_provenance.py::test_agent_machines_snapshot_publication_failure_is_retryable
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_completion_writer_gates_activation_tail
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_producer_evidence_is_accepted_without_activation_mutation
+          libs/installation-context/tests/test_snapshot_provenance.py::test_agent_machines_fixed_identity_cutover_adapter
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_producer_hash_failure_does_not_omit_payload_hash
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_payload_hash_rejects_tree_membership_change
+      - name: Qualify native installed-payload slot families
+        if: always() && matrix.phase == 'slots'
+        env:
+          INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
+        run: >-
+          python -m pytest -v --tb=short -n 2 --dist=load
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_release_installed_payload_cwd_without_legacy_staging
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_do_not_adopt_ambient_context
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_reject_foreign_snapshot_payload
+          libs/installation-context/tests/test_snapshot_provenance.py::test_exemplar_slot_actions_reject_spoofed_staging_payload_identity
+  path-captures-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'path-captures'
+    name: Path and exemplar diagnostics (windows-latest, ${{ matrix.phase }})
+    runs-on: windows-latest
+    strategy: *path-capture-strategy
+    timeout-minutes: 20
+    steps: *path-capture-steps
   bridge-commands-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
     name: Bridge commands (Ubuntu, ${{ matrix.packet.name }})
@@ -1441,12 +1553,12 @@ jobs:
         uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
-      - run: python tools/seasoned_uv.py --uv uv -- --system pytest
+      - run: python tools/seasoned_uv.py --uv uv -- --system pytest pytest-xdist==3.8.0
       - name: Run exhaustive installation-context portfolio
         env:
           INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS: "1"
         run: >-
-          python -m pytest -q --durations=50
+          python -m pytest -v --tb=short --durations=50 -n 2 --dist=load
           libs/installation-context/tests
   foundation-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
