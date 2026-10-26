@@ -100,6 +100,12 @@ The following implementation details are **agent-recommended**:
 
 ## Dispatch application source slice (#8377)
 
+The separately bounded
+[Dispatch spawn causal logging slice](dispatch-spawn-causal-logging.md)
+adds the next failure-stage correlation plan through these existing application
+owners. It does not replace native capture, installer diagnostics, telemetry
+attribution or their accepted source and running evidence.
+
 `spinning-sprocket` takes only the Dispatch application-handler and local
 discovery slice. Reconciliation confirmed #8370's independent installer capture
 and #6812's progress presentation ownership; neither shared implementation is
