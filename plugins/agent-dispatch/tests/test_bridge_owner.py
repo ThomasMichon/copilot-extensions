@@ -64,6 +64,8 @@ def http(monkeypatch, tmp_path):
 
     monkeypatch.setattr("zdd.routing.read_active_endpoint", endpoint)
     monkeypatch.setattr(bridge_remote.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(bridge_owner, "_bounded_open",
+        lambda request, *, timeout, deadline: bridge_remote.urllib.request.urlopen(request, timeout=timeout))
     monkeypatch.setattr(tracking.remote_dispatch, "local_machine", lambda: "local")
     monkeypatch.setattr(tracking, "_run_capture", lambda *a, **k: pytest.fail("no process"))
     monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: pytest.fail("no interpreter lookup"))
@@ -226,3 +228,28 @@ def test_truncated_read_is_unknown_and_enrichment_degrades(http, monkeypatch, st
     assert len(http["calls"]) == requests * 2
     assert all(response.closed for response in http["responses"])
     assert "liveness unknown" in caplog.text
+
+
+@pytest.mark.parametrize("token", ["bad\nheader", "non-latin-\u2603"])
+def test_invalid_auth_header_is_unknown_with_real_validation(http, monkeypatch, token):
+    from http.client import HTTPConnection
+    from pathlib import Path
+    import os
+    import yaml
+
+    root = Path(os.environ["AGENT_BRIDGE_CONFIG_DIR"])
+    (root / "auth.yaml").write_text(yaml.safe_dump({"token": token}), encoding="utf-8")
+
+    def validate_header(request, **kwargs):
+        connection = HTTPConnection("127.0.0.1", 1)
+        try:
+            connection.putrequest("GET", "/health")
+            connection.putheader("Authorization", request.get_header("Authorization"))
+            pytest.fail("Invalid header must fail before connecting")
+        finally:
+            connection.close()
+
+    monkeypatch.setattr(bridge_remote.urllib.request, "urlopen", validate_header)
+    assert tracking.liveness_verdict("wt", owner_session_id="s") == tracking.UNKNOWN
+    tasks = [{"status": "started", "owner": "local/wt"}]
+    assert tracking.enrich_tasks(tasks) == tasks

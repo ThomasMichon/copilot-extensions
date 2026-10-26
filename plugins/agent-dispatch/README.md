@@ -3229,5 +3229,8 @@ authentication, protocol, transport and malformed-response failures are diagnose
 as unavailable and remain UNKNOWN for GC. The captured session identity still
 determines LIVE/GONE; an uncaptured identity is UNKNOWN. Enrichment deduplicates
 equal local owner keys within one bounded wave only, with no cross-wave TTL.
+One operation deadline covers health and metadata status lines, headers and
+bodies; partial or trickling responses cannot renew that deadline. Invalid
+authentication headers also remain unavailable/UNKNOWN.
 Remote carrier/SSH/satellite routes and the existing liveness/GC age policy are
 unchanged.

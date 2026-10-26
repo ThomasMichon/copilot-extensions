@@ -97,6 +97,7 @@ def _resolve_local_owner(worktree: str, *, timeout: float) -> dict[str, Any] | N
         bridge_remote.RemoteBridgeOperationError,
         OSError,
         HTTPException,
+        ValueError,
     ) as exc:
         logging.getLogger(__name__).warning(
             "Local Bridge owner-session read unavailable (%s); liveness unknown",
