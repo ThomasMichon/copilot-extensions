@@ -650,3 +650,32 @@ source-owner coordination rather than one large rewrite.
   classification, crawl-cursor preservation, dry-run and pending-acquisition
   refusal, plus failed-full maintenance exclusion. This closes a consumer seam,
   not release/adoption, remaining acquisition/backfill or the effort matrix.
+
+### 2026-10-26 - Source-retirement policy reviewed and merged
+
+- PR #9112 merged as `8ff2500bc326896e8fe49d657fd626270ebbf22e`
+  after exact-head Copilot approval with no open issues and successful required
+  checks. Both review findings were fixed: explicit operator-retained source
+  names precede custom classification, and failed-full tests assert recorded
+  GC/compaction calls outside the legacy exception handlers.
+- The final bounded selection passes 127 tests; retained pushed rows, pending
+  acquisition exclusion, crawl aliases and no-scan disabled policy are native
+  or direct regression controls. Re-read the effort Plan and Validation Plan;
+  no broad matrix or actual-consumer checkbox is closed by this slice.
+- Next, qualify a published source containing this policy through the actual
+  consumer worker, then continue remaining bounded acquisition, model backfill
+  and logical maintenance work. No release, consumption or rollout is implied.
+
+### 2026-10-26 - Consumer repo naming without a forked FTS loop
+
+- Actual-consumer validation found that generic repo-source identity parsing
+  cannot represent every retained consumer naming convention. Added the pure
+  `ContentStore.repo_filter_sql(repo)` override point, keeping the default
+  generic identity and the shared guarded/sanitized FTS execution path.
+- Native tests exercise the real indexed query with underscore, percent,
+  apostrophe and backslash identities and a one-candidate limit. Consumers must
+  escape values and match their vector-side policy; neither unbounded
+  post-filtering nor a process-global helper replacement is used.
+- The bounded repo-filter/FTS/currentness/consumer selection passes 39 tests.
+  This is another staged consumer seam; actual published consumption and the
+  remaining full effort matrix are still open.

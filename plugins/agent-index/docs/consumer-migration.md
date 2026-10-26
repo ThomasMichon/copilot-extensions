@@ -132,6 +132,20 @@ the worker otherwise parks hinted tasks before invoking an unsupported adapter.
 
 ## Verify the actual consumer path
 
+### Repo filtering in a consumer retrieval facade
+
+The default SQL repo filter matches generic source identities such as
+`github:owner/repo:issues`. A consumer retaining another canonical naming scheme
+may subclass `ContentStore` and override its pure `repo_filter_sql(repo)` method.
+Escape user-supplied values with the existing SQL literal/pattern helpers and
+keep the consumer's vector post-filter semantics consistent.
+
+The shared `fts_search` still owns currentness guards, query sanitization,
+source/language filters and execution before the candidate limit. Do not copy
+the FTS loop, replace a process-global helper or fetch an unbounded candidate
+set to filter in Python. `tests/test_consumer_repo_filter.py` exercises the real
+native indexed query with wildcard, quote and backslash controls.
+
 `tests/test_consumer_runtime.py` qualifies single- and dual-model injected
 consumers through the actual shared engine, native metadata-only reuse,
 registered-source full GC, client/lifecycle failure cleanup and injected worker

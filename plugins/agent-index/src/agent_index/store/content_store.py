@@ -862,7 +862,7 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
             if file_path_glob:
                 filters.append(f"file_path LIKE '{_sql_str(file_path_glob)}'")
             if repo:
-                filters.append(f"({repo_filter_sql(repo)})")
+                filters.append(f"({self.repo_filter_sql(repo)})")
             if filters:
                 fts_query = fts_query.where(" AND ".join(filters))
 
@@ -875,6 +875,15 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
             (r["chunk_id"], r.get("_score", 0.0))
             for r in results
         ]
+
+    def repo_filter_sql(self, repo: str) -> str:
+        """Build the repo prefilter for this store's canonical source names.
+
+        Consumers with another naming scheme may override this pure method.
+        Keep user-supplied values escaped; the shared FTS/currentness path stays
+        responsible for executing the filter before limiting candidates.
+        """
+        return repo_filter_sql(repo)
 
     # -- stats ---------------------------------------------------------------
 
