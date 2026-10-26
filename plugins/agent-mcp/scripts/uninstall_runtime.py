@@ -10,7 +10,7 @@ import re
 import stat
 import subprocess
 import sys
-from contextlib import nullcontext
+from contextlib import ExitStack
 from typing import Any
 
 sys.dont_write_bytecode = True
@@ -21,6 +21,7 @@ ENTRIES = (
     ".provision-status",
 )
 RESOLVERS = ("resolve-runtime.ps1", "resolve-runtime.sh")
+OWNER_ENTRIES = ("stamped-version", "payload-dir", "deploy-manifest.json")
 
 
 def _load(name: str, filename: str) -> Any:
@@ -41,6 +42,24 @@ def _ordinary_path(path: Path) -> None:
             continue
         if stat.S_ISLNK(value.st_mode) or getattr(value, "st_file_attributes", 0) & 0x400:
             raise RuntimeError(f"Uninstall refuses redirected paths: {candidate}")
+
+
+def _snapshot_generations(root: Path) -> tuple[str, ...]:
+    directory = root / "snapshots"
+    _ordinary_path(directory)
+    if not directory.exists():
+        return ()
+    if not directory.is_dir():
+        raise RuntimeError("Unrecognized snapshots inventory; uninstall refused")
+    generations = []
+    for entry in directory.iterdir():
+        _ordinary_path(entry)
+        if entry.name == ".construction-leases" and entry.is_dir():
+            continue
+        if not entry.is_dir() or not re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", entry.name):
+            raise RuntimeError("Unrecognized snapshots entry; uninstall refused")
+        generations.append(entry.name)
+    return tuple(sorted(generations))
 
 
 def check_root(root: Path) -> bool:
@@ -65,7 +84,8 @@ def check_root(root: Path) -> bool:
     for name in ("install.json", "runtime-deployment.json"):
         if os.path.lexists(root / name):
             raise RuntimeError("Legacy uninstall refuses installation-cell or managed-deployment metadata")
-    if not any(os.path.lexists(root / name) for name in ENTRIES) and not any(
+    snapshots = _snapshot_generations(root)
+    if not snapshots and not any(os.path.lexists(root / name) for name in ENTRIES if name != "snapshots") and not any(
         os.path.lexists(root / "bin" / name) for name in RESOLVERS
     ):
         return False
@@ -219,12 +239,38 @@ def _remove(shell: str, root: Path, names: tuple[str, ...]) -> None:
               "mcp-uninstall", str(engine), str(root), *names])
 
 
+def _restore_owner(source: Any, evidence: dict[Path, Any]) -> None:
+    """Restore only previously validated owner bytes, never invent an owner."""
+    for path, previous in evidence.items():
+        current = source._redirect_state(path)
+        if current is not None:
+            if current.content != previous.content:
+                raise RuntimeError("Ownership changed during cleanup; refusing to overwrite it")
+            continue
+        _ordinary_path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _ordinary_path(path.parent)
+        owned: dict[Path, tuple[int, int]] = {}
+        try:
+            temporary = source._stage_redirect(
+                path.parent, path.name, previous.content, stat.S_IMODE(previous.mode), owned,
+            )
+            source._owned_redirect_state(temporary, owned, previous.content)
+            if source._redirect_state(path) is not None:
+                raise RuntimeError("Ownership appeared during cleanup recovery")
+            os.replace(temporary, path)
+        finally:
+            for temporary, identity in owned.items():
+                source._cleanup_redirect_stage(temporary, identity)
+
+
 def uninstall(root: Path, shell: str) -> None:
     if not check_root(root):
         return
     runtime = _load("_mcp_uninstall_runtime", "versioned_runtime.py")
     leases = _load("_mcp_uninstall_leases", "versioned_runtime_leases.py")
-    for name in ("versions", "snapshots"):
+    snapshots = _snapshot_generations(root)
+    for name in ("versions",):
         directory = root / name
         _ordinary_path(directory)
         if directory.exists():
@@ -242,8 +288,18 @@ def uninstall(root: Path, shell: str) -> None:
         raise RuntimeError("Mutable dev generation requires explicit owner retirement; uninstall refused")
     # Keep lease inodes, configuration, materialized fleets, auth and unknown
     # children. Native init owns .install.lock for this entire subprocess.
-    guard = leases.batch_removal_custody(root, versions) if versions else nullcontext()
-    with guard:
+    with ExitStack() as custody:
+        for snapshot in snapshots:
+            custody.enter_context(leases.construction_lease(root / "snapshots", snapshot, timeout=0))
+        if versions:
+            custody.enter_context(leases.batch_removal_custody(root, versions))
+        custody.enter_context(leases._kernel_lease(
+            root, "redirects", kind="publication", shared=False, timeout=0,
+        ))
+        if _snapshot_generations(root) != snapshots or runtime.list_versions(root) != versions:
+            raise RuntimeError("Runtime inventory changed during uninstall admission")
+        if not check_root(root):
+            return
         refuse_active(root, shell, runtime)
         local_bin = Path.home() / ".local" / "bin"
         commands: tuple[str, ...] = ()
@@ -274,11 +330,31 @@ def uninstall(root: Path, shell: str) -> None:
             commands = tuple(selected)
         _engine()
         refuse_active(root, shell, runtime)
-        _remove(shell, root, ENTRIES)
-        if (root / "bin").exists():
-            _remove(shell, root / "bin", RESOLVERS)
-        if commands:
-            _remove(shell, local_bin, commands)
+        source = _load("_mcp_uninstall_source", "versioned_runtime_source.py")
+        manifest = root / "deploy-manifest.json"
+        owner_paths = [manifest] if manifest.exists() else [
+            Path((root / "payload-dir").read_text(encoding="utf-8-sig").strip()) / "pyproject.toml",
+            root / "payload-dir", root / "stamped-version",
+        ]
+        evidence = {
+            path: state for path in owner_paths
+            if (state := source._redirect_state(path)) is not None
+        }
+        try:
+            if (root / "bin").exists():
+                _remove(shell, root / "bin", RESOLVERS)
+            if commands:
+                _remove(shell, local_bin, commands)
+            _remove(shell, root, tuple(name for name in ENTRIES if name not in (*OWNER_ENTRIES, "snapshots")))
+            _remove(shell, root / "snapshots", snapshots)
+            for name in OWNER_ENTRIES:
+                _remove(shell, root, (name,))
+        except Exception as error:
+            try:
+                _restore_owner(source, evidence)
+            except Exception as recovery:
+                raise RuntimeError(f"{error}; original ownership recovery also failed: {recovery}") from error
+            raise
 
 
 def main() -> int:

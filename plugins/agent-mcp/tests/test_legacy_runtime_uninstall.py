@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import venv
+from typing import Any
 
 import pytest
 
@@ -109,6 +110,11 @@ def _run(shell: str, root: Path, env: dict[str, str]) -> subprocess.CompletedPro
 
 def _assert_derived(root: Path, *, present: bool) -> None:
     for name in DERIVED:
+        if name == "snapshots" and not present:
+            assert not (root / name).exists() or {
+                path.name for path in (root / name).iterdir()
+            } <= {".construction-leases"}
+            continue
         assert (root / name).exists() is present, name
 
 
@@ -361,3 +367,144 @@ def test_native_removal_with_quiescent_process_inventory(
     for name, content in durable.items():
         if name != ".install.lock":
             assert (root / name).read_bytes() == content
+
+
+@pytest.fixture
+def review_shell() -> str:
+    name = "pwsh" if os.name == "nt" else "bash"
+    executable = shutil.which(name)
+    if executable is None and os.name == "nt":
+        executable = shutil.which("powershell.exe")
+    if executable is None:
+        pytest.skip("native review-control shell unavailable")
+    return executable
+
+
+def _review_adapter(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> tuple[Any, Path, dict[str, bytes]]:
+    spec = importlib.util.spec_from_file_location("mcp_review_uninstall", SCRIPTS / "uninstall_runtime.py")
+    assert spec is not None and spec.loader is not None
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    root, env, durable = _fixture(tmp_path)
+    for key in tuple(os.environ):
+        if key not in env:
+            monkeypatch.delenv(key)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    real_run = helper._run
+
+    def run(command: list[str]) -> str:
+        if os.name == "nt" and "Get-CimInstance Win32_Process" in command[-1]:
+            assert root.is_relative_to(tmp_path)
+            return json.dumps([{"pid": os.getpid(), "image": sys.executable, "command": "inspector"}])
+        return real_run(command)
+
+    monkeypatch.setattr(helper, "_run", run)
+    return helper, root, durable
+
+
+def _review_source_snapshot(helper: Any, root: Path, tmp_path: Path) -> Path:
+    source = helper._load("_mcp_review_source", "versioned_runtime_source.py")
+    payload = tmp_path / "source-payload"
+    payload.mkdir()
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname = "agent-mcp"\nversion = "1.0.0"\n', encoding="utf-8",
+    )
+    (payload / "plugin.json").write_text(
+        '{"name":"agent-mcp","version":"1.0.0"}', encoding="utf-8",
+    )
+    (payload / "src").mkdir()
+    (payload / "src" / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
+    digest = source.assembly_hash(payload)
+    identity = source.SourceIdentity(
+        "agent-mcp", "1.0.0", "0" * 39 + "1", "b" * 40, digest,
+        source.runtime_version("1.0.0", "0" * 39 + "1", digest),
+    )
+    (payload / "runtime-source.json").write_text(
+        json.dumps(identity.document()), encoding="utf-8",
+    )
+    snapshot = source.publish_source_snapshot(payload, root, identity)
+    source.publish_runtime_redirects(
+        root, snapshot, version=identity.runtime_version,
+        expected_source_identity=json.dumps(source.manifest_fields(identity), sort_keys=True),
+    )
+    return snapshot
+
+
+def test_review_source_snapshot_coordination_survives_removal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, review_shell: str,
+) -> None:
+    helper, root, durable = _review_adapter(monkeypatch, tmp_path)
+    snapshot = _review_source_snapshot(helper, root, tmp_path)
+    (root / "deploy-manifest.json").unlink()
+    coordination = root / "snapshots" / ".construction-leases"
+    before = {path.name: path.stat().st_ino for path in coordination.iterdir()}
+    assert before
+    helper.uninstall(root, review_shell)
+    assert not snapshot.exists()
+    assert {path.name: path.stat().st_ino for path in coordination.iterdir()}.items() >= before.items()
+    _assert_derived(root, present=False)
+    assert helper.check_root(root) is False
+    helper.uninstall(root, review_shell)
+    for name, content in durable.items():
+        assert (root / name).read_bytes() == content
+
+
+def test_review_snapshot_publication_custody_refuses_removal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, review_shell: str,
+) -> None:
+    helper, root, _ = _review_adapter(monkeypatch, tmp_path)
+    snapshot = _review_source_snapshot(helper, root, tmp_path)
+    source = helper._load("_mcp_review_custody_source", "versioned_runtime_source.py")
+    with source._runtime().construction_lease(root / "snapshots", snapshot.name, timeout=0):
+        with pytest.raises(TimeoutError):
+            helper.uninstall(root, review_shell)
+    assert snapshot.is_dir()
+    _assert_derived(root, present=True)
+
+
+@pytest.mark.parametrize("ownership", ("manifest", "stamp"))
+@pytest.mark.parametrize("failure", ("resolver", "command", "snapshot", "owner"))
+def test_review_partial_cleanup_retains_owner_and_retries(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, review_shell: str,
+    ownership: str, failure: str,
+) -> None:
+    helper, root, durable = _review_adapter(monkeypatch, tmp_path)
+    snapshot = _review_source_snapshot(helper, root, tmp_path)
+    if ownership == "stamp":
+        (root / "deploy-manifest.json").unlink()
+    owner = root / "deploy-manifest.json" if ownership == "manifest" else snapshot / "pyproject.toml"
+    owner_bytes = owner.read_bytes()
+    real_remove = helper._remove
+    fired = []
+
+    def remove(shell: str, directory: Path, names: tuple[str, ...]) -> None:
+        hit = (
+            (failure == "resolver" and directory == root / "bin")
+            or (failure == "command" and directory == root.parent / ".local" / "bin")
+            or (failure == "snapshot" and directory == root / "snapshots")
+            or (failure == "owner" and directory == root and names == (
+                "deploy-manifest.json" if ownership == "manifest" else "payload-dir",
+            ))
+        )
+        if hit and not fired:
+            fired.append(directory)
+            real_remove(shell, directory, (snapshot.name,) if failure == "snapshot" else names[:1])
+            raise OSError("injected failure after real native deletion")
+        real_remove(shell, directory, names)
+
+    monkeypatch.setattr(helper, "_remove", remove)
+    with pytest.raises(OSError, match="injected failure after real native deletion"):
+        helper.uninstall(root, review_shell)
+    assert fired
+    assert owner.read_bytes() == owner_bytes
+    assert helper.check_root(root) is True
+    helper.uninstall(root, review_shell)
+    _assert_derived(root, present=False)
+    assert helper.check_root(root) is False
+    assert not (root.parent / ".local" / "bin" / "agent-mcp.cmd").exists()
+    assert not (root.parent / ".local" / "bin" / "agent-mcp").exists()
+    for name, content in durable.items():
+        assert (root / name).read_bytes() == content

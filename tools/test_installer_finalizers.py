@@ -246,6 +246,7 @@ def test_native_selective_runtime_removal_validates_entire_list_first(tmp_path, 
 
 def test_posix_selective_runtime_removal_preserves_state_and_is_idempotent(tmp_path):
     root, outside = _purge_fixture(tmp_path)
+    (root / "versions .venv").write_text("unselected operator content")
     result = _purge_bash(tmp_path, root, r"""
 ln -s "$OUTSIDE" "$ROOT/versions/outside"
 remove_install_runtime_content "$ROOT" versions .venv current-version
@@ -255,6 +256,7 @@ remove_install_runtime_content "$ROOT" versions .venv current-version
     assert not (root / "versions").exists()
     for name in (".hidden-state", "a[1]", "-state"):
         assert (root / name).read_text() == "state"
+    assert (root / "versions .venv").read_text() == "unselected operator content"
     assert (root / ".install-stage" / "owner" / "running.ps1").read_text() == "active"
     assert (outside / "sentinel").read_text() == "outside"
 

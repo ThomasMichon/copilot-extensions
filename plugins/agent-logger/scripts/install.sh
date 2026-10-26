@@ -1612,44 +1612,10 @@ case "${ACTION}" in
     ok "package + units updated"
     ;;
   uninstall)
-    runtime_entries=(versions .venv snapshots bin current-version last-known-good
-      payload-dir stamped-version deploy-manifest.json running-version.json)
-    for entry in "${runtime_entries[@]}"; do
-      if [[ -e "$INSTALL_DIR/$entry" || -L "$INSTALL_DIR/$entry" ]]; then
-        py="$(_bootstrap_python)" || {
-          _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
-        }
-        "$py" -I -B - "$INSTALL_DIR" <<'PY' || exit 1
-import json
-import re
-import sys
-from pathlib import Path
-
-root = Path(sys.argv[1]).resolve()
-manifest = root / "deploy-manifest.json"
-if manifest.exists() or manifest.is_symlink():
-    if not manifest.is_file() or manifest.is_symlink():
-        raise SystemExit("Logger uninstall refused: a plain deployment manifest is required")
-    record = json.loads(manifest.read_text(encoding="utf-8-sig"))
-    if not isinstance(record, dict) or record.get("service") != "agent-logger":
-        raise SystemExit("Logger uninstall refused: deployment manifest belongs to another product")
-else:
-    marker = root / "payload-dir"
-    if not marker.is_file() or marker.is_symlink():
-        raise SystemExit("Logger uninstall refused: no deployment or stamped ownership")
-    payload = Path(marker.read_text(encoding="utf-8-sig").strip()).resolve(strict=True)
-    if not payload.is_relative_to(root / "snapshots"):
-        raise SystemExit("Logger uninstall refused: stamped payload is outside its snapshot root")
-    project = payload / "pyproject.toml"
-    if not project.is_file() or project.is_symlink():
-        raise SystemExit("Logger uninstall refused: stamped project metadata is not a plain file")
-    section = re.search(r"(?ms)^\[project\][ \t]*$\s*(.*?)(?=^\[|\Z)", project.read_text(encoding="utf-8-sig"))
-    if section is None or re.search(r'''(?m)^name[ \t]*=[ \t]*(["'])agent-logger\1[ \t]*(?:\#.*)?$''', section[1]) is None:
-        raise SystemExit("Logger uninstall refused: stamped payload belongs to another product")
-PY
-        break
-      fi
-    done
+    py="$(_bootstrap_python)" || {
+      _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
+    }
+    "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" || exit 1
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "(dry run -- nothing will be changed)"
       if systemctl --user is-enabled "${TIMER_NAME}.timer" >/dev/null 2>&1 || \
@@ -1665,19 +1631,32 @@ PY
       echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
       echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
-      systemctl --user disable --now "${TIMER_NAME}.timer" 2>/dev/null || true
-      rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
+      if [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" || -f "${UNIT_DIR}/${TIMER_NAME}.service" ]]; then
+        if [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" ]]; then
+          systemctl --user disable --now "${TIMER_NAME}.timer" || exit 1
+        fi
+        service_state=0
+        systemctl --user is-active --quiet "${TIMER_NAME}.service" || service_state=$?
+        case "$service_state" in
+          0) _fail 'Active Logger sync service; uninstall refused after disabling new scheduled starts'; exit 1 ;;
+          3|4) ;;
+          *) _fail 'Cannot determine Logger sync service state; uninstall refused'; exit 1 ;;
+        esac
+      fi
+      "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" --idle --prepare || exit 1
+      rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer" || exit 1
       systemctl --user daemon-reload || true
       chg "timer removed (config at ${INSTALL_DIR} kept)"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
         for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-          rm -f "${LOCAL_BIN}/${name}"
+          rm -f "${LOCAL_BIN}/${name}" || exit 1
         done
         chg "binstubs removed from ${LOCAL_BIN}"
       else
         chg "scoped install left legacy global binstubs unchanged"
       fi
-      remove_install_runtime_content "$INSTALL_DIR" "${runtime_entries[@]}" || exit 1
+      "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" \
+        --idle --prepare --remove-runtime --shell "$BASH" || exit 1
       chg "runtime generations and generated dispatchers removed (config/session-state kept)"
     fi
     ;;

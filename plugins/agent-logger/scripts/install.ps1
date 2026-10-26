@@ -1911,63 +1911,32 @@ switch ($Action) {
         Update-SyncTaskBinding
     }
     'uninstall' {
-        $runtimeEntries = @(
-            'versions', '.venv', 'snapshots', 'bin', 'current-version', 'last-known-good',
-            'payload-dir', 'stamped-version', 'deploy-manifest.json', 'running-version.json'
-        )
-        if (@($runtimeEntries | Where-Object { Test-Path -LiteralPath (Join-Path $InstallDir $_) }).Count -gt 0) {
-            $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-            if (Test-Path -LiteralPath $manifestPath) {
-                $manifestFile = Get-Item -LiteralPath $manifestPath -Force -ErrorAction Stop
-                if ($manifestFile.PSIsContainer -or ($manifestFile.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                    throw 'Logger uninstall refused: a plain deployment manifest is required'
-                }
-                $manifest = [IO.File]::ReadAllText($manifestPath) | ConvertFrom-Json -ErrorAction Stop
-                if (-not $manifest.PSObject.Properties['service'] -or $manifest.service -cne 'agent-logger') {
-                    throw 'Logger uninstall refused: deployment manifest belongs to another product'
-                }
-            } else {
-                $marker = Get-Item -LiteralPath (Join-Path $InstallDir 'payload-dir') -Force -ErrorAction Stop
-                if ($marker.PSIsContainer -or ($marker.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-                    throw 'Logger uninstall refused: stamped ownership is not a plain file'
-                }
-                $payload = [IO.Path]::GetFullPath([IO.File]::ReadAllText($marker.FullName).Trim())
-                $snapshotRoot = [IO.Path]::GetFullPath((Join-Path $InstallDir 'snapshots')).TrimEnd('\', '/')
-                $comparison = if ([IO.Path]::DirectorySeparatorChar -eq '\') {
-                    [StringComparison]::OrdinalIgnoreCase
-                } else { [StringComparison]::Ordinal }
-                if (-not $payload.StartsWith($snapshotRoot + [IO.Path]::DirectorySeparatorChar, $comparison)) {
-                    throw 'Logger uninstall refused: stamped payload is outside its snapshot root'
-                }
-                $project = Join-Path $payload 'pyproject.toml'
-                $ancestor = $project
-                while ($ancestor.Length -ge $snapshotRoot.Length) {
-                    $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
-                    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-                        throw 'Logger uninstall refused: indirect stamped ownership'
-                    }
-                    $ancestor = Split-Path $ancestor
-                }
-                $section = [regex]::Match(
-                    [IO.File]::ReadAllText($project),
-                    '(?ms)^\[project\][ \t]*\r?$\s*(.*?)(?=^\[|\z)'
-                )
-                if (-not $section.Success -or
-                    $section.Groups[1].Value -cnotmatch '(?m)^name[ \t]*=[ \t]*(["''])agent-logger\1[ \t]*(?:#.*)?\r?$') {
-                    throw 'Logger uninstall refused: stamped payload belongs to another product'
-                }
-            }
-        }
+        $uninstallPython = Get-BootstrapPython
+        if (-not $uninstallPython) { throw 'Logger uninstall requires a bootstrap Python interpreter' }
+        $uninstallGuardArgs = @('-I', '-B', (Join-Path $PSScriptRoot 'uninstall_guard.py'), '--root', $InstallDir)
+        $guardError = ''
+        $null = Invoke-Hidden -FilePath $uninstallPython -ArgList $uninstallGuardArgs -ErrorOutput ([ref]$guardError)
+        if ($LASTEXITCODE -ne 0) { throw $guardError }
         if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
         if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
             if ($DryRun) {
                 Write-Host "[dry-run] would remove scheduled task: $TaskName"
             } else {
+                Disable-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out-Null
+                $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+                if ($task.State -in @('Running', 'Queued', 'Unknown')) {
+                    throw 'Active Logger sync task; uninstall refused after disabling new scheduled starts'
+                }
                 Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
                 Write-Changed "scheduled task removed (config at $InstallDir kept)"
             }
         } else {
             Write-Warn2 "no scheduled task found"
+        }
+        if (-not $DryRun) {
+            $guardError = ''
+            $null = Invoke-Hidden -FilePath $uninstallPython -ArgList ($uninstallGuardArgs + @('--idle', '--prepare')) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
         }
         if ($publishGlobalBinstubs) {
             $anyStub = $false
@@ -1977,7 +1946,7 @@ switch ($Action) {
                     if (Test-Path $f) {
                         $anyStub = $true
                         if ($DryRun) { Write-Host "[dry-run] would remove binstub: $f" }
-                        else { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+                        else { Remove-Item $f -Force -ErrorAction Stop }
                     }
                 }
             }
@@ -1990,7 +1959,11 @@ switch ($Action) {
             Write-Host "[dry-run] config/session-state at $InstallDir would be kept (agent-logger uninstall never removes it)"
             Write-Host 'agent-logger uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         } else {
-            Remove-InstallRuntimeContent -InstallRoot $InstallDir -EntryNames $runtimeEntries
+            $guardError = ''
+            $null = Invoke-Hidden -FilePath $uninstallPython -ArgList (
+                $uninstallGuardArgs + @('--idle', '--prepare', '--remove-runtime', '--shell', (Get-Process -Id $PID).Path)
+            ) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
             Write-Changed 'runtime generations and generated dispatchers removed (config/session-state kept)'
         }
     }

@@ -74,6 +74,13 @@ Removal requires the deployment manifest to identify Logger, or a Logger
 project snapshot addressed inside that runtime home's snapshot directory.
 Missing, malformed, foreign or externally redirected ownership refuses removal
 before changing the task or commands.
+Legacy removal also rejects installation-cell/managed metadata and a different
+command source or lifecycle owner. It disables new scheduled starts, refuses
+an active sync task/service or runtime process, and removes generations under
+construction/retention custody. Persistent snapshot coordination inodes remain.
+Validated stamped-only ownership is recorded in the existing deployment
+manifest before destructive cleanup; ownership metadata is removed last so a
+partial removal can be retried without requiring the deleted snapshot.
 
 ## Source-qualified runtimes
 

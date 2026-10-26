@@ -122,6 +122,15 @@ is a no-op; the same source can be installed again. Disable automatic bootstrap
 in the consuming harness first if removal should persist. Installation-cell
 lifecycle and harness reference accounting remain separate operations.
 
+Source-qualified snapshot generations are removed under the same construction
+leases used by their publisher. The persistent `snapshots/.construction-leases`
+directory and its lock inodes remain; they are coordination, not generations.
+Resolver and compatibility-command cleanup precedes runtime/ownership removal.
+Cleanup errors are reported, retaining or restoring the exact previously
+validated manifest or stamped ownership evidence so a subsequent uninstall can
+authenticate and retry. This recovery restores ownership evidence only, not
+already removed runtime contents; it creates no new owner or activation policy.
+
 ## Reliable transport: one bridge, two surfaces
 
 After `customizing-copilot:defining-subagents` establishes the agent contract,

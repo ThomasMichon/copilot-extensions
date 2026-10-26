@@ -667,3 +667,9 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   prerequisites, then the real all-absent/reinstall witness around this same
   session. The protected transport closure, launch-owned shell/current hooks,
   shared YAML maintenance admission and native standby remain unresolved.
+- The prerequisite review exposed and corrected literal child-name matching,
+  same-product foreign ownership, active Logger syncs, persistent snapshot
+  coordination and retry authentication after partial cleanup. Native
+  task/process/custody controls and isolated Linux integration cover these
+  boundaries. This adds no whole-harness reference-accounting or abrupt-death
+  recovery claim; the real all-absent witness remains open.
