@@ -166,17 +166,17 @@ def gc_configured_snapshot(
     from agent_index.indexing.pending_crawl import PendingCrawls
 
     journal = PendingCrawls(path_index)
-    backfills = journal.backfill_sources()
-    if backfills:
-        log.warning("Source GC deferred: unfinished embedding backfills: %s", backfills)
-        return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
-                "deferred": backfills}
     pending = journal.sources()
     if pending:
         log.warning("Source GC deferred: complete pending crawls with original configuration: %s",
                     pending)
         return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
                 "deferred": pending, "pending_crawls": pending}
+    backfills = journal.backfill_sources()
+    if backfills:
+        log.warning("Source GC deferred: unfinished embedding backfills: %s", backfills)
+        return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
+                "deferred": backfills}
     if not source_aware:
         return gc_unconfigured_sources(
             multi_store, path_index, state, configured_names=configured_names,

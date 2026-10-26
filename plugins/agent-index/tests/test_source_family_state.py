@@ -54,6 +54,25 @@ def test_ordinary_run_reindex_defers_unfinished_backfill_gc(queued_source, caplo
     assert initialize_source_store(config)._source_domain.receipt()["state"] == "clean"
 
 
+def test_backfill_deferral_does_not_hide_unfinished_acquisition(tmp_path):
+    from agent_index.indexing.manifest import CrawlManifest
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    journal.save(CrawlManifest(source="crawl", commit="target"), scope="accepted", full=False)
+    conn = paths._connect()
+    try:
+        conn.execute("INSERT INTO embedding_backfills VALUES ('backfill', '{}', 0)")
+        conn.commit()
+    finally:
+        conn.close()
+    decision = gc_configured_snapshot(
+        None, paths, IndexState(), configured_names=frozenset(), source_aware=True,
+    )
+    assert decision["pending_crawls"] == decision["deferred"] == ["crawl"]
+
+
 @pytest.mark.timeout(180)
 def test_queued_reconcile_changes_only_exact_canonical_family(queued_source):
     repository, configure, run, config = queued_source
