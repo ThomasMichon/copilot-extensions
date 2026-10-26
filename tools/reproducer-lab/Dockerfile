@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 COPY source/ /opt/lab/source/
 COPY source.json /opt/lab/source.json
+RUN chmod -R a+rX /opt/lab/source && chmod 0644 /opt/lab/source.json
 WORKDIR /opt/lab/source
 ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_NO_CACHE=1
 RUN UV_PROJECT_ENVIRONMENT=/lab/state/runtime/worktrees \
@@ -21,11 +22,12 @@ RUN UV_PROJECT_ENVIRONMENT=/lab/state/runtime/bridge \
 RUN UV_PROJECT_ENVIRONMENT=/lab/state/runtime/dispatch \
     uv sync --project plugins/agent-dispatch --no-dev --no-editable --exclude-newer "7 days"
 RUN mv /lab/state/runtime /opt/lab/runtime-seed \
+    && chmod -R a+rX /opt/lab/runtime-seed \
     && useradd --uid 1000 --user-group --create-home --home-dir /home/lab lab \
     && mkdir -p /lab/state /lab/workspace /lab/evidence /run \
     && chown 1000:1000 /home/lab /lab/state /lab/workspace /lab/evidence \
     && chmod 0700 /home/lab /lab/state /lab/workspace /lab/evidence \
-    && ln -s /usr/local/bin/python3 /usr/bin/python3 \
+    && ln -sfnT /usr/local/bin/python3 /usr/bin/python3 \
     && chmod 0755 /opt/lab/source/tools/reproducer-lab/guest_cli.sh \
     && ln -s /opt/lab/source/tools/reproducer-lab/guest_cli.sh /usr/local/bin/agent-worktrees \
     && ln -s /opt/lab/source/tools/reproducer-lab/guest_cli.sh /usr/local/bin/agent-bridge \

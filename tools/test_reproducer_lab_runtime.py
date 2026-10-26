@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import stat
 import subprocess
@@ -269,6 +270,9 @@ def test_recipe_resets_runtime_metadata_and_does_not_start_services() -> None:
     assert "COPY source/ /opt/lab/source/" in recipe
     assert "COPY source.json /opt/lab/source.json" in recipe
     assert "immutable image references required" in recipe
+    assert "chmod -R a+rX /opt/lab/source && chmod 0644 /opt/lab/source.json" in recipe
+    assert "chmod -R a+rX /opt/lab/runtime-seed" in recipe
+    assert "ln -sfnT /usr/local/bin/python3 /usr/bin/python3" in recipe
     assert (LAB / "Dockerfile.dockerignore").read_text().splitlines() == [
         "**", "!source/", "!source/**", "!source.json", "source/.git", "source/.git/**",
     ]
@@ -280,3 +284,10 @@ def test_guest_cli_uses_only_fixed_persistent_runtime_launchers() -> None:
         assert f"exec /lab/state/runtime/{plugin}/bin/agent-{plugin}" in launcher
     assert "eval" not in launcher
     assert "Unsupported reproducer runtime command" in launcher
+
+
+def test_container_keepalive_is_in_the_existing_venue_census() -> None:
+    census = json.loads((LAB.parent / "daemon-coverage.json").read_text(encoding="utf-8"))
+    key = "t:reproducer-lab/Dockerfile::<script>::ENTRYPOINT"
+    assert census["sites"]["venue-agent"][key] == 1
+    assert sum(key in sites for sites in census["sites"].values()) == 1

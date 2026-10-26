@@ -21,6 +21,11 @@ digest-qualified public references. There are no default floating tags.
 The initial recipe expects a Debian-based official Python image with Python
 3.12 or later and the ordinary UV binary image. It installs Git in the build
 stage, then uses the three plugins' existing UV project/dependency declarations.
+Copied public source and metadata receive read/traverse permission independently
+of the staging caller's umask, preserving executable versus non-executable files.
+The same permission normalization makes the built seed readable to the guest.
+The image-local `/usr/bin/python3` link explicitly replaces an existing file or
+link without following a link to a directory; no host interpreter is modified.
 Source packages are non-editable; external Python dependencies retain the
 seven-day age restriction, no managed Python download and copy link mode.
 Dependency resolution/build is not an offline phase and needs separate
@@ -37,6 +42,9 @@ A final scratch stage copies the built filesystem but not inherited image
 metadata. It declares only the three baseline environment entries, UID/GID
 `1000:1000`, the fixed workspace and a keepalive entrypoint. It declares no
 volume, exposed port, healthcheck, service manager or automatic service launch.
+Its keepalive is explicitly counted as a container-owned test venue in the
+existing lifecycle census, matching the clean-room venue category; this is not
+resident-service startup admission or permission to create the container.
 The actual created container must still pass every effective boundary check;
 the recipe is not evidence that a selected image or build succeeded.
 
@@ -89,4 +97,6 @@ The explicitly selected `runtime_local_tests.py` uses real local `cp`, the
 existing finite process owner and an actual operation lock on synthetic
 temporary trees. It checks executable bits, hidden files, non-followed links,
 private root mode and refusal of a second preparation. It is outside default
-test discovery; neither lane qualifies a real venv, image, mount or service.
+test discovery. Separate actual local command cases cover restrictive source
+permissions and absent/file/symlink Python destinations, preserving prior link
+targets. Neither lane qualifies a real venv, image, mount or service.
