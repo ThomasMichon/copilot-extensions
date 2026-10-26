@@ -3209,7 +3209,7 @@ result = run_caller_owned(
 if result.returncode != 0:
     raise RuntimeError(
         'Supervisor launch description failed: '
-        + result.stderr.decode('utf-8', errors='replace')
+        + result.stderr
     )
 description = json.loads(base64.b64decode(result.stdout.strip(), validate=True).decode('utf-8'))
 if (

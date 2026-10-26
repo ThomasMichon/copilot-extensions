@@ -39,8 +39,8 @@ def _fixture(monkeypatch, tmp_path, *, marker=True, payload=None, returncode=0):
     owned = ModuleType("agent_procutil.owned_process")
     def describe(argv, **kwargs):
         preflight.append((argv, kwargs))
-        return SimpleNamespace(returncode=returncode, stderr=b"fixture description refused",
-                               stdout=base64.b64encode(json.dumps(description).encode()))
+        return SimpleNamespace(returncode=returncode, stderr="fixture description refused",
+                               stdout=base64.b64encode(json.dumps(description).encode()).decode("ascii"))
     owned.run_caller_owned = describe
     monkeypatch.setitem(sys.modules, "agent_procutil", module)
     monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", owned)
@@ -89,6 +89,8 @@ def test_logon_launcher_does_not_hide_failures(monkeypatch, tmp_path, failure):
         exec(compile(_bootstrap(), str(INSTALLER), "exec"), {})
     if failure == "spawn":
         assert caught.value is error
+    if failure == "preflight":
+        assert "fixture description refused" in str(caught.value)
     if failure == "legacy":
         assert preflight == [], "legacy launcher must not be executed"
     assert calls == []
