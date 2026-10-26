@@ -20,11 +20,35 @@ from agent_procutil.diagnostics import (
 
 log = logging.getLogger("agent-dispatch.spawn")
 _OPAQUE = re.compile(r"""["'](?:env|environment|prompt|startup_invocation)["']\s*:""")
+_OS_ERROR = re.compile(r"^\[(?:Errno|WinError) -?\d+\]")
+
+
+def _without_inputs(text: str, secrets: Mapping[str, str]) -> str:
+    # Remove exact supplied inputs before the shared owner's bounded normalization:
+    # truncating a long prompt first would leave an unmatched, exposed prefix.
+    values = {
+        variant
+        for value in secrets.values() if value
+        for variant in (value, json.dumps(value, ensure_ascii=True)[1:-1],
+                        json.dumps(value, ensure_ascii=False)[1:-1])
+    }
+    for value in sorted(values, key=len, reverse=True):
+        text = text.replace(value, "[REDACTED]")
+    return text
+
+
+def diagnostic_fields(text: str, secrets: Mapping[str, str]) -> dict[str, str]:
+    return structured_diagnostic_fields(_without_inputs(text, secrets), environment=secrets)
 
 
 def diagnostic_text(text: str, secrets: Mapping[str, str]) -> str:
     """Retain bounded causal text, not serialized task/input envelopes."""
-    if _OPAQUE.search(normalized_diagnostic_text(text)) or text.lstrip().startswith(("{", "[")):
+    normalized = normalized_diagnostic_text(text)
+    opaque = _OPAQUE.search(normalized) or (
+        text.lstrip().startswith(("{", "[")) and not _OS_ERROR.match(normalized)
+    )
+    text = _without_inputs(text, secrets)
+    if opaque:
         fields = structured_diagnostic_fields(text, environment=secrets)
         return json.dumps(fields) if fields else "<omitted:opaque-envelope>"
     return safe_diagnostic_text(text, 1600, secrets)

@@ -65,6 +65,12 @@ using the existing diagnostic-text owner. Raw task/environment/invocation
 envelopes are not copied into these records. These restrictions are not a reason
 to erase benign operation identities or causal errors. The existing optional
 `logs/bridge-cli` trace remains separate and default-off.
+Exact supplied prompts/invocations are removed before bounded normalization, so
+a long input cannot leak a prefix merely because it was truncated before
+matching. Plain `[Errno N]`/`[WinError N]` causes remain diagnostic text, not JSON
+arrays. The serving loop logs a type-only failure summary after the filtered
+causal stage rather than writing the same exception's unfiltered traceback;
+its optional cycle callback has its own causal stage.
 
 These records use synchronous local application emission, including its existing
 bounded lock/degradation policy; they introduce no child process, network export

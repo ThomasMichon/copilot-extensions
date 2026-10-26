@@ -178,6 +178,22 @@ def test_malformed_prompt_is_not_copied_into_diagnostics(sink, monkeypatch) -> N
     assert any(row["stage_record"].get("reason") == "no_capacity" for row in sink())
 
 
+def test_serve_does_not_reintroduce_unfiltered_cycle_traceback(sink, monkeypatch) -> None:
+    monkeypatch.setenv("SYNTHETIC_API_TOKEN", "sensitive-fixture-value")
+    supervisor = lane(monkeypatch)
+    monkeypatch.setattr(supervisor, "_eligible", lambda _: [{
+        "id": "task-a", "generation": 4, "prompt": "synthetic private prompt",
+    }])
+    error = RuntimeError("launch allocation-a sensitive-fixture-value synthetic private prompt")
+    supervisor.spawn_fn.side_effect = error
+    monkeypatch.setattr(supervisor, "wait_for_turn_end", Mock(side_effect=KeyboardInterrupt))
+    supervisor.serve()
+    text = logging.getLogger("agent-dispatch").handlers[0].path.read_text(encoding="utf-8")
+    assert "launch allocation-a" in text and "supervision cycle failed (RuntimeError)" in text
+    assert "sensitive-fixture-value" not in text and "synthetic private prompt" not in text
+    assert str(error) == "launch allocation-a sensitive-fixture-value synthetic private prompt"
+
+
 def test_sink_degradation_is_visible_without_changing_stage_result(sink, monkeypatch, capsys) -> None:
     handler = logging.getLogger("agent-dispatch").handlers[0]
 

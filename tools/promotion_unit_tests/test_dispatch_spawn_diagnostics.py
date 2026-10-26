@@ -79,6 +79,9 @@ def test_causal_exception_is_same_object_without_false_return(diagnostics, monke
     assert failed["outcome"] == "error" and failed["error_type"] == "ValueError"
     assert "database busy allocation-a" in failed["error"]
     assert "synthetic-sensitive-value" not in json.dumps(events(records))
+    for message in ("[Errno 13] Permission denied: example-file",
+                    "[WinError 2] The system cannot find example-file"):
+        assert module.diagnostic_text(message, {}) == message
 
 
 def test_opaque_envelope_and_prompt_are_not_application_output(diagnostics) -> None:
@@ -92,3 +95,11 @@ def test_opaque_envelope_and_prompt_are_not_application_output(diagnostics) -> N
     assert secret not in text
     assert "connection refused allocation-a" in text
     assert module.diagnostic_text('{"prompt":"broken', trace.secrets) == "<omitted:opaque-envelope>"
+    long_prompt = secret * 5000
+    assert module.diagnostic_text(
+        "failure allocation-a " + long_prompt, {"STARTUP_PROMPT_SECRET": long_prompt},
+    ) == "failure allocation-a [REDACTED]"
+    assert module.diagnostic_fields(
+        json.dumps({"error": "failure allocation-a " + long_prompt}),
+        {"STARTUP_PROMPT_SECRET": long_prompt},
+    ) == {"error": "failure allocation-a [REDACTED]"}

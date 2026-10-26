@@ -3593,11 +3593,17 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 try:
                     spawned = self.poll_once()
                     if on_cycle is not None:
-                        on_cycle(spawned)
+                        from .spawn_diagnostics import SpawnDiagnostics
+
+                        with SpawnDiagnostics(supervisor_id=self.supervisor_id).stage("on_cycle"):
+                            on_cycle(spawned)
                 except KeyboardInterrupt:
                     return
-                except Exception:  # pragma: no cover -- never let the loop die on a blip
-                    log.exception("supervision cycle failed")
+                except Exception as exc:
+                    # The causal stage already recorded the filtered error. Rendering
+                    # its traceback here would reintroduce credentials and prompts.
+                    log.error("supervision cycle failed (%s); inspect spawn stage records",
+                              type(exc).__name__)
                 try:
                     self.wait_for_turn_end(interval)
                 except KeyboardInterrupt:

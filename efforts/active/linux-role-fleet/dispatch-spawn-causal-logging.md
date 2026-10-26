@@ -109,3 +109,13 @@ registrar or production configuration to demonstrate these records.
   explicit admission fixture and shared daemon-launch API; no production
   launch contract changed. Source review/merge and all running-state gates
   remain open.
+- Independent review identified two real boundary defects: the serving-loop
+  traceback could copy credentials back into an otherwise filtered log, and
+  an errno prefix could be mistaken for an opaque JSON array. The outer loop
+  now retains a type-only summary alongside the detailed filtered stage, and
+  genuine OS error prefixes preserve their cause. A separate synthetic control
+  reproduced long-prompt prefix leakage when clipping preceded matching; exact
+  supplied inputs are removed before bounded normalization/field selection.
+  The affected isolated cohort passed 188 controls, including serving-loop
+  privacy and original Bridge caller/timeout behavior. The same three admitted
+  unit nodes cover errno and long-input privacy without new effect permissions.

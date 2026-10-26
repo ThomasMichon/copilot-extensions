@@ -5,10 +5,8 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 
-from agent_procutil.diagnostics import structured_diagnostic_fields
-
 from .procutil import no_window_kwargs
-from .spawn_diagnostics import SpawnDiagnostics, diagnostic_text
+from .spawn_diagnostics import SpawnDiagnostics, diagnostic_fields, diagnostic_text
 
 
 def run(
@@ -45,7 +43,7 @@ def run(
             trace.finish(result=result)
         outcome["returncode"] = result.returncode
         if result.returncode:
-            fields = structured_diagnostic_fields(result.stdout, environment=diagnostics.secrets)
+            fields = diagnostic_fields(result.stdout, diagnostics.secrets)
             if fields:
                 outcome["diagnostics"] = fields
             if result.stderr:
