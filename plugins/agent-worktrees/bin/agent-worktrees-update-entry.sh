@@ -43,7 +43,7 @@ _aw_update_entry() (
     shift
     for _arg do
         case "$_arg" in
-            --phase|--phase=*|--plugin|--plugin=*|--no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
+            --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*|--no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
                 return 0 ;;
         esac
     done
@@ -216,7 +216,7 @@ case "${1-}:${3-}" in
             _aw_bypass=0
             for _aw_arg do
                 case "$_aw_arg" in
-                    --phase|--phase=*|--plugin|--plugin=*)
+                    --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*)
                         _aw_bypass=1
                         _aw_update_diagnostic=1 ;;
                     --no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)

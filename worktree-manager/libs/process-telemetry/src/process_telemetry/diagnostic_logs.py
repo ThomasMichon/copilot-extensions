@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
+import math
 import os
 import re
 import stat
@@ -14,7 +16,9 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from .append import append_bytes
+from .append import (
+    STRICT_RECORD_BYTES, append_bytes, append_bytes_strict, strict_write_capability,
+)
 
 RETENTION = timedelta(days=30)
 MAINTENANCE_SECONDS = 60.0
@@ -29,6 +33,45 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError("diagnostic retention requires an aware clock")
     return value.astimezone(timezone.utc)
+
+
+def _invalid_json_constant(value: str) -> None:
+    raise ValueError(f"strict diagnostic JSON forbids {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("strict diagnostic JSON number is not finite")
+    return parsed
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("strict diagnostic JSON contains duplicate fields")
+        result[key] = value
+    return result
+
+
+def _same_json_fields(left: object, right: object) -> bool:
+    if (
+        type(left) is not type(right)
+        or type(left) not in (type(None), bool, int, float, str, dict, list)
+    ):
+        return False
+    if isinstance(left, dict) and isinstance(right, dict):
+        if any(type(key) is not str for key in right) or left.keys() != right.keys():
+            return False
+        return all(_same_json_fields(value, right[key]) for key, value in left.items())
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _same_json_fields(a, b) for a, b in zip(left, right)
+        )
+    if isinstance(left, float) and isinstance(right, float):
+        return math.isfinite(left) and math.isfinite(right) and left == right
+    return left == right
 
 
 def _diagnostic_files(directory: Path, component: str) -> list[Path]:
@@ -79,8 +122,10 @@ class DiagnosticLog(logging.Handler):
             self.maintain(force=True)
 
     @contextmanager
-    def _custody(self):
-        if self._create_parent:
+    def _custody(self, *, create_parent: bool | None = None):
+        if create_parent is None:
+            create_parent = self._create_parent
+        if create_parent:
             self.directory.mkdir(parents=True, exist_ok=True)
         with self._custody_factory(self.directory / f".{self.component}.lock"):
             yield
@@ -289,6 +334,44 @@ class DiagnosticLog(logging.Handler):
                 append_bytes(self.path, data)
         except Exception as error:
             self._degraded(error)
+
+    def write_event_strict(self, event: dict) -> None:
+        """Synchronously persist an explicit pre-effect record or raise.
+
+        No buffering, maintenance, silent age skip or automatic parent creation.
+        Caller-owned persistent storage and custody are prerequisites, not facts
+        inferred from this method's successful return.
+        """
+        try:
+            if strict_write_capability() is None:
+                raise NotImplementedError("strict diagnostic sync is unavailable on this platform")
+            if type(event) is not dict or not _same_json_fields(event, event):
+                raise ValueError("strict diagnostics require finite primitive JSON fields")
+            baseline = copy.deepcopy(event)
+            now = _utc(self.clock())
+            stamp = self._event_stamp(copy.deepcopy(baseline))
+            if stamp is None or stamp < now - RETENTION:
+                raise ValueError("strict diagnostic timestamp is invalid or expired")
+            data = self.encoder(copy.deepcopy(baseline))
+            if (
+                type(data) is not bytes or not 0 < len(data) <= STRICT_RECORD_BYTES
+                or not data.endswith(b"\n") or b"\n" in data[:-1] or b"\r" in data
+            ):
+                raise ValueError("strict diagnostics require one bounded UTF-8 JSONL record")
+            decoded = json.loads(
+                data.decode("utf-8"), parse_constant=_invalid_json_constant,
+                parse_float=_finite_json_float, object_pairs_hook=_unique_json_object,
+            )
+            if type(decoded) is not dict or not _same_json_fields(decoded, baseline):
+                raise ValueError("strict diagnostic encoder changed the record fields")
+            if not self.directory.is_dir():
+                raise FileNotFoundError("strict diagnostic directory must already exist")
+            with self._custody(create_parent=False):
+                self._rollover(now)
+                append_bytes_strict(self.path, data)
+        except Exception as error:
+            self._degraded(error)
+            raise
 
 
 def iso_timestamp(event: dict) -> datetime:

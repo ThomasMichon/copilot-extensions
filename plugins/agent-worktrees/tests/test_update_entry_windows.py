@@ -17,14 +17,20 @@ update_entry_case = shared_update_entry_case
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security/process contract")
 
 
-@pytest.mark.parametrize("front", ["global", "installed-project"])
-@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize(("front", "available"), [
+    ("global", False), ("global", True),
+    ("installed-project", False), ("installed-project", True),
+    ("payload", False),
+])
 @pytest.mark.parametrize("flags", [
     ["--phase", "preflight", "--plugin", "agent-example"],
     ["--phase=runtimes", "--plugin=agent-example"],
     ["--plugin", "agent-example"],
+    ["--inventory", "--json"],
+    ["--target", "agent-example"],
+    ["--target=agent-example"],
 ])
-def test_selected_update_phase_bypasses_native_repair_and_implicit_provision(
+def test_selected_update_operation_bypasses_native_repair_and_implicit_provision(
     update_entry_case, native_powershell, monkeypatch, front, available, flags,
 ):
     from agent_worktrees import project_command_templates
@@ -46,7 +52,9 @@ def test_selected_update_phase_bypasses_native_repair_and_implicit_provision(
         resolver.write_text("$AwPy = '" + str(command).replace("'", "''") + "'\n")
     entry = PLUGIN / "bin" / "agent-worktrees.ps1"
     arguments = ["--project", "sample", "update", *flags]
-    if front == "installed-project":
+    if front == "payload":
+        entry = PLUGIN / "bin" / "payload" / "agent-worktrees.ps1"
+    elif front == "installed-project":
         user_bin = home / ".local" / "bin"
         user_bin.mkdir(parents=True)
         for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
@@ -59,10 +67,14 @@ def test_selected_update_phase_bypasses_native_repair_and_implicit_provision(
     proof = tmp / "phase-arguments.json"
     escaped = lambda text: "'" + str(text).replace("'", "''") + "'"
     harness = tmp / "phase-entry.ps1"
+    compilation_guard = (
+        "function Add-Type { throw 'phase attempted source compilation' }\n"
+        if front != "payload" else ""
+    )
     harness.write_text(
         "$ErrorActionPreference = 'Stop'\n"
         "function Invoke-WebRequest { throw 'phase attempted bootstrap download' }\n"
-        "function Add-Type { throw 'phase attempted source compilation' }\n"
+        f"{compilation_guard}"
         f"$env:PHASE_ARGUMENTS = {escaped(proof)}\n"
         f"$phaseArgs = @({','.join(escaped(value) for value in arguments)})\n"
         f"& {escaped(entry)} @phaseArgs\n"

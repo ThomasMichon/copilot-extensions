@@ -197,9 +197,12 @@ class MultiModelStore(_ItemRepresentationMixin):
         vectors: np.ndarray,
         *,
         bounded_provenance: bool = False,
+        bounded_input: bool = False,
     ) -> int:
         """Store vectors for a specific model."""
         vt = self.get_vector_table(model_id)
+        if bounded_input:
+            return vt.upsert(chunks, vectors, bounded_input=True)
         if bounded_provenance:
             return vt.upsert(chunks, vectors, bounded_provenance=True)
         return vt.upsert(chunks, vectors)

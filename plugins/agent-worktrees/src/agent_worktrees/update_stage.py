@@ -245,9 +245,14 @@ def fingerprint(plugin_dir: Path) -> str:
         if not root.is_dir():
             continue
         for fp in sorted(root.rglob("*")):
-            if not fp.is_file() or fp.suffix in (".pyc", ".pyo") or "__pycache__" in fp.parts:
+            relative = fp.relative_to(plugin_dir)
+            if (
+                not fp.is_file() or fp.suffix in (".pyc", ".pyo")
+                or "__pycache__" in relative.parts
+                or any(part.endswith((".egg-info", ".dist-info")) for part in relative.parts)
+            ):
                 continue
-            h.update(str(fp.relative_to(plugin_dir)).replace("\\", "/").encode("utf-8"))
+            h.update(str(relative).replace("\\", "/").encode("utf-8"))
             try:
                 h.update(fp.read_bytes())
             except Exception:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-process-telemetry"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Optional bounded diagnostic emission through existing callable sinks"
 readme = "README.md"
 license = "MIT"

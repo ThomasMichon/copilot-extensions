@@ -498,7 +498,7 @@ if ($python) {
     Invoke-AgentWorktreesRuntime $python
 }
 if ($_awUpdateDiagnostic) {
-    [Console]::Error.WriteLine('[agent-worktrees] selected update phase requires a provisioned runtime; use ordinary update to repair it.')
+    [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
