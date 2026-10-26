@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import shutil
 import stat
 import sys
 from pathlib import Path
 
 from standalone_consumers import standalone_build_resources
+if __package__:
+    from .native_test_paths import native_test_path
+else:
+    from native_test_paths import native_test_path
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))
@@ -47,7 +53,8 @@ def dependency_fingerprint(
 
 def ordinary_cache_root(path: Path) -> Path:
     """Refuse linked cache roots before resolving a lease or removing contents."""
-    for candidate in (path, *path.parents):
+    native = native_test_path(path.absolute())
+    for candidate in (native, *native.parents):
         try:
             info = candidate.lstat()
         except FileNotFoundError:
@@ -55,3 +62,22 @@ def ordinary_cache_root(path: Path) -> Path:
         if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_reparse_tag", 0):
             raise ValueError(f"Test cache directory is not ordinary: {candidate}")
     return path.resolve()
+
+
+def clear_cache_contents(path: Path) -> None:
+    """Clear an already-leased ordinary environment without replacing its root."""
+    root = native_test_path(ordinary_cache_root(path))
+    for child in root.iterdir():
+        if child.is_symlink():
+            child.unlink()
+        elif (
+            callable(getattr(child, "is_junction", None)) and child.is_junction()
+        ) or (
+            os.name == "nt"
+            and getattr(child.lstat(), "st_reparse_tag", 0) == stat.IO_REPARSE_TAG_MOUNT_POINT
+        ):
+            child.rmdir()
+        elif child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()

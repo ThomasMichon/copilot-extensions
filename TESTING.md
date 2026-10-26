@@ -3856,6 +3856,16 @@ under `--admission-wait`; linked cache roots refuse before cleanup. Other
 targets, platforms, checkouts, installed runtimes and the global UV cache are
 untouched. There is no need to delete `.test-venvs` or purge UV's cache.
 
+On Windows, cache inspection/removal and disposable sandbox cleanup use one
+native extended-path spelling so deep private UV wheel paths do not become
+false missing-file/nonempty-directory failures. Drive, UNC and already-native
+paths retain their targets; POSIX paths are unchanged. This changes neither
+machine long-path settings nor ownership: rebuild keeps the leased root,
+linked roots/ancestors refuse, child junctions are unlinked without traversal,
+and failed cleanup cannot publish a ready dependency fingerprint. Disposable
+group cleanup still follows confirmed process reaping; an unreaped scope
+retains its sandbox, including overlong files.
+
 > **Cached local dependencies are source-bound, not editable.** Path dependencies
 > install as retained copies in `.test-venvs/<platform>/<target>`. The runner
 > fingerprints their complete canonical/transitive local source graph, explicit

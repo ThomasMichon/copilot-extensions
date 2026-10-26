@@ -21,6 +21,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 
+if __package__:
+    from .native_test_paths import native_test_path
+else:
+    from native_test_paths import native_test_path
+
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()
 sys.path.insert(
@@ -158,6 +163,13 @@ class TestSandbox(tempfile.TemporaryDirectory):
                 f"[KEEP] Unreaped process tree: sandbox retained at {self.name}",
                 file=sys.stderr,
             )
+
+    @classmethod
+    def _rmtree(cls, name, ignore_errors=False, repeated=False):
+        return super()._rmtree(
+            str(native_test_path(Path(name).absolute())),
+            ignore_errors=ignore_errors, repeated=repeated,
+        )
 
     def __exit__(self, exc_type, exc_value, traceback):
         if isinstance(exc_value, UnreapedProcessError):
