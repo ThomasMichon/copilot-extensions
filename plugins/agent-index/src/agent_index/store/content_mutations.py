@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from .repo_filter import _sql_str
@@ -52,16 +53,30 @@ def changed_chunks(table: Any, chunks: list[Chunk]) -> list[Chunk]:
         ids = ", ".join(f"'{_sql_str(cid)}'" for cid in wanted)
         predicate = f"chunk_id IN ({ids})"
         count = table.count_rows(predicate)
-        if count > len(wanted):
-            raise RuntimeError("Incomplete or duplicate canonical chunk lookup")
-        rows = (
+        reader = (
             table.search().where(predicate).select(list(next(iter(wanted.values()))))
-            .limit(max(count, 1)).to_list()
+            .limit(max(count, 1)).to_batches(batch_size=BATCH_SIZE)
         )
-        stored = {row["chunk_id"]: row for row in rows}
-        if len(rows) != count or len(stored) != count or not stored.keys() <= wanted.keys():
-            raise RuntimeError("Incomplete or duplicate canonical chunk lookup")
-        changed.extend(chunk for chunk in batch if stored.get(chunk.chunk_id) != wanted[chunk.chunk_id])
+        stored: dict[str, dict[str, Any]] = {}
+        copies: Counter[str] = Counter()
+        try:
+            for rows in reader:
+                for row in rows.to_pylist():
+                    cid = row["chunk_id"]
+                    if cid not in wanted:
+                        raise RuntimeError("Canonical chunk lookup returned an unexpected ID")
+                    if cid in stored and stored[cid] != row:
+                        raise RuntimeError("Conflicting stored canonical chunks share an ID")
+                    stored[cid] = row
+                    copies[cid] += 1
+        finally:
+            reader.close()
+        if sum(copies.values()) != count:
+            raise RuntimeError("Incomplete canonical chunk lookup")
+        changed.extend(
+            chunk for chunk in batch
+            if stored.get(chunk.chunk_id) != wanted[chunk.chunk_id] or copies[chunk.chunk_id] > 1
+        )
     return changed
 
 

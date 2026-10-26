@@ -437,7 +437,7 @@ source-owner coordination rather than one large rewrite.
   retain explicit writes.
 - Completed-file cleanup now receives the full keep-ID set, including empty
   files, rather than using timestamps as evidence of membership. Reads require
-  complete, unique file IDs; obsolete deletions are scoped and batched at 200
+  complete file-ID enumeration; obsolete deletions are scoped and batched at 200
   IDs, retaining canonical retry authority until vector deletion succeeds.
   Cleanup and pair-receipt pruning still precede file checkpoint publication.
 - Logical processed chunk totals remain compatible even when a content write
@@ -457,3 +457,9 @@ source-owner coordination rather than one large rewrite.
   embedding and both incremental/forced writes, while rejecting conflicting
   metadata at one ID. Real JavaScript chunker regressions exercise both layouts;
   the expanded focused recovery packet passed 154 tests.
+- Extended the same correction to legacy stored copies: stream duplicate rows
+  in batches of at most 200, coalesce only exact persisted-field matches, and
+  reject conflicting copies before mutation. Complete obsolete-ID enumeration
+  deduplicates IDs rather than blocking cleanup of pre-change rows. Upgrade
+  fixtures and the full composed packet passed 241 tests; bounded repair also
+  exercises 506 copies of one canonical record.

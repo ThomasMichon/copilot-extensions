@@ -207,6 +207,10 @@ def test_bounded_comparison_and_incomplete_or_duplicate_rows_are_rejected() -> N
         def to_list(self):
             return selected.copy()
 
+        def to_batches(self, *, batch_size):
+            assert batch_size == 200
+            yield SimpleNamespace(to_pylist=lambda: selected.copy())
+
     query = Query()
     table = SimpleNamespace(
         count_rows=lambda predicate: len(query.where(predicate).to_list()),
@@ -215,7 +219,7 @@ def test_bounded_comparison_and_incomplete_or_duplicate_rows_are_rejected() -> N
     assert changed_chunks(table, items) == []
     assert max(reads) == 200
     table.count_rows = lambda _predicate: 2
-    with pytest.raises(RuntimeError, match="Incomplete or duplicate"):
+    with pytest.raises(RuntimeError, match="Incomplete canonical"):
         changed_chunks(table, items[:1])
     table.count_rows = lambda _predicate: 1
     assert changed_chunks(table, [items[0], items[0]]) == []
@@ -298,3 +302,69 @@ def test_direct_content_coalesces_exact_records_and_rejects_conflicts(
             [item, replace(item, metadata={"different": True})], skip_identical=skip_identical,
         )
     assert table.version == version
+
+
+def test_legacy_identical_stored_copies_are_coalesced_but_conflicts_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    db = MultiModelStore(tmp_path / "lance")
+    original = chunk()
+    db.upsert_content([original])
+    table = db.content_store._get_or_create_table()
+    table.add([dict(content_record(original), indexed_at=0.0)] * 505)
+    search = table.search
+    batches = []
+
+    class Query:
+        def __init__(self):
+            self.query = search()
+
+        def where(self, *args, **kwargs):
+            self.query = self.query.where(*args, **kwargs)
+            return self
+
+        def select(self, *args):
+            self.query = self.query.select(*args)
+            return self
+
+        def limit(self, *args):
+            self.query = self.query.limit(*args)
+            return self
+
+        def to_batches(self, *, batch_size):
+            reader = self.query.to_batches(batch_size=batch_size)
+            try:
+                for batch in reader:
+                    batches.append(batch.num_rows)
+                    yield batch
+            finally:
+                reader.close()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(table, "search", Query)
+        assert db.upsert_content([original], skip_identical=True) == 1
+    assert sum(batches) == 506 and max(batches) <= 200
+    assert table.count_rows() == 1
+    assert db.upsert_content([original], skip_identical=True) == 0
+    table.add([dict(content_record(replace(original, metadata={"conflict": True})), indexed_at=0.0)])
+    version = table.version
+    with pytest.raises(RuntimeError, match="Conflicting stored canonical"):
+        db.upsert_content([original], skip_identical=True)
+    assert table.version == version
+
+
+def test_legacy_stale_duplicate_ids_do_not_block_file_reconciliation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    db = MultiModelStore(tmp_path / "lance")
+    original = chunk()
+    db.upsert_content([original])
+    table = db.content_store._get_or_create_table()
+    table.add([dict(content_record(original), indexed_at=0.0)])
+    assert db.content_store.get_chunk_ids_by_file(
+        original.source, original.file_path,
+    ) == [original.chunk_id]
+    assert db.reconcile_file_chunks(original.source, original.file_path, set()) == 1
+    assert table.count_rows() == 0

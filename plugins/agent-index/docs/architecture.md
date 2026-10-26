@@ -194,6 +194,9 @@ Logical processed chunk counts remain independent of actual content writes.
 Identical canonical input records sharing an ID (for example same-line code
 declarations) are coalesced before chunk accounting, embedding and storage.
 Conflicting text or metadata at the same ID is rejected, not arbitrarily chosen.
+Legacy exact stored copies are streamed in bounded batches and rewritten once
+as a single canonical record; conflicting stored copies still fail visibly.
+Cleanup deduplicates IDs only after proving complete physical row enumeration.
 Direct store calls still refresh timestamps by default for legacy callers;
 `skip_identical=True` is opt-in and requires identity-based rather than
 timestamp-based cleanup. Forced full rebuilds still write every presented row.

@@ -329,9 +329,9 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
         if not count:
             return []
         rows = table.search().where(predicate).select(["chunk_id"]).limit(count).to_list()
-        if len(rows) != count or len({r["chunk_id"] for r in rows}) != count:
+        if len(rows) != count:
             raise RuntimeError("Incomplete file chunk lookup")
-        return [r["chunk_id"] for r in rows]
+        return list(dict.fromkeys(r["chunk_id"] for r in rows))
 
     @source_write
     def delete_stale(self, source: str, *, before: float) -> int:
