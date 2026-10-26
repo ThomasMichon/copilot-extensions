@@ -38,7 +38,7 @@ from .carrier import (
     read_envelope,
     validate_hello,
 )
-from .config_sources import ConfigSource, SSHConfig, SSHProfileSource
+from .config_sources import ConfigSource, SSHConfig, SSHProfileResolutionError, SSHProfileSource
 from .forward import LocalForward, build_forward_ssh_args, build_remote_exec_args, pick_free_local_port
 from .health import HealthStatus, check_health, ensure_healthy
 from .locks import LockHolder, TargetBusyError, TargetLock, locks_dir, pid_alive
@@ -78,6 +78,7 @@ __all__ = [
     "PlatformInfo",
     "PersistentCarrier",
     "SSHConfig",
+    "SSHProfileResolutionError",
     "SSHProfileSource",
     "SupervisedRelayForward",
     "TargetBusyError",

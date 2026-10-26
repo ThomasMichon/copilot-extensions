@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+import ssh_manager
 import ssh_manager.config_sources as config_sources
-from ssh_manager.config_sources import ConfigSource, SSHConfig, SSHProfileSource
+from ssh_manager.config_sources import ConfigSource, SSHConfig, SSHProfileResolutionError, SSHProfileSource
 
 
 class TestSSHConfig:
@@ -65,6 +67,23 @@ class TestSSHConfig:
 
 class TestSSHProfileSource:
     """SSHProfileSource tests."""
+
+    @pytest.mark.parametrize("condition", ["missing-client", "invalid-config", "empty-config"])
+    def test_operational_resolution_failure_has_public_compatible_type(
+        self, monkeypatch: pytest.MonkeyPatch, condition: str,
+    ) -> None:
+        monkeypatch.setattr(
+            config_sources.shutil, "which",
+            lambda _name: None if condition == "missing-client" else "ssh-fixture",
+        )
+        monkeypatch.setattr(config_sources.subprocess, "run", lambda *_a, **_k: SimpleNamespace(
+            returncode=255 if condition == "invalid-config" else 0,
+            stdout="", stderr="invalid configuration" if condition == "invalid-config" else "",
+        ))
+        assert ssh_manager.SSHProfileResolutionError is SSHProfileResolutionError
+        with pytest.raises(SSHProfileResolutionError) as refused:
+            SSHProfileSource("receiver", resolve_timeout=30).get_ssh_config()
+        assert isinstance(refused.value, RuntimeError)
 
     def test_implements_config_source_protocol(self):
         source = SSHProfileSource(host_alias="borealis")

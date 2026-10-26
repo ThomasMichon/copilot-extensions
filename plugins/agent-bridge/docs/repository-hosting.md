@@ -109,6 +109,18 @@ workspace. This metadata-only read precedes allocation; the final execution
 checkout is still checked again. Neither a guessed remote home nor a similarly
 named local repository is proof.
 
+The SSH policy read establishes the shared manager's minimal profile-based
+connection before executing the query, including on a cold daemon. It preserves
+existing connection forwards rather than clearing another consumer's tunnels,
+and does not prepare auth hooks, plugins, worktrees or an agent channel.
+Connection establishment and the policy command share a 30-second deadline;
+connection failure, timeout and invalid or refused receiver results remain
+explicit hosting refusals. Successful connectivity is not policy admission.
+Expected OpenSSH profile-resolution failures and bounded `ssh -G` timeouts
+also become hosting refusals. The shared library distinguishes operational
+resolution errors from unrelated programming `RuntimeError`s; Bridge does not
+catch all runtime errors or infer permission from a failed profile read.
+
 ## Provider admission and capability limits
 
 Supported container and CodeSpace targets are checked, not blanket-refused.
@@ -170,11 +182,19 @@ The isolated effect-ledger coverage is in:
   overrides, late denial, resume/resync/handoff/implicit cold-start custody.
 - `tests/test_repository_hosting_receivers.py`: final resolved cwd, prepared and
   retained plans, receiver override, Session Host backstop, SSH capability
-  refusal, namespace readiness and opaque provider refusal.
+  refusal, a cold real SSH manager through the HTTP start handler, namespace
+  readiness and opaque provider refusal.
 - `tests/test_repository_hosting_surfaces.py`: keyed reservation retention,
   UI/CLI pre-seed gates and continued live delivery.
 - `tests/test_hosting_capability.py`: actual command wiring, mixed-version
   daemon refusal, per-attempt capability/protocol composition and health support.
+
+The required unit packet also admits
+`tools/promotion_unit_tests/test_ssh_hosting_policy.py`: cold connection ordering,
+preserved warm forwards, connection/receiver refusal, real profile-resolution
+failures and the shared deadline.
+Its stateful SSH boundary refuses execution before connection; no native
+process, network or OS event loop runs in these units.
 
 These selectors are intended for the repository's isolated bounded runner after
 all new source/test files are included in its snapshot. They do not assert that

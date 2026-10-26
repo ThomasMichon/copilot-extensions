@@ -82,6 +82,13 @@ running, before its final `CommandResult`. Captured output and stdin behavior
 are preserved. The existing command owner retains timeout/cancellation cleanup;
 the callback does not create another transport, retry policy or process owner.
 
+`SSHProfileSource` raises the public `SSHProfileResolutionError` when OpenSSH
+is absent, rejects the selected profile, or returns no effective configuration.
+It remains a `RuntimeError` subclass for existing callers; consumers can
+translate these operational refusals without hiding unrelated programming
+errors. OS errors and an explicitly bounded resolver's
+`subprocess.TimeoutExpired` retain their existing types.
+
 ## Optional finite reverse-forward selection
 
 `ssh_manager.reverse_candidates.FiniteReverseForward` subclasses the existing
