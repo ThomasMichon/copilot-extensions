@@ -480,6 +480,13 @@ backoff across sessions. A reachable peer is never restarted because it rejects
 the discovery request.
 No installation, global mux configuration or extra service is required.
 
+## Automatic updates
+
+Optional [automatic updates](docs/automatic-updates.md) are **off by default**.
+An explicit user choice or trusted setup can enroll Manager-owned maintenance;
+it uses current-user startup and the canonical update path, independently of
+the Picker. Startup registration alone is not proof of a running updater.
+
 ## Launch preparation
 
 ### Disable automatic maintenance while auditing

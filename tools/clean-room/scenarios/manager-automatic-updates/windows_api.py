@@ -1,0 +1,402 @@
+"""Read-only Win32 identity/desktop observations; imports are portable."""
+
+from __future__ import annotations
+
+import ctypes as ct
+from ctypes import wintypes as wt
+from dataclasses import asdict, dataclass
+import os
+from pathlib import Path, PureWindowsPath
+import threading
+from typing import Callable
+
+from windows_observation import HookPump, NativeBlocked, WindowObserver  # noqa: F401
+
+CONSOLE_IMAGES = {
+    "python.exe", "pythonw.exe", "uv.exe", "cmd.exe", "powershell.exe", "pwsh.exe",
+    "conhost.exe", "openconsole.exe", "windowsterminal.exe",
+}
+
+
+class ProcessEntry(ct.Structure):
+    _fields_ = [
+        ("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("pid", wt.DWORD),
+        ("heap", ct.c_size_t), ("module", wt.DWORD), ("threads", wt.DWORD),
+        ("parent", wt.DWORD), ("priority", wt.LONG), ("flags", wt.DWORD),
+        ("exe", wt.WCHAR * 260),
+    ]
+
+
+@dataclass(frozen=True)
+class DesktopFacts:
+    elevated: bool
+    shell_present: bool
+    foreground_visible: bool
+    station_visible: bool
+    input_desktop_matches: bool
+    same_session: bool
+    ssh: bool
+
+
+def require_desktop(facts: DesktopFacts) -> dict[str, bool]:
+    checks = (
+        (facts.elevated, "elevated-token", "use a normal unelevated Windows console"),
+        (facts.ssh, "ssh-session", "SSH is not an interactive desktop qualification venue"),
+        (not facts.shell_present, "shell-unavailable", "GetShellWindow is unavailable"),
+        (not facts.foreground_visible, "foreground-unavailable", "visible foreground access is required"),
+        (not facts.station_visible, "station-not-interactive", "a visible WinSta0 station is required"),
+        (not facts.input_desktop_matches, "desktop-not-interactive", "current input desktop is inaccessible"),
+        (not facts.same_session, "desktop-session-mismatch", "shell and foreground must share this session"),
+    )
+    for failed, code, message in checks:
+        if failed:
+            raise NativeBlocked(code, message)
+    return asdict(facts)
+
+
+def create_private_directory(path: Path) -> None:
+    """Create only the new fixture root, with a protected inheritable user DACL."""
+    if os.name != "nt":
+        raise NativeBlocked("win32-unavailable", "Windows private directory API unavailable")
+    kernel = ct.WinDLL("kernel32", use_last_error=True)
+    advapi = ct.WinDLL("advapi32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = wt.HANDLE
+    kernel.GetVolumePathNameW.argtypes = [wt.LPCWSTR, wt.LPWSTR, wt.DWORD]
+    kernel.GetVolumeInformationW.argtypes = [
+        wt.LPCWSTR, wt.LPWSTR, wt.DWORD, ct.POINTER(wt.DWORD), ct.POINTER(wt.DWORD),
+        ct.POINTER(wt.DWORD), wt.LPWSTR, wt.DWORD,
+    ]
+    volume, flags = ct.create_unicode_buffer(32768), wt.DWORD()
+    if not kernel.GetVolumePathNameW(str(path.parent), volume, len(volume)):
+        raise ct.WinError(ct.get_last_error())
+    if not kernel.GetVolumeInformationW(volume, None, 0, None, None, ct.byref(flags), None, 0):
+        raise ct.WinError(ct.get_last_error())
+    if not flags.value & 0x8:
+        raise NativeBlocked("private-acl-unsupported", "fixture volume does not preserve Windows ACLs")
+    kernel.CloseHandle.argtypes = [wt.HANDLE]
+    kernel.LocalFree.argtypes, kernel.LocalFree.restype = [wt.LPVOID], wt.LPVOID
+    advapi.OpenProcessToken.argtypes = [wt.HANDLE, wt.DWORD, ct.POINTER(wt.HANDLE)]
+    advapi.GetTokenInformation.argtypes = [
+        wt.HANDLE, ct.c_int, wt.LPVOID, wt.DWORD, ct.POINTER(wt.DWORD),
+    ]
+    advapi.ConvertSidToStringSidW.argtypes = [wt.LPVOID, ct.POINTER(wt.LPWSTR)]
+    advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW.argtypes = [
+        wt.LPCWSTR, wt.DWORD, ct.POINTER(wt.LPVOID), ct.POINTER(wt.DWORD),
+    ]
+
+    class Attributes(ct.Structure):
+        _fields_ = [("length", wt.DWORD), ("descriptor", wt.LPVOID), ("inherit", wt.BOOL)]
+
+    kernel.CreateDirectoryW.argtypes = [wt.LPCWSTR, ct.POINTER(Attributes)]
+    token, sid_text, descriptor = wt.HANDLE(), wt.LPWSTR(), wt.LPVOID()
+    if not advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x8, ct.byref(token)):
+        raise ct.WinError(ct.get_last_error())
+    try:
+        required = wt.DWORD()
+        advapi.GetTokenInformation(token, 1, None, 0, ct.byref(required))
+        if not required.value:
+            raise ct.WinError(ct.get_last_error())
+        user = ct.create_string_buffer(required.value)
+        if not advapi.GetTokenInformation(token, 1, user, len(user), ct.byref(required)):
+            raise ct.WinError(ct.get_last_error())
+        sid = ct.cast(user, ct.POINTER(wt.LPVOID)).contents
+        if not advapi.ConvertSidToStringSidW(sid, ct.byref(sid_text)):
+            raise ct.WinError(ct.get_last_error())
+        sddl = f"D:P(A;OICI;FA;;;{sid_text.value})(A;OICI;FA;;;BA)"
+        if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, 1, ct.byref(descriptor), None,
+        ):
+            raise ct.WinError(ct.get_last_error())
+        attributes = Attributes(ct.sizeof(Attributes), descriptor, False)
+        if not kernel.CreateDirectoryW(str(path), ct.byref(attributes)):
+            raise ct.WinError(ct.get_last_error())
+    finally:
+        if descriptor:
+            kernel.LocalFree(descriptor)
+        if sid_text:
+            kernel.LocalFree(ct.cast(sid_text, wt.LPVOID))
+        kernel.CloseHandle(token)
+
+
+@dataclass(frozen=True)
+class ProcessInfo:
+    pid: int
+    created: int
+    parent: int
+    image: str
+    session: int
+
+    @property
+    def key(self) -> tuple[int, int]:
+        return self.pid, self.created
+
+
+@dataclass(frozen=True)
+class WindowInfo:
+    hwnd: int
+    process: ProcessInfo
+    lineage: tuple[tuple[int, int], ...]
+
+    @property
+    def key(self) -> tuple[int, int, int]:
+        return self.hwnd, self.process.pid, self.process.created
+
+
+class WinAPI:
+    console_images = CONSOLE_IMAGES
+
+    def __init__(self) -> None:
+        if os.name != "nt":
+            raise NativeBlocked("win32-unavailable", "native Windows APIs are unavailable")
+        self.kernel = ct.WinDLL("kernel32", use_last_error=True)
+        self.user = ct.WinDLL("user32", use_last_error=True)
+        self.advapi = ct.WinDLL("advapi32", use_last_error=True)
+        self.callback = ct.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+        self.handles: dict[int, int] = {}
+        self.infos: dict[int, ProcessInfo] = {}
+        self.parents: dict[int, int] = {}
+        self.lock = threading.RLock()
+        try:
+            self._configure()
+        except (AttributeError, OSError) as exc:
+            raise NativeBlocked("required-win32-api-unavailable", str(exc)) from exc
+
+    def _configure(self) -> None:
+        k, u, a = self.kernel, self.user, self.advapi
+        signatures = (
+            (k.OpenProcess, [wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE),
+            (k.CloseHandle, [wt.HANDLE], wt.BOOL),
+            (k.GetCurrentProcess, [], wt.HANDLE),
+            (k.GetCurrentThreadId, [], wt.DWORD),
+            (k.ProcessIdToSessionId, [wt.DWORD, ct.POINTER(wt.DWORD)], wt.BOOL),
+            (k.GetProcessTimes, [wt.HANDLE, *([ct.POINTER(ct.c_ulonglong)] * 4)], wt.BOOL),
+            (k.QueryFullProcessImageNameW,
+             [wt.HANDLE, wt.DWORD, wt.LPWSTR, ct.POINTER(wt.DWORD)], wt.BOOL),
+            (k.CreateToolhelp32Snapshot, [wt.DWORD, wt.DWORD], wt.HANDLE),
+            (k.Process32FirstW, [wt.HANDLE, ct.POINTER(ProcessEntry)], wt.BOOL),
+            (k.Process32NextW, [wt.HANDLE, ct.POINTER(ProcessEntry)], wt.BOOL),
+            (a.OpenProcessToken, [wt.HANDLE, wt.DWORD, ct.POINTER(wt.HANDLE)], wt.BOOL),
+            (a.GetTokenInformation,
+             [wt.HANDLE, ct.c_int, wt.LPVOID, wt.DWORD, ct.POINTER(wt.DWORD)], wt.BOOL),
+            (u.GetShellWindow, [], wt.HWND), (u.GetForegroundWindow, [], wt.HWND),
+            (u.IsWindowVisible, [wt.HWND], wt.BOOL),
+            (u.GetWindowThreadProcessId, [wt.HWND, ct.POINTER(wt.DWORD)], wt.DWORD),
+            (u.EnumWindows, [self.callback, wt.LPARAM], wt.BOOL),
+            (u.GetProcessWindowStation, [], wt.HANDLE),
+            (u.GetThreadDesktop, [wt.DWORD], wt.HANDLE),
+            (u.OpenInputDesktop, [wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE),
+            (u.CloseDesktop, [wt.HANDLE], wt.BOOL),
+            (u.GetUserObjectInformationW,
+             [wt.HANDLE, ct.c_int, wt.LPVOID, wt.DWORD, ct.POINTER(wt.DWORD)], wt.BOOL),
+        )
+        for function, arguments, result in signatures:
+            function.argtypes, function.restype = arguments, result
+
+    def _check(self, value: object, action: str) -> None:
+        if not value:
+            raise NativeBlocked("win32-inspection-failed", f"{action}: WinError {ct.get_last_error()}")
+
+    def elevated(self, process: int) -> bool:
+        token, elevation, size = wt.HANDLE(), wt.DWORD(), wt.DWORD()
+        self._check(self.advapi.OpenProcessToken(process, 0x8, ct.byref(token)), "OpenProcessToken")
+        try:
+            self._check(
+                self.advapi.GetTokenInformation(
+                    token, 20, ct.byref(elevation), ct.sizeof(elevation), ct.byref(size),
+                ), "TokenElevation",
+            )
+            return bool(elevation.value)
+        finally:
+            self.kernel.CloseHandle(token)
+
+    def session(self, pid: int) -> int:
+        session = wt.DWORD()
+        self._check(self.kernel.ProcessIdToSessionId(pid, ct.byref(session)), "ProcessIdToSessionId")
+        return int(session.value)
+
+    def _object_name(self, handle: int) -> str:
+        buffer, size = ct.create_unicode_buffer(256), wt.DWORD()
+        self._check(
+            self.user.GetUserObjectInformationW(handle, 2, buffer, ct.sizeof(buffer), ct.byref(size)),
+            "desktop/station name",
+        )
+        return buffer.value
+
+    def facts(self) -> DesktopFacts:
+        shell, foreground = self.user.GetShellWindow(), self.user.GetForegroundWindow()
+        shell_pid, foreground_pid = wt.DWORD(), wt.DWORD()
+        if shell:
+            self._check(self.user.GetWindowThreadProcessId(shell, ct.byref(shell_pid)), "shell PID")
+        if foreground:
+            self._check(
+                self.user.GetWindowThreadProcessId(foreground, ct.byref(foreground_pid)), "foreground PID",
+            )
+        station = self.user.GetProcessWindowStation()
+        self._check(station, "GetProcessWindowStation")
+        flags, size = (wt.DWORD * 3)(), wt.DWORD()
+        self._check(
+            self.user.GetUserObjectInformationW(
+                station, 1, flags, ct.sizeof(flags), ct.byref(size),
+            ), "window station visibility",
+        )
+        desktop = self.user.OpenInputDesktop(0, False, 0x0001 | 0x0100)
+        matches = False
+        if desktop:
+            try:
+                current = self.user.GetThreadDesktop(self.kernel.GetCurrentThreadId())
+                matches = self._object_name(desktop) == self._object_name(current) == "Default"
+            finally:
+                self.user.CloseDesktop(desktop)
+        current_session = self.session(os.getpid())
+        return DesktopFacts(
+            elevated=self.elevated(self.kernel.GetCurrentProcess()),
+            shell_present=bool(shell),
+            foreground_visible=bool(foreground and self.user.IsWindowVisible(foreground)),
+            station_visible=self._object_name(station) == "WinSta0" and bool(flags[2] & 1),
+            input_desktop_matches=matches,
+            same_session=bool(
+                current_session and shell_pid.value and foreground_pid.value
+                and self.session(shell_pid.value) == self.session(foreground_pid.value) == current_session
+            ),
+            ssh=any(os.environ.get(key) for key in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")),
+        )
+
+    def refresh_processes(self) -> None:
+        first, next_entry = self.kernel.Process32FirstW, self.kernel.Process32NextW
+        handle = self.kernel.CreateToolhelp32Snapshot(2, 0)
+        if not handle or handle == ct.c_void_p(-1).value:
+            raise NativeBlocked("process-snapshot-failed", "CreateToolhelp32Snapshot failed")
+        try:
+            entry = ProcessEntry()
+            entry.dwSize = ct.sizeof(entry)
+            parents = {}
+            available = first(handle, ct.byref(entry))
+            if not available and ct.get_last_error() != 18:
+                raise NativeBlocked("process-snapshot-failed", "Process32FirstW failed")
+            while available:
+                parents[int(entry.pid)] = int(entry.parent)
+                available = next_entry(handle, ct.byref(entry))
+            if ct.get_last_error() != 18:
+                raise NativeBlocked("process-snapshot-failed", "Process32NextW failed")
+            self.parents = parents
+        finally:
+            self.kernel.CloseHandle(handle)
+
+    def process(self, pid: int) -> ProcessInfo:
+        with self.lock:
+            return self._process(pid)
+
+    def _process(self, pid: int) -> ProcessInfo:
+        if pid in self.infos:
+            return self.infos[pid]
+        handle = self.kernel.OpenProcess(0x100000 | 0x1000, False, pid)
+        self._check(handle, "pin process identity")
+        try:
+            times = [ct.c_ulonglong() for _ in range(4)]
+            self._check(
+                self.kernel.GetProcessTimes(handle, *(ct.byref(item) for item in times)),
+                "process creation time",
+            )
+            image, size = ct.create_unicode_buffer(32768), wt.DWORD(32768)
+            self._check(
+                self.kernel.QueryFullProcessImageNameW(handle, 0, image, ct.byref(size)),
+                "process executable identity",
+            )
+            if pid not in self.parents:
+                self.refresh_processes()
+            info = ProcessInfo(
+                pid, times[0].value, self.parents.get(pid, 0),
+                PureWindowsPath(image.value).name.lower(), self.session(pid),
+            )
+            self.handles[pid], self.infos[pid] = handle, info
+            return info
+        except BaseException:
+            self.kernel.CloseHandle(handle)
+            raise
+
+    def lineage(self, pid: int) -> tuple[tuple[int, int], ...]:
+        result = []
+        child_created = 1 << 64
+        for _ in range(128):
+            if pid <= 0:
+                break
+            try:
+                info = self.process(pid)
+            except NativeBlocked:
+                break
+            if info.created > child_created or info.key in result:
+                break
+            result.append(info.key)
+            child_created, pid = info.created, info.parent
+        return tuple(result)
+
+    def windows(self) -> dict[int, WindowInfo]:
+        result = {}
+        failure = []
+
+        @self.callback
+        def visit(hwnd: int, _data: int) -> bool:
+            if self.user.IsWindowVisible(hwnd):
+                try:
+                    pid = wt.DWORD()
+                    self._check(
+                        self.user.GetWindowThreadProcessId(hwnd, ct.byref(pid)), "visible window PID",
+                    )
+                    result[int(hwnd)] = WindowInfo(int(hwnd), self.process(pid.value), self.lineage(pid.value))
+                except Exception as exc:
+                    # ctypes otherwise prints and discards Python callback exceptions.
+                    failure.append(NativeBlocked(
+                        "window-callback-failed", f"{type(exc).__name__}: {exc}",
+                    ))
+                    return False
+            return True
+
+        enumerated = self.user.EnumWindows(visit, 0)
+        if failure:
+            raise failure[0]
+        self._check(enumerated, "EnumWindows")
+        return result
+
+    def foreground(self) -> int:
+        # Win32 permits NULL during activation transitions; last-error is not
+        # this API's failure contract. The observer must retain that transition.
+        return int(self.user.GetForegroundWindow() or 0)
+
+    def window_identity(self, hwnd: int) -> tuple[int, int]:
+        pid = wt.DWORD()
+        thread = self.user.GetWindowThreadProcessId(hwnd, ct.byref(pid))
+        self._check(thread and pid.value, "direct window PID/TID")
+        return int(pid.value), int(thread)
+
+    def raw_windows(self) -> dict[int, tuple[int, int]]:
+        result, failure = {}, []
+
+        @self.callback
+        def visit(hwnd: int, _data: int) -> bool:
+            if self.user.IsWindowVisible(hwnd):
+                try:
+                    result[int(hwnd)] = self.window_identity(hwnd)
+                except Exception as exc:
+                    failure.append(NativeBlocked(
+                        "visible-window-identity-failed", f"HWND {int(hwnd)}: {type(exc).__name__}: {exc}",
+                    ))
+                    return False
+            return True
+
+        enumerated = self.user.EnumWindows(visit, 0)
+        if failure:
+            raise failure[0]
+        self._check(enumerated, "raw EnumWindows")
+        return result
+
+    def require_desktop(self) -> None:
+        require_desktop(self.facts())
+
+    def event_hooks(self, receive: Callable, on_error: Callable[[Exception], None]) -> HookPump:
+        from windows_events import WinEventHooks
+        return WinEventHooks(self.user, self.kernel, receive, on_error)
+
+    def close(self) -> None:
+        for handle in self.handles.values():
+            self.kernel.CloseHandle(handle)
+        self.handles.clear()

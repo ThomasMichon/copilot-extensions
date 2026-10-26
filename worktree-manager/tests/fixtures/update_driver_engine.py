@@ -32,6 +32,11 @@ def main() -> int:
                 "phase": "engine", "pid": os.getpid(),
                 "context_keys": sorted(dict(request.spec.context)),
                 "no_manager": args.no_manager,
+                "unattended": os.environ.get("CE_UPDATE_UNATTENDED"),
+                "session_credentials_present": any(os.environ.get(key) for key in (
+                    "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
+                )),
+                "askpass_requirement": os.environ.get("SSH_ASKPASS_REQUIRE"),
             }) + "\n")
         return 6
 

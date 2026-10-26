@@ -4,8 +4,8 @@ Mirrors ``self_update_tasks.py`` structurally (same Windows Scheduled Task /
 Linux systemd --user timer lifecycle: query / register / enable / unregister
 / reconcile / status), but targets a different action entirely: instead of
 ``agent-machines self-update run --tier <t>``, the scheduled task invokes
-``worktree-manager update`` -- the fleet-wide plugin install/update
-orchestrator. Kept as an
+``agent-machines fleet-update run --tier sweep``. That wrapper rechecks
+ownership and negotiates the installed Manager before invoking its updater. Kept as an
 independent module rather than folding into ``self_update_tasks.py`` so a
 change to one subsystem's scheduling can never regress the other's
 already-deployed, live mechanism.
@@ -18,9 +18,22 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
+from sys import modules as _modules
 from typing import Any
 
 from .fleet_update_state import TIER_SPECS, tier_status
+from .legacy_fleet_definitions import FLEET_DESCRIPTION
+from .scheduler_retirement import (
+    RetirementBusy,
+    require_linux_retirement,
+    require_registration_policy,
+    require_windows_retirement,
+    windows_definition_owned,
+    windows_mutation_guard_script,
+    windows_retirement_script,
+    windows_task_snapshot,
+)
+from .windows_scheduler_registration import windows_registration_script
 
 
 @dataclass
@@ -37,6 +50,10 @@ class ScheduledTaskSnapshot:
     trigger_kind: str | None = None
     trigger_value: int | None = None
     matching: bool = False
+    task_path: str | None = None
+    action_count: int | None = None
+    trigger_count: int | None = None
+    run_level: str | None = None
 
 
 @dataclass
@@ -91,18 +108,13 @@ def runtime_root(home: Path | None = None) -> Path:
 
 
 def task_binstub_path(home: Path | None = None) -> str:
-    """The ``worktree-manager`` binstub the scheduled task invokes.
-
-    Deliberately a different binstub from ``self_update_tasks``'s own
-    ``agent-machines.cmd``/``agent-machines`` -- the fleet-update tier's job
-    is to run the Worktree Manager's own updater, not agent-machines itself.
-    """
+    """Stable AM wrapper; each firing rechecks consent and Manager capability."""
     if sys.platform == "win32":
         raw_home = home if home is not None else Path.home()
         base = PureWindowsPath(str(raw_home))
     else:
         base = home if home is not None else Path.home()
-    command = "worktree-manager.cmd" if sys.platform == "win32" else "worktree-manager"
+    command = "agent-machines.cmd" if sys.platform == "win32" else "agent-machines"
     return str(base / ".local" / "bin" / command)
 
 
@@ -112,15 +124,12 @@ def _task_command_parts(tier: str, *, home: Path | None = None) -> list[str]:
     # project-scoped tier; today's single "sweep" tier runs a global update.
     if tier not in TIER_SPECS:
         raise ValueError(f"unknown fleet-update tier: {tier}")
-    return [task_binstub_path(home), "update"]
+    return [task_binstub_path(home), "fleet-update", "run", "--tier", tier]
 
 
 def task_description(tier: str) -> str:
     if tier == "sweep":
-        return (
-            "agent-machines unattended fleet-update sweep "
-            "(daily worktree-manager update)"
-        )
+        return FLEET_DESCRIPTION
     raise ValueError(f"unknown fleet-update tier: {tier}")
 
 
@@ -174,27 +183,11 @@ def task_definition_matches(
     *,
     home: Path | None = None,
 ) -> bool:
-    if not snapshot.present:
-        return False
-    spec = TIER_SPECS[tier]
-    # See self_update_tasks.task_definition_matches for why the arguments
-    # string is checked case-folded but WITHOUT "/" -> "\\" normalization
-    # (it embeds cmd.exe's own "/c" flag) while the embedded binstub path is
-    # checked separately with that normalization applied.
-    literal_arguments = (snapshot.arguments or "").casefold().strip()
-    normalized_arguments = _normalize_windows_text(snapshot.arguments)
-    execute = Path(snapshot.execute or "").name.casefold()
     return (
-        execute == "conhost.exe"
-        and (snapshot.logon_type or "") == "Interactive"
-        and (snapshot.description or "") == task_description(tier)
-        and "cmd.exe /c" in literal_arguments
-        and _normalize_windows_text(task_binstub_path(home)) in normalized_arguments
-        and "update" in literal_arguments
-        and _normalize_windows_text(snapshot.working_directory)
-        == _normalize_windows_text(task_working_directory(home))
-        and (snapshot.trigger_kind or "") == spec.schedule_kind
-        and snapshot.trigger_value == spec.schedule_value
+        snapshot.present
+        and windows_definition_owned("fleet", _modules[__name__], snapshot, tier, home=home)
+        and (snapshot.arguments or "").casefold()
+        == task_action_arguments(tier, home=home).casefold()
     )
 
 
@@ -204,29 +197,7 @@ def _snapshot_from_payload(
     *,
     home: Path | None = None,
 ) -> ScheduledTaskSnapshot:
-    snapshot = ScheduledTaskSnapshot(
-        task_name=TIER_SPECS[tier].task_name,
-        present=bool(payload.get("present")),
-        enabled=payload.get("enabled") if isinstance(payload.get("enabled"), bool) else None,
-        state=payload.get("state") if isinstance(payload.get("state"), str) else None,
-        logon_type=payload.get("logon_type")
-        if isinstance(payload.get("logon_type"), str)
-        else None,
-        description=payload.get("description")
-        if isinstance(payload.get("description"), str)
-        else None,
-        execute=payload.get("execute") if isinstance(payload.get("execute"), str) else None,
-        arguments=payload.get("arguments") if isinstance(payload.get("arguments"), str) else None,
-        working_directory=payload.get("working_directory")
-        if isinstance(payload.get("working_directory"), str)
-        else None,
-        trigger_kind=payload.get("trigger_kind")
-        if isinstance(payload.get("trigger_kind"), str)
-        else None,
-        trigger_value=payload.get("trigger_value")
-        if isinstance(payload.get("trigger_value"), int)
-        else None,
-    )
+    snapshot = windows_task_snapshot(ScheduledTaskSnapshot, TIER_SPECS[tier].task_name, payload)
     snapshot.matching = task_definition_matches(snapshot, tier, home=home)
     return snapshot
 
@@ -246,11 +217,15 @@ def query_scheduled_task(
 if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {{
   throw 'ScheduledTasks cmdlets are unavailable'
 }}
-$task = Get-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue
-if (-not $task) {{
+$matches = @(Get-ScheduledTask -ErrorAction Stop | Where-Object {{
+  $_.TaskName -eq {_ps_literal(task_name)}
+}})
+if ($matches.Count -gt 1) {{ throw 'multiple same-name Scheduled Tasks; ownership is ambiguous' }}
+if ($matches.Count -eq 0) {{
   [ordered]@{{ present = $false }} | ConvertTo-Json -Compress
   exit 0
 }}
+$task = $matches[0]
 $action = @($task.Actions)[0]
 $trigger = @($task.Triggers)[0]
 $enabled = $null
@@ -270,6 +245,10 @@ if ($trigger.PSObject.TypeNames -contains {_ps_literal(daily_trigger_type)}) {{
 }}
 [ordered]@{{
   present = $true
+  task_path = [string]$task.TaskPath
+  action_count = @($task.Actions).Count
+  trigger_count = @($task.Triggers).Count
+  run_level = [string]$task.Principal.RunLevel
   enabled = $enabled
   state = [string]$task.State
   logon_type = [string]$task.Principal.LogonType
@@ -300,51 +279,21 @@ def register_scheduled_task(
     resolve_binary,
     home: Path | None = None,
 ):
-    spec = TIER_SPECS[tier]
-    task_name = spec.task_name
-    schedule_script = (
-        "$trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date.AddMinutes(5)) "
-        "-RepetitionInterval (New-TimeSpan -Hours 1) "
-        "-RepetitionDuration (New-TimeSpan -Days 3650)"
-        if spec.schedule_kind == "hourly"
-        else "$trigger = New-ScheduledTaskTrigger -Daily -At '4:00AM' -DaysInterval 1"
-    )
-    script = f"""
-if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {{
-  throw 'ScheduledTasks cmdlets are unavailable'
-}}
-$taskArgs = {_ps_literal(task_action_arguments(tier, home=home))}
-$action = New-ScheduledTaskAction `
-  -Execute 'conhost.exe' `
-  -Argument $taskArgs `
-  -WorkingDirectory {_ps_literal(task_working_directory(home))}
-{schedule_script}
-$settings = New-ScheduledTaskSettingsSet `
-  -AllowStartIfOnBatteries `
-  -DontStopIfGoingOnBatteries `
-  -ExecutionTimeLimit ([TimeSpan]::Zero) `
-  -StartWhenAvailable
-$currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-$principal = New-ScheduledTaskPrincipal `
-  -UserId $currentUser `
-  -LogonType Interactive `
-  -RunLevel Limited
-Register-ScheduledTask `
-  -TaskName {_ps_literal(task_name)} `
-  -Action $action `
-  -Trigger $trigger `
-  -Settings $settings `
-  -Principal $principal `
-  -Force `
-  -Description {_ps_literal(task_description(tier))} | Out-Null
-Enable-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue | Out-Null
-""".strip()
+    tasks = _modules[__name__]
+    require_registration_policy("fleet", home)
+    snapshot = query_scheduled_task(tier, runner=runner, resolve_binary=resolve_binary, home=home)
+    require_windows_retirement("fleet", tasks, snapshot, tier, home=home)
+    script = windows_registration_script("fleet", tasks, tier, home=home)
     return _run_powershell(script, runner=runner, resolve_binary=resolve_binary, timeout=300)
 
 
-def enable_scheduled_task(tier: str, *, runner, resolve_binary):
+def enable_scheduled_task(tier: str, *, runner, resolve_binary, home: Path | None = None):
+    require_registration_policy("fleet", home)
+    snapshot = query_scheduled_task(tier, runner=runner, resolve_binary=resolve_binary, home=home)
+    require_windows_retirement("fleet", _modules[__name__], snapshot, tier, home=home)
     task_name = TIER_SPECS[tier].task_name
-    script = f"""
+    guard = windows_mutation_guard_script("fleet", _modules[__name__], tier, home=home)
+    script = guard + "\n" + f"""
 if (-not (Get-Command Enable-ScheduledTask -ErrorAction SilentlyContinue)) {{
   throw 'ScheduledTasks cmdlets are unavailable'
 }}
@@ -353,22 +302,11 @@ Enable-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction Stop | Out-
     return _run_powershell(script, runner=runner, resolve_binary=resolve_binary, timeout=180)
 
 
-def unregister_scheduled_task(tier: str, *, runner, resolve_binary):
-    task_name = TIER_SPECS[tier].task_name
-    script = f"""
-if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {{
-  throw 'ScheduledTasks cmdlets are unavailable'
-}}
-$task = Get-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue
-if (-not $task) {{
-  exit 0
-}}
-Stop-ScheduledTask -TaskName {_ps_literal(task_name)} -ErrorAction SilentlyContinue | Out-Null
-Unregister-ScheduledTask `
-  -TaskName {_ps_literal(task_name)} `
-  -Confirm:$false `
-  -ErrorAction Stop | Out-Null
-""".strip()
+def unregister_scheduled_task(tier: str, *, runner, resolve_binary, home: Path | None = None):
+    tasks = _modules[__name__]
+    snapshot = query_scheduled_task(tier, runner=runner, resolve_binary=resolve_binary, home=home)
+    require_windows_retirement("fleet", tasks, snapshot, tier, home=home)
+    script = windows_retirement_script("fleet", tasks, tier, home=home)
     return _run_powershell(script, runner=runner, resolve_binary=resolve_binary, timeout=180)
 
 
@@ -530,6 +468,10 @@ def register_systemd_timer(
     resolve_binary,
     home: Path | None = None,
 ):
+    require_registration_policy("fleet", home)
+    require_linux_retirement(
+        "fleet", _modules[__name__], tier, runner=runner, home=home,
+    )
     unit_dir = _linux_unit_dir(home)
     unit_dir.mkdir(parents=True, exist_ok=True)
     _linux_service_unit_path(tier, home).write_text(
@@ -549,8 +491,13 @@ def unregister_systemd_timer(
     resolve_binary,
     home: Path | None = None,
 ):
+    require_linux_retirement(
+        "fleet", _modules[__name__], tier, runner=runner, home=home,
+    )
     timer_name = _linux_timer_name(tier)
-    runner(["systemctl", "--user", "disable", "--now", timer_name], timeout=60)
+    disabled = runner(["systemctl", "--user", "disable", "--now", timer_name], timeout=60)
+    if disabled.returncode != 0:
+        return disabled
     service_path = _linux_service_unit_path(tier, home)
     timer_path = _linux_timer_unit_path(tier, home)
     if service_path.exists():
@@ -574,7 +521,7 @@ def _reconcile_linux_timer(
         return ScheduledTaskReconcileResult(
             tier=tier,
             desired_state=desired_state,
-            status="skipped",
+            status="skipped" if desired_present else "error",
             changed=False,
             detail=(
                 "no reachable systemd --user manager on this host; fleet-update "
@@ -597,6 +544,9 @@ def _reconcile_linux_timer(
                     detail="systemd --user timer is already registered",
                     snapshot=snapshot,
                 )
+            require_linux_retirement(
+                "fleet", _modules[__name__], tier, runner=runner, home=home,
+            )
             registered = register_systemd_timer(
                 tier, runner=runner, resolve_binary=resolve_binary, home=home
             )
@@ -618,6 +568,14 @@ def _reconcile_linux_timer(
                 detail="registered the systemd --user timer",
                 snapshot=current,
             )
+        require_linux_retirement(
+            "fleet", _modules[__name__], tier, runner=runner, home=home,
+        )
+        snapshot.present = any(
+            path.exists() or path.is_symlink() for path in (
+                _linux_service_unit_path(tier, home), _linux_timer_unit_path(tier, home),
+            )
+        )
         if not snapshot.present:
             record_task_config(
                 home, tier, installed=False, opted_in=False, attempted_elevation=False
@@ -648,6 +606,11 @@ def _reconcile_linux_timer(
             changed=True,
             detail="removed the systemd --user timer",
             snapshot=snapshot,
+        )
+    except RetirementBusy as exc:
+        return ScheduledTaskReconcileResult(
+            tier=tier, desired_state=desired_state, status="deferred",
+            changed=False, detail=str(exc), snapshot=snapshot,
         )
     except Exception as exc:
         return ScheduledTaskReconcileResult(
@@ -743,7 +706,7 @@ def reconcile_scheduled_task(
             if snapshot.present and snapshot.matching:
                 if snapshot.enabled is False:
                     enabled = enable_scheduled_task(
-                        tier, runner=runner, resolve_binary=resolve_binary
+                        tier, runner=runner, resolve_binary=resolve_binary, home=home,
                     )
                     if enabled.returncode != 0:
                         raise RuntimeError(
@@ -773,6 +736,9 @@ def reconcile_scheduled_task(
                     detail="Scheduled Task is already registered",
                     snapshot=snapshot,
                 )
+            require_windows_retirement(
+                "fleet", _modules[__name__], snapshot, tier, home=home,
+            )
             registered = register_scheduled_task(
                 tier, runner=runner, resolve_binary=resolve_binary, home=home
             )
@@ -809,6 +775,9 @@ def reconcile_scheduled_task(
             raise RuntimeError(
                 registered.output or f"failed to register Scheduled Task {snapshot.task_name!r}"
             )
+        require_windows_retirement(
+            "fleet", _modules[__name__], snapshot, tier, home=home,
+        )
         if not snapshot.present:
             record_task_config(
                 home, tier, installed=False, opted_in=False, attempted_elevation=False
@@ -821,7 +790,9 @@ def reconcile_scheduled_task(
                 detail="Scheduled Task is already absent",
                 snapshot=snapshot,
             )
-        removed = unregister_scheduled_task(tier, runner=runner, resolve_binary=resolve_binary)
+        removed = unregister_scheduled_task(
+            tier, runner=runner, resolve_binary=resolve_binary, home=home,
+        )
         if removed.returncode != 0:
             raise RuntimeError(
                 removed.output or f"failed to remove Scheduled Task {snapshot.task_name!r}"
@@ -837,6 +808,11 @@ def reconcile_scheduled_task(
             changed=True,
             detail="removed the Scheduled Task",
             snapshot=snapshot,
+        )
+    except RetirementBusy as exc:
+        return ScheduledTaskReconcileResult(
+            tier=tier, desired_state=desired_state, status="deferred",
+            changed=False, detail=str(exc), snapshot=snapshot,
         )
     except Exception as exc:
         return ScheduledTaskReconcileResult(

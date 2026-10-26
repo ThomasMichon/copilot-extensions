@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,9 +12,10 @@ import pytest
 
 from worktree_manager import installation_updates as ui
 from worktree_manager import __main__ as manager
-from worktree_manager import catalog, discovery, self_install, update_driver_cli, update_orchestration
+from worktree_manager import agent_plugin_runtime, catalog, discovery, self_install, update_driver_cli, update_orchestration
 
 READ_OPERATIONS = ui._operations
+RESOLVE_ENGINE_INVOCATION = agent_plugin_runtime.resolve_installed_plugin_invocation
 
 
 def test_configuration_child_preserves_sealed_runtime():
@@ -110,16 +112,264 @@ def test_submit_revalidates_and_forwards_only_selected_target(inventory, monkeyp
     assert len(calls) == 1
 
 
-def test_manager_plugin_submission_uses_engine_identity_not_manager_queue(inventory, monkeypatch):
+@pytest.fixture
+def engine_cells(inventory, monkeypatch, tmp_path):
+    contexts = {
+        name: {
+            "COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / name / "install.json"),
+            "AGENT_WORKTREES_UPDATE_CONTEXT": str(tmp_path / name / "project"),
+            "AGENT_WORKTREES_PAYLOAD_ROOT": str(tmp_path / name / "payload"),
+        }
+        for name in ("cell-a", "cell-b")
+    }
+    roots = {name: tmp_path / name / "runtime" for name in contexts}
+    selected = []
+    resolutions = []
+
+    def resolve(plugin, *, environment):
+        assert plugin == "agent-worktrees"
+        resolutions.append(dict(environment))
+        for name, context in contexts.items():
+            if all(environment.get(key) == value for key, value in context.items()):
+                return (["/fixture/engine"], roots[name])
+        return None
+
+    def select(name):
+        selected[:] = [name]
+        for key, value in contexts[name].items():
+            monkeypatch.setenv(key, value)
+
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation", resolve)
+    monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {
+        "contract": 1, "execution_source": str(roots[selected[0]]),
+        "entries": [dict(inventory)],
+    })
+    select("cell-a")
+    return SimpleNamespace(select=select, contexts=contexts, resolutions=resolutions)
+
+
+@pytest.fixture
+def manager_request(engine_cells, monkeypatch, tmp_path):
     import update_driver
 
     calls = []
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
-    monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("plugin used Manager source identity"))
-    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args, **kwargs:
-        calls.append((project, args, kwargs)) or 0)
+    request = SimpleNamespace(
+        id="targeted-request", state="pending", exit_code=None, error=None,
+        log_path=tmp_path / "targeted.log",
+    )
+
+    def enqueue(spec, **kwargs):
+        calls.append(spec)
+        request.spec = spec
+        return request
+
+    monkeypatch.setattr(ui, "_operations", READ_OPERATIONS)
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "manager-source")
+    monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (("/fixture/python", "-m", module, *args), {}))
+    monkeypatch.setattr(update_driver, "enqueue", enqueue)
+    monkeypatch.setattr(update_driver, "status", lambda: (request,) if calls else ())
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *a, **k: None)
+    monkeypatch.setattr(update_driver, "wait", lambda *a, **k: pytest.fail("detached submission waited"))
+    monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda *a, **k:
+        pytest.fail("plugin submission bypassed Manager admission"))
+    return request, calls
+
+
+def test_manager_plugin_submission_uses_the_manager_durable_admission_boundary(
+    manager_request, engine_cells,
+):
+    request, calls = manager_request
     assert ui.submit("guide") == 0
-    assert calls == [(None, ["update", "--no-manager", "--target", "guide", "--detach", "--json"], {"headless": True})]
+    assert len(calls) == 1 and calls[0].backend == "manager"
+    assert calls[0].argv == ("--target", "guide")
+    assert calls[0].source == "manager-source"
+    assert all(dict(calls[0].context)[key] == value for key, value in engine_cells.contexts["cell-a"].items())
+    for state, exit_code, activity, error in (
+        ("pending", None, "queued", None),
+        ("running", None, "running", None),
+        ("completed", 1, "failed", "selected payload build failed"),
+        ("completed", 0, "succeeded", None),
+    ):
+        request.state, request.exit_code, request.error = state, exit_code, error
+        progress = f"Selected guide update: {activity}"
+        request.log_path.write_text(progress, encoding="utf-8")
+        row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
+        assert row["activity"] == activity
+        assert row["card"]["status"] == activity
+        body = row["card"]["body"]
+        assert progress in body and request.id in body
+        operation = json.loads(body.split("Durable operation: ", 1)[1].split("\n\n", 1)[0])
+        assert operation["exit_code"] == exit_code and operation["error"] == error
+        assert operation["log"] == str(request.log_path)
+        engine_cells.select("cell-b")
+        foreign = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
+        assert foreign["activity"] == "idle"
+        assert "Durable operation:" not in foreign["card"]["body"]
+        assert progress not in foreign["card"]["body"]
+        assert engine_cells.resolutions[-1] == dict(calls[0].context)
+        engine_cells.select("cell-a")
+
+    for spec in (
+        replace(calls[0], source="foreign-manager-source"),
+        replace(calls[0], backend="foreign-backend"),
+        replace(calls[0], backend="engine"),
+    ):
+        request.spec = spec
+        row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
+        assert row["activity"] == "idle"
+        assert "Durable operation:" not in row["card"]["body"]
+
+
+def test_same_manager_plugin_submissions_refresh_only_their_addressed_engine_cell(
+    manager_request, engine_cells, monkeypatch,
+):
+    import update_driver
+
+    request, calls = manager_request
+    request.id = "cell-a-request"
+    assert ui.submit("guide") == 0
+    first = SimpleNamespace(**vars(request))
+    first.state, first.exit_code, first.error = "completed", 1, "cell-a build failed"
+    engine_cells.select("cell-b")
+    request.id = "cell-b-request"
+    assert ui.submit("guide") == 0
+    request.state = "running"
+    assert calls[0].source == calls[1].source == "manager-source"
+    assert dict(calls[0].context) != dict(calls[1].context)
+    monkeypatch.setattr(update_driver, "status", lambda: (first, request))
+    for cell, activity, expected, excluded in (
+        ("cell-b", "running", request.id, first.id),
+        ("cell-a", "failed", first.id, request.id),
+    ):
+        engine_cells.select(cell)
+        row = next(row for row in ui.inventory()["entries"] if row["id"] == "guide")
+        assert row["activity"] == activity
+        assert expected in row["card"]["body"]
+        assert excluded not in row["card"]["body"]
+    request.state, request.exit_code = "completed", 0
+    engine_cells.select("cell-b")
+    assert next(row for row in ui.inventory()["entries"] if row["id"] == "guide")["activity"] == "succeeded"
+
+
+@pytest.mark.parametrize("context", [
+    (), (("COPILOT_EXTENSIONS_CONTEXT", "malformed-context"),),
+    (("COPILOT_EXTENSIONS_CONTEXT", "/foreign/install.json"),),
+])
+def test_unattributable_plugin_context_is_unknown_without_progress_or_ambient_fallback(
+    manager_request, engine_cells, context,
+):
+    request, calls = manager_request
+    assert ui.submit("guide") == 0
+    request.spec = replace(calls[0], context=context)
+    request.state, request.exit_code = "completed", 0
+    request.log_path.write_text("unattributed completion details", encoding="utf-8")
+    engine_cells.select("cell-b")
+    result = ui.inventory()
+    rows = {row["id"]: row for row in result["entries"]}
+    assert rows["guide"]["activity"] == "unknown"
+    body = rows["guide"]["card"]["body"]
+    assert "Durable update attribution unavailable" in body
+    assert "unattributed completion details" not in body
+    assert str(request.log_path) not in body
+    assert rows["worktree-manager"]["activity"] == "idle"
+    assert engine_cells.resolutions == [dict(context)]
+
+
+def test_manager_only_history_does_not_depend_on_engine_cell_or_saved_context(
+    manager_request, engine_cells, monkeypatch,
+):
+    import update_driver
+
+    request, calls = manager_request
+    assert ui.submit("worktree-manager") == 0
+    request.state, request.exit_code = "completed", 0
+    request.spec = replace(calls[0], context=())
+    plugin = SimpleNamespace(**vars(request))
+    plugin.spec = replace(request.spec, argv=("--target", "guide"))
+    plugin.id = "unattributable-plugin-request"
+    monkeypatch.setattr(update_driver, "status", lambda: (request, plugin))
+    engine_cells.select("cell-b")
+    rows = {row["id"]: row for row in ui.inventory()["entries"]}
+    row = rows["worktree-manager"]
+    assert row["activity"] == "succeeded"
+    assert request.id in row["card"]["body"]
+    assert rows["guide"]["activity"] == "unknown"
+    assert engine_cells.resolutions == [{}]
+
+
+def test_default_root_submission_history_uses_real_resolver_without_inheriting_cell_selection(
+    manager_request, monkeypatch, tmp_path,
+):
+    from _installation_context_fixtures import namespaced_fixture, patch_profile, write_json, write_slot
+
+    request, calls = manager_request
+    home = tmp_path / "account"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    for key in update_driver_cli._CONTEXT_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(ui.engine_client, "inherited_engine_command", lambda: None)
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_invocation", RESOLVE_ENGINE_INVOCATION)
+    patch_profile(monkeypatch, agent_plugin_runtime, home)
+    root = home / ".agent-worktrees"
+    write_slot(root / "versions" / "1.0.0", windows=os.name == "nt")
+    (root / "current-version").write_text("1.0.0", encoding="utf-8")
+    write_json(root / "deploy-manifest.json", {
+        "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
+    })
+    invocation = RESOLVE_ENGINE_INVOCATION("agent-worktrees", environment={})
+    assert invocation is not None and invocation[1] == root
+    selected = [str(invocation[1].resolve())]
+    monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {
+        "contract": 1, "execution_source": selected[0], "entries": [{
+            "id": "guide", "title": "Guide", "kind": "none", "enabled": "active",
+            "installed": True, "payload": "2", "selected": "not applicable",
+            "running": "not applicable", "source": "fixture", "updatable": True, "limitation": "",
+        }],
+    })
+    assert ui.submit("guide") == 0
+    assert calls[0].context == ()
+    for state, exit_code, activity in (
+        ("pending", None, "queued"), ("running", None, "running"),
+        ("completed", 1, "failed"), ("completed", 0, "succeeded"),
+    ):
+        request.state, request.exit_code = state, exit_code
+        assert ui.inventory()["entries"][1]["activity"] == activity
+
+    install, _python = namespaced_fixture(home, windows=os.name == "nt")
+    write_json(home / ".copilot-extensions" / "installation-mode.json", {
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True},
+    })
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(install))
+    monkeypatch.setenv("AGENT_HOME", str(home / "foreign-override"))
+    monkeypatch.setenv("AGENT_WORKTREES_UPDATE_CONTEXT", str(home / "cell-project"))
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(home / "payload"))
+    cell = RESOLVE_ENGINE_INVOCATION("agent-worktrees")
+    assert cell is not None and cell[1] == install.parent
+    assert RESOLVE_ENGINE_INVOCATION("agent-worktrees", environment={}) == invocation
+    selected[0] = str(cell[1].resolve())
+    row = ui.inventory()["entries"][1]
+    assert row["activity"] == "idle" and "Durable operation:" not in row["card"]["body"]
+    selected[0] = str(root.resolve())
+    assert ui.inventory()["entries"][1]["activity"] == "succeeded"
+    request.spec = replace(calls[0], context=(("COPILOT_EXTENSIONS_CONTEXT", str(home / "missing.json")),))
+    row = ui.inventory()["entries"][1]
+    assert row["activity"] == "unknown"
+    assert "Durable update attribution unavailable" in row["card"]["body"]
+
+
+def test_missing_engine_identity_reports_plugin_unknown_without_affecting_manager(
+    manager_request, monkeypatch,
+):
+    assert ui.submit("guide") == 0
+    monkeypatch.setattr(ui.engine_client, "run_json", lambda *a, **k: {"contract": 1, "entries": []})
+    rows = {row["id"]: row for row in ui.inventory()["entries"]}
+    assert rows["guide"]["activity"] == "unknown"
+    assert "did not report its installation identity" in rows["guide"]["card"]["body"]
+    assert rows["worktree-manager"]["activity"] == "idle"
 
 
 def test_public_manager_plugin_target_refuses_unsupported_source_before_submission(
@@ -160,7 +410,12 @@ def test_explicit_headless_engine_submission_uses_canonical_no_window_flags(monk
 
 
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])
-def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatch, target):
+@pytest.mark.parametrize("compatibility_flags", [
+    [], ["--no-anchor-sync", "--no-prune-pivots"],
+])
+def test_target_bypasses_bootstrap_and_suite_orchestration(
+    inventory, monkeypatch, target, compatibility_flags,
+):
     from worktree_manager import update_bootstrap
 
     monkeypatch.setattr(update_bootstrap, "prepare_update", lambda *a: pytest.fail("target entered suite bootstrap"))
@@ -171,8 +426,10 @@ def test_target_bypasses_bootstrap_and_suite_orchestration(inventory, monkeypatc
     calls = []
     monkeypatch.setattr(ui.engine_client, "run_engine_passthrough", lambda project, args:
         calls.append((project, args)) or 0)
-    assert manager._cmd_update(["--target=" + target]) == 0
-    assert calls == ([] if target == "worktree-manager" else [(None, ["update", "--no-manager", "--target", "guide"])])
+    assert manager._cmd_update(["--target=" + target, *compatibility_flags]) == 0
+    assert calls == ([] if target == "worktree-manager" else [
+        (None, ["update", "--no-manager", "--target", "guide", *compatibility_flags]),
+    ])
 
 
 @pytest.mark.parametrize("cutover", [

@@ -55,7 +55,9 @@ def _engine_rows(payload):
     return rows
 
 
-def run_targeted_update(rest: list[str]) -> int:
+def run_targeted_update(
+    rest: list[str], *, trigger: str = "manual", automatic_trigger: str | None = None,
+) -> int:
     from .update_driver_cli import parse_options
     from .update_events import UpdateRun
 
@@ -64,8 +66,10 @@ def run_targeted_update(rest: list[str]) -> int:
     parser.add_argument("--target", required=True)
     parser.add_argument("--project")
     parser.add_argument("--no-manager", action="store_true")
+    parser.add_argument("--no-anchor-sync", action="store_true")
+    parser.add_argument("--no-prune-pivots", action="store_true")
     args = parser.parse_args(forwarded)
-    run = UpdateRun()
+    run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
     try:
         if args.target == "worktree-manager":
             from .self_install import self_update
@@ -86,9 +90,12 @@ def run_targeted_update(rest: list[str]) -> int:
         if not preflight_runtime_source(run):
             return run.finish(1)
         # Strictly parsed by the selected engine; an older provider rejects it.
-        rc = engine_client.run_engine_passthrough(
-            args.project, ["update", "--no-manager", "--target", args.target],
-        )
+        engine_args = ["update", "--no-manager", "--target", args.target]
+        if args.no_anchor_sync:
+            engine_args.append("--no-anchor-sync")
+        if args.no_prune_pivots:
+            engine_args.append("--no-prune-pivots")
+        rc = engine_client.run_engine_passthrough(args.project, engine_args)
         return run.finish(rc)
     except (engine_client.EngineError, OSError, ValueError) as error:
         run.say(str(error), state="failed")
@@ -100,6 +107,7 @@ def run_targeted_update(rest: list[str]) -> int:
 
 def _operations(*, engine_source=None):
     import update_driver
+    from .agent_plugin_runtime import resolve_installed_plugin_invocation
     from .update_driver_cli import _source_key
 
     operations = {}
@@ -107,13 +115,30 @@ def _operations(*, engine_source=None):
     for request in update_driver.status():
         argv = request.spec.argv
         target = _stored_target(argv)
-        if target is None or (request.spec.backend == "manager" and target != "worktree-manager"):
+        if target is None:
             continue
         expected_source = source if request.spec.backend == "manager" else (
             engine_source if request.spec.backend == "engine" else None
         )
         if expected_source is None or request.spec.source != expected_source:
             continue
+        if request.spec.backend == "manager" and target != "worktree-manager":
+            try:
+                if not engine_source:
+                    raise ValueError("selected engine did not report its installation identity")
+                invocation = resolve_installed_plugin_invocation(
+                    "agent-worktrees", environment=dict(request.spec.context),
+                )
+                if invocation is None:
+                    raise ValueError("saved engine installation context is unavailable or invalid")
+                if str(invocation[1].resolve()) != engine_source:
+                    continue
+            except (OSError, ValueError, RuntimeError) as error:
+                operations[target] = {
+                    "state": "unknown", "request_id": request.id,
+                    "error": f"Durable update attribution unavailable: {error}; refresh after repairing its saved context",
+                }
+                continue
         state = request.state
         if state == "completed":
             state = "succeeded" if request.exit_code == 0 else "failed"

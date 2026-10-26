@@ -62,8 +62,11 @@ runtime construction and publication authority remain unchanged.
   repair via `agent-ssh restore-host` when the host is unhealthy or stale, and
   a dtssh mesh refresh -- re-discover live tunnel ids, re-emit this machine's
   SSH profile, and verify reachability to every known alias) and a daily
-  `sweep` tier (repo fast-forward + full repo `update` + full restore). Both
-  defer around a live session and are a clean no-op when not opted in. See the
+  `sweep` tier (repo fast-forward + standalone plugin update + maintenance-safe
+  restore). An enrolled Manager/external owner or an explicit local disable
+  suppresses only the suite-update phase; repository, dependency and SSH
+  maintenance remain independent. An unrelated live session does not defer the
+  sweep. Both tiers are a clean no-op when not opted in. See the
   `agent-machines-setup` skill's *Enable a regular unattended maintenance
   schedule* section and [`docs/resources.md`](docs/resources.md#self-update).
 - **Optional unattended fleet-update sweep.** A distinct, independently
@@ -73,7 +76,9 @@ runtime construction and publication authority remain unchanged.
   owns -- asynchronously, without waiting on an interactive session. Uses its
   own state directory, lock namespace, and scheduled-task family from
   self-update's, so a bug in one can never affect the other's already-
-  deployed mechanism. See [`docs/resources.md`](docs/resources.md#fleet-update).
+  deployed mechanism. A local automatic-update policy blocks new legacy fleet
+  schedules; existing triggers require explicit retirement, never automatic
+  removal. See [`docs/resources.md`](docs/resources.md#automatic-update-ownership).
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 

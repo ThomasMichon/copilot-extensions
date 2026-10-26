@@ -4,6 +4,7 @@
 
 - [2026-10-25 - Bridge fixed-recipe prerequisite](<journal/2026/10.25 bridge-first-use.md>)
 - [2026-10-25 - Bridge legacy bootstrap adoption](<journal/2026/10.25 bridge-bootstrap.md>)
+- [2026-10-24 - Manager maintenance integration](<journal/2026/10.24 manager-maintenance.md>)
 - [2026-10-24 - Logger fixed-recipe prerequisite](<journal/2026/10.24 logger-first-use.md>)
 - [2026-10-24 - CodeSpaces bootstrap adoption](<journal/2026/10.24 codespaces-bootstrap.md>)
 - [2026-10-24 - CodeSpaces fixed-recipe prerequisite](<journal/2026/10.24 codespaces-first-use.md>)

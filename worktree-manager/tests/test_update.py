@@ -246,9 +246,9 @@ def test_update_startup_diagnostics_share_the_human_scope(monkeypatch, update_ho
 
     original = telemetry.Run.from_env_or_new
 
-    def startup(proc):
+    def startup(proc, *, trigger="manual"):
         telemetry_run._stderr("telemetry startup diagnostic")
-        return original(proc)
+        return original(proc, trigger=trigger)
 
     monkeypatch.setattr(telemetry.Run, "from_env_or_new", startup)
     run = UpdateRun()

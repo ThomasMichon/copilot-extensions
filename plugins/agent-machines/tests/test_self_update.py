@@ -22,6 +22,12 @@ from agent_machines.reconcile import plan
 from agent_machines.resources import resolve_resources
 
 from ._helpers import base_package, write_package
+from ._scheduler_safety_helpers import fixture_unit_properties
+
+
+@pytest.fixture(autouse=True)
+def _default_legacy_unit_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 def _pkg(
@@ -66,6 +72,7 @@ def _task_snapshot(
     present: bool,
     matching: bool = True,
     enabled: bool | None = True,
+    home: Path | None = None,
 ):
     return self_update.ScheduledTaskSnapshot(
         task_name=self_update.TIER_SPECS[tier].task_name,
@@ -74,9 +81,13 @@ def _task_snapshot(
         logon_type="Interactive" if present else None,
         description=self_update.task_description(tier) if present else None,
         execute="conhost.exe" if present else None,
-        arguments=self_update.task_action_arguments(tier),
-        working_directory=self_update.task_working_directory(),
+        arguments=self_update.task_action_arguments(tier, home=home),
+        working_directory=self_update.task_working_directory(home),
         matching=matching,
+        state="Ready" if present else None,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
+        trigger_kind=self_update.TIER_SPECS[tier].schedule_kind,
+        trigger_value=self_update.TIER_SPECS[tier].schedule_value,
     )
 
 
@@ -1103,8 +1114,6 @@ def test_live_session_deferral_reason_reports_busy_worktree():
 def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and_binstub_restore(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(self_update.sys, "platform", "win32")
-    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
     monkeypatch.setattr(self_update_lock, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
     repo = type("Repo", (), {"path": tmp_path / "repo"})
@@ -1142,7 +1151,7 @@ def test_sweep_continues_despite_unrelated_live_session_and_uses_repo_update_and
         ],
         home=tmp_path,
     )
-    assert result.status == "ok"
+    assert result.status == "ok", result.detail
     assert result.steps[0].name == "git-pull"
     assert result.steps[0].status == "skipped"
     assert "dirty" in result.steps[0].detail
@@ -1252,7 +1261,9 @@ def test_register_scheduled_task_hourly_uses_native_repetition_parameters():
 
     def fake_runner(argv, *, timeout=300):
         captured["argv"] = argv
-        return self_update.CommandResult(argv, 0, "", "")
+        return self_update.CommandResult(
+            argv, 0, json.dumps({"present": False}) if "ConvertTo-Json" in argv[-1] else "",
+        )
 
     self_update_tasks.register_scheduled_task(
         "watchdog",
@@ -1274,7 +1285,9 @@ def test_register_scheduled_task_daily_has_no_repetition_parameters():
 
     def fake_runner(argv, *, timeout=300):
         captured["argv"] = argv
-        return self_update.CommandResult(argv, 0, "", "")
+        return self_update.CommandResult(
+            argv, 0, json.dumps({"present": False}) if "ConvertTo-Json" in argv[-1] else "",
+        )
 
     self_update_tasks.register_scheduled_task(
         "sweep",
@@ -1322,6 +1335,7 @@ def test_task_definition_matches_its_own_generated_arguments(monkeypatch):
         working_directory=self_update_tasks.task_working_directory(home),
         trigger_kind="daily",
         trigger_value=1,
+        task_path="\\", action_count=1, trigger_count=1, run_level="Limited",
     )
     assert self_update_tasks.task_definition_matches(
         snapshot, "sweep", machine="box-1", home=home
@@ -1360,11 +1374,13 @@ def test_reconcile_task_removes_opted_out_task_without_retry_prompt(monkeypatch,
     monkeypatch.setattr(
         self_update_tasks,
         "query_scheduled_task",
-        lambda tier, **kwargs: _task_snapshot(tier, present=True, matching=True, enabled=True),
+        lambda tier, **kwargs: _task_snapshot(
+            tier, present=True, matching=True, enabled=True, home=kwargs.get("home"),
+        ),
     )
     calls: list[str] = []
 
-    def unregister(tier, *, runner=None, resolve_binary=None, machine=None):
+    def unregister(tier, *, runner=None, resolve_binary=None, machine=None, home=None):
         calls.append(tier)
         return self_update.CommandResult(["pwsh"], 0, "", "")
 
@@ -1771,6 +1787,11 @@ def test_query_systemd_timer_matches_after_register(tmp_path):
         pytest.skip("Linux systemd unit rendering assumes a POSIX host")
 
     def runner(argv, **kwargs):
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
         if "is-active" in argv:
@@ -1805,6 +1826,11 @@ def test_query_systemd_timer_matches_after_register(tmp_path):
 
 def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path):
     def runner(argv, **kwargs):
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
         if "is-active" in argv:
@@ -1831,11 +1857,17 @@ def test_query_systemd_timer_not_matching_when_unit_content_drifted(tmp_path):
     assert snapshot.matching is False
 
 
-def test_unregister_systemd_timer_removes_units_and_disables(tmp_path):
+def test_unregister_systemd_timer_removes_units_and_disables(tmp_path, monkeypatch):
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
     calls: list[list[str]] = []
 
     def runner(argv, **kwargs):
         calls.append(list(argv))
+        if argv[2] == "show":
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         return _fake_command_result(argv, 0)
 
     self_update_tasks.register_systemd_timer(
@@ -1859,6 +1891,11 @@ def test_reconcile_scheduled_task_registers_on_linux_when_systemd_available(monk
     )
 
     def runner(argv, **kwargs):
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-enabled" in argv:
             return _fake_command_result(argv, 0, "enabled\n")
         if "is-active" in argv:
@@ -1902,6 +1939,11 @@ def test_scheduled_task_status_reports_linux_timer(monkeypatch, tmp_path):
     monkeypatch.setattr(self_update_tasks.sys, "platform", "linux")
 
     def runner(argv, **kwargs):
+        if "show" in argv:
+            return _fake_command_result(
+                argv, 0,
+                fixture_unit_properties(argv[3], self_update_tasks._linux_unit_dir(tmp_path)),
+            )
         if "is-system-running" in argv:
             return _fake_command_result(argv, 0, "running\n")
         if "is-enabled" in argv:

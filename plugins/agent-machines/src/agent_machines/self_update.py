@@ -50,6 +50,7 @@ from .self_update_state import (
     record_task_config,
     write_status,
 )
+from .self_update_suite import run_suite_updates
 from .self_update_tasks import (
     ScheduledTaskReconcileResult,
     ScheduledTaskSnapshot,
@@ -143,15 +144,17 @@ def reconcile_scheduled_task(
     runner: Callable[..., CommandResult] | None = None,
     home: Path | None = None,
 ) -> ScheduledTaskReconcileResult:
-    return _reconcile_scheduled_task(
-        tier,
-        desired_present=desired_present,
-        machine=machine,
-        runner=runner or default_command_runner,
-        resolve_binary=shutil_which,
-        record_task_config=record_task_config,
-        home=home,
-    )
+    try:
+        return _reconcile_scheduled_task(
+            tier, desired_present=desired_present, machine=machine,
+            runner=runner or default_command_runner, resolve_binary=shutil_which,
+            record_task_config=record_task_config, home=home,
+        )
+    except (OSError, RuntimeError) as exc:
+        return ScheduledTaskReconcileResult(
+            tier=tier, desired_state="present" if desired_present else "absent",
+            status="error", changed=False, detail=f"self-update scheduler refused: {exc}",
+        )
 
 
 def scheduled_task_status(
@@ -561,35 +564,18 @@ def run_tier(
             ]
             if not repo_names:
                 repo_names = ["copilot-extensions"]
-            for repo_name in sorted(set(repo_names)):
-                plugin_refresh = runner(
-                    [
-                        "agent-worktrees",
-                        "-p",
-                        repo_name,
-                        "update",
-                        "--no-manager",
-                    ],
-                    timeout=3600,
+            suite = run_suite_updates(repo_names, runner=runner, home=home)
+            steps.extend(suite.steps)
+            if suite.blocks_restore:
+                return RunResult(
+                    tier=tier,
+                    status=suite.status,
+                    opted_in=True,
+                    detail=suite.detail,
+                    lock_reclaimed=lock.reclaimed,
+                    attempted_at=attempted_at,
+                    steps=steps,
                 )
-                steps.append(
-                    StepResult(
-                        f"update:{repo_name}",
-                        "changed" if plugin_refresh.returncode == 0 else "error",
-                        plugin_refresh.output or "updated plugin payloads and runtimes",
-                        command=plugin_refresh.argv,
-                    )
-                )
-                if plugin_refresh.returncode != 0:
-                    return RunResult(
-                        tier=tier,
-                        status="error",
-                        opted_in=True,
-                        detail=plugin_refresh.output or "agent-worktrees update failed",
-                        lock_reclaimed=lock.reclaimed,
-                        attempted_at=attempted_at,
-                        steps=steps,
-                    )
             restore_cmd = [
                 "agent-machines",
                 "restore",
@@ -614,6 +600,16 @@ def run_tier(
                     status="error",
                     opted_in=True,
                     detail=restore_result.output or "agent-machines restore failed",
+                    lock_reclaimed=lock.reclaimed,
+                    attempted_at=attempted_at,
+                    steps=steps,
+                )
+            if suite.status != "ok":
+                return RunResult(
+                    tier=tier,
+                    status=suite.status,
+                    opted_in=True,
+                    detail=suite.detail,
                     lock_reclaimed=lock.reclaimed,
                     attempted_at=attempted_at,
                     steps=steps,

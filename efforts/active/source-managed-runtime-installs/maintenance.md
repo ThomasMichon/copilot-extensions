@@ -74,7 +74,7 @@ cadence limits follow the implementation review rather than this proposal.
 
 ## Implementation sequence
 
-- [ ] Land this ownership/consent amendment and its vision update through review.
+- [x] Land this ownership/consent amendment and its vision update through review.
 - [ ] Resolve installation scope, existing updater invocation, authentication,
   process lifetime, locks and update telemetry in their existing owners before
   adding interfaces. Reuse those primitives rather than another installer.
