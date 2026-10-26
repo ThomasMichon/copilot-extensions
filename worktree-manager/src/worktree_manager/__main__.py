@@ -1503,10 +1503,14 @@ def _cmd_update(rest: list[str]) -> int:
     return guarded_update(rest, _cmd_update_recorded)
 
 
-def _cmd_update_recorded(rest: list[str], trigger: str = "manual") -> int:
+def _cmd_update_recorded(
+    rest: list[str], trigger: str = "manual", automatic_trigger: str | None = None,
+) -> int:
     from .update_orchestration import execute_update
 
-    return execute_update(rest, _cmd_update_steps, trigger=trigger)
+    return execute_update(
+        rest, _cmd_update_steps, trigger=trigger, automatic_trigger=automatic_trigger,
+    )
 
 
 def _cmd_update_steps(

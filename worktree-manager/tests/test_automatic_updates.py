@@ -175,8 +175,8 @@ def test_update_guard_strips_only_its_flags_and_serializes(tmp_path: Path, monke
     policy.configure(tmp_path, owner="manager", provenance="user", project="example")
     calls = []
 
-    def execute(args: list[str], trigger: str) -> int:
-        calls.append((args, trigger))
+    def execute(args: list[str], trigger: str, automatic_trigger: str | None) -> int:
+        calls.append((args, trigger, automatic_trigger))
         with pytest.raises(CutoverLockedError):
             with CutoverLock(policy.state_dir(tmp_path) / "update-transaction"):
                 pytest.fail("concurrent writer entered")
@@ -185,7 +185,7 @@ def test_update_guard_strips_only_its_flags_and_serializes(tmp_path: Path, monke
     assert cli.guarded_update(
         ["--automatic-trigger", "manager", "--project", "example", "--no-anchor-sync"], execute,
     ) == 4
-    assert calls == [(["--project", "example", "--no-anchor-sync"], "automatic:manager")]
+    assert calls == [(["--project", "example", "--no-anchor-sync"], "schedule", "manager")]
     policy.configure(tmp_path, owner="disabled", provenance="user")
     assert cli.guarded_update(["--automatic-trigger", "manager"], execute) == 3
     assert len(calls) == 1
@@ -208,10 +208,12 @@ def test_guard_refusal_keeps_canonical_result_and_telemetry(
         policy.configure(tmp_path, owner="manager", provenance="user", project="example")
     guard = CutoverLock(policy.state_dir(tmp_path) / "update-transaction") if locked else nullcontext()
     with guard:
-        assert cli.guarded_update(["--automatic-trigger", "manager"], lambda args, trigger: 0) == code
+        assert cli.guarded_update(
+            ["--automatic-trigger", "manager"], lambda args, trigger, automatic_trigger: 0,
+        ) == code
     status = json.loads((telemetry / "update-status.json").read_text(encoding="utf-8"))
     assert status["run"]["outcome"] == outcome
-    assert status["run"]["trigger"] == "automatic:manager"
+    assert status["run"]["trigger"] == "schedule"
     assert status["run"]["event_parse_errors"] == 0
     events = [
         json.loads(line)
@@ -219,7 +221,7 @@ def test_guard_refusal_keeps_canonical_result_and_telemetry(
     ]
     event = next(
         event for event in events
-        if event.get("phase") == "update_admission" and event.get("component") == "manager"
+        if event.get("action") == "update_admission" and event.get("component") == "manager"
     )
     assert event["outcome"] == outcome
     assert event["error"]["code"] == error_code
@@ -326,17 +328,17 @@ def test_targeted_updates_share_automatic_admission_and_preserve_trigger(
     monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
     calls = []
 
-    def targeted(arguments, *, trigger="manual"):
-        calls.append((arguments, trigger))
+    def targeted(arguments, *, trigger="manual", automatic_trigger=None):
+        calls.append((arguments, trigger, automatic_trigger))
         return 0
 
     monkeypatch.setattr(installation_updates, "run_targeted_update", targeted)
     assert manager._cmd_update(["--target", "agent-bridge"]) == 0
-    assert calls == [(["--target", "agent-bridge"], "manual")]
+    assert calls == [(["--target", "agent-bridge"], "manual", None)]
     policy.configure(tmp_path, owner="manager", provenance="user", project="example")
     automatic = ["--automatic-trigger", "manager", "--target", "agent-bridge"]
     assert manager._cmd_update(automatic) == 0
-    assert calls[-1] == (["--target", "agent-bridge"], "automatic:manager")
+    assert calls[-1] == (["--target", "agent-bridge"], "schedule", "manager")
     policy.configure(tmp_path, owner="disabled", provenance="user")
     assert manager._cmd_update(automatic) == 3
     assert len(calls) == 2
