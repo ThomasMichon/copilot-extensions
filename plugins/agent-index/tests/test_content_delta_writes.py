@@ -14,7 +14,7 @@ from agent_index.index_config import IndexConfig
 from agent_index.indexing.engine import _embed_and_store_files
 from agent_index.indexing.path_index import PathIndex
 from agent_index.sources.base import FileEntry
-from agent_index.store.content_mutations import changed_chunks, content_record
+from agent_index.store.content_mutations import changed_chunks, coalesce_chunks, content_record
 from agent_index.store.multi_model_store import MultiModelStore
 from agent_index.store.source_layout import LAYOUT, initialize_source_store, validate_source_store
 
@@ -217,8 +217,10 @@ def test_bounded_comparison_and_incomplete_or_duplicate_rows_are_rejected() -> N
     table.count_rows = lambda _predicate: 2
     with pytest.raises(RuntimeError, match="Incomplete or duplicate"):
         changed_chunks(table, items[:1])
-    with pytest.raises(ValueError, match="Duplicate canonical"):
-        changed_chunks(table, [items[0], items[0]])
+    table.count_rows = lambda _predicate: 1
+    assert changed_chunks(table, [items[0], items[0]]) == []
+    with pytest.raises(ValueError, match="Conflicting canonical"):
+        changed_chunks(table, [items[0], replace(items[0], metadata={"different": True})])
 
 
 def test_cleanup_bounds_id_deletions_and_preserves_retry_authority(
@@ -248,3 +250,51 @@ def test_cleanup_bounds_id_deletions_and_preserves_retry_authority(
     assert db.reconcile_file_chunks(items[0].source, items[0].file_path, set()) == 305
     assert db.content_store.get_chunk_ids_by_file(items[0].source, items[0].file_path) == []
     assert vt.get_vectors([item.chunk_id for item in items]) == {}
+
+
+def test_same_line_declarations_are_coalesced_on_incremental_and_forced_paths(
+    store, tmp_path: Path,
+) -> None:
+    from agent_index.chunking import get_chunker
+
+    config, db = store
+    entry = FileEntry("same.js", "function a() {} function b() {}", "javascript", "git:sample")
+    chunker, _ = get_chunker(entry.path)
+    generated = chunker.chunk(entry.content, entry.path, source=entry.source)
+    unique = coalesce_chunks(generated)
+    assert len(generated) > len(unique)
+    paths = PathIndex(tmp_path / "paths.db")
+    client = Client()
+
+    def index(*, force: bool = False) -> int:
+        return _embed_and_store_files(
+            [entry], multi_store=db, multi_clients={"a": client},
+            model_profiles={"a": config.model_profiles["a"]}, path_index=paths,
+            reconcile_file=db.reconcile_file_chunks, force=force,
+        )[0]
+
+    assert index() == len(unique)
+    assert paths.chunk_count_by_family(entry.source) == len(unique)
+    assert index() == 0
+    assert index(force=True) == len(unique)
+    assert client.calls == [[item.content for item in unique]] * 2
+    assert len(db.content_store.get_chunk_ids_by_file(entry.source, entry.path)) == len(unique)
+    assert len(db.get_vector_table("a").get_vectors(
+        [item.chunk_id for item in unique], strict=True,
+    )) == len(unique)
+
+
+@pytest.mark.parametrize("skip_identical", [False, True])
+def test_direct_content_coalesces_exact_records_and_rejects_conflicts(
+    store, skip_identical: bool,
+) -> None:
+    _config, db = store
+    item = chunk()
+    assert db.upsert_content([item, item], skip_identical=skip_identical) == 1
+    table = db.content_store._get_or_create_table()
+    version = table.version
+    with pytest.raises(ValueError, match="Conflicting canonical"):
+        db.upsert_content(
+            [item, replace(item, metadata={"different": True})], skip_identical=skip_identical,
+        )
+    assert table.version == version

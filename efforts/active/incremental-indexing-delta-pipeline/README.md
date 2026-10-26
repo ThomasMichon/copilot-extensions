@@ -452,3 +452,8 @@ source-owner coordination rather than one large rewrite.
   acquisition, hosted pagination recovery, unchanged-item model backfill,
   per-stage counters and logical/sliced maintenance remain next work; no
   release, consumer adoption or live-serving gate is claimed.
+- Review found that same-line code declarations legitimately emit identical
+  canonical chunk IDs. Coalesced exact input records before logical accounting,
+  embedding and both incremental/forced writes, while rejecting conflicting
+  metadata at one ID. Real JavaScript chunker regressions exercise both layouts;
+  the expanded focused recovery packet passed 154 tests.

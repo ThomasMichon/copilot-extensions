@@ -185,8 +185,9 @@ class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
         Returns actual rows written. Opt-in reuse requires keep-ID reconciliation,
         not timestamp-based cleanup.
         """
-        from .content_mutations import BATCH_SIZE, changed_chunks, content_record
+        from .content_mutations import BATCH_SIZE, changed_chunks, coalesce_chunks, content_record
 
+        chunks = coalesce_chunks(chunks)
         if not chunks:
             return 0
         table = self._get_or_create_table()

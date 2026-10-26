@@ -191,6 +191,9 @@ field, not only the normalized content hash. Failed or incomplete reads cannot
 authorize rewrites or cleanup. Cleanup reads only that file's IDs and deletes
 obsolete IDs in batches; vector deletion precedes canonical deletion for retry.
 Logical processed chunk counts remain independent of actual content writes.
+Identical canonical input records sharing an ID (for example same-line code
+declarations) are coalesced before chunk accounting, embedding and storage.
+Conflicting text or metadata at the same ID is rejected, not arbitrarily chosen.
 Direct store calls still refresh timestamps by default for legacy callers;
 `skip_identical=True` is opt-in and requires identity-based rather than
 timestamp-based cleanup. Forced full rebuilds still write every presented row.

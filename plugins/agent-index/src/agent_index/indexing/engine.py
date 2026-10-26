@@ -762,6 +762,7 @@ def _embed_and_store_files(
     from agent_index.chunking import get_chunker
     from agent_index.indexing.embedding_coverage import EmbeddingCoverage
     from agent_index.indexing.fingerprints import file_fingerprint
+    from agent_index.store.content_mutations import coalesce_chunks
 
     coverage = EmbeddingCoverage(path_index)
     batch: list[Chunk] = []
@@ -833,6 +834,7 @@ def _embed_and_store_files(
 
         if getattr(entry, "metadata", None):
             chunks = [replace(c, metadata=entry.metadata) for c in chunks]
+        chunks = coalesce_chunks(chunks)
 
         batch.extend(chunks)
         total_chunks += len(chunks)
@@ -877,7 +879,9 @@ def _embed_and_store_batch(
     claimed by any profile are sent to all models as a fallback.
     """
     from agent_index.engine.client import EngineUnavailableError
+    from agent_index.store.content_mutations import coalesce_chunks
 
+    chunks = coalesce_chunks(chunks)
     # Pre-compute the union of all configured content types so we can
     # detect "unclaimed" chunk types and route them to every model.
     all_claimed_types: frozenset[str] = frozenset()

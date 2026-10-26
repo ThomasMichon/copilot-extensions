@@ -31,14 +31,24 @@ def content_record(chunk: Chunk) -> dict[str, Any]:
     }
 
 
+def coalesce_chunks(chunks: list[Chunk]) -> list[Chunk]:
+    """Coalesce identical canonical IDs, rejecting conflicting persisted fields."""
+    unique: dict[str, Chunk] = {}
+    for chunk in chunks:
+        previous = unique.get(chunk.chunk_id)
+        if previous is not None and content_record(previous) != content_record(chunk):
+            raise ValueError("Conflicting canonical chunks share an ID")
+        unique.setdefault(chunk.chunk_id, chunk)
+    return list(unique.values())
+
+
 def changed_chunks(table: Any, chunks: list[Chunk]) -> list[Chunk]:
     """Compare bounded raw rows; failed or incomplete reads never imply absence."""
+    chunks = coalesce_chunks(chunks)
     changed: list[Chunk] = []
     for start in range(0, len(chunks), BATCH_SIZE):
         batch = chunks[start:start + BATCH_SIZE]
         wanted = {chunk.chunk_id: content_record(chunk) for chunk in batch}
-        if len(wanted) != len(batch):
-            raise ValueError("Duplicate canonical chunk IDs in content batch")
         ids = ", ".join(f"'{_sql_str(cid)}'" for cid in wanted)
         predicate = f"chunk_id IN ({ids})"
         count = table.count_rows(predicate)
