@@ -85,7 +85,7 @@ def test_static_positive_is_not_provisioning_or_capacity_proof() -> None:
     result = mod.inspect_static_boundary(experiment, observed)
     assert result.violations == ()
     assert len(result.unresolved) == 5
-    assert any("capacity backend is not implemented" in item for item in result.unresolved)
+    assert any("monitoring must be measured separately" in item for item in result.unresolved)
     assert any("egress" in item for item in result.unresolved)
     assert not hasattr(result, "ready")
     assert observed == before
@@ -277,13 +277,13 @@ def test_user_and_same_length_environment_tampering_are_rejected(
     assert mod.inspect_static_boundary(mod.parse_declaration(declaration()), observed).violations
 
 
-def test_unsupported_quota_claim_cannot_clear_pending_backend() -> None:
+def test_unsupported_quota_claim_cannot_clear_pending_measurement() -> None:
     observed = inspection()
     observed["quota_verified"] = True
     observed["ready"] = True
     result = mod.inspect_static_boundary(mod.parse_declaration(declaration()), observed)
     assert result.violations == ()
-    assert any("backend is not implemented" in item for item in result.unresolved)
+    assert any("monitoring must be measured separately" in item for item in result.unresolved)
 
 
 def test_explicit_null_cap_add_is_distinct_from_missing_observation() -> None:

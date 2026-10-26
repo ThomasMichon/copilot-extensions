@@ -159,7 +159,7 @@ def inspect_static_boundary(
 
 
 _UNRESOLVED: Final = (
-    "bounded persistent storage and native-output capacity backend is not implemented",
+    "fresh persistent/evidence usage and backing free-space monitoring must be measured separately",
     "effective internal-network membership and egress have not been probed",
     "exclusive resource and host-driver custody have not been established",
     "guest source, volatile mounts and runtime configuration have not been qualified",
