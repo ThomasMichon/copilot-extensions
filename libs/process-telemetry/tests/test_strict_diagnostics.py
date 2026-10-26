@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import stat
@@ -279,9 +280,9 @@ def test_ordinary_expired_record_still_skips_without_strict_io(writer: tuple) ->
 
 
 @pytest.mark.parametrize("value,encoded", [
-    (float("inf"), "1e400"), (float("-inf"), "-1e400"),
-    ({"nested": [float("inf")]}, '{"nested":[1e400]}'),
-    ({"nested": [float("-inf")]}, '{"nested":[-1e400]}'),
+    (1.0, "1e400"), (-1.0, "-1e400"),
+    ({"nested": [1.0]}, '{"nested":[1e400]}'),
+    ({"nested": [-1.0]}, '{"nested":[-1e400]}'),
 ])
 def test_strict_numeric_overflow_refuses_before_custody(
     writer: tuple, value: object, encoded: str,
@@ -310,7 +311,7 @@ def test_strict_type_substitution_refuses_at_every_depth(
     store.encoder = lambda event: (
         json.dumps(dict(event, value=replacement)) + "\n"
     ).encode()
-    with pytest.raises(ValueError, match="changed the record fields"):
+    with pytest.raises(ValueError, match="changed the record fields|primitive JSON fields"):
         store.write_event_strict(event)
     assert not calls
 
@@ -334,3 +335,68 @@ def test_strict_nested_finite_json_fields_preserve_types(writer: tuple) -> None:
     event = dict(EVENT, value=[None, False, 0, 1.0, "\u00e9", {"items": [True, -2.5]}])
     store.write_event_strict(event)
     assert ("strict_append", event) in calls
+
+
+@pytest.mark.parametrize("change", ["remove_operation", "expire_timestamp", "nested_field", "nested_list"])
+def test_strict_encoder_mutation_cannot_change_validation_baseline(
+    writer: tuple, change: str,
+) -> None:
+    store, calls = writer
+    event = dict(EVENT, nested={"operation_id": "nested", "items": [{"attempt": 1}]})
+    baseline = copy.deepcopy(event)
+
+    def mutating_encoder(record: dict) -> bytes:
+        assert record is not event and record["nested"] is not event["nested"]
+        if change == "remove_operation":
+            record.pop("operation_id")
+        elif change == "expire_timestamp":
+            record["ts"] = (NOW - timedelta(days=31)).isoformat()
+        elif change == "nested_field":
+            record["nested"].pop("operation_id")
+        else:
+            record["nested"]["items"][0]["attempt"] = True
+        return (json.dumps(record) + "\n").encode()
+
+    store.encoder = mutating_encoder
+    with pytest.raises(ValueError, match="changed the record fields"):
+        store.write_event_strict(event)
+        calls.append("backend")
+    assert not calls and event == baseline
+
+
+def test_strict_decoder_also_receives_an_independent_snapshot(writer: tuple) -> None:
+    store, calls = writer
+    event = dict(EVENT, nested={"operation_id": "nested"})
+    baseline = copy.deepcopy(event)
+
+    def mutating_decoder(record: dict) -> datetime:
+        result = datetime.fromisoformat(record["ts"])
+        record.pop("operation_id")
+        record["nested"].clear()
+        return result
+
+    store.timestamp_decoder = mutating_decoder
+    store.write_event_strict(event)
+    assert ("strict_append", baseline) in calls and event == baseline
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan"),
+                                   {"nested": [float("inf")]}])
+def test_nonfinite_input_refuses_before_encoder(writer: tuple, value: object) -> None:
+    store, calls = writer
+    store.encoder = lambda event: pytest.fail("encoded nonfinite input")
+    with pytest.raises(ValueError, match="finite primitive JSON fields"):
+        store.write_event_strict(dict(EVENT, value=value))
+    assert not calls
+
+
+def test_unsupported_input_never_invokes_a_custom_deepcopy_hook(writer: tuple) -> None:
+    store, calls = writer
+
+    class Unsupported:
+        def __deepcopy__(self, memo: dict) -> object:
+            pytest.fail("invoked an unsupported object hook")
+
+    with pytest.raises(ValueError, match="primitive JSON fields"):
+        store.write_event_strict(dict(EVENT, value=Unsupported()))
+    assert not calls

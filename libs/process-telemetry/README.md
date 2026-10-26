@@ -111,6 +111,11 @@ Field preservation compares exact primitive JSON types recursively, including
 booleans versus numbers and integers versus floats. Nonfinite literal tokens
 and overflow notation such as `1e400` refuse, as do duplicate object fields,
 unsupported input types and lossy custom encoders.
+Finite primitive input is validated and deeply snapshotted before any callback.
+The timestamp decoder and encoder each receive an independent deep copy;
+encoded fields are compared with the untouched snapshot, not an event that
+the encoder could modify. Mutations that alter serialized fields refuse
+before custody, including timestamp or nested correlation changes.
 This bounds the submitted write, not arbitrary caller encoder work or heap use;
 owners must bound inputs before encoding.
 

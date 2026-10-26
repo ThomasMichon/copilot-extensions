@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
@@ -344,11 +345,14 @@ class DiagnosticLog(logging.Handler):
         try:
             if strict_write_capability() is None:
                 raise NotImplementedError("strict diagnostic sync is unavailable on this platform")
+            if type(event) is not dict or not _same_json_fields(event, event):
+                raise ValueError("strict diagnostics require finite primitive JSON fields")
+            baseline = copy.deepcopy(event)
             now = _utc(self.clock())
-            stamp = self._event_stamp(event)
+            stamp = self._event_stamp(copy.deepcopy(baseline))
             if stamp is None or stamp < now - RETENTION:
                 raise ValueError("strict diagnostic timestamp is invalid or expired")
-            data = self.encoder(event)
+            data = self.encoder(copy.deepcopy(baseline))
             if (
                 type(data) is not bytes or not 0 < len(data) <= STRICT_RECORD_BYTES
                 or not data.endswith(b"\n") or b"\n" in data[:-1] or b"\r" in data
@@ -358,7 +362,7 @@ class DiagnosticLog(logging.Handler):
                 data.decode("utf-8"), parse_constant=_invalid_json_constant,
                 parse_float=_finite_json_float, object_pairs_hook=_unique_json_object,
             )
-            if type(decoded) is not dict or not _same_json_fields(decoded, event):
+            if type(decoded) is not dict or not _same_json_fields(decoded, baseline):
                 raise ValueError("strict diagnostic encoder changed the record fields")
             if not self.directory.is_dir():
                 raise FileNotFoundError("strict diagnostic directory must already exist")
