@@ -7,13 +7,15 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from repository_policy import AgentHostingError
 
 from agent_bridge.connect import ConnectError, ConnectStage
 from agent_bridge.transport import (
     _ACP_STDIO_LIMIT_BYTES,
     AgentProcess,
     SpawnTarget,
-    _build_remote_cmd,
+    _build_remote_cmd as _guarded_remote_cmd,
+    _unguarded_remote_cmd as _build_remote_cmd,
     _extract_json_object,
     _looks_unprovisioned_project,
     _reresolve_stale_interpreter,
@@ -27,6 +29,29 @@ from agent_bridge.transport import (
     spawn_raw,
     spawn_ssh,
 )
+
+
+@pytest.fixture(autouse=True)
+def admitted_transport_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    # These units model admitted targets; the repository-hosting suites exercise
+    # real admission, including the cold-manager HTTP start regression.
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_target_hosting", AsyncMock())
+    monkeypatch.setattr("agent_bridge.hosting_policy.require_path_hosting", lambda *_a, **_k: None)
+    monkeypatch.setattr("agent_bridge.transport._build_remote_cmd", _build_remote_cmd)
+
+
+class TestRemoteCommandAdmission:
+    @pytest.mark.parametrize("selection", [{"project": "harness"}, {"cwd": "/workspace"}])
+    def test_guarded_command_requires_both_owner_and_exact_path(self, selection: dict[str, str]) -> None:
+        with pytest.raises(AgentHostingError, match="exact path and owner"):
+            _guarded_remote_cmd(SpawnTarget(type="ssh", host="receiver", **selection))
+
+    def test_guarded_command_checks_policy_before_payload(self) -> None:
+        command = _guarded_remote_cmd(SpawnTarget(
+            type="ssh", host="receiver", project="harness", cwd="/workspace", explicit_cwd=True,
+        ))
+        assert command.startswith("harness agent-policy check --path /workspace ")
+        assert command.index("agent-policy") < command.index("exec ")
 
 
 class TestSpawnTargetSerialization:

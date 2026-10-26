@@ -109,6 +109,10 @@ class ConfigSource(Protocol):
         ...
 
 
+class SSHProfileResolutionError(RuntimeError):
+    """OpenSSH could not resolve the selected profile's effective configuration."""
+
+
 class SSHProfileSource:
     """ConfigSource that reads from the local SSH config.
 
@@ -156,7 +160,7 @@ class SSHProfileSource:
         """Resolve the routing identity OpenSSH will actually use."""
         ssh = shutil.which("ssh")
         if not ssh:
-            raise RuntimeError("OpenSSH client executable `ssh` is not available")
+            raise SSHProfileResolutionError("OpenSSH client executable `ssh` is not available")
         args = [ssh, "-G"]
         if self._config_file:
             args.extend(["-F", self._config_file])
@@ -179,7 +183,7 @@ class SSHProfileSource:
         )
         if proc.returncode != 0:
             detail = (proc.stderr or "").strip()
-            raise RuntimeError(
+            raise SSHProfileResolutionError(
                 detail or f"ssh -G exited {proc.returncode}"
             )
 
@@ -190,5 +194,5 @@ class SSHProfileSource:
                 continue
             resolved.append((key.casefold(), value.strip()))
         if not resolved:
-            raise RuntimeError("ssh -G returned no effective configuration")
+            raise SSHProfileResolutionError("ssh -G returned no effective configuration")
         return tuple(resolved)
