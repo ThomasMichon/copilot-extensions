@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import venv
+from types import SimpleNamespace
 
 import pytest
 
@@ -439,3 +440,39 @@ def test_posix_logger_refuses_path_launched_ambiguous_runtime(tmp_path):
     finally:
         process.communicate("\n", timeout=15)
     assert process.returncode == 0
+
+
+@pytest.mark.parametrize("inventory", ["empty", "missing-inspector"])
+def test_logger_uninstall_refuses_unverified_process_inventory(tmp_path, monkeypatch, capsys, inventory):
+    root, durable, _ = _fixture(tmp_path, "owned")
+    spec = importlib.util.spec_from_file_location("logger_census_test", INSTALLERS / "uninstall_guard.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    runtime = SimpleNamespace(_iter_all_pids=lambda: [] if inventory == "empty" else [os.getpid() + 1])
+    monkeypatch.setattr(helper, "_load", lambda *args: runtime)
+    monkeypatch.setattr(helper, "validate", lambda _: (object(), None))
+    monkeypatch.setattr(sys, "argv", [
+        "uninstall_guard.py", "--root", str(root), "--idle", "--prepare",
+        "--remove-runtime", "--shell", "must-not-launch",
+    ])
+    assert helper.main() == 1
+    assert "process inventory is unavailable or missing the inspector" in capsys.readouterr().err
+    _assert_state(root, durable, removed=False)
+
+
+def test_logger_runtime_guard_reuses_validated_inventory(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location("logger_census_reuse", INSTALLERS / "uninstall_guard.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    calls = []
+
+    def census():
+        calls.append(True)
+        return [os.getpid()]
+
+    runtime = SimpleNamespace(
+        _iter_all_pids=census, _versions_with_live_process=lambda _: set(),
+    )
+    monkeypatch.setattr(helper, "_load", lambda *args: runtime)
+    helper.refuse_live_runtime(tmp_path)
+    assert len(calls) == 1

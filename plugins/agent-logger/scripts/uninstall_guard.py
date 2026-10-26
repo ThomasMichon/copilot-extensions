@@ -112,10 +112,13 @@ def validate(root: Path):
 
 def refuse_live_runtime(root: Path) -> None:
     runtime = _load("_logger_uninstall_runtime", "versioned_runtime.py")
+    pids = runtime._iter_all_pids()
+    if os.getpid() not in pids:
+        raise RuntimeError("Logger process inventory is unavailable or missing the inspector; uninstall refused")
     if runtime._versions_with_live_process(root):
         raise RuntimeError("Active Logger runtime; uninstall refused")
     prefix = str(root).replace("\\", "/").casefold() + "/"
-    for pid in runtime._iter_all_pids():
+    for pid in pids:
         if pid == os.getpid():
             continue
         for path in (runtime._pid_image_path(pid), runtime._pid_cmdline_argv0(pid)):
@@ -124,7 +127,7 @@ def refuse_live_runtime(root: Path) -> None:
     if os.name != "nt":
         if not sys.platform.startswith("linux") or not Path("/proc").is_dir():
             raise RuntimeError("Logger uninstall requires supported native process inspection")
-        for pid in runtime._iter_all_pids():
+        for pid in pids:
             if pid == os.getpid():
                 continue
             directory = Path("/proc") / str(pid)
