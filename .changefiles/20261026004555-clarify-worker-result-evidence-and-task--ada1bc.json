@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify worker result evidence and task-specific readiness recovery in delegation guidance.",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

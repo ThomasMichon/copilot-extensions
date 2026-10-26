@@ -180,6 +180,11 @@ Delegation is not a handoff of responsibility. Continue direct work on an
 independent coordinator-owned track while background delegates run; otherwise
 use synchronous delegation and consume the result once.
 
+Before accepting a worker's answer or declaring a prepared venue usable, follow
+[worker evidence and readiness](references/worker-evidence-and-readiness.md).
+Keep semantic completion distinct from progress, and reassess task-specific
+readiness after bounded recovery through the existing owners.
+
 ## Write bounded delegate contracts
 
 Each prompt to a delegate should state:
