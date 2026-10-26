@@ -167,10 +167,10 @@ class PickerScreenInputMixin:
                 return
             # Real reload: rebuild the data source (live mode re-fetches every
             # machine on its loader threads; fixture mode re-reads src.load()).
+            self.debug = "worktree reload requested"
             self._start_setup_reload_worker()
             self._poll_orphan_state(force=True)
             self.sel = self.default_sel()
-            self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
             if key == "escape" and self._in_configuration():
                 self._leave_configuration()

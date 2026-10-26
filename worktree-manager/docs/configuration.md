@@ -211,6 +211,8 @@ rows update matching identities in place; only a complete source listing
 removes absent rows, including an explicitly empty listing. Sources removed
 from configuration lose their retained rows immediately. Retaining a row does
 not mark its source ready or skip the Actions menu's current liveness check.
+The `r` footer acknowledges a reload request rather than reporting successful
+completion; an immediate setup admission failure retains its actual diagnostic.
 
 This is a read-only compatibility projection, not a persisted-state migration:
 historical rows are not rewritten, existing canonical-over-legacy merge
