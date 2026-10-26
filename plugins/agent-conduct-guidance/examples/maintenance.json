@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "status": "active",
+  "ownerSessionId": "<durable-copilot-session-id>",
+  "summary": "Supporting agent tools are intentionally unavailable during maintenance.",
+  "startedAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z"
+}

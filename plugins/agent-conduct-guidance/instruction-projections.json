@@ -3,6 +3,15 @@
   "version": 1,
   "projections": [
     {
+      "id": "maintenance-standby",
+      "deliveryMode": "inline",
+      "template": "instructions/maintenance-standby.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/maintenance-standby.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
+    },
+    {
       "id": "elevation-fallback",
       "deliveryMode": "inline",
       "template": "instructions/elevation-fallback.instructions.md",

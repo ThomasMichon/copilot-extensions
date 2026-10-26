@@ -157,6 +157,15 @@ for this wholesale transition. The [verbatim clarification](inception-transcript
 preserves all three operator statements. Exact native change/rollback consent,
 candidate health and data-format compatibility remain required.
 
+**Teardown-readiness priority (2026-10-25), summary:** prepare intentional
+per-machine tool outages before further installed transition. The existing
+installation-independent-sessions owner (#8669) retains wrappers, supported
+removal and actual process-survival qualification. The bounded companion #9022
+adds normally projected conduct guidance and a retained local notice identifying
+the maintenance owner, with native Copilot 30-minute standby polling and no
+supporting-service dependency. This does not activate a hold, replace native
+survival evidence or authorize host restart/removal.
+
 **Execution follow-through summary:** the requested outcome covers all installed
 services and tools, including their management tools, rather than ending at a
 successful canary. A regular flow must keep the dedicated merged-dev source
@@ -285,7 +294,8 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] **Agent-recommended bounded portfolio follow-through:** qualify source-backed updater readiness and actual execution across the eligible runtime owners rather than inferring a complete portfolio from the engine/profile witnesses. Preserve each installed command owner, canonical lifecycle tooling, existing default root, configured role and independent Manager/service/plugin selections. Use the existing collected updater and driver, retain one exact service commit and complete packet, and keep production data/serving cutover and recurring-maintenance consent separate.
 - [x] **Agent-recommended bounded source-owner SDK readiness:** ship the existing canonical lifecycle SDK in every current required-context Python runtime payload and qualify actual materialization plus the installed owner's source validator. Preserve command/catalog bytes and legacy compatibility; this finite prerequisite does not close whole-portfolio execution or adoption.
 - [x] **Agent-recommended bounded service-less execution witness:** qualify actual collected prepared-source updates through SSH's native install/update and Machines' native init frontends, retaining their original command owner, default fixture root/state, installed consumers, selected-source currentness, healthy reuse and source-unavailable global dispatch. Preserve Machines' CMD-only Windows contract and actual persistent-environment containment; this pair does not close the complete eligible portfolio or production adoption.
-- [ ] **Agent-recommended bounded MCP execution witness:** qualify native construction and collected prepared-source updates while retaining its original global command owner, default fixture state, exact installed source/currentness and completion-preserving reuse. Explicitly disable cutover and version reaping in the fixture; do not infer live daemon replacement, serving readiness or whole-portfolio completion from construction/publication evidence.
+- [x] **Agent-recommended bounded MCP execution witness:** qualify native construction and collected prepared-source updates while retaining its original global command owner, default fixture state, exact installed source/currentness and completion-preserving reuse. Explicitly disable cutover and version reaping in the fixture; do not infer live daemon replacement, serving readiness or whole-portfolio completion from construction/publication evidence.
+- [ ] Qualify the bounded #9022 maintenance-standby conduct projection and owner-attributed per-machine notice, retaining native 30-minute polling and explicit unsupported/missing-notice outcomes without a service dependency. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
 
 ### Phase 4a - Manager-owned opt-in background maintenance
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
