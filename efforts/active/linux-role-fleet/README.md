@@ -488,6 +488,24 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- Prepared the fixed guest-state operation consumer using the existing shared
+  primitive and mount-table parser. The context checks state/lock posture before
+  acquisition, before consequential stages and on exit; failures retain partial
+  work and release only the operation descriptor. Synthetic controls and local
+  directory fixtures cover refusal and cleanup, not real shared-volume custody,
+  crash settlement or case admission. Continue independent source review, then
+  the existing-owner guest/case prerequisites. No resources were created.
+- #9128 merged explicit offline-mode declaration and finite loopback/no-route
+  observations as `c08ddfc5cced923802128fe92bcec32e4afcb87e` after exact-head
+  Copilot approval, no findings and all required checks. The bounded combined
+  selectors passed 462 controls, including 63 new synthetic offline controls
+  and two existing explicitly selected real local-Git cases.
+  Re-read this complete Plan and Validation Plan. The selected first case uses
+  one offline container with local fake peers; no resources were created.
+  Continue the guest/case and physical-state custody controls through existing
+  owners, then obtain exact resource approval before actual provisioning.
+  Real boundary/persistence/fault, full runtime/source, native-output and
+  strict pre-effect gates remain open; this does not close the reproducer.
 - #9124 merged bounded effective volatile-mount observations as
   `4d0ee4b02552f6d193a8d3b177fdec8ae0a4d5d9` after exact-head Copilot
   approval, resolved documentation feedback and all required checks.

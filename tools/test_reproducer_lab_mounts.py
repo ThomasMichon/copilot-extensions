@@ -236,7 +236,7 @@ def guest_probe(
         O_RDONLY=os.O_RDONLY, O_DIRECTORY=os.O_DIRECTORY, O_NOFOLLOW=os.O_NOFOLLOW,
         ST_RDONLY=os.ST_RDONLY, path=os.path,
     ))
-    monkeypatch.setattr(guest_mounts, "_table", lambda: TABLE)
+    monkeypatch.setattr(guest_mounts, "read_mount_table", lambda: TABLE)
     return opened
 
 
@@ -255,10 +255,10 @@ def test_guest_mount_table_change_and_elapsed_deadline_refuse(
     guest_probe: list[int], monkeypatch: Any,
 ) -> None:
     tables = iter([TABLE, TABLE + "changed"])
-    monkeypatch.setattr(guest_mounts, "_table", lambda: next(tables))
+    monkeypatch.setattr(guest_mounts, "read_mount_table", lambda: next(tables))
     with pytest.raises(ValueError, match="changed or expired"):
         guest_mounts.observe()
-    monkeypatch.setattr(guest_mounts, "_table", lambda: TABLE)
+    monkeypatch.setattr(guest_mounts, "read_mount_table", lambda: TABLE)
     clock = iter([0, guest_mounts.MAX_SECONDS])
     monkeypatch.setattr(guest_mounts, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     with pytest.raises(ValueError, match="changed or expired"):
@@ -275,7 +275,7 @@ def test_guest_table_reader_stops_at_its_byte_ceiling(tmp_path: Path, monkeypatc
     table.write_bytes(b"x" * (guest_mounts.MAX_TABLE_BYTES + 1))
     monkeypatch.setattr(guest_mounts, "open", lambda *_args: table.open("rb"), raising=False)
     with pytest.raises(ValueError, match="ceiling"):
-        guest_mounts._table()
+        guest_mounts.read_mount_table()
 
 
 def test_physical_storage_replacement_after_mount_probe_refuses() -> None:

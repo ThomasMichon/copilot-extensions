@@ -30,6 +30,14 @@ class _Mount:
     filesystem: str
 
 
+@dataclass(frozen=True)
+class StateMount:
+    mount_id: int
+    device: str
+    root: str
+    filesystem: str
+
+
 def _path(value: str) -> str:
     decoded = _ESCAPE.sub(lambda match: chr(int(match[1], 8)), value)
     path = PurePosixPath(decoded)
@@ -74,6 +82,22 @@ def _inventory(table: object) -> dict[str, _Mount]:
         ids.add(mount_id)
         inventory[destination] = _Mount(mount_id, fields[2], root, frozenset(options), filesystem[0])
     return inventory
+
+
+def inspect_state_mount(table: object, device: str) -> StateMount:
+    """Check the fixed durable-state mount, not Docker volume association."""
+    inventory = _inventory(table)
+    root, state = inventory.get("/"), inventory.get("/lab/state")
+    if (
+        root is None or "ro" not in root.options or "rw" in root.options
+        or state is None or "rw" not in state.options or "ro" in state.options
+        or state.filesystem not in {"ext4", "xfs", "btrfs", "zfs"}
+        or state.device != device or state.device == root.device
+        or "/lab" in inventory
+        or any(path.startswith("/lab/state/") for path in inventory)
+    ):
+        raise ValueError("effective durable state mount is unavailable or unsupported")
+    return StateMount(state.mount_id, state.device, state.root, state.filesystem)
 
 
 def inspect_volatile_mounts(experiment: Experiment, value: object) -> VolatileMounts:
