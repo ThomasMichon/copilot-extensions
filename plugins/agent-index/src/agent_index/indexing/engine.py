@@ -510,7 +510,7 @@ def run_reindex(
             logger.warning("Post-reindex compaction failed", exc_info=True)
             print("  WARNING: compaction failed (see logs)")
 
-    if selected_layout():
+    if selected_layout() and not multi_store.content_store.fts_current():
         # Cover the final content version, including all post-index GC and compaction.
         multi_store.ensure_fts_index()
     state.save(config.state_file)
@@ -533,7 +533,7 @@ def run_reindex(
     # Refresh the similarity-cluster artifact from the just-updated vectors.
     # Reuses stored embeddings (no re-embedding), so it runs post-index in the
     # same pipeline. Legacy clustering remains optional; selected failures propagate.
-    cluster_stats = _refresh_clusters(multi_store, config)
+    cluster_stats = _refresh_clusters(multi_store, config, force=full)
     if cluster_stats is not None:
         result["clusters"] = cluster_stats["clusters"]
 
@@ -545,7 +545,7 @@ def run_reindex(
 
 
 def _refresh_clusters(
-    multi_store: MultiModelStore, config: IndexConfig
+    multi_store: MultiModelStore, config: IndexConfig, *, force: bool = False,
 ) -> dict[str, int | float] | None:
     """Recompute clusters; selected-domain failures must fail the indexing task.
 
@@ -553,26 +553,9 @@ def _refresh_clusters(
     Returns the pass stats dict, or ``None`` when clustering is disabled or
     fails in legacy mode. Selected mode propagates failures without recovery.
     """
-    if not config.cluster_enabled:
-        return None
-    try:
-        from agent_index.indexing.cluster_pass import run_clustering_pass
-        from agent_index.store.cluster_store import ClusterStore
+    from agent_index.indexing.derived_maintenance import refresh_clusters
 
-        cluster_store = ClusterStore(config.clusters_db)
-        print("\nRefreshing similarity clusters...")
-        stats = run_clustering_pass(multi_store, cluster_store, config)
-        print(
-            f"  {stats['clusters']} clusters across {stats['slices']} slices "
-            f"({stats['items']} items, {stats['elapsed_ms']}ms)"
-        )
-        return stats
-    except Exception:
-        if selected_layout():
-            raise
-        logger.warning("Clustering pass failed", exc_info=True)
-        print("  WARNING: clustering pass failed (see logs)")
-        return None
+    return refresh_clusters(multi_store, config, force=force)
 
 
 def _index_source(

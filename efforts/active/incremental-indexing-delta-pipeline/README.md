@@ -110,7 +110,7 @@ After the reviewed proposal, the operator admitted execution:
 
 ### Phase 2 - Shared no-op, fingerprint and embedding reuse
 
-- [ ] Reuse source metadata/revisions before fetching content where supported.
+- [x] Reuse source metadata/revisions before fetching content where supported.
   Add normal-round fingerprint checks, not only retry-window skipping.
 - [ ] Separate text, searchable metadata, chunker/schema and embedding-profile
   identity. Metadata-only updates must not invalidate unchanged vectors.
@@ -125,7 +125,7 @@ After the reviewed proposal, the operator admitted execution:
 
 - [ ] Carry exact changed IDs/ref ranges through intake, queue and connector
   boundaries; merge duplicate deliveries without erasing distinct changes.
-- [ ] Make local Git use commit-range changes and tombstones without enumerating
+- [x] Make local Git use commit-range changes and tombstones without enumerating
   all tracked paths and commit history on each ordinary round.
 - [ ] Bound hosted issue/PR acquisition and timestamp overlap replay by cursor
   and identity. Provider limitations must remain explicit.
@@ -266,3 +266,46 @@ source-owner coordination rather than one large rewrite.
   account-wide source leases/shared alias watermarks, per-chunk/model reuse,
   mutation-aware maintenance and consumer qualification remain open under
   their existing owners. The next implementation slice is pinned Git discovery.
+
+### 2026-10-26 - Pinned Git discovery merged
+
+- Merged #9058 as `9dc29b068` after current-head Copilot approval and green CI.
+  The final bounded Git/recovery packet passed 125 tests; both new parsing
+  helpers pass mypy. The initial integrated post-rebase packet passed 140 tests.
+- Revision-backed Git discovery now uses immutable object reads, raw range
+  diffs, explicit tombstones and new-commit history only. A no-op performs zero
+  range/blob/history commands after resolution; one file plus its commit uses
+  five, identically with 100, 10,000 and 100,000 unchanged stored items.
+- Full reconciliation remains explicit for missing or rewritten cursors.
+  Working-tree fallback retains its logged legacy reconciliation behavior.
+  Unsupported non-UTF-8 paths are logged consistently, commit-message control
+  characters retain their content, and portable rename coverage stays active
+  on Windows.
+- This closes supported revision-before-content reuse and the revision-backed
+  Git discovery Plan items. Hosted acquisition, actual hint-consuming
+  connectors, external-provider qualification, page-level recovery and derived
+  maintenance remain open. Continue with negotiated provider integration and
+  no-op derived-artifact coverage reuse; no consumer rollout is implied.
+
+### 2026-10-26 - Covered derived-maintenance implementation slice
+
+- Added conservative physical-version coverage for cluster artifacts and actual
+  native FTS coverage checks. Covered ordinary rounds skip item enumeration,
+  cluster publication and FTS-builder subprocesses. Full repair remains explicit.
+- Cluster rows and coverage publish atomically; computation-time mutation,
+  failed passes, policy/model changes and same-name/version table reincarnation
+  cannot validate stale coverage. Existing source-domain authority is retained.
+- Native fixtures with 100, 10,000 and 100,000 content rows in both layouts
+  measured the same metadata-only work for two covered rounds: 12 legacy or 24
+  source-aware table-refresh calls, zero enumeration, builder, index recreation
+  or artifact replacement, with unchanged index metadata and artifact timestamp.
+  These fixtures seed a known-empty cluster artifact because they have no
+  vectors; they do not claim a measured 100,000-item full clustering pass.
+- Targeted maintenance/lifecycle/FTS tests passed (64, one Windows-only skip);
+  retained source-store and multi-model tests passed (55, eight Windows-only
+  skips). Source-aware child-failure coverage now writes actual uncovered data
+  before injecting failure rather than requesting redundant covered work.
+- This advances Phase 4 but does not close its logical-mutation or local-slice
+  gates, the complete count matrix, consumer integration, release or rollout.
+  Continue with negotiated provider checkpoint fencing, precise chunk/model
+  reuse and the shared consumer injection path.

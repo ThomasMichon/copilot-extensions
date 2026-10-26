@@ -342,6 +342,27 @@ in detached versioned worker subprocesses, so a service cutover does not kill an
 in-flight indexing job; the successor service re-adopts live workers or marks
 dead ones interrupted/resumable.
 
+### Covered derived maintenance
+
+An ordinary FTS update checks existing coverage before launching a builder.
+Source-aware stores use their existing domain receipt and durable index;
+legacy stores use Lance's actual unindexed-row metadata. Unknown coverage keeps
+maintenance due. Explicit full builds still run, and new content versions remain
+eligible for incremental maintenance and the existing failure/retry path.
+
+Similarity clusters persist their coverage key and result counts in the same
+SQLite transaction as the artifact. The key covers refreshed versions of the
+configured content/vector tables, qualified local dataset identity, the existing
+source-domain identity and clustering policy. A covered ordinary round checks
+metadata without enumerating items, rewriting the artifact or starting an FTS
+child. Changing inputs or policy invalidates coverage; computation verifies its
+input key again before publishing. Explicit full indexing forces clustering.
+Unqualified remote storage logs the limitation and runs an uncached pass.
+
+This is conservative physical-version reuse, not a logical mutation generation,
+source cursor, new reader authority or lock. A real change still invokes the
+global clustering pass; model/bucket-local maintenance remains separate work.
+
 ### Durable acquisition hints (queue contract v1)
 
 `indexing.change_hints.ChangeHints` is a typed, immutable version-1 acquisition

@@ -177,6 +177,12 @@ class MultiModelStore(_ItemRepresentationMixin):
     def model_ids(self) -> list[str]:
         return list(self._vector_tables)
 
+    @source_read
+    def projection_snapshot(self) -> dict[str, object]:
+        from .projection_snapshot import projection_snapshot
+
+        return projection_snapshot(self)
+
     # -- write ---------------------------------------------------------------
 
     @source_write

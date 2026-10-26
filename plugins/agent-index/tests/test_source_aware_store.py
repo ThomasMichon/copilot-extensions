@@ -603,6 +603,7 @@ def test_selected_fts_failed_rebuild_is_not_old_index_availability(cold, monkeyp
         return native_run(args, **kwargs)
 
     monkeypatch.setattr(content_module.subprocess, "run", fail_real_child)
+    store.upsert_content([chunk(path="new.md")])
     content.mark_fts_dirty()
     with pytest.raises(SourceLayoutError, match="FTS preparation failed"):
         content.ensure_fts_index(max_retries=1)

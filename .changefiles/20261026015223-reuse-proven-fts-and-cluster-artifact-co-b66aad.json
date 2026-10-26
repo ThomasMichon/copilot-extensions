@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse proven FTS and cluster artifact coverage without no-op maintenance scans",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
