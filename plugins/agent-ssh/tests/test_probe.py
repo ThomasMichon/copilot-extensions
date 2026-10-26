@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from agent_ssh import probe
+
+
+@pytest.fixture(autouse=True)
+def posix_probe_contract(monkeypatch) -> None:
+    monkeypatch.setattr(probe, "IS_WINDOWS", False)
 
 
 def test_probe_alias_reachable(monkeypatch) -> None:

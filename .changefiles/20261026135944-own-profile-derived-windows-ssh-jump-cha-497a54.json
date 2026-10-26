@@ -1,0 +1,29 @@
+{
+  "comment": "Own profile-derived Windows SSH jump chains and bounded probes; add isolated selected-client visibility and retirement qualification (#9122).",
+  "changes": [
+    {
+      "plugin": "libs/ssh-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

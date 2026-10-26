@@ -45,6 +45,9 @@ control the console flags of a native proxy descendant. Do not put a console or
 pseudoconsole wrapper around an opaque protocol stream. Move that descendant
 behind an owned loopback broker instead, pump bytes without decoding them, and
 apply the normal captured-child launch primitive at the point that creates it.
+`ProxyJump` is another such boundary. Resolve the complete declared hop chain
+before launch and give every native SSH stage to the same owner; do not let
+OpenSSH spawn an opaque jump chain beneath an otherwise hidden root.
 The shared SSH launcher owns this broker in-process for the lifetime of one SSH
 root; normal exit, timeout, and cancellation close its listener and proxy child,
 and both the proxy child and the SSH root are bound to a kill-on-close Job
