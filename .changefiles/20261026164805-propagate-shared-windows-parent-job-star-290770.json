@@ -1,0 +1,13 @@
+{
+  "comment": "Propagate shared Windows parent-Job startup primitive into declared process-helper consumers; existing callers unchanged",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}
