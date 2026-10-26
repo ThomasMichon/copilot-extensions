@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 import sys
+import venv
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,8 +17,10 @@ from agent_procutil import no_window_kwargs
 
 from agent_index.indexing import engine, runner as runner_module
 from agent_index.indexing.change_hints import ChangeHints
+from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL
 from agent_index.indexing.runner import TaskRunner
 from agent_index.indexing.task_store import TaskStore
+from agent_index.runtime_version import RUNTIME_VERSION_ENV
 
 
 def _hints():
@@ -35,17 +39,26 @@ def test_actual_worker_rollback_monitor_then_capability_restoration(tmp_path, mo
     capable.change_hints_versions = (1,)
     monkeypatch.setattr(engine, "run_reindex", capable)
     source = Path(__file__).resolve().parents[1] / "src"
+    dependency_paths = json.dumps([str(Path(path).absolute()) for path in sys.path if path])
+    interpreters = {}
+    for mode in ("legacy", "capable"):
+        runtime = tmp_path / f"worker-{mode}"
+        venv.EnvBuilder(with_pip=False).create(runtime)
+        interpreters[mode] = runtime / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    monkeypatch.setattr(runner_module.sys, "executable", str(interpreters["legacy"]))
+    monkeypatch.setenv(RUNTIME_VERSION_ENV, "test-legacy")
     child_code = """
-import sys, time
+import json, sys, time
 from pathlib import Path
-sys.path.insert(0, sys.argv[1])
+sys.path[:0] = [sys.argv[1]] + json.loads(sys.argv[5])
 from agent_index.indexing import engine, priority, worker
 deadline = time.monotonic() + 8
 while not Path(sys.argv[3]).exists() and time.monotonic() < deadline:
     time.sleep(0.01)
 assert Path(sys.argv[3]).exists()
 def run_reindex(**kwargs):
-    assert kwargs["change_hints"].item_ids == ("a",)
+    if "change_hints" in kwargs:
+        assert kwargs["change_hints"].item_ids == ("a",)
     return {"chunks_total": 1}
 if sys.argv[4] == "capable":
     run_reindex.change_hints_versions = (1,)
@@ -57,6 +70,7 @@ raise SystemExit(worker.run_worker(sys.argv[2]))
     async def exercise():
         store = TaskStore(tmp_path / "data" / "tasks.db")
         task = store.enqueue("git:sample", change_hints=_hints())
+        plain = [store.enqueue(f"git:plain-{index}") for index in range(2)]
         events = []
         runner = TaskRunner(store, SimpleNamespace(publish=lambda *event: events.append(event)))
         runner.set_governance_recheck_fn(lambda _: {"status": "ready"})
@@ -70,9 +84,9 @@ raise SystemExit(worker.run_worker(sys.argv[2]))
 
         def spawn(task_id):
             start = tmp_path / f"start-{len(children)}"
-            mode = "legacy" if not children else "capable"
+            mode = "legacy" if sys.executable == str(interpreters["legacy"]) else "capable"
             child = subprocess.Popen(
-                [sys.executable, "-c", child_code, str(source), task_id, str(start), mode],
+                [sys.executable, "-c", child_code, str(source), task_id, str(start), mode, dependency_paths],
                 env=os.environ.copy(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 **no_window_kwargs(),
             )
@@ -82,30 +96,44 @@ raise SystemExit(worker.run_worker(sys.argv[2]))
 
         runner.set_source_lock_fn(acquire)
         monkeypatch.setattr(runner, "_spawn_worker", spawn)
+
+        async def run_next(expected_task, expected_code):
+            await runner._worker_iteration()
+            monitor = runner._monitors[expected_task.id]
+            child = children[-1]
+            assert lock.locked()
+            starts[-1].write_text("start", encoding="utf-8")
+            _, stderr = await asyncio.to_thread(child.communicate, timeout=12)
+            assert child.returncode == expected_code, stderr.decode()
+            await asyncio.wait_for(monitor, timeout=5)
+            assert not lock.locked()
+            assert not runner._active_workers
+            assert runner.tasks_failed == 0
+
         try:
-            for expected_code in (2, 0):
-                await runner._worker_iteration()
-                monitor = runner._monitors[task.id]
-                child = children[-1]
-                assert lock.locked()
-                starts[-1].write_text("start", encoding="utf-8")
-                _, stderr = await asyncio.to_thread(child.communicate, timeout=12)
-                assert child.returncode == expected_code, stderr.decode()
-                await asyncio.wait_for(monitor, timeout=5)
-                assert not lock.locked()
-                assert not runner._active_workers
-                assert runner.tasks_failed == 0
-                record = store.get_task(task.id)
-                assert record.change_hints == task.change_hints
-                assert record.attempt_count == 1
-                if expected_code == 2:
-                    assert record.status == "queued_hints"
-                    assert runner.tasks_completed == 0
-                    assert store.dequeue_next() is None
-                    assert not any(kind == "task_complete" for kind, _ in events)
-                else:
-                    assert record.status == "complete"
-                    assert runner.tasks_completed == 1
+            await run_next(task, 2)
+            assert store.get_task(task.id).status == "queued_hints"
+            assert store.get_task(task.id).error == WORKER_HINT_REFUSAL
+            assert runner.tasks_completed == 0
+            assert not any(kind == "task_complete" for kind, _ in events)
+            for ordinary in plain:
+                await run_next(ordinary, 0)
+                assert store.get_task(ordinary.id).status == "complete"
+                assert store.get_task(task.id).status == "queued_hints"
+            assert len(children) == 3
+            for _ in range(3):
+                runner.notify()
+                assert await runner._worker_iteration() == 10.0
+            assert len(children) == 3, "a refusing worker generation must not be relaunched for hints"
+            monkeypatch.setattr(runner_module.sys, "executable", str(interpreters["capable"]))
+            monkeypatch.setenv(RUNTIME_VERSION_ENV, "test-capable")
+            await run_next(task, 0)
+            record = store.get_task(task.id)
+            assert record.status == "complete"
+            assert record.change_hints == task.change_hints
+            assert record.attempt_count == 1
+            assert record.worker_version == "test-capable"
+            assert runner.tasks_completed == 3
         finally:
             for start in starts:
                 start.write_text("start", encoding="utf-8")

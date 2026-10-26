@@ -282,8 +282,15 @@ claimed hinted task to `queued_hints`, without calling the engine or advancing
 its checkpoints. An unclaimed hinted task cannot be executed directly by the
 new worker. The monitor preserves intentional re-parking after the worker
 exits, publishes a queue update rather than a terminal failure, and allows
-dequeue when capability returns without requiring a manual retry. A pending
-cancellation still cancels the parked row.
+dequeue after worker capability can be revalidated without requiring a manual
+retry. The worker records refusal atomically in the existing task error field
+when re-parking. A runner retains that refusal against the selected interpreter
+and immutable runtime version. While that selection remains unchanged, it excludes
+hinted dequeue and continues serving ordinary queued tasks. A changed selection
+allows a new worker attempt, whose own callable must still verify v1 support.
+Time passing or another queue notification is not evidence of capability.
+Worker registration uses the existing immutable runtime-version metadata.
+A pending cancellation still cancels the parked row.
 
 The execution seam is
 `agent_index.indexing.engine.run_reindex(..., change_hints: ChangeHints | None = None)`.
@@ -324,6 +331,8 @@ option. With no hints file, the existing direct CLI execution path is retained.
 Split-runtime forwarding makes relative hint-file paths absolute in the
 caller's working directory before the hosted child changes directory. Both
 `--change-hints-file FILE` and `--change-hints-file=FILE` retain that binding.
+The intake DTO and transport additions retain the declared Python 3.10 floor,
+using postponed concrete annotations rather than newer `typing` exports.
 
 Deploy receivers before producers, and enable hinted execution only with a
 qualified capable engine. This transport expansion does not itself add engine

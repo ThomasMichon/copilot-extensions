@@ -8,6 +8,7 @@ from typing import Any
 from .change_hints import ChangeHints
 
 CONTRACT_ID = "agent-index.change-hints"
+WORKER_HINT_REFUSAL = "Selected worker does not support change-hints v1"
 
 
 def execution_versions(selected_run_reindex: object) -> list[int]:

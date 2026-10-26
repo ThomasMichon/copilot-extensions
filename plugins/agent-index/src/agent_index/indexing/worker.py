@@ -125,11 +125,11 @@ def run_worker(task_id: str) -> int:
     Claims the task's worker identity, runs the reindex, and writes the terminal
     status + result stats to the queue. Returns a process exit code.
     """
-    from agent_index import __version__
     from agent_index import config as _config
     from agent_index.index_config import IndexConfig
+    from agent_index.runtime_version import current_runtime_version
     from agent_index.indexing import engine as indexing_engine
-    from agent_index.indexing.change_hints_contract import execution_versions
+    from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL, execution_versions
     from agent_index.indexing.runner import IndexingCancelled
     from agent_index.indexing.task_store import TaskStatus, TaskStore
 
@@ -151,7 +151,7 @@ def run_worker(task_id: str) -> int:
             print("[FAIL] worker: hinted task must be claimed before execution", file=sys.stderr)
             return 2
         if not execution_versions(run_reindex):
-            store.release_processing(task_id)
+            store.release_processing(task_id, error=WORKER_HINT_REFUSAL)
             print("[FAIL] worker: selected callable cannot execute change-hints v1; task parked", file=sys.stderr)
             return 2
 
@@ -171,7 +171,7 @@ def run_worker(task_id: str) -> int:
         import platform
 
         host = platform.node()
-    store.set_worker(task_id, os.getpid(), host, __version__)
+    store.set_worker(task_id, os.getpid(), host, current_runtime_version())
 
     cancelled = threading.Event()
     _install_signal_handlers(cancelled)

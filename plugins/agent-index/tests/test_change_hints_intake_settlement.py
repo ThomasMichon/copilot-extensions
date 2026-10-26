@@ -33,9 +33,10 @@ class _ObservedStore(TaskStore):
 
 
 async def _until(predicate):
-    async with asyncio.timeout(2):
+    async def wait():
         while not predicate():
             await asyncio.sleep(0.01)
+    await asyncio.wait_for(wait(), timeout=2)
 
 
 @pytest.mark.parametrize("cancelled", [False, True])

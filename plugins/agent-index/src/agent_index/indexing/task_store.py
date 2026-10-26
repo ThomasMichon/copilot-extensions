@@ -728,7 +728,7 @@ class TaskStore:
         finally:
             conn.close()
 
-    def release_processing(self, task_id: str) -> bool:
+    def release_processing(self, task_id: str, *, error: str | None = None) -> bool:
         """Return an unowned processing task to the queued state."""
         now = time.time()
         conn = self._connect()
@@ -740,9 +740,10 @@ class TaskStore:
                        worker_pid = NULL,
                        worker_host = NULL,
                        worker_version = NULL,
+                       error = COALESCE(?, error),
                        updated_at = ?
                    WHERE id = ? AND status = 'processing'""",
-                (now, task_id),
+                (error, now, task_id),
             ).rowcount
             conn.commit()
             return affected > 0

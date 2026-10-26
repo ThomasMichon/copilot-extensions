@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -35,7 +35,7 @@ class HintedReindexRequest(BaseModel):
         return ChangeHints.from_dict(value)
 
     @model_validator(mode="after")
-    def check_scope(self) -> Self:
+    def check_scope(self) -> HintedReindexRequest:
         """Validate exact-source incremental scope before queue effects."""
         validate_scope(self.source, self.full, self.change_hints)
         return self
