@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -33,7 +34,18 @@ def systemctl(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def registration(root: Path) -> dict:
+def registration(root: Path, *, instance_environment: dict[str, str] | None = None) -> dict:
+    from agent_procutil._daemon_instance_store import _test_context
+    from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+
+    if (
+        not instance_environment or set(instance_environment) != {TEST_CONTEXT_ENV}
+        or _test_context(instance_environment) is None
+    ):
+        raise RuntimeError("native fixture registration requires its disposable lifecycle owner")
+    binding = root / "probe" / "native-lifecycle.json"
+    with binding.open("x", encoding="utf-8") as stream:
+        json.dump(instance_environment, stream)
     module = importlib.import_module("worktree_manager.automatic_updates_autostart")
     result = module.register_autostart(root)
     if result.get("activation") == "blocked":
@@ -81,7 +93,28 @@ def assert_mainpid(unit: str, status: dict, root: Path) -> dict[str, str]:
     group = values.get("ControlGroup", "")
     if not group.endswith("/" + unit) or group not in identity[3]:
         raise AssertionError("native worker does not belong to the exact unit cgroup")
+    assert_disposable_instance(root, status["pid"])
     return values
+
+
+def assert_disposable_instance(root: Path, pid: int) -> None:
+    from agent_procutil._daemon_instance_store import _test_context
+    from agent_procutil.daemon_instances import inspect_instances
+
+    binding = json.loads((root / "probe" / "native-lifecycle.json").read_text(encoding="utf-8"))
+    context = _test_context(binding)
+    if context is None:
+        raise AssertionError("native fixture lost its disposable lifecycle declaration")
+    matches = [
+        record for record in inspect_instances(Path(context["registry_root"]))
+        if record.get("pid") == str(pid) and record.get("runtime_root") == str(root)
+        and record.get("service") == "worktree-manager-automatic-updates"
+        and record.get("purpose") == context["purpose"]
+        and record.get("run_id") == context["run_id"] and record.get("owner") == context["owner"]
+        and 0 < float(record.get("deadline", 0)) <= float(record.get("hard_deadline", 0))
+    ]
+    if len(matches) != 1:
+        raise AssertionError("native MainPID has no exact leased instance for this qualification run")
 
 
 def retire(root: Path, unit: str) -> None:

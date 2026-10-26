@@ -529,6 +529,8 @@ def test_native_mainpid_checks_the_actual_retained_worker_command(
     group = "/user.slice/" + unit
     values = {"MainPID": "123", "ControlGroup": group}
     monkeypatch.setattr(native, "fields", lambda name: values)
+    disposable = Mock()
+    monkeypatch.setattr(native, "assert_disposable_instance", disposable)
     argv = fixtures.command(
         root, ["automatic-updates", "run", "--root", str(root)], version=fixtures.OLD,
     )
@@ -540,9 +542,67 @@ def test_native_mainpid_checks_the_actual_retained_worker_command(
     }
     if defect == "none":
         assert native.assert_mainpid(unit, status, root) == values
+        disposable.assert_called_once_with(root, 123)
     else:
         with pytest.raises(AssertionError, match="retained"):
             native.assert_mainpid(unit, status, root)
+
+
+def test_native_registration_binds_only_its_fixture_lifecycle(
+    windows_probe: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_procutil import _daemon_instance_store as store
+    from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+    from worktree_manager import automatic_updates_autostart as startup
+
+    native = importlib.import_module("native")
+    (tmp_path / "probe").mkdir()
+    overlay = {TEST_CONTEXT_ENV: "controlled-disposable-declaration"}
+    monkeypatch.setattr(store, "_test_context", lambda environment: {"purpose": "unattended-test"})
+    register, activate = Mock(return_value={"registered": True}), Mock(return_value={"activation": "started"})
+    monkeypatch.setattr(startup, "register_autostart", register)
+    monkeypatch.setattr(startup, "activate_autostart", activate)
+    before = dict(os.environ)
+    native.registration(tmp_path, instance_environment=overlay)
+    assert json.loads((tmp_path / "probe/native-lifecycle.json").read_text()) == overlay
+    assert dict(os.environ) == before
+    register.assert_called_once_with(tmp_path)
+    activate.assert_called_once_with(tmp_path)
+
+
+@pytest.mark.parametrize("defect", ["none", "production", "foreign-run", "foreign-owner", "no-expiry", "foreign-pid"])
+def test_native_mainpid_requires_this_run_and_disposable_expiry(
+    windows_probe: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: str,
+) -> None:
+    from agent_procutil import _daemon_instance_store as store, daemon_instances
+
+    native = importlib.import_module("native")
+    (tmp_path / "probe").mkdir()
+    (tmp_path / "probe/native-lifecycle.json").write_text("{}")
+    context = {
+        "registry_root": str(tmp_path / "registry"), "purpose": "unattended-test",
+        "run_id": "current-run", "owner": "current-owner",
+    }
+    monkeypatch.setattr(store, "_test_context", lambda environment: context)
+    record = {
+        "pid": "123", "runtime_root": str(tmp_path),
+        "service": "worktree-manager-automatic-updates", "purpose": "unattended-test",
+        "run_id": "current-run", "owner": "current-owner",
+        "deadline": "1", "hard_deadline": "2",
+    }
+    if defect != "none":
+        key, value = {
+            "production": ("purpose", "production"), "foreign-run": ("run_id", "foreign"),
+            "foreign-owner": ("owner", "foreign"), "no-expiry": ("deadline", "0"),
+            "foreign-pid": ("pid", "999"),
+        }[defect]
+        record[key] = value
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda registry: [record])
+    if defect == "none":
+        native.assert_disposable_instance(tmp_path, 123)
+    else:
+        with pytest.raises(AssertionError, match="exact leased instance"):
+            native.assert_disposable_instance(tmp_path, 123)
 
 
 @pytest.mark.parametrize("known_entry", [True, False])
@@ -602,6 +662,34 @@ def test_cycle_witness_uses_loaded_package_and_retained_runtime_not_file_depth(
     observed = json.loads((root / "probe/cycle-001-begin.json").read_text())
     assert observed["version"] == fixtures.NEW
     assert observed["runtime"] == str(slot.resolve())
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_fixture_only_native_binding_reaches_startup_before_worker_admission(
+    windows_probe: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, valid: bool,
+) -> None:
+    from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+
+    fixtures = importlib.import_module("fixtures")
+    (tmp_path / "probe").mkdir()
+    overlay = {TEST_CONTEXT_ENV: "owned-test-declaration"} if valid else {"HOME": "foreign"}
+    (tmp_path / "probe/native-lifecycle.json").write_text(json.dumps(overlay))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
+    monkeypatch.setenv("WORKTREE_MANAGER_AUTOMATIC_UPDATES_UNIT", "fixture.service")
+    monkeypatch.delenv(TEST_CONTEXT_ENV, raising=False)
+    monkeypatch.setattr(sys, "argv", ["worktree-manager", "automatic-updates", "run"])
+    spec = importlib.util.spec_from_file_location(
+        "worktree_manager._native_lifecycle_fixture", fixtures.HERE / "fixture_cycle.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    if valid:
+        spec.loader.exec_module(module)
+        assert os.environ[TEST_CONTEXT_ENV] == overlay[TEST_CONTEXT_ENV]
+    else:
+        with pytest.raises(RuntimeError, match="exact disposable lifecycle"):
+            spec.loader.exec_module(module)
+        assert TEST_CONTEXT_ENV not in os.environ
 
 
 def test_native_update_execution_uses_private_driver_root(

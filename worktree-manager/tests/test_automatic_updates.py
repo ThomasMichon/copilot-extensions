@@ -240,7 +240,8 @@ def test_environment_clears_session_and_run_identity(tmp_path: Path, monkeypatch
                 "WORKTREE_MANAGER_ENGINE_CMD", "WORKTREE_MANAGER_ENGINE_ARGV",
                 "COPILOT_EXTENSIONS_CONTEXT", "GIT_DIR", "GIT_CONFIG_COUNT",
                 "PYTHONEXECUTABLE", "UV_INTERNAL__PYTHONHOME", "__PYVENV_LAUNCHER__",
-                "UV_PROJECT_ENVIRONMENT"):
+                "UV_PROJECT_ENVIRONMENT", "AGENT_WORKTREES_UPDATE_CONTEXT",
+                "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.setenv(key, "old-session")
     monkeypatch.setenv("SSH_ASKPASS_REQUIRE", "force")
     monkeypatch.setenv("DISPLAY", ":fixture")
