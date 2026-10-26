@@ -69,6 +69,7 @@ composition; content integrity does not reduce to trusting a source marker.
 | Regression admission contributor | First bounded contributor-regression unit cohort; existing broad periodic ownership retained | Managed source `chugging-wrench`; #3336 |
 | Stamped-candidate contributor | Bounded Phase 9c ordering and coverage-provenance correction; other campaign and control owners retained | Managed source `faded-washer`; #8390 |
 | Composite-source contributor | Phase 9d complete source publication and late Main-control reconciliation; existing artifact/profile and runtime owners retained | Managed source `stubborn-lantern`; #8736 |
+| Release implementation coherence contributor | Phase 9e durable helper/controller coherence, bounded Main bootstrap and qualified release recovery | Managed source `buzzing-gauge`; #8983 |
 
 _Expand this table if/when work is split across additional participants
 (e.g. a dedicated worktree for the CI pipeline vs. one for CONTRIBUTING/AGENTS.md
@@ -90,6 +91,11 @@ rewrite)._
   Historical Phase 9c attribution does not transfer current implementation
   custody. #8367 retains its optional profile/index producer and API; coordinate
   shared publication or documentation interfaces rather than superseding it.
+- **Phase 9e:** the Release implementation coherence contributor owns the
+  [source-coherent implementation proposal](source-coherent-release-implementations.md)
+  and its explicitly authorized Main workflow repair. Preserve the Phase 9d
+  contributor's wider late-control work, #6237 portfolio ownership and all
+  runtime/lifecycle owners; coordinate shared publication interfaces.
 
 ## Context
 
@@ -116,6 +122,17 @@ rewrite)._
   agents will keep following stale guidance after the split ships.
 
 ## Request
+
+**2026-10-26 durable release recovery (verbatim):**
+
+> Focus on making a durable fix to unblock main releases, which doesn't require regularly updating version pins. Version pins produce brittleness. You have my full authorization to make direct-main workflow commits, drive PRs, and deploy locally to produce an unblocked release.
+
+The operator requires durable release recovery rather than repeated manual
+helper-pin updates and explicitly authorizes the bounded Main workflow repair,
+PR completion and local rollout. Phase 9e is the **agent-recommended**
+realization. It retains immutable per-run input identities and the source,
+review, signing, publication and actual Main-merge gates; permission to repair
+workflow control is not a generic source or integrity exemption.
 
 **2026-10-24 final promotion boundary and independently advancing Main controls
 (verbatim):**
@@ -994,6 +1011,21 @@ late-control reconciliation, Main activation and live acceptance remain open.)_
       promotion satisfies the complete pre-PR source/artifact contract,
       preserves late Main changes and remains under thirty minutes including
       queueing, publication, actual merge and tagging.
+
+### Phase 9e - Source-coherent release implementations
+
+_(Agent-recommended realization of the 2026-10-26 operator direction.
+Participant: Release implementation coherence contributor; bounded tracker:
+#8983. Status: Proposed; no source-coherent Main activation yet.)_
+
+- [ ] Review the [source-coherent implementation plan](source-coherent-release-implementations.md)
+      before changing implementation authority or Main execution.
+- [ ] Implement coherent immutable source selection and PR-time compatibility
+      checks, preserving privilege isolation and the existing unit portfolio.
+- [ ] Drive the independently reviewed Main workflow transaction and one actual
+      frozen-source release through artifact publication, Main merge and tag.
+- [ ] Complete the authorized local rollout and running-state proof, journal
+      any remaining gates under their existing owners.
 
 ## Validation Plan
 
