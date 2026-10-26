@@ -241,6 +241,58 @@ in detached versioned worker subprocesses, so a service cutover does not kill an
 in-flight indexing job; the successor service re-adopts live workers or marks
 dead ones interrupted/resumable.
 
+### Durable acquisition hints (queue contract v1)
+
+`indexing.change_hints.ChangeHints` is a typed, immutable version-1 acquisition
+hint envelope. Its exact configured `source`, adapter-supplied
+`canonical_family`, and opaque nonsecret `account_id` form the union scope.
+Adapters own canonical-family selection and stable account identification; the
+queue does not infer aliases, accounts or credentials. Item IDs, event IDs,
+distinct base/target `RefRange` pairs and item-bound `MetadataRevision` pairs
+are deterministically deduplicated and unioned without collapsing differing
+targets or metadata revisions. These are acquisition hints only: no snapshot
+completeness, tombstone, deletion or checkpoint authority is implied. Unknown
+fields, unsupported versions, malformed typed values and corrupt persisted
+JSON fail visibly rather than becoming an empty or full-snapshot request.
+
+`TaskStore.enqueue(source=..., change_hints=...)` accepts these envelopes only
+for a matching exact-source incremental task (`full=False`). The additive
+nullable `tasks.change_hints` column retains payloads across restart, retry and
+recovery. A `BEGIN IMMEDIATE` transaction atomically unions new deliveries into
+one same-scope `queued_hints` row. Processing payloads are immutable; events
+arriving during active work accumulate into a separate trailing row. Retrying
+an older attempt can leave two pending rows; both payloads remain intact and
+new deliveries union into the oldest matching pending row. Different configured
+sources, families or accounts are never coalesced.
+
+Hinted tasks remain conservatively separate from legacy full tasks, including
+`source='all'`: a full task has no proven account/ref/event coverage and cannot
+cancel or swallow hinted work. Unhinted tasks retain queued exact deduplication,
+queued-full supersession, full-first dequeue ordering and the existing rule
+that a processing full task never absorbs a trailing incremental. A capable
+dequeue preserves full-first ordering and FIFO within each tier.
+
+This is a **receiver-first expansion**, not producer or worker adoption.
+`dequeue_next()` retains legacy selection; only an explicit
+`dequeue_next(accept_change_hints=True)` may claim parked work. That opt-in
+asserts the caller preserves and consumes v1 hints throughout execution; package
+version or presence of a newer payload is not execution support. The current
+runner, worker, CLI and HTTP intake do not opt in or emit hints. They require a
+separate capability-aware migration before hinted tasks can be executed.
+No new transport syntax or runtime capability advertisement is introduced here.
+
+The storage migration atomically installs durable SQLite triggers with the new
+column. The triggers preserve `queued_hints` even when an older runtime's
+retry, release or generic status update writes `queued`; older dequeue SQL
+therefore cannot claim hinted work after rollback. Existing plain rows retain
+their old defaults and behavior. New queue queries, pending counts, cancellation
+and retry include parked rows. Older diagnostic/cancellation code may not list
+or cancel parked work; use a capable TaskStore to manage it. Keep the nullable
+column, parked status and rollback-fencing triggers throughout the supported
+upgrade/rollback window; this expansion retires no legacy form. Existing source
+locks, committed-reader state, checkpoints and vector-gap repair retain their
+own authorities.
+
 Step 6 has two independent GC passes. `gc_stale_sources` purges abandoned
 crawler NAMING SCHEMES (a stale generation, e.g. an old `forge:*` variant) and
 runs only on a full reindex, paired with post-GC compaction. `gc_unconfigured_sources`

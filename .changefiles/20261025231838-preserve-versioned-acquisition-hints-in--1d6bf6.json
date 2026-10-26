@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve versioned acquisition hints in durable queue unions and fence hinted work from legacy workers.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

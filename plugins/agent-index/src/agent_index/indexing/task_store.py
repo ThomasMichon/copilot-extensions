@@ -14,10 +14,13 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+from .change_hints import ChangeHints
+from .task_hints_schema import install_hints_schema
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_tasks_finished_at
 
 class TaskStatus(StrEnum):
     QUEUED = "queued"
+    QUEUED_HINTS = "queued_hints"
     PROCESSING = "processing"
     COMPLETE = "complete"
     PARTIAL = "partial"
@@ -102,9 +106,10 @@ class TaskRecord:
     started_at: float | None
     finished_at: float | None
     updated_at: float
+    change_hints: ChangeHints | None = field(default=None, kw_only=True)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "id": self.id,
             "source": self.source,
             "full": self.full,
@@ -123,9 +128,18 @@ class TaskRecord:
             "finished_at": self.finished_at,
             "updated_at": self.updated_at,
         }
+        if self.change_hints is not None:
+            result["change_hints"] = self.change_hints.to_dict()
+        return result
 
 
 def _row_to_record(row: sqlite3.Row) -> TaskRecord:
+    raw_hints = row["change_hints"] if "change_hints" in row.keys() else None
+    hints = ChangeHints.from_json(raw_hints) if raw_hints is not None else None
+    if hints is not None and (hints.source != row["source"] or row["full"]):
+        raise ValueError("Persisted change hints do not match incremental task scope")
+    if row["status"] == TaskStatus.QUEUED_HINTS and hints is None:
+        raise ValueError("Parked hinted task has no change hints")
     # Parse result_stats JSON if present
     raw_stats = row["result_stats"] if "result_stats" in row.keys() else None
     result_stats: dict[str, Any] | None = None
@@ -157,6 +171,7 @@ def _row_to_record(row: sqlite3.Row) -> TaskRecord:
         started_at=row["started_at"],
         finished_at=row["finished_at"],
         updated_at=row["updated_at"],
+        change_hints=hints,
     )
 
 
@@ -215,12 +230,16 @@ class TaskStore:
                     conn.execute(f"ALTER TABLE tasks ADD COLUMN {col} {decl}")
                     conn.commit()
                     log.info("Migrated tasks table: added %s column", col)
+            install_hints_schema(conn)
         finally:
             conn.close()
 
     # ── Enqueue ──────────────────────────────────────────────
 
-    def enqueue(self, source: str = "all", *, full: bool = False, trigger_source: str = "unknown") -> TaskRecord:
+    def enqueue(
+        self, source: str = "all", *, full: bool = False,
+        trigger_source: str = "unknown", change_hints: ChangeHints | None = None,
+    ) -> TaskRecord:
         """Create a new queued task and return it.
 
         Deduplication: if an identical task is already queued (not
@@ -255,7 +274,16 @@ class TaskStore:
 
         ``trigger_source`` records what initiated this task (e.g.
         'api:agent_index_reindex', 'webhook:forge:push', 'cli', 'mcp').
+
+        Hinted incremental work is parked separately, never covered by a legacy
+        full task, and unions only with queued hints in the same exact scope.
         """
+        if change_hints is not None:
+            if type(change_hints) is not ChangeHints:
+                raise ValueError("change_hints must be a ChangeHints value")
+            if full or source != change_hints.source:
+                raise ValueError("Change hints require matching incremental source scope")
+            return self._enqueue_hints(change_hints, trigger_source)
         now = time.time()
         task_id = uuid.uuid4().hex[:12]
 
@@ -341,9 +369,53 @@ class TaskStore:
         finally:
             conn.close()
 
+    def _enqueue_hints(self, hints: ChangeHints, trigger_source: str) -> TaskRecord:
+        now = time.time()
+        conn = self._connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT * FROM tasks WHERE status = 'queued_hints' AND source = ? "
+                "ORDER BY created_at, id",
+                (hints.source,),
+            ).fetchall()
+            existing = [_row_to_record(row) for row in rows]
+            matching = [
+                record for record in existing
+                if record.change_hints is not None and record.change_hints.scope == hints.scope
+            ]
+            if matching:
+                record = matching[0]
+                # Retry can leave multiple pending rows; retain each row and its
+                # attempt history, while all new deliveries union into the first.
+                assert record.change_hints is not None
+                merged = record.change_hints.union(hints)
+                task_id = record.id
+                conn.execute(
+                    "UPDATE tasks SET change_hints = ?, updated_at = ? WHERE id = ?",
+                    (merged.to_json(), now, task_id),
+                )
+            else:
+                task_id = uuid.uuid4().hex[:12]
+                conn.execute(
+                    """INSERT INTO tasks
+                       (id, source, full, status, trigger_source, change_hints, created_at, updated_at)
+                       VALUES (?, ?, 0, 'queued_hints', ?, ?, ?, ?)""",
+                    (task_id, hints.source, trigger_source, hints.to_json(), now, now),
+                )
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            record = _row_to_record(row)
+            conn.commit()
+            return record
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     # ── Dequeue ──────────────────────────────────────────────
 
-    def dequeue_next(self) -> TaskRecord | None:
+    def dequeue_next(self, *, accept_change_hints: bool = False) -> TaskRecord | None:
         """Atomically claim the next queued task for processing.
 
         Full tasks are prioritized ahead of incremental ones (``ORDER BY
@@ -354,28 +426,34 @@ class TaskStore:
         enqueued before a full for the same scope still defers to it.
         Within each priority tier, tasks are served FIFO by ``created_at``.
 
-        Returns ``None`` if the queue is empty.
+        Hinted tasks require explicit ``accept_change_hints=True`` from a caller
+        that preserves and consumes v1 hints through its entire execution path.
+        Returns ``None`` if no eligible work is queued.
         """
+        if type(accept_change_hints) is not bool:
+            raise ValueError("accept_change_hints must be a boolean")
         now = time.time()
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT id FROM tasks WHERE status = 'queued' "
+                "SELECT * FROM tasks WHERE status IN ('queued', ?) "
                 "ORDER BY full DESC, created_at ASC LIMIT 1",
+                ("queued_hints" if accept_change_hints else "queued",),
             ).fetchone()
             if row is None:
                 conn.rollback()
                 return None
 
-            task_id = row["id"]
+            record = _row_to_record(row)  # Refuse corrupt hints before claiming.
+            task_id = record.id
             affected = conn.execute(
                 """UPDATE tasks
                    SET status = 'processing', started_at = ?,
                        first_started_at = COALESCE(first_started_at, ?),
                        updated_at = ?
-                   WHERE id = ? AND status = 'queued'""",
-                (now, now, now, task_id),
+                   WHERE id = ? AND status = ?""",
+                (now, now, now, task_id, record.status),
             ).rowcount
             conn.commit()
 
@@ -461,7 +539,7 @@ class TaskStore:
             affected = conn.execute(
                 """UPDATE tasks
                    SET status = 'cancelled', finished_at = ?, updated_at = ?
-                   WHERE id = ? AND status = 'queued'""",
+                   WHERE id = ? AND status IN ('queued', 'queued_hints')""",
                 (now, now, task_id),
             ).rowcount
             conn.commit()
@@ -478,6 +556,10 @@ class TaskStore:
         now = time.time()
         conn = self._connect()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is not None:
+                _row_to_record(row)  # Corruption must not mutate attempt state.
             affected = conn.execute(
                 """UPDATE tasks
                    SET status = 'queued',
@@ -520,7 +602,7 @@ class TaskStore:
         try:
             rows = conn.execute(
                 """SELECT * FROM tasks
-                   WHERE status IN ('queued', 'processing')
+                   WHERE status IN ('queued', 'queued_hints', 'processing')
                    ORDER BY created_at""",
             ).fetchall()
             return [_row_to_record(r) for r in rows]
@@ -571,7 +653,7 @@ class TaskStore:
         conn = self._connect()
         try:
             row = conn.execute(
-                "SELECT COUNT(*) AS cnt FROM tasks WHERE status = 'queued'",
+                "SELECT COUNT(*) AS cnt FROM tasks WHERE status IN ('queued', 'queued_hints')",
             ).fetchone()
             return row["cnt"]
         finally:
@@ -585,7 +667,7 @@ class TaskStore:
                 "SELECT * FROM tasks WHERE status = 'processing' LIMIT 1",
             ).fetchone()
             queued_rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = 'queued' ORDER BY created_at",
+                "SELECT * FROM tasks WHERE status IN ('queued', 'queued_hints') ORDER BY created_at",
             ).fetchall()
             history_rows = conn.execute(
                 """SELECT * FROM tasks
