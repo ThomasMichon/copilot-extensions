@@ -172,8 +172,10 @@ See also: [Manager overview](../README.md) and
 
 Scheduling and runtime-retention leases are installation-root-local. They are
 not a shared cross-root daemon-instance inventory or independent disposable-test
-expiry. That integration remains with
-[Leased Daemon Instances](../../efforts/active/leased-daemon-instances/README.md)
-(#8403), whose shared substrate is still proposed. Do not mistake successful
-owned fixture teardown for independent orphan expiry, or add a competing registry
-inside this maintenance worker.
+expiry. Worker startup and detached launch also use the shared
+`agent_procutil.daemon_instances` admission/instance contract delivered by
+[Leased Daemon Instances](<../../efforts/2026/10/25 leased-daemon-instances/README.md>)
+(#8403). Production workers have no expiry; explicit qualification runs pass the
+shared disposable lifecycle declaration to their actual children. These
+attribution and test-lifetime controls do not replace scheduling custody,
+installation execution authority or native supervision.

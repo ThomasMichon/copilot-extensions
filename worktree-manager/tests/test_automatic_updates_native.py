@@ -206,6 +206,102 @@ def test_get_foreground_window_null_does_not_read_stale_last_error(windows_probe
     api._check.assert_not_called()
 
 
+def test_concurrent_process_snapshots_retain_one_ctypes_signature(
+    windows_probe: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    module, _ = windows_probe
+    signature = [module.wt.HANDLE, module.ct.POINTER(module.ProcessEntry)]
+
+    def first(_handle, pointer):
+        assert isinstance(pointer._obj, module.ProcessEntry)
+        return False
+
+    first_call = Mock(side_effect=first)
+    next_call = Mock(side_effect=AssertionError("empty snapshot has no next entry"))
+    first_call.argtypes = next_call.argtypes = signature
+    api = module.WinAPI.__new__(module.WinAPI)
+    api.kernel = SimpleNamespace(
+        CreateToolhelp32Snapshot=Mock(return_value=1),
+        Process32FirstW=first_call, Process32NextW=next_call, CloseHandle=Mock(),
+    )
+    monkeypatch.setattr(module.ct, "get_last_error", lambda: 18, raising=False)
+    with ThreadPoolExecutor(max_workers=2) as callers:
+        list(callers.map(lambda _: api.refresh_processes(), range(100)))
+    assert first_call.argtypes is signature and next_call.argtypes is signature
+    assert first_call.call_count == api.kernel.CloseHandle.call_count == 100
+    assert api.parents == {}
+
+
+def test_native_case_retains_ctypes_startup_error_when_cleanup_also_fails(
+    windows_probe: tuple, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    api_module, adapter = windows_probe
+    lifecycle = importlib.import_module("lifecycle")
+    root = tmp_path / "fixture"
+    (root / "probe").mkdir(parents=True)
+    monkeypatch.setattr(lifecycle.fixtures, "build", lambda *a, **k: {
+        "runtime_hashes": {}, "resolution_environment": "test",
+    })
+    monkeypatch.setattr(lifecycle.fixtures, "environment", lambda *a, **k: {})
+    monkeypatch.setattr(lifecycle.fixtures, "warm", lambda *a: None)
+    monkeypatch.setattr(lifecycle, "cleanup", lambda *a: None)
+    monkeypatch.setattr(lifecycle, "os", SimpleNamespace(name="nt"))
+
+    class Session:
+        def __init__(self, *args):
+            pass
+
+        def start(self):
+            raise api_module.ct.ArgumentError("controlled pointer signature conflict")
+
+        def close_job(self):
+            pass
+
+        def retire(self):
+            raise api_module.NativeBlocked("unattested-startup-cleanup", "controlled cleanup hold")
+
+    monkeypatch.setattr(adapter, "StartupSession", Session)
+    with pytest.raises(api_module.NativeBlocked, match="cleanup hold"):
+        lifecycle.case(
+            root, root, {"automatic_updates_process": object()}, cycles=2,
+            native_startup=True, windows_observer=object(),
+        )
+    result = json.loads((root / "probe/result.json").read_text())
+    assert result["error"] == "ArgumentError: controlled pointer signature conflict"
+    assert "cleanup hold" in result["cleanup_error"]
+    assert result["passed"] is False and result["cleanup_verified"] is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX immutable worker command identity")
+@pytest.mark.parametrize("leased", [False, True])
+def test_worker_identity_accepts_only_retained_invocation_and_canonical_lease_shim(
+    windows_probe: tuple, tmp_path: Path, leased: bool,
+) -> None:
+    from agent_procutil._daemon_instance_child import leased_python_command
+
+    lifecycle = importlib.import_module("lifecycle")
+    slot = tmp_path / "versions" / lifecycle.fixtures.OLD
+    command = [
+        sys.executable, "-I", "-S", "-B", "-X", "utf8",
+        str(slot / ".runtime-bootstrap/runtime_launcher.py"),
+        "-m", "worktree_manager", "automatic-updates", "run", "--root", str(tmp_path),
+    ]
+    if leased:
+        command, _environment = leased_python_command(command)
+    assert lifecycle.worker_command_matches(tmp_path, slot, tuple(command))
+    assert lifecycle.worker_command_matches(
+        tmp_path, slot, tuple([*command, "--standby", "a" * 32]),
+    )
+    assert not lifecycle.worker_command_matches(tmp_path, slot, tuple([*command, "--unexpected"]))
+    wrong_root = [*command[:-1], str(tmp_path / "foreign")]
+    assert not lifecycle.worker_command_matches(tmp_path, slot, tuple(wrong_root))
+    if leased:
+        command[command.index("-c") + 2] = str(tmp_path / "foreign-helper")
+        assert not lifecycle.worker_command_matches(tmp_path, slot, tuple(command))
+
+
 def test_initial_null_foreground_does_not_create_a_passing_observer(windows_probe: tuple) -> None:
     module, _ = windows_probe
     api = DesktopStub(module)

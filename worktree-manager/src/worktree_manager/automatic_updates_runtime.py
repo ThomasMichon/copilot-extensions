@@ -16,6 +16,7 @@ from typing import Any
 
 from agent_procutil import DaemonSpawnError
 from agent_procutil.daemon_broker import WindowsDaemonProcess
+from agent_procutil.daemon_instances import daemon_entrypoint
 from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
 from . import automatic_updates_process as process
@@ -247,6 +248,10 @@ class Worker:
             "successor failed activation; old worker retained", state="replacement-recovered",
         )
 
+    @daemon_entrypoint(
+        "worktree-manager-automatic-updates", source=__file__,
+        runtime_root=lambda self: self.root, purpose="production",
+    )
     async def run(self) -> int:
         if load_policy(self.root).owner != "manager":
             raise PolicyError("Manager automatic maintenance is not enabled")

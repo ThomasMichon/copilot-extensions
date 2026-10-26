@@ -51,23 +51,54 @@ def pin_worker(root: Path, status: dict, pins: list[ProcessPin], observer: Any =
     from worktree_manager.automatic_updates_startup import process_snapshot
 
     identity = process_snapshot(status["pid"])
-    expected = ("-m", "worktree_manager", "automatic-updates", "run", "--root", str(root))
     command = identity[2]
     slot = Path(status["runtime"])
-    if (
-        slot.parent != root / "versions"
-        or command[1:6] != ("-I", "-S", "-B", "-X", "utf8")
-        or command[6] != str(slot / ".runtime-bootstrap/runtime_launcher.py")
-        or command[7:13] != expected
-    ):
+    if slot.parent != root / "versions" or not worker_command_matches(root, slot, command):
         raise AssertionError("health PID does not execute this fixture's worker argv")
 
 
+def worker_command_matches(root: Path, slot: Path, command: tuple[str, ...]) -> bool:
+    import agent_procutil
+    from agent_procutil._daemon_instance_child import leased_python_command
+
+    expected = [
+        str(slot / "bin/python"), "-I", "-S", "-B", "-X", "utf8",
+        str(slot / ".runtime-bootstrap/runtime_launcher.py"),
+        "-m", "worktree_manager", "automatic-updates", "run", "--root", str(root),
+    ]
+    leased, _environment = leased_python_command(expected)
+    helper_index = leased.index("-c") + 2
+    libraries = [
+        Path(agent_procutil.__file__).resolve().parent.parent,
+        *(root / "versions" / version / "payload/libs/agent-procutil/src"
+          for version in (fixtures.OLD, fixtures.NEW)),
+    ]
+    candidates = [expected, *(
+        [*leased[:helper_index], str(library), *leased[helper_index + 1:]]
+        for library in libraries
+    )]
+    for candidate in candidates:
+        if tuple(command[1:len(candidate)]) != tuple(candidate[1:]):
+            continue
+        tail = command[len(candidate):]
+        if not tail or (
+            len(tail) == 2 and tail[0] == "--standby"
+            and len(tail[1]) == 32 and all(char in "0123456789abcdef" for char in tail[1])
+        ):
+            return True
+    return False
+
+
 def launcher(root: Path, env: dict[str, str]) -> subprocess.Popen:
+    from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_instance
+
     output = (root / "probe" / "launcher.log").open("ab")
     try:
-        return subprocess.Popen(
+        return spawn_instance(
             fixtures.command(root, ["automatic-updates", "run", "--root", str(root)]),
+            instance=DaemonInstanceSpec(
+                "worktree-manager-automatic-updates", root, Path(__file__).resolve(),
+            ),
             cwd=root, env=env, stdin=subprocess.DEVNULL,
             stdout=output, stderr=subprocess.STDOUT,
             **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
@@ -101,9 +132,11 @@ def case(
     source: Path, root: Path, manager: dict[str, Any], *, cycles: int,
     failing_standby: bool = False, native_startup: bool = False,
     windows_observer: Any = None,
+    instance_environment: dict[str, str] | None = None,
 ) -> dict:
     metadata = fixtures.build(source, root, manager, failing_standby=failing_standby)
     env = fixtures.environment(root, native=native_startup and os.name != "nt")
+    env.update(instance_environment or {})
     fixtures.warm(root, env)
     process = manager["automatic_updates_process"]
     pins: list[ProcessPin] = []
@@ -269,7 +302,7 @@ def case(
             raise AssertionError("qualification changed immutable production worker modules")
         result["passed"] = True
         return result
-    except (OSError, ValueError, RuntimeError, AssertionError, subprocess.SubprocessError) as exc:
+    except BaseException as exc:
         result.update(passed=False, error=f"{type(exc).__name__}: {exc}")
         raise
     finally:
@@ -294,9 +327,13 @@ def case(
             )
 
 
-def signal_drain_case(source: Path, root: Path, manager: dict[str, Any]) -> dict:
+def signal_drain_case(
+    source: Path, root: Path, manager: dict[str, Any], *,
+    instance_environment: dict[str, str] | None = None,
+) -> dict:
     fixtures.build(source, root, manager)
     env = fixtures.environment(root, native=True)
+    env.update(instance_environment or {})
     fixtures.warm(root, env)
     process = manager["automatic_updates_process"]
     pins: list[ProcessPin] = []
