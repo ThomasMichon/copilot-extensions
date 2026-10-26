@@ -495,7 +495,10 @@ is unchanged.
 Trusted-venue plugin preparation uses the dispatcher's controller worktree,
 not the daemon's launch directory or the remote product checkout when controller
 context is supplied. A declared `caller_owner_ref` resolves through the
-Worktrees owner to its local, nonterminal checkout; any supplied controller
+Worktrees owner's authoritative version-1 `record --worktree-id <id> --json`
+response to its local, nonterminal checkout, without depending on advisory roster
+publication. Missing, malformed or unavailable records refuse before preparation;
+there is no roster fallback. Any supplied controller
 path must agree, and a `#session` qualifier must match `caller_session_id`.
 Explicit version-1 Worktrees rows are decoded by the shared dependency-free
 identity codec: the owner reference must match the separate execution owner,
