@@ -4,7 +4,8 @@ Back to [Linux role fleet](README.md) and the
 [logging integration plan](logging-conventions.md). Tracker: #8377.
 Complements the merged [first causal-record source](dispatch-spawn-causal-logging.md).
 
-**Status: source plan reviewed in #9069; pure source controls in progress.**
+**Status: plan reviewed in #9069; first pure controls merged in #9071;
+ordinary-volume storage amendment proposed below.**
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -26,6 +27,24 @@ discipline, but a retained experiment is **not** that vision's fresh-machine
 qualification. Fresh-install tests continue to start independently clean.
 Keep the existing ownership, bounded-work and service-contract patterns; no
 new fleet manager, resident controller, diagnostic database or message protocol.
+
+### Operator-selected storage amendment
+
+The operator selected the literal value:
+
+> ordinary-volumes
+
+The selected option was presented as:
+
+> Use ordinary persistent Docker volumes; revise the hard quota requirement to monitored limits
+
+This supersedes the earlier agent-recommended hard persistent-storage quota
+requirement. Use ordinary experiment-exclusive Docker volumes with monitored
+usage and free-space thresholds, not a privileged filesystem/mount or new volume
+driver. This choice does not authorize creation, service actions or host changes.
+The source controls must change through review; actual provisioning remains
+separately approved. CPU/memory/PID limits and all other isolation, retention,
+custody and pre-effect requirements are unchanged.
 
 ## Source-backed boundaries
 
@@ -65,12 +84,14 @@ uninspectable or mismatched boundaries:
   checkout, home, runtime, vault, credential store or production state.
   Remove inherited credentials, proxies and service-discovery overrides from
   the minimal launch environment. Use only experiment-local synthetic identities.
-- Storage must have an independently verified finite backing capacity/quota,
-  including Docker/native output. An ordinary unbounded local named volume,
-  tmpfs or a post-write size monitor is not persistent bounded storage proof.
-  The implementation must select and test a supported existing backend; if
-  unavailable, report a prerequisite refusal. Do not change a host filesystem,
-  daemon setting or privileged mount to manufacture support.
+- Use ordinary named local volumes, never tmpfs for durable state. Treat
+  `persistent_bytes` and `output_bytes` as monitored usage thresholds, not
+  enforced quotas. Check experiment usage and backing free space before
+  starting a case and on a bounded cadence during an explicitly active case;
+  refuse new work on threshold exhaustion or an unavailable/stale measurement.
+  Reuse the native output owner's existing bounded capture/rotation where
+  available. Do not change host filesystems, daemon settings or privileged
+  mounts to manufacture quota support.
 - Persist an exclusive experiment declaration in that owned storage with source
   and image identity, actual physical resources, fixed budgets and output paths.
   This is test-artifact metadata, not a second allocation/session ledger.
@@ -84,7 +105,18 @@ own recovery semantics; copying an open database is not a valid snapshot.
 Private logs, seeds and authoritative databases are not interchangeable:
 apply each existing owner's retention/protection contract, preserve unknown
 or incomplete evidence and refuse further synthetic work when capacity is
-exhausted. No automatic broad cleanup, truncation or volume replacement.
+at its monitored threshold. No automatic broad cleanup, truncation or volume replacement.
+
+Monitoring does not intercept every write: accepted work, concurrent host users
+and delayed samples can exceed a threshold or consume the remaining backing
+space. Report that limitation explicitly; do not advertise a hard storage bound.
+Client disconnect can also end the host monitor. No new experiment case may
+start while that monitor is absent, and resume must measure again before work.
+Do not force-stop accepted work or fabricate a successful drain when monitoring
+is lost. Retained services/evidence do not imply permission for an unattended
+stream of new tasks. The approved experiment must name its active-case lifetime
+and observation cadence; lifetime expiry refuses new cases, not automatic
+deletion or an unauthorized process kill.
 
 The default retains resources and evidence on failure or client exit.
 Inspection/export is bounded and explicitly selected; exports allocate an
@@ -135,16 +167,17 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 
 1. Land this source proposal through independent review and required CI before
    implementation. Preserve #8377, native capture and released/running gates.
-2. Implement pure experiment configuration/resource-selection and boundary
-   validation, including honest refusal for unsupported bounded persistent
-   storage. Add synthetic positive and negative controls without starting Docker.
+2. Review this storage amendment, then extend pure configuration/boundary
+   controls with explicit monitored thresholds, fresh usage/free-space refusal
+   and honest unavailable-measurement outcomes. Add synthetic positive and
+   negative controls without starting Docker.
 3. Implement the opt-in host tool and credential-free fixtures using existing
    source-materialization, finite subprocess and service owners. Give every
    action a timeout, output cap and explicit outcome; leave unresolved native
    capture/strict-write dependencies unavailable rather than bypassed.
 4. After separate resource/provisioning approval, create exactly one isolated
-   experiment, inspect its effective boundary and prove persistence and egress
-   controls before the ordinary spawn and fault cases. Source review does not
+   experiment, inspect its effective boundary and prove persistence, monitoring
+   and egress controls before the ordinary spawn and fault cases. Source review does not
    supply this approval or authorize existing-service changes.
 5. Review the implementation and record only actually exercised qualification.
    Select later native CLI, Windows, real authentication and service-manager
@@ -155,10 +188,11 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 
 - [ ] Pure controls reject foreign/shared volumes, host mounts/sockets/devices,
   credential-bearing environment, external networks/ports, privileged or mutable
-  image posture, missing resource bounds and unsupported quota enforcement.
+  image posture, missing CPU/memory/PID limits and missing or stale monitoring
+  prerequisites. No schema or report may turn a monitored threshold into quota.
 - [ ] Existing restricted-provider policy and ephemeral test-runner behavior
   remain unchanged; no test claims persistence from tmpfs or mocked Docker.
-- [ ] On the approved real backend, inspect actual physical IDs and bounds,
+- [ ] On the approved real Docker volumes, inspect actual physical IDs and limits,
   prove no host-state exposure or egress, and prove two experiment names cannot
   share storage, network peers or export destinations.
 - [ ] Create guest-owned state through actual services, disconnect the client,
@@ -167,9 +201,11 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
   continuity. Missing storage refuses, without automatic replacement.
 - [ ] Concurrent-driver, stale selection and interrupted host-command controls
   preserve exclusive custody; an unknown outcome does not repeat an effect.
-- [ ] Fill only a dedicated synthetic capacity-test allocation to its actual
-  enforced boundary; preserve existing evidence, expose the storage error and
-  refuse new strict effects without silently deleting or growing storage.
+- [ ] Use a small dedicated synthetic monitoring-test allocation and controlled
+  free-space observations to cross the configured threshold. Refuse new cases,
+  preserve evidence and expose missing/stale/failed measurements without
+  deleting, growing or claiming a write-time quota. Cover cadence, monitor loss,
+  remeasurement on resume and overshoot/accepted-work outcomes.
 - [ ] Ordinary spawn records the actual invocation/returned identity and one
   seed delivery; delay, error, lost-reply and process-exit cases preserve literal
   failure/unknown semantics and existing deduplication/recovery.
@@ -190,10 +226,13 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 The first [pure controls](../../../tools/reproducer-lab/README.md) parse the
 declaration and identify known unsafe or missing static Docker observations.
 They retain explicit unavailable backend, egress, custody and guest/runtime
-requirements, never a lab-ready result. Source review and the actual bounded
-host/storage implementation remain open; synthetic tests cannot close step 2's
+requirements, never a lab-ready result. The bounded source merged in #9071;
+it still carries the earlier unimplemented capacity-backend requirement.
+That implementation must be revised after this amendment's review, not credited
+as monitored-volume support. Synthetic tests cannot close step 2's
 real boundary qualification or any persistence/fault gate.
 
-Review this bounded source, then implement the selected host-reader/storage
-boundary before a provisioning path. Keep persistent provisioning blocked until its exact
-backend, budgets and resource actions receive separate approval.
+Review this storage amendment, then implement the finite host reader and
+ordinary-volume usage/free-space monitoring before a provisioning path.
+Keep persistent provisioning blocked until the exact resources, thresholds,
+case lifetime and actions receive separate approval.

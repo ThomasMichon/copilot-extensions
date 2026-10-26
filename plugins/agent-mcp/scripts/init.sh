@@ -23,19 +23,49 @@ INSTALL_DIR=""
 # this script with an already-shifted (empty) "$@", so a positional action would
 # be lost across the staging boundary. Carry it through the exec via the env.
 ACTION="${AGENT_MCP_ACTION:-init}"
+UNINSTALL_REQUESTED=0
+EXPLICIT_ACTION=""
+INSTALL_DIR_SET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
-        --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-        stamp|provision|init) ACTION="$1"; shift ;;
-        *) shift ;;
+        --install-dir)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+                _fail '--install-dir requires a nonempty path value'
+                exit 2
+            fi
+            if [[ "$INSTALL_DIR_SET" == 1 ]]; then
+                _fail 'Duplicate --install-dir is not supported'
+                exit 2
+            fi
+            INSTALL_DIR="$2"; INSTALL_DIR_SET=1; shift 2 ;;
+        uninstall|install|stamp|provision|init)
+            if [[ -n "$EXPLICIT_ACTION" && "$EXPLICIT_ACTION" != "$1" ]]; then
+                _fail 'Conflicting installer actions are not supported'
+                exit 2
+            fi
+            ACTION="$1"; EXPLICIT_ACTION="$1"
+            [[ "$1" != uninstall ]] || UNINSTALL_REQUESTED=1
+            shift ;;
+        *)
+            _fail "Unsupported installer argument: $1"
+            exit 2 ;;
     esac
 done
+if [[ "$ACTION" == uninstall && "$UNINSTALL_REQUESTED" != 1 ]]; then
+    _fail 'Uninstall must be an explicit action, not inherited from the environment'
+    exit 2
+fi
+if [[ "$ACTION" == uninstall && "/$INSTALL_DIR/" == *"/../"* ]]; then
+    _fail 'Uninstall refuses parent-traversal path components'
+    exit 2
+fi
 export AGENT_MCP_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+if [[ "$ACTION" != uninstall ]]; then
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -175,7 +205,9 @@ INSTALL_WATCHDOG
     esac
 fi
 # === end install-contract:v4 self-stage ===
+fi
 
+if [[ "$ACTION" != uninstall ]]; then
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock/watchdog behavior WITHOUT a heavy venv build: this
@@ -207,6 +239,7 @@ if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
     exit 0
 fi
 # === end install-contract:v4 smoke seam ===
+fi
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -533,7 +566,27 @@ _bootstrap_python() {
 }
 
 source "$SCRIPT_DIR/source-runtime.sh"
-_initialize_source_runtime || exit 1
+UNINSTALL_PYTHON=""
+if [[ "$ACTION" == uninstall ]]; then
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            UNINSTALL_PYTHON="$(command -v "$candidate")"
+            break
+        fi
+    done
+    if [[ -z "$UNINSTALL_PYTHON" ]]; then
+        _fail 'Uninstall requires an existing Python 3.10+ outside the runtime'
+        exit 1
+    fi
+    uninstall_status="$("$UNINSTALL_PYTHON" -I -B "$SCRIPT_DIR/uninstall_runtime.py" check \
+        --root "$INSTALL_DIR" --shell "$BASH")" || exit 1
+    if [[ "$uninstall_status" == absent ]]; then
+        _ok 'Legacy MCP runtime is already absent'
+        exit 0
+    fi
+else
+    _initialize_source_runtime || exit 1
+fi
 if ! _enter_install_lock; then
     _fail "Could not acquire the install transaction lock ($INSTALL_DIR/.install.lock) within $(_install_lock_timeout)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -541,6 +594,11 @@ fi
 trap '_exit_install_lock' EXIT
 trap '_exit_install_lock; exit 130' INT
 trap '_exit_install_lock; exit 143' TERM
+if [[ "$ACTION" == uninstall ]]; then
+    "$UNINSTALL_PYTHON" -I -B "$SCRIPT_DIR/uninstall_runtime.py" remove \
+        --root "$INSTALL_DIR" --shell "$BASH"
+    exit $?
+fi
 _assert_source_runtime || exit 1
 
 case "$ACTION" in

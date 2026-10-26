@@ -21,6 +21,25 @@ LOCAL_BIN="${HOME}/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+if [[ "$ACTION" == uninstall ]]; then
+    __uninstall_args=("$@")
+    for (( __arg=1; __arg<${#__uninstall_args[@]}; __arg++ )); do
+        if [[ "${__uninstall_args[$__arg]}" == --install-dir ]]; then
+            __arg=$((__arg + 1))
+            __root="${__uninstall_args[$__arg]:-}"
+            if [[ -z "$__root" || "$__root" == -* ]]; then
+                printf '%s\n' '--install-dir requires a directory' >&2
+                exit 2
+            fi
+            case "/$__root/" in
+                */../*) printf '%s\n' 'Logger uninstall requires a root without parent-traversal components' >&2; exit 2 ;;
+            esac
+            [[ "$__root" == /* ]] || __uninstall_args[$__arg]="$PWD/$__root"
+        fi
+    done
+    set -- "${__uninstall_args[@]}"
+fi
+
 # Staging itself writes installation state, so publication admission precedes it.
 case "$ACTION" in
     install|update|stamp|provision)
@@ -321,6 +340,15 @@ fi
 # is the authoritative TOTAL bound, this just shortens single-request stalls.
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
+_bootstrap_python() {
+    # Keep construction supervision outside the candidate being built.
+    local __c
+    for __c in python3 python; do
+        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+    done
+    return 1
+}
+
 if [[ $# -gt 0 ]]; then
     shift
 fi
@@ -341,10 +369,33 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+if [[ "$ACTION" == uninstall ]]; then
+    case "/$INSTALL_DIR/" in
+        */../*) printf '%s\n' 'Logger uninstall requires a root without parent-traversal components' >&2; exit 2 ;;
+    esac
+fi
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi
-LEGACY_INSTALL_DIR="$HOME/.agent-logger"
+_normalize_install_root() {
+    local remaining="$1" component normalized=""
+    while [[ -n "$remaining" ]]; do
+        component="${remaining%%/*}"
+        if [[ "$remaining" == */* ]]; then remaining="${remaining#*/}"; else remaining=""; fi
+        case "$component" in ""|.) ;; *) normalized="$normalized/$component" ;; esac
+    done
+    printf '%s\n' "${normalized:-/}"
+}
+INSTALL_DIR="$(_normalize_install_root "$INSTALL_DIR")"
+if [[ "$ACTION" == uninstall ]]; then
+    py="$(_bootstrap_python)" || {
+        printf '%s\n' 'Cannot validate Logger uninstall ownership without a bootstrap Python' >&2
+        exit 1
+    }
+    INSTALL_DIR="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+        --root "$INSTALL_DIR" --resolve-root)" || exit 1
+fi
+LEGACY_INSTALL_DIR="$(_normalize_install_root "$HOME/.agent-logger")"
 legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
 install_cmp="$(printf '%s' "$INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
 PUBLISH_GLOBAL_BINSTUBS=1
@@ -461,15 +512,6 @@ _rt_python() {
     # after bin/ is deployed. Empty -> the caller reports "not installed".
     [[ -n "$py" && -x "$py" ]] || return 1
     printf '%s' "$py"
-}
-
-_bootstrap_python() {
-    # Keep construction supervision outside the candidate being built.
-    local __c
-    for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
-    done
-    return 1
 }
 
 _payload_hash() {
@@ -1612,32 +1654,64 @@ case "${ACTION}" in
     ok "package + units updated"
     ;;
   uninstall)
+    py="$(_bootstrap_python)" || {
+      _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
+    }
+    "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" || exit 1
+    legacy_units="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+        --root "$INSTALL_DIR" --unit-names --unit-dir "$UNIT_DIR")" || exit 1
+    uninstall_units="$(printf '%s\n' "$TIMER_NAME" "$legacy_units" | sed '/^$/d' | sort -u)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "(dry run -- nothing will be changed)"
-      if systemctl --user is-enabled "${TIMER_NAME}.timer" >/dev/null 2>&1 || \
-         [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" ]]; then
-        echo "[dry-run] would disable + remove: ${TIMER_NAME}.service / .timer"
-      fi
+      while IFS= read -r unit; do
+        if systemctl --user is-enabled "${unit}.timer" >/dev/null 2>&1 || \
+           systemctl --user is-active --quiet "${unit}.timer" >/dev/null 2>&1 || \
+           [[ -f "${UNIT_DIR}/${unit}.timer" ]]; then
+          echo "[dry-run] would disable + remove: ${unit}.service / .timer"
+        fi
+      done <<< "$uninstall_units"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
         for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
           [[ -e "${LOCAL_BIN}/${name}" ]] && echo "[dry-run] would remove binstub: ${LOCAL_BIN}/${name}"
         done
       fi
+      echo "[dry-run] would remove runtime generations, snapshots, generated dispatchers and runtime selectors"
       echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
       echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
-      systemctl --user disable --now "${TIMER_NAME}.timer" 2>/dev/null || true
-      rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer"
+      while IFS= read -r unit; do
+        timer_active=0
+        if systemctl --user is-active --quiet "${unit}.timer" >/dev/null 2>&1; then timer_active=1; fi
+        if [[ "$timer_active" == 1 || -f "${UNIT_DIR}/${unit}.timer" || -f "${UNIT_DIR}/${unit}.service" ]]; then
+          if [[ "$timer_active" == 1 || -f "${UNIT_DIR}/${unit}.timer" ]]; then
+            systemctl --user disable --now "${unit}.timer" || exit 1
+          fi
+          service_state=0
+          systemctl --user is-active --quiet "${unit}.service" || service_state=$?
+          case "$service_state" in
+            0) _fail 'Active Logger sync service; uninstall refused after disabling new scheduled starts'; exit 1 ;;
+            3|4) ;;
+            *) _fail 'Cannot determine Logger sync service state; uninstall refused'; exit 1 ;;
+          esac
+        fi
+      done <<< "$uninstall_units"
+      "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" --idle --prepare || exit 1
+      while IFS= read -r unit; do
+        rm -f "${UNIT_DIR}/${unit}.service" "${UNIT_DIR}/${unit}.timer" || exit 1
+      done <<< "$uninstall_units"
       systemctl --user daemon-reload || true
       chg "timer removed (config at ${INSTALL_DIR} kept)"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
         for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
-          rm -f "${LOCAL_BIN}/${name}"
+          rm -f "${LOCAL_BIN}/${name}" || exit 1
         done
         chg "binstubs removed from ${LOCAL_BIN}"
       else
         chg "scoped install left legacy global binstubs unchanged"
       fi
+      "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" \
+        --idle --prepare --remove-runtime --shell "$BASH" || exit 1
+      chg "runtime generations and generated dispatchers removed (config/session-state kept)"
     fi
     ;;
   status)

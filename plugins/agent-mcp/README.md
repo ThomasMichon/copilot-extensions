@@ -94,6 +94,60 @@ plugin-root interpolation contract and may run before or independently of
 session command-catalog context. That surface cannot consume the payload-local
 argv until the host provides a plugin-root-capable MCP launcher contract.
 
+### Removing a legacy runtime
+
+Run `scripts/init.ps1 uninstall [-InstallDir PATH]` on Windows or
+`bash scripts/init.sh uninstall [--install-dir PATH]` on Linux. Uninstall uses
+the same transaction lock as install/provision/stamp and requires an existing
+Python 3.10+ interpreter outside the installation. It does not provision a
+runtime, reconcile instances, terminate processes, or stop upstream services.
+Windows also supports a launcher-only `py.exe` installation; uninstall skips
+installed-runtime interpreter candidates. Bash accepts `--install-dir PATH`,
+not `--install-dir=PATH`; unsupported flags (including `--dry-run`), missing
+values, repeated root selections and conflicting actions are rejected before
+dispatch. Uninstall must be explicit, never inherited from the environment.
+Destructive roots containing a `..` path component are refused before
+normalization or lock creation. Ordinary relative roots and names such as
+`release..dev` remain supported; spell the intended root without parent traversal.
+Windows relative roots bind to PowerShell's current filesystem-provider location
+before locking, independently of the process working directory.
+Windows requires native CIM process inspection; Linux requires readable
+current-user `/proc` process information. Other platforms and unavailable or
+ambiguous inspection fail closed. A base-interpreter MCP process without an
+attributable runtime path also blocks removal, even if it may belong to another
+installation. Close active MCP runtime processes through their normal owner
+before retrying. Concurrent launches must remain quiescent; this is not
+reference-safe whole-harness removal or a session shutdown command.
+
+The action removes only installed generations, `.venv`, source snapshots,
+selected-runtime markers and the deploy manifest, plus generated resolvers and
+recognizable default-root compatibility wrappers. It preserves the install root,
+lock/lease files, bridge configuration, databases, authentication, caches,
+materialized fleets and unknown content. It refuses linked roots/ancestors,
+unrecognized generation/snapshot inventory, missing or foreign deployment/stamped
+ownership, foreign lifecycle ownership, installation-cell or managed-deployment
+metadata, and mutable `dev` generations. Stamped ownership must identify this
+plugin inside the runtime home's own snapshots. An absent installation
+is a no-op; the same source can be installed again. Disable automatic bootstrap
+in the consuming harness first if removal should persist. Installation-cell
+lifecycle and harness reference accounting remain separate operations.
+
+Source-qualified snapshot generations are removed under the same construction
+leases used by their publisher. The persistent `snapshots/.construction-leases`
+directory and its lock inodes remain; they are coordination, not generations.
+Resolver and compatibility-command cleanup precedes runtime/ownership removal.
+Cleanup errors are reported, retaining or restoring the exact previously
+validated manifest or stamped ownership evidence so a subsequent uninstall can
+authenticate and retry. This recovery restores ownership evidence only, not
+already removed runtime contents; it creates no new owner or activation policy.
+The packaged plugin includes the canonical native removal helpers and finite
+process supervisor through the existing installer-engine synchronization owner;
+uninstall does not require a source checkout alongside the payload.
+POSIX cleanup children use the shared owned-process runner, which settles their
+process group before returning or propagating a timeout while the caller keeps
+uninstall custody. This caller-held mode does not claim lease retention after
+abrupt caller termination.
+
 ## Reliable transport: one bridge, two surfaces
 
 After `customizing-copilot:defining-subagents` establishes the agent contract,

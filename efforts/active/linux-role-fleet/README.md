@@ -283,6 +283,9 @@ mutation follows from this amendment.
   through a reviewed source plan, bounded synthetic implementation and separately
   approved real persistence/fault qualification. Existing restricted-provider
   invariants, ephemeral tests and native/installer/deployment owners stay unchanged.
+  The operator selected ordinary persistent volumes with monitored storage
+  thresholds, not hard quotas; the linked amendment preserves that distinction
+  and requires review before changing the source controls.
 
 ### Mission amendment - Setup, refresh and first useful services
 
@@ -443,7 +446,8 @@ All entries are **agent-recommended implementation gates**.
 - [ ] Pure contracts: explicit provider/adapter selection, fixed named operations,
   untrusted/ambiguous input refusal and no raw remote script/URL/executable API.
 - [ ] Reproducer acceptance follows its [isolation and fault matrix](persistent-isolated-reproducer.md#validation-plan):
-  actual bounded persistent storage, no production reach, literal unknown
+  actual exclusive persistent volumes, monitored usage/free-space refusal,
+  no production reach, literal unknown
   outcomes and independently retained evidence. Fake peers do not qualify native
   CLI, actual task START, review completion or released/running adoption.
 - [ ] Client-only fresh install and uninstall on Windows/Linux: no controller,
@@ -484,6 +488,15 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9071 merged the first pure reproducer controls as
+  `85d0d535ba244fda76a3ac53952a69da0efdee14` after exact-head Copilot approval,
+  resolution of both capability/cgroup findings and required checks.
+  The bounded synthetic selector passed 142 controls. Re-read this Plan and
+  Validation Plan; no actual isolation, persistence, strict-write or native
+  gate closes. Static observations retain explicit unavailable requirements.
+  The next source work selects the bounded persistent backend and implements
+  the finite host reader. Provisioning and lifecycle actions remain separately
+  approved; the parent and #8377 stay open.
 - #9069 merged the persistent isolated reproducer source proposal as
   `2a17f7219697a4b324754d0d000f6eab5c429894` after exact-head Copilot approval
   and all required checks. Re-read this complete Plan and Validation Plan.

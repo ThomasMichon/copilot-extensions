@@ -42,8 +42,10 @@ PYTHON_ADOPTERS = (
     "agent-codespaces", "agent-logger", "agent-bridge",
 )
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
-STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver",)
-STANDALONE_NATIVE_FILES = ("installer-engine.ps1", "installer-engine.sh")
+STANDALONE_NATIVE_ADOPTERS = ("libs/update-driver", "plugins/agent-mcp")
+STANDALONE_NATIVE_FILES = (
+    "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
+)
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
