@@ -291,9 +291,9 @@ def gc_stale_sources(
     purged: dict[str, int] = {}
     kept: list[str] = []
     for source, count in counts.items():
-        live = (
+        live = source in extra_keep or (
             policy.is_live_source(source) if policy.is_live_source is not None
-            else is_live_source(source, extra_keep=extra_keep)
+            else is_live_source(source)
         )
         if live:
             kept.append(source)

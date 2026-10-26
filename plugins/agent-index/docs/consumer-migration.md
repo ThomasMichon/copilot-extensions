@@ -52,6 +52,8 @@ as the complete inventory. Pass `SourceRetirementPolicy` from `indexing.gc`
 with `configured_snapshot=False` to retain sources outside that selection.
 `stale_generations=False` disables full-run naming-generation collection, while
 the existing `AGENT_INDEX_REINDEX_GC=0` safety valve disables both collections.
+Exact names in `AGENT_INDEX_GC_KEEP_SOURCES` remain protected before either
+classifier runs; a caller's naming predicate cannot override operator retention.
 
 A consumer with a legacy naming scheme can supply the policy's pure
 `is_live_source(source)` predicate and `live_crawl_keys` set. The shared GC loop

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -126,8 +127,10 @@ def test_failed_full_run_keeps_last_completed_reconciliation_and_skips_maintenan
     config.ensure_dirs()
     state = IndexState(last_full_reindex=123.0)
     state.save(config.state_file)
-    monkeypatch.setattr(MultiModelStore, "compact", forbidden)
-    monkeypatch.setattr("agent_index.indexing.gc.gc_stale_sources", forbidden)
+    compact = Mock(side_effect=forbidden)
+    stale_gc = Mock(side_effect=forbidden)
+    monkeypatch.setattr(MultiModelStore, "compact", compact)
+    monkeypatch.setattr("agent_index.indexing.gc.gc_stale_sources", stale_gc)
 
     def fail(*args: object, **kwargs: object) -> None:
         raise RuntimeError("source acquisition failed")
@@ -141,6 +144,8 @@ def test_failed_full_run_keeps_last_completed_reconciliation_and_skips_maintenan
     )
     assert result["sources_failed"][0]["source"] == "sample:feed"
     assert IndexState.load(config.state_file).last_full_reindex == 123.0
+    compact.assert_not_called()
+    stale_gc.assert_not_called()
 
 
 def test_disabled_direct_stale_collection_does_not_scan_or_mutate() -> None:
@@ -149,3 +154,31 @@ def test_disabled_direct_stale_collection_does_not_scan_or_mutate() -> None:
         policy=SourceRetirementPolicy(stale_generations=False),
     )
     assert result == {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False}
+
+
+def test_operator_keep_override_precedes_custom_stale_classifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_GC_KEEP_SOURCES", "pushed:protected")
+    config = IndexConfig(data_dir=tmp_path)
+    config.ensure_dirs()
+    store = MultiModelStore(config.lance_dir)
+    kept = chunk("pushed:protected")
+    stale = chunk("sample:obsolete")
+    store.upsert_content([kept, stale])
+    classified: list[str] = []
+
+    def classifier(source: str) -> bool:
+        classified.append(source)
+        return False
+
+    summary = gc_stale_sources(
+        store, PathIndex(tmp_path / "paths.db"), IndexState(),
+        policy=SourceRetirementPolicy(is_live_source=classifier),
+    )
+    assert classified == [stale.source]
+    assert summary["purged"] == {stale.source: 1}
+    assert summary["kept"] == [kept.source]
+    assert store.content_store.get_by_ids([kept.chunk_id])
+    assert not store.content_store.get_by_ids([stale.chunk_id])
