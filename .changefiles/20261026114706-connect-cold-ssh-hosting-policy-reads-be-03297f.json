@@ -1,0 +1,9 @@
+{
+  "comment": "Connect cold SSH hosting-policy reads before execution while preserving existing forwards and admission ordering",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

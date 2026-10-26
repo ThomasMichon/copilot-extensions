@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from dataclasses import dataclass, replace
@@ -11,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 from repository_policy import AgentHostingError, require_agent_hosting, validate_hosting_result
 
 if TYPE_CHECKING:
+    from ssh_manager import CommandResult
+
     from .agent_registry_namespace import NamespaceResolver
     from .agent_registry_resolver import AgentResolver
     from .spawn_target import SpawnTarget
@@ -199,7 +202,7 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
     """Read the actual receiving owner without starting an agent channel."""
     if not target.host or not target.project:
         raise unsupported_receiver("SSH without an execution owner", operation=operation)
-    from ssh_manager import get_default_manager
+    from ssh_manager import SSHProfileSource, get_default_manager
 
     from .worktree_owner_operation import owner_ssh_command
 
@@ -211,9 +214,18 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
         ),
         target.ssh_shell,
     )
+    manager = get_default_manager()
+
+    async def read_policy() -> CommandResult:
+        await manager.ensure_connected(
+            target.host, SSHProfileSource(host_alias=target.host, resolve_timeout=30),
+            preserve_existing_forwards=True,
+        )
+        return await manager.exec_command(target.host, command, timeout=30)
+
     try:
-        result = await get_default_manager().exec_command(target.host, command, timeout=30)
-    except (OSError, ConnectionError, TimeoutError) as exc:
+        result = await asyncio.wait_for(read_policy(), timeout=30)
+    except (OSError, ConnectionError, TimeoutError, asyncio.TimeoutError) as exc:
         raise unsupported_receiver("SSH policy check", operation=operation) from exc
     if result.timed_out or result.exit_code != 0:
         detail = (result.stderr or result.stdout or "receiver check unavailable").strip()
