@@ -149,6 +149,35 @@ source exclusion and coverage-before-progress ordering. Whole vector-mutation
 I/O remains unqualified. Without the keyword, the content-first pipeline retains
 its existing writes, receipt invalidation, batching and compatibility defaults.
 
+### Bounded canonical snapshot reader
+
+`ContentStore.capture_snapshot()` captures a typed `ContentSnapshot` without
+creating or migrating a table, reading content rows, or changing the writer's
+handle. `read_snapshot(snapshot, start=..., limit=...)` opens an independent
+handle and checks out the captured immutable native version. It reads at most
+`limit` logical offsets using `take_offsets(...).select(...).to_arrow()`, verifies
+the captured row count and complete batch length, and strictly decodes canonical
+fields and JSON-object metadata. Offsets are relative to that version; returned
+row order is unspecified. The terminal offset returns an empty batch only after
+the descriptor, retained version and storage checks pass.
+
+The descriptor binds the resolved local root, table name, native version, row
+count, device/inode/directory-ctime identity and existing source-domain UUID.
+Identity is checked before and after each read. Remote storage, unavailable
+retained versions, replaced storage, malformed/incomplete rows and identity
+changes raise `ContentSnapshotUnavailable`, never fall back to latest.
+Existing source-aware dirty/busy/currentness checks remain in force and retain
+their `SourceLayoutError` disposition.
+
+The directory identity is deliberately conservative: native append,
+replacement, deletion and index operations preserve old-version offset reads,
+but ordinary operations can change directory `ctime` while preserving its
+inode. Such a change requires explicit repair rather than weakening the
+incarnation key. This API does not promise uninterrupted resume through every
+canonical mutation, pin retention, persist a cursor, select source/account/model
+scope, or authorize progress. A resumable backfill owner must supply those
+contracts and the pair writer's current-input checks before vector publication.
+
 ## Qualification and limits
 
 `tests/test_chunk_id_index.py` exercises actual content/vector stores at 100,
@@ -165,6 +194,14 @@ pre-effect refusal, intervening content commits, retry, post-effect uncertainty
 and legacy exclusion. The scale fixture also routes real vector writes through
 this provenance opt-in while retaining the canonical table version. This does
 not claim that native vector mutation I/O has been fully qualified.
+
+`tests/test_content_snapshot.py` qualifies native immutable offsets across
+append/upsert/delete/index creation, bounded pages and reopen in both layouts,
+metadata corruption, incomplete reads, descriptor/range refusals, before/after
+identity races and existing source-domain guards. It records the conservative
+directory-ctime limitation rather than claiming stable incarnation metadata
+across all ordinary mutations. No source cursor or operational backfill is
+qualified by these reader tests.
 
 The qualified native dependency composition is LanceDB 0.40.0, pylance 13.0.0
 and lance-namespace 0.11.1 on Linux x86-64. SDK wheels also exist for Linux ARM64,
