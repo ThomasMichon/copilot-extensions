@@ -463,3 +463,7 @@ source-owner coordination rather than one large rewrite.
   deduplicates IDs rather than blocking cleanup of pre-change rows. Upgrade
   fixtures and the full composed packet passed 241 tests; bounded repair also
   exercises 506 copies of one canonical record.
+- Advanced the file fingerprint policy to v2 so pre-coalescing v1 checkpoints
+  cannot hide duplicate chunk accounting. Old checkpoints miss only when a file
+  is next presented; verified chunk/model receipts remain reusable. The real
+  same-line declaration fixture starts with a v1 checkpoint on both layouts.

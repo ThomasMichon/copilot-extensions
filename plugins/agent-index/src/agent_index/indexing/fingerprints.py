@@ -46,4 +46,5 @@ def file_fingerprint(
         "models": models,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return "file-v1:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    # v2 also qualifies canonical ID coalescing and its unique-chunk accounting.
+    return "file-v2:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()

@@ -12,6 +12,7 @@ from test_embedding_pair_reuse import Client, chunk, profile
 
 from agent_index.index_config import IndexConfig
 from agent_index.indexing.engine import _embed_and_store_files
+from agent_index.indexing.fingerprints import file_fingerprint
 from agent_index.indexing.path_index import PathIndex
 from agent_index.sources.base import FileEntry
 from agent_index.store.content_mutations import changed_chunks, coalesce_chunks, content_record
@@ -269,11 +270,15 @@ def test_same_line_declarations_are_coalesced_on_incremental_and_forced_paths(
     assert len(generated) > len(unique)
     paths = PathIndex(tmp_path / "paths.db")
     client = Client()
+    profiles = {"a": config.model_profiles["a"]}
+    # A checkpoint from before canonical coalescing must not hide old copies.
+    old_hash = file_fingerprint(entry, profiles).replace("file-v2:", "file-v1:", 1)
+    paths.mark_indexed(entry.source, entry.path, content_hash=old_hash, chunk_count=len(generated))
 
     def index(*, force: bool = False) -> int:
         return _embed_and_store_files(
             [entry], multi_store=db, multi_clients={"a": client},
-            model_profiles={"a": config.model_profiles["a"]}, path_index=paths,
+            model_profiles=profiles, path_index=paths,
             reconcile_file=db.reconcile_file_chunks, force=force,
         )[0]
 
