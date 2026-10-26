@@ -149,6 +149,41 @@ def test_preview_and_removal_preserve_durable_bytes(tmp_path, capsys):
     assert tree_bytes(tmp_path) == after
 
 
+@pytest.mark.parametrize("absolute", [False, True])
+def test_cli_normalizes_parent_components_before_ownership_comparison(tmp_path, monkeypatch, absolute):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root)
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    target = (caller if absolute else Path()) / ".." / "manager"
+    before = tree_bytes(tmp_path)
+    preview = invoke("--root", target, "--uninstall", "--json")
+    assert preview.returncode == 0, preview.stdout + preview.stderr
+    planned = json.loads(preview.stdout)
+    assert planned["status"] == "planned" and planned["root"] == str(root.resolve())
+    assert tree_bytes(tmp_path) == before
+    applied = invoke("--root", target, "--uninstall", "--apply", "--json")
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    removed = json.loads(applied.stdout)
+    assert removed["status"] == "removed" and removed["root"] == str(root.resolve())
+    assert not slot.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX directory symlink")
+def test_root_indirection_is_refused_before_canonicalization(tmp_path, capsys):
+    root = tmp_path / "manager"
+    fixture_slot(root)
+    alias = tmp_path / "alias"
+    alias.symlink_to(root, target_is_directory=True)
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(alias, apply=True, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and result["removed"] == []
+    assert "Indirect removal path" in result["reason"]
+    assert tree_bytes(tmp_path) == before
+
+
 @pytest.mark.parametrize("apply", [False, True])
 def test_unreliable_process_enumeration_refuses_without_effects(tmp_path, monkeypatch, capsys, apply):
     root = tmp_path / "manager"

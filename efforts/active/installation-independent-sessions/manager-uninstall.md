@@ -229,3 +229,19 @@ termination, credential change or installed rollout is authorized by this plan.
 - The five directly affected Windows files passed 104 tests with eleven
   explicit platform/tier skips under unchanged limits. New-head native proof
   and review are required for these additional corrections.
+- A later review identified two configuration-fixture prefix slices left at
+  their pre-`-B` offsets and a mismatch between lexical `..` roots and canonical
+  installation records. Both fixture commands retain `-B` with the corrected
+  prefix; removal validates no-indirection before resolving its target root.
+  Real relative/absolute-parent CLI controls and a POSIX symlink refusal
+  preserve both usable canonical roots and strict ownership.
+- Once that configuration test reached its actual update step, Windows
+  `CREATE_NO_WINDOW` exposed lost implicit grandchild stdout/stderr. A real
+  bounded process control reproduced the loss and confirmed explicit streams
+  preserve receipts. Headless engine passthrough now retains those streams
+  without changing its window flags, stdin or ordinary interactive branch.
+  The test verifies the decoded complete receipt rather than comparing an
+  unescaped Windows path against raw JSON.
+- The complete affected engine, inventory, configuration and removal packet
+  passed 203 Windows tests with three explicit POSIX skips. Changed-head
+  native qualification and review remain required.

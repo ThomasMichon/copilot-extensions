@@ -38,12 +38,13 @@ print(json.dumps({
                            'src/worktree_manager/runtime_candidate.py',
                            'src/worktree_manager/self_install.py',
                            'src/worktree_manager/mux_file_lock.py',
+                           'src/worktree_manager/engine_client.py',
                            'src/worktree_manager/installation_updates.py',
                            'src/worktree_manager/mux_daemon_process.py')},
     'installed_files': {
         name: hashlib.sha256((pathlib.Path(worktree_manager.__file__).parent / name).read_bytes()).hexdigest()
         for name in ('runtime_candidate.py', 'self_install.py', 'mux_file_lock.py',
-                     'installation_updates.py', 'mux_daemon_process.py')
+                     'engine_client.py', 'installation_updates.py', 'mux_daemon_process.py')
     },
 }))
 """

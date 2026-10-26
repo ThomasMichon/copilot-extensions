@@ -155,6 +155,8 @@ def test_explicit_headless_engine_submission_uses_canonical_no_window_flags(monk
         None, ["update", "--target", "guide", "--detach"], headless=True,
     ) == 0
     assert seen["creationflags"] == 0x08000000
+    if os.name == "nt":
+        assert seen["stdout"] is sys.stdout and seen["stderr"] is sys.stderr
 
 
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])

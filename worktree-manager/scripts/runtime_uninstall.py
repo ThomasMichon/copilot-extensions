@@ -323,11 +323,13 @@ def uninstall(root: Path, *, apply: bool, as_json: bool) -> int:
               "contract": "worktree-manager.uninstall", "generation": 1,
               "root": str(root), "removed": removed}
     try:
+        root = _plain(root).resolve()
+        result["root"] = str(root)
         _contract(SCRIPTS.parent / "references" / "uninstall-contract.json")
         if apply and (
-            Path(sys.executable).resolve().is_relative_to(root.resolve())
-            or Path(sys.prefix).resolve().is_relative_to(root.resolve())
-            or SCRIPTS.resolve().is_relative_to(root.resolve())
+            Path(sys.executable).resolve().is_relative_to(root)
+            or Path(sys.prefix).resolve().is_relative_to(root)
+            or SCRIPTS.resolve().is_relative_to(root)
         ):
             raise ValueError(
                 "Uninstall requires a base Python and installer payload outside the target. "

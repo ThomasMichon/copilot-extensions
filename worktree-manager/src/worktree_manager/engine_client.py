@@ -21,6 +21,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -342,12 +343,16 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     child_environment = _engine_environment() if environment is None else _engine_environment(environment)
     from agent_procutil import no_window_kwargs
 
+    headless_options = no_window_kwargs() if headless else {}
+    if headless and os.name == "nt":
+        # CREATE_NO_WINDOW needs explicit streams to retain a caller's capture pipes.
+        headless_options.update(stdout=sys.stdout, stderr=sys.stderr)
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
             **{**handoff_launch_options(child_environment, handoff),
                **(_terminal_aware_launch_options() if terminal_aware else {}),
-               **(no_window_kwargs() if headless else {})},
+               **headless_options},
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

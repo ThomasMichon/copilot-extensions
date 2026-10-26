@@ -185,7 +185,7 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     reg = ui.configuration_pivot()
     assert "--engine-context" in reg.list_cmd
     assert "COPILOT_EXTENSIONS_CONTEXT" not in tasks._child_process_env()
-    reg = dataclasses.replace(reg, list_cmd=(sys.executable, str(wrapper), *reg.list_cmd[3:]))
+    reg = dataclasses.replace(reg, list_cmd=(sys.executable, "-B", str(wrapper), *reg.list_cmd[4:]))
     runtime = tasks.RegisteredPivotRuntime(reg)
     before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
     state, rows, error, summary = runtime._exec_list({})
@@ -195,10 +195,12 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     assert str(install.parent) in row["source"]
     update = next(action for action in reg.actions if action.key == "update")
     argv = list(pivots.format_template(update.run, {"id": "guide"}))
-    argv = [sys.executable, str(wrapper), *argv[3:]]
+    argv = [sys.executable, "-B", str(wrapper), *argv[4:]]
     ok, message = runtime.run_resolved(argv, preserve_output=True)
     assert ok, message
-    assert "cell-request" in message and str(install) in message
+    assert json.loads(message) == {
+        "request_id": "cell-request", "state": "pending", "exit_code": None, "context": str(install),
+    }
     assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
 
 
