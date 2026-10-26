@@ -55,9 +55,17 @@ class DockerReader:
         if result.returncode != 0:
             raise ReadError(f"Docker observation exited with status {result.returncode}")
         try:
-            return json.loads(result.stdout)
+            value = json.loads(result.stdout)
         except (ValueError, RecursionError) as error:
             raise ReadError("Docker observation is not bounded valid JSON") from error
+        self._check_deadline(deadline)
+        return value
+
+    def _check_deadline(self, deadline: float) -> float:
+        observed = self.clock()
+        if observed >= deadline:
+            raise ReadError("Docker observation deadline exhausted")
+        return observed
 
     def inspect(
         self, experiment: Experiment, container_id: str, *, deadline: float | None = None,
@@ -93,6 +101,10 @@ class DockerReader:
             ):
                 raise ReadError("ordinary local volume identity/posture is unavailable")
             volumes[name] = VolumeIdentity(name, created, mountpoint)
+        for mount in container["Mounts"]:
+            if mount.get("Source") != volumes[mount["Name"]].mountpoint:
+                raise ReadError("effective mount does not expose the full volume root")
+        self._check_deadline(end)
         return Resources(container_id, tuple(volumes[name] for name in names))
 
     def measure(self, experiment: Experiment, expected: Resources) -> Usage:
@@ -115,9 +127,11 @@ class DockerReader:
                 raise ReadError("guest measurement counts are malformed")
         if self.inspect(experiment, expected.container_id, deadline=deadline) != expected:
             raise ReadError("physical storage changed during measurement")
+        persistent = sum(value["usage"])
+        output, free = value["usage"][3], min(value["free"])
+        finished = self._check_deadline(deadline)
         return Usage(
-            expected, started, self.clock(), sum(value["usage"]),
-            value["usage"][3], min(value["free"]),
+            expected, started, finished, persistent, output, free,
         )
 
     def refresh(self, monitor: StorageMonitor) -> None:

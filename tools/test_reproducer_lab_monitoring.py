@@ -255,6 +255,41 @@ def test_static_refusal_precedes_any_guest_probe() -> None:
     assert len(fake.calls) == 1
 
 
+@pytest.mark.parametrize("change", ["subpath", "missing", "malformed", "foreign", "duplicate"])
+def test_whole_volume_declarations_are_required_before_probe(change: str) -> None:
+    fake = FakeDocker()
+    mounts = fake.container["HostConfig"]["Mounts"]
+    if change == "subpath":
+        mounts[0]["VolumeOptions"] = {"Subpath": "visible-only"}
+    elif change == "missing":
+        del fake.container["HostConfig"]["Mounts"]
+    elif change == "malformed":
+        mounts[0]["VolumeOptions"] = None
+    elif change == "foreign":
+        mounts[0]["Source"] = "foreign-volume"
+    else:
+        mounts[1] = copy.deepcopy(mounts[0])
+    with pytest.raises(reader.ReadError, match="volume"):
+        reader.DockerReader(Path("/synthetic/docker"), run=fake).measure(experiment(), resources())
+    assert all(argv[1] != "exec" for argv, _timeout in fake.calls)
+
+
+@pytest.mark.parametrize("source", [None, "/volumes/subtree", "/volumes/foreign", ""])
+def test_effective_mount_source_must_match_the_observed_volume_root(source: object) -> None:
+    fake = FakeDocker()
+    fake.container["Mounts"][0]["Source"] = source
+    with pytest.raises(reader.ReadError, match="full volume root"):
+        reader.DockerReader(Path("/synthetic/docker"), run=fake).measure(experiment(), resources())
+    assert all(argv[1] != "exec" for argv, _timeout in fake.calls)
+
+
+def test_explicit_empty_subpath_still_exposes_the_full_volume() -> None:
+    fake = FakeDocker()
+    fake.container["HostConfig"]["Mounts"][0]["VolumeOptions"] = {"Subpath": ""}
+    host = reader.DockerReader(Path("/synthetic/docker"), run=fake)
+    assert host.inspect(experiment(), "c" * 64) == resources()
+
+
 def test_one_deadline_bounds_the_whole_measurement() -> None:
     fake = FakeDocker()
     now = [0]
@@ -268,6 +303,60 @@ def test_one_deadline_bounds_the_whole_measurement() -> None:
     with pytest.raises(reader.ReadError, match="deadline exhausted"):
         host.measure(experiment(), resources())
     assert len(fake.calls) == 3
+
+
+def test_final_docker_settlement_cannot_outlive_observation_deadline() -> None:
+    fake = FakeDocker()
+    now = [0]
+
+    def run(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        result = fake(argv, timeout=timeout)
+        if len(fake.calls) == 5:
+            now[0] = 30
+        return result
+
+    observer = monitor()
+    host = reader.DockerReader(Path("/synthetic/docker"), run=run, clock=lambda: now[0])
+    with pytest.raises(reader.ReadError, match="deadline exhausted"):
+        host.refresh(observer)
+    assert observer.latest is None
+    assert observer.refusals(now=30)
+    assert len(fake.calls) == 5
+
+
+def test_json_processing_is_inside_the_observation_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeDocker()
+    now = [0]
+    original_loads = reader.json.loads
+
+    def loads(value: str) -> object:
+        parsed = original_loads(value)
+        now[0] = 30
+        return parsed
+
+    monkeypatch.setattr(reader.json, "loads", loads)
+    host = reader.DockerReader(Path("/synthetic/docker"), run=fake, clock=lambda: now[0])
+    with pytest.raises(reader.ReadError, match="deadline exhausted"):
+        host.inspect(experiment(), "c" * 64)
+
+
+def test_final_sample_timestamp_must_still_be_inside_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = FakeDocker()
+    now = [0]
+    host = reader.DockerReader(Path("/synthetic/docker"), run=fake, clock=lambda: now[0])
+    inspections = [0]
+
+    def inspect(*_args: object, **_kwargs: object) -> storage.Resources:
+        inspections[0] += 1
+        if inspections[0] == 2:
+            now[0] = 31
+        return resources()
+
+    monkeypatch.setattr(host, "inspect", inspect)
+    with pytest.raises(reader.ReadError, match="deadline exhausted"):
+        host.measure(experiment(), resources())
 
 
 def test_selection_is_explicit_and_invalid_id_never_invokes_docker() -> None:

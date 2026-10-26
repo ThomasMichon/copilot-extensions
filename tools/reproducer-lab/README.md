@@ -43,7 +43,10 @@ running-source or persistence proof.
 full physical container ID, never a guessed name or automatic replacement.
 `inspect(experiment, container_id)` applies the static checks and reads only the
 four declared volumes. Each must have the ordinary `local` driver, local scope
-and no driver options. The returned `storage.Resources` binds the container ID
+and no driver options. Full-volume mount declarations are required: subpath
+mounts refuse, and each effective mount source must match its inspected volume
+root so that a subtree cannot hide usage elsewhere in the same volume.
+The returned `storage.Resources` binds the container ID
 and volume names, creation timestamps and mountpoints. These observed Docker
 identifiers are not exclusive-custody proof; retain and compare them on resume.
 Docker exposes no separate immutable local-volume UUID.
@@ -54,6 +57,8 @@ The synthetic image must supply `/usr/bin/python3`. It does not start a stopped
 container or retry an unknown result. The reader uses the existing
 `agent-procutil` caller-owned runner, at most 10 seconds per command within a
 30-second observation deadline, with 256 KiB stdout and 16 KiB stderr caps.
+Settlement, JSON/metadata processing and the final sample timestamp must remain
+inside that deadline; merely starting the last command before expiry is insufficient.
 Failures raise `ReadError` with a bounded reason rather than echoing guest or
 Docker diagnostic payloads. The caller's selected Docker context is used;
 this tool does not discover endpoints, log in or borrow credentials.

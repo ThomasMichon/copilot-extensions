@@ -70,9 +70,14 @@ def inspection() -> dict[str, Any]:
             "NanoCpus": budget.cpus * 10**9,
             "PidsLimit": budget.pids,
             "NetworkMode": experiment.resource_prefix + "-internal",
+            "Mounts": [
+                {"Type": "volume", "Source": name, "Target": destination, "ReadOnly": False}
+                for destination, name in experiment.volumes.items()
+            ],
         },
         "Mounts": [
-            {"Type": "volume", "Name": name, "Destination": destination, "RW": True}
+            {"Type": "volume", "Name": name, "Destination": destination, "RW": True,
+             "Source": f"/volumes/{name}"}
             for destination, name in experiment.volumes.items()
         ],
     }
