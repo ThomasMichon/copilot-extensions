@@ -605,7 +605,16 @@ unreaped-child `waitid` observation and the existing libc subreaper interface.
 Optional Python pidfd wrappers may be absent: the shared binding then calls
 the existing libc interface through `ctypes`, without compiling a helper.
 Owner loss, monotonic lease/hard deadlines and reparented-descendant settlement
-retain the same record protocol and matched settlement witness. A missing
+retain the matched settlement witness. Linux disposable reservations use record
+schema 2: `deadline_mono` and `hard_deadline_mono` are `CLOCK_MONOTONIC` timestamps,
+and `clock_domain` binds them to the kernel boot and the current time namespace.
+Reservation, renewal, admission, monitoring and collection use that same clock;
+epoch fields are informational only. Wall-clock steps cannot extend or shorten
+a committed renewal. A different boot/namespace, unavailable namespace identity,
+or legacy schema-1 Linux disposable lease refuses admission/renewal and holds
+live cleanup rather than guessing a conversion. Older readers reject schema 2;
+finish disposable work under its original owner before upgrading or rolling
+back. Production records remain schema 1 and never expire. A missing
 facility refuses disposable admission or holds cleanup with diagnostics;
 there is no numeric-PID signaling fallback. Windows' pre-Python binding is
 unchanged by this Linux replacement and retains its separate compiler-free

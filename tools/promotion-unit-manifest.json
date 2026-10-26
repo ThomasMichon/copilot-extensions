@@ -1,6 +1,19 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_domain_binds_boot_and_time_namespace_without_wall_time",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_publication_and_observation_share_absolute_monotonic_bounds",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[legacy]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[namespace]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[nan]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[infinite]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[over-cap]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_unknown_or_invalid_timing_never_falls_back_to_epoch[negative]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_invalid_publication_refuses[0-10-100]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_invalid_publication_refuses[11-10-100]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_invalid_publication_refuses[1-inf-100]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_invalid_publication_refuses[1-10--1]",
+        "tools/promotion_unit_tests/test_daemon_clock.py::test_invalid_publication_refuses[1-1e+308-1e+308]",
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py::test_cold_policy_query_connects_before_exec",
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py::test_policy_query_preserves_existing_connection_forwards",
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py::test_connection_failure_is_explicit_before_policy_exec[os-error]",
@@ -2397,6 +2410,8 @@
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[hosting-fenced]"
     ],
     "sources": {
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py": "6036e8400b8250d7c745907025dd48a99a2441e07e9ffebb8ee0f751c6a2c43c",
+        "tools/promotion_unit_tests/test_daemon_clock.py": "8dd13337618d5bf7648124bbe20fba9a8c35e06c0b3fb5db6231859406f187f9",
         "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py": "d8bada832bbbb3b5bba1aa317efdadd9ab4e65c0fa8862ef25f75e8bcdec9d2f",
         "tools/promotion_unit_tests/test_gh_account_prerequisite.py": "2119a0f2a99998eb02916fe8254382e9d776567851404ecf970999c19cbeada9",
         ".devcontainer/trusted-harness-base/build.py": "4d96b40567c1135bf82d117f6b54a41ac88b5ddf6fe6d033835a42e88203966d",
@@ -2414,7 +2429,7 @@
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py": "081933f7f8512827ff9fe0800a3bf226b0d4a757114e9b7060b63081b5aea644",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py": "c2e0010c35f710c0ce5668840d68ee1e088b288651f5d74f5fc0bd56c2744723",
         "libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py": "cefaa53b33187c2ee4cacc3e1179116fbe03e182b43b73f1d87152205a522942",
-        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "b9747277c9f23eee12ac5d32a5475733a4c9a26fe91d1f22486accfb712241c8",
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py": "96b116d1bc558e59c75a05bf6d460aafd61b8b80617dbcfd1320d32374549927",
         "libs/agent-procutil/src/agent_procutil/_darwin_caller_owned.py": "4dfafcc9944e429d3c1c83525d30379c2f02473d12c4031433cf7fe4f6906974",
         "libs/agent-procutil/src/agent_procutil/_interpreter.py": "0fe387814f80638c27f4d12c7bb1c2122abaeb2b4c71b75402d471e3940f92c7",
         "libs/agent-procutil/src/agent_procutil/_linux_pidfd.py": "cfb80912e44db7f98efe911ad57dd38f0fa5eb5a28e4e7b91da8206431871560",
@@ -2689,6 +2704,7 @@
         "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd"
     },
     "coverage_targets": [
+        "libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py",
         "libs/ssh-manager/src/ssh_manager/config_sources.py",
         "plugins/agent-bridge/src/agent_bridge/hosting_policy.py",
         "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py",

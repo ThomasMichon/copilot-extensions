@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import math
 from pathlib import Path
 import sys
@@ -12,6 +13,7 @@ if not __package__:
 
 from agent_procutil import _daemon_instance_linux as linux
 from agent_procutil import _daemon_instance_store as store
+from agent_procutil import _daemon_instance_clock as lease_clock
 from agent_procutil.daemon_instances import DaemonInstanceReceipt
 
 
@@ -19,6 +21,9 @@ def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="operation", required=True)
     subcommands.add_parser("check")
+    timing = subcommands.add_parser("lease-fields")
+    timing.add_argument("ttl", type=float)
+    timing.add_argument("maximum", type=float)
     supervisor = subcommands.add_parser("supervise")
     supervisor.add_argument("record", type=Path)
     supervisor.add_argument("--ready-fd", type=int)
@@ -36,6 +41,12 @@ def main(arguments: list[str] | None = None) -> int:
         parser.error("daemon lifecycle requires Linux and Python 3.10 or newer")
     if options.operation == "check":
         linux.check()
+        return 0
+    if options.operation == "lease-fields":
+        for key, value in lease_clock.fields(
+            options.ttl, options.maximum, store._monotonic_clock(),
+        ).items():
+            print(f"{key}\t{base64.b64encode(value.encode('ascii')).decode('ascii')}")
         return 0
     if options.operation == "supervise":
         if not command or (

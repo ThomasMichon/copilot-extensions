@@ -7,7 +7,6 @@ from collections.abc import Callable
 import ctypes
 from dataclasses import dataclass
 import errno
-import math
 import os
 from pathlib import Path
 import select
@@ -15,6 +14,7 @@ import signal
 import time
 
 from . import _daemon_instance_store as store
+from . import _daemon_instance_clock as lease_clock
 from ._daemon_instance_identity import birth_identity, path_identity
 from ._linux_pidfd import open_pidfd, send_pidfd_signal
 from .daemon_instances import DaemonInstanceReceipt
@@ -22,8 +22,6 @@ from .daemon_instances import DaemonInstanceReceipt
 
 @dataclass
 class _Lease:
-    deadline: float
-    hard: float
     hard_mono: float
     lease_mono: float
 
@@ -72,13 +70,6 @@ def _subreaper() -> None:
         raise OSError(number, os.strerror(number))
 
 
-def _deadline(record: dict[str, str], name: str) -> float:
-    value = float(record[name])
-    if not math.isfinite(value) or value <= 0:
-        raise ValueError("invalid daemon lifetime")
-    return value
-
-
 def _validate(record: dict[str, str]) -> tuple[float, float]:
     if record["purpose"] not in ("unattended-test", "interactive-test"):
         raise ValueError("Linux tree supervision requires a disposable instance")
@@ -104,9 +95,8 @@ def _validate(record: dict[str, str]) -> tuple[float, float]:
             birth_identity(launcher) != record["launcher_birth"]
         ):
             raise ValueError("daemon launch belongs to a different process")
-    deadline = _deadline(record, "deadline")
-    hard = _deadline(record, "hard_deadline")
-    if not time.time() < deadline <= hard:
+    deadline, hard = lease_clock.bounds(record)
+    if time.monotonic() >= deadline:
         raise ValueError("daemon admission lease expired")
     return deadline, hard
 
@@ -217,15 +207,13 @@ def _watch_child(
                 updated = store._read(record_path)
                 if any(updated[key] != record[key] for key in (
                     "pid", "birth", "supervisor_pid", "supervisor_birth",
-                    "owner_pid", "owner_birth", "hard_deadline",
+                    "owner_pid", "owner_birth", "hard_deadline_mono", "clock_domain",
                 )):
                     raise ValueError("daemon supervision identity changed")
-                renewed = _deadline(updated, "deadline")
-                if renewed > lease.hard:
+                renewed, hard = lease_clock.bounds(updated)
+                if hard != lease.hard_mono:
                     raise ValueError("daemon lease exceeds hard maximum")
-                if renewed != lease.deadline:
-                    lease.deadline = renewed
-                    lease.lease_mono = time.monotonic() + renewed - time.time()
+                lease.lease_mono = renewed
                 if time.monotonic() >= lease.lease_mono:
                     return 124
                 inspection_deferred = False
@@ -260,8 +248,7 @@ def supervise(path: Path, command: list[str], *, ready_fd: int | None = None) ->
                 raise ValueError("invalid daemon supervision invocation")
             record = store._read(record_path)
             deadline, hard = _validate(record)
-            wall, mono = time.time(), time.monotonic()
-            lease = _Lease(deadline, hard, mono + hard - wall, mono + deadline - wall)
+            lease = _Lease(hard, deadline)
             owner = _pin(int(record["owner_pid"]), record["owner_birth"])
             if os.getpgrp() != os.getpid():
                 os.setpgid(0, 0)

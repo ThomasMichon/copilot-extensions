@@ -452,6 +452,7 @@ def test_real_pure_wheel_and_source_archive_need_only_selected_python(tmp_path, 
     selected = [
         tests / "test_daemon_instances_linux.py",
         tests / "test_daemon_reconcile_cursor.py",
+        tests / "test_daemon_instance_clock.py",
     ]
     for path in selected:
         shutil.copyfile(PROCUTIL / "tests" / path.name, path)

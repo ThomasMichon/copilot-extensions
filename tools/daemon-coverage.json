@@ -152,7 +152,8 @@
       "commands": {
         "supervise": "supervised-service-child",
         "cleanup": "finite-worker",
-        "check": "finite-worker"
+        "check": "finite-worker",
+        "lease-fields": "finite-worker"
       },
       "resource": "daemon_instance_runtime.pyz",
       "platforms": ["linux"]

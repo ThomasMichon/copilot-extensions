@@ -34,7 +34,7 @@ RUNNER_FILES = frozenset({
     "fixture_auth.py", "fixture_service.py", "probe.py",
 })
 PROCUTIL_MODULES = frozenset("""
-__init__ _async _caller_owned _daemon_instance_child _daemon_instance_cli
+__init__ _async _caller_owned _daemon_instance_child _daemon_instance_cli _daemon_instance_clock
 _daemon_instance_identity _daemon_instance_linux _daemon_instance_native _daemon_instance_owner
 _daemon_instance_store _darwin_caller_owned _interactive_groups
 _interactive_session _interactive_terminal _interpreter _linux_pidfd

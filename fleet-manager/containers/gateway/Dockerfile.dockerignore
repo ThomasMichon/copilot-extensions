@@ -37,6 +37,7 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/_caller_owned.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_cli.py
+!libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_native.py

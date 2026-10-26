@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Linux shell binding of agent_procutil.daemon_instances schema 1.
+# Linux shell binding of agent_procutil.daemon_instances inventory.
 # Sourcing is inert. No installer, service, process scan or implicit sweep.
 
 daemon_instance_root() {
@@ -93,7 +93,8 @@ _di_read() {
     size="$(stat -c '%s' -- "$path")" || return 1
     [[ "$size" -le 65536 ]] || return 1
     _di_decode_fields "$name" <"$path" || return 1
-    [[ "${result[schema]:-}" == 1 && "${result[instance_id]:-}" == "$(basename -- "$path" .instance)" ]]
+    [[ ( "${result[schema]:-}" == 1 || "${result[schema]:-}" == 2 ) &&
+       "${result[instance_id]:-}" == "$(basename -- "$path" .instance)" ]]
 }
 
 _di_write() {
@@ -117,7 +118,8 @@ new_daemon_instance_reservation() {
     local service="$1" runtime="$2" source="$3" root="${4:-}"
     local purpose="${5:-production}" ttl="${6:-0}" maximum="${7:-0}"
     local owner_pid="$BASHPID" launcher_pid="$BASHPID" owner_birth owner run='' now hard deadline lockfd
-    local -A record context
+    local -A record context timing
+    local clock_fields key
     [[ "$(uname -s)" == Linux && -n "$service" && "$source" == /* && -f "$source" &&
         "$runtime" == /* && "$(readlink -m -- "$runtime")" == "$runtime" ]] || return 1
     owner_birth="$(_di_birth "$owner_pid")" || return 1
@@ -166,6 +168,11 @@ new_daemon_instance_reservation() {
         [created]="$now" [updated]="$now" [artifact_count]=0 [ttl]="$ttl"
         [deadline]="$deadline" [hard_deadline]="$hard" [run_id]="$run" [protected]=0
     )
+    if [[ "$purpose" != production ]]; then
+        clock_fields="$(_di_lifecycle lease-fields "$ttl" "$maximum")" || return 1
+        _di_decode_fields timing <<<"$clock_fields" || return 1
+        for key in "${!timing[@]}"; do record["$key"]="${timing[$key]}"; done
+    fi
     (umask 077; : >>"${__daemon_instance_record%.instance}.lock") || return 1
     _di_plain "${__daemon_instance_record%.instance}.lock" || return 1
     exec {lockfd}>>"${__daemon_instance_record%.instance}.lock" || return 1
@@ -275,7 +282,7 @@ reconcile_daemon_instances() (
     local LC_ALL=C cursor visited='' collector_fd
     local -a after=() before=()
     local -A record
-    start="$(date +%s.%N)"
+    read -r start _ </proc/uptime || return 1
     [[ "$limit" =~ ^[0-9]+$ && "$limit" -ge 1 && "$limit" -le 4096 ]] || return 1
     awk -v n="$seconds" 'BEGIN { exit !(n>0 && n<1e9) }' || return 1
     root="$(daemon_instance_root "$root")" || return 1
@@ -332,7 +339,7 @@ reconcile_daemon_instances() (
         if [[ "$id" > "$cursor" ]]; then after+=("$path"); else before+=("$path"); fi
     done
     for path in "${after[@]}" "${before[@]}"; do
-        now="$(date +%s.%N)"
+        read -r now _ </proc/uptime || return 1
         [[ "$count" -lt "$limit" ]] || break
         awk -v a="$start" -v b="$now" -v limit="$seconds" 'BEGIN { exit !(b-a<limit) }' || break
         count=$((count+1)); id="$(basename -- "$path" .instance)"; reason=invalid-record; status=held
@@ -340,8 +347,6 @@ reconcile_daemon_instances() (
         if [[ "$id" =~ ^[a-f0-9]{32}$ ]] && _di_read "$path" record; then
             if [[ "${record[purpose]:-}" == production ]]; then
                 [[ "${record[lifecycle]:-resident}" == finite-worker ]] || continue
-            else
-                awk -v n="$now" -v d="${record[deadline]:-0}" 'BEGIN { exit !(d>0 && n>=d) }' || continue
             fi
             local python target remaining
             if ! python="$(_di_python)" || ! target="$(_di_lifecycle_source)"; then
@@ -349,7 +354,8 @@ reconcile_daemon_instances() (
                 printf 'daemon instance held: %s lifecycle-binding-unavailable\n' "$id" >&2
                 continue
             fi
-            remaining="$(awk -v a="$start" -v b="$(date +%s.%N)" -v limit="$seconds" \
+            read -r now _ </proc/uptime || return 1
+            remaining="$(awk -v a="$start" -v b="$now" -v limit="$seconds" \
                 'BEGIN { printf "%.6f", limit-(b-a) }')"
             awk -v n="$remaining" 'BEGIN { exit !(n>0) }' || break
             "$python" -I -S -B "$target" cleanup "$path" "$remaining" || {

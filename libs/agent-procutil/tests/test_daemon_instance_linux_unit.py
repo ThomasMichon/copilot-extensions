@@ -155,9 +155,10 @@ def test_immediately_waitable_children_cannot_extend_the_settlement_deadline(
 def monitored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     receipt = DaemonInstanceReceipt("a" * 32, tmp_path)
     original = {
+        "schema": "2", "clock_domain": linux.lease_clock.domain(),
         "pid": "123", "birth": "child", "supervisor_pid": "456",
         "supervisor_birth": "supervisor", "owner_pid": "789", "owner_birth": "owner",
-        "hard_deadline": "1010", "deadline": "1001",
+        "hard_deadline_mono": "10", "deadline_mono": "1",
     }
     current = dict(original)
     clock = SimpleNamespace(mono=2.0, wall=1002.0)
@@ -183,8 +184,8 @@ def monitored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
 
 
 def test_committed_renewal_precedes_a_delayed_supervisor_wakeup(monitored: SimpleNamespace) -> None:
-    monitored.current.update(deadline="1004", updated="1000.9")
-    lease = linux._Lease(1001, 1010, 10, 1)
+    monitored.current.update(deadline_mono="4", updated="1000.9")
+    lease = linux._Lease(10, 1)
     assert linux._watch_child(
         monitored.receipt, monitored.original, 123, 99, lease, lambda: False,
     ) == 37
@@ -203,11 +204,11 @@ def test_expiry_decision_stays_under_the_lock_when_release_is_delayed(
     def locked(receipt: DaemonInstanceReceipt) -> Iterator[Path]:
         yield receipt.record_path
         if monitored.read.call_count == 1:
-            monitored.current.update(deadline="1004", updated="1000.9")
+            monitored.current.update(deadline_mono="4", updated="1000.9")
             monitored.clock.mono, monitored.clock.wall = 2, 1002
 
     monkeypatch.setattr(linux.store, "_locked", locked)
-    lease = linux._Lease(1001, 1010, 10, 1)
+    lease = linux._Lease(10, 1)
     assert linux._watch_child(
         monitored.receipt, monitored.original, 123, 99, lease, lambda: False,
     ) == 37
@@ -216,7 +217,7 @@ def test_expiry_decision_stays_under_the_lock_when_release_is_delayed(
 
 
 def test_unrenewed_lease_is_observed_before_expiry(monitored: SimpleNamespace) -> None:
-    lease = linux._Lease(1001, 1010, 10, 1)
+    lease = linux._Lease(10, 1)
     assert linux._watch_child(
         monitored.receipt, monitored.original, 123, 99, lease, lambda: False,
     ) == 124
@@ -230,14 +231,14 @@ def test_lock_contention_is_unknown_until_inspection_or_independent_hard_cap(
     monitored.wait.side_effect = None
     monitored.wait.return_value = None
     monitored.locked.side_effect = BlockingIOError()
-    monitored.original["hard_deadline"] = monitored.current["hard_deadline"] = "1003"
+    monitored.original["hard_deadline_mono"] = monitored.current["hard_deadline_mono"] = "3"
 
     def advance(_seconds: float) -> None:
         monitored.clock.mono += .5
         monitored.clock.wall += .5
 
     monitored.sleep.side_effect = advance
-    lease = linux._Lease(1001, 1003, 3, 1)
+    lease = linux._Lease(3, 1)
     assert linux._watch_child(
         monitored.receipt, monitored.original, 123, 99, lease, lambda: False,
     ) == 124

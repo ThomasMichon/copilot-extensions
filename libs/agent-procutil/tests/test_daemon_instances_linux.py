@@ -190,7 +190,7 @@ def test_missing_lifecycle_interpreter_reports_a_held_record(tmp_path):
     ))
     with store._locked(receipt) as path:
         record = store._read(path)
-        record["deadline"] = str(time.time() - 1)
+        record["deadline_mono"] = str(time.monotonic() - 1)
         store._write(path, record)
     result = subprocess.run(
         ["bash", "-c", '. "$1"; _di_python() { return 1; }; '
@@ -223,7 +223,7 @@ def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_pa
         assert process.returncode == 0, error
         with store._locked(receipt) as path:
             record = store._read(path)
-            record["deadline"] = str(time.time() - 1)
+            record["deadline_mono"] = str(time.monotonic() - 1)
             store._write(path, record)
         result = subprocess.run(
             ["bash", "-c", '. "$1"; reconcile_daemon_instances 128 600 "$2"',
