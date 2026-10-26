@@ -127,7 +127,13 @@ interrupted older delta (for example, a file changed and then reverted).
 Source/account configuration changes refuse replay rather than applying old
 work under a new scope. Completed checkpoints also retain the existing
 `recovery_scope` hash in `SourceState.acquisition_scope`, alongside their cursor
-and canonical family. A missing or mismatched checkpoint identity requires an
+and canonical family. On disk, accepted scopes live in the additive top-level
+`acquisition_scopes` map so legacy readers can still construct their three-field
+source records. The reader also accepts the previously published nested
+`acquisition_scope` encoding; conflicting dual encodings, malformed scopes and
+identities without a corresponding source refuse. A legacy writer can drop the
+additive map, but that loss never grants a newer reader acquisition authority.
+A missing or mismatched checkpoint identity requires an
 explicit full reindex before any new acquisition, in either storage layout;
 a new target cannot reuse an old target's cursor even after its journal clears.
 Successful application and atomic checkpoint publication bind the accepted
