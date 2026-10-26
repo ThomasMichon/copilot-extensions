@@ -276,3 +276,61 @@ def test_ordinary_expired_record_still_skips_without_strict_io(writer: tuple) ->
     store, calls = writer
     store.write_event(dict(EVENT, ts=(NOW - timedelta(days=31)).isoformat()))
     assert not calls and store.last_error is None
+
+
+@pytest.mark.parametrize("value,encoded", [
+    (float("inf"), "1e400"), (float("-inf"), "-1e400"),
+    ({"nested": [float("inf")]}, '{"nested":[1e400]}'),
+    ({"nested": [float("-inf")]}, '{"nested":[-1e400]}'),
+])
+def test_strict_numeric_overflow_refuses_before_custody(
+    writer: tuple, value: object, encoded: str,
+) -> None:
+    store, calls = writer
+    event = dict(EVENT, value=value)
+    store.encoder = lambda event: (
+        json.dumps(EVENT)[:-1] + ',"value":' + encoded + "}\n"
+    ).encode()
+    with pytest.raises(ValueError, match="not finite"):
+        store.write_event_strict(event)
+    assert not calls
+
+
+@pytest.mark.parametrize("value,replacement", [
+    (1, True), (True, 1), (0, False), (False, 0),
+    (1.0, 1), (1, 1.0), ({"nested": [1]}, {"nested": [True]}),
+    ([{"nested": False}], [{"nested": 0}]),
+    ((1, 2), [1, 2]),
+])
+def test_strict_type_substitution_refuses_at_every_depth(
+    writer: tuple, value: object, replacement: object,
+) -> None:
+    store, calls = writer
+    event = dict(EVENT, value=value)
+    store.encoder = lambda event: (
+        json.dumps(dict(event, value=replacement)) + "\n"
+    ).encode()
+    with pytest.raises(ValueError, match="changed the record fields"):
+        store.write_event_strict(event)
+    assert not calls
+
+
+@pytest.mark.parametrize("fragment", [
+    '"value":1,"value":1', '"value":{"nested":1,"nested":1}',
+])
+def test_strict_duplicate_fields_are_not_ambiguous_preservation(
+    writer: tuple, fragment: str,
+) -> None:
+    store, calls = writer
+    event = dict(EVENT, value=1 if "nested" not in fragment else {"nested": 1})
+    store.encoder = lambda event: (json.dumps(EVENT)[:-1] + "," + fragment + "}\n").encode()
+    with pytest.raises(ValueError, match="duplicate fields"):
+        store.write_event_strict(event)
+    assert not calls
+
+
+def test_strict_nested_finite_json_fields_preserve_types(writer: tuple) -> None:
+    store, calls = writer
+    event = dict(EVENT, value=[None, False, 0, 1.0, "\u00e9", {"items": [True, -2.5]}])
+    store.write_event_strict(event)
+    assert ("strict_append", event) in calls

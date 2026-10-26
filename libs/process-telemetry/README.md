@@ -107,6 +107,10 @@ unparseable timestamps rather than silently skipping them. Equality at the
 30-day cutoff and future timestamps retain the existing policy. The encoded
 record must be one complete UTF-8 JSONL object, preserve the caller's fields,
 contain no nonfinite JSON numbers, and fit **65,536 bytes including newline**.
+Field preservation compares exact primitive JSON types recursively, including
+booleans versus numbers and integers versus floats. Nonfinite literal tokens
+and overflow notation such as `1e400` refuse, as do duplicate object fields,
+unsupported input types and lossy custom encoders.
 This bounds the submitted write, not arbitrary caller encoder work or heap use;
 owners must bound inputs before encoding.
 

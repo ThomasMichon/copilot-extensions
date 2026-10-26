@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import stat
@@ -35,6 +36,41 @@ def _utc(value: datetime) -> datetime:
 
 def _invalid_json_constant(value: str) -> None:
     raise ValueError(f"strict diagnostic JSON forbids {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("strict diagnostic JSON number is not finite")
+    return parsed
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("strict diagnostic JSON contains duplicate fields")
+        result[key] = value
+    return result
+
+
+def _same_json_fields(left: object, right: object) -> bool:
+    if (
+        type(left) is not type(right)
+        or type(left) not in (type(None), bool, int, float, str, dict, list)
+    ):
+        return False
+    if isinstance(left, dict) and isinstance(right, dict):
+        if any(type(key) is not str for key in right) or left.keys() != right.keys():
+            return False
+        return all(_same_json_fields(value, right[key]) for key, value in left.items())
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _same_json_fields(a, b) for a, b in zip(left, right)
+        )
+    if isinstance(left, float) and isinstance(right, float):
+        return math.isfinite(left) and math.isfinite(right) and left == right
+    return left == right
 
 
 def _diagnostic_files(directory: Path, component: str) -> list[Path]:
@@ -318,8 +354,11 @@ class DiagnosticLog(logging.Handler):
                 or not data.endswith(b"\n") or b"\n" in data[:-1] or b"\r" in data
             ):
                 raise ValueError("strict diagnostics require one bounded UTF-8 JSONL record")
-            decoded = json.loads(data.decode("utf-8"), parse_constant=_invalid_json_constant)
-            if not isinstance(decoded, dict) or decoded != event:
+            decoded = json.loads(
+                data.decode("utf-8"), parse_constant=_invalid_json_constant,
+                parse_float=_finite_json_float, object_pairs_hook=_unique_json_object,
+            )
+            if type(decoded) is not dict or not _same_json_fields(decoded, event):
                 raise ValueError("strict diagnostic encoder changed the record fields")
             if not self.directory.is_dir():
                 raise FileNotFoundError("strict diagnostic directory must already exist")
