@@ -273,7 +273,8 @@
       "t:clean-room/Dockerfile::<script>::ENTRYPOINT": 1,
       "t:clean-room/Dockerfile::<script>::CMD": 1,
       "t:clean-room/Dockerfile.pristine::<script>::ENTRYPOINT": 1,
-      "t:clean-room/Dockerfile.pristine::<script>::CMD": 1
+      "t:clean-room/Dockerfile.pristine::<script>::CMD": 1,
+      "t:reproducer-lab/Dockerfile::<script>::ENTRYPOINT": 1
     },
     "finite-worker": {
       "d:execution_cli.py::_spawn_detached_waiter::Popen": 1,

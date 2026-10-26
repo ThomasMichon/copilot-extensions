@@ -488,6 +488,16 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9151 merged the initial synthetic-task gate as
+  `42134b2b95042b842462366c38365afce66f0912` after exact-head Copilot
+  approval, resolved retained-history findings and all required checks.
+  The bounded selectors passed 114 controls, including 13 explicit actual
+  local-owner cases. Existing task/Bridge journals reject retained operations;
+  the strict diagnostic owner syncs before the existing task-create call.
+  Re-read this complete Plan and Validation Plan. No actual guest service,
+  mounted-volume, persistence/fault, native START or running acceptance closes.
+  Continue the actual offline guest fixture and source/image/runtime wiring
+  through existing service owners; resource creation remains separately approved.
 - #9139 merged explicit strict pre-effect writer source as
   `62535d65c08d326a937a7233b2f0447f633eb4c2` after exact-head Copilot
   approval, resolved numeric/type/mutation/portable-fixture feedback and all
