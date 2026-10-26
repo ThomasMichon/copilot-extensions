@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import os
 from pathlib import Path
+import re
 import secrets
 import stat
 import time
@@ -19,9 +20,11 @@ from .gateway_service_caller import _read
 from .gateway_service_channel import TransportError, check, origin, shape, unpack
 from .gateway_service_connector import verified_tls
 from .gateway_service_context import fields
+from .gateway_enrollment import enrollment_scope
 from .machine_identity import PROFILE, machine_headers, make_machine_proof
 from .private_state import create_private_file, private_directory, read_private_file
 from .operations import OperationIntent
+from .runtime_identity import _text, _time
 
 PROVIDER = "local-projection-v1"
 CAPABILITY = "delegated-machine-enrollment-v1"
@@ -35,24 +38,27 @@ def _projection(path: Path, harness: str) -> dict:
           and value["provider"] == PROVIDER, "unsupported-continuity-source")
     declaration = fields(
         value["delegation"], {"id", "scope", "grant_sha256", "grant_expires_at"})
-    scope = declaration["scope"]
-    check(isinstance(scope, dict) and scope.get("harness") == harness,
+    scope = enrollment_scope(declaration["scope"])
+    planning.identifier(declaration["id"], "delegation")
+    check(scope["harness"] == harness,
           "continuity-harness-mismatch")
-    check(isinstance(value["grant"], str) and len(value["grant"]) == 43
+    check(isinstance(value["grant"], str)
+          and re.fullmatch(r"[A-Za-z0-9_-]{43}", value["grant"]) is not None
           and isinstance(declaration["grant_sha256"], str)
+          and re.fullmatch(r"[0-9a-f]{64}", declaration["grant_sha256"]) is not None
           and hmac.compare_digest(hashlib.sha256(value["grant"].encode()).hexdigest(),
                                   declaration["grant_sha256"]), "continuity-grant-mismatch")
     check(type(scope.get("expires_at")) is int and int(time.time()) < scope["expires_at"],
           "continuity-grant-expired")
-    check(type(declaration["grant_expires_at"]) is int, "invalid-continuity-grant")
+    check(_time(declaration["grant_expires_at"]), "invalid-continuity-grant")
     check(isinstance(scope.get("slots"), list) and 1 <= len(scope["slots"]) <= 64,
           "invalid-continuity-scope")
     check(value["gateway_ca"] is None or (
         isinstance(value["gateway_ca"], str) and Path(value["gateway_ca"]).is_absolute()),
         "invalid-continuity-trust")
     origin(scope["destination"])
-    for item in ("authority", "audience"):
-        check(isinstance(value[item], str) and bool(value[item]), "invalid-continuity-scope")
+    planning.identifier(value["authority"], "authority")
+    check(_text(value["audience"], 512), "invalid-continuity-scope")
     return value
 
 
@@ -96,7 +102,6 @@ def _state(root: Path, projection: dict, *, apply: bool) -> dict | None:
     if not apply:
         return None
     check(int(time.time()) < declaration["grant_expires_at"], "continuity-delegation-expired")
-    private_directory(root)
     key = ECKey.generate_key("P-256")
     binding = {
         "delegation": declaration["id"], "delegation_digest": planning.digest(declaration),
@@ -107,12 +112,14 @@ def _state(root: Path, projection: dict, *, apply: bool) -> dict | None:
         "principal": scope["principal"], "account": scope["account"], "target": scope["machine"],
         "generation": scope["generation"], "command": "machine.enroll",
         "parameters": {"enrollment": planning.digest(binding)}}
+    OperationIntent.from_dict(intent)
     value = {
         "version": 1, "source_digest": source_digest, "private_key": key.as_dict(private=True),
         "request": {
             "intent": intent, "delegation": declaration["id"],
             "scope": scope, "public_key": binding["public_key"]}}
     try:
+        private_directory(root)
         descriptor = create_private_file(path)
     except FileExistsError:
         return _state(root, projection, apply=False)

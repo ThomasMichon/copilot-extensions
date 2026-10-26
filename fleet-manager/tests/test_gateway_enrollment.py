@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import asyncio
 from contextlib import contextmanager
+from dataclasses import replace
 import hashlib
 from pathlib import Path
 import sqlite3
@@ -19,11 +20,15 @@ from fleet_manager.gateway_enrollment import SCHEMA
 from fleet_manager.gateway_enrollment import EnrollmentPolicy
 from fleet_manager.gateway_service_policy import ServiceAuthority, ServicePolicyError
 from fleet_manager.gateway_service_server import Listener, ServiceRuntime
+from fleet_manager import gateway_service_server
+from fleet_manager.gateway_service_caller import ServiceCaller
+from fleet_manager.gateway_service_connector import ServiceConnector
 from fleet_manager.ledger import OperationLedger
 from fleet_manager.operations import OperationIntent
 from fleet_manager.machine_identity import make_machine_proof
 from test_machine_identity import MachineHarness
 from test_runtime_identity import AUDIENCE, NOW
+from gateway_service_transport_fixtures import Rig
 
 DESTINATION = "https://gateway.example"
 GRANT = "test-only-" + "g" * 33
@@ -363,5 +368,114 @@ def test_contended_journal_does_not_hold_serving_lock(
                 await asyncio.to_thread(worker.join, 6)
         assert done.is_set()
         assert not failures
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("same_generation", [False, True])
+def test_reversed_reload_completion_cannot_restore_old_context_or_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, same_generation: bool,
+) -> None:
+    async def run() -> None:
+        h = EnrollmentHarness(tmp_path)
+        earlier = replace(h.owner.reload(), settlement_error="enrollment-settlement-pending")
+        if not same_generation:
+            h.document["policy"]["manifest"]["revision"] += 1
+        later = h.owner.reload()
+        runtime = ServiceRuntime(
+            h.owner, Listener("fleet-a", "gateway-a", "127.0.0.1", 0, DESTINATION, "", ""), 1)
+        responses = [asyncio.get_running_loop().create_future() for _ in range(2)]
+        calls = []
+
+        async def reversed_result(function):
+            index = len(calls)
+            calls.append(function)
+            return await responses[index]
+
+        monkeypatch.setattr(gateway_service_server, "settled", reversed_result)
+        first = asyncio.create_task(runtime.reload())
+        second = asyncio.create_task(runtime.reload())
+        await asyncio.sleep(0)
+        assert len(calls) == 2
+        responses[1].set_result(later)
+        await second
+        responses[0].set_result(earlier)
+        await first
+        assert runtime.context is later.snapshot.context
+        assert runtime.last_error is None
+
+    asyncio.run(run())
+
+
+def test_enrollment_preserves_unrelated_live_channel_request_and_replay_fence(tmp_path: Path) -> None:
+    async def run() -> None:
+        rig = Rig(tmp_path)
+        h = EnrollmentHarness(tmp_path)
+        h.h.clock.value = rig.h.clock.value
+        h.scope["expires_at"] = rig.h.clock.value + 600
+        h.delegation["grant_expires_at"] = rig.h.clock.value + 300
+        h.document["policy"]["manifest"]["revision"] += 1
+        rig.h.document = h.document
+        try:
+            await rig.start(enrollment_journal=h.ledger)
+            h.scope["destination"] = rig.origin
+            h.document["policy"]["manifest"]["revision"] += 1
+            rig.save()
+            await rig.state.reload()
+            h.owner = rig.state.authority
+            connector = ServiceConnector(
+                slot="service-a", gateway_origin=rig.origin, backend_origin=rig.origins[0],
+                proof_key=h.h.keys[1], gateway_ca=rig.ca,
+                machine_principal="service-a", machine_audience=AUDIENCE)
+            task = asyncio.create_task(connector.connect_once())
+            rig.tasks.append(task)
+            await asyncio.wait_for(connector.connected.wait(), 3)
+            channel = rig.state.channels["service-a"]
+            nonce = h.owner.challenge()
+            proof = make_machine_proof(
+                h.h.keys[3], principal="caller-a", audience=AUDIENCE, kind="caller",
+                resource="service-a", method="GET", target_uri=rig.origin + "/api",
+                nonce=nonce, body=b"", now=rig.h.clock.value)
+            arguments = dict(method="GET", request_method="GET", slot="service-a",
+                             target_uri=rig.origin + "/api",
+                             content_digest=hashlib.sha256(b"").hexdigest())
+            grant = h.owner.authenticate_caller("caller-a", proof, **arguments)
+            caller = ServiceCaller(
+                gateway_origin=rig.origin, proof_key=h.h.keys[3], gateway_ca=rig.ca,
+                machine_principal="caller-a", machine_audience=AUDIENCE,
+                machine_resource="service-a")
+            request = asyncio.create_task(caller.request("GET", "/api/hold"))
+            rig.tasks.append(request)
+            await asyncio.wait_for(rig.backends[0].started.wait(), 3)
+            raw = h.request()
+            enrollment_proof = make_machine_proof(
+                h.key, principal="new-caller", audience=AUDIENCE, kind="caller",
+                resource="enrollment", method="POST", target_uri=rig.origin + "/_fleet/enroll",
+                nonce=await asyncio.to_thread(h.owner.enrollment_challenge),
+                body=raw, now=rig.h.clock.value)
+            async with rig.session.post(
+                rig.origin + "/_fleet/enroll", data=raw,
+                headers={"Fleet-Enrollment-Grant": GRANT, "Fleet-Machine-Proof": enrollment_proof},
+            ) as response:
+                assert response.status == 200
+            await rig.state.reload()
+            assert h.owner.challenge() == nonce
+            assert rig.state.channels["service-a"] is channel and not channel.closed
+            assert h.owner.revalidate_caller(grant).principal == "caller-a"
+            with pytest.raises(ServicePolicyError, match="^proof-replayed$"):
+                h.owner.authenticate_caller("caller-a", proof, **arguments)
+            rig.backends[0].release.set()
+            assert (await asyncio.wait_for(request, 3)).status == 200
+            h.document["policy"]["enrollment"]["mappings"] = [
+                mapping for mapping in h.document["policy"]["enrollment"]["mappings"]
+                if mapping["resource"] != "service-a"]
+            h.document["policy"]["manifest"]["revision"] += 1
+            rig.save()
+            await rig.state.reload()
+            assert channel.closed
+            with pytest.raises(ServicePolicyError):
+                h.owner.revalidate_caller(grant)
+        finally:
+            await rig.close()
 
     asyncio.run(run())

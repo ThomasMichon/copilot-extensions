@@ -252,7 +252,10 @@ class ServiceAuthority:
             changed = current is None or context.manifest.revision != current.revision
             if changed:
                 if not current or current.context.trust_digest != context.trust_digest:
-                    self._verifier = candidate_verifier
+                    if not (type(self._verifier) is MachineIdentityVerifier
+                            and type(candidate_verifier) is MachineIdentityVerifier
+                            and self._verifier.refresh(candidate_verifier)):
+                        self._verifier = candidate_verifier
                 self._enrollment = enrollment
                 self._snapshot = ServiceSnapshot(context, current.generation + 1 if current else 1)
                 self._prune(context, now)
@@ -361,6 +364,8 @@ class ServiceAuthority:
                           ) -> tuple[ServiceContext, int]:
         context, current, now = self._active()
         require(verifier is current, "trust-changed")
+        if type(identity) is MachineIdentity and type(current) is MachineIdentityVerifier:
+            require(current.current(identity), "trust-changed")
         require(identity.verified_at <= now < identity.expires_at, "expired-grant")
         return context, now
 
@@ -368,6 +373,9 @@ class ServiceAuthority:
         identity = record.identity
         return (
             record.verifier is self._verifier
+            and (type(identity) is not MachineIdentity
+                 or (type(self._verifier) is MachineIdentityVerifier
+                     and self._verifier.current(identity)))
             and identity.verified_at <= now < identity.expires_at
             and now < context.trust_valid_until
             and context.slot_fingerprint(record.slot) == record.slot_fingerprint

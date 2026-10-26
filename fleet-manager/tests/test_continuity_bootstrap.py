@@ -17,7 +17,8 @@ from agent_procutil import no_window_kwargs
 import pytest
 
 from fleet_manager import planning
-from fleet_manager.continuity_bootstrap import bootstrap
+from fleet_manager.continuity_bootstrap import _state, bootstrap
+from fleet_manager import private_state
 from gateway_service_transport_fixtures import Rig
 from test_gateway_enrollment import EnrollmentHarness, GRANT
 
@@ -79,7 +80,7 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
                     "import importlib.util;raise SystemExit(importlib.util.find_spec('fleet_manager') is None)",
                     **no_window_kwargs())
                 if await installed.wait():
-                    pytest.skip("selected engine test environment needs its fleet-onboarding extra")
+                    pytest.skip("selected engine test environment needs its Fleet service-Gateway SDK")
                 home = tmp_path / "home"
                 home.mkdir(mode=0o700)
                 state = home / ".fleet-continuity-harness-a"
@@ -180,3 +181,44 @@ def test_real_cli_first_touch_check_restart_and_same_private_key(
         finally:
             await rig.close()
     asyncio.run(scenario())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode-bit custody; native ACL lane is separate")
+def test_replacement_after_path_validation_cannot_bypass_opened_file_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, replacement = tmp_path / "source.json", tmp_path / "replacement.json"
+    source.write_bytes(b"private-original")
+    source.chmod(0o600)
+    replacement.write_bytes(b"shared-replacement")
+    replacement.chmod(0o644)
+    validate = private_state.validate_private_file
+
+    def replace_after_validation(path: Path) -> None:
+        validate(path)
+        replacement.replace(path)
+
+    monkeypatch.setattr(private_state, "validate_private_file", replace_after_validation)
+    with pytest.raises(planning.PlanError, match="private to its owner"):
+        private_state.read_private_file(source, 16384)
+
+
+@pytest.mark.parametrize("change", [
+    {"generation": 0}, {"generation": -1}, {"generation": "1"},
+    {"principal": "invalid principal"}, {"account": ""},
+])
+def test_invalid_first_touch_intent_leaves_no_immutable_state(
+    tmp_path: Path, change: dict,
+) -> None:
+    enrollment = EnrollmentHarness(tmp_path)
+    scope = copy.deepcopy(enrollment.scope)
+    scope.update(change)
+    projection = {
+        "provider": "local-projection-v1", "authority": "authority-a", "audience": "example-gateway",
+        "delegation": dict(enrollment.delegation, scope=scope)}
+    projection["delegation"]["grant_expires_at"] = 2**52
+    root = tmp_path / "invalid-machine"
+    with pytest.raises(planning.PlanError):
+        _state(root, projection, apply=True)
+    assert not (root / "machine.json").exists()
+    assert not root.exists()

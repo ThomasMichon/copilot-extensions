@@ -88,6 +88,8 @@ class ServiceRuntime:
         self.origin = listener.external_origin or listener.origin
         self.interval = reload_interval
         self.context: ServiceContext | None = None
+        self._reload_serial = 0
+        self._publication_cursor = (0, 0)
         self.channels: dict[str, Channel] = {}
         self.tickets: dict[str, Ticket] = {}
         self.unverified = 0
@@ -141,7 +143,13 @@ class ServiceRuntime:
                 self.authority.release_candidate(ticket.candidate)
 
     async def reload(self) -> None:
+        self._reload_serial += 1
+        serial = self._reload_serial
         publication = await settled(self.authority.reload)
+        cursor = (publication.generation, serial)
+        if cursor <= self._publication_cursor:
+            return
+        self._publication_cursor = cursor
         self.context = publication.snapshot.context
         self.last_error = publication.settlement_error
         if self.last_error is not None:

@@ -23,6 +23,25 @@ SCOPE_FIELDS = {
     "principal", "generation", "slots", "methods", "expires_at",
 }
 
+def enrollment_scope(value: object) -> dict:
+    """Validate source-independent scope before any first-touch state is created."""
+    scope = fields(value, SCOPE_FIELDS)
+    for name in SCOPE_FIELDS - {"destination", "slots", "methods", "expires_at", "generation"}:
+        identifier(scope[name])
+    require(_https(scope["destination"])
+            and scope["destination"].rstrip("/") == scope["destination"], "invalid-delegation")
+    require(_time(scope["expires_at"]) and type(scope["generation"]) is int
+            and 0 < scope["generation"] < 2**53, "invalid-delegation")
+    slots = items(scope["slots"], 64, minimum=1)
+    methods = items(scope["methods"], len(METHODS), minimum=1)
+    require(all(isinstance(s, str) for s in slots)
+            and len(set(slots)) == len(slots), "invalid-scope")
+    for slot in slots:
+        identifier(slot)
+    require(all(isinstance(m, str) for m in methods)
+            and len(set(methods)) == len(methods) and set(methods) <= METHODS, "invalid-scope")
+    return scope
+
 
 class EnrollmentPolicy:
     """No key issuer, sync provider, external effects or independent registry."""
@@ -55,24 +74,9 @@ class EnrollmentPolicy:
                     and re.fullmatch(r"[0-9a-f]{64}", item["grant_sha256"]) is not None,
                     "invalid-delegation")
             require(_time(item["grant_expires_at"]), "invalid-delegation")
-            scope = fields(item["scope"], SCOPE_FIELDS)
-            for field in SCOPE_FIELDS - {
-                "destination", "slots", "methods", "expires_at", "generation",
-            }:
-                identifier(scope[field])
-            require(scope["gateway"] == self.gateway and _https(scope["destination"])
-                    and scope["destination"].rstrip("/") == scope["destination"],
-                    "invalid-delegation")
-            require(_time(scope["expires_at"]) and type(scope["generation"]) is int
-                    and 0 < scope["generation"] < 2**53, "invalid-delegation")
-            slots = items(scope["slots"], 64, minimum=1)
-            methods = items(scope["methods"], len(METHODS), minimum=1)
-            require(all(isinstance(s, str) for s in slots)
-                    and len(set(slots)) == len(slots)
-                    and set(slots) <= {s.name for s in context.manifest.slots},
-                    "invalid-scope")
-            require(all(isinstance(m, str) for m in methods)
-                    and len(set(methods)) == len(methods) and set(methods) <= METHODS,
+            scope = enrollment_scope(item["scope"])
+            require(scope["gateway"] == self.gateway, "invalid-delegation")
+            require(set(scope["slots"]) <= {s.name for s in context.manifest.slots},
                     "invalid-scope")
             require(scope["principal"] not in {c.principal for c in context.callers},
                     "principal-already-configured")

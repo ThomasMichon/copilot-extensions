@@ -54,6 +54,7 @@ class MachineIdentity(VerifiedIdentity):
     profile: str = PROFILE
     kind: str = ""
     resource: str = ""
+    binding: MachineBinding | None = None
 
 
 class MachineIdentityVerifier(ProofFence):
@@ -88,6 +89,21 @@ class MachineIdentityVerifier(ProofFence):
                 raise IdentityError("ambiguous-enrollment")
             self._bindings[lookup] = (binding, key)
 
+    def refresh(self, candidate: MachineIdentityVerifier) -> bool:
+        """Replace current bindings without resetting an unchanged proof epoch."""
+        if (self._audience != candidate._audience
+                or self._trust_valid_until != candidate._trust_valid_until):
+            return False
+        with self._lock:
+            self._bindings = candidate._bindings.copy()
+        return True
+
+    def current(self, identity: MachineIdentity) -> bool:
+        """Previously admitted work retains standing only for the exact binding."""
+        with self._lock:
+            selected = self._bindings.get((identity.subject, identity.kind, identity.resource))
+            return selected is not None and selected[0] == identity.binding
+
     def verify(self, principal: str, proof: str, *, method: str, target_uri: str,
                kind: str, resource: str, content_digest: str) -> MachineIdentity:
         """Bind a proof to the actual buffered body and full server-derived URI."""
@@ -100,7 +116,7 @@ class MachineIdentityVerifier(ProofFence):
             raise IdentityError("invalid-request-context")
         with self._lock:
             self._now_locked()
-        selected = self._bindings.get((principal, kind, resource))
+            selected = self._bindings.get((principal, kind, resource))
         if selected is None:
             raise IdentityError("invalid-key-binding")
         binding, key = selected
@@ -138,4 +154,5 @@ class MachineIdentityVerifier(ProofFence):
             expires_at=min(binding.expires_at, self._trust_valid_until),
             verified_at=now, evidence=hashlib.sha256(proof.encode("ascii")).hexdigest(),
             kind=kind, resource=resource,
+            binding=binding,
         )

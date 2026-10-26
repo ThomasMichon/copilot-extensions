@@ -43,6 +43,10 @@ The Gateway derives method/target, reads the bounded body once and reuses those
 same bytes for dispatch. Forwarding headers cannot choose the proof authority.
 Nonce epochs, monotonic time checks, bounded atomic replay tracking and
 capacity refusal reuse the existing proof fence. Restart chooses a new nonce.
+Adding an unrelated machine keeps the current nonce/replay fence and unchanged
+binding grants, so existing connector channels and in-flight requests survive.
+Changed/withdrawn bindings invalidate only their own retained work; a changed
+audience or trust deadline replaces the proof epoch.
 
 Actual machine-mode discovery is `GET /_fleet/machine-challenge`, returning
 exactly `{profile, nonce}`. The legacy challenge's `{nonce}` shape is unchanged.
@@ -148,6 +152,8 @@ Receipt-storage failure does not undo or conceal an installed publication:
 the transport receives the installed context and reports
 `enrollment-settlement-pending` in status/logs. A later reload retries settlement
 against that same exact installed context; it does not invent a new operation.
+Transport adoption is generation-ordered even when concurrent reload workers
+complete in reverse order; an older result cannot restore stale routing/status.
 Claims/floors are retained; there is no automatic rotation, reclamation or
 re-enrollment under another generation. Such recovery requires its owner's
 explicit future recovery contract.
@@ -174,6 +180,8 @@ it. The selected projection is already authenticated/protected by its source
 owner; this implementation adds no cloud login, OneDrive client or Git sync.
 Shared/unowned files and symlink/reparse traversal refuse without permission
 repair. A plaintext exported source must retain equivalent private custody.
+Custody checks cover the opened reader's ownership/mode or native ACL, not just
+a pathname that could be replaced between validation and reading.
 
 The actual Fleet executable reports its implemented contracts with
 `capabilities`. `bootstrap --source <absolute-file> --harness <context-name>
