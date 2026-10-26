@@ -31,6 +31,25 @@ def read_request(stream) -> str:
             return "".join(lines)
 
 
+def router_helper(python: str = sys.executable) -> str:
+    import shlex
+
+    from agent_procutil import direct_python
+
+    try:
+        executable, environment = direct_python(python)
+    except (OSError, RuntimeError):
+        executable, environment = python, {}
+    prefix = "".join(
+        key + "=" + shlex.quote(value.replace("\\", "/")) + " "
+        for key, value in environment.items()
+    )
+    return (
+        "!" + prefix + shlex.quote(executable.replace("\\", "/"))
+        + " -I -X utf8 -m agent_worktrees._git_credential_route"
+    )
+
+
 def parse_attributes(text: str) -> dict[str, str]:
     return dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
 

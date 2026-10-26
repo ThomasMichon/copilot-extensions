@@ -227,7 +227,7 @@ def test_native_strict_inventory_distinguishes_missing_and_unavailable_ancestors
 def test_registry_git_probe_uses_canonical_headless_options(monkeypatch):
     options = {"creationflags": 123}
     calls = []
-    monkeypatch.setattr(repos.git_ops, "no_window_kwargs", lambda: options)
+    monkeypatch.setattr("agent_procutil.no_window_kwargs", lambda: options)
     selectors = (
         "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT",
         "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",

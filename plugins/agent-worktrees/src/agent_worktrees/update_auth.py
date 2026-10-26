@@ -6,7 +6,6 @@ import dataclasses
 import json
 import os
 import re
-import shlex
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -14,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from ._git_credential_route import (
+    router_helper,
     NON_INTERACTIVE,
     NATIVE_KEY,
     SECRET_KEY,
@@ -148,12 +148,6 @@ def command_scope(env: Mapping[str, str], entries: Sequence[tuple[str, str]]) ->
         )
         result["GIT_CONFIG_PARAMETERS"] = env["GIT_CONFIG_PARAMETERS"] + " " + parameters
     return result
-
-
-def router_helper(python: str = sys.executable) -> str:
-    argv = module_argv("agent_worktrees._git_credential_route", python=python)
-    argv[0] = argv[0].replace("\\", "/")
-    return "!" + shlex.join(argv)
 
 
 def non_repository_environment(env: Mapping[str, str], cwd: Path) -> dict[str, str]:

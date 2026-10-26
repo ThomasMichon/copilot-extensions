@@ -8,10 +8,12 @@ import os
 import subprocess
 import sys
 import io
+import shlex
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from agent_worktrees import _git_credential_route as router
 from agent_worktrees import (
@@ -119,6 +121,96 @@ def test_unknown_filtered_payload_rejects_before_auth_discovery(monkeypatch):
         argparse.Namespace(phase="payloads", plugin=["unknown"]),
         update_cli._update_in_plugin_steps,
     ) == 1
+
+
+def test_router_import_does_not_load_installer_cleanup_or_command_rendering():
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-X", "utf8", "-c",
+            "import sys; import agent_worktrees._git_credential_route; "
+            "assert not {'agent_worktrees.installer_run', 'agent_worktrees.push_timeout', "
+            "'shlex'} & sys.modules.keys()",
+        ],
+        capture_output=True, text=True, timeout=5, check=False, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("venv", [False, True])
+def test_router_helper_scopes_direct_interpreter_selection(monkeypatch, venv):
+    import agent_procutil
+
+    python = r"C:\selected slot\Scripts\python.exe"
+    base = r"C:\base Python\python.exe" if venv else python
+    extra = {"__PYVENV_LAUNCHER__": python} if venv else {}
+    calls = []
+
+    def direct(selected):
+        calls.append(selected)
+        return base, extra
+
+    before = dict(os.environ)
+    monkeypatch.setattr(agent_procutil, "direct_python", direct)
+    tokens = shlex.split(auth.router_helper(python)[1:])
+    assert calls == [python]
+    assert tokens == (
+        (["__PYVENV_LAUNCHER__=C:/selected slot/Scripts/python.exe"] if venv else [])
+        + [base.replace("\\", "/"), "-I", "-X", "utf8", "-m",
+           "agent_worktrees._git_credential_route"]
+    )
+    unchanged = dict(os.environ) == before
+    assert unchanged
+
+
+@pytest.mark.parametrize("error", [OSError, RuntimeError])
+def test_router_helper_retains_selected_interpreter_when_direct_selection_is_unavailable(
+    monkeypatch, error,
+):
+    import agent_procutil
+
+    def unavailable(selected):
+        raise error("optional direct interpreter unavailable")
+
+    monkeypatch.setattr(agent_procutil, "direct_python", unavailable)
+    assert shlex.split(auth.router_helper("selected python")[1:]) == [
+        "selected python", "-I", "-X", "utf8", "-m", "agent_worktrees._git_credential_route",
+    ]
+
+
+def test_auth_process_result_retains_immutable_named_fields_and_defaults():
+    result = process.Result(0)
+    assert result.status == 0
+    assert result.stdout == result.stderr == ""
+    assert not result.timed_out and not result.missing and not result.truncated
+    assert result == process.Result(status=0)
+    with pytest.raises(AttributeError):
+        result.status = 1
+
+
+def test_auth_timeout_cannot_report_success_after_zero_exit(monkeypatch):
+    waits = []
+    closed = []
+
+    def wait(**kwargs):
+        waits.append(kwargs)
+        if len(waits) == 1:
+            raise subprocess.TimeoutExpired(["fixture"], kwargs["timeout"])
+        return 0
+
+    child = SimpleNamespace(
+        returncode=0, stdin=io.BytesIO(), stdout=io.BytesIO(b"partial"),
+        stderr=io.BytesIO(), wait=wait,
+    )
+    monkeypatch.setattr(process, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        process, "spawn_sync_in_kill_on_close_job",
+        lambda *args, **kwargs: (child, SimpleNamespace(close=lambda: closed.append(True))),
+    )
+    result = process.run(["fixture"], env={})
+    assert result.timed_out
+    assert result.status is None
+    assert result.stdout == "partial"
+    assert closed == [True, True]
 
 
 def _source(owner="team", *, id="marketplace:example", required=True, cwd=None):
@@ -328,7 +420,7 @@ def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(tmp_
     config = _clean_git_env(monkeypatch, tmp_path)
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    subprocess.run(["git", "init", "-q", str(checkout)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(checkout)], check=True, **no_window_kwargs())
     helper = "!f() { printf '%s\\n' username=original " + router.SECRET_KEY + "=fixture; }; f"
     for key, value in [
         ("credential.helper", "!exit 71"),
@@ -338,7 +430,7 @@ def test_real_git_router_replays_url_helpers_and_local_reset_without_writes(tmp_
         subprocess.run(
             ["git", "-C", str(checkout), "config", "--add", key, value],
             check=True,
-            **git_ops.no_window_kwargs(),
+            **no_window_kwargs(),
         )
     local = checkout / ".git" / "config"
     before = config.read_bytes(), local.read_bytes()
@@ -757,33 +849,33 @@ def test_skipped_anchor_does_not_create_an_auth_requirement(
     anchor = tmp_path / "anchor"
     subprocess.run(
         ["git", "init", "-q", "-b", branch or "main", str(anchor)],
-        check=True, **git_ops.no_window_kwargs(),
+        check=True, **no_window_kwargs(),
     )
     if branch is None:
         subprocess.run(
             ["git", "-C", str(anchor), "-c", "user.name=Test", "-c",
              "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
         subprocess.run(
             ["git", "-C", str(anchor), "checkout", "--detach", "-q"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
     if bare:
         subprocess.run(
             ["git", "-C", str(anchor), "config", "core.bare", "true"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
     if inherited:
         caller = tmp_path / "caller"
         subprocess.run(
             ["git", "init", "-q", "-b", "main", str(caller)],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
         subprocess.run(
             ["git", "-C", str(caller), "-c", "user.name=Test", "-c",
              "user.email=test@example.invalid", "commit", "--allow-empty", "-qm", "fixture"],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
         monkeypatch.setenv("GIT_DIR", str(caller / ".git"))
         monkeypatch.setenv("GIT_WORK_TREE", str(caller))
@@ -863,7 +955,7 @@ def test_real_router_does_not_execute_checkout_local_python(tmp_path, monkeypatc
 def test_real_git_ops_isolation_retains_only_the_scoped_auth_overlay(tmp_path, monkeypatch):
     _clean_git_env(monkeypatch, tmp_path)
     subprocess.run(
-        ["git", "init", "-q", str(tmp_path / "checkout")], check=True, **git_ops.no_window_kwargs()
+        ["git", "init", "-q", str(tmp_path / "checkout")], check=True, **no_window_kwargs()
     )
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.bare")
@@ -1003,7 +1095,7 @@ def test_real_configured_router_preserves_non_password_credentials(tmp_path, mon
     )
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.helper", helper],
-        check=True, **git_ops.no_window_kwargs(),
+        check=True, **no_window_kwargs(),
     )
     item = auth.SourceAuth(_source(cwd=tmp_path), [])
     request = (
@@ -1049,7 +1141,7 @@ def test_native_credentials_are_discovered_validated_and_replayed(
     ):
         subprocess.run(
             ["git", "config", "--file", str(config), key, value],
-            check=True, **git_ops.no_window_kwargs(),
+            check=True, **no_window_kwargs(),
         )
     before = config.read_bytes()
     item = _source(cwd=tmp_path)
@@ -1731,7 +1823,7 @@ def test_reachable_remote_with_unborn_head_is_not_an_auth_failure(tmp_path, monk
     _clean_git_env(monkeypatch, tmp_path)
     remote = tmp_path / "unborn.git"
     subprocess.run(
-        ["git", "init", "--bare", "-q", str(remote)], check=True, **git_ops.no_window_kwargs()
+        ["git", "init", "--bare", "-q", str(remote)], check=True, **no_window_kwargs()
     )
     item = auth.SourceAuth(_source(), [])
 
@@ -1787,7 +1879,7 @@ def test_git_returned_error_http_auth_status_is_not_a_generic_failure(monkeypatc
 def test_local_only_anchor_does_not_abort_auth_source_discovery(tmp_path, monkeypatch):
     _clean_git_env(monkeypatch, tmp_path)
     anchor = tmp_path / "local-only"
-    subprocess.run(["git", "init", "-q", str(anchor)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(anchor)], check=True, **no_window_kwargs())
     repo = cfg.RepoConfig(
         anchor=str(anchor), worktree_root=str(tmp_path / "worktrees"), default_branch="main"
     )
@@ -1807,11 +1899,11 @@ def test_first_clone_report_ignores_caller_repository_helper_reset(tmp_path, mon
     config = _clean_git_env(monkeypatch, tmp_path)
     config.write_text("[credential]\n    helper = global-fixture\n", encoding="utf-8")
     caller = tmp_path / "caller"
-    subprocess.run(["git", "init", "-q", str(caller)], check=True, **git_ops.no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(caller)], check=True, **no_window_kwargs())
     subprocess.run(
         ["git", "-C", str(caller), "config", "--add", "credential.helper", ""],
         check=True,
-        **git_ops.no_window_kwargs(),
+        **no_window_kwargs(),
     )
     staging = caller / "manager" / "staging"
     staging.mkdir(parents=True)
@@ -1887,12 +1979,12 @@ def test_fill_discovery_and_replay_keep_the_actual_source_path(
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.helper", helper],
         check=True,
-        **git_ops.no_window_kwargs(),
+        **no_window_kwargs(),
     )
     subprocess.run(
         ["git", "config", "--file", str(config), "credential.useHttpPath", "true"],
         check=True,
-        **git_ops.no_window_kwargs(),
+        **no_window_kwargs(),
     )
     before = config.read_bytes()
     probe = Probe(gh=False)
@@ -1928,7 +2020,7 @@ def test_public_source_header_fallback_is_failure_only_and_source_scoped(
     subprocess.run(
         ["git", "config", "--file", str(config),
          "http.https://example.test/.extraHeader", configured_header],
-        check=True, **git_ops.no_window_kwargs(),
+        check=True, **no_window_kwargs(),
     )
     before = config.read_bytes()
     item = _source(cwd=tmp_path)
