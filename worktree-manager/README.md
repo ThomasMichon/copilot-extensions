@@ -112,6 +112,10 @@ Managed authoring launch honors the target repository's
 [`expose_agent` hosting veto](../plugins/agent-worktrees/docs/repository-agent-policy.md).
 The Manager uses the engine's read-only policy API, never imports the plugin,
 and refuses engines without hosting admission instead of dropping the guard.
+Shell-delegated launch resolution defers instruction projection publication
+using a call-scoped flag while retaining the selected engine provider and
+the caller's profile, PATH and installation-selection environment. Parent Python
+runtime overrides remain stripped; the flag does not alter later launches.
 Recovery resolves its runtime first, then checks the actual setup repository
 before running its setup script. Source-only worktree allocation remains
 available through `agent-worktrees create --json`; it does not return a launch

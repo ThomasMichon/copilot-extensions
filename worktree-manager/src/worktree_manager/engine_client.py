@@ -675,7 +675,8 @@ def resolve_launch_plan(
                 if target_machine and seed and timeout is not None else timeout
             ),
             stream_progress=True,
-            **({"environment": {"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"}} if defer_projections else {}),
+            environment={**os.environ, "AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} if defer_projections else None,
+            engine_command=engine_base_command() if defer_projections else None,
         )
     except EngineError as e:
         detail = _engine_error_detail(e)
