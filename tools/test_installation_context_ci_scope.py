@@ -678,7 +678,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch_owner", "dispatch_delegation", "pr_service", "ssh_service", "pr_artifacts", "dependency_compile",
         "candidate_profiles", "ssh_snapshot", "wheel_inputs",
         "guardian_followthrough", "guardian_ref",
-        "runtime_profiles", "chat_construction",
+        "runtime_profiles", "chat_construction", "update_diagnostics",
         "immutable_runtime", "immutable_runtime_ref",
         "interactive_completion", "native_launch", "ssh_service",
         "ssh_headless", "update_diagnostics",
@@ -689,6 +689,8 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
     assert inputs["watch_owner"]["default"] is False
     assert inputs["ssh_service"]["type"] == "boolean"
     assert inputs["ssh_service"]["default"] is False
+    assert inputs["update_diagnostics"]["type"] == "boolean"
+    assert inputs["update_diagnostics"]["default"] is False
     routes = {
         "derived-diagnostics-posix": "ubuntu-latest",
         "derived-diagnostics-windows": "windows-latest",
@@ -699,12 +701,14 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "watch-owner-boundaries-linux", "watch-owner-boundaries-windows",
         "dispatch-delegation-linux", "dispatch-delegation-windows",
         "pr-service-linux", "pr-service-windows",
+        "update-diagnostics-linux", "update-diagnostics-windows",
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
         "marketplace-source-linux", "marketplace-source-windows",
+        "packaging-seed-linux", "packaging-seed-windows",
         "installer-latency-linux", "installer-latency-windows",
         "packaging-seed-linux", "packaging-seed-windows",
         "logger-installer-latency-linux", "logger-installer-latency-windows",
