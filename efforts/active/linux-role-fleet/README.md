@@ -488,6 +488,15 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9161 merged image/runtime preparation source as
+  `f9f9651997c63e5bd3e3acefa28895572f5a1f9f` after exact-head Copilot approval,
+  resolved permission/symlink feedback and all required checks. The bounded
+  selectors passed 46 controls, including six explicit local command/copy/lock
+  cases on synthetic trees. Re-read this complete Plan and Validation Plan;
+  no image build, dependency closure, guest service, persistence/fault, native
+  START or running acceptance closes. Continue the credential-free synthetic
+  hosting workspace, owner configuration and actual service/peer fixture.
+  Resource creation and lifecycle actions remain separately approved.
 - #9151 merged the initial synthetic-task gate as
   `42134b2b95042b842462366c38365afce66f0912` after exact-head Copilot
   approval, resolved retained-history findings and all required checks.
