@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from agent_index.indexing.change_hints import ChangeHints
     from agent_index.indexing.embedding_coverage import EmbeddingCoverage
     from agent_index.indexing.embedding_runtime import EmbeddingRuntime
+    from agent_index.indexing.gc import SourceRetirementPolicy
     from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
@@ -281,6 +282,7 @@ def run_reindex(
     source_specs: list[SourceSpec] | None = None,
     embedding_runtime: EmbeddingRuntime | None = None,
     change_hints: ChangeHints | None = None,
+    retirement_policy: SourceRetirementPolicy | None = None,
 ) -> dict[str, object]:
     """Run the four-phase indexing pipeline.
 
@@ -300,6 +302,8 @@ def run_reindex(
         embedding_runtime: Optional owned client/lifecycle policy. Clients are
             closed on exit and readiness remains deferred until embedding.
         change_hints: Required exact-source acquisition identities; never a poll fallback.
+        retirement_policy: Optional source inventory and legacy naming policy.
+            Defaults retain configured-source and registered-source collection.
 
     Returns:
         Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
@@ -315,6 +319,7 @@ def run_reindex(
         open_embedding_clients,
     )
     from agent_index.indexing.path_index import PathIndex
+    from agent_index.indexing.gc import SourceRetirementPolicy
     from agent_index.indexing.pending_crawl import PendingCrawlConflict
     from agent_index.indexing.runner import IndexingCancelled
     from agent_index.indexing.state import IndexState
@@ -322,6 +327,7 @@ def run_reindex(
 
     config = config if config is not None else IndexConfig()
     runtime = embedding_runtime if embedding_runtime is not None else default_embedding_runtime()
+    retirement = retirement_policy if retirement_policy is not None else SourceRetirementPolicy()
     configured = list(source_specs) if source_specs is not None else configured_source_specs()
     sources_to_index = (
         configured if source is None else
@@ -452,7 +458,8 @@ def run_reindex(
     # a config change -- e.g. removing a source from `.agent-index/config.yaml`
     # -- take effect on the very next routine reindex tick, with no full
     # reindex and no service restart required.
-    if source is None and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0":
+    if (source is None and retirement.configured_snapshot
+            and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0"):
         try:
             from agent_index.indexing.gc import gc_configured_snapshot
 
@@ -484,7 +491,7 @@ def run_reindex(
             logger.warning("Unconfigured-source GC failed", exc_info=True)
             print("  WARNING: unconfigured-source GC failed (see logs)")
 
-    if full:
+    if full and not failed_sources:
         state.last_full_reindex = time.time()
 
         # Purge stale source generations (abandoned naming schemes) BEFORE
@@ -495,12 +502,18 @@ def run_reindex(
         # scheme, so if remote /api/ingest producers (e.g. a revived
         # agent-index-push-daemon) write machine-scoped sources, either disable this
         # or add their names to AGENT_INDEX_GC_KEEP_SOURCES.
-        if os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0" and not gc_deferred:
+        if (retirement.stale_generations and not gc_deferred
+                and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0"):
             print("\nGarbage-collecting stale source generations...")
             try:
                 from agent_index.indexing.gc import gc_stale_sources
 
-                gc_summary = gc_stale_sources(multi_store, path_index, state)
+                if retirement_policy is None:
+                    gc_summary = gc_stale_sources(multi_store, path_index, state)
+                else:
+                    gc_summary = gc_stale_sources(
+                        multi_store, path_index, state, policy=retirement,
+                    )
                 purged = gc_summary["purged"]
                 if purged:
                     for src, cnt in sorted(purged.items()):

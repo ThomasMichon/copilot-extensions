@@ -611,3 +611,42 @@ source-owner coordination rather than one large rewrite.
   budgeted unchanged-item model backfill, logical mutation generations,
   hosted acquisition recovery and the full effort matrix remain open.
   No release, consumer consumption or live rollout is asserted.
+
+### 2026-10-26 - Prepared point reads reviewed and merged
+
+- PR #9102 merged as `38fa973a2e6b16c93fc023832e2dfd8a39669520`
+  after current-head Copilot approval with no open issues and green required
+  checks. The review's writer-entry race was fixed and independently re-reviewed;
+  167 bounded native/shared tests pass. Reconciled the existing worktree and
+  re-read the Plan and Validation Plan; the effort remains Active.
+- Prepared point reads and explicit physical-row/segment budgeting are shared
+  source primitives, not automatic ordinary-round adoption or completed model
+  backfill. #9082 retains the wider native adoption/qualification scope.
+- The prior release prerequisite changed: #9061 is merged and #8983 closed.
+  Published Main `2b761442786c2067dd1091aa8e8f84c97c3417f1` contains the
+  consumer injection seams and round work counts, with agent-index
+  `0.10.96-dev1`. This does not imply that the just-merged #9102 primitive is
+  already released, or that any consumer has adopted it.
+- Next, consume a qualified published shared engine through the consumer's
+  existing mechanical vendor path and remove duplicate orchestration; continue
+  budgeted profile backfill and remaining acquisition/maintenance matrix work.
+  Consumer replacement and live rollout retain their own safety gates.
+
+### 2026-10-26 - Explicit consumer source-retirement ownership
+
+- Consumer integration exposed a missing distinction: a configured crawl list
+  need not be an authoritative inventory when the product also accepts pushed
+  content. Added optional `SourceRetirementPolicy` to the shared reindex entry
+  point, preserving ordinary defaults and the existing global GC safety valve.
+- Consumers can retain sources outside their crawl selection, explicitly disable
+  stale-generation collection, or supply a pure naming predicate and retained
+  crawl-alias set. Exact deletion and pending-crawl/selected-store guards remain
+  shared; no consumer-owned GC or orchestration loop is introduced.
+- Failed full runs no longer advance the last successful full-reconciliation
+  marker, collect stale generations or compact as if acquisition had succeeded.
+  Existing cluster configuration supports consumer-owned background coalescing
+  without an additional callback or global patch.
+- Native tests cover actual engine retention of pushed content, full-run
+  classification, crawl-cursor preservation, dry-run and pending-acquisition
+  refusal, plus failed-full maintenance exclusion. This closes a consumer seam,
+  not release/adoption, remaining acquisition/backfill or the effort matrix.

@@ -222,6 +222,9 @@ Python consumers can call the same `run_reindex` with their `IndexConfig`
 subclass, explicit complete `SourceSpec` list and an optional
 `EmbeddingRuntime` client/lifecycle policy. Connectors continue to use
 `register_connector`; no alternate crawl/embed/checkpoint engine is needed.
+An optional `SourceRetirementPolicy` separates the crawl selection from an
+externally owned source inventory and supplies pure legacy-name classification
+without replacing shared garbage collection or its pending-acquisition guards.
 `run_worker` accepts an explicit config and indexing callable, retaining exact
 callable hint negotiation, resume/progress/cancellation and terminal status.
 An explicit worker config is forwarded to the default engine; a custom callable
