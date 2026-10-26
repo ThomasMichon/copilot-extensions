@@ -43,6 +43,16 @@ Concurrent participating processes refuse busy access; they do not use PID
 or an idle-status snapshot as authority. Marker replacement never replaces
 the lock file. A missing lock on an initialized domain fails closed.
 
+`SourceDomain.operation(db)` holds this existing exclusion across a sequence
+of independently committed reads/writes. Retirement uses it from its pending-
+work admission through canonical/vector/path removal and configured-identity
+cleanup, so backfill intent cannot enter between the GC check and deletion.
+Nested mutation methods retain their own dirty/effect/clean protocol; the
+operation itself is not a transaction and does not roll back or reclassify
+uncertain effects. A read/guard refusal before mutation remains clean, and a
+later retry retains already completed writes. Ordinary indexing is not fenced
+for a backfill job's lifetime.
+
 HTTP `/status`, including `?sources=true`, holds that same read guard across
 table inventory, counts and the optional source histogram. A refused domain
 returns explicit unknown inventory (`available: null`, `chunks: null`, empty

@@ -33,11 +33,18 @@ END;
 """
 
 
+def embedding_profile_key(profile: ModelProfile) -> list[str | int]:
+    """The existing embedding-input policy identity, shared with bounded backfill."""
+    return [
+        profile.model_id, profile.model_name, profile.revision,
+        profile.dim, profile.query_prefix, profile.max_seq_length,
+    ]
+
+
 def input_hash(chunk: Chunk, profile: ModelProfile) -> str:
     """Hash raw embedding input, not the chunk ID's normalized text hash."""
     raw = json.dumps(
-        [chunk.content, profile.model_id, profile.model_name, profile.revision,
-         profile.dim, profile.query_prefix, profile.max_seq_length],
+        [chunk.content, *embedding_profile_key(profile)],
         ensure_ascii=False, separators=(",", ":"),
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

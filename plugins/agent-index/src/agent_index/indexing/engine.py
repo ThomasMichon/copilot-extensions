@@ -82,6 +82,11 @@ class SourceSpec:
     auth_relay: str | None = None
 
 
+def source_scope_hash(spec: SourceSpec) -> str:
+    """The existing nonsecret resolved-source configuration identity."""
+    return hashlib.sha256(json.dumps(asdict(spec), sort_keys=True).encode()).hexdigest()
+
+
 def _type_from_name(name: str) -> str:
     """Infer a connector type from a source name prefix (``git:``/``github:``/…)."""
     head = name.split(":", 1)[0].strip().lower()
@@ -409,9 +414,7 @@ def run_reindex(
                     resume_since=resume_since,
                     connector_kwargs=connector_kwargs,
                     before_store=prepare_embedding,
-                    source_scope=hashlib.sha256(
-                        json.dumps(asdict(spec), sort_keys=True).encode(),
-                    ).hexdigest(),
+                    source_scope=source_scope_hash(spec),
                     connector=hinted_connector, change_hints=change_hints,
                 )
                 total_chunks += stored
@@ -490,6 +493,14 @@ def run_reindex(
                 raise
             logger.warning("Unconfigured-source GC failed", exc_info=True)
             print("  WARNING: unconfigured-source GC failed (see logs)")
+
+    if (full and retirement.stale_generations and not gc_deferred
+            and os.environ.get("AGENT_INDEX_REINDEX_GC", "1") != "0"):
+        from agent_index.indexing.pending_crawl import PendingCrawls
+
+        gc_deferred = PendingCrawls(path_index).backfill_sources()
+        if gc_deferred:
+            logger.warning("Stale-source GC deferred: unfinished embedding backfills: %s", gc_deferred)
 
     if full and not failed_sources:
         state.last_full_reindex = time.time()

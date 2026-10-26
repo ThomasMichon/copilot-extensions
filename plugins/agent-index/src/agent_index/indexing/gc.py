@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import wraps
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
@@ -49,6 +50,18 @@ if TYPE_CHECKING:
     from agent_index.store.multi_model_store import MultiModelStore
 
 log = logging.getLogger(__name__)
+
+
+def _retirement_writer(function):
+    """Keep admission, row retirement and identity cleanup in one source operation."""
+    @wraps(function)
+    def call(multi_store, path_index, state, **kwargs):
+        domain = getattr(multi_store, "_source_domain", None)
+        if domain is None or kwargs.get("dry_run", False) or domain.writing:
+            return function(multi_store, path_index, state, **kwargs)
+        with domain.operation(multi_store.content_store.db):
+            return function(multi_store, path_index, state, **kwargs)
+    return call
 
 
 @dataclass(frozen=True)
@@ -158,6 +171,7 @@ def is_configured_source(
     return any(source.startswith(f"{name}:") for name in configured_names)
 
 
+@_retirement_writer
 def gc_configured_snapshot(
     multi_store: MultiModelStore, path_index: PathIndex, state: IndexState, *,
     configured_names: frozenset[str], source_aware: bool,
@@ -165,12 +179,18 @@ def gc_configured_snapshot(
     """Retain canonical rows separately from active configured crawl identities."""
     from agent_index.indexing.pending_crawl import PendingCrawls
 
-    pending = PendingCrawls(path_index).sources()
+    journal = PendingCrawls(path_index)
+    pending = journal.sources()
     if pending:
         log.warning("Source GC deferred: complete pending crawls with original configuration: %s",
                     pending)
         return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
                 "deferred": pending, "pending_crawls": pending}
+    backfills = journal.backfill_sources()
+    if backfills:
+        log.warning("Source GC deferred: unfinished embedding backfills: %s", backfills)
+        return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
+                "deferred": backfills}
     if not source_aware:
         return gc_unconfigured_sources(
             multi_store, path_index, state, configured_names=configured_names,
@@ -195,6 +215,7 @@ def gc_configured_snapshot(
     return result
 
 
+@_retirement_writer
 def gc_unconfigured_sources(
     multi_store: MultiModelStore,
     path_index: PathIndex,
@@ -268,6 +289,7 @@ def gc_unconfigured_sources(
     }
 
 
+@_retirement_writer
 def gc_stale_sources(
     multi_store: MultiModelStore,
     path_index: PathIndex,

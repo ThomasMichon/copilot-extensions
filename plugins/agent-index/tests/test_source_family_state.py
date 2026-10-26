@@ -31,6 +31,51 @@ def test_path_family_lookup_is_literal_and_case_sensitive(tmp_path, family):
     assert set(paths.get_paths_by_prefix(family)) > set(expected)  # Legacy API stays compatible.
 
 
+@pytest.mark.parametrize("single_source_full", [False, True])
+def test_ordinary_run_reindex_defers_unfinished_backfill_gc(
+    queued_source, caplog, single_source_full,
+):
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    repository, configure, run, config = queued_source
+    configure(repository("active"))
+    assert run(full=True)[1].status == "complete"
+    paths = PathIndex(config.data_dir / "path_index.db")
+    PendingCrawls(paths)
+    conn = paths._connect()
+    try:
+        conn.execute(
+            "INSERT INTO embedding_backfills VALUES (?, ?, ?)", ("git:alias", "retained intent", 0),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    code, task = run(full=True, source="git:alias") if single_source_full else run()
+    assert code == 0 and task.status == "complete"
+    assert "GC deferred: unfinished embedding backfills: ['git:alias']" in caplog.text
+    assert PendingCrawls(paths).backfill_sources() == ["git:alias"]
+    assert initialize_source_store(config)._source_domain.receipt()["state"] == "clean"
+
+
+def test_backfill_deferral_does_not_hide_unfinished_acquisition(tmp_path):
+    from agent_index.indexing.manifest import CrawlManifest
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    paths = PathIndex(tmp_path / "paths.db")
+    journal = PendingCrawls(paths)
+    journal.save(CrawlManifest(source="crawl", commit="target"), scope="accepted", full=False)
+    conn = paths._connect()
+    try:
+        conn.execute("INSERT INTO embedding_backfills VALUES ('backfill', '{}', 0)")
+        conn.commit()
+    finally:
+        conn.close()
+    decision = gc_configured_snapshot(
+        None, paths, IndexState(), configured_names=frozenset(), source_aware=True,
+    )
+    assert decision["pending_crawls"] == decision["deferred"] == ["crawl"]
+
+
 @pytest.mark.timeout(180)
 def test_queued_reconcile_changes_only_exact_canonical_family(queued_source):
     repository, configure, run, config = queued_source

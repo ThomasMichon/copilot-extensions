@@ -123,6 +123,9 @@ class SourceDomain:
 
     @contextmanager
     def exclusion(self):
+        if getattr(self._local, "operation", False):
+            yield
+            return
         if not self._mutex.acquire(blocking=False):
             raise SourceLayoutError("source-aware domain busy")
         stream = None
@@ -146,6 +149,23 @@ class SourceDomain:
             if stream is not None:
                 stream.close()  # Closing releases the kernel lock, including after errors.
             self._mutex.release()
+
+    @contextmanager
+    def operation(self, db):
+        """Hold existing exclusion across independently committed reads/writes."""
+        if self.writing or getattr(self._local, "operation", False):
+            yield
+            return
+        with self.exclusion():
+            value = self.receipt()
+            if (value.get("fts_pending") or value.get("state") != "clean"
+                    or value["versions"] != _versions(db)):
+                raise SourceLayoutError("source projection incomplete or changed")
+            self._local.operation = True
+            try:
+                yield
+            finally:
+                self._local.operation = False
 
     def receipt(self) -> dict:
         try:
