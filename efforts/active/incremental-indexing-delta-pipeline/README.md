@@ -448,6 +448,25 @@ source-owner coordination rather than one large rewrite.
   Controls cover both layouts, raw-text normalized-hash collisions, metadata,
   original timestamp/version preservation, new model pairs, retained/new chunks,
   empty files, failed reads, source/path isolation and partial vector cleanup.
+- Phase 4's content/vector write-avoidance item is resolved. Exact hinted
+  acquisition, hosted pagination recovery, unchanged-item model backfill,
+  per-stage counters and logical/sliced maintenance remain next work; no
+  release, consumer adoption or live-serving gate is claimed.
+- Review found that same-line code declarations legitimately emit identical
+  canonical chunk IDs. Coalesced exact input records before logical accounting,
+  embedding and both incremental/forced writes, while rejecting conflicting
+  metadata at one ID. Real JavaScript chunker regressions exercise both layouts;
+  the expanded focused recovery packet passed 154 tests.
+- Extended the same correction to legacy stored copies: stream duplicate rows
+  in batches of at most 200, coalesce only exact persisted-field matches, and
+  reject conflicting copies before mutation. Complete obsolete-ID enumeration
+  deduplicates IDs rather than blocking cleanup of pre-change rows. Upgrade
+  fixtures and the full composed packet passed 241 tests; bounded repair also
+  exercises 506 copies of one canonical record.
+- Advanced the file fingerprint policy to v2 so pre-coalescing v1 checkpoints
+  cannot hide duplicate chunk accounting. Old checkpoints miss only when a file
+  is next presented; verified chunk/model receipts remain reusable. The real
+  same-line declaration fixture starts with a v1 checkpoint on both layouts.
 
 ### 2026-10-26 - Content reconciliation reviewed and merged
 
@@ -493,22 +512,40 @@ source-owner coordination rather than one large rewrite.
   admitting a different endpoint or item, and refresh the source-aware reader
   before no-op version assertions. A real changed-title control proves that
   the same assertion detects writes. The final review-fix packet passed 125.
-- Phase 4's content/vector write-avoidance item is resolved. Exact hinted
-  acquisition, hosted pagination recovery, unchanged-item model backfill,
-  per-stage counters and logical/sliced maintenance remain next work; no
-  release, consumer adoption or live-serving gate is claimed.
-- Review found that same-line code declarations legitimately emit identical
-  canonical chunk IDs. Coalesced exact input records before logical accounting,
-  embedding and both incremental/forced writes, while rejecting conflicting
-  metadata at one ID. Real JavaScript chunker regressions exercise both layouts;
-  the expanded focused recovery packet passed 154 tests.
-- Extended the same correction to legacy stored copies: stream duplicate rows
-  in batches of at most 200, coalesce only exact persisted-field matches, and
-  reject conflicting copies before mutation. Complete obsolete-ID enumeration
-  deduplicates IDs rather than blocking cleanup of pre-change rows. Upgrade
-  fixtures and the full composed packet passed 241 tests; bounded repair also
-  exercises 506 copies of one canonical record.
-- Advanced the file fingerprint policy to v2 so pre-coalescing v1 checkpoints
-  cannot hide duplicate chunk accounting. Old checkpoints miss only when a file
-  is next presented; verified chunk/model receipts remain reusable. The real
-  same-line declaration fixture starts with a v1 checkpoint on both layouts.
+
+### 2026-10-26 - Scoped work-item hints reviewed and merged
+
+- PR #9076 merged as `ea2123bafc87b676d26194c74985e9cf259972de`
+  after current-head Copilot approval with both findings resolved and green CI.
+  Reconciled the existing source worktree; release and consumption are not
+  implied. Retained orchestration tests also passed (85, one platform skip).
+- Actual GitHub item identities now cross intake, queue, engine and connector
+  boundaries, with real worker burst/restart tests. The broader changed-ID/ref-
+  range and full built-in/external qualification gates remain open.
+- Continue typed stage counts and bounded unchanged-item model backfill, then
+  hosted page recovery and logical/local maintenance. The canonical Plan and
+  Validation Plan remain the completion gate; both efforts are still Active.
+
+### 2026-10-26 - Typed round work-count implementation slice
+
+- Added versioned, JSON-safe `work_counts` to the existing engine result and
+  worker statistics. Separate acquisition outputs, file/checkpoint reuse,
+  per-model embedding calls/pairs, actual primary row upserts and canonical
+  file-deletion IDs. Preserve legacy logical result totals and pending-crawl
+  serialization. Extracted the routed batch writer while retaining the engine
+  compatibility seam and its cancellation/failure behavior.
+- Shared HTTP measurements count client-boundary attempts/retries, responses,
+  decoded payload bytes, 304s and parsed JSON results. Unobserved transports
+  remain `null`; semantic provider pages/bodies and physical storage I/O are
+  not inferred. Cluster attempts/failures remain visible even when legacy
+  maintenance catches an error; cached skips do not count as passes. FTS
+  availability calls are not mislabeled as full builds.
+- Native one/two-model fixtures in both layouts distinguish unchanged/replayed
+  identities, metadata reuse, text edits, tombstones and interrupted-vector
+  recovery. Real hosted-hint fixtures verify request counts and persisted
+  worker statistics. Coupled bounded suites passed (172 and 160 tests);
+  helper typing, Python lint and the 13-plugin install-contract guard passed.
+- This establishes a measured subset, not the complete Phase 1 counters gate
+  or the 100/10,000/100,000 acceptance matrix. Remaining provider-semantic,
+  GC/derived physical-work and unchanged-item model-backfill qualification
+  stays explicit; both Plan and Validation Plan remain open.

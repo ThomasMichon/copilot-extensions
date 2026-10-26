@@ -55,6 +55,14 @@ does not delay pushed updates or change request, lease, or shutdown deadlines.
 The explicit `status-monitor --interval <seconds>` override remains available
 with its existing two-second minimum.
 
+Unavailable passive roster reads renew project demand but wake the producer only
+once while the same unavailable read-demand episode remains active. Repeated
+polls do not pull the full producer forward; the periodic backstop still retries.
+Successful owned publication, demand expiry and reactivation rearm the next
+unavailable wake. A successful passive read is not a producer-completion receipt:
+interleaved healthy reads cannot continually rearm failing-reader retries.
+Explicit Picker bootstrap and lifecycle wakes are unchanged.
+
 ### Creation starts from freshly resolved repository state
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the

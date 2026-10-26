@@ -6,6 +6,8 @@ import json
 import socketserver
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import pytest
 
@@ -122,6 +124,110 @@ def test_worktrees_runtime_demand_linger_is_owner_accounting_not_read_compute(tm
     clock[0] = 40.001
     assert owner.demand_projects() == set()
     owner.shutdown()
+
+
+@pytest.fixture
+def demand_owner(tmp_path):
+    clock = [10.0]
+    wakes = []
+    owner = runtime.WorktreesRuntime(
+        tmp_path / "current.sqlite3",
+        now=lambda: clock[0],
+        wake=SimpleNamespace(set=lambda: wakes.append(1)),
+    )
+    owner.activate()
+    wakes.clear()
+    try:
+        yield owner, clock, wakes
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_unavailable_read_retries_renew_demand_without_repeating_wakes(demand_owner, version):
+    owner, clock, wakes = demand_owner
+    for _ in range(1000):
+        result = owner.handle(request(contract_version=version))
+        assert result["ok"] is False and result["error"]["code"] == "unready"
+        clock[0] += 1
+    assert len(wakes) == 1
+    assert owner.demand_projects() == {"project"}
+
+    clock[0] += 29
+    assert owner.handle(request())["error"]["code"] == "unready"
+    assert len(wakes) == 1
+    clock[0] += 30.001
+    owner.handle(request())
+    assert len(wakes) == 2
+    clock[0] += 30.001
+    assert owner.demand_projects() == set()
+    owner.handle(request())
+    assert len(wakes) == 3
+
+
+def test_concurrent_unavailable_readers_coalesce_per_project_and_reactivate(demand_owner):
+    owner, _clock, wakes = demand_owner
+    projects = ["project", "other"] * 32
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda project: owner.handle(request(project=project)), projects))
+    assert all(result["error"]["code"] == "unready" for result in results)
+    assert len(wakes) == 2
+    assert owner.demand_projects() == {"project", "other"}
+    assert owner.handle(request(history=True))["error"]["code"] == "invalid-request"
+    assert len(wakes) == 2
+    owner.close_admission()
+    assert owner.handle(request())["error"]["code"] == "draining"
+    assert len(wakes) == 2
+    owner.activate()
+    wakes.clear()
+    owner.handle(request())
+    owner.handle(request())
+    assert len(wakes) == 1
+
+
+def test_publication_rearms_unavailable_wakes_but_passive_reads_do_not(demand_owner, monkeypatch):
+    owner, _clock, wakes = demand_owner
+    owner.handle(request())
+    owner.publication_failed("project", OSError("producer fixture unavailable"))
+    result = owner.handle(request())
+    assert result["error"]["message"] == "producer fixture unavailable"
+    assert len(wakes) == 1
+    owner.publish("project", [{"id": "one"}], observed_at=1)
+    assert owner.handle(request())["worktrees"] == [{"id": "one"}]
+    assert len(wakes) == 1
+
+    original = owner.store.read
+    unavailable = [True]
+
+    def read(*args, **kwargs):
+        if unavailable[0]:
+            raise projection.ProjectionUnavailable("read fixture unavailable")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(owner.store, "read", read)
+    owner.handle(request())
+    owner.handle(request())
+    assert len(wakes) == 2
+    unavailable[0] = False
+    assert owner.handle(request())["ok"] is True
+    unavailable[0] = True
+    owner.handle(request())
+    assert len(wakes) == 2
+    owner.publish("project", [{"id": "two"}], observed_at=2)
+    owner.handle(request())
+    assert len(wakes) == 3
+
+
+def test_unavailable_read_does_not_wake_after_admission_closes(demand_owner, monkeypatch):
+    owner, _clock, wakes = demand_owner
+
+    def closing_read(*_args, **_kwargs):
+        owner.close_admission()
+        raise projection.ProjectionUnavailable("closed during read")
+
+    monkeypatch.setattr(owner.store, "read", closing_read)
+    assert owner.handle(request())["error"]["code"] == "unready"
+    assert not wakes
 
 
 def test_worktrees_runtime_failed_producer_keeps_labeled_last_good_rows(tmp_path):
@@ -250,3 +356,30 @@ def test_worktrees_runtime_slow_progress_cannot_extend_the_read_deadline():
         server.shutdown()
         server.server_close()
         thread.join(timeout=1)
+
+
+def test_unavailable_wake_remains_inside_admission_fence(demand_owner, monkeypatch):
+    owner, _clock, wakes = demand_owner
+    entered = threading.Event()
+    finish = threading.Event()
+    original = owner._wake.set
+
+    def paused_wake():
+        entered.set()
+        assert finish.wait(timeout=5), "fixture wake was not released"
+        original()
+
+    monkeypatch.setattr(owner._wake, "set", paused_wake)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        response = pool.submit(owner.handle, request())
+        try:
+            assert entered.wait(timeout=5), "reader did not reach notification"
+            acquired = owner._lock.acquire(blocking=False)
+            if acquired:
+                owner._lock.release()
+        finally:
+            finish.set()
+        result = response.result(timeout=5)
+    assert not acquired, "close_admission could return before the accepted wake is sent"
+    assert result["error"]["code"] == "unready"
+    assert len(wakes) == 1

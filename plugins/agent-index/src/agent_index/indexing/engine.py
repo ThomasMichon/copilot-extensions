@@ -26,6 +26,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from agent_index.store.source_layout import selected_layout
+from agent_index.indexing.work_counts import current_counts, measure_reindex
 
 # UTF-8 stdio so human-facing status glyphs render safely (Rule B, #769).
 _utf8_sys = __import__("sys")
@@ -269,6 +270,7 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
     return {}
 
 
+@measure_reindex
 def run_reindex(
     *,
     full: bool = False,
@@ -305,6 +307,7 @@ def run_reindex(
         pass runs). If one or more sources fail to index, the run continues past
         them and a ``sources_failed`` list of ``{"source", "error"}`` entries is
         also included (see #1350).
+        ``work_counts`` contains versioned round-local measurements, not coverage.
     """
     from agent_index.index_config import IndexConfig
     from agent_index.indexing.embedding_runtime import (
@@ -530,7 +533,12 @@ def run_reindex(
 
     if selected_layout() and not multi_store.content_store.fts_current():
         # Cover the final content version, including all post-index GC and compaction.
+        counts = current_counts()
+        if counts is not None:
+            counts.fts_ensure_attempts += 1
         multi_store.ensure_fts_index()
+        if counts is not None:
+            counts.fts_ensure_completed += 1
     state.save(config.state_file)
 
     elapsed = time.monotonic() - start
@@ -643,6 +651,7 @@ def _apply_source_manifest(
         Tuple of (chunks_stored, chunks_deleted, files_crawled).
     """
     print(f"Indexing source: {source_name}")
+    counts = current_counts()
     if manifest.is_empty:
         print(f"  No changes detected for {source_name}")
         # Still update commit marker so we don't re-crawl next time
@@ -654,6 +663,8 @@ def _apply_source_manifest(
         )
         if manifest.stored_family is not None:
             state.stored_families[source_name] = manifest.stored_family
+        if counts is not None:
+            counts.manifests_applied += 1
         return (0, 0, 0)
 
     stats = manifest.stats
@@ -668,7 +679,10 @@ def _apply_source_manifest(
 
     def reconcile_file(src: str, path: str, keep_ids: set[str]) -> None:
         nonlocal stale_cleaned
-        stale_cleaned += multi_store.reconcile_file_chunks(src, path, keep_ids)
+        removed = multi_store.reconcile_file_chunks(src, path, keep_ids)
+        stale_cleaned += removed
+        if counts is not None:
+            counts.stale_chunk_ids_deleted += removed
 
     if manifest.upserts:
         if progress_cb:
@@ -702,7 +716,9 @@ def _apply_source_manifest(
         try:
             path_index.invalidate_batch([(deleted.source, deleted.path)])
             # Multi-model store (content + vectors)
-            multi_store.delete_by_file(deleted.source, deleted.path)
+            removed_ids = multi_store.delete_by_file(deleted.source, deleted.path)
+            if counts is not None:
+                counts.file_chunk_ids_deleted += len(removed_ids)
             # Path index
             path_index.remove(deleted.source, deleted.path)
             total_deleted += 1
@@ -725,6 +741,8 @@ def _apply_source_manifest(
         state.stored_families[source_name] = manifest.stored_family
 
     total_removed = total_deleted + stale_cleaned
+    if counts is not None:
+        counts.manifests_applied += 1
     print(f"  Total: {total_stored} chunks stored, {total_removed} removed")
     return (total_stored, total_removed, stats.files_changed)
 
@@ -747,12 +765,19 @@ def _crawl_source(
 
     if progress_cb:
         progress_cb.phase("crawling", msg=f"Crawling {source_name}")
-    return collect_source_changes(
+    manifest = collect_source_changes(
         source_name, state=state, path_index=path_index, full=full,
         source_aware=bool(selected_layout()), progress_cb=progress_cb,
         connector_kwargs=connector_kwargs,
         connector=connector, source_scope=source_scope, change_hints=change_hints,
     )
+    counts = current_counts()
+    if counts is not None:
+        counts.manifests_acquired += 1
+        counts.identities_scanned += manifest.stats.files_scanned
+        counts.upserts_acquired += len(manifest.upserts)
+        counts.tombstones_acquired += len(manifest.deletions)
+    return manifest
 
 
 def _embed_and_store_files(
@@ -792,7 +817,11 @@ def _embed_and_store_files(
     total_stored = 0
     stored_files: set[tuple[str, str]] = set()
     skipped = 0
+    counts = current_counts()
     resume_index = path_index.get_entries([(entry.source, entry.path) for entry in files])
+    if counts is not None:
+        counts.checkpoint_lookup_keys += len(files)
+        counts.checkpoint_rows_found += len(resume_index)
     # Files whose chunks are in the current (not-yet-flushed) batch, with their
     # content hash + chunk count — checkpointed to path_index on each flush. A
     # file's chunks never straddle a flush (a whole file is added before the
@@ -809,6 +838,8 @@ def _embed_and_store_files(
             reconcile_file(source, path, keep_ids)
             coverage.retain(source, path, keep_ids)
         path_index.mark_indexed_batch(pending)
+        if counts is not None:
+            counts.checkpoint_rows_written += len(pending)
         pending = []
 
     def _flush() -> None:
@@ -845,6 +876,8 @@ def _embed_and_store_files(
             not force or (resume_since is not None and prior[1] >= resume_since)
         ):
             skipped += 1
+            if counts is not None:
+                counts.files_reused += 1
             continue
 
         chunker, _lang = get_chunker(entry.path)
@@ -857,6 +890,9 @@ def _embed_and_store_files(
         if getattr(entry, "metadata", None):
             chunks = [replace(c, metadata=entry.metadata) for c in chunks]
         chunks = coalesce_chunks(chunks)
+        if counts is not None:
+            counts.files_chunked += 1
+            counts.chunks_generated += len(chunks)
 
         batch.extend(chunks)
         total_chunks += len(chunks)
@@ -894,102 +930,11 @@ def _embed_and_store_batch(
     before_embed: Callable[[], None] | None = None,
     skip_identical_content: bool = False,
 ) -> int:
-    """Embed a batch of chunks via the engine(s) and upsert into stores.
+    """Compatibility seam for the routed batch writer."""
+    from agent_index.indexing.embedding_batch import embed_and_store_batch
 
-    When *model_profiles* is provided, chunks are routed to each model
-    based on ``ModelProfile.content_types``.  Chunks whose type is not
-    claimed by any profile are sent to all models as a fallback.
-    """
-    from agent_index.engine.client import EngineUnavailableError
-    from agent_index.store.content_mutations import coalesce_chunks
-
-    chunks = coalesce_chunks(chunks)
-    # Pre-compute the union of all configured content types so we can
-    # detect "unclaimed" chunk types and route them to every model.
-    all_claimed_types: frozenset[str] = frozenset()
-    if model_profiles:
-        all_claimed_types = frozenset().union(
-            *(p.content_types for p in model_profiles.values() if p.content_types)
-        )
-
-    total = 0
-    for i in range(0, len(chunks), stream_batch_size):
-        sub = chunks[i : i + stream_batch_size]
-
-        # Logical processed count is independent of physical content mutations.
-        if skip_identical_content:
-            multi_store.upsert_content(sub, skip_identical=True)
-        else:
-            multi_store.upsert_content(sub)
-        total += len(sub)
-
-        # Embed with each model's engine, routing by content type
-        for model_id, client in multi_clients.items():
-            profile = model_profiles.get(model_id) if model_profiles else None
-            if profile and profile.content_types:
-                # Route: chunks matching this profile's types + unclaimed types
-                model_chunks = [
-                    c for c in sub
-                    if c.chunk_type in profile.content_types
-                    or c.chunk_type not in all_claimed_types
-                ]
-            else:
-                model_chunks = sub  # no filter = embed all
-
-            if not model_chunks:
-                continue
-
-            table = multi_store.get_vector_table(model_id) if coverage else None
-            if coverage and table is not None and profile is not None and not force:
-                model_chunks = coverage.missing(table, model_chunks, profile)
-            if not model_chunks:
-                continue
-            model_texts = [c.content for c in model_chunks]
-            try:
-                if before_embed:
-                    before_embed()
-                if coverage and table is not None:
-                    coverage.invalidate(table, model_chunks)
-                model_vectors = client.embed_texts(model_texts)
-                multi_store.upsert_vectors(model_id, model_chunks, model_vectors)
-                if coverage and table is not None and profile is not None:
-                    coverage.record(table, model_chunks, profile, model_vectors)
-            except EngineUnavailableError:
-                # Fail loud -- never silently skip vectorization (#775). The
-                # client already retried once (re-activating a transiently-idle
-                # on-demand engine), so reaching here means *genuine*
-                # unavailability. Raising aborts this source so its commit state
-                # is NOT advanced and the next reindex retries it, instead of
-                # completing "successfully" with chunks content-stored but
-                # unvectorized (and thus missing from search until a full reindex).
-                logger.error(
-                    "Engine for model '%s' unavailable mid-run; failing the "
-                    "source so %d chunks are retried, not silently skipped",
-                    model_id, len(model_chunks),
-                )
-                raise
-            except Exception:
-                # ANY other embed/upsert failure must ALSO fail loud, for the
-                # exact same #775 reason the EngineUnavailableError branch
-                # above already covers: upsert_content() ran earlier in this
-                # loop iteration and already persisted this batch's chunks, so
-                # silently continuing here leaves them stored WITHOUT their
-                # vector -- permanently invisible to semantic search, with the
-                # task still reporting a clean "complete". This previously
-                # only logged a warning and moved on, which is exactly how a
-                # real host accumulated chunks across MULTIPLE sources with
-                # silently-missing vectors once the embedding engine started
-                # returning HTTP 500s (httpx.HTTPStatusError, NOT
-                # EngineUnavailableError, which only covers connection-level
-                # unreachability -- a since-fixed transformers version-pin
-                # typo, copilot-extensions#114) while every affected reindex
-                # task still reported success.
-                logger.error(
-                    "Failed to embed batch with model '%s'; failing the "
-                    "source so %d chunks are retried, not silently stored "
-                    "without vectors", model_id, len(model_chunks),
-                    exc_info=True,
-                )
-                raise
-
-    return total
+    return embed_and_store_batch(
+        chunks, multi_store, multi_clients, model_profiles,
+        stream_batch_size=stream_batch_size, coverage=coverage, force=force,
+        before_embed=before_embed, skip_identical_content=skip_identical_content,
+    )

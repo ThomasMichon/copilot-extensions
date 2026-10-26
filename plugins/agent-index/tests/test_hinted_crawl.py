@@ -228,7 +228,10 @@ def native(request, tmp_path, monkeypatch):
 def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     config, run, calls, clients, _, events, constructions = native
     assert execution_versions(engine.run_reindex) == [1]
-    assert run(source=SOURCE, change_hints=hints())["chunks_total"] > 0
+    first = run(source=SOURCE, change_hints=hints())
+    assert first["chunks_total"] > 0
+    assert first["work_counts"]["http"]["attempts"] == 3
+    assert first["work_counts"]["upserts_acquired"] == 1
     state = IndexState.load(config.state_file)
     assert state.sources[SOURCE].last_commit is None
     state.sources[SOURCE].last_commit = "prior-poll"
@@ -236,7 +239,12 @@ def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     db = MultiModelStore(config.lance_dir)
     table = db.content_store._get_or_create_table()
     version = table.version
-    assert run(source=SOURCE, change_hints=hints())["chunks_total"] == 0
+    second = run(source=SOURCE, change_hints=hints())
+    assert second["chunks_total"] == 0
+    assert second["work_counts"]["http"]["attempts"] == 2
+    assert second["work_counts"]["files_reused"] == 1
+    assert second["work_counts"]["content_rows_upserted"] == 0
+    assert second["work_counts"]["models"] == {}
     assert db.content_store._get_or_create_table().version == version
     assert not clients[-1].texts
     assert events.count("ensure") == events.count("stop") == 1
@@ -270,6 +278,10 @@ def test_worker_duplicate_union_and_active_trailing_burst_use_real_connector(nat
     native[4].append(burst)
     assert worker.run_worker(task.id, config=config, indexer=run) == 0
     assert store.get_task(task.id).status == "complete"
+    counts = store.get_task(task.id).result_stats["work_counts"]
+    assert counts["http"]["attempts"] == 5
+    assert counts["upserts_acquired"] == 2
+    assert counts["files_chunked"] == 2
     next_task = store.dequeue_next(accept_change_hints=True)
     assert next_task.id == trailing[0].id != task.id
     assert next_task.change_hints.item_ids == ("3",)
