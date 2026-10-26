@@ -40,8 +40,10 @@ def main() -> int:
         cwd=ROOT, check=True, capture_output=True, timeout=30,
     ).stdout
     current = yaml.safe_load(current_bytes)
+    current_implementations = {name: (ROOT / "tools" / name).read_bytes()
+                               for name in sorted(helper_implementations(current))}
     verify_helper_contract(ROOT, manifest, controllers=(current_bytes.decode("utf-8"),))
-    compatible, reason = active_controller_compatibility(current, implementations)
+    compatible, reason = active_controller_compatibility(current, current_implementations)
     if not compatible:
         print(f"::warning::Main {main} requires a separately reviewed legacy controller bootstrap: {reason}")
         print(json.dumps({"main": main, "active_compatible": False, "prepared_compatible": True}))

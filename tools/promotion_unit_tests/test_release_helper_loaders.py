@@ -467,3 +467,112 @@ def test_third_unresolved_raw_spec_in_actor_source_is_not_exempt(scope):
         source = _ACTOR_BOUNDARY.replace('if __name__ == "__main__":', "    " + raw + 'if __name__ == "__main__":')
     with pytest.raises(UnitEvidenceError):
         _discover(source, _ACTOR_SOURCE)
+
+
+@pytest.mark.parametrize("source", [
+    'from importlib import import_module as load\nload("hidden")',
+    'import importlib\nimportlib.import_module("hidden")',
+    'import importlib as imports\nimports.import_module("hidden")',
+    'from builtins import __import__ as load\nload("hidden")',
+    'import builtins\nbuiltins.__import__("hidden")',
+    'import builtins as native\nnative.__import__("hidden")',
+    '__import__("hidden")',
+    'from runpy import run_path as load\nload("hidden.py")',
+    'from runpy import run_module as load\nload("hidden")',
+    'import runpy as scripts\nscripts.run_path("hidden.py")',
+    'import runpy as scripts\nscripts.run_module("hidden")',
+    'import runpy\nrunpy.run_module("hidden")',
+    'from builtins import exec as execute\nexecute("hidden()")',
+    'from builtins import eval as evaluate\nevaluate("hidden()")',
+    'from builtins import exec\nexec("hidden()")',
+    'from builtins import eval\neval("hidden()")',
+    'import builtins as native\nnative.exec("hidden()")',
+    'import builtins as native\nnative.eval("hidden()")',
+    'eval("hidden()")',
+])
+def test_tools_dynamic_module_and_executable_aliases_are_refused(source):
+    with pytest.raises(UnitEvidenceError, match="dynamic module loading or executable alias"):
+        _discover(source)
+
+
+@pytest.mark.parametrize("binding", [
+    "load = callback", "del load", "from other import callback as load",
+    "def load(value): pass",
+    "try:\n    pass\nexcept Error as load:\n    pass",
+    "match value:\n    case load: pass",
+])
+def test_rebinding_imported_dynamic_callable_does_not_erase_its_origin(binding):
+    source = "from importlib import import_module as load\n" + binding + '\nload("hidden")'
+    with pytest.raises(UnitEvidenceError):
+        _discover(source)
+
+
+@pytest.mark.parametrize("source", [
+    'from importlib import import_module as load\ndef nested():\n    load("hidden")',
+    'from importlib import import_module as load\nload = callback\ndef nested():\n    load("hidden")',
+    'from importlib import import_module as load\ndef nested(load):\n    load("hidden")',
+    'from importlib import import_module as load\ndef nested():\n    load = callback\n    def deeper():\n        load("hidden")',
+    'from importlib import import_module as load\ndef nested(load=callback):\n    return lambda: load("hidden")',
+    'import importlib as namespace\ndef nested(namespace):\n    namespace.import_module("hidden")',
+    'import runpy as namespace\nnamespace = callback\ndef nested():\n    namespace.run_module("hidden")',
+    'import builtins as namespace\ndef nested():\n    namespace = callback\n    namespace.exec("hidden()")',
+    'from importlib import import_module as load\ndef nested(value=load("hidden")): pass',
+    'from importlib import import_module as load\nclass Nested(load("hidden")): pass',
+])
+def test_nested_scope_and_shadowing_cannot_hide_dynamic_loader_aliases(source):
+    with pytest.raises(UnitEvidenceError):
+        _discover(source)
+
+
+@pytest.mark.parametrize("source", [
+    'from importlib import import_module as load\nalias = load\nalias("hidden")',
+    'import importlib as namespace\nalias = namespace\nalias.import_module("hidden")',
+    'import runpy as namespace\nalias = namespace\nalias.run_module("hidden")',
+    'import builtins as namespace\nalias = namespace\nalias.exec("hidden()")',
+    'import runpy\nload = runpy.run_path\nload("hidden.py")',
+    'import builtins\nexecute = builtins.exec\nexecute("hidden()")',
+    'execute = exec\nexecute("hidden()")',
+    'load = __import__\nload("hidden")',
+    'import importlib\nload = getattr(importlib, "import_module")\nload("hidden")',
+    'import runpy\nnamespace = runpy.__dict__\nnamespace["run_module"]("hidden")',
+    'from importlib import __dict__ as namespace\nnamespace["import_module"]("hidden")',
+    'import importlib\nload = importlib.__getattribute__("import_module")\nload("hidden")',
+    'from runpy import *\nrun_module("hidden")',
+    'from builtins import *\n__import__("hidden")',
+])
+def test_tools_dynamic_namespace_and_callable_escapes_are_refused(source):
+    with pytest.raises(UnitEvidenceError):
+        _discover(source)
+
+
+@pytest.mark.parametrize("source", [
+    'from importlib import import_module as load\nload("runtime_product")',
+    'import importlib\nimportlib.import_module("runtime_product")',
+    'from builtins import __import__ as load\nload("runtime_product")',
+    'from runpy import run_path as load\nload("runtime_product.py")',
+    'import runpy as scripts\nscripts.run_module("runtime_product")',
+    'from builtins import exec as execute\nexecute(callback)',
+    'import builtins as native\nnative.eval(callback)',
+    'def callback(exec, eval, __import__):\n    exec(value)\n    eval(value)\n    __import__(value)',
+])
+def test_library_runtime_callbacks_do_not_acquire_tools_only_dynamic_restrictions(source):
+    assert _discover(source, "libs/runtime/runtime_callbacks.py") == set()
+
+
+def test_direct_native_compile_exec_remains_the_parent_registered_input_boundary():
+    source = 'exec(compile(helper.read_bytes(), str(helper), "exec"), owner.__dict__)'
+    assert _discover(source, "tools/native_daemon_artifacts.py") == set()
+    assert _discover(
+        "def build():\n    " + source,
+        "tools/native_daemon_artifacts.py",
+    ) == set()
+    with pytest.raises(UnitEvidenceError):
+        _discover(
+            "exec = callback\n" + source,
+            "tools/native_daemon_artifacts.py",
+        )
+    with pytest.raises(UnitEvidenceError):
+        _discover(
+            "from builtins import exec\n" + source,
+            "tools/native_daemon_artifacts.py",
+        )

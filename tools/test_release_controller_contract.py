@@ -1,4 +1,4 @@
-"""Exercise the prepared controller, not an older preserved/generated workflow."""
+"""Exercise the recorded source proposal or an explicitly prepared controller."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from _promotion_workflow_test_support import source_workflow
 from promotion_unit_contract import UnitEvidenceError
 from release_controller_contract import (
     CONTROL_REF, HELPER_JOBS, SOURCE_REF, helper_implementations,
@@ -16,8 +17,10 @@ from release_controller_contract import (
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _prepared():
-    return yaml.safe_load((ROOT / ".github/workflows/validate-and-promote.yml").read_bytes())
+def _prepared(path: Path | None = None):
+    if path is not None:
+        return yaml.safe_load(path.read_bytes())
+    return source_workflow(ROOT, "validate-and-promote.yml")
 
 
 def _implementations():
@@ -35,6 +38,30 @@ def test_complete_prepared_controller_uses_its_actual_source_interfaces():
     assert all(checkout["ref"] == CONTROL_REF and checkout["persist-credentials"] is False
                for checkout in bootstrap)
     assert "RELEASE_HELPERS_SHA" not in str(workflow)
+
+
+def test_source_contract_default_does_not_activate_or_substitute_explicit_main(
+    tmp_path, monkeypatch,
+):
+    import sys
+
+    source = _prepared()
+    legacy = deepcopy(source)
+    legacy["env"] = {"RELEASE_HELPERS_SHA": "a" * 40}
+    preserved = tmp_path / ".github/workflows/validate-and-promote.yml"
+    preserved.parent.mkdir(parents=True)
+    preserved.write_text(yaml.safe_dump(legacy), encoding="utf-8")
+    module = sys.modules[__name__]
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+
+    def recorded_recipe(root, name):
+        assert root == tmp_path and name == "validate-and-promote.yml"
+        return deepcopy(source)
+
+    monkeypatch.setattr(module, "source_workflow", recorded_recipe)
+    verify_helper_selection(_prepared())
+    with pytest.raises(UnitEvidenceError, match="manual helper pin"):
+        verify_helper_selection(_prepared(preserved))
 
 
 @pytest.mark.parametrize("job_name", HELPER_JOBS)

@@ -47,6 +47,16 @@ _OWNED_RUNTIME_MAIN = ast.parse(
 ).body
 _MAIN_GUARD = ast.parse('__name__ == "__main__"', mode="eval").body
 _SUPERVISOR_ARGS = ast.parse("def _supervise_windows(args, argv): pass").body[0].args
+_DYNAMIC_OPERATIONS = {
+    "importlib.import_module", "builtins.__import__", "runpy.run_path",
+    "runpy.run_module", "builtins.exec", "builtins.eval",
+}
+_DYNAMIC_NAMESPACES = {"importlib", "builtins", "runpy"}
+_DYNAMIC_NAMESPACE_ESCAPES = {
+    f"{namespace}.{attribute}" for namespace in _DYNAMIC_NAMESPACES
+    for attribute in ("__dict__", "__getattribute__", "__getattr__")
+}
+_DIRECT_EXEC = "@direct-builtin-exec"
 
 
 def _spelling(node: ast.AST) -> str:
@@ -260,7 +270,72 @@ class _Discovery:
             return ""
         return aliases[root] + (separator + suffix if separator else "")
 
-    def scope(self, scope: ast.AST, inherited: dict[str, str]) -> None:
+    def dynamic_modules(
+        self, nodes: list[ast.AST], writes: Counter,
+        imports: dict[str, set[str]], inherited: dict[str, set[str]] | None,
+    ) -> dict[str, set[str]]:
+        """Refuse tools-only dynamic graphs while preserving parent-owned exec."""
+        if not self.relative.startswith("tools/"):
+            return {}
+        origins = {
+            name: set(targets) for name, targets in (
+                inherited if inherited is not None else {
+                    "__import__": {"builtins.__import__"},
+                    "eval": {"builtins.eval"},
+                    "exec": {_DIRECT_EXEC},
+                }
+            ).items()
+        }
+        for name, targets in imports.items():
+            relevant = targets.intersection(
+                _DYNAMIC_NAMESPACES | _DYNAMIC_OPERATIONS | _DYNAMIC_NAMESPACE_ESCAPES,
+            )
+            if relevant:
+                origins.setdefault(name, set()).update(relevant)
+        if writes["exec"] and _DIRECT_EXEC in origins.get("exec", set()):
+            origins["exec"].remove(_DIRECT_EXEC)
+            origins["exec"].add("builtins.exec")
+        for node in nodes:
+            if (
+                isinstance(node, ast.ImportFrom) and not node.level
+                and node.module in _DYNAMIC_NAMESPACES
+                and any(item.name == "*" for item in node.names)
+            ):
+                self.fail(node, "wildcard dynamic module or executable import")
+            if not isinstance(node, (ast.Name, ast.Attribute)) or not isinstance(node.ctx, ast.Load):
+                continue
+            spelling = _spelling(node)
+            root, separator, suffix = spelling.partition(".")
+            targets = {
+                target + (separator + suffix if separator else "")
+                for target in origins.get(root, ())
+            }
+            parent = self.parents.get(node)
+            # Only an unaliased, unbound builtin call is delegated. The parent
+            # guard owns its registered native-build input, not this analyzer.
+            direct_exec = (
+                isinstance(node, ast.Name) and node.id == "exec"
+                and targets == {_DIRECT_EXEC}
+                and isinstance(parent, ast.Call) and parent.func is node
+            )
+            if direct_exec:
+                continue
+            if (
+                targets.intersection(_DYNAMIC_OPERATIONS | {_DIRECT_EXEC})
+                or spelling in _DYNAMIC_OPERATIONS
+            ):
+                self.fail(node, "dynamic module loading or executable alias is not admitted")
+            if targets.intersection(_DYNAMIC_NAMESPACE_ESCAPES) or (
+                targets.intersection(_DYNAMIC_NAMESPACES)
+                and not (isinstance(parent, ast.Attribute) and parent.value is node)
+            ):
+                self.fail(node, "dynamic module or executable namespace cannot escape")
+        return origins
+
+    def scope(
+        self, scope: ast.AST, inherited: dict[str, str],
+        inherited_dynamic: dict[str, set[str]] | None = None,
+    ) -> None:
         nodes = list(_scope_nodes(scope))
         writes = Counter(
             node.id for node in nodes
@@ -301,6 +376,7 @@ class _Discovery:
             for node in ast.walk(scope.args):
                 if isinstance(node, ast.arg):
                     writes[node.arg] += 1
+        dynamic_origins = self.dynamic_modules(nodes, writes, import_targets, inherited_dynamic)
         aliases = {name: target for name, target in inherited.items() if not writes[name]}
         aliases.update({
             name: target for name, target in imports.items()
@@ -481,7 +557,7 @@ class _Discovery:
             if child is not scope and isinstance(
                 child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda),
             ):
-                self.scope(child, aliases)
+                self.scope(child, aliases, dynamic_origins)
 
     def run(self) -> set[str]:
         if any(
@@ -509,7 +585,9 @@ def dynamic_loads(tree: ast.Module, relative: str) -> set[str]:
 
     Self-file Path expressions and the exact promotion adapter yield source
     edges. The exact private Windows guardian seam admits two external runtime
-    actor loads, not repository edges. Unsupported provenance raises
+    actor loads, not repository edges. Tools-only dynamic import/executable
+    aliases are refused; direct builtin exec remains the parent guard's
+    registered build-input boundary. Unsupported provenance raises
     UnitEvidenceError rather than silently omitting an implementation edge.
     """
     return _Discovery(tree, relative).run()

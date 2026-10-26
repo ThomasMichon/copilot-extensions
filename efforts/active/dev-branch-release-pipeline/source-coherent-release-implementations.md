@@ -152,6 +152,13 @@ expression while leaving incompatible call sites.
 
 ## Journal
 
+- 2026-10-26: Hosted follow-up now checks actual Main against Main's own helper
+  inventory, including commands absent from the source proposal. Lexical loader
+  provenance refuses dynamic import aliases and shadowing. Source-contract tests
+  use recorded Dev while explicit Main inputs remain unsubstituted. The complete
+  2,330-case packet passed in 28.618 seconds with the compatibility CLI itself
+  positively covered; source/explicit-controller regressions passed 101 cases.
+  The single-workflow Main bootstrap is prepared locally, not activated.
 - 2026-10-26: The next hosted review follow-up restricts migration warnings to
   the explicit legacy pin generation, makes active source-coherent interface
   mismatches fail, and checks each direct/indirect helper invocation separately.

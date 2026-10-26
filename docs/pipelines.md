@@ -284,6 +284,8 @@ Synchronized executable copies borrow only their canonical origin's coverage;
 every run first verifies both admitted hashes and hard-refuses byte divergence.
 Self-file-relative `spec_from_file_location` implementations also join source
 and decision coverage; unresolved loaders, aliases and rebinding are refused.
+Dynamic module-import aliases use lexical provenance too; renaming a loader
+cannot hide an unadmitted dependency.
 The existing Windows retention guardian retains its separate runtime-actor
 contract: only its exact adapter and two owned resource-call shapes are
 recognized as external runtime loads, never as qualified repository helpers.
@@ -291,7 +293,9 @@ Release implementations cannot invoke that private loader interface.
 
 Source PR guards compare helper-required CLI inputs and complete-source
 construction/attestation/publication against both the prepared proposal and
-the actual immutable Main controller. An incompatible prepared proposal fails.
+the actual immutable Main controller, each against its own discovered helper
+inventory. A helper used only by Main cannot escape its interface check.
+An incompatible prepared proposal fails.
 A compatible prepared proposal with the explicit legacy pinned-helper Main
 generation reports
 `active_compatible: false` and the required separately reviewed Main bootstrap;

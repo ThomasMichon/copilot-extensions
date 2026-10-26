@@ -133,6 +133,52 @@ def test_active_source_coherent_controller_mismatch_is_not_a_bootstrap_warning()
     assert control.active_controller_compatibility(prepared, implementations) == (True, "")
 
 
+@pytest.mark.parametrize("provided", [False, True], ids=["missing", "matching"])
+def test_real_cli_validates_main_only_helpers_against_main_inventory(
+    tmp_path, monkeypatch, capsys, provided,
+):
+    import importlib.util
+    import json
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    import yaml
+
+    script = Path(__file__).resolve().parents[1] / "check-release-controller-compatibility.py"
+    spec = importlib.util.spec_from_file_location("synthetic_controller_cli", script)
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    prepared = _workflow()
+    main = deepcopy(prepared)
+    main["jobs"]["main-only"] = {
+        "needs": ["gate", "source-units"],
+        "steps": [
+            deepcopy(main["jobs"]["python-artifacts"]["steps"][0]),
+            {"run": "python reviewed-helpers/tools/main_only.py" + (" --main-input value" if provided else "")},
+        ],
+    }
+    _source(tmp_path, ".github/workflows/validate-and-promote.yml", yaml.safe_dump(prepared).encode())
+    _source(tmp_path, "tools/main_only.py", b'parser.add_argument("--main-input", required=True)')
+    _source(tmp_path, "tools/promotion-unit-manifest.json", b"{}")
+    monkeypatch.setattr(cli, "ROOT", tmp_path)
+    monkeypatch.setattr(cli, "verify_helper_contract", lambda *args, **kwargs: set())
+    monkeypatch.setattr(sys, "argv", ["check-controller", "--main-ref", "origin/main"])
+
+    def read_git(arguments, **kwargs):
+        assert arguments[:2] == ["git", "--no-replace-objects"]
+        result = "a" * 40 + "\n" if arguments[2] == "rev-parse" else yaml.safe_dump(main).encode()
+        return subprocess.CompletedProcess(arguments, 0, result, "")
+
+    monkeypatch.setattr(subprocess, "run", read_git)
+    if provided:
+        assert cli.main() == 0
+        assert json.loads(capsys.readouterr().out)["active_compatible"] is True
+    else:
+        with pytest.raises(UnitEvidenceError, match="main_only.py missing required inputs: --main-input"):
+            cli.main()
+
+
 @pytest.mark.parametrize("separator", ["\n", "; ", " && ", " || "],
                          ids=["newline", "semicolon", "and", "or"])
 def test_required_inputs_are_checked_for_each_helper_invocation(separator):

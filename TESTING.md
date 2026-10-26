@@ -1653,8 +1653,10 @@ the admission, reuse, materialization, resource and native verification rules.
 Compiler, Git transport and setuptools superclass actors are substituted only
 at their boundaries. These tests do not qualify real compiler/native execution.
 
-`tools/test_release_controller_contract.py` reads the actual complete prepared
-workflow, rather than substituting an older preserved controller. It checks
+`tools/test_release_controller_contract.py` uses the recorded development
+proposal for source-contract tests, even inside generated Main with an
+independently preserved controller. Its explicit-path tests never substitute
+that source recipe for the supplied Main control. It checks
 immutable Main/bootstrap and admitted-source/helper selection, the existing
 signer qualification dependency, required CLI inputs and complete-source
 producer/attestor/publisher ordering. The PR-time compatibility guard reports
@@ -1665,6 +1667,10 @@ Main that lacks a required input fails before a source merge.
 Invocation regressions isolate repeated calls and exclude inputs mentioned only
 by comments or unrelated commands; the current indirect promoter is tested with
 its own base argument array, not the composition step's arguments.
+The command-line compatibility regression also supplies a helper used only by
+Main, proving that active Main is checked against its own implementation
+inventory. File-loader regressions retain imported-alias provenance through
+lexical scopes and shadowing; a renamed dynamic import is not qualification.
 
 Use the bounded test supervisor around:
 
