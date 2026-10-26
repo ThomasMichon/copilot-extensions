@@ -743,9 +743,8 @@ def test_stamp_materializes_standalone_engine_pair_and_all_libraries(
         for source in sources.values()
     }
     if not materialized:
-        assert sources["agent-repository-policy"] == {
-            "path": "../../libs/repository-policy", "editable": True,
-        }
+        original_sources = tomllib.loads((PLUGIN / "pyproject.toml").read_text())["tool"]["uv"]["sources"]
+        assert sources["agent-repository-policy"] == original_sources["agent-repository-policy"]
     library = (plugin / sources["agent-procutil"]["path"]).resolve()
     repository_policy = (plugin / sources["agent-repository-policy"]["path"]).resolve()
     runtime = tmp_path / "runtime"
@@ -853,6 +852,15 @@ if (@(Get-ChildItem (Join-Path $InstallDir 'snapshots') -Directory).Count -ne {1
     assert nested["tool"]["uv"]["sources"]["agent-dropin-registry"] == {
         "path": "../dropin-registry"
     }
+
+
+def test_stamp_preserves_already_materialized_policy_closure(tmp_path, monkeypatch):
+    generated = _fixture_checkout(tmp_path / "input", materialized=True)
+    monkeypatch.setattr(sys.modules[__name__], "PLUGIN", generated)
+    (tmp_path / "output").mkdir()
+    test_stamp_materializes_standalone_engine_pair_and_all_libraries(
+        tmp_path / "output", False, "repository-policy",
+    )
 
 
 @pytest.mark.parametrize(
