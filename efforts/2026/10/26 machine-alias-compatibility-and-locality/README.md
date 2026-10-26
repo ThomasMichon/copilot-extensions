@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Existing identity-repair publication; separate reviewed effort-capture change
 - **Created:** 2026-10-15
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/plugins/agent-worktrees/README.md` (durable repository/worktree identity); `visions/agent-fabric/README.md` (shared identity authority)
 - **Umbrella issue:** #5674
 - **Related issues:** #5972 · #6170 · #6692 · #6739 · #6945 · #7057 · #7097
@@ -21,7 +21,7 @@ The completion gate is released, installed behavior that resolves every existing
 worktree on the adopting host's Windows and WSL environments, not a passing
 example, a source commit, or a merged individual pull request.
 
-**Current status (2026-10-25):** the containing promotion and #7743 native
+**Earlier milestones (2026-10-25):** the containing promotion and #7743 native
 self-repair gates are verified. Runtime alignment #8010 and allocation repair
 #8110 released in natural `39912447859`; bounded follow-ups #8283, #8289 and
 #8297 released through independently verified natural qualifications. Supported
@@ -68,7 +68,7 @@ structured-policy work and separately reviewed ordinary activation remain open.
 The parent effort remains Active.
 The qualified release does not establish installation or default activation.
 
-**Current status (2026-10-26):** structured guidance and separately reviewed
+**Earlier milestones (2026-10-26):** structured guidance and separately reviewed
 ordinary call-site selection are released and installed after explicit
 ordinary-activation consent. Actual ordinary creation/replay/Resume acceptance
 and Manager new-row observation pass across all eight native/guest project
@@ -82,6 +82,22 @@ integrity capability continues in the reviewed authoritative-daemon intake,
 not as completed implementation.
 The [current journal](journal/2026/10.26%20progress.md) records exact qualification,
 selected runtimes, acceptance, consent and lifecycle evidence.
+
+**Final installed acceptance (2026-10-26):** the operator separately
+authorizes this harness to complete the remaining acceptance without acquiring
+another participant's source or resource custody. All 362 native records pass
+the public exact-record reader and agree with their current resident rosters;
+no label repair is needed. Actual named-direct WSL login and SSH agents run a
+read-only command in their exact new worktrees, return distinct session IDs and
+readiness responses, and exit successfully. Plan generation alone is not counted
+as startup. Both validation records are normally finalized after exact cleanup
+consent. Both exact checkouts and branches are independently verified absent,
+with tuples, nonces, records and session evidence retained. The direct checkout
+was protected until its session-end sync process naturally finished; only then
+did normal exact cleanup remove it. No process was killed or retirement fence
+bypassed. Every parent Plan/Validation item is resolved or retains its reviewed
+named transfer. No broader integrity implementation or resource retirement is
+claimed; the archive change still requires normal independent review and merge.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
@@ -108,6 +124,7 @@ the gated producer's registry-required assumption before ordinary activation.
 | Guest installation identity repair | Bounded #6945 proposal, shared identity repair and entry-path acceptance | Managed source `tinkling-toolbox` |
 | Canonical native label history | Bounded #7057 convergence on the canonical native repair; owns source PRs, not live application | Managed source `chugging-ratchet` |
 | Gated producer contributor | Phase 3d producers/replay/equivalence plus explicitly assigned Windows repair and installed acceptance; ordinary-default activation remains review-gated | Managed source `chugging-wrench` |
+| Installed acceptance continuation | Operator-authorized remaining Phase 3b/3c acceptance, initially read-only; existing source/resource custody retained | Existing eligible harness driving managed source `chugging-wrench` |
 
 ## Coordination
 
@@ -135,6 +152,13 @@ the gated producer's registry-required assumption before ordinary activation.
   cohort under the release effort's Phase 9b, `chugging-wrench` resumes the
   declared gated producer contribution in Phase 3d. Release, installed rollout,
   original compatibility repair and other participants retain their obligations.
+- **2026-10-26 acceptance continuation:** after ordinary delivery and explicit
+  owner-boundary review, the operator authorizes this participant to drive the
+  remaining guest/native installed acceptance from its eligible harness. This
+  adds acceptance responsibility, not custody of another source, resource or
+  claim. Start read-only; any record migration, default change or service action
+  requires separate approval. Existing implementation owners and #7097's
+  receiving effort remain intact.
 
 ## Context
 
@@ -355,6 +379,24 @@ repair authority is distinct from native settlement and never implies replay.
 The observed supported guest repair/update now passes its bounded acceptance;
 the remaining identity implementation and installed matrix stay open.
 
+**2026-10-26 remaining acceptance (operator-selected form):**
+
+> Authorize this session to drive the remaining acceptance, preserving existing custody
+
+The form explicitly scopes this continuation to the remaining guest/native
+installed acceptance from the current eligible harness, starting read-only.
+Existing sources, claims and historical identities remain preserved. Record
+migration, default changes and service actions require separate approval.
+
+**Actual-launch clarification (operator-selected form):**
+
+> Authorize two bounded actual agent launches to verify startup and readiness
+
+This supersedes plan-only verification for the final guest-entry gate. The
+operator subsequently approves normal cleanup of the two exact validation
+checkouts and branches, retaining their records and session evidence. It does
+not authorize a service restart, process kill or unrelated resource removal.
+
 ## Plan
 
 ### Phase 0 - Empty-mux readiness prerequisite
@@ -423,9 +465,12 @@ _(Agent-recommended prerequisite discovered while checking the requested live-da
   or a competing topology registry.
   Source #7009 separates guest/default diagnostics from logical-address
   authority; no OS default, distro name or existing record was changed.
-- [ ] Pass the proposal's same-guest, foreign-guest, default-drift and
+- [x] Pass the proposal's same-guest, foreign-guest, default-drift and
   cross-runner validation, then land, qualify, release and perform only
   authorized installation/default-selection changes.
+  The current journal combines the retained source/release/update evidence,
+  bounded cross-runner controls, actual installed entry diagnostics and real
+  direct-login/SSH agent readiness. The host default is observed, not changed.
 
 ### Phase 3c - Canonical native label repair and historical records
 _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
@@ -456,16 +501,25 @@ _(Operator-selected convergence; detailed mechanism is agent-recommended.)_
   misplaced duplicates/orphans without lifecycle destruction or a weakened
   receiving-project fence.
   Reviewed intake #8764 preserves the complete
-  [direct Plan, Validation and continuing coordination](../agent-worktrees-authoritative-daemon/README.md#7097---approved-exact-misplaced-store-integrity-repair)
+  [direct Plan, Validation and continuing coordination](../../../active/agent-worktrees-authoritative-daemon/README.md#7097---approved-exact-misplaced-store-integrity-repair)
   and `GLOBAL-7097` validation. Administrative closure of #7097 does not mean
   implementation completion, transfer native/resource custody or authorize live
   repair. The containing all-record/resident-roster gate remains below.
-- [ ] Coordinator verifies all native records and resident roster show canonical
+- [x] Coordinator verifies all native records and resident roster show canonical
   ownership, with wrong-store blockers resolved or explicitly transferred. A
   direct exact-record write alone is not a resident projection refresh.
-- [ ] Transfer the retained clean source and canonical CLI commands to the
+  The operator-authorized acceptance continuation verifies all 362 native
+  exact records and current resident rows across both registered native
+  projects. There are no owner, receiving-project, public-read or row mismatches;
+  no record write, resident restart or repair is performed.
+- [x] Transfer the retained clean source and canonical CLI commands to the
   coordinator. No runtime deployment, service change, real-record repair or
   release promotion by this participant; the containing user gate remains open.
+  The authorized acceptance continuation accepts the immutable merged #7068
+  source snapshot and its
+  [canonical report-first command documentation](../../../../plugins/agent-worktrees/docs/machine-record-repair.md).
+  Original source checkouts and resource/claim custody remain with their owners;
+  accepting delivered source does not acquire or retire those resources.
 
 ### Phase 3d - Physical machine and environment boundaries
 _(Agent-recommended realization of the operator's explicit model clarification.)_
@@ -574,8 +628,15 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   qualification `39725960073` and installed through the supported updater.
   The operator confirmed ordinary, non-elevated PowerShell startup of Manager
   `0.6.67-dev1`; the administrative probe alone was not counted as that proof.
-- [ ] Resolve or explicitly transfer every remaining Plan/Validation Plan item,
+- [x] Resolve or explicitly transfer every remaining Plan/Validation Plan item,
   capture durable behavior documentation, and archive only then.
+  The remaining guest-entry and native-record/resident/source-delivery gates
+  are verified above. #7097's complete reviewed intake remains with the active
+  authoritative-daemon effort. Existing canonical library/record-repair docs
+  retain behavior ownership; this archive records outcomes, not another runtime
+  or deployment procedure. The eight ordinary-activation and two actual-startup
+  validation checkouts and branches are retired, with records and session
+  evidence retained; earlier opt-in resource retirement remains recorded separately.
 
 ## Validation Plan
 
@@ -603,8 +664,10 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   branches are removed through normal finalization, retaining records/receipts.
   The subsequent separately authorized ordinary activation is recorded in Phase
   3d; this evidence does not close the remaining Phase 3b/3c owner gates.
-- [ ] Satisfy the [guest-identity validation matrix](guest-execution-identity.md#validation-plan)
+- [x] Satisfy the [guest-identity validation matrix](guest-execution-identity.md#validation-plan)
   before declaring the #6945 containing rollout gap closed.
+  Actual startup/readiness is independently observed through both supported
+  entry paths, not inferred from a launch plan or a self-reported ready flag.
 - [x] For Phase 3c, prove read-only dry-run, exact selection and JSON, local
   existing/missing checkouts, unchanged non-owner fields, repeated apply,
   changed-record/lock failures and original-byte backup/audit recovery.

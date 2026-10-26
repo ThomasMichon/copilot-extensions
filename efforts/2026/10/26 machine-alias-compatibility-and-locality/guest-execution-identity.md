@@ -17,9 +17,9 @@ environments remain distinct. Missing identity is not evidence of ordinary
 native POSIX execution.
 
 The standing intent extends
-[`host-qualified-guest-identity`](../../../visions/agent-fabric/README.md#host-qualified-guest-identity)
+[`host-qualified-guest-identity`](../../../../visions/agent-fabric/README.md#host-qualified-guest-identity)
 and closes installation-cells'
-[`stable-installation-identity`](../../../visions/plugin-services/installation-cells/README.md#stable-installation-identity).
+[`stable-installation-identity`](../../../../visions/plugin-services/installation-cells/README.md#stable-installation-identity).
 
 ## Current failure
 
@@ -60,28 +60,54 @@ normal proposal review gate.
 
 ## Validation Plan
 
-- [ ] Same registered guest, profile and installation resolve identically
+- [x] Same registered guest, profile and installation resolve identically
   through direct, SSH-without-WSL-variables, supervised and interactive paths.
-- [ ] Real guest detection does not classify a container sharing a WSL kernel
+- [x] Real guest detection does not classify a container sharing a WSL kernel
   as that guest, or a native Linux/Windows caller as WSL.
-- [ ] Foreign distro, different profile, conflicting observed/declarative
+- [x] Foreign distro, different profile, conflicting observed/declarative
   identity, malformed registration and ambiguous mapping remain blocked.
-- [ ] No registration or diagnostic obtains authority by copying an incumbent
+- [x] No registration or diagnostic obtains authority by copying an incumbent
   command binding, lifecycle reservation or historical worktree label.
-- [ ] Logical host/guest names need no extra distro suffix; a named persistent
+- [x] Logical host/guest names need no extra distro suffix; a named persistent
   VM remains distinct from the default WSL role.
-- [ ] The designated worktree distro is verifiably the host default. A later
+- [x] The designated worktree distro is verifiably the host default. A later
   default change is reported without redirecting existing worktrees, changing
   their records or implicitly changing the OS default back.
-- [ ] Python, Bash and PowerShell agree on registration, resolution, refusal
+- [x] Python, Bash and PowerShell agree on registration, resolution, refusal
   and report-only behavior; lone-plugin and legacy-default operation work.
-- [ ] Actual diagnostics leave records, registration, lifecycle markers and
+- [x] Actual diagnostics leave records, registration, lifecycle markers and
   unrelated profiles byte-for-byte unchanged; repair changes only its explicitly
   approved target through the supported owner.
-- [ ] Existing installation-context, command-binding and lifecycle guards
+- [x] Existing installation-context, command-binding and lifecycle guards
   pass through the bounded runner, with focused native boundary coverage.
-- [ ] The containing release and authorized installed update succeed, followed
+- [x] The containing release and authorized installed update succeed, followed
   by real launch/update acceptance across both entry paths.
+
+### Acceptance evidence and limits
+
+The [current journal](journal/2026/10.26%20progress.md) joins #7009's retained
+source/native controls, the qualified containing releases and successful
+authorized updates with current installed acceptance. The focused guest packet
+passes 34 cases with two native-Windows fixture skips; those skips are not
+reported as executed native tests. Actual installed native Python/PowerShell
+default diagnostics are independently compared. Python/Bash/PowerShell agree
+through named direct, SSH-without-WSL-variables, supervised and interactive-shell
+guest entries, without changing guest registration.
+
+The final launch gate uses actual finite agents through named-direct WSL
+**login** and SSH entries. Each runs the read-only shell check in its exact
+disposable worktree, reports its own session ID and readiness marker, and exits
+with code zero. The coordinator verifies the actual assistant/tool events,
+worktree binding, clean checkout and absence of each recorded process. A
+non-preview Resume plan alone is not this proof.
+
+The initial bare, non-login WSL command lacks the user command path and selects
+a different executable; its pre-agent failure remains recorded, not converted
+into a passing bare-entry claim. Ordinary login startup passes without a PATH,
+installation or system change. A separate WSL mount warning is not represented
+as repaired. Whole-store byte stability during real startup is not claimed:
+concurrent shared-store changes are reported separately from the isolated
+allocation/diagnostic preservation checks. Existing identities are not migrated.
 
 ## Boundaries
 
