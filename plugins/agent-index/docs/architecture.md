@@ -193,6 +193,15 @@ The opt-in [prepared pair path](chunk-id-index.md#stored-content-pair-writer)
 checks current canonical input before engine readiness and under vector-writer
 exclusion; the caller still owns discovery and source/account/profile progress.
 
+The [bounded content snapshot reader](chunk-id-index.md#bounded-canonical-snapshot-reader)
+captures local incarnation/version/row-count metadata and reads finite
+version-relative logical offsets through an independent handle. It strictly
+refuses incomplete input, unavailable versions and before/after identity changes,
+without creating storage or pinning the current writer's handle. Its conservative
+directory-ctime identity can require repair after ordinary native mutations.
+This is a discovery prerequisite, not a source/account/profile cursor or a
+retention/operational-backfill authority.
+
 Ordinary writes revoke receipts before a potentially partial vector write.
 Prepared pair writes retain old receipts through pre-effect refusal, then
 invalidate after the vector commit and before explicitly budgeted preparation.

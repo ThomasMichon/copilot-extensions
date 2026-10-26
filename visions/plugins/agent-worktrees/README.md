@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** branch (worktree-lifetime authority; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-10-23
+- **Last revised:** 2026-10-26
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -219,6 +219,12 @@ worktrees, pull requests, environments, sessions, connections, and other
 scarce resources. Exclusive access is fenced, ownership is answerable in both
 directions, and finalization is gated on settlement or an explicit transfer.
 
+Remote allocation preserves that creator responsibility without moving either
+machine's state authority. The origin coordinates the request and its obligation;
+the receiving owner creates and tracks its own workspace. Selecting another
+destination repository or execution environment never silently changes the
+creator or makes the receiver authoritative over the origin's ledger.
+
 ### Write guards are hygiene nudges, named for their plain, mundane reason
 
 A family of `preToolUse` hooks (`anchor_write_guard`, `cross_repo_guard`,
@@ -429,6 +435,25 @@ Creation identity is distinct from the resulting worktree identity. Changed
 target facts, an unresolved creation outcome, or a retired allocation never
 silently authorize another worktree under the same logical request. Deliberate
 replacement is a new logical revision, not a transport retry.
+
+### origin-coordinated-remote-allocation
+
+A caller acting from a managed worktree can allocate another worktree on a
+selected machine and repository through the ordinary allocation authority.
+The originating worktree remains responsible even when the destination
+repository differs. A successful owned allocation means both the actual remote
+workspace and the originating worktree's matching obligation are durable.
+
+Responsibility is recoverable before allocation effects begin. Interrupted
+creation or acknowledgement remains an explicit unresolved obligation, never
+an unowned success or permission to create a replacement. Parent completion
+cannot strand an allocation whose outcome is still uncertain.
+
+SSH and an explicitly adopted Gateway route reach the same receiving owner;
+they do not introduce competing allocators. Correctness does not depend on
+the receiver initiating a reverse connection to the caller. Session hosts and
+task dispatchers compose this same allocation capability, and allocating space
+alone never launches an agent.
 
 ### authoritative-head-and-lineage
 

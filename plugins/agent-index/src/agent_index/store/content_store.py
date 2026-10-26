@@ -28,6 +28,7 @@ from agent_procutil import no_window_kwargs as no_window_kwargs
 
 from agent_index.store.content_fts_worker import _ContentFtsWorkerMixin, fts_retryable
 from agent_index.store.content_item_reads import _ContentItemReadsMixin
+from agent_index.store.content_snapshot import _ContentSnapshotMixin
 from agent_index.store.lance_connection import connect_content_store
 from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
 from agent_index.store.source_layout import (
@@ -109,7 +110,7 @@ def _decode_metadata(raw: object) -> dict:
         return {}
 
 
-class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin):
+class ContentStore(_ContentFtsWorkerMixin, _ContentItemReadsMixin, _ContentSnapshotMixin):
     """LanceDB-backed store for chunk content and metadata.
 
     Owns the canonical ``chunks`` table and the BM25 full-text index.

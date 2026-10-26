@@ -2,6 +2,7 @@
 
 This pattern realizes the worktree vision's
 [replay-safe-workspace-allocation](../../visions/plugins/agent-worktrees/README.md#replay-safe-workspace-allocation),
+[origin-coordinated-remote-allocation](../../visions/plugins/agent-worktrees/README.md#origin-coordinated-remote-allocation),
 the bridge vision's
 [workspace allocation and session embodiment](../../visions/plugins/agent-bridge/README.md#workspace-allocation-and-session-embodiment),
 and dispatch's
@@ -33,6 +34,92 @@ Three repository roles can legitimately differ:
 Only the execution project qualifies allocation and session embodiment.
 A mismatch between requested and owner-returned workspace facts refuses before
 launch; it is not a reason to search another registry or create a replacement.
+
+## Origin-owned remote allocation
+
+This is the **required target architecture**, not a claim that remote owned
+creation is implemented. [#5839](https://github.com/ThomasMichon/copilot-extensions/issues/5839)
+retains the cross-registry implementation and qualification gap. Existing
+cross-space and unsupported-capability refusals remain until the complete
+ownership protocol is implemented and verified; this contract is not permission
+to remove them.
+
+### Origin-local creation interface
+
+With the calling managed worktree as the current directory, the target CLI
+contract is:
+
+```text
+agent-worktrees create --json --machine=<target-machine> --repo=<target-repository>
+```
+
+Resolve and validate the creator through its existing worktree authority
+**before** selecting destination configuration. The explicit allocation request
+establishes responsibility; merely observing a directory does not.
+
+- `--repo` selects the receiving repository, not a replacement caller or local
+  project context. If omitted, use the repository resolved from the calling
+  worktree's current directory.
+- `--machine` selects the receiving machine through the existing machine and
+  execution-environment resolver. Preserve explicit environment selection and
+  refuse ambiguity rather than infer ledger locality from a physical host name.
+  If omitted, preserve ordinary local creation.
+- A successful exit and JSON result mean the receiving worktree exists and the
+  originating worktree records its matching, qualified claim. Return the actual
+  owner-selected machine/environment, repository, worktree identity and path,
+  together with the creation/ownership result needed for recovery. Do not return
+  a planned path or transport acknowledgement as completed allocation.
+
+The command allocates a worktree only. It does not launch a Copilot session,
+deliver a prompt or imply agent-hosting permission. Source-only allocation and
+existing standalone/unowned policy remain distinct from owned creation; a
+supplied managed owner that cannot be established must never degrade to unowned
+success.
+
+### One coordinator, two local authorities
+
+The origin's `agent-worktrees` allocation operation coordinates responsibility
+and remote creation. It records a durable pending obligation before requesting
+receiving-side effects. The receiving `agent-worktrees` owner creates and tracks
+the child through its own allocation boundary, retaining the qualified origin
+and logical creation identity. The origin confirms the exact returned identity
+and durably binds its claim before reporting successful owned allocation.
+
+Each owner mutates only its own state through its existing named operation
+boundary. This is not a shared registry, a cross-machine filesystem lock, or
+authority for a remote command to open the caller's tracking files. Hold local
+locks only for local state transitions, not across network requests.
+
+SSH initially carries the receiving operation; an explicitly adopted Gateway
+manager may later route that same operation. The transport owns connectivity,
+not worktree allocation or claim semantics. No mandatory receiving-to-origin SSH
+connection is needed: the origin consumes the receiving owner's retained result.
+Optional notifications cannot substitute for durable ownership acknowledgement.
+Bridge and Dispatch use this same origin-coordinated allocator rather than
+maintaining separate remote-create or callback-to-claims implementations.
+
+### Interruption and settlement
+
+Use the logical creation identity described below throughout the transaction.
+Its effective facts distinguish the origin authority/worktree from the receiving
+authority, machine/environment and repository. Retain the identity before effects
+even when the caller did not supply a key; expose it for recovery. A deliberate
+fresh invocation and recovery of an existing invocation remain different actions.
+
+An interrupted request, missing reply or lost claim acknowledgement leaves a
+pending or unknown operation, not success. Recover the receiving owner's same
+allocation and the origin's same claim; do not generate a replacement creation
+identity, drop owner metadata, or delete an uncertain child to make a retry pass.
+Parent finalization must remain blocked while allocation responsibility is
+unresolved. Explicit ownership transfer must carry that pending responsibility,
+not leave it behind.
+
+Only confirmed allocation ownership permits a composing host to begin
+embodiment. Later child conclusion settles the originating obligation through
+the same recorded authorities and existing lifecycle operations. Lost settlement
+responses remain reconcilable without a second writer or mandatory reverse
+reachability. Unsupported peers refuse before effects; no compatibility fallback
+may silently turn an owned request into an unowned allocation.
 
 ## Creation identity is not delivery identity
 
@@ -69,6 +156,10 @@ instead of ignoring a safety-affecting option. Existing unkeyed standalone
 creation keeps its deliberate fresh-create behavior; remote/fleet keyed
 worktree embodiment remains explicitly unsupported.
 
+Those are current capability limits. The origin-owned remote contract above is
+the required extension, not evidence that these CLI or protocol generations
+already implement it.
+
 An explicitly selected provider-exec instance may instead use protocol 36's
 `provider_instance` keyed-native option. Its provider owns the concrete
 workspace; Bridge retains one physical provider instance and native result,
@@ -100,3 +191,23 @@ responses must recover that result; conflicts and terminal keys must refuse;
 and a first conversation in a positively sessionless existing worktree must
 retain the same project/path. Preserve refusal for foreign/live holders,
 missing legacy history, and ambiguous launch effects.
+
+Before enabling origin-owned remote allocation, additionally prove:
+
+- The origin-local public CLI creates in the selected remote repository while
+  the caller's ledger remains the owner, including a different destination repo,
+  omitted repo/machine selectors and independent Windows/WSL environments.
+- Real owner command boundaries preserve the pending obligation before effects,
+  receiving-side creation before completed claim acknowledgement, and both
+  durable records before a successful public result or agent launch.
+- Concurrent/restarted requests, crashes before and after receiving creation,
+  and lost creation/claim replies recover one child and one matching claim.
+  An unresolved operation blocks parent finalization and unauthorized transfer.
+- A caller reachable only through outbound transport still completes allocation
+  and later settlement; neither path requires a reverse SSH session.
+- Bridge and Dispatch exercise the same allocator; SSH and a synthetic adopted
+  Gateway adapter preserve the same target/owner semantics. A real Gateway
+  implementation and its native qualification remain separate delivery work.
+- Unsupported peers, changed request facts, invalid/frozen origins and mismatched
+  receiver results refuse without owner-dropping fallbacks, duplicate children,
+  premature session launch or fabricated absence.
