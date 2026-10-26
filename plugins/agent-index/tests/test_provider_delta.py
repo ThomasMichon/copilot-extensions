@@ -54,7 +54,12 @@ with (root / "calls.jsonl").open("a") as stream:
 if args.verb == "content-current-commit":
     response = config["metadata"]
 elif args.verb == "content-list-paths":
-    response = {"paths": {canonical: ["old.md"]}}
+    paths = {canonical: ["old.md"]}
+    if "snapshot_entries" in config:
+        paths = {}
+        for entry in config["snapshot_entries"]:
+            paths.setdefault(entry["source"], []).append(entry["path"])
+    response = {"paths": paths}
 elif getattr(args, "delta_version", None) is not None:
     if config.get("fail_delta"):
         sys.stderr.write("delta refused after acceptance")
@@ -64,9 +69,9 @@ elif getattr(args, "delta_version", None) is not None:
         sys.exit(0)
     response = config["delta"]
 else:
-    response = {"entries": [{
+    response = {"entries": config.get("snapshot_entries", [{
         "source": canonical, "path": "old.md", "content": "old", "language": "markdown",
-    }]}
+    }])}
 if args.verb != "content-current-commit" and isinstance(response, dict) and config["new"]:
     delta = getattr(args, "delta_version", None) is not None
     if config.get("echo_scope" if delta else "echo_snapshot_scope", True):
@@ -207,6 +212,7 @@ def test_collection_and_journal_preserve_canonical_family(tmp_path, mode, full):
     paths.mark_indexed(entry_source, "gone.md", chunk_count=1)
     paths.mark_indexed("other:repo", "outside.md", chunk_count=1)
     state = IndexState(sources={"alias": SourceState(last_commit="base")})
+    state.sources["alias"].acquisition_scope = recovery_scope("alias", connector)
     state.stored_families["alias"] = canonical
     manifest = collect_source_changes(
         "alias", state=state, path_index=paths, full=full,

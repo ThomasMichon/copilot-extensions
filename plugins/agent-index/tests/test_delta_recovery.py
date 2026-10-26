@@ -14,6 +14,7 @@ from agent_index.chunking.base import Chunk
 from agent_index.index_config import ModelProfile
 from agent_index.indexing import engine
 from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.pending_crawl import recovery_scope
 from agent_index.indexing.state import IndexState, SourceState
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile, SourceDelta
@@ -32,6 +33,7 @@ def setup_round(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
         delta=SourceDelta(commit="next"),
     )
     connector.discover_delta = lambda *a, **k: connector.delta
+    state.sources["alias"].acquisition_scope = recovery_scope("alias", connector)
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     chunker = SimpleNamespace(chunk=lambda *a, **k: [object(), object()])

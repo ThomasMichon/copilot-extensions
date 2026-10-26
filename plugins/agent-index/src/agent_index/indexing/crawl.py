@@ -24,15 +24,20 @@ def collect_source_changes(
     progress_cb: ProgressCallback | None = None,
     connector_kwargs: dict[str, object] | None = None,
     connector: SourceConnector | None = None,
+    source_scope: str | None = None,
 ) -> CrawlManifest:
     """Prefer explicit deltas; retain full reconciliation for legacy providers."""
     from agent_index.sources import get_connector
+    from agent_index.indexing.pending_crawl import recovery_scope
 
     if connector is None:
         connector = get_connector(source_name, **(connector_kwargs or {}))
     canonical = connector.source_name if source_aware else None
     if source_aware and (not isinstance(canonical, str) or not canonical):
         raise RuntimeError("connector has no canonical stored family")
+    state.require_acquisition_scope(
+        source_name, recovery_scope(source_scope or source_name, connector), full=full,
+    )
     cancel_check = progress_cb.check_cancelled if progress_cb else None
     src_state = state.sources.get(source_name)
     last_commit = src_state.last_commit if src_state else None

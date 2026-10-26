@@ -12,6 +12,7 @@ from agent_index.index_config import IndexConfig, ModelProfile
 from agent_index.indexing import engine
 from agent_index.indexing.fingerprints import file_fingerprint
 from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.pending_crawl import recovery_scope
 from agent_index.indexing.state import IndexState, SourceState
 from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import DeletedFile, SourceDelta
@@ -49,11 +50,13 @@ def test_delta_acquisition_does_not_enumerate_existing_corpus(
 
     connector = SimpleNamespace(
         source_name="forge:repo", discover_delta=discover,
+        recovery_identity=("fixture-target",),
         current_commit=forbidden, list_paths=forbidden, discover_changed=forbidden,
     )
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     state = IndexState(sources={"configured": SourceState(last_commit="previous")})
+    state.sources["configured"].acquisition_scope = recovery_scope("configured", connector)
     manifest = engine._crawl_source(
         "configured", config=None, state=state, path_index=paths, full=False,
     )
@@ -100,9 +103,11 @@ def test_unsafe_delta_fails_before_indexing(
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     connector = SimpleNamespace(
         source_name="forge:repo", discover_delta=lambda *a, **k: result,
+        recovery_identity=("fixture-target",),
     )
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     state = IndexState(sources={"configured": SourceState(last_commit="previous")})
+    state.sources["configured"].acquisition_scope = recovery_scope("configured", connector)
     with pytest.raises(ValueError):
         engine._crawl_source(
             "configured", config=None, state=state, path_index=paths, full=False,
@@ -144,6 +149,7 @@ def test_compatible_upsert_skips_chunker_engine_and_stale_cleanup(
     state = IndexState(
         sources={"configured": SourceState(last_commit="previous", chunk_count=3)},
     )
+    state.sources["configured"].acquisition_scope = recovery_scope("configured", connector)
     result = engine._index_source(
         "configured",
         config=SimpleNamespace(

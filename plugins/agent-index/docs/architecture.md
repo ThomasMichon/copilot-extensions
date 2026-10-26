@@ -116,7 +116,19 @@ JSON source cursor, then clears the journal and acquires fresh changes. This
 prevents a newer net delta from omitting an item partially written by an
 interrupted older delta (for example, a file changed and then reverted).
 Source/account configuration changes refuse replay rather than applying old
-work under a new scope. The same constructed connector supplies both acquisition
+work under a new scope. Completed checkpoints also retain the existing
+`recovery_scope` hash in `SourceState.acquisition_scope`, alongside their cursor
+and canonical family. A missing or mismatched checkpoint identity requires an
+explicit full reindex before any new acquisition, in either storage layout;
+a new target cannot reuse an old target's cursor even after its journal clears.
+Successful application and atomic checkpoint publication bind the accepted
+scope, including empty full snapshots with a null cursor. Failed application
+or publication restores the prior in-memory checkpoint and retains any pending
+acquisition for replay. Older state files still load, but their unbound cursors
+require full reconciliation. An already-admitted pending journal with a matching
+scope may finish and bind its checkpoint before fresh acquisition; its existing
+envelope does not change. No additional identity or credential authority is
+introduced. The same constructed connector supplies both acquisition
 and its canonical/effective recovery identity: delta connectors declare a
 nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
 remote target and selected ref, including environment/registry resolution;

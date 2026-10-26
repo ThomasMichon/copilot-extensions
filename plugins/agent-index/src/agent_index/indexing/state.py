@@ -7,7 +7,7 @@ import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import UTC
+from datetime import timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,11 +16,12 @@ if TYPE_CHECKING:
 
 @dataclass
 class SourceState:
-    """Tracking state for a single data source."""
+    """A source cursor/totals and the accepted acquisition's nonsecret scope hash."""
 
     last_commit: str | None = None
     last_indexed_at: float | None = None
     chunk_count: int = 0
+    acquisition_scope: str | None = None
 
 
 @dataclass
@@ -45,6 +46,10 @@ class IndexState:
         ):
             raise ValueError("invalid persisted canonical source identities")
         sources = {name: SourceState(**src) for name, src in data.get("sources", {}).items()}
+        if any(src.acquisition_scope is not None and (
+            not isinstance(src.acquisition_scope, str) or not src.acquisition_scope
+        ) for src in sources.values()):
+            raise ValueError("invalid persisted source acquisition scope")
         return cls(
             sources=sources,
             total_chunks=data.get("total_chunks", 0),
@@ -78,12 +83,24 @@ class IndexState:
         finally:
             temporary.unlink(missing_ok=True)
 
+    def require_acquisition_scope(self, name: str, scope: str, *, full: bool) -> None:
+        """Refuse an unproven incremental cursor before acquiring or applying data."""
+        if not isinstance(scope, str) or not scope:
+            raise ValueError("invalid source acquisition scope")
+        checkpoint = self.sources.get(name)
+        if not full and checkpoint is not None and checkpoint.acquisition_scope != scope:
+            raise ValueError(
+                f"Source checkpoint {name!r} has a missing or different acquisition identity; "
+                "explicit full reindex required",
+            )
+
     def mark_source_indexed(self, name: str, commit: str | None, chunk_count: int) -> None:
         """Update state after indexing a source."""
         self.sources[name] = SourceState(
             last_commit=commit,
             last_indexed_at=time.time(),
             chunk_count=chunk_count,
+            acquisition_scope=self.sources[name].acquisition_scope if name in self.sources else None,
         )
         self.total_chunks = sum(s.chunk_count for s in self.sources.values())
 
@@ -101,7 +118,7 @@ def print_status() -> None:
     if state.last_full_reindex:
         from datetime import datetime
 
-        dt = datetime.fromtimestamp(state.last_full_reindex, tz=UTC)
+        dt = datetime.fromtimestamp(state.last_full_reindex, tz=timezone.utc)
         print(f"Last full reindex: {dt.isoformat()}")
     print()
     for name, src in sorted(state.sources.items()):

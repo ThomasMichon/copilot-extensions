@@ -601,7 +601,7 @@ def _index_source(
         acquire=partial(
             _crawl_source, source_name, config=config, state=state, path_index=path_index,
             full=full, progress_cb=progress_cb, connector_kwargs=connector_kwargs,
-            connector=connector,
+            connector=connector, source_scope=source_scope,
         ),
         apply=partial(
             _apply_source_manifest, source_name, config=config, state=state,
@@ -641,13 +641,12 @@ def _apply_source_manifest(
     if manifest.is_empty:
         print(f"  No changes detected for {source_name}")
         # Still update commit marker so we don't re-crawl next time
-        if manifest.commit:
-            src_state = state.sources.get(source_name)
-            state.mark_source_indexed(
-                source_name,
-                manifest.commit,
-                src_state.chunk_count if src_state else 0,
-            )
+        src_state = state.sources.get(source_name)
+        state.mark_source_indexed(
+            source_name,
+            manifest.commit,
+            src_state.chunk_count if src_state else 0,
+        )
         if manifest.stored_family is not None:
             state.stored_families[source_name] = manifest.stored_family
         return (0, 0, 0)
@@ -735,6 +734,7 @@ def _crawl_source(
     progress_cb: ProgressCallback | None = None,
     connector_kwargs: dict[str, object] | None = None,
     connector: SourceConnector | None = None,
+    source_scope: str | None = None,
 ) -> CrawlManifest:
     """Compatibility entrypoint for the separately owned crawl phase."""
     from agent_index.indexing.crawl import collect_source_changes
@@ -745,7 +745,7 @@ def _crawl_source(
         source_name, state=state, path_index=path_index, full=full,
         source_aware=bool(selected_layout()), progress_cb=progress_cb,
         connector_kwargs=connector_kwargs,
-        connector=connector,
+        connector=connector, source_scope=source_scope,
     )
 
 

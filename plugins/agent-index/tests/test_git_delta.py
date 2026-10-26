@@ -12,6 +12,7 @@ from agent_procutil import no_window_kwargs
 
 from agent_index.indexing.crawl import collect_source_changes
 from agent_index.indexing.path_index import PathIndex
+from agent_index.indexing.pending_crawl import recovery_scope
 from agent_index.indexing.state import IndexState, SourceState
 from agent_index.sources.git_delta import GitReconciliationRequired
 from agent_index.sources.git_repo import GitRepoConnector
@@ -86,6 +87,7 @@ def test_git_delta_is_bounded_by_changes_not_stored_corpus(
     ])
     monkeypatch.setattr(paths, "get_paths_by_family", forbidden)
     state = IndexState(sources={source.source_name: SourceState(last_commit=base)})
+    state.sources[source.source_name].acquisition_scope = recovery_scope(source.source_name, source)
     manifest = collect_source_changes(
         source.source_name, state=state, path_index=paths,
         full=False, source_aware=False, connector=source,
@@ -238,6 +240,7 @@ def test_git_delta_blob_failure_never_authorizes_a_checkpoint(
 
     monkeypatch.setattr(source, "_git_bytes", fail_blob)
     state = IndexState(sources={source.source_name: SourceState(last_commit=base)})
+    state.sources[source.source_name].acquisition_scope = recovery_scope(source.source_name, source)
     with pytest.raises(subprocess.CalledProcessError):
         collect_source_changes(
             source.source_name, state=state, path_index=PathIndex(tmp_path / "paths.db"),

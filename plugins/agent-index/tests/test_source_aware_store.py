@@ -436,9 +436,9 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
     def fail(*args, **kwargs):
         raise RuntimeError("fixture source failure")
 
-    for failure in ("current_commit", "discover_changed", "chunk", "embed", "reconcile"):
+    for failure in ("current_commit", "discover", "chunk", "embed", "reconcile"):
         with monkeypatch.context() as patch:
-            if failure in ("current_commit", "discover_changed"):
+            if failure in ("current_commit", "discover"):
                 original = sources.get_connector
 
                 def connector(*args, **kwargs):
@@ -458,13 +458,13 @@ def test_queued_source_identity_publishes_only_after_success(queued_source, monk
                 patch.setattr(EngineClient, "embed_texts", fail)
             else:
                 patch.setattr(MultiModelStore, "delete_stale_by_file", fail)
-            code, task = run()
+            code, task = run(full=True)
             assert code == 0 and task.status == "partial", failure
         assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:old"}
         store = initialize_source_store(config)
         assert "git:old" in store.distinct_sources()
         assert store.get_document("git:old", "one.md") is not None
-    assert run()[1].status == "complete"
+    assert run(full=True)[1].status == "complete"
     assert IndexState.load(config.state_file).stored_families == {"git:alias": "git:new"}
     assert "git:old" not in store.distinct_sources()
     assert "git:new" in store.distinct_sources()

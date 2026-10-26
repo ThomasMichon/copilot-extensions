@@ -7,13 +7,13 @@ import hashlib
 import sqlite3
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Protocol
 
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
 from agent_index.indexing.path_index import PathIndex
-from agent_index.indexing.state import IndexState
+from agent_index.indexing.state import IndexState, SourceState
 from agent_index.sources.base import FileEntry, SourceConnector
 from agent_index.sources.delta import DeletedFile, SourceDelta
 
@@ -155,23 +155,44 @@ def recover_source(
     paths: PathIndex, full: bool, acquire: Callable[[], CrawlManifest], apply: ApplyManifest,
     family: str | None = None,
 ) -> tuple[int, int, int]:
-    """Drain pinned partial work, persist its cursor, then acquire current changes."""
+    """Publish pinned work and its scope before admitting another scoped acquisition."""
     journal = PendingCrawls(paths)
     journal.assert_family_available(source, family or source)
     totals = (0, 0, 0)
+
+    def publish(manifest: CrawlManifest, *, full: bool) -> tuple[int, int, int]:
+        previous = state.sources.get(source)
+        previous = replace(previous) if previous is not None else None
+        previous_family = state.stored_families.get(source)
+        previous_total = state.total_chunks
+        try:
+            result = apply(manifest=manifest, full=full)
+            state.sources.setdefault(source, SourceState()).acquisition_scope = scope
+            state.save(state_file)
+        except BaseException:
+            if previous is None:
+                state.sources.pop(source, None)
+            else:
+                state.sources[source] = previous
+            if previous_family is None:
+                state.stored_families.pop(source, None)
+            else:
+                state.stored_families[source] = previous_family
+            state.total_chunks = previous_total
+            raise
+        return result
+
     pending = journal.load(source, scope)
     if pending is not None:
         manifest, pending_full = pending
-        totals = apply(manifest=manifest, full=pending_full)
-        state.save(state_file)
+        totals = publish(manifest, full=pending_full)
         journal.clear(source)
 
+    state.require_acquisition_scope(source, scope, full=full)
     manifest = acquire()
     if not manifest.is_empty:
         journal.save(manifest, scope=scope, full=full)
-    current = apply(manifest=manifest, full=full)
-    # Clearing before this save would reintroduce lost revert/deletion recovery.
-    state.save(state_file)
+    current = publish(manifest, full=full)
     if not manifest.is_empty:
         journal.clear(source)
     return totals[0] + current[0], totals[1] + current[1], totals[2] + current[2]

@@ -86,7 +86,9 @@ def test_queued_alias_equal_old_family_retires_rows_not_active_cursor(queued_sou
     configure(old, name="git:old")
     assert run(full=True)[1].status == "complete"
     configure(repository("new"), name="git:old")
-    assert run()[1].status == "complete"
+    assert run()[1].status == "partial"
+    assert IndexState.load(config.state_file).stored_families == {"git:old": "git:old"}
+    assert run(full=True)[1].status == "complete"
     store = initialize_source_store(config)
     state = IndexState.load(config.state_file)
     assert state.stored_families == {"git:old": "git:new"}
