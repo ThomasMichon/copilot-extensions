@@ -261,6 +261,9 @@ def test_gateway_pinned_context_and_docker_allowlist_include_exact_procutil_clos
     source = _gateway_source()
     package = PROCUTIL / "src" / "agent_procutil"
     assert source.PROCUTIL_MODULES == {path.stem for path in package.glob("*.py")}
+    assert source.PROCUTIL_RESOURCES == set(
+        validate_static_build(PROCUTIL)["tool"]["setuptools"]["package-data"]["agent_procutil"]
+    )
     recipe_root = ROOT / "fleet-manager" / "containers" / "gateway"
     patterns = (recipe_root / "Dockerfile.dockerignore").read_text().splitlines()
 
@@ -397,10 +400,18 @@ def test_real_pure_wheel_and_source_archive_need_only_selected_python(tmp_path, 
         [uv, "pip", "install", "--python", str(python), "--no-deps", "--no-index", str(wheel)],
         check=True, umask=0o077,
     )
+    ambient = tmp_path / "ambient-imports"
+    ambient.mkdir()
+    (ambient / "agent_procutil.py").write_text(
+        "raise RuntimeError('ambient imports cannot qualify the installed wheel')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(ambient))
     installed = subprocess.check_output(
-        [str(python), "-c", "import pathlib,agent_procutil;print(pathlib.Path(agent_procutil.__file__).parent)"],
+        [str(python), "-I", "-c", "import pathlib,agent_procutil;print(pathlib.Path(agent_procutil.__file__).parent)"],
         text=True,
     ).strip()
+    assert Path(installed).resolve().is_relative_to(venv.resolve())
     runtime_bin = tmp_path / "runtime-bin"
     runtime_bin.mkdir()
     for name in ("bash", "dirname", "uname", "readlink", "stat", "id"):
@@ -447,13 +458,18 @@ def test_real_pure_wheel_and_source_archive_need_only_selected_python(tmp_path, 
     shutil.copyfile(PROCUTIL / "tests" / "conftest.py", tests / "conftest.py")
     qualified = subprocess.run(
         [str(python), "-I", "-c",
-         "import sys;sys.path.insert(0,sys.argv.pop(1));import pytest;"
+         "import sys;from pathlib import Path;"
+         "sys.path.append(sys.argv.pop(1));expected=Path(sys.argv.pop(1)).resolve();"
+         "import agent_procutil;"
+         "assert Path(agent_procutil.__file__).resolve().parent==expected;"
+         "import pytest;"
          "raise SystemExit(pytest.main(sys.argv[1:]))",
-         str(Path(pytest.__file__).parent.parent), *(str(path) for path in selected),
+         str(Path(pytest.__file__).parent.parent), installed, *(str(path) for path in selected),
          "--basetemp", str(tmp_path / "lifecycle-roots"), "-q"],
         env={
-            **os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
-            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            **{key: value for key, value in os.environ.items() if not key.startswith("PYTHON")},
+            "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
         },
         text=True, capture_output=True, timeout=60,
     )

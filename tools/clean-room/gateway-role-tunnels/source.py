@@ -43,6 +43,7 @@ interactive metrics metrics_accounting native_child owned_process startup stream
 """.split())
 PROCUTIL_RESOURCES = frozenset("""
 daemon_instances.ps1 daemon_instances.sh
+daemon_instance_runtime.pyz
 native_daemon.ps1 native_daemon.sh native_owned.ps1 native_owned.sh
 """.split())
 REQUIRED = frozenset({

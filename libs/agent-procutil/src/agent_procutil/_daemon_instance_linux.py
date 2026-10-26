@@ -140,7 +140,7 @@ def _settle(child: int) -> bool:
     while True:
         try:
             _retire_children()
-        except (OSError, ValueError, IndexError) as error:
+        except (OSError, RuntimeError, ValueError, IndexError) as error:
             store._log.error("daemon descendant custody unavailable: %s", error)
             custody_valid = False
         try:
@@ -196,6 +196,7 @@ def supervise(path: Path, command: list[str], *, ready_fd: int | None = None) ->
         interrupted = True
 
     try:
+        check()
         with store._locked(receipt) as record_path:
             if path != record_path or not command:
                 raise ValueError("invalid daemon supervision invocation")

@@ -63,6 +63,7 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/wsl.py
 !libs/agent-procutil/src/agent_procutil/daemon_instances.ps1
 !libs/agent-procutil/src/agent_procutil/daemon_instances.sh
+!libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
 !libs/agent-procutil/src/agent_procutil/native_daemon.ps1
 !libs/agent-procutil/src/agent_procutil/native_daemon.sh
 !libs/agent-procutil/src/agent_procutil/native_owned.ps1
