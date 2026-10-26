@@ -17,8 +17,12 @@ def tuple_controller(monkeypatch, tmp_path):
         "id": "controller", "repo": "control", "path": str(tmp_path), "status": "active",
         "machine_identity_version": 1, "machine": "physical-host", "environment": "wsl",
         "execution_machine": "custom-guest", "platform": "wsl",
+        "creation_nonce": "controller-nonce", "session_count": 1,
+        "last_session_id": "native-caller", "execution_leg": None,
+        "sessions_indexed": True, "execution_leg_opaque": False,
+        "session_backend": None, "session_backend_opaque": False,
     }
-    command = AsyncMock(return_value={"worktrees": [row]})
+    command = AsyncMock(return_value={"version": 1, "ok": True, "worktree": row})
     monkeypatch.setattr("agent_bridge.acquisition_authority.worktree_command", command)
     return row, command, tmp_path
 
@@ -36,7 +40,7 @@ async def test_tuple_controller_checks_execution_owner_and_preserves_metadata(
     caller = SpawnTarget(caller_worktree=str(path), caller_owner_ref=f"{owner}/control/controller")
     assert await resolve_controller_cwd(caller) == str(path.resolve())
     command.assert_awaited_once_with(
-        ["list", "--json", "--cache-only", "--worktree-id", "controller"], "control",
+        ["record", "--worktree-id", "controller", "--json"], "control",
     )
     assert row == before
 
