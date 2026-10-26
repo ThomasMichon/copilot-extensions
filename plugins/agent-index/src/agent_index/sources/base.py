@@ -19,9 +19,11 @@ def nonsecret_target(url: str) -> str:
     parts = urlsplit(url)
     if parts.query or parts.fragment:
         raise ValueError("Recovery target URL must not have ambiguous query or fragment semantics")
-    return urlunsplit((
-        parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path, "", "",
-    ))
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    if parts.scheme in {"ssh", "git+ssh", "ssh+git"} and parts.username is not None:
+        # SSH usernames select remote home directories, unlike HTTP credentials.
+        authority = f"{parts.username}@{authority}"
+    return urlunsplit((parts.scheme, authority, parts.path, "", ""))
 
 
 @dataclass(frozen=True)

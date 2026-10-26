@@ -12,6 +12,7 @@ from agent_index.indexing import engine
 from agent_index.indexing.manifest import CrawlManifest, CrawlStats
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls, recover_source
+from agent_index.indexing.pending_crawl import recovery_scope
 from agent_index.indexing.state import IndexState
 from agent_index.sources.base import FileEntry
 from agent_index.sources.base import nonsecret_target
@@ -237,3 +238,26 @@ def test_recovery_target_drops_url_credentials_but_refuses_ambiguous_semantics()
     )
     with pytest.raises(ValueError, match="ambiguous"):
         nonsecret_target("https://example.test/repo.git?target=other")
+
+
+@pytest.mark.parametrize("scheme", ["ssh", "git+ssh", "ssh+git"])
+def test_ssh_account_change_refuses_pending_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scheme: str,
+) -> None:
+    monkeypatch.setattr(GitRepoConnector, "_derive_repo_name", lambda self: "sample")
+    remote = f"{scheme}://account_a@example.test/~/repo.git"
+    monkeypatch.setattr(GitRepoConnector, "_git_quiet", lambda *a: remote)
+    connector = GitRepoConnector(repo_path=tmp_path)
+    old_scope = recovery_scope("same-spec", connector)
+    journal = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    manifest = CrawlManifest(
+        source="git", accounting_family="git:sample",
+        upserts=[FileEntry("a.md", "old", "markdown", "git:sample")],
+    )
+    journal.save(manifest, scope=old_scope, full=False)
+    remote = f"{scheme}://account_b@example.test/~/repo.git"
+    with pytest.raises(ValueError, match="configuration"):
+        journal.load("git", recovery_scope("same-spec", connector))
+    assert nonsecret_target(remote) == remote
+    password_remote = remote.replace("account_b@", "account_b:temporary-password@")
+    assert nonsecret_target(password_remote) == remote
