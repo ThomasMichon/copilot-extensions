@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import subprocess
 import sys
 import sysconfig
@@ -44,6 +45,7 @@ def test_selected_client_jump_chain_is_headless_and_reaped(tmp_path, capsys, par
         print(json.dumps({"parent": parent, "native_evidence": evidence}), flush=True)
     assert result.returncode == 0 and evidence["ok"], evidence
     assert evidence["parent_console_handle"] == 0
+    assert evidence["parent_python_version"] == platform.python_version()
     assert evidence["observer_control_detected_and_retired"] is True
     expected_arch = os.environ["SSH_MANAGER_EXPECTED_PYTHON_ARCH"]
     assert evidence["parent_platform"] == {

@@ -317,6 +317,7 @@ async def drive(root: Path) -> dict:
     return {
         "parent_console_handle": console_window(), "parent_machine": platform.machine(),
         "parent_platform": sysconfig.get_platform(),
+        "parent_python_version": platform.python_version(),
         "observer_control_detected_and_retired": True,
         "cycles": cycles, "new_visible_terminal_windows": len(observed),
         "terminal_took_foreground": foreground_changed,

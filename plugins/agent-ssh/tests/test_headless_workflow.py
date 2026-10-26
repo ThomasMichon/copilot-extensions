@@ -47,6 +47,10 @@ def test_headless_lane_pins_source_client_bytes_and_signature():
 def test_native_lane_uses_exact_setup_interpreter_and_containment():
     job = _workflow()["jobs"]["ssh-headless-windows"]
     assert job["env"]["SSH_MANAGER_WINDOWS_JUMP_TEST"] == "1"
+    setup = next(step for step in job["steps"] if step.get("id") == "python")
+    assert setup["with"] == {
+        "python-version": "3.13", "architecture": "${{ matrix.python_arch }}",
+    }
     qualification = next(
         step for step in job["steps"] if "two parent shapes" in step.get("name", "")
     )

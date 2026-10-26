@@ -173,7 +173,7 @@ jobs:
       - uses: actions/setup-python@v5
         id: python
         with:
-          python-version: "3.13.7"
+          python-version: "3.13"
           architecture: ${{ matrix.python_arch }}
       - uses: astral-sh/setup-uv@v9.0.0
         with:
