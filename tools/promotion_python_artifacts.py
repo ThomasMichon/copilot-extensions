@@ -21,6 +21,7 @@ from artifact_source_build import (
     validate_runtime_metadata as validate_runtime_metadata,
 )
 from standalone_python_artifacts import COMPONENTS, artifact_label, project_key
+from artifact_attestation import INDEX_NAME, INDEX_SCHEMA as SCHEMA
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "libs" / "installer-engine"))
 from installer_wheel_inputs import WheelLimits
@@ -31,8 +32,6 @@ try:
 except ModuleNotFoundError:  # Python 3.10 uses the existing tooling backport.
     import tomli as tomllib
 
-SCHEMA = "copilot-extensions.promotion-python-artifacts"
-INDEX_NAME = "python-artifacts.json"
 _BUNDLES_NAME = "wheel-bundles.json"
 _SHA = re.compile(r"[0-9a-f]{40}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")

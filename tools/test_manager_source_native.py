@@ -12,7 +12,7 @@ from dataclasses import asdict, replace
 
 import pytest
 import runtime_feed_configuration as configuration
-import runtime_source_build as builds
+import runtime_source_manager as builds
 from test_installer_wheel_acquisition import CERTIFICATE, feeds as feeds  # noqa: F401
 from test_runtime_feed_configuration import environment
 from test_runtime_source_authentication import configured_source as configured_source  # noqa: F401
@@ -140,9 +140,11 @@ from dataclasses import asdict
 from pathlib import Path
 source = Path(sys.argv[1])
 sys.path.insert(0, str(source / "tools"))
-import runtime_source_build as builds
+import runtime_source_manager as builds
 import runtime_feed_configuration as configuration
 from runtime_profile_policy import plan_installation_profile
+from installer_wheel_acquisition import AcquisitionLimits
+from installer_wheel_inputs import WheelLimits
 from worktree_manager import self_install as si
 options = json.loads(sys.argv[2])
 assert (shutil.which("uv") is None) == (options["uv"] != "uv")
@@ -159,8 +161,8 @@ def forbidden(*args, **kwargs):
 builds.retain_source_runtime_inputs = forbidden
 builds.engine._construct = forbidden
 options["python"] = Path(options["python"])
-options["acquisition_limits"] = builds.AcquisitionLimits(**options["acquisition_limits"])
-options["wheel_limits"] = builds.WheelLimits(**options["wheel_limits"])
+options["acquisition_limits"] = AcquisitionLimits(**options["acquisition_limits"])
+options["wheel_limits"] = WheelLimits(**options["wheel_limits"])
 options["deadline"] = time.monotonic() + 60
 plan = plan_installation_profile(
     installation=installation, release_index=None, repository="example/plugins",

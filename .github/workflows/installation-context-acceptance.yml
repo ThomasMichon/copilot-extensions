@@ -850,6 +850,8 @@ jobs:
         run: >-
           python -m pytest -q
           tools/test_runtime_source_build.py
+          tools/test_runtime_admission_toolkit.py
+          libs/payload-invocation/tests/test_runtime_admission.py
           -k "${{ matrix.expression }}"
       - name: Persisted Manager admission and fresh-process offline reuse
         if: ${{ matrix.suite == 'manager' }}

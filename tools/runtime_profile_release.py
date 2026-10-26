@@ -63,7 +63,7 @@ def release_profiles(index: dict) -> tuple:
 def validate_release_bindings(index: dict, manifests: dict) -> None:
     """Pre-signing composition check against already-validated bundle manifests."""
     from packaging.utils import canonicalize_name
-    from promotion_python_artifacts import _artifact_label
+    from standalone_python_artifacts import artifact_label
 
     for profile in release_profiles(index):
         record = profile.record()
@@ -71,7 +71,7 @@ def validate_release_bindings(index: dict, manifests: dict) -> None:
         if binding is None:
             raise ProfileError("release profile has no validated first-party manifest")
         manifest, digest = binding
-        label = _artifact_label(manifest)
+        label = artifact_label(manifest)
         if (
             record["artifact"]["manifest_sha256"] != digest
             or record["release"] != {
@@ -105,8 +105,7 @@ def _attested_index(path: Path, *, max_subject_bytes: int, identity: dict) -> tu
     from installer_dependency_policy import _private_retained_root, _temporary_inputs
     from installer_wheel_inputs import WheelError, _ordinary
     from installer_wheel_snapshot import _open, _unchanged
-    from publish_python_artifacts import verify_attestation_subject
-    from promotion_python_artifacts import INDEX_NAME, SCHEMA as INDEX_SCHEMA
+    from artifact_attestation import INDEX_NAME, INDEX_SCHEMA, verify_attestation_subject
 
     if type(max_subject_bytes) is not int or max_subject_bytes <= 0:
         raise ProfileError("release subject byte limit must be an explicit positive integer")

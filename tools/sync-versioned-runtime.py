@@ -204,7 +204,7 @@ def main() -> int:
         ).is_file():
             instance_pairs.append((data, wsl / name))
     if args.native_wheel is not None:
-        from native_daemon_artifacts import wheel_assets
+        from native_daemon_payload import wheel_assets
 
         source = REPO / "libs" / "agent-procutil"
         try:

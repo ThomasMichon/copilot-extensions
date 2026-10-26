@@ -58,6 +58,25 @@ bytes and capture identity, and retain offline, unsafe-index and insecure-TLS
 refusals without an HTTP request. This qualifies the shared capture mechanism,
 not admission-tool installation, normal-consumer enablement or a live feed.
 
+`libs/payload-invocation/tests/test_runtime_admission.py` exercises the actual
+opt-in SDK generator and copied toolkit in an isolated process. Its complete
+entry-module imports, configuration and native-template checks reject repository
+Manager/CLI/publishing adapters and assert payload-local first-party locations.
+`tools/test_runtime_admission_toolkit.py` then exercises real source acquisition,
+canonical preparation, native feed/lock capture, wheel admission, source building,
+offline immutable construction, health and completed-generation reuse using only
+that copied toolkit. A separate witness admits the actual dependency-free
+Packaging seed, imports every toolkit entry in that interpreter and validates
+both a complete profile and an incomplete-closure refusal. Its installed
+distribution inventory contains only the selected Packaging wheel.
+These run in the existing source-build profile partition on
+Linux and Windows (`dependency_compile=true`), without a new job, longer timeout
+or required-unit expansion.
+The credential-free fixture retains the existing deterministic opaque-identity
+seam; keyed authentication and credential-key ACLs have independent controls.
+This is fresh toolkit-delivery evidence, not first-tooling admission,
+normal-consumer enablement, production feeds or performance qualification.
+
 `tools/test_runtime_profile_bootstrap.py` also runs runtime source-policy and
 actual wheel inspection in a fresh isolated Python process with the Manager
 installer, promotion and publisher modules explicitly refused. Pure owner

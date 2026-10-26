@@ -151,11 +151,11 @@ def test_instance_only_sync_ships_only_native_ps_pair_to_wsl_payload(repository,
 
 
 def test_explicit_native_wheel_fanout_preserves_the_built_executable(repository, monkeypatch):
-    import native_daemon_artifacts
+    import native_daemon_payload
 
     relative = Path("native") / "linux-x86_64" / "daemon-instance"
     monkeypatch.setattr(
-        native_daemon_artifacts, "wheel_assets",
+        native_daemon_payload, "wheel_assets",
         lambda *args, **kwargs: {relative: b"verified built native fixture\n"},
     )
     monkeypatch.setattr(sys, "argv", [
