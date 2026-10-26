@@ -3211,3 +3211,28 @@ configuration over token flags where process arguments may be observable.
   before replacing an attempt, including graceful coordinator cutover.
 - Wildcard binds (`0.0.0.0`, `::`) require `AGENT_DISPATCH_TOKEN`; otherwise the
   server refuses to start rather than expose the task-control API on the LAN.
+
+
+### Passive local owner-session reads
+
+Owner-session capture, CLI-task enrichment and liveness GC use the existing
+local Bridge `GET /api/v1/live-sessions/resolve?handle=...` metadata contract
+(HTTP generation 1), not a per-owner Bridge CLI/interpreter launch. Discovery,
+listener checks and authentication reuse Dispatch's local Bridge client. An
+explicit installation context validates the Dispatch owner and same-cell Bridge
+receipts/governance before selecting that cell's rendezvous and credentials;
+legacy config-directory and explicit loopback-URL overrides remain supported.
+Packaged validator code is reused in-process; receipts, source identity and
+governance are revalidated on every lookup, without an authority-result cache.
+Reads never ensure a service, enumerate providers or read conversations.
+
+Only the resolve endpoint's documented 404 means an absent owner. Discovery,
+authentication, protocol, transport and malformed-response failures are diagnosed
+as unavailable and remain UNKNOWN for GC. The captured session identity still
+determines LIVE/GONE; an uncaptured identity is UNKNOWN. Enrichment deduplicates
+equal local owner keys within one bounded wave only, with no cross-wave TTL.
+One operation deadline covers health and metadata status lines, headers and
+bodies; partial or trickling responses cannot renew that deadline. Invalid
+authentication headers also remain unavailable/UNKNOWN.
+Remote carrier/SSH/satellite routes and the existing liveness/GC age policy are
+unchanged.
