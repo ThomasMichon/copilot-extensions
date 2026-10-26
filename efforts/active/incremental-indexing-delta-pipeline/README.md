@@ -116,7 +116,7 @@ After the reviewed proposal, the operator admitted execution:
   identity. Metadata-only updates must not invalidate unchanged vectors.
 - [ ] Make embedding selection operate on missing/invalid chunk-model pairs,
   with bounded batch lookups and resumable coverage/backfill.
-- [ ] Delay expensive model readiness until a nonempty embedding plan exists.
+- [x] Delay expensive model readiness until a nonempty embedding plan exists.
   Keep search availability independent of indexing-engine lifecycle.
 - [ ] Preserve store-before-checkpoint ordering, partial-write recovery,
   source isolation and compatibility with #4222/#4220.
@@ -228,3 +228,41 @@ source-owner coordination rather than one large rewrite.
 - This is receiver-first expansion only. Worker/HTTP/CLI capability migration
   and connector consumption remain the next intake stretch; the queue merge
   does not enable hinted execution or complete Phase 1.
+
+### 2026-10-26 - Capability-aware hint transport merged
+
+- Merged #9049 as `7842464c3` after current-head Copilot approval and green CI.
+  Independently qualified the final worker-settlement, Python-floor,
+  intake-settlement, execution and governance selection (42 passed);
+  the implementation packet passed 184 tests with one Windows-only skip.
+- HTTP, CLI, foreground and detached-worker paths preserve required version-1
+  hints. The actual selected callable, not package metadata, declares execution
+  support. A refusing worker generation parks hinted tasks while ordinary
+  tasks continue; changing generation permits revalidation, not blind execution.
+- Cancellation-safe queue admission/settlement retains drain custody until
+  outstanding writes settle. The Python 3.10 import surface remains supported.
+- The real engine still does not advertise hint execution. Connector semantics,
+  full external-provider negotiation and end-to-end event qualification remain
+  open. The next discovery slice is pinned Git ranges and tombstones; the core
+  recovery/reuse PR remains under review.
+
+### 2026-10-26 - Replay-safe delta core merged
+
+- Merged #9043 as `f63927fcb` after current-head Copilot approval and green CI.
+  The final credential/recovery/HTTP packet passed 86 tests and the Azure
+  DevOps suite passed nine. Earlier bounded recovery/GC/source/lifecycle
+  selections passed 131 tests with one existing skip; operation-count fixtures
+  cover 100, 10,000 and 100,000 unchanged path-index entries.
+- Complete in-process deltas, exact bounded file-checkpoint lookups,
+  conservative normal-round reuse and lazy embedding readiness are available.
+  Invalidation precedes writes; stale cleanup and tombstones precede source
+  cursor publication. Acquired manifests survive partial application and replay
+  before newer upstream changes.
+- Recovery binds effective connector targets/accounts, rejects overlapping
+  pending families atomically and defers retirement while acquisition remains
+  pending. Installation credentials remain usable without a user endpoint;
+  their opaque credential scope conservatively refuses rotation of pending work.
+- This closes the lazy-readiness Plan item only. Acquisition-page checkpoints,
+  account-wide source leases/shared alias watermarks, per-chunk/model reuse,
+  mutation-aware maintenance and consumer qualification remain open under
+  their existing owners. The next implementation slice is pinned Git discovery.

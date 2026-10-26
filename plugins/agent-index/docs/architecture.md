@@ -43,6 +43,19 @@ storage layout. The opt-in Python
 protocol does not change the external provider CLI wire format; provider
 capability negotiation and durable event/task payloads remain separate work.
 
+Git revision sources use this seam for pinned base-to-target raw diffs and
+bounded new-commit history, without listing unchanged tracked paths, stored
+paths or all historical commits. Renames produce an old-path tombstone and
+new-path upsert; files becoming non-indexable retire their previous content.
+Blob reads use immutable object IDs and enforce the size bound before loading
+content. A missing/unavailable cursor or rewritten history explicitly requests
+a full reindex rather than silently performing an unlimited repair.
+Full reindexing remains the initial reconciliation path.
+Connectors whose current mode cannot prove delta coverage can expose
+`delta_available=False`; Git's working-tree fallback retains its existing
+snapshot path and logs that legacy reconciliation selection. Remote/ref reads
+remain pinned even if the named ref moves during discovery.
+
 Presented files use bounded, exact checkpoint lookups. A normal round reuses
 only complete file fingerprints covering text, language, metadata, chunker
 policy and configured embedding profiles. `IndexConfig.chunker_revision` and

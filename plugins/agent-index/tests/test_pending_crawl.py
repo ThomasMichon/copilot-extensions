@@ -197,6 +197,7 @@ def test_unchanged_spec_refuses_pending_replay_after_effective_git_target_change
     source_spec = engine.SourceSpec("git")
     monkeypatch.setattr(GitRepoConnector, "_derive_repo_name", lambda self: "sample")
     monkeypatch.setattr(GitRepoConnector, "_git_quiet", lambda *a: "")
+    monkeypatch.setattr(GitRepoConnector, "delta_available", True)
     monkeypatch.setattr(
         GitRepoConnector, "discover_delta",
         lambda *a, **k: SourceDelta(

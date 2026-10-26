@@ -29,12 +29,14 @@ import logging
 import os
 import shutil
 import subprocess
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
 
 from agent_index.sources.base import FileEntry, nonsecret_target
+from agent_index.sources.delta import SourceDelta
 from agent_index.sources.credentials import (
     SourceCredentialError,
     TokenProvider,
@@ -407,11 +409,28 @@ class GitRepoConnector:
 
     def _index_rev(self) -> str:
         """The revision to read trees/blobs/log from (ref name or 'HEAD')."""
-        if self._token_provider is not None and self._index_commit is not None:
+        if not self._use_worktree and self._index_commit is not None:
             return self._index_commit
         return self._index_ref if (self._index_ref and not self._use_worktree) else "HEAD"
 
     # -- discovery -----------------------------------------------------------
+
+    @property
+    def delta_available(self) -> bool:
+        """Only immutable revision reads can prove complete range coverage."""
+        self._resolve()
+        if self._use_worktree:
+            logger.info("git_repo: working-tree source uses legacy reconciliation")
+        return not self._use_worktree
+
+    def discover_delta(
+        self,
+        last_commit: str | None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        from agent_index.sources.git_delta import discover_git_delta
+
+        return discover_git_delta(self, last_commit, cancel_check)
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover current tracked files plus commit-history entries."""
@@ -498,7 +517,12 @@ class GitRepoConnector:
         if not self._is_indexable_path(path):
             return None
         raw = self._read_blob(path)
-        if raw is None or len(raw) > _MAX_FILE_BYTES:
+        if raw is None:
+            return None
+        return self._file_entry(path, head, raw)
+
+    def _file_entry(self, path: str, head: str | None, raw: bytes) -> FileEntry | None:
+        if len(raw) > _MAX_FILE_BYTES:
             return None
         if b"\0" in raw:
             return None
@@ -541,6 +565,7 @@ class GitRepoConnector:
         last_commit: str | None,
         *,
         cancel_check: Callable[[], None] | None,
+        strict: bool = False,
     ) -> list[FileEntry]:
         args = [
             "log",
@@ -561,8 +586,12 @@ class GitRepoConnector:
                 continue
             fields = record.split("\x1f", 5)
             if len(fields) < 6:
+                if strict:
+                    raise ValueError("Incomplete Git commit record")
                 continue
             sha, author_name, author_email, authored_at, subject, body = fields
+            if strict and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", sha) is None:
+                raise ValueError("Invalid Git commit identity")
             content = (
                 f"Commit: {sha}\n"
                 f"Author: {author_name} <{author_email}>\n"

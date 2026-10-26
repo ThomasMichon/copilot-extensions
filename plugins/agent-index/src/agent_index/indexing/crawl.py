@@ -40,7 +40,7 @@ def collect_source_changes(
         last_commit = None
 
     discover_delta = getattr(connector, "discover_delta", None)
-    if not full and callable(discover_delta):
+    if not full and callable(discover_delta) and getattr(connector, "delta_available", True):
         delta = discover_delta(last_commit, cancel_check=cancel_check)
         if not isinstance(delta, SourceDelta):
             raise ValueError("Connector returned an incompatible delta result")
