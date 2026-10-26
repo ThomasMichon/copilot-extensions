@@ -691,6 +691,12 @@ from hosted Linux execution, which remains open under #6934 and the broader
 - [x] Review and land the [scoped acquisition contract](dispatch-session-acquisition.md)
       before runtime changes; coordinate through #6076 with the adjacent
       durable CLI worker tracker #4038. Plan PR #6078 merged.
+- [x] Bounded selector follow-up (agent-recommended adaptation): provide exact
+      worktree-only CLI resume and executing-CLI support disclosure without
+      changing positional routing or adding another native-resume owner.
+      [PR #9086](https://github.com/ThomasMichon/copilot-extensions/pull/9086)
+      merged; its in-process contract proof does not close native, installed
+      or broader acquisition acceptance.
 - [ ] Inventory the current mode selectors, acquisition entry points, retained
       conversation identity, and protocol/capability checks; reuse existing
       strict bridge recovery rather than inventing a second resume mechanism.
@@ -757,6 +763,12 @@ this tracking change.
       including actual conversation-ID continuity across process exit, CLI/ACP
       task-mode selection, fresh/retired/unknown identity, concurrent holders,
       pending steers, missing optional capabilities, and protocol skew.
+
+- [x] Bounded selector follow-up: exercise the actual parser, client and
+      response boundary, prior CLI declarations, protocol/hosting refusal,
+      truncated HTTP responses and no effectful replay in positively admitted
+      units. #9086 adds 49 cases; native process-exit and installed execution
+      remain separate from this unit acceptance.
 
 - [x] A represented interactive peer under concurrent `send` pressure never
       produces a split-stream turn (regression covering the Phase 1 fix) —
@@ -845,6 +857,12 @@ symmetric venue-launch surface (needed once a venue's own daemon differs
 from the host's).
 
 ## Journal
+
+### 2026-10-26 - Exact worktree CLI selection merged
+
+[Source and contract receipt](journal/2026/10.26%20exact-resume-cli.md):
+#9086 delivers the bounded selector/disclosure follow-up. Hosted Linux,
+broader Phase 6, release/adoption and existing capability ownership stay open.
 
 ### 2026-10-22 - Complete retained acceptance from #1167
 
