@@ -41,9 +41,12 @@ rewritten as a new harness enrollment.
 
 The initial implementation addresses the selected **user-local legacy
 installation at the standard per-user Manager root**. Alternate roots and
-explicit marketplace installation contexts require durable bindings shared
+explicit marketplace installation contexts and `AGENT_HOME` overrides require durable bindings shared
 with legacy controllers, so enrollment refuses them rather than hiding an
 owner from those controllers or silently updating another cell.
+The refusal precedes enrollment writes. A worker for the supported legacy
+installation clears `AGENT_HOME` from its child environment so later logon
+settings cannot redirect the engine selected by that enrollment.
 Source-backed recurring deployment remains subject to
 its separate source-selection and publication prerequisites.
 
@@ -131,6 +134,9 @@ native restart is requested. Failed or unsettled qualification retains the old
 controller; a changed selection or disabled policy is rechecked before
 retirement. The unit, not the warmup child, owns the eventual replacement.
 Status proves liveness with a local challenge/response, not a cached PID.
+The response includes the worker's original kernel birth identity. Native
+qualification matches that identity to its pinned handle before any fixture
+signal, rather than treating a reused numeric PID as the original worker.
 
 Worker logic itself also advances. At a safe cycle boundary a windowless
 successor proves standby readiness before receiving the singleton lease.

@@ -103,7 +103,14 @@ class StartupSession:
         code = self.caller.wait(timeout=120)
         result = json.loads((directory / "job-launch.json").read_text(encoding="utf-8"))
         if type(result.get("control_pid")) is int and result["control_pid"] > 0:
-            self.control = ProcessPin(result["control_pid"], terminate_control=True)
+            try:
+                self.control = ProcessPin(
+                    result["control_pid"], terminate_control=True,
+                    expected_birth=result.get("control_birth"),
+                )
+            except (OSError, RuntimeError, ValueError) as error:
+                raise NativeBlocked("control-identity-unavailable", str(error)) from error
+            self.result["control_identity_verified"] = True
             self.observer.add_pid(result["control_pid"])
         if code or result.get("error") or result.get("gui_returncode") != 0:
             raise NativeBlocked("registered-command-failed", str(result))
@@ -121,7 +128,10 @@ class StartupSession:
         self.readiness_verified = True
         if self.job is None or self.control is None:
             raise NativeBlocked("job-proof-missing", "owned inner Job/control are unavailable")
-        worker = ProcessPin(status["pid"])
+        birth = status.get("birth")
+        if not isinstance(birth, str) or not birth:
+            raise NativeBlocked("worker-identity-unavailable", "health omitted the kernel birth identity")
+        worker = ProcessPin(status["pid"], expected_birth=birth)
         try:
             if worker.exited() or self.control.exited():
                 raise NativeBlocked("job-precondition-failed", "worker and control must both be live")
@@ -178,6 +188,7 @@ def observation_passed(packet: dict, handover: dict) -> bool:
         and handover.get("observed_cycle_spacing_seconds", 0) >= 300
         and lifetime.get("inner_job_closed") is True
         and lifetime.get("contained_control_exit_verified") is True
+        and lifetime.get("control_identity_verified") is True
         and lifetime.get("daemon_kernel_handle_live_after_job_close") is True
         and lifetime.get("authenticated_health_after_job_close") is True
         and lifetime.get("registered_command_executed") is True

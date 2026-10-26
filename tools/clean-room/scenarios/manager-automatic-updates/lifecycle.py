@@ -43,7 +43,10 @@ def summarize(status: dict) -> dict:
 
 
 def pin_worker(root: Path, status: dict, pins: list[ProcessPin], observer: Any = None) -> None:
-    pins.append(ProcessPin(status["pid"]))
+    birth = status.get("birth")
+    if not isinstance(birth, str) or not birth:
+        raise RuntimeError("worker health omitted its original kernel birth identity")
+    pins.append(ProcessPin(status["pid"], expected_birth=birth))
     if observer is not None:
         observer.add_pid(status["pid"])
     if os.name == "nt":

@@ -227,3 +227,17 @@ def test_missing_systemctl_does_not_discard_observed_timer(native_inventory) -> 
     replies[f"{legacy.LEGACY_NAME}.service"] = FileNotFoundError("systemctl")
     with pytest.raises(PolicyError, match="timer"):
         legacy.require_legacy_retired()
+
+
+def test_default_directory_timer_blocks_with_custom_xdg_config(
+    native_inventory, tmp_path: Path,
+) -> None:
+    calls, _replies = native_inventory
+    timer = tmp_path / ".config" / "systemd" / "user" / f"{legacy.LEGACY_NAME}.timer"
+    timer.parent.mkdir(parents=True)
+    timer.write_text("[Timer]\nOnBootSec=1min\n", encoding="utf-8")
+    before = timer.read_bytes()
+    with pytest.raises(PolicyError, match="retirement"):
+        legacy.require_legacy_retired()
+    assert calls == []
+    assert timer.read_bytes() == before

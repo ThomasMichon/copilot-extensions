@@ -19,6 +19,7 @@ def execute(spec: dict) -> dict:
     library = slot / "payload/libs/agent-procutil/src"
     sys.path.insert(0, str(library))
     import agent_procutil as pu
+    from agent_procutil._daemon_instance_identity import created_process_identity
 
     if Path(pu.__file__).resolve() != library / "agent_procutil/__init__.py":
         raise RuntimeError("inner Job process helper is not the selected fixture's canonical library")
@@ -32,7 +33,13 @@ def execute(spec: dict) -> dict:
         console_children=True, breakaway=False, contained_fallback=False,
         display="contained native qualification control",
     )
-    result = {"control_pid": control.pid, "gui_pid": None, "registered_command_executed": False}
+    identity = created_process_identity(control)
+    if identity is None or identity[0] != control.pid or not identity[1].startswith("windows:"):
+        raise RuntimeError("contained control has no original Windows creation identity")
+    result = {
+        "control_pid": control.pid, "control_birth": identity[1],
+        "gui_pid": None, "registered_command_executed": False,
+    }
     try:
         with (root / "probe/registered-command.log").open("ab") as output:
             # REG_SZ is already a complete CreateProcess command line, not a shell expression.
