@@ -194,7 +194,9 @@ Backfill intent lives in the existing path database, initialized with the
 canonical family from `IndexState`, effective embedding policies and routing/
 table mappings, immutable canonical snapshot and model-table versions. A
 missing or mismatched acquisition identity requests repair, including for an
-explicit restart. Only rows in the accepted colon-delimited family are embedded;
+explicit restart. Backfill requires an explicit connector `recovery_identity`;
+ordinary indexing's legacy source-name fallback never grants backfill account
+or target authority. Only rows in the accepted colon-delimited family are embedded;
 other rows still consume the explicit global-offset budget and are reported
 separately. This is budgeted snapshot discovery, not a source-indexed point
 enumeration or an ordinary-round corpus scan.
@@ -221,6 +223,10 @@ ordinary crawl acquisition is not fenced for the job's lifetime. Ordinary
 so successful acquisition does not become a failed indexing round. Known
 pre-effect writer-admission refusals propagate only after a clean writer exit;
 effectful failures retain the normal uncertainty disposition.
+Retirement holds existing source-domain operation exclusion from pending-work
+admission through data and identity cleanup, preventing a backfill from entering
+between the guard and deletion without turning independently committed writes
+into an outer transaction.
 
 Explicit `discard_embedding_backfill` removes only an exactly matching derived intent
 under clean source-domain exclusion; it requires caller authorization and

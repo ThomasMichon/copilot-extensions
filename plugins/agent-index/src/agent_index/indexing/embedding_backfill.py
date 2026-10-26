@@ -60,6 +60,8 @@ def _binding(
             or Path(store._db_path).resolve() != config.lance_dir.resolve()
             or store.content_store._table_name != config.content_table):
         raise BackfillRepairRequired("Backfill requires the configured participating source store")
+    if getattr(connector, "recovery_identity", None) is None:
+        raise BackfillRepairRequired("Backfill requires explicit connector account/target identity")
     scope = recovery_scope(
         source_scope_hash(spec), connector,
     )

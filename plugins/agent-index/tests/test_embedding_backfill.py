@@ -417,3 +417,77 @@ def test_unprepared_canonical_index_refuses_cleanly_then_can_be_prepared(context
     assert context.store._source_domain.receipt()["state"] == "clean"
     prepare_chunk_id_index(content, max_rows=20)
     assert context.run(restart=True).offset == 2
+
+
+@pytest.mark.parametrize("restart", [False, True])
+def test_legacy_recovery_fallback_never_grants_backfill_account_authority(context, restart) -> None:
+    context.connector = SimpleNamespace(source_name=context.connector.source_name)
+    state = IndexState.load(context.config.state_file)
+    state.sources[context.spec.name].acquisition_scope = recovery_scope(
+        source_scope_hash(context.spec), context.connector,
+    )
+    state.save(context.config.state_file)
+    before = context.config.state_file.read_bytes()
+    with pytest.raises(BackfillRepairRequired, match="explicit connector"):
+        context.run(restart=restart)
+    assert context.client.calls == []
+    assert context.config.state_file.read_bytes() == before
+    assert context.store._source_domain.receipt()["state"] == "clean"
+
+
+@pytest.mark.parametrize("kind", ["configured", "stale"])
+def test_gc_guard_and_retirement_exclude_concurrent_backfill_admission(
+    context, monkeypatch, kind,
+) -> None:
+    import threading
+    from agent_index.indexing.gc import (
+        SourceRetirementPolicy, gc_stale_sources, gc_unconfigured_sources,
+    )
+
+    guard = PendingCrawls.assert_gc_available
+    failures = []
+
+    def try_backfill():
+        try:
+            context.run()
+        except SourceLayoutError as exc:
+            failures.append(str(exc))
+
+    def interleaved(journal):
+        guard(journal)
+        worker = threading.Thread(target=try_backfill)
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert failures and "busy" in failures[-1]
+
+    monkeypatch.setattr(PendingCrawls, "assert_gc_available", interleaved)
+    state = IndexState.load(context.config.state_file)
+    if kind == "configured":
+        result = gc_unconfigured_sources(
+            context.store, context.paths, state, configured_names=frozenset(),
+        )
+    else:
+        result = gc_stale_sources(
+            context.store, context.paths, state,
+            policy=SourceRetirementPolicy(is_live_source=lambda _source: False),
+        )
+    assert result["chunks_deleted"] == 5
+    assert context.store.content_store.capture_snapshot().rows == 0
+    assert context.store._source_domain.receipt()["state"] == "clean"
+    assert PendingCrawls(context.paths).backfill_sources() == []
+
+
+def test_explicit_retirement_refusal_keeps_domain_clean_and_backfill_reusable(context) -> None:
+    from agent_index.indexing.gc import gc_unconfigured_sources
+
+    context.run()
+    before = context.store.content_store.capture_snapshot()
+    with pytest.raises(PendingCrawlConflict, match="backfill"):
+        gc_unconfigured_sources(
+            context.store, context.paths, IndexState.load(context.config.state_file),
+            configured_names=frozenset(),
+        )
+    assert context.store._source_domain.receipt()["state"] == "clean"
+    assert context.store.content_store.capture_snapshot() == before
+    assert context.run().offset == 4
