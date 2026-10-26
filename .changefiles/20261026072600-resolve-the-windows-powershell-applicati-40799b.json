@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve the Windows PowerShell application to an absolute executable before durable supervisor logon launch, and freeze repository-policy into durable snapshots without mutating checkout references.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
