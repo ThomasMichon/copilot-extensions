@@ -698,6 +698,16 @@ base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
 `pr-self-merge`); use live `pr-status` for the acting identity's effective
 profile when `pr.roles` or live merge authority can change which verbs apply.
 
+After a recorded PR squash-merges, `pr-complete` verifies its original head
+against reachable upstream commits and replays only later local commits.
+Candidate discovery ignores unchanged diff context, so independent edits near
+the PR's hunks do not hide a valid squash boundary. Each candidate still needs
+an exact whole-tree result from applying the original binary PR diff to its
+parent; a merged label or a patch-ID match alone never authorizes dropping
+commits. Stored publication patch IDs retain their existing format.
+Missing or conflicting proof retains the ordinary rebase/refusal path, and a
+durable pre-completion backup remains required before history changes.
+
 
 
 ### Observed check failure diagnostics

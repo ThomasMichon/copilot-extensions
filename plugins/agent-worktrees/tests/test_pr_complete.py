@@ -295,7 +295,9 @@ class TestPrComplete:
         _git("commit", "-m", "unrelated upstream", cwd=anchor)
         _git("push", "origin", "master", cwd=anchor)
         candidate = _git("rev-parse", "origin/master", cwd=wt_path)
-        effective_patch = pr_ops._patch_id(base, head, cwd=str(wt_path))
+        effective_patch = pr_ops._patch_id(
+            base, head, cwd=str(wt_path), ignore_context=True,
+        )
         monkeypatch.setattr(
             pr_ops,
             "_commit_patch_ids",

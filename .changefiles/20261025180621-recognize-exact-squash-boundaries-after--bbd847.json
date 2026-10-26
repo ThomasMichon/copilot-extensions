@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize exact squash boundaries after independent nearby edits while preserving post-merge commits and durable publication patch IDs",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
