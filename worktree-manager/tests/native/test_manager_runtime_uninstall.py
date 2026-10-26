@@ -38,10 +38,12 @@ print(json.dumps({
                            'src/worktree_manager/runtime_candidate.py',
                            'src/worktree_manager/self_install.py',
                            'src/worktree_manager/mux_file_lock.py',
+                           'src/worktree_manager/installation_updates.py',
                            'src/worktree_manager/mux_daemon_process.py')},
     'installed_files': {
         name: hashlib.sha256((pathlib.Path(worktree_manager.__file__).parent / name).read_bytes()).hexdigest()
-        for name in ('runtime_candidate.py', 'self_install.py', 'mux_file_lock.py', 'mux_daemon_process.py')
+        for name in ('runtime_candidate.py', 'self_install.py', 'mux_file_lock.py',
+                     'installation_updates.py', 'mux_daemon_process.py')
     },
 }))
 """
@@ -78,6 +80,19 @@ with subprocess.Popen(
         if child.poll() is None:
             child.terminate()
             child.wait(timeout=10)
+"""
+
+_LIST_QUERY = """
+import json, os
+from agent_procutil.owned_process import run_owned
+from worktree_manager.installation_updates import configuration_pivot
+os.environ.pop('PYTHONDONTWRITEBYTECODE', None)
+command = list(configuration_pivot().list_cmd)
+result = run_owned(command, timeout=30)
+assert result.returncode == 0, result.stdout + result.stderr
+inventory = json.loads(result.stdout)
+assert any(row['id'] == 'worktree-manager' for row in inventory['entries'])
+print(json.dumps({'manager_listed': True, 'command': command}))
 """
 
 
@@ -239,6 +254,12 @@ def _exercise(directory):
     )).stdout)
     assert daemon["started"] and daemon["stopped"]
     assert _snapshot([slot]) == sealed, "Daemon launch changed the sealed installed runtime"
+    print("Manager uninstall native: actual installed configuration list command", flush=True)
+    listing = json.loads(_success(_run(
+        [installed_python, "-I", "-B", "-c", _LIST_QUERY], env, directory,
+    )).stdout)
+    assert listing["manager_listed"]
+    assert _snapshot([slot]) == sealed, "Configuration list changed the sealed installed runtime"
     roots = [root, bin_dir, provider.parent, directory / "state"]
     before = _snapshot(roots)
     preview = json.loads(_success(_run([*external, "--uninstall", "--json"], env, directory)).stdout)
@@ -282,6 +303,7 @@ def _exercise(directory):
         "source_files": fixture["source_files"], "origin": fixture["origin"], "reinstalled": reinstalled,
         "preview": preview["status"], "installed_self": self_result["status"],
         "daemon": daemon,
+        "installation_list": listing,
         "removal": removed["status"], "repeat": absent["status"],
         "removed_runtime_and_frontdoors_confirmed": True,
         "durable_bytes_preserved": True,
@@ -298,6 +320,7 @@ def test_real_installed_manager_removal_and_reinstall():
     assert evidence["removed_runtime_and_frontdoors_confirmed"]
     assert evidence["durable_bytes_preserved"]
     assert evidence["daemon"]["started"] and evidence["daemon"]["stopped"]
+    assert evidence["installation_list"]["manager_listed"]
     assert evidence["origin"]["files"] == evidence["reinstalled"]["files"] == evidence["source_files"]
     assert Path(evidence["reinstalled"]["module"]).is_file()
     assert not Path(evidence["base_python"]).is_relative_to(Path(evidence["root"]))

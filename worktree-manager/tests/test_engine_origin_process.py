@@ -146,7 +146,7 @@ def test_posix_acquisition_selects_supported_owned_scope(monkeypatch, tmp_path, 
     kind, argv, options = calls[0]
     assert kind == ("linux" if platform == "linux" else "portable")
     assert result.returncode == 0 and result.stdout == "updated"
-    assert argv[:4] == [sys.executable, "-I", "-S", "-c"]
+    assert argv[:5] == [sys.executable, "-I", "-S", "-B", "-c"]
     assert "fixture" not in argv
     assert json.loads(options["input_text"]) == {
         "argv": ["copilot", "plugin", "update", "x@y"],

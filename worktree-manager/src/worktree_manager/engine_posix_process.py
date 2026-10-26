@@ -44,7 +44,7 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
         if errors is not None:
             kwargs["stderr"] = errors
         owner = subprocess.Popen(
-            [sys.executable, "-c", _OWNER, json.dumps(argv), str(output.fileno())],
+            [sys.executable, "-B", "-c", _OWNER, json.dumps(argv), str(output.fileno())],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             start_new_session=True, pass_fds=(output.fileno(),), **kwargs,
         )

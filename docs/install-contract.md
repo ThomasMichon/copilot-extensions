@@ -2047,7 +2047,8 @@ existing install/update behavior remains available.
 
 Construction seals an attributable per-slot inventory before completion.
 The inventory is created privately even under a permissive POSIX umask.
-Supported daemon child launches disable bytecode writes to preserve that seal.
+Manager-owned child interpreters, including daemon, configuration and demo
+self-reexecution, disable bytecode writes to preserve that seal.
 Removal validates all present generations and integrations, then revalidates
 under canonical construction, exclusive retention and publication custody.
 Manager frontdoor publication uses that same publication authority. The

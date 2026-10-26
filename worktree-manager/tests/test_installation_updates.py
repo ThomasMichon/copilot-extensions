@@ -16,6 +16,12 @@ from worktree_manager import catalog, discovery, self_install, update_driver_cli
 READ_OPERATIONS = ui._operations
 
 
+def test_configuration_child_preserves_sealed_runtime():
+    assert ui.configuration_pivot().list_cmd[:4] == (
+        sys.executable, "-B", "-m", "worktree_manager.installation_updates",
+    )
+
+
 @pytest.fixture
 def inventory(tmp_path, monkeypatch):
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))

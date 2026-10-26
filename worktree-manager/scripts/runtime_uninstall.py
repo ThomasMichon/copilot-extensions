@@ -144,10 +144,8 @@ def _validate_inventory(slot: Path) -> dict:
 def _integration(root: Path, record: dict) -> list[Path]:
     home = Path(os.environ.get("USERPROFILE") or Path.home())
     local_bin = _plain(home / ".local" / "bin")
-    registry = _plain(Path(os.environ.get(
-        "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR",
-        str(home / ".agent-worktrees" / "control-plane-providers.d"),
-    )).expanduser())
+    registry = _plain(Path(os.environ.get("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR")
+                           or home / ".agent-worktrees" / "control-plane-providers.d").expanduser())
     provider = registry / "worktree-manager.json"
     expected = record["provider"]
     primary = "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
@@ -158,7 +156,8 @@ def _integration(root: Path, record: dict) -> list[Path]:
         or expected.get("command") != [str(local_bin / primary)]
     ):
         raise ValueError("Inventory names another Manager registration")
-    if os.environ.get("AGENT_WORKTREES_CONTROL_PLANE_PROVIDER", "worktree-manager") != "worktree-manager":
+    selected = os.environ.get("AGENT_WORKTREES_CONTROL_PLANE_PROVIDER", "").strip()
+    if selected and selected != "worktree-manager":
         raise ValueError("Another control-plane provider is selected")
     publication = runtime._runtime_component("versioned_runtime_publication")
     owned = []

@@ -212,3 +212,20 @@ termination, credential change or installed rollout is authorized by this plan.
   `agent-procutil` dependency could not find `cc`. The exact owned container
   was removed; no compiler was installed or result credited. Diagnose the
   canonical toolchain prerequisite before rerunning the new native head.
+- A distinct fresh NoToken Linux run then declared and provisioned the
+  documented `gcc`/`libc6-dev` source-build prerequisite inside only its owned
+  container. At `8bcc3fb516afb54692d5855368126c74c5326e75`, uninstall controls
+  passed 39 tests with no skips, interpreter controls passed 18 with one
+  explicit Windows-only skip, and actual installed daemon/removal/reinstall
+  passed in 57.55 seconds. Source/installed hashes and durable-state bytes
+  matched. The exact container was removed and the shared image/tag unchanged.
+  This does not turn the earlier missing-compiler run into a pass.
+- The next review found additional empty-environment compatibility cases and
+  another Manager self-reexecution path that could write bytecode. Removal now
+  retains empty-as-unset directory/provider semantics while refusing a selected
+  foreign provider. Installed Manager self-reexecution paths suppress bytecode;
+  the native flow also executes the actual installed configuration list command
+  and checks its sealed tree before removal.
+- The five directly affected Windows files passed 104 tests with eleven
+  explicit platform/tier skips under unchanged limits. New-head native proof
+  and review are required for these additional corrections.

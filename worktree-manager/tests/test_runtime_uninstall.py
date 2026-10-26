@@ -231,12 +231,15 @@ def test_shared_frontdoors_require_current_registration(tmp_path, capsys, missin
     assert tree_bytes(tmp_path) == before
 
 
-@pytest.mark.parametrize("directory", ["~/providers", "~/provider registrations"])
+@pytest.mark.parametrize("directory", ["", "~/providers", "~/provider registrations"])
 def test_home_relative_provider_override_matches_installer(tmp_path, monkeypatch, capsys, directory):
     monkeypatch.setenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", directory)
     root = tmp_path / "manager"
     slot = fixture_slot(root)
-    provider = Path(directory).expanduser() / "worktree-manager.json"
+    registry = Path(directory).expanduser() if directory else (
+        Path(os.environ["USERPROFILE"]) / ".agent-worktrees" / "control-plane-providers.d"
+    )
+    provider = registry / "worktree-manager.json"
     assert provider.is_file()
     before = tree_bytes(tmp_path)
     assert removal.uninstall(root, apply=False, as_json=True) == 0
@@ -245,6 +248,24 @@ def test_home_relative_provider_override_matches_installer(tmp_path, monkeypatch
     assert removal.uninstall(root, apply=True, as_json=True) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "removed"
     assert not slot.exists() and not provider.exists()
+
+
+@pytest.mark.parametrize("selected", [
+    "", " ", "worktree-manager", " worktree-manager ", "different-provider", " different-provider ",
+])
+def test_provider_selection_preserves_empty_and_foreign_semantics(tmp_path, monkeypatch, capsys, selected):
+    root = tmp_path / "manager"
+    slot = fixture_slot(root)
+    monkeypatch.setenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDER", selected)
+    before = tree_bytes(tmp_path)
+    refused = selected.strip() == "different-provider"
+    assert removal.uninstall(root, apply=True, as_json=True) == int(refused)
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == ("refused" if refused else "removed")
+    if refused:
+        assert result["removed"] == [] and tree_bytes(tmp_path) == before
+    else:
+        assert not slot.exists()
 
 
 def test_settled_daemon_routing_history_is_preserved(tmp_path, capsys):

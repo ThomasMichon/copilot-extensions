@@ -3677,8 +3677,9 @@ It prepares a real standalone payload and canonical installed Manager in a
 redirected disposable home, then checks an actual installed daemon start,
 health request and graceful shutdown before non-mutating preview, installed-self
 refusal, actual external removal, repeated absence and actual reinstall.
-The daemon executes the production child argv without an inherited bytecode
-suppression setting; its settled launch must leave the sealed runtime unchanged.
+The daemon and Installation & Updates list command execute their production
+child argv without an inherited bytecode suppression setting; both must leave
+the sealed runtime unchanged.
 Installed package/payload hashes and origin evidence must match; runtime slots,
 selectors and owned frontdoors/registration must disappear while durable-state
 bytes remain. No synthetic inventory, constructor mock or manual fixture
