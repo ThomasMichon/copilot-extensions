@@ -11,6 +11,11 @@ volatile checks merged in #9111.**
 Immutable local source staging merged in #9115; image/guest qualification
 remains open. Effective volatile-mount observation source merged in #9124;
 actual guest qualification remains open.
+Explicit offline-mode and loopback/no-route observation source merged in #9128;
+no actual offline case or resource provisioning has been qualified.
+The next source slice implements fixed guest-state operation exclusion through
+the existing shared primitive; real shared-volume and crash qualification remains
+open. Its API and limitations live in the [tool guide](../../../tools/reproducer-lab/README.md#fixed-guest-operation-exclusion).
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -78,6 +83,7 @@ or starting resources, or retire custody, source/runtime or pre-effect gates.
 | `tools/clean-room/ARCHITECTURE.md` | Keep scenario inputs generic, outcomes literal and results separately attributable. Do not import its optional real-login/authentication path into the credential-free lab. |
 | `plugins/agent-bridge/tests/runtime_idle_fixture.py` | Reuse relevant actual runtime-graph setup knowledge. Its in-memory transfer channel and synthetic grant are not proof of native process handoff or durable guest storage. |
 | Existing Dispatch diagnostics, Bridge event storage and process-telemetry owners | Discover and retain their real outputs; observation does not supply task, session, retry or service authority. Native streams and protected installer attempts remain with their owners. |
+| `libs/single-instance-lease` operation primitive | Reuse a fixed lock in the guest state volume, not an arbitrary host-results path. Exclusion does not settle accepted descendants after a driver crash; the case owner must join existing task/Bridge journals and refuse unknown accepted work before replay. |
 
 The proposed home is a small, opt-in test tool under `tools/reproducer-lab/`,
 with synthetic fixtures in the owning plugins' tests where appropriate.
@@ -275,8 +281,10 @@ No image build, guest copy or running-source claim follows.
 read-only root and private bounded `/tmp`/`/run` posture. Its synthetic tables,
 mocked Docker calls and local descriptor fixtures are not a real container
 qualification or a complete guest mount/runtime/source policy.
-Implement the remaining source-to-image/guest qualification, controlled egress,
-resource and interrupted-driver custody prerequisites before provisioning.
+Implement the remaining source-to-image/guest and resource/interrupted-driver
+custody controls through the existing owners. After separate exact resource
+approval and bounded lifecycle implementation, create the selected offline lab
+to qualify actual boundaries before any case, DB mutation or injected fault.
 Reuse existing finite process, source and service owners;
 this remains ordinary integration-test tooling, not a new runtime or fleet.
 Keep persistent provisioning blocked until the exact resources, thresholds,

@@ -7,6 +7,8 @@ inspect explicitly selected existing resources and run fixed, non-root
 probes in an already running guest. It never creates, starts, stops or
 deletes resources. Source publication does not authorize those observations
 against an existing installation.
+The separate guest operation context is effectful only when explicitly invoked
+in a separately authorized guest; the host reader never invokes it.
 
 `boundary.py` provides:
 
@@ -257,6 +259,47 @@ persistence, native-output retention or strict pre-effect support, clear the
 static unresolved list, or admit a case. Client cleanup is not proof that a
 daemon-side exec settled; missing/error observations remain unavailable.
 
+## Fixed guest operation exclusion
+
+`guest_operation.operation()` reuses the source-shipped
+[`single-instance-lease` operation primitive](../../libs/single-instance-lease/README.md#operation----custody-for-one-operation)
+at the fixed `/lab/state/reproducer-driver.lock` key. It does not accept a host
+results directory, create the state directory, initialize resources or install
+dependencies. The lock file may be created on first authorized acquisition and
+is retained after release; no unlink, PID/age reclaim or automatic replay occurs.
+
+Before acquisition, before yielding custody, on each returned
+`GuestOperation.assert_owned()` and at context exit, it checks existing Linux
+`1000:1000` identity, the unlinked state directory's device/inode and private
+`0700` posture. Bounded mount-table reads reuse `guest_mounts.py` and the existing
+`mounts.py` parser. `/lab/state` must be an exact writable mount on a different
+device from the read-only root, without nested/shadowed mounts. The initial
+parser also rejects any `/lab` ancestor mount: a same-device overmount can hide
+an older state record still present in mountinfo. Device equality alone does
+not prove that record is the opened directory's effective mount. The initial
+nonvolatile filesystem selection supports ext4, XFS, Btrfs and ZFS; unfamiliar
+filesystems refuse rather than being presumed durable. The open directory device
+must match that mount. Each observation has a five-second elapsed ceiling,
+32 KiB table ceiling and 256-record ceiling; the operation lifetime itself
+belongs to the future bounded case owner.
+
+Existing lock files must be regular, single-linked, on the observed state
+device, owned by `1000:1000` with mode `0600`. After acquisition, the shared
+primitive verifies lock-file and execution ownership. The caller must invoke
+`custody.assert_owned()` before its consequential stages. Failure propagates
+and releases only this context's descriptor; partial work/evidence is retained.
+
+This serializes cooperative guest drivers mounting the same physical state
+volume. It is not a Docker volume-association certificate, persistence
+qualification, overall READY signal or fencing of accepted descendants.
+Directory/mount observations are non-atomic; equal-privilege replacement is not
+prevented. After a driver crash, kernel lock release does not prove its task,
+Bridge delivery or service work finished. The future case owner must join the
+existing task/Bridge journals and refuse unknown accepted work before new work
+or replay. Actual shared-volume contention, crash retention and case recovery
+remain separate qualification obligations. No read-only observation acquires
+this lock or authorizes a resource/case action.
+
 ## Tests
 
 `tools/test_reproducer_lab_boundary.py` is an in-process, synthetic control set:
@@ -280,11 +323,17 @@ state or invoking Docker; they are not real container qualification.
 kernel observation bounds, loopback-only refusal, actual-error classification,
 before/after drift, fixed probe/resource selection and host/guest deadlines.
 All sockets, namespace and kernel inputs are synthetic.
+`tools/test_reproducer_lab_operation.py` covers fixed-key shared-primitive
+selection, bounded parser reuse, state/lock posture and pre/post failure
+propagation through synthetic lock seams and local directory-descriptor
+fixtures. It never reads host mount tables or invokes the guest lock against
+real resources. These controls do not qualify real inter-process/shared-volume
+exclusion or crash settlement.
 Run it with the repository's selected Python/pytest environment through the
 caller's bounded test supervisor:
 
 ```text
-<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py tools/test_reproducer_lab_offline.py
+<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py tools/test_reproducer_lab_offline.py tools/test_reproducer_lab_operation.py
 ```
 
 These tests do not run Docker, open a socket, install dependencies, exercise native
