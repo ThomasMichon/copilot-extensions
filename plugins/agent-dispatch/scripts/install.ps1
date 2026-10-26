@@ -1224,6 +1224,7 @@ function Materialize-DispatchSnapshot {
         'agent-worktree-identity' = 'worktree-identity'
         'agent-process-telemetry' = 'process-telemetry'
         'agent-plugin-activation' = 'plugin-activation'
+        'agent-repository-policy' = 'repository-policy'
     }
     $libsDir = Join-Path $SnapshotDir 'libs'
     New-Item -ItemType Directory -Path $libsDir -Force | Out-Null
@@ -3198,7 +3199,15 @@ spawn_daemon(
     console_children=True,
 )
 '@
-    & $LinkPython -c $spawn $InstallDir powershell.exe -NoProfile -ExecutionPolicy Bypass `
+    $application = Get-Command powershell.exe -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    $windowsPowerShell = if ($application) { $application.Source } else { $null }
+    if (-not $windowsPowerShell -or -not [IO.Path]::IsPathRooted($windowsPowerShell) -or
+        -not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) {
+        throw 'Could not resolve a usable Windows PowerShell application (powershell.exe)'
+    }
+    $windowsPowerShell = (Get-Item -LiteralPath $windowsPowerShell -ErrorAction Stop).FullName
+    & $LinkPython -c $spawn $InstallDir $windowsPowerShell -NoProfile -ExecutionPolicy Bypass `
         -File $Launcher @LauncherArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Could not launch durable service '$Launcher' outside the installer Job"
