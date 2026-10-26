@@ -56,6 +56,10 @@ if [[ "$ACTION" == uninstall && "$UNINSTALL_REQUESTED" != 1 ]]; then
     _fail 'Uninstall must be an explicit action, not inherited from the environment'
     exit 2
 fi
+if [[ "$ACTION" == uninstall && "/$INSTALL_DIR/" == *"/../"* ]]; then
+    _fail 'Uninstall refuses parent-traversal path components'
+    exit 2
+fi
 export AGENT_MCP_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

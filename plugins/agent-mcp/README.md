@@ -106,6 +106,11 @@ installed-runtime interpreter candidates. Bash accepts `--install-dir PATH`,
 not `--install-dir=PATH`; unsupported flags (including `--dry-run`), missing
 values, repeated root selections and conflicting actions are rejected before
 dispatch. Uninstall must be explicit, never inherited from the environment.
+Destructive roots containing a `..` path component are refused before
+normalization or lock creation. Ordinary relative roots and names such as
+`release..dev` remain supported; spell the intended root without parent traversal.
+Windows relative roots bind to PowerShell's current filesystem-provider location
+before locking, independently of the process working directory.
 Windows requires native CIM process inspection; Linux requires readable
 current-user `/proc` process information. Other platforms and unavailable or
 ambiguous inspection fail closed. A base-interpreter MCP process without an
@@ -135,6 +140,13 @@ Cleanup errors are reported, retaining or restoring the exact previously
 validated manifest or stamped ownership evidence so a subsequent uninstall can
 authenticate and retry. This recovery restores ownership evidence only, not
 already removed runtime contents; it creates no new owner or activation policy.
+The packaged plugin includes the canonical native removal helpers and finite
+process supervisor through the existing installer-engine synchronization owner;
+uninstall does not require a source checkout alongside the payload.
+POSIX cleanup children use the shared owned-process runner, which settles their
+process group before returning or propagating a timeout while the caller keeps
+uninstall custody. This caller-held mode does not claim lease retention after
+abrupt caller termination.
 
 ## Reliable transport: one bridge, two surfaces
 

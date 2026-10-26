@@ -9,7 +9,9 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import venv
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -20,6 +22,27 @@ DERIVED = (
     "running-version.json", "payload-dir", "stamped-version", "deploy-manifest.json",
     ".provision-status",
 )
+
+
+def test_packaged_legacy_uninstall_has_no_canonical_checkout_dependency(tmp_path: Path) -> None:
+    if os.name == "nt" or not shutil.which("bash"):
+        pytest.skip("native POSIX packaged cleanup")
+    root, env, durable = _fixture(tmp_path / "installation")
+    payload = tmp_path / "packaged" / "agent-mcp"
+    shutil.copytree(SCRIPTS, payload / "scripts", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("plugin.json", "pyproject.toml"):
+        shutil.copyfile(SCRIPTS.parent / name, payload / name)
+    assert not (tmp_path / "libs" / "installer-engine").exists()
+    result = subprocess.run(
+        [shutil.which("bash"), str(payload / "scripts" / "init.sh"),
+         "uninstall", "--install-dir", str(root)],
+        cwd=tmp_path, env=env, capture_output=True, text=True, timeout=90,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_derived(root, present=False)
+    for name, content in durable.items():
+        if name != ".install.lock":
+            assert (root / name).read_bytes() == content
 
 
 @pytest.fixture(params=("powershell.exe", "pwsh", "bash"))
@@ -659,3 +682,205 @@ def test_round2_windows_launcher_only_bootstrap(tmp_path: Path, review_shell: st
     assert resolved.returncode == 0, resolved.stdout + resolved.stderr
     assert Path(resolved.stdout.strip()).is_file()
     assert not Path(resolved.stdout.strip()).is_relative_to(root)
+
+
+@pytest.mark.parametrize("action", ("check", "remove"))
+def test_final_helper_rejects_original_parent_components(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str], action: str,
+) -> None:
+    helper, root, _ = _review_adapter(monkeypatch, tmp_path)
+    requested = str(root / "link" / ".." / "target")
+
+    def unexpected(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("request reached normalization or uninstall dispatch")
+
+    monkeypatch.setattr(helper, "os", SimpleNamespace(path=SimpleNamespace(abspath=unexpected)))
+    monkeypatch.setattr(helper.sys, "argv", [
+        "uninstall_runtime.py", action, "--root", requested, "--shell", "unused",
+    ])
+    monkeypatch.setattr(helper, "uninstall", unexpected)
+    assert helper.main() == 1
+    assert "parent-traversal path components" in capsys.readouterr().err
+    _assert_derived(root, present=True)
+
+
+def test_final_posix_symlink_parent_request_preserves_both_roots(tmp_path: Path) -> None:
+    bash = shutil.which("bash") if os.name != "nt" else None
+    if bash is None:
+        pytest.skip("native POSIX Bash required")
+    default, env, _ = _fixture(tmp_path)
+    lexical = default.parent / "target"
+    outside = tmp_path / "outside"
+    nested = outside / "nested"
+    nested.mkdir(parents=True)
+    physical = outside / "target"
+    for root in (lexical, physical):
+        shutil.copytree(default, root)
+        (root / ".install.lock").unlink()
+    link = default.parent / "link"
+    link.symlink_to(nested, target_is_directory=True)
+    requested = str(link) + "/../target"
+    before = {
+        path: path.read_bytes() for root in (default, lexical, physical)
+        for path in root.rglob("*") if path.is_file()
+    }
+    result = subprocess.run(
+        [bash, str(SCRIPTS / "init.sh"), "uninstall", "--install-dir", requested],
+        env=env, cwd=default.parent, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "parent-traversal path components" in result.stderr
+    assert {
+        path: path.read_bytes() for root in (default, lexical, physical)
+        for path in root.rglob("*") if path.is_file()
+    } == before
+    assert not (lexical / ".install.lock").exists()
+    assert not (physical / ".install.lock").exists()
+
+
+def test_final_windows_parent_request_precedes_bootstrap(tmp_path: Path, review_shell: str) -> None:
+    if os.name != "nt":
+        pytest.skip("native Windows request boundary")
+    root, env, _ = _fixture(tmp_path)
+    (root / "child").mkdir()
+    empty_path = tmp_path / "no-interpreters"
+    empty_path.mkdir()
+    env["PATH"] = str(empty_path)
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    result = _run(review_shell, Path(str(root) + "\\child\\.."), env)
+    assert result.returncode != 0
+    assert "parent-traversal path components" in result.stderr, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+def test_final_normal_relative_root_remains_supported(tmp_path: Path, review_shell: str) -> None:
+    default, env, _ = _fixture(tmp_path)
+    target = default.parent / "release..dev"
+    if os.name == "nt":
+        command = [
+            review_shell, "-NoProfile", "-NonInteractive", "-File", str(SCRIPTS / "init.ps1"),
+            "uninstall", "-InstallDir", ".\\release..dev",
+        ]
+    else:
+        shutil.copytree(default, target)
+        command = [
+            review_shell, str(SCRIPTS / "init.sh"), "uninstall", "--install-dir", "./release..dev",
+        ]
+    before = {path: path.read_bytes() for path in default.rglob("*") if path.is_file()}
+    result = subprocess.run(
+        command, env=env, cwd=default.parent, capture_output=True, text=True, timeout=90,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if os.name == "nt":
+        assert not target.exists()
+    else:
+        _assert_derived(target, present=False)
+    assert {path: path.read_bytes() for path in default.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("outcome", ("success", "timeout", "error"))
+def test_final_posix_runner_uses_caller_held_custody(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: str,
+) -> None:
+    helper, _, _ = _review_adapter(monkeypatch, tmp_path)
+    monkeypatch.setattr(helper, "os", SimpleNamespace(name="posix", environ=os.environ))
+    observed = []
+
+    def run_owned(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        observed.append(kwargs)
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, 60)
+        if outcome == "error":
+            raise subprocess.CalledProcessError(1, command, stderr="injected failure")
+        return subprocess.CompletedProcess(command, 0, "settled", "")
+
+    def load(name: str, filename: str) -> Any:
+        assert Path(filename).name == "installer_engine_process.py"
+        return SimpleNamespace(run_owned=run_owned)
+
+    monkeypatch.setattr(helper, "_load", load)
+    if outcome == "timeout":
+        with pytest.raises(subprocess.TimeoutExpired):
+            helper._run(["fixture-child"])
+    elif outcome == "error":
+        with pytest.raises(RuntimeError, match="injected failure"):
+            helper._run(["fixture-child"])
+    else:
+        assert helper._run(["fixture-child"]) == "settled"
+    assert observed == [{
+        "cwd": Path.cwd(), "env": dict(os.environ), "timeout": 60,
+        "procutil": None, "construction_fd": None,
+    }]
+
+
+def test_final_posix_timeout_settles_descendant_writes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    bash = shutil.which("bash") if os.name != "nt" else None
+    if bash is None:
+        pytest.skip("native POSIX process settlement required")
+    helper, _, _ = _review_adapter(monkeypatch, tmp_path)
+    original_load = helper._load
+
+    def load(name: str, filename: str) -> Any:
+        module = original_load(name, filename)
+        if Path(filename).name == "installer_engine_process.py":
+            original_run = module.run_owned
+
+            def short_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+                assert kwargs["timeout"] == 60
+                kwargs["timeout"] = 0.2
+                return original_run(command, **kwargs)
+
+            module.run_owned = short_run
+        return module
+
+    monkeypatch.setattr(helper, "_load", load)
+    late = tmp_path / "late-write"
+    with pytest.raises(subprocess.TimeoutExpired):
+        helper._run([
+            bash, "-c", '(sleep 1; printf late > "$1") & wait', "timeout-fixture", str(late),
+        ])
+    time.sleep(1.2)
+    assert not late.exists()
+
+
+@pytest.mark.parametrize("host", ("powershell.exe", "pwsh"))
+def test_final_windows_relative_root_uses_provider_location(tmp_path: Path, host: str) -> None:
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip(f"native Windows {host} required")
+    default, env, _ = _fixture(tmp_path)
+    desired = tmp_path / "desired-parent"
+    other = tmp_path / "other-parent"
+    desired.mkdir()
+    other.mkdir()
+    owned = other / "scoped-runtime"
+    shutil.copytree(default, owned)
+    before = {
+        path: path.read_bytes() for root in (default, owned)
+        for path in root.rglob("*") if path.is_file()
+    }
+    wrapper = tmp_path / "provider-cwd-control.ps1"
+    wrapper.write_text(
+        "param($Installer, $Desired, $Other)\n"
+        "$ErrorActionPreference = 'Stop'\n"
+        "Set-Location -LiteralPath $Desired\n"
+        "[IO.Directory]::SetCurrentDirectory($Other)\n"
+        "& $Installer uninstall -InstallDir scoped-runtime\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(wrapper),
+         str(SCRIPTS / "init.ps1"), str(desired), str(other)],
+        env=env, cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "already absent" in result.stdout
+    assert not (desired / "scoped-runtime").exists()
+    assert {
+        path: path.read_bytes() for root in (default, owned)
+        for path in root.rglob("*") if path.is_file()
+    } == before

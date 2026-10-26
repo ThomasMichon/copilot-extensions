@@ -189,6 +189,21 @@ def remove_runtime(root: Path, shell: str) -> None:
                     shell, "-c", '. "$1"; shift; remove_install_runtime_content "$@"',
                     "logger-uninstall", str(engine), str(target), *entries,
                 ]
+                spec = importlib.util.spec_from_file_location(
+                    "_logger_uninstall_process", engine.with_name("installer_engine_process.py"),
+                )
+                if spec is None or spec.loader is None:
+                    raise RuntimeError("Logger cleanup process supervisor is unavailable")
+                supervisor = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(supervisor)
+                try:
+                    supervisor.run_owned(
+                        command, cwd=Path.cwd(), env=dict(os.environ), timeout=90,
+                        procutil=None, construction_fd=None,
+                    )
+                except subprocess.CalledProcessError as error:
+                    raise RuntimeError(f"Logger runtime removal failed: {error.stderr.strip()}") from error
+                return
             result = subprocess.run(
                 command, capture_output=True, text=True, timeout=90, check=False,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -211,6 +226,8 @@ def main() -> int:
     parser.add_argument("--shell")
     args = parser.parse_args()
     try:
+        if ".." in Path(args.root).parts:
+            raise RuntimeError("Logger uninstall requires a root without parent-traversal components")
         root = Path(os.path.abspath(args.root))
         owner = validate(root)
         if args.idle:

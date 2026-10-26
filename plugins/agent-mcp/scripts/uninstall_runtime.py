@@ -44,6 +44,11 @@ def _ordinary_path(path: Path) -> None:
             raise RuntimeError(f"Uninstall refuses redirected paths: {candidate}")
 
 
+def _reject_parent_traversal(path: str | Path) -> None:
+    if ".." in Path(path).parts:
+        raise RuntimeError("Uninstall refuses parent-traversal path components")
+
+
 def _snapshot_generations(root: Path) -> tuple[str, ...]:
     directory = root / "snapshots"
     _ordinary_path(directory)
@@ -64,6 +69,7 @@ def _snapshot_generations(root: Path) -> tuple[str, ...]:
 
 def check_root(root: Path) -> bool:
     """Validate before native lock creation, staging, or any other mutation."""
+    _reject_parent_traversal(root)
     _ordinary_path(root)
     homes = {Path.home(), *(Path(os.environ[key]) for key in ("HOME", "USERPROFILE") if os.environ.get(key))}
     if root == Path(root.anchor) or any(root == home or root in home.parents for home in homes):
@@ -133,10 +139,25 @@ def check_root(root: Path) -> bool:
 
 
 def _run(command: list[str]) -> str:
-    result = subprocess.run(
-        command, capture_output=True, text=True, timeout=60, check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    if os.name == "nt":
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=60, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    else:
+        helper = SCRIPTS / "installer_engine_process.py"
+        if not helper.is_file():
+            helper = SCRIPTS.parents[2] / "libs" / "installer-engine" / helper.name
+        if not helper.is_file():
+            raise RuntimeError("Shared installer process settlement helper is unavailable")
+        runner = _load("_mcp_uninstall_process", str(helper))
+        try:
+            result = runner.run_owned(
+                command, cwd=Path.cwd(), env=dict(os.environ), timeout=60,
+                procutil=None, construction_fd=None,
+            )
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError(f"Uninstall native helper failed: {(error.stderr or '').strip()}") from error
     if result.returncode:
         raise RuntimeError(f"Uninstall native helper failed: {result.stderr.strip()}")
     return result.stdout
@@ -398,8 +419,9 @@ def main() -> int:
     parser.add_argument("--root", required=True)
     parser.add_argument("--shell", required=True)
     arguments = parser.parse_args()
-    root = Path(os.path.abspath(arguments.root))
     try:
+        _reject_parent_traversal(arguments.root)
+        root = Path(os.path.abspath(arguments.root))
         if arguments.action == "check":
             print("ready" if check_root(root) else "absent")
         else:

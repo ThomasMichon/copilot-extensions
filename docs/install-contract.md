@@ -2421,6 +2421,15 @@ empty/null PowerShell selections refuse rather than falling back to purge.
 Omitting the selection preserves existing purge behavior; the helper does not
 establish product ownership, acquire the transaction or retire live processes.
 
+Destructive adapters bind an unambiguous root before acquiring their transaction;
+Logger and MCP refuse parent-traversal components rather than mixing native
+filesystem traversal with Python's lexical normalization. POSIX removal children
+use the existing finite-process supervisor and settle descendant writers before
+returning or propagating a timeout. Its explicit caller-held mode needs no
+runtime process-utility dependency; without a construction descriptor it does
+not establish storage-custody retention after abrupt caller death. Existing
+construction callers retain their descriptor-backed contract.
+
 `agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
 `flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through
 Python, so it still excludes PowerShell and `flock` holders of `.install.lock`;

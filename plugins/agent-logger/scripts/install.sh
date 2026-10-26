@@ -21,6 +21,25 @@ LOCAL_BIN="${HOME}/.local/bin"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+if [[ "$ACTION" == uninstall ]]; then
+    __uninstall_args=("$@")
+    for (( __arg=1; __arg<${#__uninstall_args[@]}; __arg++ )); do
+        if [[ "${__uninstall_args[$__arg]}" == --install-dir ]]; then
+            __arg=$((__arg + 1))
+            __root="${__uninstall_args[$__arg]:-}"
+            if [[ -z "$__root" || "$__root" == -* ]]; then
+                printf '%s\n' '--install-dir requires a directory' >&2
+                exit 2
+            fi
+            case "/$__root/" in
+                */../*) printf '%s\n' 'Logger uninstall requires a root without parent-traversal components' >&2; exit 2 ;;
+            esac
+            [[ "$__root" == /* ]] || __uninstall_args[$__arg]="$PWD/$__root"
+        fi
+    done
+    set -- "${__uninstall_args[@]}"
+fi
+
 # Staging itself writes installation state, so publication admission precedes it.
 case "$ACTION" in
     install|update|stamp|provision)
@@ -341,6 +360,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+if [[ "$ACTION" == uninstall ]]; then
+    case "/$INSTALL_DIR/" in
+        */../*) printf '%s\n' 'Logger uninstall requires a root without parent-traversal components' >&2; exit 2 ;;
+    esac
+fi
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi

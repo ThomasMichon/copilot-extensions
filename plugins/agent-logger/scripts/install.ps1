@@ -49,6 +49,14 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($Action -eq 'uninstall' -and $InstallDir) {
+    if (($InstallDir -split '[\\/]') -contains '..') {
+        throw 'Logger uninstall requires a root without parent-traversal components'
+    }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -590,6 +598,9 @@ function Ensure-UvIndex {
 }
 
 $InstallDir = if ($InstallDir) { $InstallDir } else { Join-Path $env:USERPROFILE '.agent-logger' }
+if ($Action -eq 'uninstall' -and ($InstallDir -split '[\\/]' -contains '..')) {
+    throw 'Logger uninstall requires a root without parent-traversal components'
+}
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger'))
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(

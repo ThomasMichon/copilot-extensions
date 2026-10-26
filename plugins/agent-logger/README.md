@@ -86,6 +86,10 @@ installer staging area is allowed). Linux checks full current-user command
 lines and refuses ambiguously attributed Logger processes, including PATH
 launches through symlinked virtualenv interpreters; unavailable native process
 inspection refuses removal.
+Uninstall roots cannot contain `..` components. Relative selections are bound
+before installer staging (and against PowerShell's provider location on Windows).
+POSIX removal children use the shared finite-process supervisor so timeout
+settlement completes before the caller releases its install/generation custody.
 
 ## Source-qualified runtimes
 

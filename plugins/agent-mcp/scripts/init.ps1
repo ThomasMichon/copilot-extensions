@@ -33,6 +33,17 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($Action -eq 'uninstall' -and (($InstallDir -split '[\\/]') -contains '..')) {
+    throw 'Uninstall refuses parent-traversal path components'
+}
+if ($Action -eq 'uninstall' -and $InstallDir) {
+    if (-not [IO.Path]::IsPathRooted($InstallDir)) {
+        $InstallDir = Join-Path $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath $InstallDir
+    }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)

@@ -476,3 +476,91 @@ def test_logger_runtime_guard_reuses_validated_inventory(tmp_path, monkeypatch):
     monkeypatch.setattr(helper, "_load", lambda *args: runtime)
     helper.refuse_live_runtime(tmp_path)
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh", "bash"])
+def test_logger_parent_traversal_refuses_before_lock_or_root_mutation(tmp_path, host):
+    if (host == "bash") == (os.name == "nt"):
+        pytest.skip("native OS shell only")
+    executable = shutil.which(host)
+    if executable is None:
+        pytest.skip("native shell unavailable")
+    root, durable, env = _fixture(tmp_path / "first", "owned")
+    other, other_durable, _ = _fixture(tmp_path / "other", "owned")
+    destination = other.parent / "nested"
+    destination.mkdir()
+    alias = root.parent / "alias"
+    try:
+        alias.symlink_to(destination, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks unavailable")
+    requested = str(alias / ".." / root.name)
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    if os.name == "nt":
+        command = [executable, "-NoProfile", "-NonInteractive", "-File",
+                   str(INSTALLERS / "install.ps1"), "uninstall", "-InstallDir", requested]
+    else:
+        command = [executable, str(INSTALLERS / "install.sh"), "uninstall", "--install-dir", requested]
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, env=env, **kwargs,
+    )
+    assert result.returncode != 0
+    assert "parent-traversal components" in result.stdout + result.stderr
+    _assert_state(root, durable, removed=False)
+    _assert_state(other, other_durable, removed=False)
+    assert not (root / ".install.lock").exists()
+    assert not (other / ".install.lock").exists()
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_logger_relative_root_uses_provider_not_process_cwd(tmp_path, host):
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip("native Windows shell required")
+    root, durable, env = _fixture(tmp_path / "wanted", "owned")
+    other, other_durable, _ = _fixture(tmp_path / "other", "owned")
+    runner = tmp_path / "relative-root.ps1"
+    runner.write_text(
+        "param($Installer, $WantedParent, $OtherParent)\n"
+        "$ErrorActionPreference='Stop'\n"
+        "function Get-ScheduledTask { param($TaskName, $ErrorAction) }\n"
+        "Set-Location -LiteralPath $WantedParent\n"
+        "[IO.Directory]::SetCurrentDirectory($OtherParent)\n"
+        "& $Installer uninstall -InstallDir scoped-runtime\n",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(runner),
+         str(INSTALLERS / "install.ps1"), str(root.parent), str(other.parent)],
+        capture_output=True, text=True, timeout=45, env=env,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_state(root, durable, removed=True)
+    _assert_state(other, other_durable, removed=False)
+    assert not (other / ".install.lock").exists()
+
+
+def test_posix_logger_relative_root_survives_marketplace_self_staging(tmp_path):
+    bash = shutil.which("bash") if os.name != "nt" else None
+    if bash is None:
+        pytest.skip("native POSIX Bash required")
+    root, durable, env = _fixture(tmp_path / "wanted", "owned")
+    other, other_durable, _ = _fixture(tmp_path / "other", "owned")
+    env["HOME"] = env["USERPROFILE"] = str(other.parent)
+    spec = importlib.util.spec_from_file_location(
+        "logger_release_fixture", REPO / "plugins" / "agent-logger" / "tests" / "test_install_binstub.py",
+    )
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    payload = fixture._stage_release_payload(tmp_path / "release-fixture")
+    installed = other.parent / ".copilot" / "installed-plugins" / "fixture" / "agent-logger"
+    shutil.copytree(payload, installed)
+    result = subprocess.run(
+        [bash, str(installed / "scripts" / "install.sh"), "uninstall",
+         "--install-dir", "scoped-runtime"],
+        cwd=root.parent, capture_output=True, text=True, timeout=60, env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_state(root, durable, removed=True)
+    _assert_state(other, other_durable, removed=False)
+    assert not (other / ".install.lock").exists()
