@@ -50,7 +50,10 @@ def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
     env = {
         **os.environ, "HOME": str(home), "USERPROFILE": str(home),
         "PYTHONPATH": str(tmp_path),
+        "WORKTREE_BLOCKING_INSTALL": "1",
     }
+    # This extracted recovery join starts after target admission and opt-in.
+    # Their separate policy contracts remain outside this stage-status fixture.
     if shell == "bash":
         source = (root / "launch-session.sh").read_text(encoding="utf-8")
         start = source.index("invoke_update_apply() {")
@@ -59,6 +62,9 @@ def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
         fixture.write_text(
             "set -euo pipefail\n"
             "setup_status() { :; }; setup_log() { :; }; _start_setup_progress() { :; }\n"
+            'admit_launch_target() { [[ "$1" == "$_LAUNCH_POLICY_PATH" && "$2" == maintenance ]]; }\n'
+            "automatic_maintenance_enabled() { return 0; }\n"
+            "_LAUNCH_ADMITTED=1; _LAUNCH_POLICY_PATH=synthetic-target\n"
             f"PYTHON={shlex.quote(python)}\n"
             "_NO_UPDATE=0; _UPDATE_APPLIED=''; _STAGE_PID=''\n"
             + source[start:end]
@@ -78,6 +84,11 @@ def test_launcher_join_retries_unusable_stage_once(tmp_path, shell, state):
         fixture.write_text(
             "$ErrorActionPreference='Stop'\n"
             "function Write-SetupStatus {}\n"
+            "function Assert-LaunchTarget { param($Path, $Operation)\n"
+            "  if ($Path -ne $script:LaunchPolicyPath -or $Operation -ne 'maintenance') "
+            "{ throw 'Wrong target admission' }\n}\n"
+            "function Test-AutomaticMaintenance { return $true }\n"
+            "$script:LaunchAdmitted=$true; $script:LaunchPolicyPath='synthetic-target'\n"
             f"$VenvPython='{python}'; $noUpdate=$false; $script:UpdateApplied=$false\n"
             + source[start:end]
             + (

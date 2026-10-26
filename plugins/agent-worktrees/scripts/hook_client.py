@@ -693,22 +693,6 @@ def _fallback_legacy_session_start(payload: dict, *, skip_reconcile: bool = Fals
     return result
 
 
-def _update_driver_image(helper, pid: int) -> str | None:
-    image = helper._pid_image_path(pid)
-    if image or sys.platform != "darwin":
-        return image
-    import ctypes
-
-    libproc = ctypes.CDLL("/usr/lib/libproc.dylib")
-    probe = libproc.proc_pidpath
-    probe.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
-    probe.restype = ctypes.c_int
-    buffer = ctypes.create_string_buffer(4096)
-    if probe(pid, buffer, len(buffer)) <= 0:
-        return None
-    return os.fsdecode(buffer.value) or None
-
-
 def _external_update_driver_active(home: Path, python: Path) -> bool:
     """Defer only to a live update stage, not an installed Manager.
 
@@ -750,7 +734,7 @@ def _external_update_driver_active(home: Path, python: Path) -> bool:
             current = identity.process_start_time(pid)
             if current is None or str(recorded) != current:
                 return False
-        image = _update_driver_image(helper, pid)
+        image = _RUNTIME.update_driver_image(helper, pid)
         return bool(
             image
             and Path(image).resolve() == python.resolve()

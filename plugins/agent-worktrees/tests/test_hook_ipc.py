@@ -981,7 +981,7 @@ def test_update_driver_tracks_real_stage_lock_lifetime(tmp_path):
     assert helper is not None
     # Test venvs can use a trampoline; production version slots use copied
     # interpreters. Bind this fixture to the actual running image.
-    image = hook_client._update_driver_image(helper, os.getpid())
+    image = hook_client._RUNTIME.update_driver_image(helper, os.getpid())
     assert image is not None
     python = Path(image)
     assert update_stage.acquire_lock(lock)
@@ -999,7 +999,7 @@ def test_update_driver_does_not_expire_a_live_stage(monkeypatch, tmp_path, proto
     runtime = tmp_path / ".agent-worktrees"
     lock = runtime / "updater.lock"
     helper = hook_client._load_sibling("versioned_runtime.py")
-    image = hook_client._update_driver_image(helper, os.getpid())
+    image = hook_client._RUNTIME.update_driver_image(helper, os.getpid())
     assert image
     assert update_stage.acquire_lock(lock)
     try:
@@ -1025,7 +1025,7 @@ def test_update_driver_rejects_reused_pid_with_matching_python(tmp_path):
     runtime = tmp_path / ".agent-worktrees"
     runtime.mkdir()
     helper = hook_client._load_sibling("versioned_runtime.py")
-    image = hook_client._update_driver_image(helper, os.getpid())
+    image = hook_client._RUNTIME.update_driver_image(helper, os.getpid())
     assert image
     (runtime / "updater.lock").write_text(
         json.dumps({
@@ -1045,7 +1045,7 @@ def test_update_driver_identity_probe_needs_no_installed_runtime(tmp_path):
     runtime = tmp_path / ".agent-worktrees"
     lock = runtime / "updater.lock"
     helper = hook_client._load_sibling("versioned_runtime.py")
-    image = hook_client._update_driver_image(helper, os.getpid())
+    image = hook_client._RUNTIME.update_driver_image(helper, os.getpid())
     assert image
     script = (
         "import importlib.util,pathlib,sys;"
@@ -1071,7 +1071,7 @@ def test_real_update_driver_fixtures_use_darwin_image_fallback(monkeypatch, tmp_
     import ctypes
 
     helper = hook_client._load_sibling("versioned_runtime.py")
-    image = hook_client._update_driver_image(helper, os.getpid())
+    image = hook_client._RUNTIME.update_driver_image(helper, os.getpid())
     assert image
 
     def probe(pid, buffer, size):
@@ -1080,7 +1080,7 @@ def test_real_update_driver_fixtures_use_darwin_image_fallback(monkeypatch, tmp_
 
     monkeypatch.setattr(helper, "_pid_image_path", lambda pid: None)
     monkeypatch.setattr(
-        hook_client, "sys", SimpleNamespace(platform="darwin", executable=sys.executable),
+        hook_client._RUNTIME, "sys", SimpleNamespace(platform="darwin", executable=sys.executable),
     )
     original_cdll = ctypes.CDLL
 
@@ -1140,7 +1140,7 @@ def test_update_driver_darwin_native_image_probe(monkeypatch, tmp_path, result):
         buffer.value = os.fsencode(result)
         return len(buffer.value)
 
-    monkeypatch.setattr(hook_client.sys, "platform", "darwin")
+    monkeypatch.setattr(hook_client._RUNTIME, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(
         hook_client, "_load_sibling",
         lambda name: SimpleNamespace(
