@@ -49,7 +49,7 @@ function _resolve_aw_py {
 $_py = _resolve_aw_py
 if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }
 if ($_awUpdateDiagnostic) {
-    [Console]::Error.WriteLine('[agent-worktrees] selected update phase requires a provisioned runtime; use ordinary update to repair it.')
+    [Console]::Error.WriteLine('[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.')
     exit 127
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { & python -m agent_worktrees @args; exit $LASTEXITCODE }
