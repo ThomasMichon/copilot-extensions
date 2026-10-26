@@ -149,6 +149,38 @@ def test_preview_and_removal_preserve_durable_bytes(tmp_path, capsys):
     assert tree_bytes(tmp_path) == after
 
 
+@pytest.mark.parametrize("apply", [False, True])
+def test_unreliable_process_enumeration_refuses_without_effects(tmp_path, monkeypatch, capsys, apply):
+    root = tmp_path / "manager"
+    fixture_slot(root)
+    monkeypatch.setattr(removal.runtime, "_reliable_process_enumeration", lambda: False)
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=apply, as_json=True) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "refused" and result["removed"] == []
+    assert "process enumeration" in result["reason"]
+    assert tree_bytes(tmp_path) == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file creation modes and umask")
+@pytest.mark.parametrize("mask", [0o002, 0o000])
+def test_permissive_umask_still_creates_private_removable_inventory(tmp_path, capsys, mask):
+    root = tmp_path / "manager"
+    previous = os.umask(mask)
+    try:
+        slot = fixture_slot(root)
+    finally:
+        os.umask(previous)
+    assert (slot / removal.INVENTORY).stat().st_mode & 0o777 == 0o600
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=False, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "planned"
+    assert tree_bytes(tmp_path) == before
+    assert removal.uninstall(root, apply=True, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "removed"
+    assert not slot.exists()
+
+
 @pytest.mark.parametrize("change", ["artifact", "extra", "inventory", "selector", "frontdoor", "service", "legacy"])
 def test_unknown_or_changed_ownership_refuses_without_effects(tmp_path, capsys, change):
     root = tmp_path / "manager"

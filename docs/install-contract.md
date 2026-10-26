@@ -2046,6 +2046,8 @@ or unsupported legacy ownership gives explicit refusal without reconstruction;
 existing install/update behavior remains available.
 
 Construction seals an attributable per-slot inventory before completion.
+The inventory is created privately even under a permissive POSIX umask.
+Supported daemon child launches disable bytecode writes to preserve that seal.
 Removal validates all present generations and integrations, then revalidates
 under canonical construction, exclusive retention and publication custody.
 Manager frontdoor publication uses that same publication authority. The
@@ -2053,6 +2055,8 @@ daemon's existing spawn lease prevents ordinary service startup during removal;
 live/unknown lifecycle custody refuses, while settled routing history and
 persistent control files remain intact. No parallel selector, service or
 force-cleared lock is introduced.
+Present targets refuse preview and apply when reliable process enumeration is
+unavailable (currently outside Windows and Linux `/proc`).
 
 Preview/absence do not provision or create lock files. Apply requires a base
 interpreter and installer outside the target, withdraws only owned artifacts,

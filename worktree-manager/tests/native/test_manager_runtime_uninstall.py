@@ -37,12 +37,47 @@ print(json.dumps({
                            'scripts/versioned_runtime.py', 'scripts/versioned_runtime_leases.py',
                            'src/worktree_manager/runtime_candidate.py',
                            'src/worktree_manager/self_install.py',
-                           'src/worktree_manager/mux_file_lock.py')},
+                           'src/worktree_manager/mux_file_lock.py',
+                           'src/worktree_manager/mux_daemon_process.py')},
     'installed_files': {
         name: hashlib.sha256((pathlib.Path(worktree_manager.__file__).parent / name).read_bytes()).hexdigest()
-        for name in ('runtime_candidate.py', 'self_install.py', 'mux_file_lock.py')
+        for name in ('runtime_candidate.py', 'self_install.py', 'mux_file_lock.py', 'mux_daemon_process.py')
     },
 }))
+"""
+
+_DAEMON_CYCLE = """
+import json, os, pathlib, subprocess, sys, time
+from agent_procutil import no_window_kwargs
+from worktree_manager import mux_daemon_cutover, mux_daemon_process
+root = pathlib.Path(sys.argv[1])
+argv = mux_daemon_process.detached_child_argv(root)
+python, extra_env = mux_daemon_process.direct_daemon_python(argv[0])
+env = mux_daemon_process.scrub_session_credentials(dict(os.environ))
+env.pop('PYTHONDONTWRITEBYTECODE', None)
+env.update(extra_env)
+with subprocess.Popen(
+    [python, *argv[1:]], cwd=root, env=env, stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **no_window_kwargs(),
+) as child:
+    try:
+        deadline = time.monotonic() + 30
+        endpoint = None
+        while child.poll() is None and time.monotonic() < deadline:
+            endpoint = mux_daemon_cutover.routed_endpoint(root)
+            if endpoint is not None and endpoint.pid == child.pid:
+                break
+            time.sleep(0.05)
+        assert endpoint is not None and endpoint.pid == child.pid, child.poll()
+        client = mux_daemon_cutover.ControlClient(endpoint.base_url, root=root)
+        assert client.health()
+        assert client.shutdown()['shutdown']
+        assert child.wait(timeout=30) == 0
+        print(json.dumps({'started': True, 'stopped': True, 'pid': child.pid, 'argv': argv}))
+    finally:
+        if child.poll() is None:
+            child.terminate()
+            child.wait(timeout=10)
 """
 
 
@@ -196,12 +231,19 @@ def _exercise(directory):
         "bash", entry, "--version",
     ]
     durable = _durable(root, env)
+    installed_python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    sealed = _snapshot([slot])
+    print("Manager uninstall native: actual installed daemon start/stop", flush=True)
+    daemon = json.loads(_success(_run(
+        [installed_python, "-I", "-B", "-c", _DAEMON_CYCLE, root], env, directory,
+    )).stdout)
+    assert daemon["started"] and daemon["stopped"]
+    assert _snapshot([slot]) == sealed, "Daemon launch changed the sealed installed runtime"
     roots = [root, bin_dir, provider.parent, directory / "state"]
     before = _snapshot(roots)
     preview = json.loads(_success(_run([*external, "--uninstall", "--json"], env, directory)).stdout)
     assert preview["status"] == "planned", preview
     assert _snapshot(roots) == before, "Preview changed the actual installation"
-    installed_python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     refused = _run([
         installed_python, "-I", "-S", "-B", slot / "payload" / "scripts" / "runtime_install.py",
         "--root", root, "--uninstall", "--apply", "--json",
@@ -239,6 +281,7 @@ def _exercise(directory):
         "platform": sys.platform, "base_python": str(base), "root": str(root),
         "source_files": fixture["source_files"], "origin": fixture["origin"], "reinstalled": reinstalled,
         "preview": preview["status"], "installed_self": self_result["status"],
+        "daemon": daemon,
         "removal": removed["status"], "repeat": absent["status"],
         "removed_runtime_and_frontdoors_confirmed": True,
         "durable_bytes_preserved": True,
@@ -254,6 +297,7 @@ def test_real_installed_manager_removal_and_reinstall():
     assert evidence["removal"] == "removed" and evidence["repeat"] == "absent"
     assert evidence["removed_runtime_and_frontdoors_confirmed"]
     assert evidence["durable_bytes_preserved"]
+    assert evidence["daemon"]["started"] and evidence["daemon"]["stopped"]
     assert evidence["origin"]["files"] == evidence["reinstalled"]["files"] == evidence["source_files"]
     assert Path(evidence["reinstalled"]["module"]).is_file()
     assert not Path(evidence["base_python"]).is_relative_to(Path(evidence["root"]))

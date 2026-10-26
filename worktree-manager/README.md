@@ -1532,6 +1532,8 @@ Settle any running Manager infrastructure through its existing lifecycle owner
 first: removal never stops Copilot, its mux, another installation or a service.
 Settled routing history is preserved under the daemon's existing spawn lease,
 not mistaken for a running daemon or deleted to make removal succeed.
+Present installations also require a reliable process census (Windows or
+Linux `/proc`); other platforms refuse rather than assuming no process is live.
 
 Every present runtime slot must carry the construction-owned generation-1
 artifact inventory. Legacy, development, changed, unexpectedly linked, foreign, busy or

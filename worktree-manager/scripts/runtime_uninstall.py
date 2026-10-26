@@ -99,7 +99,8 @@ def seal_inventory(slot: Path, *, frontdoors: dict[str, str], provider: dict) ->
                       for name, body in frontdoors.items()},
         "provider": provider,
     }
-    with (slot / INVENTORY).open("x", encoding="utf-8", newline="\n") as stream:
+    descriptor = os.open(slot / INVENTORY, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
         json.dump(record, stream, sort_keys=True)
         stream.write("\n")
 
@@ -221,6 +222,8 @@ def _daemon_custody(root: Path, *, create: bool):
 
 
 def _quiescent(root: Path) -> None:
+    if not runtime._reliable_process_enumeration():
+        raise ValueError("Reliable process enumeration is unavailable; removal cannot prove quiescence")
     for name in ("dev-claim.json", "mux-daemon.lock"):
         if os.path.lexists(root / name):
             raise ValueError(f"Manager lifecycle evidence requires its owner to settle first: {name}")

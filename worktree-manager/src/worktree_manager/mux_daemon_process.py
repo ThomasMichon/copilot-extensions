@@ -111,7 +111,7 @@ def spawn_detached(argv: list[str], *, cwd: Path | None = None) -> bool:
 
 
 def detached_child_argv(root: Path | None = None) -> list[str]:
-    argv = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
+    argv = [sys.executable, "-B", "-m", "worktree_manager", "mux-daemon", "run"]
     if root is not None:
         argv.append(f"--root={root}")
     return argv

@@ -170,3 +170,11 @@ termination, credential change or installed rollout is authorized by this plan.
   source/test hashes. It does not widen the module-size baseline, add actors
   to unit CI or waive either required check. Final-head validation and normal
   review remain required.
+- Corrected head `af3aa6add10468f0e81de26e9f3afbc611a56cc1` passed required CI
+  and actual Windows/Linux removal/reinstall qualification. Its first review
+  identified three remaining gaps: unreliable platform process enumeration,
+  permissive-umask inventory creation, and daemon-child bytecode writes into
+  the sealed tree. All three are being corrected with refusal/mode controls and
+  an actual installed daemon start/health/shutdown before removal. The prior
+  native proof does not credit these new controls; review and changed-head
+  qualification remain open.

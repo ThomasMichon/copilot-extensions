@@ -107,6 +107,15 @@ def test_ordinary_start_anchors_relative_cwd_before_instance_spec(tmp_path, monk
     assert captured["instance"].runtime_root == tmp_path / "relative-root"
 
 
+@pytest.mark.parametrize("with_root", [False, True])
+def test_detached_child_disables_bytecode_independently_of_parent(tmp_path, with_root):
+    root = tmp_path / "manager" if with_root else None
+    assert mux_daemon_process.detached_child_argv(root) == [
+        sys.executable, "-B", "-m", "worktree_manager", "mux-daemon", "run",
+        *([f"--root={root}"] if root is not None else []),
+    ]
+
+
 @pytest.mark.parametrize("gui_name", ["pythonw.exe", "gui-host.exe"], ids=["relocated", "renamed"])
 def test_linked_gui_keeps_console_and_venv_from_configured_home(tmp_path, monkeypatch, gui_name):
     base = tmp_path / "base"

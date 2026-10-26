@@ -3674,8 +3674,11 @@ python tools/run-manager-runtime-acceptance.py --root .validation --contract uni
 ```
 
 It prepares a real standalone payload and canonical installed Manager in a
-redirected disposable home, then checks non-mutating preview, installed-self
+redirected disposable home, then checks an actual installed daemon start,
+health request and graceful shutdown before non-mutating preview, installed-self
 refusal, actual external removal, repeated absence and actual reinstall.
+The daemon executes the production child argv without an inherited bytecode
+suppression setting; its settled launch must leave the sealed runtime unchanged.
 Installed package/payload hashes and origin evidence must match; runtime slots,
 selectors and owned frontdoors/registration must disappear while durable-state
 bytes remain. No synthetic inventory, constructor mock or manual fixture
@@ -3684,8 +3687,9 @@ removal/reinstall exercise use separate existing 300-second native groups:
 each requires a real cold construction, with a 240-second command bound inside
 its group. Ordinary pytest items retain 30 seconds. Other native contracts,
 production deadlines and required PR CI are unchanged.
-This quiescent operation does not launch a service, mux or Copilot, qualify
-interactive session survival, or authorize a host uninstall/rollout.
+The disposable daemon is caller-contained and fully settled before removal.
+This operation does not launch a mux or Copilot, qualify interactive session
+survival, or authorize a host uninstall/rollout.
 The ordinary Manager suite excludes this prepared lane.
 The manual `installation-context-full.yml` portfolio `manager-uninstall`
 executes the same owner on a fresh Windows runner with Python 3.12, read-only
