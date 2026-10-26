@@ -20,6 +20,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def routed_model_chunks(
+    chunks: list[Chunk], model_id: str, profiles: dict[str, ModelProfile] | None,
+) -> list[Chunk]:
+    """Shared pair routing, including unclaimed content types."""
+    if not profiles:
+        return chunks
+    profile = profiles.get(model_id)
+    if profile is None or not profile.content_types:
+        return chunks
+    claimed = frozenset().union(
+        *(p.content_types for p in profiles.values() if p.content_types),
+    )
+    return [c for c in chunks if c.chunk_type in profile.content_types or c.chunk_type not in claimed]
+
+
 def embed_and_store_batch(
     chunks: list[Chunk],
     multi_store: MultiModelStore,
@@ -87,11 +102,6 @@ def embed_and_store_pairs(
         raise ValueError("Bounded pairs require coverage, model profiles and after-store preparation")
     counts = current_counts()
     chunks = coalesce_chunks(chunks)
-    all_claimed_types: frozenset[str] = frozenset()
-    if model_profiles:
-        all_claimed_types = frozenset().union(
-            *(p.content_types for p in model_profiles.values() if p.content_types)
-        )
     total = 0
     for i in range(0, len(chunks), stream_batch_size):
         sub = chunks[i : i + stream_batch_size]
@@ -100,14 +110,7 @@ def embed_and_store_pairs(
 
         for model_id, client in multi_clients.items():
             profile = model_profiles.get(model_id) if model_profiles else None
-            if profile and profile.content_types:
-                model_chunks = [
-                    c for c in sub
-                    if c.chunk_type in profile.content_types
-                    or c.chunk_type not in all_claimed_types
-                ]
-            else:
-                model_chunks = sub
+            model_chunks = routed_model_chunks(sub, model_id, model_profiles)
             if not model_chunks:
                 continue
 

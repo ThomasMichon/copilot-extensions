@@ -202,6 +202,16 @@ directory-ctime identity can require repair after ordinary native mutations.
 This is a discovery prerequisite, not a source/account/profile cursor or a
 retention/operational-backfill authority.
 
+Explicit [model backfill slices](chunk-id-index.md#explicit-resumable-model-backfill)
+reuse that reader and the shared routed pair writer. They bind accepted source/
+account identity, effective profile/routing/table policy and native versions in
+the existing path database, retain verified coverage before a compare-and-save
+offset, and never advance acquisition checkpoints or rewrite canonical content.
+Canonical changes require an explicit restart; ordinary indexing stays active
+between bounded writer slices. Existing GC guards retain unfinished intent;
+operator-authorized exact-intent discard affects no canonical rows. This API
+does not replace source leases or promise mixed-old-binary GC exclusion.
+
 Ordinary writes revoke receipts before a potentially partial vector write.
 Prepared pair writes retain old receipts through pre-effect refusal, then
 invalidate after the vector commit and before explicitly budgeted preparation.

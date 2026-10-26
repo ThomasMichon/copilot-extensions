@@ -54,6 +54,10 @@ class PendingCrawls:
                 "(source TEXT PRIMARY KEY, scope TEXT NOT NULL, payload TEXT NOT NULL)",
             )
             conn.execute(
+                "CREATE TABLE IF NOT EXISTS embedding_backfills "
+                "(source TEXT PRIMARY KEY, payload TEXT NOT NULL, complete INTEGER NOT NULL)",
+            )
+            conn.execute(
                 "CREATE INDEX IF NOT EXISTS pending_crawl_family ON pending_crawls "
                 "(COALESCE(json_extract(payload, '$.manifest.accounting_family'), "
                 "json_extract(payload, '$.manifest.stored_family'), source))",
@@ -89,6 +93,15 @@ class PendingCrawls:
         if row is not None:
             raise PendingCrawlConflict(
                 f"Complete pending crawl {row['source']!r} with its original configuration "
+                "before source garbage collection",
+            )
+        with closing(self._paths._connect()) as conn:
+            row = conn.execute(
+                "SELECT source FROM embedding_backfills WHERE complete = 0 LIMIT 1",
+            ).fetchone()
+        if row is not None:
+            raise PendingCrawlConflict(
+                f"Complete, explicitly restart or discard embedding backfill {row['source']!r} "
                 "before source garbage collection",
             )
 
