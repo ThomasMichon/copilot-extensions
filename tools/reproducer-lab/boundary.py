@@ -121,7 +121,11 @@ def inspect_static_boundary(
         violations.append("guest user must be the fixed non-root image user")
     if host.get("ReadonlyRootfs") is not True or host.get("Privileged") is not False:
         violations.append("read-only unprivileged root is not established")
-    if host.get("CapDrop") != ["ALL"] or host.get("CapAdd") not in (None, []):
+    if (
+        host.get("CapDrop") != ["ALL"]
+        or "CapAdd" not in host
+        or host["CapAdd"] not in (None, [])
+    ):
         violations.append("all capabilities must be dropped without additions")
     if host.get("SecurityOpt") != ["no-new-privileges"]:
         violations.append("the fixed no-new-privileges security posture is missing")
@@ -132,9 +136,11 @@ def inspect_static_boundary(
             violations.append(f"forbidden Docker exposure: {field}")
     if host.get("PublishAllPorts") is not False:
         violations.append("published-port policy is missing or enabled")
-    for field in ("PidMode", "IpcMode", "UTSMode", "UsernsMode", "CgroupnsMode"):
+    for field in ("PidMode", "IpcMode", "UTSMode", "UsernsMode"):
         if host.get(field) not in ("", "private"):
             violations.append(f"private namespace not established: {field}")
+    if host.get("CgroupnsMode") != "private":
+        violations.append("private namespace not established: CgroupnsMode")
     budgets = experiment.budgets
     for field, expected in (
         ("Memory", budgets.memory_bytes),

@@ -178,6 +178,7 @@ def test_git_sha256_declaration() -> None:
     ("UTSMode", "host"),
     ("UsernsMode", "host"),
     ("CgroupnsMode", "host"),
+    ("CgroupnsMode", ""),
     ("Memory", 0),
     ("MemorySwap", -1),
     ("NanoCpus", 0),
@@ -193,7 +194,7 @@ def test_unsafe_host_observation_is_rejected(field: str, value: object) -> None:
 
 
 @pytest.mark.parametrize("field", [
-    "ReadonlyRootfs", "Privileged", "CapDrop", "SecurityOpt", "PublishAllPorts",
+    "ReadonlyRootfs", "Privileged", "CapDrop", "CapAdd", "SecurityOpt", "PublishAllPorts",
     "PidMode", "IpcMode", "UTSMode", "UsernsMode", "Memory", "MemorySwap",
     "NanoCpus", "PidsLimit", "NetworkMode", "CgroupnsMode", "Binds", "Devices",
     "DeviceRequests", "PortBindings", "ExtraHosts", "Links", "VolumesFrom",
@@ -283,3 +284,12 @@ def test_unsupported_quota_claim_cannot_clear_pending_backend() -> None:
     result = mod.inspect_static_boundary(mod.parse_declaration(declaration()), observed)
     assert result.violations == ()
     assert any("backend is not implemented" in item for item in result.unresolved)
+
+
+def test_explicit_null_cap_add_is_distinct_from_missing_observation() -> None:
+    observed = inspection()
+    observed["HostConfig"]["CapAdd"] = None
+    experiment = mod.parse_declaration(declaration())
+    assert mod.inspect_static_boundary(experiment, observed).violations == ()
+    del observed["HostConfig"]["CapAdd"]
+    assert mod.inspect_static_boundary(experiment, observed).violations
