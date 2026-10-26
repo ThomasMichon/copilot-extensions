@@ -539,6 +539,19 @@ Fixture package locations are queried through the selected interpreter's
 Fresh/resumed delivery measurements do not qualify the composed two-second
 startup gate, cold-cache behavior or latency tails.
 
+The opt-in Windows visibility lane is
+`tests/test_snapshot_windows_visibility.py` with
+`AGENT_SSH_WINDOWS_VISIBILITY=1`. It requires the active interactive input
+desktop; a locked/inaccessible desktop is an explicit blocker, not a zero-event
+pass. A real GUI-subsystem Python parent drives completed SSH/Worktrees runtimes,
+two native callbacks, a missing-adapter red control and resolution/execution
+timeout cleanup while Win32 enumerates visible windows and foreground changes.
+The fixture requires the native adapter and makes shell fallback fail closed.
+Set `AGENT_SSH_NATIVE_CALLER` plus the runner's host-state flags to reuse an
+existing configured external-state caller; otherwise the lane constructs a
+qualified disposable external-state fixture. This is source-consumer visibility
+evidence, not installed-release or cold/tail qualification.
+
 ## Layout
 
 ```

@@ -828,16 +828,22 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
 
 @pytest.mark.timeout(150)
 def test_native_optional_deadline_reaps_actual_adapter_descendants(tmp_path, monkeypatch):
-    from agent_ssh import _worktrees
-
     _, payloads = _cell(tmp_path / "cell", monkeypatch, legacy=True)
     repo, _ = _configured_caller(tmp_path)
+    _optional_deadline_controls(tmp_path, payloads, repo)
+
+
+def _optional_deadline_controls(tmp_path, payloads, repo):
+    from agent_ssh import _worktrees
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
     resolver = payloads["agent-ssh"] / "scripts" / "snapshot_runtime.py"
     original = resolver.read_text(encoding="utf-8")
     adapter = payloads["agent-ssh"] / "scripts" / "snapshot_worktrees.py"
     controls = load(
         _PLUGIN / "tests" / "test_write_session_guidance.py", "snapshot_cleanup_controls"
     )
+    results = []
     for phase in ("resolution", "execution"):
         pid_file = tmp_path / f"{phase}.pid"
         blocked = (
@@ -860,12 +866,17 @@ def test_native_optional_deadline_reaps_actual_adapter_descendants(tmp_path, mon
         try:
             started = time.monotonic()
             assert _worktrees.state_root(repo, None) == (None, "unavailable")
-            assert time.monotonic() - started < 8  # 5s plus owned cleanup, not a new deadline.
+            elapsed = time.monotonic() - started
+            assert elapsed < 8  # 5s plus owned cleanup, not a new deadline.
             assert pid_file.is_file()
             assert not controls._pid_running(int(pid_file.read_text()))
+            results.append(
+                {"phase": phase, "seconds": round(elapsed, 3), "descendant_reaped": True}
+            )
         finally:
             if pid_file.exists() and controls._pid_running(int(pid_file.read_text())):
                 os.kill(int(pid_file.read_text()), __import__("signal").SIGTERM)
+    return results
 
 
 @pytest.mark.skipif(
