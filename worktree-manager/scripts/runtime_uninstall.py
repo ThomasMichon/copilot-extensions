@@ -147,7 +147,7 @@ def _integration(root: Path, record: dict) -> list[Path]:
     registry = _plain(Path(os.environ.get(
         "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR",
         str(home / ".agent-worktrees" / "control-plane-providers.d"),
-    )))
+    )).expanduser())
     provider = registry / "worktree-manager.json"
     expected = record["provider"]
     primary = "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"

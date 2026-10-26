@@ -760,14 +760,11 @@ def _complete_candidate(
             _write_control_plane_provider_manifest(payload, root=root)
 
     installer = _runtime_installer()
-    if transactional_activation:
-        installer.activate(
-            root, slot.name, expected=previous,
-            after_publish=(lambda: after_activate(slot)) if after_activate is not None else None,
-            before_publish=publish_frontdoors,
-        )
-    else:
-        installer.activate(root, slot.name, expected=previous, before_publish=publish_frontdoors)
+    installer.activate(
+        root, slot.name, expected=previous, before_publish=publish_frontdoors,
+        after_publish=(lambda: after_activate(slot))
+        if transactional_activation and after_activate is not None else None,
+    )
     if after_activate is not None and not transactional_activation:
         after_activate(slot)
     return SelfInstallResult(

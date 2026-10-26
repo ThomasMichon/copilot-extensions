@@ -197,3 +197,18 @@ termination, credential change or installed rollout is authorized by this plan.
   explicit platform-gated skips under their unchanged item/group limits.
   Canonical SDK copies and exact admitted source/test hashes also match.
   Revised-head native removal/reinstall and a fresh review remain open.
+- At `a8c6496071ea1b0b7feb700a41768b25225d6804`, the fresh Windows lane
+  `40281114456` passed actual installed daemon start/health/graceful shutdown,
+  sealed-tree preservation and removal/reinstall. The admitted unit packet
+  also passed; the size guard found three excess lines in the existing
+  grandfathered installer module. Consolidating its duplicate activation
+  calls restores the unchanged ceiling without widening policy.
+- The next review found a home-relative provider-directory mismatch.
+  Removal now applies the installer's existing `expanduser()` semantics.
+  Two real preview/removal controls cover ordinary and spaced tilde paths.
+  The affected installer/removal packet passed 99 Windows tests with four
+  platform skips under unchanged limits.
+- The new Linux run stopped before any test because building the current
+  `agent-procutil` dependency could not find `cc`. The exact owned container
+  was removed; no compiler was installed or result credited. Diagnose the
+  canonical toolchain prerequisite before rerunning the new native head.

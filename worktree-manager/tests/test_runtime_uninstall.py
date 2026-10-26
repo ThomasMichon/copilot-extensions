@@ -231,6 +231,22 @@ def test_shared_frontdoors_require_current_registration(tmp_path, capsys, missin
     assert tree_bytes(tmp_path) == before
 
 
+@pytest.mark.parametrize("directory", ["~/providers", "~/provider registrations"])
+def test_home_relative_provider_override_matches_installer(tmp_path, monkeypatch, capsys, directory):
+    monkeypatch.setenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", directory)
+    root = tmp_path / "manager"
+    slot = fixture_slot(root)
+    provider = Path(directory).expanduser() / "worktree-manager.json"
+    assert provider.is_file()
+    before = tree_bytes(tmp_path)
+    assert removal.uninstall(root, apply=False, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "planned"
+    assert tree_bytes(tmp_path) == before
+    assert removal.uninstall(root, apply=True, as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "removed"
+    assert not slot.exists() and not provider.exists()
+
+
 def test_settled_daemon_routing_history_is_preserved(tmp_path, capsys):
     from worktree_manager import mux_daemon_process
     from zdd import routing
