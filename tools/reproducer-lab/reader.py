@@ -6,30 +6,18 @@ import json
 import os
 import re
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Callable
 
 from boundary import Experiment, inspect_static_boundary
 from network import NetworkIdentity, inspect_inventory, selected_containers
+from process import run as _run
 from storage import Resources, StorageMonitor, Usage, VolumeIdentity
 
 
 class ReadError(RuntimeError):
     """A finite observation failed; it grants no lifecycle or retry authority."""
-
-
-def _run(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-    source = Path(__file__).resolve().parents[2] / "libs" / "agent-procutil" / "src"
-    if str(source) not in sys.path:
-        sys.path.insert(0, str(source))
-    from agent_procutil.owned_process import run_caller_owned
-
-    return run_caller_owned(
-        argv, timeout=timeout, max_stdout_bytes=256 * 1024, max_stderr_bytes=16 * 1024,
-        input_text=None, capture=True,
-    )
 
 
 class DockerReader:

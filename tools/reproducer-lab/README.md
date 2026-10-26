@@ -140,6 +140,54 @@ Restricted-provider policy and ephemeral tests remain unchanged. Real resource
 creation, guest lifecycle/fault actions and deletion need separate authorization
 through the normal owner. No production credentials, state or network are used.
 
+## Immutable local source input
+
+`source.SourceReader(absolute_git_path).materialize(repository, commit,
+private_results_root, fresh_name)` prepares one local build input from the
+experiment's full `source_sha`. It does not build an image, transfer into a
+guest, install dependencies or run a service. The results root must already
+exist, be private and caller-owned, and be outside repositories and managed
+session state. This initial source path supports POSIX hosts only.
+The fresh artifact directory is exclusive; an existing or incomplete attempt
+is never overwritten, deleted, resumed or retried automatically.
+
+Git reads only the selected immutable objects, not the index or dirty/untracked
+working-tree bytes. Preflight refuses symlinks, submodules, malformed paths,
+case-folded or Unicode-normalization path aliases (including directory prefixes
+and reserved Git metadata components), even on case-sensitive hosts,
+more than 16,000 files, any blob over 8 MiB or logical source content over
+256 MiB. Canonical caseless comparison normalizes before and after folding.
+The listing is at most 4 MiB; the prefix inventory admits at most 32,000 entries
+and 8 MiB of combined original/key UTF-8 bytes, checked before retaining a new
+entry. Deep zero-byte trees cannot grow that inventory without bound; these
+are input/retention ceilings, not a hard process-memory quota.
+A shallow local-file fetch produces one detached commit and its tree
+without copying the source's config, hooks, refs, reflogs, index or object store.
+No remote URL is configured and no fetch-head source-path record is written.
+The subprocess environment is a fixed synthetic baseline: ambient credentials,
+Git overrides, proxies and service-discovery settings are not inherited.
+Global/system Git config, templates, hooks, lazy fetches and automatic
+maintenance are excluded. `GIT_ATTR_NOSYSTEM=1` and an explicit null
+`core.attributesFile` also exclude host system/user attribute policy;
+repository-tracked attributes remain part of the selected source.
+Only the explicit local-file transport is permitted. Destination initialization
+explicitly matches the verified commit's SHA-1 or SHA-256 object format.
+
+Every command uses `process.py`'s existing caller-owned runner with at most
+15 seconds, 4 MiB stdout and 16 KiB stderr within one 60-second preparation
+deadline. Final commit/tree observations and metadata writing are inside that
+deadline. `source.json` contains selected object identities and input counts,
+not completion, running-source, custody or lab-admission authority. Any raised
+error leaves the attempt unavailable even if partial files or metadata exist.
+The tool does not interpret a lock/PID, old directory or artifact as permission
+to continue an interrupted guest effect.
+
+The input-size ceilings are **not a hard disk quota** on Git metadata or
+materialization. Partial writes and filesystem overhead remain possible and
+are retained on failure. Source staging, image build and guest copy still need
+their own bounded storage/approval and installed-source qualification; an
+observed Git commit is not a proof of an executing guest's code.
+
 ## Tests
 
 `tools/test_reproducer_lab_boundary.py` is an in-process, synthetic control set:
@@ -151,13 +199,29 @@ lifetime edges, monitor loss/resume and local synthetic traversal fixtures.
 `tools/test_reproducer_lab_network.py` covers exact subject/peer membership,
 foreign attachments, physical endpoint replacement, retained selections,
 malformed/missing observations and final-settlement deadline refusal.
+`tools/test_reproducer_lab_source.py` covers pure/synthetic immutable-source
+inputs, exact file/byte ceilings, environment/command selection, retained
+partial failures and the last command's deadline. It invokes no Git.
 Run it with the repository's selected Python/pytest environment through the
 caller's bounded test supervisor:
 
 ```text
-<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py
+<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py
 ```
 
 These tests do not run Docker, open a socket, install dependencies, exercise native
 service lifetimes or join the unconditional promotion matrix. See
 [`TESTING.md`](../../TESTING.md) for the separate real integration portfolio.
+
+The explicit local-Git lane is separate from those synthetic selectors:
+
+```text
+<bounded-test-supervisor> -- <python> -m pytest -q tools/reproducer-lab/source_native_tests.py
+```
+
+Its fresh SHA-1 and SHA-256 synthetic repositories prove the selected committed bytes survive
+dirty/skip-worktree changes, excludes untracked content, source configuration,
+hooks and older history, and leaves the source checkout untouched. It does not
+use Docker, a remote forge, production credentials or service processes.
+The filename is intentionally outside default pytest discovery; no required
+PR/promotion matrix is expanded.

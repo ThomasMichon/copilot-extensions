@@ -4,9 +4,10 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Dedicated integration branch; reviewed proposal before source changes
 - **Created:** 2026-10-23
-- **Status:** Done
-- **Completed:** 2026-10-25
-- **Source:** #8720 (merged to `dev`; release and rollout are separate)
+- **Status:** Active
+- **Original scope completed:** 2026-10-25
+- **Source:** #8720 (original implementation merged); compiler-free amendment
+  proposed before implementation
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
@@ -74,9 +75,15 @@ identity; limit deletion to declared disposable artifacts; preserve production
 cutover; use installer reconciliation as a backstop rather than the primary
 cleanup mechanism.
 
-For Python-free Linux lease enforcement, the operator selected `prebuilt`:
-ship the native helper with supported release artifacts and compile only during
-explicit source builds. Ordinary production startup remains compiler-free.
+The original Python-free Linux choice was a prebuilt helper with explicit
+source builds. The operator's 2026-10-26 requirement supersedes that choice:
+no native code in the repository and no compilation at the build/release or
+device end. The complete verbatim requirement and cross-owner acceptance live
+in the [compiler-free execution amendment](../lean-runtime-dependencies/compiler-free-execution.md).
+This effort retains shared daemon-instance custody while replacing its
+compiled implementation with thin shell entrypoints and standard-library
+Python. Original completed phases remain historical evidence, not proof of the
+replacement.
 
 ## Plan
 
@@ -142,7 +149,27 @@ explicit source builds. Ordinary production startup remains compiler-free.
 - [x] Report source/release/installed state separately. No runtime rollout is
   authorized by this implementation request.
 
+### Phase 5 - Compiler-free shared lifecycle amendment
+
+- [ ] Review the governing compiler-free vision and
+  [complete amendment](../lean-runtime-dependencies/compiler-free-execution.md)
+  through the existing #8403 owner.
+- [ ] Reuse shared Python reservation, schema, locks and identity operations;
+  replace Linux C supervise/cleanup and preserve owner-loss, lease/hard maximum,
+  subreaper descendant settlement and exact-artifact behavior.
+- [ ] Migrate thin shell and PowerShell instance entrypoints through a qualified
+  interpreter boundary; preserve Windows process/Job and uncertainty contracts.
+- [ ] Remove canonical C, all distributed copies and native build/export hooks,
+  regenerating consumers through their normal owner.
+- [ ] Complete actual compiler-free construction and lifecycle qualification,
+  update current docs and journal reviewed merged results.
+
 ## Validation Plan
+
+- [ ] Review and complete the compiler-free amendment below, preserving every
+  original process/lifetime/artifact guarantee without native compilation.
+- [ ] Requalify the actual compiler-free implementation and consumers; retain
+  original results as historical, not current replacement acceptance.
 
 - [x] Pure tests cover reservation/admission/renewal/expiry, production
   non-expiry, interactive-policy refusal, concurrent mutation, PID reuse,
@@ -167,8 +194,9 @@ explicit source builds. Ordinary production startup remains compiler-free.
 
 ## Proposal
 
-Proposal #8433 and implementation #8720 are merged. The shared ownership,
-complete caller/installer integration and recorded validation plan are done.
+Proposal #8433 and implementation #8720 completed the original shared ownership
+and caller/installer integration. The compiler-free amendment remains proposed;
+implementation does not begin until it clears review.
 The journal distinguishes actual supported-lane proof from unavailable
 hardware, dependency and production-venue lanes; those are not claimed as
 exercised. Release promotion and installed rollout are separate, and no
@@ -179,6 +207,7 @@ runtime rollout was authorized or performed.
 All original entries and qualification details are retained in dated sidecars,
 newest first:
 
+- [2026-10-26 - compiler-free amendment](journal/2026/10.26%20compiler-free-amendment.md)
 - [2026-10-25 - retirement and completion](journal/2026/10.25%20retirement-and-completion.md)
 - [2026-10-24 - native and installer qualification](journal/2026/10.24%20native-and-installer-qualification.md)
 - [2026-10-23 - design and initial integration](journal/2026/10.23%20design-and-initial-integration.md)

@@ -488,6 +488,14 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9111 merged finite internal-network/endpoint observations and exact static
+  volatile-mount checks as `304fdba1b9bbc96ef8b15f15a069c14cb6c9b4fa` after
+  exact-head Copilot approval, no findings and all required checks.
+  The bounded synthetic selectors passed 281 controls. Re-read this complete
+  Plan and Validation Plan; egress, exclusive custody, guest/runtime/source,
+  persistence/fault, native output and strict pre-effect gates remain open.
+  Continue the existing-owner source/materialization and custody prerequisites;
+  no resources, services or production state were created or changed.
 - #9104 merged finite reproducer observations and storage-only monitoring as
   `482fe0b0f553067d5ca095410cfc60f616385246` after exact-head Copilot approval,
   resolution of both full-volume/deadline findings and required checks.
