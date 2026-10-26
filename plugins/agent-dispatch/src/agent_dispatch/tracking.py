@@ -98,6 +98,7 @@ def _resolve_local_owner(worktree: str, *, timeout: float) -> dict[str, Any] | N
         OSError,
         HTTPException,
         ValueError,
+        OverflowError,
     ) as exc:
         logging.getLogger(__name__).warning(
             "Local Bridge owner-session read unavailable (%s); liveness unknown",

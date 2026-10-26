@@ -119,6 +119,8 @@ def test_missing_stale_or_down_service_is_unknown(http, mode):
 
 
 @pytest.mark.parametrize("health", [b"broken", [], {"protocol_version": "bad"},
+    b'{"protocol_version": 1e309, "min_protocol_version": 1}',
+    b'{"protocol_version": 50, "min_protocol_version": -1e309}',
     {"protocol_version": 50, "min_protocol_version": 2}])
 def test_unavailable_contract_is_unknown(http, health):
     http["health"] = health
