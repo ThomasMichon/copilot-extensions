@@ -59,7 +59,7 @@ def test_real_gh_first_touch_empty_config_is_an_honest_read_only_failure(
         "example-user",
         "stored",
     )
-    assert reason == "account-missing"
+    assert reason in {"account-missing", "probe-failed-or-unsupported"}
     assert "--no-refresh" in argv and "--show-token" not in argv
     assert sorted(config.rglob("*")) == before
 
@@ -96,6 +96,27 @@ print(json.dumps({"hosts": {"github.example.com": [{
     assert result.ok and not result.changed
     assert "private-child-output" not in json.dumps(vars(result))
     assert not list(config.rglob("*"))
+
+
+def test_first_touch_witness_accepts_unsupported_cli_without_retry(tmp_path, monkeypatch):
+    helper = fake_gh(
+        tmp_path,
+        monkeypatch,
+        """
+from pathlib import Path
+import sys
+assert "--no-refresh" in sys.argv
+counter = Path(__file__).with_suffix(".calls")
+counter.write_text(counter.read_text() + "." if counter.exists() else ".")
+print("unknown flag: --no-refresh", file=sys.stderr)
+raise SystemExit(2)
+""",
+    )
+    test_real_gh_first_touch_empty_config_is_an_honest_read_only_failure(
+        tmp_path,
+        monkeypatch,
+    )
+    assert helper.with_suffix(".calls").read_text() == "."
 
 
 def test_native_probe_deadline_is_five_seconds_not_package_manager_timeout(
