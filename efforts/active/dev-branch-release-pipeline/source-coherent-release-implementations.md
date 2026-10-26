@@ -69,6 +69,14 @@ canonical Main/run admission. Unit success is not itself artifact integrity:
 the existing source-bound wheel, lock/feed, attestation, independent readback,
 complete-source, freshness and final merge checks remain required.
 
+Qualification must bind the repository-owned privileged helper import closure
+to the admitted unit inputs and exercise its decision rules through eligible
+unit coverage. Merely listing a new helper's hash is not coverage. Newly used
+resource/native admission helpers and their explicit executable build inputs
+must not enter privileged execution through an unqualified import or an
+unrecorded dynamic load. Real compiler/process behavior remains separately
+qualified rather than relabeled as unit execution.
+
 The helper selection is therefore derived from the release's admitted source,
 not a second hand-maintained version. New controller policy remains an
 independently reviewed Main change; source helper evolution does not grant
@@ -88,6 +96,9 @@ expression while leaving incompatible call sites.
       proposal. Retain and prove the existing privileged-job qualification
       prerequisites rather than adding redundant gates. Keep Main bootstrap
       code tied to its exact executing snapshot.
+- [ ] Bind the privileged helper closure and executable build inputs to
+      qualification, enroll missing helper decision-rule coverage and reject
+      uncovered/unbound additions before privileged execution.
 - [ ] Add bounded PR-time compatibility checks against the actual Main control
       contract. Exercise the known missing complete-source input and
       producer/verifier disagreement before publication, not for the first time
@@ -118,6 +129,9 @@ expression while leaving incompatible call sites.
 - [ ] Prove fork/manual-feature refs, forged dispatch payloads, missing source
       qualification, failed/skipped units and wrong owning run cannot enter
       privileged implementation execution or release landing.
+- [ ] Prove a newly added privileged helper or dynamic executable input cannot
+      be omitted from the qualified source/coverage contract. Positive units
+      cover new native/resource decision rules without invoking real actors.
 - [ ] Prove that a source helper change reaches its matching producer/verifier
       in the next admitted run without editing a Main helper pin. Required
       controller capabilities and complete-source inputs still fail visibly
