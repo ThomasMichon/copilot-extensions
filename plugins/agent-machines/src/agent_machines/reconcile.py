@@ -603,6 +603,7 @@ def restore(
     only: list[str] | None = None,
     maintenance_safe: bool = False,
     accepted_machines: tuple[str, ...] | None = None,
+    git_config_plan_sha256: str | None = None,
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
@@ -629,7 +630,8 @@ def restore(
     if _want_resources(only, resource_names):
         home_path = Path(home) if home is not None else Path.home()
         ctx = _resources.ResourceContext(
-            home=home_path, repo_paths=_repo_paths(resolved), platform=plat
+            home=home_path, repo_paths=_repo_paths(resolved), platform=plat,
+            git_config_plan_sha256=git_config_plan_sha256,
         )
         if maintenance_safe:
             resource_results.extend(
@@ -695,6 +697,8 @@ def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
     resources = []
     for resource in result.resource_results:
         payload = dataclasses.asdict(resource)
+        if payload["change_plan"] is None:
+            del payload["change_plan"]
         payload["status"] = resource.status
         resources.append(payload)
     return {

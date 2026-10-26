@@ -11,6 +11,7 @@ Verbs:
 * ``self-update`` -- run unattended watchdog / sweep tiers
 * ``fleet-update`` -- run the unattended daily worktree-manager update sweep
 * ``installation-repair`` -- observe or explicitly repair selected enabled owner modules
+* ``git-config rollback`` -- preview or explicitly reverse a recorded global-file transaction
 * ``bootstrap-killswitch`` -- pause/resume every plugin's sessionStart
   reconcile at once (for hand-diagnosing a venv/install)
 * ``provision-playwright-cli`` -- converge the machine-local Playwright CLI workspace
@@ -25,6 +26,7 @@ import sys
 from pathlib import Path
 
 from . import cli_fleet_update
+from . import cli_git_config
 from . import discover as _discover
 from . import identity as _identity
 from . import killswitch_cli
@@ -414,6 +416,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
             only=args.only,
             maintenance_safe=args.maintenance_safe,
             accepted_machines=identity.accepted,
+            git_config_plan_sha256=getattr(args, "git_config_plan_sha", None),
         )
     except (_reconcile.RestoreValidationError, SurfaceStateError) as exc:
         print(f"restore refused: {exc}", file=sys.stderr)
@@ -456,6 +459,8 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         print("  resources: none")
     for r in result.resource_results:
         label = f"{r.type}:{r.id}"
+        if r.change_plan:
+            cli_git_config.print_plan(r.change_plan)
         if r.status == "error":
             print(f"  resource {label}: ERROR {r.detail}", file=sys.stderr)
         elif r.blocked_reason:
@@ -822,6 +827,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="make changes (default is a dry-run preview)"
     )
     restore.add_argument(
+        "--git-config-plan-sha", type=cli_git_config.plan_sha,
+        help="consent to the exact declared Git configuration preview",
+    )
+    restore.add_argument(
         "--only",
         action="append",
         metavar="NAME",
@@ -839,6 +848,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show each module's captured output (shown by default in a dry-run)",
     )
+    cli_git_config.register(sub)
     self_update = sub.add_parser(
         "self-update",
         help="Run or manage unattended self-update tiers.",
