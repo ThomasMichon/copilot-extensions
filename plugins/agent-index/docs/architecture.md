@@ -192,6 +192,20 @@ updates. Global vector-gap repair remains owned by its existing mechanism.
 
 ## Process model
 
+Python consumers can call the same `run_reindex` with their `IndexConfig`
+subclass, explicit complete `SourceSpec` list and an optional
+`EmbeddingRuntime` client/lifecycle policy. Connectors continue to use
+`register_connector`; no alternate crawl/embed/checkpoint engine is needed.
+`run_worker` accepts an explicit config and indexing callable, retaining exact
+callable hint negotiation, resume/progress/cancellation and terminal status.
+An explicit worker config is forwarded to the default engine; a custom callable
+owns binding its own matching config.
+
+The [consumer migration recipe](consumer-migration.md) defines ownership,
+compatibility and verification requirements. No CLI/provider negotiation is
+implied by these in-process seams, and custom callable wrappers must not claim
+hint support they do not actually preserve.
+
 ```mermaid
 flowchart LR
   Agent[Any Copilot agent] --> CLI[agent-index read CLI]

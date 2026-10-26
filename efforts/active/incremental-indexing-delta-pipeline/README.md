@@ -112,7 +112,7 @@ After the reviewed proposal, the operator admitted execution:
 
 - [x] Reuse source metadata/revisions before fetching content where supported.
   Add normal-round fingerprint checks, not only retry-window skipping.
-- [ ] Separate text, searchable metadata, chunker/schema and embedding-profile
+- [x] Separate text, searchable metadata, chunker/schema and embedding-profile
   identity. Metadata-only updates must not invalidate unchanged vectors.
 - [ ] Make embedding selection operate on missing/invalid chunk-model pairs,
   with bounded batch lookups and resumable coverage/backfill.
@@ -151,10 +151,10 @@ After the reviewed proposal, the operator admitted execution:
 
 ### Phase 5 - Consumer integration and qualification
 
-- [ ] Reuse the existing multi-model engine and qualify its supported connector,
+- [x] Reuse the existing multi-model engine and qualify its supported connector,
   profile, embedding-client and progress hooks; add only missing injection or
   lifecycle seams rather than creating a second multi-model engine.
-- [ ] Demonstrate a generic single-model consumer and an injected multi-model
+- [x] Demonstrate a generic single-model consumer and an injected multi-model
   consumer use the same engine path without importing private integrations.
 - [ ] Publish a consumer migration recipe and staged compatibility tests.
   Consumers re-sync the shared engine and remove duplicated orchestration;
@@ -375,3 +375,37 @@ source-owner coordination rather than one large rewrite.
   routing, bounded large-batch reads and interrupted-cleanup retry also pass.
 - This implements another bounded Phase 2 slice, not the full count matrix,
   consumer adoption, release or authorized rollout.
+
+### 2026-10-26 - Chunk/model reuse reviewed and merged
+
+- PR #9065 merged as `79713efa87b969cf62be0e1fc3f4f6f49f3d31f8`
+  after current-head Copilot approval and required green CI. Reconciled the
+  existing implementation worktree; no continuation worktree was created.
+- The text/metadata/chunker/profile separation gate is resolved by raw-input
+  pair qualification and native metadata-only vector preservation. Selection
+  and restart backfill for presented files are implemented, but discovering
+  unchanged files requiring a newly added profile still needs an explicit,
+  bounded coverage/backfill pass. The complete backfill gate remains open.
+- Continue with the minimal shared consumer configuration/source-selection,
+  client/lifecycle and worker-callable injection seams. Reuse the existing
+  connector registration API, and preserve actual-callable hint negotiation.
+  Exact hinted acquisition, bounded hosted pagination, content-write avoidance,
+  logical mutation maintenance and the full validation matrix remain open.
+
+### 2026-10-26 - Shared consumer injection slice
+
+- Added optional explicit config/source selection and one typed embedding
+  client/lifecycle bundle to the existing engine. Existing connector
+  registration remains the source extension API; default callers retain
+  late-bound defaults and the same pipeline.
+- Added optional worker config/callable injection without a process-global
+  engine replacement. Explicit config is forwarded to the default engine;
+  custom adapters bind their own config. Actual-callable hint capability,
+  resume, progress, cancellation, partial status and result accounting remain.
+- Native single- and dual-model consumer fixtures exercise the shared path,
+  metadata-only vector reuse, registered-source full GC and restart cursors.
+  Factory/close/source failure controls retain owned cleanup and stop only
+  engines started by this run. The expanded bounded packet passed 150 tests.
+- The first two Phase 5 integration-seam gates are resolved. The linked
+  migration recipe describes provider-first consumption; actual consumer
+  adoption and staged compatibility qualification remain open.

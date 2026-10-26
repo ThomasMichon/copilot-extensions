@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from agent_index.engine.client import EngineClient
     from agent_index.index_config import IndexConfig, ModelProfile
     from agent_index.indexing.embedding_coverage import EmbeddingCoverage
+    from agent_index.indexing.embedding_runtime import EmbeddingRuntime
     from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
@@ -273,6 +274,9 @@ def run_reindex(
     source: str | None = None,
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
+    config: IndexConfig | None = None,
+    source_specs: list[SourceSpec] | None = None,
+    embedding_runtime: EmbeddingRuntime | None = None,
 ) -> dict[str, object]:
     """Run the four-phase indexing pipeline.
 
@@ -286,6 +290,11 @@ def run_reindex(
             interrupted reindex resumes mid-source instead of restarting. ``None``
             (a fresh incremental run) also reuses compatible file checkpoints.
             ``full=True`` forces rebuilding files outside a resumed task window.
+        config: Optional consumer configuration; ordinary callers keep defaults.
+        source_specs: Optional complete consumer source selection. Connectors
+            still use the supported registry and existing recovery identity.
+        embedding_runtime: Optional owned client/lifecycle policy. Clients are
+            closed on exit and readiness remains deferred until embedding.
 
     Returns:
         Dict with keys ``chunks_total``, ``chunks_deleted``, ``files_crawled``,
@@ -294,17 +303,25 @@ def run_reindex(
         them and a ``sources_failed`` list of ``{"source", "error"}`` entries is
         also included (see #1350).
     """
-    from agent_index.engine.client import EngineClient
-    from agent_index.engine.lifecycle import ensure_engine, stop_engine
     from agent_index.index_config import IndexConfig
+    from agent_index.indexing.embedding_runtime import (
+        default_embedding_runtime,
+        open_embedding_clients,
+    )
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.pending_crawl import PendingCrawlConflict
     from agent_index.indexing.runner import IndexingCancelled
     from agent_index.indexing.state import IndexState
     from agent_index.store.multi_model_store import MultiModelStore
 
-    config = IndexConfig()
+    config = config if config is not None else IndexConfig()
     config.ensure_dirs()
+    runtime = embedding_runtime if embedding_runtime is not None else default_embedding_runtime()
+    configured = list(source_specs) if source_specs is not None else configured_source_specs()
+    sources_to_index = (
+        configured if source is None else
+        [_resolve_explicit_source_spec(source, {spec.name: spec for spec in configured})]
+    )
 
     print(f"Data directory: {config.data_dir}")
     print(f"Model: {config.model_name}")
@@ -323,39 +340,24 @@ def run_reindex(
         initialize_source_store(config) if selected_layout() else
         MultiModelStore(config.lance_dir, content_table=config.content_table)
     )
-    multi_clients: dict[str, EngineClient] = {}
-    for profile in config.model_profiles.values():
-        multi_store.register_model(profile)
-        multi_clients[profile.model_id] = EngineClient(
-            base_url=profile.engine_url,
-            query_prefix=profile.query_prefix,
-            model_id=profile.model_id,
-        )
+    multi_clients, client_cleanup = open_embedding_clients(
+        multi_store, config.model_profiles, runtime,
+    )
 
     # Track which on-demand engines we start so we can stop them afterwards.
     # Initialized before the try so the finally can always see it, even if
     # ensuring engines (or the migration) fails partway.
     started_engines: list[ModelProfile] = []
-    ensure_engines = os.environ.get("AGENT_INDEX_INDEX_ENSURE_ENGINES", "1") != "0"
     engines_ready = False
 
     def prepare_embedding() -> None:
         nonlocal engines_ready
-        if engines_ready or not ensure_engines:
+        if engines_ready or not runtime.manage_engines:
             return
         for profile in config.model_profiles.values():
-            if ensure_engine(profile, multi_clients[profile.model_id]):
+            if runtime.ensure_engine(profile, multi_clients[profile.model_id]):
                 started_engines.append(profile)
         engines_ready = True
-
-    sources_to_index: list[SourceSpec]
-    if source is None:
-        sources_to_index = configured_source_specs()
-    else:
-        # An explicit --source names one source: prefer its configured spec so
-        # its repo/auth still resolve; otherwise synthesize a bare spec.
-        by_name = {s.name: s for s in configured_source_specs()}
-        sources_to_index = [_resolve_explicit_source_spec(source, by_name)]
 
     total_chunks = 0
     total_deleted = 0
@@ -409,18 +411,18 @@ def run_reindex(
             # Save state after each source so progress isn't lost
             state.save(config.state_file)
     finally:
-        for c in multi_clients.values():
-            c.close()
-        # Stop on-demand engines we started, freeing VRAM (honors the
-        # on-demand design). Best-effort; never let cleanup mask a real error.
-        for profile in started_engines:
-            try:
-                stop_engine(profile)
-            except Exception:
-                logger.warning(
-                    "Failed to stop on-demand engine '%s'",
-                    profile.model_id, exc_info=True,
-                )
+        try:
+            client_cleanup.close()
+        finally:
+            # Lifecycle cleanup still runs if an injected client's close fails.
+            for profile in started_engines:
+                try:
+                    runtime.stop_engine(profile)
+                except Exception:
+                    logger.warning(
+                        "Failed to stop on-demand engine '%s'",
+                        profile.model_id, exc_info=True,
+                    )
 
     # Purge sources removed from the CURRENT corpus config (a harness's own
     # checked-in defaults, a knowledge-repo overlay, or a personal/machine
