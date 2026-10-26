@@ -53,10 +53,13 @@ not replaced or declared complete by this amendment.
    custody and explicit unknown outcomes. Small platform bindings through
    `ctypes` call existing OS libraries; they do not compile new code.
 4. Qualify the interpreter/bootstrap boundary before migrating Windows
-   pre-Python callers. Preserve authenticated pipe endpoints, process handles,
-   strict atomic Job containment, headlessness, operation-lock compatibility,
-   filesystem/reparse/ACL checks and uncertain launch outcomes. Do not invent
-   a PATH-Python dependency or declare an impossible bootstrap successful.
+   callers that currently run before their plugin runtime. Reuse the
+   [existing Python prerequisite](#python-prerequisite-boundary), rather than
+   preserve a Python-free helper implementation. Preserve authenticated pipe
+   endpoints, process handles, strict atomic Job containment, headlessness,
+   operation-lock compatibility, filesystem/reparse/ACL checks and uncertain
+   launch outcomes. Do not invent a PATH-Python dependency or declare an
+   impossible bootstrap successful.
    An unresolved bootstrap design blocks that slice before mutation.
 5. Remove canonical and generated native sources, compiler setup/build hooks,
    custom native artifact export/verification and embedded compilation/code
@@ -66,6 +69,53 @@ not replaced or declared complete by this amendment.
 6. Add ownership-aware guards, update current reality docs and requalify actual
    minimal-machine construction, process safety and affected consumers. Old
    compiled-helper evidence is historical, not replacement qualification.
+
+## Python prerequisite boundary
+
+The operator clarified that Python is a prerequisite of the whole harness,
+installed through Agent Machines. The earlier choice of official Python
+acquisition belongs to that existing provisioning owner; it is not approval
+for an additional embedded distribution, helper-owned download or competing
+installer.
+
+The Windows migration therefore orders the existing Python prerequisite before
+the shared safety helpers. A cold plugin runtime is not a Python-free machine.
+Thin shells hand off to shared standard-library Python through an attributable,
+qualified physical interpreter, without importing an addressed plugin's venv
+or selecting an arbitrary executable from PATH. Source-only distributions must
+carry the complete Python helper closure, not rely on an installed sibling.
+Existing process, lease, update-driver and installation-context owners still
+own their protocols and native OS bindings through ctypes.
+
+The prerequisite itself remains owned by machine provisioning. Missing or
+unsupported Python must report the prerequisite and use its existing consented
+provisioning path, not silently download another interpreter or compile an
+interop helper. Status, discovery and optional read-only selection never
+install Python. Standalone plugin use retains its declared Python prerequisite
+and independent installation; this is not a new requirement to run an Agent
+Machines service for every helper.
+
+Before removing a Windows compiled implementation:
+
+- [ ] Qualify the existing prerequisite-to-helper interpreter handoff,
+  including physical executable selection, supported version, retained
+  identity/custody and refusal of missing, replaced or addressed-runtime inputs.
+- [ ] Prove the actual first-entry order: machine-owned Python provisioning,
+  admitted standard-library helper, then runtime construction or application
+  work. No unqualified Python process establishes its own trust.
+- [ ] Preserve byte-range/operation-lock compatibility, authenticated pipe
+  peers, strict atomic child Job assignment, headlessness and uncertain cleanup
+  outcomes through the existing Python owners.
+- [ ] Requalify cold and repeat invocation with compilers absent and no helper
+  acquisition fallback. Include missing-prerequisite, startup failure,
+  caller-loss and retained-identity controls in bounded disposable fixtures.
+
+Stock Windows metadata confirms some file-identity, native-system and trust
+bindings already exist in platform assemblies. Metadata alone does not prove
+private-call permission, final-path semantics, file custody or Job behavior;
+neither an incomplete inventory nor a web answer establishes impossibility.
+Do not replace an unresolved guarantee with runtime code emission or a weaker
+post-start assignment.
 
 ## Validation and stopping gates
 
@@ -81,7 +131,8 @@ not replaced or declared complete by this amendment.
 - [ ] Production remains non-expiring. Protected/live/foreign/changed state and
   inconclusive inspection remain explicit holds; cleanup remains limited to
   declared disposable artifacts.
-- [ ] Windows proves genuine cold/pre-Python bootstrap, native-handle identity,
+- [ ] Windows proves machine-owned Python prerequisite ordering and genuine
+  cold plugin-runtime bootstrap, native-handle identity,
   authenticated pipes, operation-lock compatibility, filesystem custody,
   strict Job containment and zero unintended windows/focus changes, without
   embedded compilation or emitted interop types.
