@@ -44,6 +44,32 @@ Retirement of a legacy consumer naming scheme is a separate migration under
 the existing source-ownership guards, not an unrestricted pre-index callback.
 Custom sources must remain declared/registered during the compatibility window.
 
+### Source retirement and background maintenance
+
+The default configured crawl selection is authoritative for source retirement.
+Consumers also accepting pushed content must not treat a partial crawl selection
+as the complete inventory. Pass `SourceRetirementPolicy` from `indexing.gc`
+with `configured_snapshot=False` to retain sources outside that selection.
+`stale_generations=False` disables full-run naming-generation collection, while
+the existing `AGENT_INDEX_REINDEX_GC=0` safety valve disables both collections.
+Exact names in `AGENT_INDEX_GC_KEEP_SOURCES` remain protected before either
+classifier runs; a caller's naming predicate cannot override operator retention.
+
+A consumer with a legacy naming scheme can supply the policy's pure
+`is_live_source(source)` predicate and `live_crawl_keys` set. The shared GC loop
+still owns exact-source deletion, pending-acquisition exclusion and selected
+store guards. The predicate classifies stored names, not crawl aliases; retained
+crawl keys preserve cursors even when a stale stored generation shares a name.
+This is not a pre-index mutation callback or a replacement pipeline.
+Failed full runs do not advance `last_full_reindex`, collect stale generations
+or compact as though reconciliation had completed.
+
+Consumers with their own coalescing cluster maintainer should pass a config
+copy with `cluster_enabled=False` to indexing, leaving the retrieval/background
+configuration unchanged. Preserve pending-maintenance accounting in the worker;
+disabling inline clustering is not evidence that the background artifact is
+current. Source-retirement policy does not disable required selected-store FTS.
+
 ## Client and lifecycle ownership
 
 `EmbeddingRuntime` contains `create_client(profile)`,

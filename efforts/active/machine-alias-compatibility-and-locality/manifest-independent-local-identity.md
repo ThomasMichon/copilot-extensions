@@ -194,4 +194,4 @@ read-only lookup observations from the still-open actual allocation/Resume gate.
 - [ ] Review ordinary activation separately. Installed opt-in acceptance is not
   ordinary-default or rollout authorization. Preserve the low-level omitted-mode
   legacy contract; activate ordinary call sites only through separately reviewed
-  selection.
+  [selection](ordinary-callsite-activation.md).

@@ -397,6 +397,15 @@ for the installer `start` action when its env selects
 Unlabeled legacy launchers remain inert, absent registrations are not enrolled,
 and an explicitly disabled Scheduled Task is not bypassed through a logon
 registration.
+The installer start-now path asks its generated launcher for a versioned launch
+description, preserving profile gates and slot selection, then submits the actual
+Python command to the shared durable-process SDK. This binds daemon admission to
+the supervisor PID, not a PowerShell wrapper. Description mode prepares the log
+path and rotates oversized logs but never starts the supervisor; normal logon/task entrypoints are unchanged.
+An explicit Python `-X agent_dispatch_install_dir=<root>` ownership marker keeps
+the direct base interpreter installation-scoped for retirement. It is combined
+with exact supervisor command parsing, never used to select arbitrary Python
+processes or to bypass process creation-identity checks.
 
 ### Same-cell sibling invocation
 

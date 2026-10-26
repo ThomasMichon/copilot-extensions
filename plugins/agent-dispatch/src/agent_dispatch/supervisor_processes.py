@@ -13,9 +13,8 @@ import logging
 import ntpath
 import os
 import shlex
-import signal
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -35,6 +34,7 @@ class WindowsProcess:
     parent_pid: int
     executable: str = ""
     command_line: str = ""
+    start_time: str = ""
 
 
 @dataclass
@@ -128,8 +128,25 @@ def _under_install_root(path: str, install_dir: str | Path) -> bool:
         return False
 
 
+def _has_install_marker(process: WindowsProcess, install_dir: str | Path) -> bool:
+    if _basename(process.executable).lower() not in {"python.exe", "pythonw.exe"}:
+        return False
+    tokens = _tokens(process.command_line)
+    if len(tokens) < 5 or tokens[1] != "-X":
+        return False
+    marker = "agent_dispatch_install_dir="
+    if not tokens[2].startswith(marker):
+        return False
+    declared = tokens[2][len(marker):]
+    return (
+        ntpath.isabs(declared)
+        and ntpath.normcase(ntpath.abspath(tokens[0])) == ntpath.normcase(process.executable)
+        and ntpath.normcase(ntpath.abspath(declared)) == ntpath.normcase(ntpath.abspath(str(install_dir)))
+    )
+
+
 def _is_supervisor_runtime(process: WindowsProcess, install_dir: str | Path) -> bool:
-    if not _under_install_root(process.executable, install_dir):
+    if not (_under_install_root(process.executable, install_dir) or _has_install_marker(process, install_dir)):
         return False
     argv = _agent_dispatch_argv(process.command_line)
     if not argv:
@@ -257,6 +274,7 @@ def parse_windows_process_json(text: str) -> list[WindowsProcess]:
                 parent_pid=parent_pid,
                 executable=str(row.get("ExecutablePath") or ""),
                 command_line=str(row.get("CommandLine") or ""),
+                start_time=str(row.get("CreationFileTime") or ""),
             )
         )
     return result
@@ -268,7 +286,9 @@ def iter_windows_processes() -> list[WindowsProcess]:
     script = (
         "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
         "$rows = @(Get-CimInstance Win32_Process | "
-        "Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine); "
+        "Select-Object ProcessId,ParentProcessId,ExecutablePath,CommandLine,"
+        "@{Name='CreationFileTime';Expression={if($_.CreationDate){"
+        "$_.CreationDate.ToUniversalTime().ToFileTimeUtc().ToString()}}}); "
         "[Console]::Out.Write((ConvertTo-Json -InputObject $rows -Compress))"
     )
     completed = subprocess.run(
@@ -288,20 +308,29 @@ def iter_windows_processes() -> list[WindowsProcess]:
     )
     if completed.returncode != 0:
         raise RuntimeError((completed.stderr or "Win32_Process query failed").strip())
-    return parse_windows_process_json(completed.stdout or "")
+    from zdd.diagnostics import process_start_time
+
+    records = []
+    for process in parse_windows_process_json(completed.stdout or ""):
+        actual = process_start_time(process.pid)
+        # CIM keeps microseconds; the shared terminator requires the exact
+        # 100-ns handle token, obtained only after checking the census identity.
+        matching = (actual and actual.isdigit() and process.start_time.isdigit()
+                    and int(actual) // 10 == int(process.start_time) // 10)
+        records.append(replace(process, start_time=actual if matching else ""))
+    return records
 
 
-def terminate_process(pid: int) -> bool:
-    """Force-terminate one Windows process; already-gone is success."""
+def terminate_process(pid: int, *, expected_start_time: str = "") -> bool:
+    """Retire through the shared creation-identity-bound Windows handle."""
+    from zdd.diagnostics import terminate_pid_if_identity
 
-    try:
-        os.kill(pid, signal.SIGTERM)
+    result = terminate_pid_if_identity(pid, expected_start_time, exit_timeout=5)
+    if result.get("killed") and result.get("exit_confirmed"):
         return True
-    except ProcessLookupError:
-        return True
-    except (OSError, PermissionError):
-        log.debug("could not terminate supervisor process pid=%s", pid, exc_info=True)
-        return False
+    from zdd.diagnostic_exit import pid_alive_windows
+
+    return not pid_alive_windows(pid)
 
 
 def retire_windows_supervisor_generations(
@@ -340,7 +369,12 @@ def retire_windows_supervisor_generations(
             attempted.add(pid)
             if pid == os.getpid():
                 continue
-            if terminate(pid):
+            if terminate is terminate_process:
+                snapshot = next(process for process in processes if process.pid == pid)
+                stopped = terminate(pid, expected_start_time=snapshot.start_time)
+            else:
+                stopped = terminate(pid)
+            if stopped:
                 result.retired.append(pid)
             else:
                 result.errors.append(f"terminate pid={pid} failed")

@@ -34,9 +34,19 @@ def test_logon_application_argv_reaches_canonical_provenance(tmp_path, resolutio
     witness = runtime / "witness.json"
     launcher = runtime / "fixture launcher.ps1"
     environment = runtime / "profile's environment.env"
+    launcher.write_text("# agent-dispatch-supervisor-launch-v1\n", encoding="utf-8")
     # Execute canonical spawn validation, stopping before reservations and process creation.
     (runtime / "sitecustomize.py").write_text(
-        "import json, os\nfrom pathlib import Path\nimport agent_procutil as pu\n"
+        "import base64, json, os, sys\nfrom pathlib import Path\nimport agent_procutil as pu\n"
+        "from types import SimpleNamespace\nfrom agent_procutil import owned_process\n"
+        "def describe(argv, **kwargs):\n"
+        "    Path(os.environ['LAUNCH_WITNESS'] + '.preflight').write_text(json.dumps(argv))\n"
+        "    value = {'version': 1, 'executable': sys.executable,\n"
+        "             'arguments': ['-m', 'agent_dispatch', 'supervise', 'serve'],\n"
+        "             'log_path': str(Path(kwargs['cwd']) / 'supervise-service.log')}\n"
+        "    return SimpleNamespace(returncode=0, stderr='',\n"
+        "                           stdout=base64.b64encode(json.dumps(value).encode()).decode('ascii'))\n"
+        "owned_process.run_caller_owned = describe\n"
         "from agent_procutil import daemon\n"
         "class Validated(Exception): pass\n"
         "automatic = daemon._automatic_instance\n"
@@ -121,7 +131,11 @@ def test_logon_application_argv_reaches_canonical_provenance(tmp_path, resolutio
         return
     assert result.returncode == 0, result.stdout + result.stderr
     observed = json.loads(witness.read_text(encoding="utf-8"))
-    command = observed.pop("argv")
+    actual = observed.pop("argv")
+    assert Path(actual[0]).samefile(sys.executable)
+    assert actual[1:] == ["-X", "agent_dispatch_install_dir=" + str(runtime),
+                          "-m", "agent_dispatch", "supervise", "serve"]
+    command = json.loads(Path(str(witness) + ".preflight").read_text())
     assert Path(command[0]).is_absolute()
     assert Path(command[0]).samefile(expected)
     assert Path(command[0]).name.lower() == "powershell.exe"
@@ -135,10 +149,11 @@ def test_logon_application_argv_reaches_canonical_provenance(tmp_path, resolutio
         str(environment),
         "-Name",
         "two words",
+        "-DescribeLaunch",
     ]
     assert observed == {
         "cwd": str(runtime),
-        "log_path": str(runtime / "supervise-launcher.log"),
+        "log_path": str(runtime / "supervise-service.log"),
         "console_children": True,
         "explicit_instance": False,
     }
