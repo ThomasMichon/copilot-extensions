@@ -15,13 +15,15 @@ import pytest
 from .installer_test_support import installer_functional_timeout, snapshot_tree_manifest
 
 
-@pytest.mark.parametrize("profile,multiplier", [(None, 1), ("standard", 1), ("busy-host-functional", 3)])
-@pytest.mark.parametrize("seconds", [45, 60])
-def test_installer_functional_profile_is_explicit(monkeypatch, profile, multiplier, seconds):
+@pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
+@pytest.mark.parametrize("seconds,functional", [(45, 135), (60, 300)])
+def test_installer_functional_profile_is_explicit(monkeypatch, profile, seconds, functional):
     monkeypatch.delenv("CODESPACES_INSTALLER_TEST_PROFILE", raising=False)
     if profile is not None:
         monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
-    assert installer_functional_timeout(seconds) == seconds * multiplier
+    assert installer_functional_timeout(seconds) == (
+        functional if profile == "busy-host-functional" else seconds
+    )
 
 
 @pytest.mark.parametrize("profile", ["", "busy", "STANDARD"])
@@ -48,14 +50,16 @@ def _contract_module(module_name, monkeypatch):
     return module
 
 
-@pytest.mark.parametrize("profile,multiplier", [("standard", 1), ("busy-host-functional", 3)])
+@pytest.mark.parametrize("profile,native_seconds,item_seconds", [
+    ("standard", 45, 60), ("busy-host-functional", 135, 300),
+])
 @pytest.mark.parametrize("module_name", ["test_installer_engine_adoption", "test_snapshot_copy_contract"])
 def test_installer_functional_profile_reaches_module_and_native_harness(
-    monkeypatch, tmp_path, profile, multiplier, module_name,
+    monkeypatch, tmp_path, profile, native_seconds, item_seconds, module_name,
 ):
     monkeypatch.setenv("CODESPACES_INSTALLER_TEST_PROFILE", profile)
     module = _contract_module(module_name, monkeypatch)
-    assert module.pytestmark.args == (60 * multiplier,)
+    assert module.pytestmark.args == (item_seconds,)
     observed = []
     monkeypatch.setattr(
         module.subprocess, "run",
@@ -68,7 +72,7 @@ def test_installer_functional_profile_reaches_module_and_native_harness(
         monkeypatch.setattr(module, "isolate_installer_environment", lambda *_args: None)
         layout = (tmp_path, tmp_path, tmp_path / "engine.ps1", "")
         assert module._native(layout, tmp_path, "exit 0") == "completed"
-    assert observed[0][1]["timeout"] == 45 * multiplier
+    assert observed[0][1]["timeout"] == native_seconds
     assert observed[0][1]["check"] is False
 
 

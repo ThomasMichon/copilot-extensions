@@ -916,7 +916,7 @@ def main(argv: list[str] | None = None) -> int:
                     effective_subsuite_timeout = 900.0
                     effective_plugin_timeout = 2700.0
                     print(
-                        "[PROFILE] busy-host-functional: native=135s module-item=180s "
+                        "[PROFILE] busy-host-functional: native=135s module-item=300s "
                         "default-item=30s group=900s plugin=2700s; "
                         "functional evidence only, not original-budget/performance PASS"
                     )

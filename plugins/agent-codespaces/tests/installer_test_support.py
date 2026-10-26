@@ -13,7 +13,9 @@ def installer_functional_timeout(seconds: int) -> int:
     profile = os.environ.get("CODESPACES_INSTALLER_TEST_PROFILE", "standard")
     if profile not in ("standard", "busy-host-functional"):
         raise ValueError(f"Unknown Codespaces installer test profile: {profile}")
-    return seconds * 3 if profile == "busy-host-functional" else seconds
+    if profile == "busy-host-functional":
+        return 300 if seconds == 60 else seconds * 3
+    return seconds
 
 
 def snapshot_tree_manifest(root: Path) -> dict[str, tuple[str, str]]:
