@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import stat
 from pathlib import Path
 
@@ -54,13 +55,12 @@ def documents() -> dict[Path, dict[str, object]]:
     anchor = WORKSPACE / "anchor"
     registry = HOME / ".agent-worktrees"
     project = HOME / ("." + PROJECT)
-    peer = SOURCE / "plugins/agent-bridge/tests/mock_acp_peer.py"
-    peer_args = ["-u", str(peer)]
+    peer = HOME / "bin/mock-acp"
     repo: dict[str, object] = {
         "anchor": str(anchor), "worktree_root": str(WORKSPACE / "worktrees"),
         "default_branch": "main", "auto_fast_forward": False,
         "expose_agent": True,
-        "launch": {"linux": ["/usr/bin/python3", *peer_args]},
+        "launch": {"linux": [str(peer)]},
         "session_env": environment(),
     }
     return {
@@ -92,8 +92,8 @@ def documents() -> dict[Path, dict[str, object]]:
             }},
         },
         HOME / ".agent-bridge/acp-agents.json": {PROJECT: {
-            "project": PROJECT, "copilot_path": "/usr/bin/python3",
-            "copilot_args": peer_args,
+            "project": PROJECT, "copilot_path": str(peer),
+            "copilot_args": [],
             "env": {
                 **environment(), "MOCK_ACP_TRANSCRIPT": str(EVIDENCE / "acp-peer.jsonl"),
             },
@@ -136,12 +136,15 @@ def _initial_roots() -> None:
             raise ValueError("retained workspace requires its original owner; no fixture preparation")
 
 
-def _write_document(path: Path, data: dict[str, object]) -> None:
+def _write_text(path: Path, text: str, *, mode: int = 0o600) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        json.dump(data, stream, sort_keys=True)
-        stream.write("\n")
+        stream.write(text)
+
+
+def _write_document(path: Path, data: dict[str, object]) -> None:
+    _write_text(path, json.dumps(data, sort_keys=True) + "\n")
 
 
 def prepare_fixture(custody: GuestOperation) -> None:
@@ -169,6 +172,13 @@ def prepare_fixture(custody: GuestOperation) -> None:
     (HOME / ".agent-bridge/providers.d").mkdir(mode=0o700)
     template = HOME / "git-template"
     template.mkdir(mode=0o700)
+    # Bridge appends ACP flags immediately after the executable, before args.
+    peer = SOURCE / "plugins/agent-bridge/tests/mock_acp_peer.py"
+    _write_text(
+        HOME / "bin/mock-acp",
+        "#!/bin/sh\nexec " + shlex.join(["/usr/bin/python3", "-u", str(peer)]) + ' "$@"\n',
+        mode=0o700,
+    )
     for path, data in documents().items():
         custody.assert_owned()
         _write_document(path, data)

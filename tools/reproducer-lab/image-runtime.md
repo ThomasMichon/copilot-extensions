@@ -124,6 +124,9 @@ generic configuration, without hooks, global/system Git config, inherited templa
 remotes, credentials or network. A failure propagates its bounded literal
 diagnostic and leaves the attempt intact.
 The explicit agent registry selects the existing test-only stdio ACP peer;
+an exclusively created private executable wrapper places its Python script
+before the ACP flags that Bridge appends. Python itself is not registered as
+the Copilot executable, since those flags would be interpreted by Python.
 its transcript contains only synthetic data. This is not a native Copilot or
 model and does not complete a Dispatch task. Credential relay listening is
 disabled and the private provider registry starts empty; the ordinary Bridge
@@ -148,8 +151,10 @@ targets. Neither lane qualifies a real venv, image, mount or service.
 
 `tools/test_reproducer_lab_fixture.py` supplies synthetic preparation/failure,
 minimal-environment, configuration and no-launch controls. Explicitly selected
-`fixture_owner_tests.py` exercises real local Git and the actual owner config
-loaders on temporary synthetic paths; its guest ownership check is substituted.
+`fixture_owner_tests.py` exercises real local Git, the peer wrapper's argument
+parser and actual owner config loaders on temporary synthetic paths; its guest
+ownership check is substituted. The parser control uses `--help` and never
+enters the peer loop or writes a transcript.
 It starts no service or backend and is outside default test discovery. Neither
 lane qualifies the actual image, guest mounts, installed runtimes or ordinary
 Dispatch-to-Bridge execution.

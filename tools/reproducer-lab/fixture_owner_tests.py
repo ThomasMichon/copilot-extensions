@@ -57,6 +57,22 @@ def test_local_git_created_only_synthetic_harness(prepared: SimpleNamespace) -> 
         guest_fixture.prepare_fixture(prepared.custody)
 
 
+def test_actual_peer_launcher_accepts_protocol_flags_before_extra_args(
+    prepared: SimpleNamespace,
+) -> None:
+    from process import run
+
+    launcher = guest_fixture.HOME / "bin/mock-acp"
+    assert launcher.stat().st_mode & 0o777 == 0o700
+    result = run(
+        [str(launcher), "--acp", "--stdio", "--no-auto-update", "--help"],
+        timeout=5, max_stdout_bytes=16 * 1024, env=guest_fixture.environment(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--acp" in result.stdout and "--stdio" in result.stdout
+    assert not (guest_fixture.EVIDENCE / "acp-peer.jsonl").exists()
+
+
 def test_actual_owner_loaders_select_fixture_inputs(prepared: SimpleNamespace) -> None:
     worktrees = importlib.import_module("agent_worktrees.config")
     worktrees.set_active_project(guest_fixture.PROJECT)

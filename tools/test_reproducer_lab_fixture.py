@@ -101,10 +101,8 @@ def test_subject_is_separate_from_source_and_explicitly_hosts(
     agents = docs[paths.home / ".agent-bridge/acp-agents.json"]
     agent = agents[guest_fixture.PROJECT]
     assert agent["project"] == guest_fixture.PROJECT
-    assert agent["copilot_path"] == "/usr/bin/python3"
-    assert agent["copilot_args"] == [
-        "-u", str(guest_fixture.SOURCE / "plugins/agent-bridge/tests/mock_acp_peer.py"),
-    ]
+    assert agent["copilot_path"] == str(paths.home / "bin/mock-acp")
+    assert agent["copilot_args"] == []
     bridge = docs[paths.home / ".agent-bridge/config.yaml"]
     assert bridge["enable_credential_relay"] is False
     assert bridge["idle_reap_ttl_seconds"] == 0
