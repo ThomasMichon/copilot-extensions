@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from boundary import Experiment, inspect_static_boundary
+from mounts import VolatileMounts, inspect_volatile_mounts
 from network import NetworkIdentity, inspect_inventory, selected_containers
 from process import run as _run
 from storage import Resources, StorageMonitor, Usage, VolumeIdentity
@@ -153,3 +154,22 @@ class DockerReader:
         if monitor.closed or self.clock() >= monitor.started + monitor.policy.lifetime_seconds:
             raise ReadError("host monitor is closed or its active lifetime has expired")
         monitor.record(self.measure(monitor.experiment, monitor.resources), now=self.clock())
+
+    def volatile_mounts(self, experiment: Experiment, expected: Resources) -> VolatileMounts:
+        """Observe effective root/tmpfs posture without qualifying services or source."""
+        deadline = self.clock() + 30
+        if self.inspect(experiment, expected.container_id, deadline=deadline) != expected:
+            raise ReadError("physical storage selection differs from retained resources")
+        probe = Path(__file__).with_name("guest_mounts.py").read_text(encoding="utf-8")
+        value = self._json([
+            "exec", "--user", "1000:1000", expected.container_id,
+            "/usr/bin/python3", "-I", "-c", probe,
+        ], deadline)
+        try:
+            observed = inspect_volatile_mounts(experiment, value)
+        except ValueError as error:
+            raise ReadError(str(error)) from error
+        if self.inspect(experiment, expected.container_id, deadline=deadline) != expected:
+            raise ReadError("physical storage changed during mount observation")
+        self._check_deadline(deadline)
+        return observed

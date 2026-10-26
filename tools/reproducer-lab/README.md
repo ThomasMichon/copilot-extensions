@@ -3,8 +3,8 @@
 This directory implements the first boundary and storage observations from the
 [reviewed persistent reproducer plan](../../efforts/active/linux-role-fleet/persistent-isolated-reproducer.md).
 There is no provisioning CLI or qualified persistent lab. The opt-in reader can
-inspect explicitly selected existing resources and run one fixed, non-root
-measurement in an already running guest. It never creates, starts, stops or
+inspect explicitly selected existing resources and run fixed, non-root
+probes in an already running guest. It never creates, starts, stops or
 deletes resources. Source publication does not authorize those observations
 against an existing installation.
 
@@ -132,7 +132,7 @@ resource ownership, and a controlled real egress-refusal experiment remain
 separate prerequisites. This API never clears the static unresolved list or
 admits a case.
 
-Effective egress, exclusive driver/resource custody, guest/runtime/source
+Effective egress, exclusive driver/resource custody, full guest/runtime/source
 qualification, native output ownership and strict pre-effect support remain
 unavailable. Actual provisioning and case execution remain blocked until those
 requirements and separate approval are satisfied.
@@ -188,6 +188,35 @@ are retained on failure. Source staging, image build and guest copy still need
 their own bounded storage/approval and installed-source qualification; an
 observed Git commit is not a proof of an executing guest's code.
 
+## Effective volatile-mount observations
+
+`reader.volatile_mounts(experiment, retained_resources)` checks the same physical
+container/volume selection before and after one fixed non-root guest probe.
+It uses the existing five-call, 30-second observation envelope and 10-second
+per-command bound. `guest_mounts.py` reads at most 32 KiB of
+`/proc/self/mountinfo`, opens only `/tmp` and `/run` with no-follow directory
+descriptors, and reads their owner, mode, filesystem device, read-only flag and
+total capacity.
+It requires unchanged mount-table bytes around the observations and has a
+guest-local five-second timer plus an elapsed-time check.
+
+`mounts.inspect_volatile_mounts` checks the bounded wire shape, effective
+`1000:1000` identity, one read-only `/` mount, and separate `/tmp`/`/run`
+filesystems with exact top-level mounts. Each must be tmpfs with
+`rw,nosuid,nodev`, a writable filesystem flag, owner `1000:1000`, mode `0700`
+and the exact declared capacity.
+An observed capacity rounded above or below the declaration refuses; select
+representable byte sizes rather than silently rounding the budget.
+Duplicate/shadowed mounts, nested volatile mounts, malformed paths/options,
+more than 256 records and stale physical selections refuse.
+
+These are non-atomic, point-in-time observations of the selected volatile
+mounts, not a complete guest mount policy, service/config/DB/registrar or
+executing-source qualification. They do not establish egress, resource custody,
+persistence, native-output retention or strict pre-effect support, clear the
+static unresolved list, or admit a case. Client cleanup is not proof that a
+daemon-side exec settled; missing/error observations remain unavailable.
+
 ## Tests
 
 `tools/test_reproducer_lab_boundary.py` is an in-process, synthetic control set:
@@ -202,11 +231,16 @@ malformed/missing observations and final-settlement deadline refusal.
 `tools/test_reproducer_lab_source.py` covers pure/synthetic immutable-source
 inputs, exact file/byte ceilings, environment/command selection, retained
 partial failures and the last command's deadline. It invokes no Git.
+`tools/test_reproducer_lab_mounts.py` covers bounded mount-table parsing,
+read-only root, exact tmpfs flags/capacities/owner/mode/device checks, duplicate/
+nested mounts, fixed probe/physical selection, failed commands and final expiry.
+Local file-descriptor fixtures exercise the probe without querying host mount
+state or invoking Docker; they are not real container qualification.
 Run it with the repository's selected Python/pytest environment through the
 caller's bounded test supervisor:
 
 ```text
-<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py
+<bounded-test-supervisor> -- <python> -m pytest -q tools/test_reproducer_lab_boundary.py tools/test_reproducer_lab_monitoring.py tools/test_reproducer_lab_network.py tools/test_reproducer_lab_source.py tools/test_reproducer_lab_mounts.py
 ```
 
 These tests do not run Docker, open a socket, install dependencies, exercise native
