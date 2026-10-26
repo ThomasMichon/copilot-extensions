@@ -9,7 +9,10 @@ import sys
 from pathlib import Path
 
 from standalone_consumers import standalone_build_resources
-from native_test_paths import native_test_path
+if __package__:
+    from .native_test_paths import native_test_path
+else:
+    from native_test_paths import native_test_path
 
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT / "libs" / "installer-engine"))

@@ -21,7 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypeVar
 
-from native_test_paths import native_test_path
+if __package__:
+    from .native_test_paths import native_test_path
+else:
+    from native_test_paths import native_test_path
 
 # Repository runners consume the canonical source without a plugin installation.
 _previous_path = sys.path.copy()

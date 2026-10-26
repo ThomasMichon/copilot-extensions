@@ -15,6 +15,32 @@ from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
 
 
+@pytest.mark.parametrize("mode", ["package", "script"])
+def test_fresh_stdlib_caller_imports_native_cleanup_in_both_modes(tmp_path, mode):
+    root = Path(__file__).resolve().parents[1]
+    script = """
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+if sys.argv[2] == "package":
+    import tools.coverage_guided_selection.baseline
+    from tools import plugin_test_containment as containment
+    assert containment.native_test_path.__module__ == "tools.native_test_paths"
+else:
+    sys.path.insert(0, str(root / "tools"))
+    import plugin_test_containment as containment
+    import plugin_test_cache
+    assert containment.native_test_path.__module__ == "native_test_paths"
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(root), mode],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15,
+        **plugin_test_containment.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
     monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
