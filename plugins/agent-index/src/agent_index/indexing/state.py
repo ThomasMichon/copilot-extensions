@@ -50,6 +50,18 @@ class IndexState:
             not isinstance(src.acquisition_scope, str) or not src.acquisition_scope
         ) for src in sources.values()):
             raise ValueError("invalid persisted source acquisition scope")
+        scopes = data.get("acquisition_scopes", {})
+        if not isinstance(scopes, dict) or any(
+            not isinstance(name, str) or not name or name not in sources
+            or not isinstance(scope, str) or not scope
+            for name, scope in scopes.items()
+        ):
+            raise ValueError("invalid persisted source acquisition scopes")
+        for name, scope in scopes.items():
+            source = sources[name]
+            if source.acquisition_scope is not None and source.acquisition_scope != scope:
+                raise ValueError("conflicting persisted source acquisition scope")
+            source.acquisition_scope = scope
         return cls(
             sources=sources,
             total_chunks=data.get("total_chunks", 0),
@@ -61,12 +73,20 @@ class IndexState:
         """Persist state to disk."""
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
-            "sources": {name: asdict(src) for name, src in self.sources.items()},
+            "sources": {
+                name: {key: value for key, value in asdict(src).items()
+                       if key != "acquisition_scope"}
+                for name, src in self.sources.items()
+            },
             "total_chunks": self.total_chunks,
             "last_full_reindex": self.last_full_reindex,
         }
         if self.stored_families:
             data["stored_families"] = self.stored_families
+        scopes = {name: src.acquisition_scope for name, src in self.sources.items()
+                  if src.acquisition_scope is not None}
+        if scopes:
+            data["acquisition_scopes"] = scopes
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             with temporary.open("x", encoding="utf-8", newline="\n") as stream:
