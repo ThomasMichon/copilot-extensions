@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Instruction Source Resolution](active/instruction-source-resolution/README.md) | Draft; review the compatibility repair before implementation | #9097; effective enabled-source verification, exact generated output, unchanged trust/maintenance boundaries; no rollout |
 | [Incremental Indexing Delta Pipeline](active/incremental-indexing-delta-pipeline/README.md) | Active; shared delta seam and normal-round reuse slice, complete acquisition/store/adoption gates open | #9023; preserves #4222/#4220/#8733/#5302 correctness owners; generic engine first, consumer adoption separate |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |
 | [Vault Service](active/vault-service/README.md) | Draft; initial architecture and complete phased acceptance proposal only, implementation admission pending | #8729; Vault credential/transaction authority, stateless Manager, central/local/federated deployment; existing custody retained, no rollout |
