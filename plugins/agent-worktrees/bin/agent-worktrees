@@ -32,6 +32,10 @@ _aw_exec_resolved() {
   [ -n "$AW_PY" ] && exec "$AW_PY" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
+if [ "${_aw_update_diagnostic:-0}" = 1 ]; then
+  printf '%s\n' '[agent-worktrees] selected update phase requires a provisioned runtime; use ordinary update to repair it.' >&2
+  exit 127
+fi
 
 # No runtime slot exists -> self-provision on first use (runtime-self-provisioning
 # pattern). This is the confined-host path: a Copilot app / cloud agent where the

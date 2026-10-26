@@ -191,7 +191,7 @@ def _entry(
     snapshot: RepositoryResourceSnapshot,
 ) -> dict:
     if not isinstance(entry, dict) or set(entry) - {
-        "id", "title", "description", "kind", "declaration", "requirements",
+        "id", "title", "description", "kind", "declaration", "requirements", "operator_fields",
     }:
         raise ValueError("template entry must be an object with supported fields")
     name = entry.get("id")
@@ -207,6 +207,9 @@ def _entry(
     if not isinstance(requirements, list) or len(requirements) > 32:
         raise ValueError("requirements must be a list of at most 32 text items")
     requirements = [_text(value, "requirement", 1000) for value in requirements]
+    from .worker_operator_inputs import parse_fields
+
+    operator_fields = parse_fields(entry["operator_fields"]) if "operator_fields" in entry else None
     relative = _text(entry.get("declaration"), "declaration", 1000)
     posix = PurePosixPath(relative.replace("\\", "/"))
     if posix.is_absolute() or PureWindowsPath(relative).anchor or "\0" in relative:
@@ -250,6 +253,11 @@ def _entry(
     )
     if requirements:
         body += "\n\nDeclared requirements:\n" + "\n".join(f"- {value}" for value in requirements)
+    if operator_fields is not None:
+        body += (
+            "\n\nThis source declares bounded operator controls. Human forms accept only "
+            "those recipe parameters; executable structure and guidance remain source-owned."
+        )
     row = {
         "id": row_id, "title": title, "group": "Available templates",
         "description": description, "kind": kind, "revision": revision,
@@ -265,6 +273,8 @@ def _entry(
         "components": [], "components_basis": "template",
         "card": {"title": title, "body": body},
     }
+    if operator_fields is not None:
+        row["operator_parameters"] = operator_fields
     if definitions is not None:
         reference = (
             f"{source.provider}:{document_path.relative_to(root).as_posix()}"
@@ -332,10 +342,11 @@ def _read_source(
 
 def discover_templates(
     activation: ActivationReport, *, _definitions: dict | None = None,
+    snapshot: RepositoryResourceSnapshot | None = None,
 ) -> tuple[list[dict], dict]:
     """Enumerate inert provider rows and separately scoped completeness findings."""
     findings: list[dict] = []
-    snapshot = RepositoryResourceSnapshot(execution=False)
+    snapshot = snapshot or RepositoryResourceSnapshot(execution=False)
     sources = []
     for finding in activation.findings:
         _finding(findings, "plugin-activation", "activation-finding", str(finding))

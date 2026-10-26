@@ -4,6 +4,7 @@ from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
+import platform
 import runpy
 import re
 import shutil
@@ -219,6 +220,21 @@ def test_bridge_missing_fingerprint_tool_refuses_before_acquisition(
     assert not root.exists() and not installation.exists()
 
 
+def build_bridge_native_test_assets(payload, procutil):
+    if sys.platform != "linux":
+        return
+    package = procutil / "src/agent_procutil"
+    relative = Path("native") / f"linux-{platform.machine()}" / "daemon-instance"
+    result = subprocess.run(
+        [sys.executable, str(package / "_build_native.py"), "--output", str(package / relative)],
+        capture_output=True, text=True, timeout=90, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    destination = payload / "scripts" / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(package / relative, destination)
+
+
 @pytest.fixture
 def materialized_bridge(owning_bridge, area):
     payload, installation, project = owning_bridge
@@ -233,6 +249,7 @@ def materialized_bridge(owning_bridge, area):
     finally:
         sys.path[:] = previous
     assert not any(line.startswith("SKIP ") for line in result), result
+    build_bridge_native_test_assets(candidate, candidate / "libs/agent-procutil")
     shutil.rmtree(payload)
     shutil.copytree(candidate, payload)
     return payload, installation, project
@@ -269,10 +286,14 @@ def bridge_service_adapter(env):
         env["USERNAME"] = "fixture-user"
     else:
         adapter = Path(env["PATH"])
-        for name in ("seq", "xargs"):
+        for name in ("seq", "xargs", "cc", "as", "ld"):
             executable = shutil.which(name)
             assert executable, f"native installer requires {name}"
             (adapter / name).symlink_to(executable)
+        for name in ("python", "python3", "uv"):
+            assert shutil.which(name, path=env["PATH"]) is None, (
+                f"cold Bridge fixture exposes {name}"
+            )
         real_curl = (adapter / "curl").resolve()
         (adapter / "curl").unlink()
         (adapter / "curl").write_text(
@@ -310,7 +331,7 @@ def bridge_service_adapter(env):
     return adapter
 
 
-def assert_bridge_registration(installation, adapter):
+def assert_bridge_registration(installation, adapter, *, unattended=False):
     effects = registration_effects(adapter)
     if os.name == "nt":
         task = json.loads((adapter / "task.json").read_text(encoding="utf-8-sig"))
@@ -318,9 +339,10 @@ def assert_bridge_registration(installation, adapter):
         assert task["Actions"][0]["Execute"] == "conhost.exe"
         assert str(installation / "start-agent-bridge.ps1") in task["Actions"][0]["Arguments"]
         assert task["Actions"][0]["WorkingDirectory"] == str(installation)
-        assert task["Trigger"]["AtLogOn"] and not task["Trigger"]["AtStartup"]
+        assert task["Trigger"]["AtLogOn"] is not unattended
+        assert task["Trigger"]["AtStartup"] is unattended
         assert task["Trigger"]["Delay"] == "PT15S"
-        assert task["Principal"]["LogonType"] == "Interactive"
+        assert task["Principal"]["LogonType"] == ("S4U" if unattended else "Interactive")
         assert task["Settings"] == {"LimitSeconds": 0, "MultipleInstances": "IgnoreNew"}
         assert any(item["operation"] == "register" for item in effects)
         assert any(item["operation"] == "start" for item in effects)
@@ -337,14 +359,29 @@ def assert_bridge_registration(installation, adapter):
 @pytest.fixture
 def native_recipe_runner(area):
     calls, owners, descriptors, roots = [], [], [], {}
+    caller_jobs = {}
 
-    def start(command, *, env, cwd, root, diagnostic):
+    def start(
+        command, *, env, cwd, root, diagnostic, contain_caller=False,
+        stdin=subprocess.DEVNULL, stdout=None,
+    ):
         path = area / f"native-recipe-{len(calls)}.log"
         output = path.open("wb")
-        process = subprocess.Popen(
-            command, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
-            stdout=output, stderr=subprocess.STDOUT, **no_window_kwargs(),
+        arguments = dict(
+            env=env, cwd=cwd, stdin=stdin,
+            stdout=output if stdout is None else stdout,
+            stderr=subprocess.STDOUT if stdout is None else output, **no_window_kwargs(),
         )
+        if contain_caller and os.name == "nt":
+            from agent_procutil import spawn_sync_in_kill_on_close_job
+            process, job = spawn_sync_in_kill_on_close_job(
+                command, require_job=True, allow_breakaway=False, **arguments,
+            )
+            caller_jobs[process] = job
+        else:
+            process = subprocess.Popen(command, start_new_session=contain_caller, **arguments)
+            if contain_caller:
+                caller_jobs[process] = None
         calls.append((process, output, path))
         roots[root] = diagnostic
         prefix = "[installation-driver] launch acknowledgement: "
@@ -370,8 +407,25 @@ def native_recipe_runner(area):
         code = process.wait(timeout=900)
         return subprocess.CompletedProcess(command, code, path.read_text(errors="replace"), "")
 
+    def lose_caller(process):
+        assert process in caller_jobs and process.poll() is None
+        job = caller_jobs.pop(process)
+        if os.name == "nt":
+            job.close()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=30)
+
+    def owners_finished():
+        if os.name == "nt":
+            return bool(owners) and all(owner.poll() is not None for owner in owners)
+        from agent_procutil._caller_owned import _pidfd_exited
+        return bool(descriptors) and all(_pidfd_exited(descriptor) for descriptor in descriptors)
+
     try:
-        yield SimpleNamespace(start=start, run=run)
+        yield SimpleNamespace(
+            start=start, run=run, lose_caller=lose_caller, owners_finished=owners_finished,
+        )
     finally:
         with ExitStack() as settlement:
             for _process, output, _path in calls:
@@ -387,6 +441,11 @@ def native_recipe_runner(area):
                         observe, lambda descriptor=descriptor: _pidfd_exited(descriptor), 900,
                         lambda: "native supervisor still running",
                     )
+            for process, job in caller_jobs.items():
+                if job is not None:
+                    job.close()
+                elif process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
             for process, _output, _path in calls:
                 if process.poll() is None:
                     process.kill()

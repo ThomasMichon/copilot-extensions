@@ -1,6 +1,7 @@
 """Focused contract tests for repository test-runner admission."""
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import os
@@ -12,6 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,6 +86,64 @@ def cleanup_runner(monkeypatch, tmp_path):
         )
 
     return run
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows short TEMP alias")
+def test_short_temp_alias_reaches_real_daemon_registry(monkeypatch, tmp_path, cleanup_runner):
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetShortPathNameW(str(tmp_path), buffer, len(buffer))
+    if not length or length >= len(buffer) or Path(buffer.value) == tmp_path:
+        pytest.skip("filesystem has no short alias for the temporary parent")
+    monkeypatch.setenv("TEMP", buffer.value)
+    observed = []
+
+    def run_contained(*args, **kwargs):
+        from agent_procutil.daemon_instances import daemon_test_lifecycle
+
+        sandbox = kwargs["sandbox"]
+        assert sandbox == sandbox.resolve(strict=True)
+        with daemon_test_lifecycle(
+            owner="short-temp-regression", registry_root=sandbox / "daemon-instances",
+        ):
+            observed.append(sandbox)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", run_contained)
+    assert cleanup_runner() == 0
+    assert observed
+
+
+@pytest.mark.parametrize("noncanonical", [False, True])
+def test_temp_parent_is_canonical_before_sandbox_and_native_admission(
+    monkeypatch, tmp_path, cleanup_runner, noncanonical,
+):
+    from agent_procutil import _daemon_instance_store as store
+
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    requested = nested / ".." if noncanonical else tmp_path
+    monkeypatch.setenv("TEMP", str(requested))
+    original = runner._TestSandbox
+    parents = []
+
+    class CanonicalSandbox(original):
+        def __init__(self, *args, **kwargs):
+            parent = Path(kwargs["dir"])
+            assert parent == parent.resolve(strict=True)
+            parents.append(parent)
+            super().__init__(*args, **kwargs)
+
+    def admitted(*args, **kwargs):
+        root = kwargs["sandbox"] / "daemon-instances"
+        assert store._root(root, create=True) == root
+        return 0
+
+    monkeypatch.setattr(runner, "_TestSandbox", CanonicalSandbox)
+    monkeypatch.setattr(runner, "run_contained", admitted)
+    assert cleanup_runner() == 0
+    assert parents == [tmp_path.resolve()]
 
 
 def test_plugin_budget_includes_final_sandbox_cleanup(
@@ -735,8 +795,10 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     assert {path.name for path in native} == {
         "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
         "test_manager_updater_recovery.py",
+        "test_manager_runtime_uninstall.py",
         "test_launch_attempts_native.py", "test_mux_discovery_native.py",
         "test_psmux_home_directory.py", "test_warm_picker_lifetime.py",
+        "test_companion_pane_native.py", "test_companion_pane_tmux.py",
     }
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
@@ -750,6 +812,29 @@ def test_manager_explicit_native_selection_remains_available():
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
+
+
+def test_manager_uninstall_native_groups_preserve_existing_contracts_and_bounds():
+    source = SCRIPT.with_name("run-manager-runtime-acceptance.py").read_text(encoding="utf-8")
+    assignment = next(
+        node for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "groups" for target in node.targets)
+    )
+    expression = compile(ast.Expression(assignment.value), "native-groups", "eval")
+    for contract, count in (("runtime", 1), ("callbacks", 1), ("updater", 3), ("uninstall", 2)):
+        groups = eval(expression, {"str": str}, {
+            "args": SimpleNamespace(contract=contract), "prepare_command": ["prepare"],
+            "assertions": ["assert"], "python": "python", "native": "native", "sandbox": "sandbox",
+        })
+        assert len(groups) == count
+        assert groups[0][1][0] == ["prepare"]
+        assert groups[-1][1][-1] == ["assert"]
+        if contract == "uninstall":
+            assert groups[0][1] == [["prepare"]]
+            assert groups[1][1][0] == ["python", "-I", "-B", "native", "--exercise", "sandbox"]
+    assert "remaining = 300 - (time.monotonic() - started)" in source
+    assert "limits=Limits(wall_seconds=remaining)" in source
 
 
 @pytest.mark.parametrize("setting", [
@@ -1403,6 +1488,7 @@ def test_external_targets_are_explicit_and_contained_in_repository(monkeypatch, 
     assert runner._plugin_dir("runtime-source") == tmp_path / "libs" / "versioned-runtime"
     assert runner._plugin_dir("worktree-identity") == tmp_path / "libs" / "worktree-identity"
     assert runner._plugin_dir("repository-policy") == tmp_path / "libs" / "repository-policy"
+    assert runner._plugin_dir("agent-procutil") == tmp_path / "libs" / "agent-procutil"
     assert runner.EXTERNAL_TEST_DEPENDENCIES["repository-policy"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["payload-invocation"] == ("pyyaml>=6.0.3",)
     assert runner.EXTERNAL_TEST_DEPENDENCIES["runtime-source"] == ("pyyaml>=6.0.3",)

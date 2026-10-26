@@ -601,8 +601,42 @@ function Get-HostProcess {
     return @()
 }
 
+function Get-DaemonInstanceHelperRoot {
+    $payloadScripts = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..\scripts'))
+    $roots = @($PSScriptRoot)
+    $manifest = Join-Path (Split-Path $payloadScripts -Parent) 'plugin.json'
+    $expectedSource = Join-Path (Split-Path $payloadScripts -Parent) 'transports\dtssh\scripts'
+    if ([IO.Path]::GetFullPath($expectedSource) -eq [IO.Path]::GetFullPath($PSScriptRoot) -and
+        (Test-Path -LiteralPath $manifest -PathType Leaf) -and
+        -not ([IO.File]::GetAttributes($manifest) -band [IO.FileAttributes]::ReparsePoint) -and
+        ((Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json).name -ceq 'agent-ssh')) {
+        $roots += $payloadScripts
+    }
+    foreach ($root in $roots) {
+        $valid = $true
+        foreach ($name in @('daemon_instances.ps1', 'installer-instance-reconcile.ps1')) {
+            $path = Join-Path $root $name
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or
+                ([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint)) {
+                $valid = $false
+                break
+            }
+        }
+        if ($valid) { return $root }
+    }
+    throw 'Native daemon-instance helpers are unavailable; update the owning payload.'
+}
+
 function Install-Shortcut {
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    $helperRoot = Get-DaemonInstanceHelperRoot
+    foreach ($name in @('daemon_instances.ps1', 'installer-instance-reconcile.ps1')) {
+        $source = Join-Path $helperRoot $name
+        $destination = Join-Path $InstallDir $name
+        if ([IO.Path]::GetFullPath($source) -ne [IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+    }
     Copy-Item $LauncherSrc $LauncherDst -Force
     if ([System.IO.Path]::GetFullPath($InstallerSrc) -ne
         [System.IO.Path]::GetFullPath($InstallerDst)) {
@@ -768,6 +802,9 @@ function Stop-Launcher {
 
 switch ($Action) {
     { $_ -in @('install', 'update') } {
+        $helperRoot = Get-DaemonInstanceHelperRoot
+        . (Join-Path $helperRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $helperRoot
         # Validation requires ssh-keygen. Provision it while the existing host
         # is still running so a rebuilt machine can restore before any outage.
         Install-HostIdentityValidationTools

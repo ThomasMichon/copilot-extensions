@@ -16,9 +16,15 @@ from worktree_manager import catalog, discovery, self_install, update_driver_cli
 READ_OPERATIONS = ui._operations
 
 
+def test_configuration_child_preserves_sealed_runtime():
+    assert ui.configuration_pivot().list_cmd[:4] == (
+        sys.executable, "-B", "-m", "worktree_manager.installation_updates",
+    )
+
+
 @pytest.fixture
 def inventory(tmp_path, monkeypatch):
-    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path / "manager")
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "manager"))
     monkeypatch.setattr(self_install, "manager_repo", lambda root: "https://example.invalid/suite.git")
     monkeypatch.setattr(self_install, "manager_ref", lambda root: "selected")
     monkeypatch.setattr(self_install, "current_version", lambda root: "1")
@@ -120,11 +126,12 @@ def test_public_manager_plugin_target_refuses_unsupported_source_before_submissi
     inventory, tmp_path, monkeypatch, capsys,
 ):
     import update_driver
-    from worktree_manager.runtime_source_config import RuntimeSource, set_source
+    from worktree_manager.runtime_source_config import RuntimeSource, configured_source, set_source
 
     root = self_install.default_root()
     root.mkdir()
     set_source(RuntimeSource(channel="dev", allow_dev=True), root=root)
+    assert configured_source().channel == "dev"
     baseline = (root / "config.toml").read_bytes()
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
     monkeypatch.setattr(update_driver, "enqueue", lambda *a, **k: pytest.fail("unsupported source queued"))
@@ -148,6 +155,8 @@ def test_explicit_headless_engine_submission_uses_canonical_no_window_flags(monk
         None, ["update", "--target", "guide", "--detach"], headless=True,
     ) == 0
     assert seen["creationflags"] == 0x08000000
+    if os.name == "nt":
+        assert seen["stdout"] is sys.stdout and seen["stderr"] is sys.stderr
 
 
 @pytest.mark.parametrize("target", ["guide", "worktree-manager"])

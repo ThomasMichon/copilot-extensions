@@ -134,6 +134,17 @@ implementation and validation choices remain proposed means.
   without changing registration identity, execution parameters or runtime
   behavior (#8841). Structured operator controls and independent client
   adoption remain separate acceptance.
+- [x] Add source-declared bounded operator controls through the existing Save
+  lifecycle and native field vocabulary. Pin edits to the exact original
+  source, retain advanced CLI compatibility, and refuse unsupported human
+  editing rather than exposing declaration or agent-guidance JSON.
+  PR #8937 closes this source/native slice; bounded independent graphical
+  adoption is recorded below. Promotion and authorized installed proof remain open.
+- [x] Adopt the version-1 bounded controls in an independent graphical client
+  through the existing owner Save operation, with literal source-owned fields,
+  explicit confirmation, truthful refusal and original-request recovery.
+  This closes only the bounded configuration journey, not the complete
+  source/status/history/input parity matrix or installed acceptance.
 - [x] Expose sufficient machine-readable inputs and prerequisites for clients
   to instantiate offered emitter, evaluator and pool templates; retain an
   advanced declaration path where appropriate. PR #8363 supplies the bounded
@@ -204,6 +215,13 @@ All items below are **agent-recommended acceptance checks** for execution.
   toggle targets, published-versus-draft labels and native Configuration
   snapshot compatibility through contained CLI and compositor checks (#8841).
   This is source-level evidence, not a rollout or full graphical journey.
+- [x] Exercise independent graphical configuration through the actual source
+  owner and client bridge: fresh before/after reads, default-cancel confirmation,
+  exact source/revision binding, no activation, unsupported-owner refusal,
+  retained receipts and separately confirmed identical-request recovery.
+  Exercise late/older reads, project changes and pending/unknown outcomes without
+  duplicate writes or lost receipts. Render wide/narrow and themed views;
+  retain process-local recovery and installed-adoption limits explicitly.
 - [x] Prove the bounded provider-fragment catalog-to-Save boundary with selected
   closure binding, immutable sources, opaque output arguments, static dependency
   inspection, independent named execution admission and ordinary pointer
@@ -504,6 +522,71 @@ and first-touch/restart evidence, normal review/CI/release and separately
 authorized installed proof remain distinct obligations.
 
 ## Journal
+
+### 2026-10-25 - Bounded graphical operator-controls acceptance completed
+
+- An independent graphical client now consumes the version-1 source-owned
+  fields from #8937 through the existing catalog and Save lifecycle. Configure
+  performs fresh reads, retains immutable source identity and revision, renders
+  captions literally and requires explicit confirmation with Cancel as default.
+  Executable declarations and agent guidance remain read-only; advanced CLI
+  compatibility is unchanged.
+- The actual owner/bridge acceptance exercised Save-only configuration,
+  correctable names, unsupported contracts and stale context. Pending or unknown
+  writes block conflicting operations across project changes. Original requests
+  and receipts survive automatic/older reads; only a later explicit Refresh can
+  reset a completed receipt. Recovery requires fresh capability evidence and
+  separately confirmed identical retry, without automatic provisioning, service
+  startup or fallback invocation.
+- Focused owner/bridge tests, negative recovery controls, the full graphical
+  consumer regression suite, type checking and production build passed.
+  Rendered wide/narrow and themed views were exercised. Clipped narrow captures
+  do not establish full receipt visibility. Recovery is window/process-local,
+  not durable across application restart or coordinated across client processes.
+- This is source and contained consumer-boundary acceptance, not installed IPC,
+  release or fleet proof. Fresh isolated owner state was exercised; full machine
+  provisioning, another native OS, live external production and installed/fleet
+  lanes were not exercised because this slice adds no provisioning and no live
+  effects or rollout were authorized.
+- Re-read the Plan and Validation Plan and closed only this bounded graphical
+  controls acceptance. Source/status/history/input parity, process/evaluator
+  integration, mapped production, migration, promotion and authorized installed
+  acceptance remain open. The effort and #7091 stay Active; #6379, #4959 and
+  #6283 retain their ownership. Next is the remaining shared semantic matrix and
+  history coverage, followed by mapped production through existing adapters.
+  User-defined workflow authoring is outside this controls slice.
+
+### 2026-10-25 - Bounded source-owned operator controls merged
+
+- PR #8937 merged at 12:49:03Z as
+  `646d8b294d287a56868b09eeb0b4f52cc3ccacd9`, from approved head
+  `7effc9ca55b95249f4483e4ec98e6c1054c298c9`. Both review threads were
+  resolved and all three required checks passed before managed Maintainer
+  self-merge. No required CI was waived.
+- Version-1 source-declared text/choice fields reuse `workers save` with
+  `--operator-inputs`, opaque revisions, source binding, Save-only and explicit
+  activation consent. Advanced CLI editing remains available; unsupported,
+  legacy and unknown human contracts stay read-only, never raw JSON editors.
+  Original source and local values are rechecked under the owner lock; exact
+  retry and partial values retain their existing semantics.
+- Native Configuration consumes the same bounded fields and renders captions
+  literally. One read-only supplier snapshot per refresh covers discovery,
+  prerequisites and binding verification, including negative results; Save
+  obtains fresh evidence. This does not change production deadlines.
+- Final owner/materialization/revision coverage passed 402 tests with four
+  skips; producer/resource coverage passed 354 with one skip; refresh snapshot
+  coverage passed nine (33 deselected). Earlier native field/backstage coverage
+  passed 37 with one skip, including 13 scenarios; native preview coverage
+  passed 68. Lint, module ceilings and install contracts passed. Contained
+  first-touch CLI and actual native consumers were exercised. Fresh PNG export
+  was unavailable because the official renderer dependency installation timed
+  out; no installer or admission gate was bypassed. No live external or installed
+  lane was run: this slice changed source contracts, not deployment or activation.
+- Re-read this effort's Plan and Validation Plan after merge. Closed only
+  the bounded source/native controls item. Independent graphical configure/Save
+  and rendered parity, history, mapped production, migration, promotion and
+  authorized installed acceptance remain open. The effort stays Active.
+  Next is independent graphical adoption through this same owner contract.
 
 ### 2026-10-24 - Bounded provider instantiation source merged
 

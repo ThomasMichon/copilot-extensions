@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,11 +18,14 @@ from typing import Any, Protocol
 
 import yaml
 
+from .bridge_event_worker import BridgeEventWorker
+
 log = logging.getLogger("agent-dispatch.supervisor.events")
 
 REMOTE_EVENT_MULTIPLEX_PROTOCOL_VERSION = 13
 _READ_TIMEOUT_SECONDS = 60.0
 _RECONNECT_MAX_SECONDS = 30.0
+_CLOSE_JOIN_SECONDS = 2.0
 _BOUNDARY_EVENTS = frozenset(
     {
         "assistant.turn_end",
@@ -74,6 +79,7 @@ class BridgeEventClient(Protocol):
 class _SseStream:
     def __init__(self, response: Any) -> None:
         self._response = response
+        self._close_lock = threading.Lock()
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
         event = ""
@@ -99,9 +105,10 @@ class _SseStream:
                 data = []
 
     def close(self) -> None:
-        response, self._response = self._response, None
-        if response is not None:
-            response.close()
+        with self._close_lock:
+            if self._response is not None:
+                self._response.close()
+                self._response = None
 
 
 class LocalBridgeEventClient:
@@ -240,7 +247,10 @@ class SupervisorEventWake:
         self._generation = 0
         self._pending: dict[BridgeSubscription, tuple[int, str | None]] = {}
         self._stream: BridgeEventStream | None = None
+        self._streams: list[BridgeEventStream] = []
+        self._close_error: BaseException | None = None
         self._thread: threading.Thread | None = None
+        self._worker: BridgeEventWorker | None = None
         self._healthy = False
         self._detail = "idle"
         self._failure_wake_sent = False
@@ -258,6 +268,8 @@ class SupervisorEventWake:
         desired = tuple(sorted(set(subscriptions)))
         stream: BridgeEventStream | None = None
         with self._lock:
+            if self._stop.is_set():
+                return
             if desired == self._desired:
                 return
             self._desired = desired
@@ -268,11 +280,14 @@ class SupervisorEventWake:
             stream = self._stream
             if desired and self._thread is None:
                 self._changed.clear()
+                owner = self._worker = BridgeEventWorker()
                 self._thread = threading.Thread(
-                    target=self._run,
+                    target=owner.run,
+                    args=(self._run,),
                     name="agent-dispatch-bridge-events",
                     daemon=True,
                 )
+                owner.thread = self._thread
                 self._thread.start()
             else:
                 self._changed.set()
@@ -281,7 +296,7 @@ class SupervisorEventWake:
                 self._detail = "idle"
                 self._failure_wake_sent = False
         if stream is not None:
-            stream.close()
+            self._close_stream(stream)
 
     def wait(self, timeout: float) -> bool:
         if timeout < 0:
@@ -308,12 +323,55 @@ class SupervisorEventWake:
         self._stop.set()
         self._changed.set()
         with self._lock:
-            stream = self._stream
-        if stream is not None:
+            streams = tuple(self._streams)
+        for stream in streams:
+            self._close_stream(stream)
+        owner = self._worker
+        deadline = time.monotonic() + _CLOSE_JOIN_SECONDS
+        while owner is not None and not owner.retired():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.02, remaining))
+
+    def close_and_wait(self) -> None:
+        """Retain the lane admission across bounded close and native retirement."""
+        owner = self._worker
+        interrupted = sys.exc_info()[1]
+        retry = False
+        while True:
+            try:
+                if retry:
+                    time.sleep(0.05)
+                self.close()
+            except BaseException as exc:
+                if interrupted is None:
+                    interrupted = exc
+            retry = True
+            try:
+                worker_retired = owner is None or owner.retired()
+                with self._lock:
+                    if interrupted is None:
+                        interrupted = self._close_error
+                    streams_retired = not self._streams
+                if worker_retired and streams_retired:
+                    break
+            except BaseException as exc:
+                if interrupted is None:
+                    interrupted = exc
+        if interrupted is not None:
+            raise interrupted
+
+    def _close_stream(self, stream: BridgeEventStream) -> None:
+        try:
             stream.close()
-        thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=2.0)
+        except BaseException as exc:
+            with self._lock:
+                if self._close_error is None:
+                    self._close_error = exc
+            raise
+        with self._lock:
+            self._streams = [owned for owned in self._streams if owned is not stream]
 
     def _degrade(self, detail: str) -> None:
         wake = False
@@ -411,6 +469,7 @@ class SupervisorEventWake:
             try:
                 stream = self._client.open_events(desired)
                 with self._lock:
+                    self._streams.append(stream)
                     stale = (
                         self._stop.is_set()
                         or generation != self._generation
@@ -439,8 +498,8 @@ class SupervisorEventWake:
                         self._stream = None
                 if stream is not None:
                     try:
-                        stream.close()
-                    except Exception:
+                        self._close_stream(stream)
+                    except BaseException:
                         pass
             if self._stop.is_set():
                 break

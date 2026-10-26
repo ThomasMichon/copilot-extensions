@@ -15,6 +15,8 @@ identity (Phase 3 anchors event IDs to it).
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import admit_daemon_instance
+
 import asyncio
 import json
 import logging
@@ -97,6 +99,10 @@ class SessionHost:
         self._server: asyncio.base_events.Server | None = None
         self._reader_task: asyncio.Task | None = None
         self._closing = False
+        self._lifecycle_lock = asyncio.Lock()
+        self._instance_guard = None
+        self._close_task: asyncio.Task | None = None
+        self._connections: dict[asyncio.Task, asyncio.StreamWriter] = {}
         # Auto-reap of an idle child once the front is lost (#51). The front
         # continuously reports whether the child is REAPABLE (its turn completed
         # with no active background tasks) via STATUS, and signals a *graceful*
@@ -205,6 +211,24 @@ class SessionHost:
                                   proto.pack_liveness(False, self._child_exit or 0))
 
     # -- frontend serving --------------------------------------------------
+    def _accept_front(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        if self._closing:
+            writer.close()
+            return
+        task = asyncio.create_task(self._run_front(reader, writer))
+        self._connections[task] = writer
+        task.add_done_callback(lambda done: self._connections.pop(done, None))
+
+    async def _run_front(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await self._handle_front(reader, writer)
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except (OSError, ConnectionError):
+                pass
+
     async def _flush_front(self, front: _Front) -> None:
         """Send every buffered frame the front is still owed, in order.
 
@@ -562,12 +586,28 @@ class SessionHost:
 
     # -- lifecycle ---------------------------------------------------------
     async def serve(self, host: str = "127.0.0.1", port: int = 0) -> int:
-        """Start serving on loopback. Returns the bound port."""
-        self._reader_task = asyncio.create_task(self._reader_loop())
-        self._server = await asyncio.start_server(
-            self._handle_front, host, port, limit=proto.MAX_MESSAGE_BYTES)
-        sock = self._server.sockets[0]
-        return sock.getsockname()[1]
+        """Start serving and return the port; retain admission until close completes."""
+        guard = admit_daemon_instance(
+            "agent-bridge-session-host", source=__file__, purpose="production",
+        )
+        try:
+            async with self._lifecycle_lock:
+                if self._closing or self._instance_guard is not None:
+                    raise RuntimeError("Session Host is already serving or closed")
+                self._instance_guard = guard
+                self._server = await asyncio.start_server(
+                    self._accept_front, host, port, limit=proto.MAX_MESSAGE_BYTES,
+                    start_serving=False,
+                )
+                self._reader_task = asyncio.create_task(self._reader_loop())
+                await self._server.start_serving()
+                return self._server.sockets[0].getsockname()[1]
+        except BaseException:
+            if self._instance_guard is guard:
+                await self.close()
+            else:
+                guard.close()
+            raise
 
     async def serve_forever(self) -> None:
         assert self._server is not None
@@ -575,18 +615,33 @@ class SessionHost:
             await self._server.serve_forever()
 
     async def close(self) -> None:
-        self._closing = True
-        self._cancel_reap_timer()
-        if self._private_attachment is not None:
-            self._private_attachment.close()
-        if self._server is not None:
-            self._server.close()
-        if self._reader_task is not None:
-            self._reader_task.cancel()
-            try:
-                await self._reader_task
-            except asyncio.CancelledError:
-                pass
+        if self._close_task is None:
+            self._closing = True
+            self._close_task = asyncio.create_task(self._close(asyncio.current_task()))
+        await asyncio.shield(self._close_task)
+
+    async def _close(self, caller: asyncio.Task | None) -> None:
+        async with self._lifecycle_lock:
+            self._cancel_reap_timer()
+            if self._private_attachment is not None:
+                self._private_attachment.close()
+            if self._server is not None:
+                self._server.close()
+            for writer in tuple(self._connections.values()):
+                writer.close()
+            tasks = set(self._connections)
+            tasks.update(task for task in (self._reader_task, self._self_reap_task) if task is not None)
+            if caller is self._self_reap_task:
+                tasks.discard(caller)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if self._server is not None:
+                await self._server.wait_closed()
+            if self._instance_guard is not None:
+                self._instance_guard.close()
+                self._instance_guard = None
 
 
 class _suppress_close:

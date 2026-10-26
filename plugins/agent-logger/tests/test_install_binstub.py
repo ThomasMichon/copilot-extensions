@@ -161,7 +161,7 @@ def install_local(project, installed):
 if 'setuptools>=83.0.0' in args:
     assert '--quiet' in args
     shutil.copytree(fixture / 'setuptools', site, dirs_exist_ok=True)
-elif 'pyyaml>=6.0' in args:
+if 'pyyaml>=6.0' in args:
     assert '--quiet' in args
     shutil.copytree(fixture / 'PyYAML', site, dirs_exist_ok=True)
 else:
@@ -170,6 +170,14 @@ else:
     if names == {{'agent-procutil', 'agent-single-instance-lease', 'agent-update-driver'}}:
         assert len(sources) == 3 and '--no-editable' in args and '--link-mode' in args
         assert args[args.index('--link-mode') + 1] == 'copy'
+    elif 'agent-logger' in names:
+        expected = {{'agent-config-migrate', 'agent-procutil', 'agent-single-instance-lease',
+                    'agent-update-driver', 'agent-dropin-registry', 'agent-plugin-resolve',
+                    'agent-plugin-activation', 'agent-logger'}}
+        assert names == expected and len(sources) == 8 and '--no-editable' in args, args
+        assert {{args[i + 1] for i, arg in enumerate(args) if arg == '--reinstall-package'}} == expected
+        assert (site / 'setuptools-83.0.0.dist-info').is_dir()
+        assert (site / 'yaml').is_dir()
     else:
         assert len(sources) == 1 and '--quiet' in args, args
     installed = set()
@@ -767,6 +775,14 @@ def test_provision_publishes_durable_compatibility_wrappers(
     assert snapshot.is_dir()
     assert wrapper.is_file()
     assert calls.is_file()
+    installs = [json.loads(line) for line in calls.read_text().splitlines()]
+    bootstrap = [args for args in installs if "setuptools>=83.0.0" in args]
+    assert len(bootstrap) == 1 and "pyyaml>=6.0" in bootstrap[0]
+    closure = [
+        args for args in installs
+        if "--reinstall-package" in args and "agent-logger" in args
+    ]
+    assert len(closure) == 1
     _assert_complete_runtime(home)
     manifest = json.loads((home / ".agent-logger" / "deploy-manifest.json").read_text(encoding="utf-8-sig"))
     assert manifest["commandLifecycle"]["owner"]["pluginId"] == "agent-logger"
@@ -1112,8 +1128,8 @@ def _vendored_path_dependencies() -> dict[str, str]:
     (``path = "libs/<dir>"``) and the `uv`-editable canonical-reference form
     (``path = "../../libs/<dir>", editable = true`` --
     vendor-pointer-generalization effort, Phase 1) -- a lib converted to the
-    latter still needs its own explicit install step ahead of this
-    installer's final package install, exactly like a real copy does."""
+    latter still needs its own explicit root in the install batch, exactly
+    like a real copy does."""
     sources_match = re.search(
         r"\[tool\.uv\.sources\](.*?)(?:\n\[|\Z)", _PYPROJECT_TEXT, re.DOTALL
     )
@@ -1135,20 +1151,21 @@ _VENDORED_LIB_DIRS = sorted(_vendored_path_dependencies().values())
 def _install_sh_lib_positions() -> dict[str, int]:
     text = _INSTALL_SH.read_text(encoding="utf-8")
     main_marker = text.index(
-        'invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" "${PLUGIN_DIR}"'
+        'invoke_uv_pip_install_resilient "${UV_CMD}" "${install_args[@]}"'
     )
     body = text[:main_marker]
     positions = {}
     for lib in _VENDORED_LIB_DIRS:
-        index = body.find(f"libs/{lib}")
-        assert index != -1, f"install.sh has no install step for libs/{lib}"
+        package = next(name for name, directory in _vendored_path_dependencies().items() if directory == lib)
+        index = body.find(f"{lib}:{package}")
+        assert index != -1, f"install.sh has no batch root for libs/{lib}"
         positions[lib] = index
     return positions
 
 
 def _install_ps1_lib_positions() -> dict[str, int]:
     text = _INSTALL_PS1.read_text(encoding="utf-8")
-    main_marker = text.index("-Arguments @('--python', $VenvPython, \"$PluginDir\", '--quiet')")
+    main_marker = text.index("-PayloadDirToScrub $PluginDir -Arguments $installArgs")
     body = text[:main_marker]
     positions = {}
     for lib in _VENDORED_LIB_DIRS:
@@ -1161,27 +1178,20 @@ def _install_ps1_lib_positions() -> dict[str, int]:
 @pytest.mark.parametrize(
     "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
 )
-def test_installers_install_every_pyproject_vendored_lib_before_main_package(
+def test_installers_include_every_pyproject_vendored_lib_in_main_batch(
     positions_fn,
 ) -> None:
-    """Every ``[tool.uv.sources]`` path dependency in pyproject.toml gets an
-    explicit install step, in both installers, before the final seasoned
-    main-package install (asserted by ``_install_*_positions`` itself
-    raising if a lib's install step is missing entirely)."""
+    """Canonical and materialized helpers remain explicit batch roots."""
     positions_fn()
 
 
 @pytest.mark.parametrize(
     "positions_fn", [_install_sh_lib_positions, _install_ps1_lib_positions]
 )
-def test_installers_install_plugin_activation_after_its_own_transitive_deps(
+def test_installers_enumerate_plugin_activation_transitive_deps(
     positions_fn,
 ) -> None:
-    """plugin_activation imports dropin_registry and plugin_resolve at module
-    load time, so its own install step must come after both of theirs --
-    installing it first would leave its own dependencies briefly
-    unresolvable mid-install. Every step still resolves its transitive and
-    isolated build dependencies through the canonical seasoning policy."""
+    """The batch retains the complete helper closure for UV to resolve."""
     positions = positions_fn()
     assert positions["plugin-activation"] > positions["dropin-registry"]
     assert positions["plugin-activation"] > positions["plugin-resolve"]

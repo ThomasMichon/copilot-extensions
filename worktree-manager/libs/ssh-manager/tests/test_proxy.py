@@ -1,0 +1,547 @@
+"""Contracts for owned, byte-transparent Windows SSH proxies."""
+
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+from agent_procutil import no_window_kwargs, windowless_python
+
+from ssh_manager import SSHConfig
+from ssh_manager import proxy
+from ssh_manager.process import register_process_cleanup, run_process_cleanup
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("prior_state", [None, "original-parent-state"])
+async def test_native_probe_cancels_pipe_drain_even_when_cleanup_fails(
+    tmp_path, monkeypatch, cleanup_fails, prior_state,
+):
+    fixture = Path(__file__).parent / "fixtures" / "windows_proxy_probe.py"
+    spec = importlib.util.spec_from_file_location("native_proxy_probe", fixture)
+    assert spec is not None and spec.loader is not None
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    monkeypatch.setattr(probe, "console_window", lambda: 0)
+    monkeypatch.setattr(probe, "terminal_windows", lambda: {})
+    monkeypatch.setattr(probe, "drive_procutil_spawn", AsyncMock(return_value={}))
+    if prior_state is None:
+        monkeypatch.delenv(probe.DESCRIPTOR_STATE, raising=False)
+    else:
+        monkeypatch.setenv(probe.DESCRIPTOR_STATE, prior_state)
+    monkeypatch.setenv("SSH_MANAGER_TEST_SSH", sys.executable)
+    monkeypatch.setenv("SSH_MANAGER_TEST_SSH_KIND", "native")
+    drains = []
+    processes = []
+
+    async def communicate(marker):
+        drains.append(asyncio.current_task())
+        marker.write_text(json.dumps({
+            "console_handles": [0], "inherited_descriptor_state": False,
+        }), encoding="utf-8")
+        await asyncio.Event().wait()
+
+    async def spawn(*args, **kwargs):
+        marker = tmp_path / f"proxy-{len(processes)}.json"
+        process = SimpleNamespace(returncode=None, communicate=lambda: communicate(marker))
+        processes.append(process)
+        return process
+
+    async def terminate(process):
+        process.returncode = 1
+        if cleanup_fails:
+            raise RuntimeError("owned cleanup failed")
+
+    monkeypatch.setattr(proxy, "create_ssh_subprocess", spawn)
+    monkeypatch.setattr("ssh_manager.process.terminate_ssh_process_tree", terminate)
+    monkeypatch.setattr("ssh_manager.process.run_process_cleanup", AsyncMock())
+    try:
+        if cleanup_fails:
+            with pytest.raises(RuntimeError, match="owned cleanup failed"):
+                await asyncio.wait_for(probe.drive(tmp_path), timeout=1)
+        else:
+            evidence = await asyncio.wait_for(probe.drive(tmp_path), timeout=1)
+            assert len(evidence["cycles"]) == 2
+        assert len(drains) == (1 if cleanup_fails else 2)
+        assert all(task.cancelled() for task in drains)
+        restored_state = os.environ.get(probe.DESCRIPTOR_STATE)
+        assert restored_state == prior_state
+    finally:
+        for task in drains:
+            task.cancel()
+        await asyncio.gather(*drains, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("environment", ["ambient", "ambient-none", "explicit", "empty"])
+@pytest.mark.parametrize("has_proxy", [False, True])
+@pytest.mark.parametrize("descriptor_present", [False, True])
+async def test_ssh_spawn_discards_only_inherited_windows_descriptor_state(
+    monkeypatch, windows, environment, has_proxy, descriptor_present,
+):
+    key = "c28fc6f98a2c44abbbd89d6a3037d0d9_POSIX_FD_STATE"
+    inherited = {
+        "OTHER_POSIX_FD_STATE": "keep",
+        "GH_TOKEN": "synthetic-account-value",
+    }
+    if descriptor_present:
+        inherited.update({
+            key: "synthetic-descriptors",
+            key.upper(): "synthetic-case-variant",
+        })
+    monkeypatch.setattr(proxy, "_is_windows", lambda: windows)
+    monkeypatch.setattr(os, "environ", dict(inherited))
+    explicit = {} if environment == "empty" else dict(inherited)
+    ambient = environment.startswith("ambient")
+    before = dict(os.environ if ambient else explicit)
+    process = SimpleNamespace(wait=AsyncMock(return_value=0))
+    spawn = AsyncMock(return_value=(process, None))
+    broker_environments = []
+    broker = SimpleNamespace(start=AsyncMock(return_value=34567), close=AsyncMock())
+
+    def make_broker(command, env, **kwargs):
+        broker_environments.append(env)
+        return broker
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(proxy, "_ProxyBroker", make_broker)
+    monkeypatch.setattr(proxy, "_resolve_shell", AsyncMock(return_value=None))
+    monkeypatch.setattr(proxy, "_split_windows_command", lambda command: ["proxy"])
+    monkeypatch.setattr(proxy, "_client_command", lambda *args, **kwargs: "client")
+    kwargs = {} if environment == "ambient" else {"env": explicit}
+    if environment == "ambient-none":
+        kwargs = {"env": None}
+    try:
+        await proxy.create_ssh_subprocess(
+            "ssh", "example",
+            config=SSHConfig("example", user="probe", proxy_command="proxy" if has_proxy else None),
+            **kwargs,
+        )
+        if windows and descriptor_present and environment != "empty":
+            expected = {
+                name: value for name, value in before.items()
+                if name.casefold() != key.casefold()
+            }
+            assert spawn.await_args.kwargs["env"] == expected
+            if has_proxy:
+                assert broker_environments == [expected]
+        elif ambient:
+            assert spawn.await_args.kwargs.get("env") is None
+            if has_proxy and windows:
+                assert broker_environments == [None]
+        else:
+            assert spawn.await_args.kwargs["env"] == before
+            if has_proxy and windows:
+                assert broker_environments == [before]
+        assert dict(os.environ if ambient else explicit) == before
+    finally:
+        await run_process_cleanup(process)
+
+
+@pytest.mark.asyncio
+async def test_pump_treats_connection_reset_as_clean_eof():
+    """A read-side ConnectionResetError is a peer-gone-away signal, not a bug.
+
+    Regression: on Windows, ProactorEventLoop pipe/socket reads commonly raise
+    ConnectionResetError (WinError 64) instead of returning b"" at EOF once
+    the peer has closed. Observed live bridging a loopback ProxyCommand
+    socket to a `gh cs ssh --stdio` child -- this used to propagate up
+    through `_serve` as an unhandled "SSH proxy connection failed" warning.
+    """
+
+    class ResetThenNothingReader:
+        def __init__(self):
+            self._raised = False
+
+        async def read(self, n):
+            if not self._raised:
+                self._raised = True
+                raise ConnectionResetError(64, "The specified network name is no longer available")
+            return b""
+
+    writer = SimpleNamespace(write=lambda data: None, drain=AsyncMock())
+    # Must return normally (no exception) -- this is the fix under test.
+    await proxy._pump(ResetThenNothingReader(), writer)
+    writer.drain.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pump_still_relays_data_before_reset():
+    chunks = [b"hello", ConnectionResetError(64, "reset")]
+
+    class FlakyReader:
+        async def read(self, n):
+            item = chunks.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    written = []
+    writer = SimpleNamespace(write=written.append, drain=AsyncMock())
+    await proxy._pump(FlakyReader(), writer)
+    assert written == [b"hello"]
+
+
+def test_loopback_routing_preserves_remote_identity_and_command():
+    config = SSHConfig(
+        host_alias="codespace.example",
+        hostname="ssh.example",
+        user="test-user",
+        port=2222,
+        proxy_command="gh cs ssh --stdio",
+    )
+    command = "printf '%s' '-p 99'"
+    args = [
+        "ssh", "-F", "example.config", "-p", "2222",
+        "-o", "HostName=ssh.example", "-o", "Port=2222",
+        "-o", "AddressFamily=inet6",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "UserKnownHostsFile=example.known_hosts",
+        "-i", r"C:\keys\%h\identity", "-o", "CertificateFile=certs/%h-cert.pub",
+        config.ssh_target, command,
+    ]
+    routed = proxy._broker_args(args, "windowless-client")
+    assert routed == ["ssh", "-o", "ProxyCommand=windowless-client", *args[1:]]
+
+
+def test_loopback_routing_preserves_explicit_host_key_alias():
+    config = SSHConfig(host_alias="example", extra_options={"HostKeyAlias": "stable"})
+    args = ["ssh", "-o", "HostKeyAlias=stable", config.ssh_target]
+    routed = proxy._broker_args(args, "windowless-client")
+    assert [arg for arg in routed if arg.startswith("HostKeyAlias=")] == [
+        "HostKeyAlias=stable",
+    ]
+
+
+def test_proxy_tokens_use_remote_not_loopback_identity():
+    config = SSHConfig(
+        host_alias="alias", hostname="remote.example", user="tester", port=2222,
+    )
+    assert proxy._expand_tokens("%h %n %p %r %%", config) == (
+        "remote.example alias 2222 tester %"
+    )
+    with pytest.raises(ValueError, match="Unsupported SSH proxy token"):
+        proxy._expand_tokens("%Z", config)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows argument parser")
+def test_windows_proxy_command_preserves_quoted_arguments():
+    args = [r"C:\Program Files\Example\gh.exe", "cs", "ssh", "a b", r"C:\path with spaces\x"]
+    assert proxy._split_windows_command(subprocess.list2cmdline(args)) == args
+
+
+@pytest.mark.asyncio
+async def test_no_proxy_preserves_existing_subprocess_contract(monkeypatch):
+    process = object()
+    spawn = AsyncMock(return_value=(process, None))
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    config = SSHConfig(host_alias="example")
+    result = await proxy.create_ssh_subprocess(
+        "ssh", "example", config=config, stdin=asyncio.subprocess.DEVNULL,
+    )
+    assert result is process
+    assert spawn.await_args.args == ("ssh", "example")
+    assert spawn.await_args.kwargs["stdin"] == asyncio.subprocess.DEVNULL
+    assert "config" not in spawn.await_args.kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_ssh_subprocess_binds_root_to_owner_job(monkeypatch):
+    class FakeProcess:
+        pid = 12345
+
+        def __init__(self):
+            self.released = asyncio.Event()
+
+        async def wait(self):
+            await self.released.wait()
+            return 0
+
+    class FakeJobHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    fake_process = FakeProcess()
+    job_handle = FakeJobHandle()
+    monkeypatch.setattr(
+        proxy, "spawn_in_kill_on_close_job", AsyncMock(return_value=(fake_process, job_handle))
+    )
+
+    result = await proxy.create_ssh_subprocess("ssh", "example", config=SSHConfig("example"))
+
+    assert result is fake_process
+    assert proxy._OWNER_JOBS[id(fake_process)] is job_handle
+    fake_process.released.set()
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if job_handle.closed:
+            break
+    assert job_handle.closed == 1
+    assert id(fake_process) not in proxy._OWNER_JOBS
+
+
+@pytest.mark.asyncio
+async def test_non_windows_proxy_keeps_native_ssh_routing(monkeypatch):
+    monkeypatch.setattr(proxy, "_is_windows", lambda: False)
+    spawn = AsyncMock(return_value=(object(), None))
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    config = SSHConfig(host_alias="example", proxy_command="some-proxy")
+    await proxy.create_ssh_subprocess("ssh", "example", config=config)
+    assert spawn.await_args.args == ("ssh", "example")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [OSError("spawn failed"), asyncio.CancelledError()])
+async def test_ssh_spawn_failure_closes_broker(monkeypatch, error):
+    monkeypatch.setattr(proxy, "_is_windows", lambda: True)
+    monkeypatch.setattr(proxy, "_resolve_shell", AsyncMock(return_value=None))
+    monkeypatch.setattr(proxy, "_split_windows_command", lambda command: ["proxy"])
+    monkeypatch.setattr(proxy, "_client_command", lambda port, capability, **kwargs: "client")
+    broker = SimpleNamespace(start=AsyncMock(return_value=34567), close=AsyncMock())
+    monkeypatch.setattr(proxy, "_ProxyBroker", lambda command, env, **kwargs: broker)
+    monkeypatch.setattr(
+        proxy, "spawn_in_kill_on_close_job", AsyncMock(side_effect=error),
+    )
+    with pytest.raises(type(error)):
+        await proxy.create_ssh_subprocess(
+            "ssh", "example",
+            config=SSHConfig(host_alias="example", proxy_command="proxy"),
+        )
+    broker.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_cleanup_is_shared_between_concurrent_owners():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def close():
+        nonlocal calls
+        calls += 1
+        entered.set()
+        await release.wait()
+
+    process = SimpleNamespace()
+    register_process_cleanup(process, close)
+    first = asyncio.create_task(run_process_cleanup(process))
+    await entered.wait()
+    second = asyncio.create_task(run_process_cleanup(process))
+    await asyncio.sleep(0)
+    assert not first.done() and not second.done()
+    release.set()
+    await asyncio.gather(first, second)
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_proxy_preserves_binary_stream_and_reaps_on_close(monkeypatch):
+    spawn = asyncio.create_subprocess_exec
+    processes = []
+
+    async def record(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        processes.append(process)
+        return process, None
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", record)
+    script = (
+        "import sys\n"
+        "while data := sys.stdin.buffer.read1(65536):\n"
+        " sys.stdout.buffer.write(data)\n"
+        " sys.stdout.buffer.flush()\n"
+    )
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    payload = bytes(range(256)) * 513
+    try:
+        writer.write(broker.capability.encode("ascii") + payload)
+        await writer.drain()
+        assert await asyncio.wait_for(reader.readexactly(len(payload)), timeout=5) == payload
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await broker.close()
+    assert len(processes) == 1
+    assert processes[0].returncode is not None
+    assert not broker._clients
+
+
+@pytest.mark.asyncio
+async def test_proxy_cancellation_reaps_hung_child(monkeypatch):
+    spawn = asyncio.create_subprocess_exec
+    processes = []
+
+    async def record(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        processes.append(process)
+        return process, None
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", record)
+    script = (
+        "import sys,time; sys.stdout.buffer.write(b'ready\\n'); "
+        "sys.stdout.buffer.flush(); time.sleep(60)"
+    )
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(broker.capability.encode("ascii"))
+        await writer.drain()
+        assert await asyncio.wait_for(reader.readline(), timeout=5) == b"ready\n"
+        await asyncio.wait_for(broker.close(), timeout=5)
+        assert len(processes) == 1
+        assert processes[0].returncode is not None
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await broker.close()
+
+
+@pytest.mark.asyncio
+async def test_proxy_binds_spawned_child_to_kill_on_close_job(monkeypatch):
+    class FakeJobHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    spawn = asyncio.create_subprocess_exec
+    processes = []
+    handles = []
+
+    async def record(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        processes.append(process)
+        handle = FakeJobHandle()
+        handles.append(handle)
+        return process, handle
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", record)
+    script = (
+        "import sys,time; sys.stdout.buffer.write(b'ready\\n'); "
+        "sys.stdout.buffer.flush(); time.sleep(60)"
+    )
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(broker.capability.encode("ascii"))
+        await writer.drain()
+        assert await asyncio.wait_for(reader.readline(), timeout=5) == b"ready\n"
+        await asyncio.wait_for(broker.close(), timeout=5)
+        assert len(processes) == 1
+        assert handles[0].closed == 1
+        assert not broker._child_jobs
+    finally:
+        writer.close()
+        await broker.close()
+
+
+@pytest.mark.asyncio
+async def test_broker_close_waits_for_already_started_cleanup(monkeypatch):
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    terminate = proxy.terminate_ssh_process_tree
+
+    async def delayed_terminate(process):
+        entered.set()
+        await release.wait()
+        await terminate(process)
+
+    monkeypatch.setattr(proxy, "terminate_ssh_process_tree", delayed_terminate)
+    monkeypatch.setattr(proxy, "_DRAIN_TIMEOUT", 0.01)
+    script = "import time; print('ready',flush=True); time.sleep(60)"
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    closing = None
+    try:
+        writer.write(broker.capability.encode("ascii"))
+        await writer.drain()
+        await asyncio.wait_for(reader.readline(), timeout=5)
+        writer.close()
+        await writer.wait_closed()
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        closing = asyncio.create_task(broker.close())
+        await asyncio.sleep(0)
+        assert not closing.done()
+        release.set()
+        await asyncio.wait_for(closing, timeout=5)
+        assert not broker._cleanups
+    finally:
+        release.set()
+        writer.close()
+        await broker.close()
+        if closing is not None:
+            await closing
+
+
+@pytest.mark.asyncio
+async def test_invalid_capability_does_not_spawn_proxy(monkeypatch):
+    spawn = AsyncMock()
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
+    broker = proxy._ProxyBroker(["unused"], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(b"invalid".ljust(64, b"x"))
+        await writer.drain()
+        assert await asyncio.wait_for(reader.read(), timeout=5) == b""
+        spawn.assert_not_awaited()
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await broker.close()
+
+
+@pytest.mark.asyncio
+async def test_stdio_client_streams_binary_before_stdin_closes():
+    script = (
+        "import sys\n"
+        "while data := sys.stdin.buffer.read1(65536):\n"
+        " sys.stdout.buffer.write(data)\n"
+        " sys.stdout.buffer.flush()\n"
+    )
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    client = await asyncio.create_subprocess_exec(
+        windowless_python(), str(Path(proxy.__file__).with_name("proxy_client.py")),
+        str(port), broker.capability,
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
+    )
+    try:
+        greeting = b"SSH-2.0-local-test\r\n"
+        client.stdin.write(greeting)
+        await client.stdin.drain()
+        assert await asyncio.wait_for(
+            client.stdout.readexactly(len(greeting)), timeout=5,
+        ) == greeting
+        payload = bytes(range(256)) * 513
+        client.stdin.write(payload)
+        await client.stdin.drain()
+        client.stdin.close()
+        output, error = await asyncio.wait_for(client.communicate(), timeout=5)
+        assert output == payload
+        assert client.returncode == 0, error
+    finally:
+        if client.returncode is None:
+            client.kill()
+            await client.wait()
+        await broker.close()

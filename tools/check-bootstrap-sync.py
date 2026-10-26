@@ -73,11 +73,9 @@ FAMILIES: dict[str, list[str]] = {
     # the selected cell rather than the plugin root -- the same rationale as
     # agent-index's split above, a genuinely distinct variant, not drift.
     "versioned-venv/context-selected-agent-mcp": ["agent-mcp"],
-    # agent-bridge reference: the psscriptroot model plus reconcile observability
-    # (reconcile.log / reconcile-status.json) and a venv-or-.venv guard (its
-    # stable link is 'venv', not '.venv'). Kept distinct until the observability
-    # is propagated to the shared template.
-    "versioned-venv/agent-bridge-reference": ["agent-bridge"],
+    # Bridge submits stamp/install; its source-aware POSIX readiness is the
+    # shared reference independently of execution-owner classification.
+    "versioned-venv/driver-agent-bridge": ["agent-bridge"],
     # Dispatch tracks the actual worker and its process tree, fences completion
     # by attempt, and permits its longer graceful-cutover installer deadline.
     "versioned-venv/agent-dispatch-worker": ["agent-dispatch"],

@@ -17,6 +17,7 @@ from collections import defaultdict
 from typing import TYPE_CHECKING
 
 from agent_index.store.clustering import Cluster, ClusterEntry, build_clusters, source_bucket
+from agent_index.store.projection_snapshot import ClusterCoverage, cluster_signature
 
 if TYPE_CHECKING:
     from agent_index.index_config import IndexConfig
@@ -30,6 +31,8 @@ def run_clustering_pass(
     multi_store: MultiModelStore,
     cluster_store: ClusterStore,
     config: IndexConfig,
+    *,
+    coverage_signature: str | None = None,
 ) -> dict[str, int | float]:
     """Recompute all similarity clusters and replace the stored artifact.
 
@@ -40,7 +43,7 @@ def run_clustering_pass(
     # Group each item's per-space centroid into its (bucket, model_id) slice.
     slices: dict[tuple[str, str], list[ClusterEntry]] = defaultdict(list)
     item_count = 0
-    for rep in multi_store.iter_item_representations():
+    for rep in multi_store.iter_item_representations(strict=True):
         item_count += 1
         bucket = source_bucket(rep.source)
         for model_id, centroid in rep.centroids.items():
@@ -66,7 +69,12 @@ def run_clustering_pass(
             )
         )
 
-    cluster_store.replace_all(all_clusters)
+    coverage = None
+    if coverage_signature is not None:
+        if cluster_signature(multi_store, config) != coverage_signature:
+            raise RuntimeError("Projection changed during clustering; artifact coverage was not published")
+        coverage = ClusterCoverage(coverage_signature, item_count, len(slices), len(all_clusters))
+    cluster_store.replace_all(all_clusters, coverage=coverage)
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
     stats: dict[str, int | float] = {

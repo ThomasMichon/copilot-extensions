@@ -17,6 +17,7 @@ SPEC.loader.exec_module(sync)
 NAMES = (
     sync.VRT_NAME, *sync.COMPONENT_NAMES,
     sync.DEPENDENCY_POLICY.name, sync.DEPENDENCY_CONFIG.name, *sync.RESOLVER_NAMES,
+    *sync.INSTALLER_INSTANCE_NAMES,
 )
 
 
@@ -30,7 +31,12 @@ def repository(tmp_path, monkeypatch):
     (scripts / "install.sh").write_text("# fixture\n")
     (scripts.parent / "pyproject.toml").write_text("[project]\nname='example'\n")
     for name in NAMES:
-        source = (engine if name.startswith("installer_dependency_") else runtime) / name
+        source = (
+            sync.installer_instance_sources(tmp_path)[name]
+            if name in sync.INSTALLER_INSTANCE_NAMES
+            else (engine if name.startswith("installer_dependency_") else runtime) / name
+        )
+        source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text(f"canonical {name}\n")
         (scripts / name).write_bytes(source.read_bytes())
     monkeypatch.setattr(sync, "REPO", tmp_path)
@@ -106,7 +112,57 @@ def test_main_repairs_ordinary_missing_and_stale_files_and_is_idempotent(reposit
     assert sync.main() == 0
     for name in NAMES:
         source = (
-            sync.DEPENDENCY_POLICY.parent if name.startswith("installer_dependency_")
-            else sync.CANONICAL.parent
-        ) / name
+            sync.installer_instance_sources(sync.REPO)[name]
+            if name in sync.INSTALLER_INSTANCE_NAMES else (
+                sync.DEPENDENCY_POLICY.parent if name.startswith("installer_dependency_")
+                else sync.CANONICAL.parent
+            ) / name
+        )
         assert (scripts / name).read_bytes() == source.read_bytes()
+
+
+def test_instance_only_sync_preserves_unrelated_runtime_bytes(repository, monkeypatch):
+    scripts = repository
+    unrelated = scripts / sync.VRT_NAME
+    unrelated.write_bytes(b"concurrent runtime edit\n")
+    for name in sync.INSTALLER_INSTANCE_NAMES:
+        (scripts / name).unlink()
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+
+    assert sync.main() == 0
+    assert unrelated.read_bytes() == b"concurrent runtime edit\n"
+    for name, source in sync.installer_instance_sources(sync.REPO).items():
+        assert (scripts / name).read_bytes() == source.read_bytes()
+
+
+def test_instance_only_sync_ships_only_native_ps_pair_to_wsl_payload(repository, monkeypatch):
+    references = sync.REPO / "plugins" / "wsl-setup" / "skills" / "setting-up-wsl" / "references"
+    references.mkdir(parents=True)
+    (references / "wsl-keepalive.ps1").write_text("# explicit installer\n")
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+
+    assert sync.main() == 0
+    sources = sync.installer_instance_sources(sync.REPO)
+    for name in ("daemon_instances.ps1", "installer-instance-reconcile.ps1"):
+        assert (references / name).read_bytes() == sources[name].read_bytes()
+    assert {path.name for path in references.iterdir()} == {
+        "wsl-keepalive.ps1", "daemon_instances.ps1", "installer-instance-reconcile.ps1",
+    }
+
+
+def test_explicit_native_wheel_fanout_preserves_the_built_executable(repository, monkeypatch):
+    import native_daemon_artifacts
+
+    relative = Path("native") / "linux-x86_64" / "daemon-instance"
+    monkeypatch.setattr(
+        native_daemon_artifacts, "wheel_assets",
+        lambda *args, **kwargs: {relative: b"verified built native fixture\n"},
+    )
+    monkeypatch.setattr(sys, "argv", [
+        str(SCRIPT), "--only-installer-instances", "--native-wheel", str(sync.REPO / "built.whl"),
+    ])
+    assert sync.main() == 0
+    executable = repository / relative
+    assert executable.read_bytes() == b"verified built native fixture\n"
+    if os.name != "nt":
+        assert executable.stat().st_mode & 0o111

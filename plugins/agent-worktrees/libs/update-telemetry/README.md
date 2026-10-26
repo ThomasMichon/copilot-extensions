@@ -38,13 +38,13 @@ raises into, or changes the result of, the update.
 
 Outcomes in increasing severity: `verified_current`, `requires_restart`,
 `in_progress` (status only), `configuration_limitation`, `blocked_by_lock`,
-`auth_required`, `timeout`, `command_failed`; `skipped` never counts. The run
+`auth_required`, `timeout`, `command_failed`; target-level `skipped` never counts. The run
 outcome is the most severe outcome over **required** targets; failures of
 non-required targets are reported as `advisories`.
 
 | Exit | Outcome |
 |---|---|
-| 0 | `verified_current` or `requires_restart` |
+| 0 | `verified_current`, `requires_restart`, or an explicit final `skipped` |
 | 1 | `command_failed` |
 | 2 | usage error (recorded only when an owning run already exists, e.g. a Manager whose engine rejects the forwarded arguments) |
 | 3 | `configuration_limitation` |
@@ -52,6 +52,13 @@ non-required targets are reported as `advisories`.
 | 5 | `blocked_by_lock` |
 | 6 | `timeout` |
 | 130 | interrupted |
+
+An explicit `run.finish(ut.SKIPPED)` marks partial/no-convergence completion:
+it stays `skipped` through final status folding and preserves both
+`last_success` and `last_failure`. Required target failures still win and retain
+their nonzero exit. Ordinary `finish()`/`finish(ut.VERIFIED_CURRENT)` aggregation
+is unchanged; successful full updates, including unchanged ones, advance
+`last_success`.
 
 Runtime installer exits map as: `75` (cutover not completed, previous
 generation still serving) to `blocked_by_lock`, `76` (degraded cutover) to

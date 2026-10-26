@@ -541,6 +541,15 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 ### Step 1: `create-pr`
 
 Managed PR pushes retain a bounded deadline and run the real pre-push hook.
+The managed hook performs shell/ref policy only, without Python/runtime startup,
+validation, provisioning or claims-backend calls. Its existing installer resolves
+and embeds PR mode and protected branches; refresh hooks through that owner after
+policy changes. Foreign `.local` hooks still run with the original arguments/ref
+input and may be expensive. Preserved repository wrappers do not chain back
+into their own `.local` file. Move repository-owned validators into required CI;
+`validate_hook`, `validate_paths` and legacy core-validation scripts no longer run
+automatically during managed publication. Explicit review policies, source/ref
+custody, post-success bookkeeping and remote merge gates remain unchanged.
 If legitimate validation needs longer than the default 180 seconds, configure
 `pr.push_timeout_seconds: 300` in the repository's
 `.copilot-extensions/agent-worktrees/config.yaml` (or the machine-local

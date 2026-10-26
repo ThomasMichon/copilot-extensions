@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import argparse
 import os
 import sys
 
 from . import config as cfg
 from .sessions_pane_args import sweep_mux_pane_args
+
+_DEFAULT_SWEEP_INTERVAL_S = 30
 
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
@@ -138,11 +142,15 @@ def add_parsers(sub) -> None:
         "(one process instead of one per session; mandatory, always-on "
         "infrastructure -- not operator-configurable)",
     )
-    p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
+    p.add_argument(
+        "--interval", type=int, default=_DEFAULT_SWEEP_INTERVAL_S,
+        help="Correctness backstop in seconds (default 30, min 2); pushes wake immediately",
+    )
     p.add_argument("--passive", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--control-port", type=int, default=None, help=argparse.SUPPRESS)
 
 
+@daemon_entrypoint("agent-worktrees-status-monitor", source=__file__, purpose="production")
 def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
@@ -170,7 +178,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     core = _core()
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
-    interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
+    interval = (
+        args.interval
+        if getattr(args, "interval", None) and args.interval >= 2
+        else _DEFAULT_SWEEP_INTERVAL_S
+    )
     passive_mode = bool(getattr(args, "passive", False))
 
     # Stage D (agent-cli-lazy-dispatch): these six are owned by
@@ -958,22 +970,20 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
-        with state_lock:
-            shutdown_requested.set()
-            _enter_drain_only_state()
-            worktrees_runtime.close_admission("shutdown")
-            repositories_runtime.close_admission("shutdown")
-        repositories_runtime.shutdown()
-        worktrees_runtime.feed.wait_closed(status_monitor_cutover._READ_TIMEOUT_S)
-        _close_request_surfaces()
-        control_server.close()
-        receipts.wait_idle()
-        resident_push.reset()
-        worktrees_runtime.shutdown()
-        worktree_status_runtime.shutdown()
-        managed_mux_runtime.shutdown()
-        status_monitor_cutover.clear_route_if_owner(os.getpid())
-        d = _locks.read_lock(lock)
-        if isinstance(d, dict) and d.get("pid") == os.getpid():
-            _locks.remove_lock(lock)
+        from .status_monitor_retirement import retire_monitor
+
+        def _close_monitor_admission():
+            with state_lock:
+                shutdown_requested.set()
+                _enter_drain_only_state()
+                worktrees_runtime.close_admission("shutdown")
+                repositories_runtime.close_admission("shutdown")
+
+        retire_monitor(
+            close_admission=_close_monitor_admission, repositories_runtime=repositories_runtime,
+            worktrees_runtime=worktrees_runtime, close_request_surfaces=_close_request_surfaces,
+            control_server=control_server, receipts=receipts,
+            worktree_status_runtime=worktree_status_runtime, managed_mux_runtime=managed_mux_runtime,
+            lock=lock, original_error=sys.exc_info()[1],
+        )
     return 0

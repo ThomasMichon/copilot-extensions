@@ -91,7 +91,7 @@ Never commit a recovered-card raster to this public repository; committed demos
 must use the identifier-neutral synthetic fixture.
 
 `--configuration-guide` renders Profiles, its Apply confirmation, Workers
-loading/catalog/actions/details, instantiation/declaration/editing, effect
+loading/catalog/actions/details, instantiation/operator controls/editing, effect
 confirmation, pending receipt, discovery error, and an 80x24 catalog. It needs
 the agent-dispatch Python dependencies as well as the Manager's; it reuses
 provider-owned scaffolds and effects. Discovery and submission are patched to

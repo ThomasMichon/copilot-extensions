@@ -8,7 +8,6 @@ import logging
 import sys
 import threading
 import time
-from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +15,7 @@ from fastapi import FastAPI
 
 from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
+from .app_lifecycle import lifespan
 from .app_supersession import retire_previous_daemon
 from .app_worktree_cache import start_worktree_cache, stop_worktree_cache
 from .config import load_config, load_or_create_auth_token
@@ -323,9 +323,11 @@ async def _start_credential_relay(app: FastAPI, *, start_listener: bool = True):
     return None
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+@contextlib.asynccontextmanager
+async def _lifespan(app: FastAPI):
     """Application lifespan -- initialize DB, topology, and session manager."""
+    from .app_lifecycle import close_database
+
     cfg = app.state.config
 
     lifecycle_start_task = None
@@ -397,12 +399,12 @@ async def lifespan(app: FastAPI):
                 port=_bound_port, pid=_os.getpid(), version=_ver,
             )
         except ForwardedRouteRefused as exc:
-            await asyncio.to_thread(db.close)
+            await close_database(db)
             skip_forwarded_daemon_start(app, exc)
             yield
             return
         except Exception as exc:
-            await asyncio.to_thread(db.close)
+            await close_database(db)
             log.exception("Failed to publish the bound daemon endpoint")
             raise RuntimeError(
                 "Cannot start agent-bridge without publishing its active endpoint"
@@ -1062,11 +1064,8 @@ async def lifespan(app: FastAPI):
     # Shutdown: disconnect SSH master connections (after sessions are stopped)
     await shutdown_ssh()
 
-    # Shutdown: persist every queued event before the process exits.
-    try:
-        await asyncio.to_thread(db.close)
-    except Exception:
-        log.warning("Failed to stop event writer cleanly", exc_info=True)
+    # The outer admission lifecycle settles the event writer even when an
+    # earlier startup/shutdown step raises or its async owner is cancelled.
 
 
 def create_app(

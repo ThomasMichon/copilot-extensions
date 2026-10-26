@@ -37,7 +37,10 @@ that one-time bootstrap transition is a plain stop/start, not a regression.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import json
+import os
 import secrets
 import socket as _socket
 import subprocess
@@ -138,13 +141,13 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
 
     from .sockio import daemon_env_overrides
 
-    # Resolve every path against THIS process's cwd before the spawn: the
+    # Anchor every path against THIS process's cwd before the spawn: the
     # child runs from the data root, so a relative AGENT_MCP_HOME-derived
     # socket/log path (or AGENT_MCP_HOME itself) would otherwise be resolved a
     # second time there and name ``home/home/...``.
     home = Path(ctx.data_root).resolve()
-    socket_path = Path(ctx.new_socket_path).resolve()
-    log_path = Path(ctx.new_log_path).resolve()
+    socket_path = Path(os.path.abspath(ctx.new_socket_path))
+    log_path = Path(os.path.abspath(ctx.new_log_path))
     python = sys.executable
     cmd = [windowless_python(python), "-m", "agent_mcp", "serve",
            "--socket", str(socket_path),
@@ -154,6 +157,9 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
     env_overrides.update(windowless_python_env(python))
     home.mkdir(parents=True, exist_ok=True)
     proc = spawn_daemon(cmd, cwd=home, log_path=log_path,
+                        instance=DaemonInstanceSpec(
+                            "agent-mcp", socket_path.parent, Path(__file__).resolve(),
+                        ),
                         env_overrides=env_overrides,
                         display=f"agent_mcp serve --passive --control-port {control_port}")
     ctx.token_by_port[control_port] = ctx.new_control_token

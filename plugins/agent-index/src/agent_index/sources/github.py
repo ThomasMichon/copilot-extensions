@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
+import hashlib
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from agent_index.sources.base import FileEntry
+from agent_index.sources.base import FileEntry, nonsecret_target
 from agent_index.sources.credentials import TokenProvider, authorization, https_origin
 from agent_index.sources.good_citizen_http import (
     ApiResult as _ApiResult,
@@ -22,10 +24,24 @@ from agent_index.sources.good_citizen_http import (
 
 log = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from agent_index.indexing.change_hints import ChangeHints
+    from agent_index.sources.delta import SourceDelta
+
 _DEFAULT_API_BASE = "https://api.github.com"
 _DEFAULT_TIMEOUT = 20.0
 _DEFAULT_PER_PAGE = 100
 _DEFAULT_MIN_INTERVAL_S = 0.2
+
+
+def _retry_identity_probe(response: httpx.Response) -> bool:
+    """Permission-only 403s are expected for installations, not transient."""
+    return response.status_code != 403 or (
+        "retry-after" in response.headers
+        or response.headers.get("x-ratelimit-remaining", "").strip() == "0"
+        or "rate limit" in response.text.lower()
+        or "abuse detection" in response.text.lower()
+    )
 
 
 class GitHubConnector:
@@ -74,11 +90,77 @@ class GitHubConnector:
         self._client = self._http.client
         self._owns_client = self._http.owns_client
         self._default_since = since
+        self._recovery_account: str | None = None
 
     @property
     def source_name(self) -> str:
         """Unique source family name for this repository."""
         return f"github:{self.owner}/{self.repo}"
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        return (
+            nonsecret_target(str(self._client.base_url).rstrip("/")), self.owner, self.repo,
+            self._effective_account(), json.dumps(self._default_since),
+        )
+
+    @property
+    def hint_scope(self) -> tuple[str, str]:
+        """Explicit nonsecret family/account scope, independent of tuple layouts."""
+        return self.source_name, self._effective_account()
+
+    def _effective_account(self) -> str:
+        if self._recovery_account is None:
+            if self._token or self._token_provider is not None or (
+                self._client.auth is not None or "authorization" in self._client.headers
+            ):
+                self._recovery_account = self._authenticated_recovery_account()
+            else:
+                self._recovery_account = "anonymous"
+        return self._recovery_account
+
+    def discover_hints(
+        self, hints: ChangeHints, last_commit: str | None,
+        *, cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        """Acquire v1 work-item identities without advancing ordinary polling."""
+        from agent_index.sources.github_hints import acquire_hints
+
+        return acquire_hints(self, hints, last_commit, cancel_check=cancel_check)
+
+    def _authenticated_recovery_account(self) -> str:
+        try:
+            data = self._http.get_json(
+                "/user", etag=False, retry_status=_retry_identity_probe,
+            ).data
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (403, 404) or (
+                exc.response.status_code == 403 and _retry_identity_probe(exc.response)
+            ):
+                raise
+            # Installation tokens have no /user principal endpoint. Verify their
+            # installation API access, then fence this opaque credential rather
+            # than guessing an account from repository ownership or token syntax.
+            installation = self._http.get_json(
+                "/installation/repositories", params={"per_page": 1}, etag=False,
+            )
+            data = installation.data
+            if not isinstance(data, dict) or not isinstance(data.get("repositories"), list):
+                raise ValueError("GitHub installation response did not include repositories")
+            credential = (
+                installation.request.headers.get("authorization") if installation.request else None
+            )
+            if not credential:
+                raise ValueError("GitHub installation recovery requires an explicit credential")
+            log.warning(
+                "GitHub installation recovery is credential-scoped; rotate credentials "
+                "only after completing pending crawls",
+            )
+            return "installation-credential:" + hashlib.sha256(credential.encode()).hexdigest()
+        user_id = data.get("id") if isinstance(data, dict) else None
+        if type(user_id) not in (int, str) or not str(user_id):
+            raise ValueError("GitHub /user did not include an authenticated account id")
+        return str(user_id)
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover all issues and pull requests."""
@@ -297,6 +379,9 @@ class GitHubConnector:
         if dt is None:
             return None
         return (dt - timedelta(seconds=60)).astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+setattr(GitHubConnector.discover_hints, "change_hints_versions", (1,))
 
 
 def _env_token() -> str | None:

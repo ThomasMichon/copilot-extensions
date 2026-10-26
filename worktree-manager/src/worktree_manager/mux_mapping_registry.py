@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .self_install import default_root
+from .mux_file_lock import _try_lock_file_once as _try_lock_file_once, _unlock_file
 
 _REQUIRED_MAPPING_STR_FIELDS = ("project", "worktree_id", "mux_session", "mux_bin")
 
@@ -77,40 +78,11 @@ if sys.platform == "win32":
                     raise
                 time.sleep(_LOCK_RETRY_INTERVAL_S)
 
-    def _unlock_file(fh) -> None:
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-
-    def _try_lock_file_once(fh) -> bool:
-        """A single non-blocking lock attempt -- unlike :func:`_lock_file`,
-        never retries, so a caller can tell "someone else already holds
-        this" from "acquired it" immediately."""
-        fh.seek(0, os.SEEK_END)
-        if fh.tell() == 0:
-            fh.write(b"\0")
-            fh.flush()
-        fh.seek(0)
-        try:
-            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
-            return True
-        except OSError:
-            return False
 else:
     import fcntl
 
     def _lock_file(fh) -> None:
         fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-
-    def _unlock_file(fh) -> None:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-
-    def _try_lock_file_once(fh) -> bool:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            return False
-
 
 _UNCONDITIONAL = object()
 

@@ -87,9 +87,26 @@ their final close, including after the original context exits. Windows retention
 remains process-owned; this API does not promise inherited child protection
 there. No lease file is deleted and no second pin registry is introduced.
 
-These helpers live with their adjacent installer helper family, not as an
-ambient import available in an installed provider venv. No current Bridge,
-provider CLI or transport launch path calls them. They do not transfer
-responsibility to a wrapper, guest or native host, and do not change either
-profile's `retainedCreation: false` declaration. Actual launch integration and
-continuing responsibility through reconciliation remain open.
+The [canonical resource builder](../../../libs/versioned-runtime/standalone_build.py)
+packages the synchronized helper family and
+the unchanged profile owner into each wheel and independently buildable sdist.
+An installed provider therefore uses its own immutable resources, not an
+ambient installer-script import. The build helper, profile and build controls
+participate in the source fingerprint; promotion verifies the registered build
+hook and each injected wheel member against those inputs.
+
+Internal `agent_containers.execution_runtime.retain_current_execution` reads
+this process's `sys.executable` slot, requires the expected version and payload
+hash and a package inside that slot, then enters the same retention context.
+Containment uses resolved resource origins, including the initializer, context
+and helper family; a file or package-directory link to mutable code outside
+the slot refuses before importing the profile owner.
+It does not consult `current-version`, provision, activate or invoke a mutable
+payload shim. Missing packaged resources or conflicting/legacy slot evidence
+refuse; an editable source import is not an immutable executing runtime.
+
+No current Bridge, provider CLI or transport launch path calls these contexts.
+They do not transfer responsibility to a wrapper, guest or native host, and do
+not change either profile's `retainedCreation: false` declaration. Actual
+launch integration and continuing responsibility through reconciliation remain
+open.

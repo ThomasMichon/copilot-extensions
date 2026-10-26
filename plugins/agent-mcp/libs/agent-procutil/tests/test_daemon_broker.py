@@ -23,6 +23,19 @@ def _denied():
 @pytest.fixture(autouse=True)
 def no_native_caller_job(monkeypatch):
     monkeypatch.setattr(broker, "caller_in_job", lambda: False)
+    from agent_procutil import _daemon_instance_store
+    monkeypatch.setattr(_daemon_instance_store, "bind_process", lambda *_: None)
+    from agent_procutil.daemon_instances import DaemonInstanceSpec
+    from pathlib import Path
+    original = pu.spawn_daemon
+
+    def explicit_fixture(*args, **kwargs):
+        if "instance" not in kwargs:
+            kwargs["instance"] = DaemonInstanceSpec(
+                "fixture", Path(kwargs["cwd"]), Path(__file__).resolve(),
+            )
+        return original(*args, **kwargs)
+    monkeypatch.setattr(pu, "spawn_daemon", explicit_fixture)
 
 
 def test_nested_caller_job_uses_verified_broker_without_starting_a_direct_child(monkeypatch, tmp_path):
@@ -73,11 +86,13 @@ def test_denied_breakaway_uses_shared_broker_with_actual_child_contract(monkeypa
 
     assert result is process
     assert popen.call_count == 1, "successful brokerage must not trigger a contained retry"
-    launch.assert_called_once_with(
-        ["py", "arg with spaces"], cwd=str(tmp_path), env={"KEY": "new", "OTHER": "value"},
-        creationflags=pu._CREATE_NO_WINDOW | 0x4000,
-        log_path=str(tmp_path / "out.log"), stderr_log_path=str(tmp_path / "err.log"),
-    )
+    assert launch.call_count == 1
+    assert launch.call_args.args == (["py", "arg with spaces"],)
+    passed = launch.call_args.kwargs
+    assert passed["env"]["KEY"] == "new" and passed["env"]["OTHER"] == "value"
+    assert passed["env"]["COPILOT_EXTENSIONS_DAEMON_INSTANCE"]
+    assert passed["instance_receipt"].instance_id == passed["env"]["COPILOT_EXTENSIONS_DAEMON_INSTANCE"]
+    assert passed["creationflags"] == pu._CREATE_NO_WINDOW | 0x4000
     for name in ("out.log", "err.log"):
         text = (tmp_path / name).read_text(encoding="utf-8")
         assert "trying Windows lifetime broker" in text
@@ -105,7 +120,9 @@ def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
     monkeypatch.setattr(
         daemon, "spawn_brokered_daemon",
-        Mock(side_effect=pu.DaemonSpawnError("sensitive-fixture-detail")),
+        Mock(side_effect=pu.DaemonSpawnError(
+            "sensitive-fixture-detail", process_created=False, admission_sent=False,
+        )),
     )
     with pytest.raises(pu.DaemonSpawnError) as caught:
         pu.spawn_daemon(

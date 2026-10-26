@@ -756,6 +756,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
     if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
+    if ($Action -in @('install', 'update', 'provision')) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
     if ($Action -eq 'status') {
@@ -827,7 +831,7 @@ try {
 
     if (-not $slotAlreadyComplete) {
         if ($Force -or -not (Test-Path $VenvPython) -or -not (Test-Path (Join-Path $VenvDir 'pyvenv.cfg'))) {
-            if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+            if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
                 Write-Fail "Venv creation failed -- $VenvPython not found"
                 exit 1
             }

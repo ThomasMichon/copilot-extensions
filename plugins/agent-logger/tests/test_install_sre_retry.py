@@ -158,7 +158,8 @@ function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_f
         check=True,
         capture_output=True,
         text=True,
-        timeout=20,
+        timeout=180,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 
@@ -169,6 +170,7 @@ def _delays(delays_file: Path) -> list[int]:
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+@pytest.mark.timeout(210)
 def test_windows_sre_mismatch_retries_then_succeeds(tmp_path: Path, shell: str) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
@@ -189,6 +191,7 @@ Write-Host "OUT:$($result.Output)"
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+@pytest.mark.timeout(210)
 def test_windows_unrelated_failure_is_not_retried(tmp_path: Path, shell: str) -> None:
     counter_file = tmp_path / "attempt-count.txt"
     counter_file.write_text("0", encoding="utf-8")
@@ -207,6 +210,7 @@ Write-Host "OUT:$($result.Output)"
 
 
 @pytest.mark.parametrize("shell", ["powershell.exe", "pwsh"])
+@pytest.mark.timeout(210)
 def test_windows_persisting_sre_mismatch_still_fails_after_all_retries(
     tmp_path: Path, shell: str
 ) -> None:

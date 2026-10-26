@@ -53,8 +53,9 @@ effects. Truthful unresolved-locality refusal recording merged in #8574 and Mana
 boundary observations merged in #8588. Negotiated remote prompted admission and
 target receipt binding merged in #8605. Local and seedless resolution receipts
 and both-hop attempt propagation merged in #8615. Deferred process and
-seed-claim/return observations merged in #8627. Native conversation and
-accepted-turn correlation remains incomplete. Engine activity
+seed-claim/return observations merged in #8627. Qualified original Linux/WSL
+native-session observations merged in #8641; accepted-turn correlation and
+joined Manager inspection remain incomplete. Engine activity
 has rolling lifecycle and preparation-phase events, but attempts before
 allocation lack a worktree identity, prompt text is
 deliberately absent there, and phase step IDs are not a whole-attempt ID.
@@ -77,6 +78,18 @@ The operator confirmed `worktree-launch-attempt-journal` and **90 days** of
 full-prompt retention. The preceding report requires crash-resistant prompt
 preservation and SSH creation delegated with the seed to the selected venue,
 which owns execution beyond that boundary.
+
+### Follow-up: active Open regression
+
+The operator also reported:
+
+> Bug to fix in current agent-worktres and worktree-manager while we are here: using Open on any active workreee in Worktree Manager yields this:
+
+The reported parser error names `--require-agent-hosting`,
+`--require-launch-attempt` and `--launch-attempt-id`, followed by the Manager's
+resolution-receipt compatibility refusal. The long command listing is omitted.
+The existing hosting, receipt-ownership and uncertain-launch contracts still
+apply while restoring active Open through a coherent installed pair.
 
 The following decomposition and detailed evidence rules are agent-recommended.
 
@@ -118,23 +131,32 @@ The following decomposition and detailed evidence rules are agent-recommended.
   target receipt and allocated worktree ID before later launch phases.
 - [ ] Record per-owner progress, refusal, error and exit events without putting
   prompt contents in shared logs. Distinguish allocated, launcher started,
-  Copilot process started and prompt handoff/acceptance where proven.
-- [ ] Represent a missing terminal receipt after crash as interrupted or unknown,
+  Copilot process started and prompt handoff/acceptance where proven. Existing
+  resolver/execution observations are projected in #9013; accepted-turn
+  correlation and installed qualification remain open.
+- [x] Represent a missing terminal receipt after crash as interrupted or unknown,
   including allocated-but-not-launched cases; never infer success from a plan,
-  a zero SSH exit, `copilot_invoked` alone or missing errors.
+  a zero SSH exit, `copilot_invoked` alone or missing errors. #9013 preserves
+  absent or explicit unknown source terminals; installed crash validation
+  remains in Phase 5 and the Validation Plan.
 - [x] Integrate negotiated SSH prompt admission with #6057. The selected venue
   owns allocation, seed staging and launch after admission; the host journal is
   not a second execution authority and cannot automatically replay uncertainty.
 
 ### Phase 4 -- Inspect, sweep and retain
 
-- [ ] Expose a discoverable Manager history/detail path and bounded structured
-  local reader, filterable by time, action, project, venue, outcome and attempt.
-  Prompt contents require explicit detail retrieval.
-- [ ] Add a read-only sweep over explicitly selected configured reachable
+- [x] Expose a discoverable Manager history/detail path and bounded structured
+  local reader, filterable by time, action, project, venue, Manager-boundary
+  outcome and attempt. Prompt contents require explicit detail retrieval;
+  complete owner-terminal classification remains in Phase 3.
+- [x] Add a read-only metadata sweep over explicitly selected configured SSH
   machines through existing transports, preserving per-source errors,
   unavailable machines and source identity rather than reporting empty success.
-- [ ] Enforce 90-day prompt retention, including a documented policy for legacy
+- [x] Add explicit selected-machine exact detail and protected-input retrieval,
+  retaining source identity and errors without implicitly revealing prompts.
+  #9017 supplies the bounded reader; installed target qualification remains in
+  Phase 5 and the Validation Plan.
+- [x] Enforce 90-day prompt retention, including a documented policy for legacy
   seed-history copies, SQLite sidecars, expiry and explicit deletion. Do not
   silently leave a second indefinite full-prompt copy or delete pending intent.
 
@@ -172,6 +194,23 @@ The following decomposition and detailed evidence rules are agent-recommended.
 - [ ] Run affected tests, lint and contracts, then record genuine installed
   local/remote proof separately from source and synthetic backend checks.
 
+## Current blockers
+
+- **Containing release:** #8983 tracks the trusted Main artifact builder's
+  rejection of candidate `setup.py`. Its finite compatibility fix already has
+  an owner. #9013 and #9017 remain source merges pending release; do not retry
+  promotion as repair or bypass executable/source/signing qualification.
+- **Installed acceptance:** the existing #6859 / #7833 Windows broker
+  qualification and runtime owner remain authoritative. Binding-free Bridge
+  startup #8961 is merged source, not installed readiness. Retain uncertain
+  updater outcomes without replay; containing release and authorized rollout
+  must precede any claim of repaired Open or installed prompt parity.
+- **Accepted-turn evidence:** the qualified native owner proves original
+  Linux/WSL session identity, not prompt acceptance. No authoritative
+  accepted-turn backend is available in the current integration. Preserve
+  `unknown` and the open Phase 3 / Phase 5 gates; do not invent a receipt or
+  infer acceptance from process, hook, UUID or wrapper observations.
+
 ## Proposal
 
 Use one machine-local append interface in the existing Manager private-state
@@ -186,6 +225,411 @@ prompt text through general telemetry. Select the concrete schema and latency
 budget after reviewing existing stores and consumer boundaries in Phase 1.
 
 ## Journal
+
+- **2026-10-25** -- #9017 merged as
+  `2f1ce1bc6e99683ed21b046b8c2f7acd23632742` after genuine current-head
+  approval with no findings, all required CI and a complete empty thread list.
+  Windows and frozen-source POSIX packets each pass 203 cases; publication
+  did not change the qualified Manager, engine or transport source bodies.
+  Both parent plans were re-read after merge. Phase 4's exact selected-source
+  reader is source-complete, not installed; accepted-turn correlation,
+  containing release, authorized rollout, installed original-conversation /
+  exactly-once proof and cleanup remain open. Neither effort is Done.
+
+- **2026-10-25** -- Prepared exact selected-machine detail under the existing
+  read-only Phase 4 contract. One configured SSH source invokes its existing
+  local Manager reader; protected prompt/options require explicit opt-in.
+  Metadata and event pages are validated, engine receipts reuse the prompt-free
+  owner projection, and a validated partial target failure retains useful
+  intent with a nonzero outcome instead of becoming empty success. Default
+  metadata sweeps are unchanged. Windows and frozen-source POSIX packets each
+  pass 203 cases, including native target-shell/Manager reads, exact private
+  input, event continuation, expiry refusal, partial engine failure and
+  unchanged fixture bytes. The remote transport and positive engine fixture
+  are synthetic; this does not establish real SSH authentication, installed
+  target compatibility or Copilot acceptance. Release, authorized rollout and
+  the original installed-conversation gates remain open.
+
+- **2026-10-25** -- #9013 merged as
+  `fdd1daf27d5c3c946483b8d270584a1601de839c` after genuine current-head
+  approval, required CI and complete resolution of the recorded-result/final-
+  wrapper-exit finding. Both parent plans were re-read after merge. The
+  source reader preserves missing terminals as unknown; no installed wrapper,
+  Copilot acceptance or crash outcome is inferred. Continue Phase 4's explicit
+  selected-machine protected detail, retaining accepted-turn correlation and
+  all containing-release, authorized-rollout, installed-conversation and
+  cleanup gates. Both efforts remain Active.
+
+- **2026-10-25** -- The bounded local summary now projects existing resolver,
+  execution and admission observations separately. Resolver uncertainty and
+  missing terminals remain distinct; recorded results and actual child exits,
+  receipt uncertainty and parent identities are retained per operation.
+  Final wrapper exits remain unknown without an external return observation. No new
+  producer or engine invocation is required, and no admission refusal, crash,
+  prompt acceptance or replay permission is inferred. Windows and frozen-source
+  POSIX packets each pass 76 cases, including the real Manager-to-engine reader
+  across 105 receipts in two pages and unchanged synthetic fixture state.
+  The actual execution owner also runs a real child after an injected earlier
+  receipt-write failure: its terminal records zero result/child exits with
+  uncertainty, while its real wrapper returns 3. The projection preserves that
+  distinction rather than claiming the wrapper returned zero.
+  This qualifies source inspection, not installed conversation delivery.
+  Selected-machine protected detail, accepted-turn correlation, release,
+  authorized rollout and the original installed acceptance remain open.
+
+### 2026-10-25 -- Explicit configured-SSH metadata inspection merged
+
+- #9008 merged as `57c63a574296ffa248bc77a1fc146e684b84c91e` after a passing
+  current-head Copilot Comment, all required CI and complete thread resolution.
+  Four concrete review findings were fixed and qualified; the unthreaded
+  registry-directory suggestion was evaluated against the actual engine and
+  Manager legacy-root owners and explained without inventing a new redirect.
+  The managed merge used the verified Maintainer review-rule exception, not a
+  CI exception.
+- Re-read both parent plans after merge. The local history interfaces and
+  explicit metadata sweep are implemented; selected-machine protected detail,
+  complete owner-terminal observations, containing release, authorized rollout
+  and installed prompt/conversation acceptance remain open. Neither parent
+  tracker closed, and both efforts remain Active.
+- Pull-forward initially auto-aborted on the squash-merged incremental history.
+  With the original head retained, a clean tree, provider-confirmed merge and
+  matching changed files proved there were no surviving local commits. A
+  zero-local-range rebase restored the existing owned branch, and managed
+  synchronization then succeeded. No reset, stash, remote rewrite or worktree
+  finalization was used.
+- Continue the existing Phase 3 owner-terminal slice using actual resolver,
+  execution and admission observations. Wrapper and child exits must remain
+  separate, missing terminals unknown, and zero return never prompt acceptance.
+
+### 2026-10-25 -- Explicit configured-SSH metadata inspection prepared
+
+- Added an opt-in bounded metadata-list sweep, separating the source-roster
+  project and selected SSH machine identities from existing journal filters.
+  It reads only the selected registered project's files, shares the Picker's
+  additive machine parser, and never discovers provider venues or invokes an
+  engine scalar to resolve configuration. Explicit installation-cell contexts
+  refuse rather than borrowing the legacy machine-global registry.
+- Each configured target uses the existing SSH profile/proxy/process owner and
+  published absolute Manager front door. Source errors and continuation remain
+  independent; limits, deadlines, strict prompt-free response validation and
+  nonzero partial-failure status prevent unavailable targets becoming empty
+  success. No setup, replay, retries or private-input sweep is introduced.
+- A real selected Windows-to-POSIX SSH read reached the installed target reader
+  but returned non-JSON output; the sweep reported an incompatible source
+  without echoing it or changing the installed pair. This is incompatibility
+  evidence, not delivered-source or installed acceptance proof.
+- Qualification: the focused Windows packet passed 208 cases, including three
+  native target-shell/Manager process cases. The frozen POSIX packet passed
+  the same 208 cases. Its first run exposed a Windows-only locality fixture
+  that mocked the hostname but not the execution platform; the fixture now
+  explicitly supplies both, and its 59-case module passes on Windows.
+  Shared SSH profile compatibility tests passed 14 cases. Ruff, installation,
+  changed-module, dependency-age and affected-consumer changefile gates pass.
+  Disposable source, dependency cache and failed-fixture residue were cleaned.
+- Fresh-source construction and missing/incompatible target refusal are
+  covered; full machine provisioning and installed prompt acceptance are not
+  claims of this read-only source lane. The POSIX venue lacked the optional
+  devcontainer CLI, so it used the canonical contained runner.
+- Review follow-up rejects every non-null event without a positive integer
+  sequence before inspecting its outcome/details, and rejects nonnumeric or
+  boolean observation times. Regression cases include malformed private fields
+  and the actual CLI's refusal without echoing them. Missing optional registry
+  documents now remain empty mappings for selected/supplier anchor resolution,
+  while missing machine files still preserve supplier fallback. The expanded
+  Windows and frozen-source POSIX packets both pass 223 cases.
+- A second review exposed unsplit legacy multi-profile alias reselection and
+  agent/X11 forwarding inherited from SSH configuration. Such ambiguous entries
+  now refuse before connection rather than selecting a default profile; SSH
+  explicitly disables agent and X11 forwarding as well as port forwards.
+  Non-default alias refusal and transport-argument regressions bring both
+  passing Windows and frozen-source POSIX packets to 225 cases.
+- This slice closes neither whole-attempt terminal outcomes nor remote private
+  detail, containing release, authorized rollout, original New/cold Resume
+  conversation/acceptance proof or cleanup. Both parent efforts remain Active.
+
+### 2026-10-25 -- Bounded local positive-evidence summary merged
+
+- #9004 merged as `1d7be74ce1ae9a2ed11087cccac939038d823be3` after genuine
+  current-head Copilot approval, required CI and no open review threads.
+  No parent tracker was included in closing references.
+- Re-read both parent plans after merge. The local projection does not close
+  terminal classification, selected-machine sweeps, containing release,
+  authorized rollout or installed prompt/conversation proof. Continue with
+  bounded inspection of explicitly selected configured machines through their
+  existing transport and runtime owners, without provisioning or replay.
+- Managed synchronization moved the owned source onto the confirmed merge.
+  Both efforts remain Active; this worktree must not finalize a partial slice.
+
+### 2026-10-25 -- Bounded local positive-evidence summary prepared
+
+- An explicit Manager `launch-attempts <id> --summary` joins up to ten existing
+  v1 engine pages under one 120-second engine-read deadline. The default
+  list/detail and shared history UI remain unchanged; no new engine flags,
+  response fields, daemon, launch behavior or replay path are introduced.
+- Allocation requires completed New admission evidence. Launcher-command
+  spawn, backend-command spawn and the engine's qualified native-session join
+  remain separate positive facts with their own request/operation identities.
+  Returned plans, zero exits, seed claims and absent receipts never become
+  Copilot acceptance or allocated-but-not-launched verdicts.
+- Pages are independent, non-atomic observations. Partial failures retain safe
+  positive facts with source errors, budgets and continuation visible; Manager
+  references and events remain bounded. Remote targets are not contacted.
+- The focused Windows and frozen-source POSIX packets each pass 45 cases, including four actual
+  Manager/engine subprocess cases with and without explicit private input.
+  Cross-page cases read 103 receipts in two engine calls and reach the native
+  join beyond page one without changing fixture state. Measured summary reads
+  took 4.806444 and 4.283359 seconds on Windows, and 0.407694 and 0.437641
+  seconds on POSIX; these are source samples, not an installed performance or
+  acceptance qualification. Frozen POSIX source and caches were removed after
+  qualification. Touched Python lint, installation contracts and the scoped
+  module-size guard pass; committed-source documentation checks pass.
+- This closes only a bounded local projection gap. Complete per-owner terminal
+  classification, selected-machine sweeps, containing release, authorized
+  rollout, installed prompt/conversation proof and parent cleanup remain open.
+
+### 2026-10-25 -- Manager-boundary outcome filtering merged
+
+- #9001 merged as `69794c92b53ba40a5a170f6807eadb1e1516fc10` after genuine
+  current-head Copilot approval, no review threads/findings and required CI
+  passing. Both parent trackers remain open.
+- Re-read both parent plans after merge. The new filters intentionally expose
+  only Manager-boundary observations; they do not settle whole-attempt
+  provider/native aggregation or selected-machine inspection. Continue those
+  source slices before containing release, authorized rollout and installed
+  New/cold Resume same-conversation/exactly-once proof.
+- The managed post-merge sync pulled this worktree onto the provider-confirmed
+  merge. Parent validation, release/rollout, resource cleanup and effort
+  closure gates remain open; this worktree is not ready to finalize.
+
+### 2026-10-25 -- Scoped Manager-outcome filter source
+
+- Local list and detail now project the latest durable Manager observation
+  independently of event-page cursors, retaining its sequence and exact
+  timestamp. Indexed latest-event lookup and a shared deterministic SQLite
+  function apply outcome filters before pagination without materializing
+  private input, querying engines or requiring SQLite's JSON extension.
+- CLI `--outcome` and both Pickers' shared history screen expose only this
+  explicitly named `manager-boundary` scope. Refusal, nonzero launcher return
+  and explicit interruption are distinguishable; a zero return is labeled
+  `returned`, never successful Copilot launch or prompt acceptance. Missing
+  events and ambiguous engine/transport failures remain unknown.
+- The focused Windows packet passes 145 cases with four platform-specific
+  skips, including actual Manager-to-engine subprocess detail, legacy reads,
+  outcome pagination, timestamp fidelity and real Textual navigation.
+  Frozen-source POSIX coverage passes 147 cases with two Windows-only skips
+  plus 16 engine-reader cases; the actual cross-runtime subprocess cases run
+  on both platforms. Rapid-click tests await Textual's real button-animation
+  completion rather than assuming idle means click-ready; Windows UI coverage
+  passes all 12 cases after that correction. No deadlines were widened.
+  Source qualification is not release, rollout or installed launch acceptance.
+- Whole-attempt provider/native evidence aggregation, selected-machine sweeps
+  and every remaining parent acceptance/cleanup gate stay open. This scoped
+  filter does not close the larger Phase 3 or Phase 4 inspection items.
+
+### 2026-10-25 -- Retention source merged; outcome classification next
+
+- #8999 merged as `1e3638ee4b257416e4d0f5eae6bb97f4f51247eb` after genuine
+  current-head approval, no open findings, all three review threads resolved
+  and required CI passing. Both parent trackers remain open.
+- The bounded 90-day retention implementation is now complete in source,
+  including legacy copies, crash-retry scrubbing, exact-deadline cached
+  navigation, malformed timestamp refusal and incomplete sidecar preservation.
+  Explicit expiry erases private text, not journal metadata or pending intent;
+  no early per-attempt erasure or whole-store reset command is introduced.
+- Current-source Windows failure/confirmation coverage passes 100 cases.
+  Frozen final-source POSIX coverage passes 156 cases with two Windows-only
+  skips, including native WAL/restart, composer expiry and maintenance-policy
+  controls. The isolated source/caches were removed. These results do not
+  establish rollout or installed prompt acceptance.
+- Re-read both canonical plans after merge. Next, classify whole-attempt
+  outcomes from the existing qualified owners and expose bounded outcome
+  filtering without treating a plan, launcher return or missing event as
+  accepted prompt delivery. Selected-machine sweeps, containing release,
+  authorized rollout, real local/SSH conversation proof and cleanup remain
+  open. This worktree must continue rather than finalize a completed slice.
+
+### 2026-10-25 -- Retention and legacy history migration prepared
+
+- Normal production Picker use runs local private-input maintenance after first
+  paint, respecting the automatic-maintenance veto and read-only/mock modes.
+  Explicit confirmation also runs it off-thread before saving, preserving the
+  draft and refusing launch on a sanitized retention failure.
+- Legacy prompt history now has the same 90-day bound, preserving original
+  IDs, projects, exact text and submission timestamps without inventing launch
+  evidence. Migration securely deletes expired rows, checkpoints recognized
+  WAL through SQLite, scrubs old freelist copies and leaves a retryable marker
+  if interrupted before the scrub finishes. New history is indexed and uses
+  DELETE journaling and secure deletion. Orphan or unexpected sidecars refuse.
+- The affected intent/history/confirmation/maintenance packet passes 213 cases
+  with eight platform skips. Follow-up retention controls include the real
+  production maintenance callback and native abrupt-exit WAL/restart proof.
+  The final migration/database/native packet passes 44 cases, including a busy
+  real WAL reader. Windows migration measured about 37.71ms for 101 legacy
+  rows, with 20 warm maintenance samples at p50/p95/p99/max
+  14.66/89.94/103.27/103.27ms and no failures. An earlier run measured
+  49.61ms migration and 14.75/17.45/21.18/21.18ms warm samples; the later
+  outlier remains evidence, not a discarded sample. This is storage work
+  off-thread, not installed or key latency; neither small sample qualifies
+  high-percentile tails.
+- Frozen-source POSIX validation passes 128 cases with two Windows-only skips,
+  including all three native migration/restart/measurement cases. The source
+  archive and isolated caches were removed afterward. POSIX migration measured
+  about 20.53ms for 101 legacy rows; 20 warm samples measured
+  p50/p95/p99/max 0.87/2.79/2.84/2.84ms with no failures, still not tail or
+  installed qualification.
+- Pending daemon seed state is untouched. Review/merge, containing release and
+  authorized rollout remain owed.
+  Outcome filtering, selected-machine sweeps and installed local/SSH prompt
+  acceptance are still parent completion gates.
+- Review identified two real read-side gaps: malformed legacy timestamps could
+  pass SQLite's numeric comparison, and already-loaded composer caches could
+  outlive their deadline. Reads now validate legacy timestamps under one
+  read-only snapshot. Both history loaders retain original deadlines; cached
+  navigation drops expired text and edits without overwriting the current draft
+  or reviving them after clock rollback. The review-fix packet passes 123 cases
+  with four platform skips; the affected UI ownership/navigation packet passes
+  104 cases with four skips. Real New and asynchronous Resume composer tests
+  advance the clock after loading history and after physical deletion.
+- The next review found an incomplete-store hole: an empty main file could
+  allow SQLite to discard leftover WAL evidence. Every non-WAL header now
+  refuses WAL/shared-memory sidecars before opening SQLite, including empty
+  files and false WAL headers. All read/write/expiry operations preserve the
+  exact fixture bytes on refusal. A separate startup correction reports a
+  retention warning without suppressing independent anchor repair, housekeeping
+  or heartbeat ownership; confirmation still refuses launch. The focused
+  failure-path/confirmation packet passes 100 cases.
+
+### 2026-10-25 -- Interactive local history merged; retention next
+
+- #8994 merged both Picker entry points with current-head approval and required
+  CI. The common read-only screen exposes local metadata, bounded owner detail
+  and separately requested private input without launching or replaying.
+- Review regressions prove history row messages cannot reach compact Resume,
+  including queued selections during a read; explicit private-input recovery
+  hints retain their flag; and project/action changes cannot reuse another
+  query's pagination cursor. The focused packet passes 32 cases.
+- Next, complete the reviewed 90-day retention contract across normal Manager
+  use and legacy prompt-history copies, retaining original timestamps,
+  protecting SQLite sidecars and never deleting pending daemon intent.
+  Whole-attempt outcome filtering, selected-machine sweeps and installed
+  local/SSH acceptance remain separate incomplete work.
+
+### 2026-10-25 -- Bounded local reader merged; interactive history next
+
+- #8990 merged with current-head approval and required CI. Manager metadata
+  lists and explicit-input detail now join bounded local engine receipts
+  without replay, provisioning or inferred prompt acceptance.
+- Review corrections complete full/lazy command registration and prove actual
+  cluster-free execution. The opt-in native consumer lane now strips Git
+  overrides before fixture setup and tests deliberately redirecting values.
+- Native Windows and earlier frozen-source Linux consumer evidence remain
+  separate from installed acceptance. The local reader does not query the
+  selected remote machine or establish whole-attempt terminal success.
+- Next, expose the existing protected metadata/detail reader from the
+  interactive Manager without blocking navigation or revealing prompts by
+  default. Outcome filtering, selected-machine sweeps, legacy retention,
+  release and installed local/SSH proof remain incomplete.
+
+### 2026-10-25 -- Interactive local history source
+
+- Both interactive Pickers now expose the same local history screen through
+  Ctrl+Shift+H. Metadata paging and project/action filters do not start an
+  engine; explicit row detail reuses the versioned CLI reader boundary.
+- Private input requires a separate exact-attempt reveal, respects expiry and
+  is removed from the view on return to the list. The screen retains source
+  errors, page cursors and unknown acceptance rather than inventing a terminal
+  outcome. Long previews identify truncation and direct further paging to the
+  CLI.
+- Headless Textual navigation exercises both entry points, read-only actual
+  SQLite data, privacy, paging, slow-read dismissal and preserved launch
+  shortcuts. The actual native Windows Manager/engine consumer lane also
+  passes after sharing the detail implementation.
+- This source increment does not close the composite Phase 4 item: outcome
+  filtering, selected-machine sweeps, retention, release and installed proof
+  remain open.
+
+### 2026-10-24 -- Bounded local inspection prepared
+
+- Added a discoverable Manager CLI list/detail path. Lists query protected
+  metadata without starting the engine; explicit detail joins the existing
+  local engine receipt owners across their versioned CLI boundary.
+- Time, action, project and venue filters stay in the journal query. Separate
+  intent, event and receipt cursors retain incomplete-page evidence; equal-time
+  intent rows use an ID tie-breaker. Private input still requires an exact-ID
+  opt-in and respects its original expiry.
+- The engine bounds one exact attempt directory and projects only validated
+  resolution, execution, historical native-session and matching admission
+  evidence. Missing, corrupt and incompatible sources remain explicit.
+  Admission acceptance and process exit never become accepted-turn evidence.
+- Focused source tests cover privacy, read-only missing/corrupt state, limits,
+  pagination and receipt identity. The real Windows Manager-to-engine process
+  lane passes metadata and explicit-input cases with unchanged fixture state.
+  A frozen committed-source export on native Linux storage passes the engine
+  packet and the Manager journal/CLI/cross-runtime packet. Earlier attempts
+  stalled on mounted-source filesystem I/O before tests; they are not passes.
+  No installed Copilot acceptance or latency qualification is claimed.
+- This is not the whole Phase 4 item: interactive history, outcome aggregation,
+  selected-machine sweeps, legacy retention and installed acceptance remain
+  open. Both parent objectives remain Active.
+
+### 2026-10-24 -- Active Open installation mismatch identified
+
+- The current Manager selects an older complete engine runtime that lacks the
+  launch-receipt arguments, while a newer installed payload contains them.
+  The parser refusal therefore occurs before Open can return an attachment
+  plan; it is not permission to strip the required receipt checks.
+- The promoted release already makes hosting enforcement intrinsic in #8703
+  and retains the launch-receipt contract. Drive the normal registered-source
+  unified updater to reconcile the installed pair, then verify the actual
+  Manager-to-engine Open boundary. Do not hand-edit deployed packages or
+  mistake a refreshed payload for a selected, compatible runtime.
+- The normal update advanced Manager but could not start its durable worker,
+  so the older engine remains selected and the update stays pending. A bounded
+  inert diagnostic authenticates the WMI bootstrap, then observes its real
+  Job-membership check refuse startup; cleanup is confirmed. This matches
+  the existing #6859 / held #7833 repair, not an argument-parsing workaround.
+  The existing owner has also recorded that adding the WMI breakaway flag
+  alone did not establish independent lifetime. Do not introduce a competing
+  broker, deploy the held draft or relax the ownership proof.
+- Keep all diagnostic roots and workers headless. No foreground updater
+  fallback or deployed-code patch was used while diagnosing this refusal.
+- Publication of this inspection slice also exposed the fixed short push
+  budget: its two independent read-only pre-push guards exceed that budget
+  when serialized. The operator selected configured-only identifier checks
+  without automatic cross-repository discovery, and final-diff file-size
+  enforcement in required CI because contributions are squash-merged.
+  #8953 merged that policy and removed the expensive history scan without
+  changing the publication deadline. The earlier parallel-guard experiment
+  is superseded and is not part of this inspection slice.
+
+### 2026-10-25 -- Binding-free Bridge prerequisite merged
+
+- #8961 merged startup topology discovery without mandatory source-project
+  machine binding, following current-head approval and required CI. Optional
+  canonical selectors remain validated; effect-side ownership is unchanged.
+- The affected source packet covers combined-profile locality, remote-only
+  capture/restore and key/SSH-alias collisions. These are source contracts,
+  not evidence that a running service or installed launch path changed.
+- Promotion, authorized rollout, the held updater repair and actual active
+  Open / New / cold Resume verification remain separate incomplete gates.
+
+### 2026-10-24 -- Native observation slice merged; joined inspection next
+
+- #8641 merged with current-head approval, no open findings and required CI
+  passing. Both parent trackers remain open. Verified all 13 authored file
+  blobs against the provider-confirmed merge before advancing the source.
+- Review corrections preserve unknown outcomes for missing execution receipts
+  while retaining corruption errors. The actual backend process now forbids
+  direct writes in the native qualification lane; unavailable registration and
+  unavailable observation each fail their negative control without a receipt.
+- Re-read this effort and the remote parity effort after merge. No broad
+  Phase 3 or validation checkbox is closed: native-session observation is not
+  accepted-turn, installed same-conversation or end-to-end outcome proof.
+- Next, expose bounded joined inspection using the existing protected journal
+  and receipt owners. Preserve metadata-only defaults, explicit private-input
+  retrieval, unknown/interrupted outcomes and per-source errors. Retention,
+  legacy history integration, selected sweeps and installed acceptance remain
+  open; neither rollout nor objective completion is implied by this merge.
 
 ### 2026-10-24 -- Original native-session association prepared
 

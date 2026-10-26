@@ -13,6 +13,7 @@ import shutil
 import stat
 import sys
 import tempfile
+import time
 from types import ModuleType
 from typing import Any
 
@@ -325,7 +326,8 @@ def package_version(slot_name: str) -> str:
     """Separate generated source/repair identities from the package version."""
     ordinary = re.sub(r"[+.]repair\.[0-9a-f]{32}$", "", slot_name)
     return re.sub(
-        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}$", "", ordinary,
+        r"[+.]source\.(?:[0-9a-f]{40}|[0-9a-f]{64})\.[0-9a-f]{16}"
+        r"(?:\.profile\.[0-9a-f]{16})?$", "", ordinary,
     )
 
 
@@ -538,7 +540,8 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
     snapshots = root / "snapshots"
     snapshot = snapshots / identity.runtime_version
     snapshots.mkdir(parents=True, exist_ok=True)
-    with _runtime().construction_lease(snapshots, identity.runtime_version):
+    runtime = _runtime()
+    with runtime.construction_lease(snapshots, identity.runtime_version):
         verify(payload)
         if snapshot.exists() or snapshot.is_symlink():
             verify(snapshot)
@@ -547,9 +550,19 @@ def publish_source_snapshot(payload: Path, root: Path, identity: SourceIdentity)
         with tempfile.TemporaryDirectory(prefix=".source-", dir=snapshots) as temporary:
             candidate = Path(temporary) / "payload"
             shutil.copytree(payload, candidate, symlinks=True)
-            verify(candidate)
-            verify(payload)
-            candidate.rename(snapshot)
+            for attempt in range(runtime._AV_RETRY_ATTEMPTS):
+                verify(candidate)
+                verify(payload)
+                try:
+                    candidate.rename(snapshot)
+                    break
+                except OSError as error:
+                    if (
+                        getattr(error, "winerror", None) not in (5, 32, 33)
+                        or attempt == runtime._AV_RETRY_ATTEMPTS - 1
+                    ):
+                        raise
+                    time.sleep(runtime._AV_RETRY_BACKOFF * (attempt + 1))
         return snapshot
 
 

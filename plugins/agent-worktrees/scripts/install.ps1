@@ -4188,6 +4188,10 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
 }
 
 try {
+if ($Action -in @('install', 'update', 'provision')) {
+    . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+}
 switch ($Action) {
     'publish-runtime-helpers' {
         if (-not $RuntimePublicationPlan -or -not $RuntimePublicationDigest -or -not $BootstrapPython) {

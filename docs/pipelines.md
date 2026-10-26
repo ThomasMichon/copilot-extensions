@@ -9,6 +9,46 @@ and reactive automation this repo runs. `CONTRIBUTING.md` owns contributor
 requirements); this doc owns the *infrastructure* those steps run on top
 of — link here rather than restating any of it.
 
+## Branch-only local publication
+
+The repository pre-push hook and installed Worktrees shim perform branch/ref
+policy only. The shim embeds the existing resolved PR/protected-branch policy
+at normal hook installation; rerun the existing hook installer after changing
+that policy. Installing a payload alone does not refresh a previously installed
+shim. Pre-commit is unchanged.
+
+| Validation outside automatic local publication | CI owner |
+| --- | --- |
+| `check-no-internal-identifiers.py`, including local live sweeps | Trusted `workflow-lockdown-guard` required job: pinned PR base/head, existing repository-secret denylists, `--ci` sanitized output and live sweeps disabled |
+| `check-large-files.py` (already removed from local hooks) | Same required job: resulting file blobs in the pinned PR base/head final diff; preserve the existing source-CI and explicit full-audit lanes, without complete object-history scans |
+| Generic `validate_hook`, `validate_paths`, legacy `tools/worktree/validate-core.ps1` | Adopting repository's required CI: move its command/contract there before adopting this policy; this source repository configures none of these hooks |
+| Contract/install, module-size, lint, version/changefiles, documentation, structure and vendor checks | Existing `ci.yml` `checks` job; these were already outside this repository's pre-push path |
+
+The trusted required workflow checks out only `github.workflow_sha`. Candidate
+commits are fetched/read as inert Git objects, never checked out or executed.
+The required job fails on either publication-validator failure. As with other
+`pull_request_target` changes, this new coverage becomes live only after the
+workflow is promoted to `main`; a green check from the older definition does
+not prove it ran. Do not activate the revised repository/managed hooks before
+that trusted `main` definition is available. Landing source on `dev` is not
+hook-activation or installation authority. Do not mistake `PR gate (required check)`'s name for live
+ruleset enrollment: inspect the provider rules.
+
+Worktrees no longer executes custom/core/legacy source validation during
+`push-changes` or finalize's publication path. Existing explicit validation
+commands remain available. Explicit review/scope policies, claims bookkeeping,
+clean-source/ref custody, required PR policy and remote merge gates are not
+disabled. No claims backend or network call is added to pre-push. Preserved
+foreign hooks still run; branch-only managed hooks cannot promise that an
+unknown chained hook is fast.
+
+Direct publication also omits the automatic anchor-hygiene inventory
+(untracked-inclusive status, stash listing and upstream-history count).
+These are machine-local maintenance diagnostics, not CI source validators;
+`anchor-check` remains their explicit owner. Source-workspace cleanliness,
+expected-branch/ref checks and Git's non-forced checkout/fast-forward refusal
+remain in the publication path to preserve local work.
+
 ## Standalone PR job admission
 
 The existing manual `installation-context-full.yml` workflow additionally accepts
@@ -214,9 +254,70 @@ Actions artifacts remain the original producing-job evidence, while the
 release copy retains the verified packet after Actions retention expires.
 
 Source support does not itself activate Main. Its independently reviewed
-controller and immutable helper pin select the active qualification contract.
+controller selects the active qualification contract.
 Historical raw-source and legacy-CI packets retain their original verification;
 neither can be relabeled as candidate execution.
+
+### Source-coherent release implementations
+
+The source workflow proposal derives implementation revisions from existing
+admission, not a manually maintained helper-version constant. The read-only
+bootstrap uses the exact executing `github.workflow_sha`. After Main resolves
+and ancestry-checks live Dev once, downstream helper checkouts use that full
+immutable `needs.gate.outputs.sha`, matching the release's source input.
+Neither mutable branch names, dispatch payloads nor the generated candidate
+select implementation code. Helper checkouts do not persist credentials.
+The signer retains its existing successful source-unit prerequisite; Main
+still owns job privileges, pause, lifecycle, publication and exact-head landing.
+
+`promotion_release_helpers.py` discovers direct and indirect helper commands
+from both the development recipe and preserved Main controller, then resolves
+their repository-owned static import closure and registered dynamic build inputs
+as data. A new controller command cannot remain outside qualification merely
+because it was absent from an older entrypoint list. Qualification requires
+their byte admission, coverage enrollment for release-tool decision bodies,
+and actual test-call hits inside executable function bodies, not module
+initialization or definition lines reached by an import inside a test. Registered
+native compiler source is hash-bound data, not an executable unit or a coverage
+target. Real build/compiler behavior remains separate development validation.
+Synchronized executable copies borrow only their canonical origin's coverage;
+every run first verifies both admitted hashes and hard-refuses byte divergence.
+Self-file-relative `spec_from_file_location` implementations also join source
+and decision coverage regardless of directory or earlier static-import traversal;
+unresolved loaders, aliases and rebinding are refused. The native build `exec`
+exception is restricted to its exact source-bound site and declared input
+bindings, not all executable loads in that module.
+Dynamic module-import aliases use lexical provenance too; renaming a loader
+cannot hide an unadmitted dependency.
+The existing Windows retention guardian retains its separate runtime-actor
+contract: only its exact adapter and two owned resource-call shapes are
+recognized as external runtime loads, never as qualified repository helpers.
+Release implementations cannot invoke that private loader interface.
+
+Source PR guards compare helper-required CLI inputs and complete-source
+construction/attestation/publication against both the prepared proposal and
+the actual immutable Main controller, each against its own discovered helper
+inventory. A helper used only by Main cannot escape its interface check.
+Unsupported helper-bearing shell command substitutions fail explicitly, even
+beside a later valid invocation; they cannot hide a missing required input.
+An incompatible prepared proposal fails.
+A compatible prepared proposal with the explicit legacy pinned-helper Main
+generation reports
+`active_compatible: false` and the required separately reviewed Main bootstrap;
+it never claims activation. After source-coherent Main selection is active,
+an interface mismatch is a failing source gate, not another bootstrap warning.
+Required inputs are checked against each invocation's own arguments, including
+the promoter's literal base argument array and exact `runpy` trampoline;
+comments, adjacent commands and conditional additions cannot supply them.
+Unsupported shell or loader forms fail visibly rather than becoming an
+unverified compatibility result. This catches new required inputs before release
+without requiring a pin update. Controller-policy changes still need Main
+review. Mode-dependent publisher inputs are declared once and used by both
+the actual CLI validation and the compatibility checker; making an optional
+argparse field mandatory for a publication mode cannot bypass that check.
+Implementation discovery also includes the promoter's indirect `runpy` call.
+Main activation and live release proof are tracked in
+[Phase 9e](../efforts/active/dev-branch-release-pipeline/source-coherent-release-implementations.md).
 
 Chat's enrolled package initializer resolves its version from distribution
 metadata, with a source-project metadata fallback when uninstalled. Its
@@ -1629,11 +1730,11 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > of embedding a Python literal. Its version guard requires the declared
 > resolver assignment, keeping admitted unit code unchanged during allocation.
 >
-> **Enforced by `tools/check-version-consistency.py`** (pre-push): fails
+> **Enforced by `tools/check-version-consistency.py`** (CI): fails
 > if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`
 > versions disagree.
 >
-> **Enforced by `tools/check-changefile-presence.py`** (pre-push + CI,
+> **Enforced by `tools/check-changefile-presence.py`** (CI,
 > PR-diff scoped, against `dev`): fails the push/PR if a plugin's content
 > changed **without** a pending changefile naming it. A change to **any
 > file under `plugins/<p>/`** requires a changefile for `<p>`; a change to

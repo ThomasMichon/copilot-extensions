@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import argparse
 import datetime
 import json
@@ -420,7 +422,9 @@ def _launch_bridge_daemon(argv: list[str], *, display: str, contained_last_resor
         "console_children": True,
     }
     return core.spawn_daemon(
-        argv, display=display, contained_fallback=contained_last_resort, **launch,
+        argv, display=display, contained_fallback=contained_last_resort,
+        instance=DaemonInstanceSpec("agent-bridge", Path(root), Path(__file__).resolve()),
+        **launch,
     )
 
 

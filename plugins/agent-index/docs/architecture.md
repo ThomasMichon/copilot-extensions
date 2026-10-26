@@ -26,7 +26,202 @@ requiring explicit `[stdio-mcp]` opt-in on either role (absent from base and hos
 That means the old "Phase 1 service shell only" description is stale. Future
 work still exists, but indexing and retrieval are present in the shipped code.
 
+## Incremental connector and reuse contracts
+
+An in-process connector may opt into `DeltaSourceConnector.discover_delta()`,
+returning a version-1 `SourceDelta` with changed `FileEntry` values, explicit
+`DeletedFile` tombstones, its target checkpoint and complete-acquisition status.
+The engine validates the result and canonical source family before writes.
+Incomplete/incompatible deltas fail the source; they are not converted into
+an empty success or inferred whole-corpus deletion.
+
+This path does not call `current_commit()`, `list_paths()` or read all stored
+paths: the connector owns coherent base-to-target coverage. Full reindexing and
+legacy connectors retain the snapshot/discovery path, with stored-path
+reconciliation limited to the connector's exact canonical family in either
+storage layout. The opt-in Python
+protocol is independent of the external provider CLI wire format. External
+providers can opt into the separately negotiated contract below.
+
+An external provider's existing `content-current-commit --source SOURCE` reply
+may add `source_delta` with contract `agent-index.source-delta`, explicit
+`versions`, canonical `family`, stable nonsecret `account` and effective
+`target`. One connector instance captures one negotiation snapshot from the
+actual executed provider; package or manifest versions do not imply support.
+Missing or valid future-only declarations retain logged legacy reconciliation
+with unchanged verbs and flags. Malformed declarations fail visibly.
+Only advertised version 1 enables
+`content-discover-changed --source SOURCE [--last-commit CURSOR] --delta-version 1`.
+Its response requires `version`, `upserts`, `deletions`, `commit`, `complete`
+and a `source_delta` echo of the acquisition process's actual scope. The echo
+must still support v1 and exactly match the negotiated family/account/target,
+so retargeting between metadata and acquisition cannot cross a recovery fence.
+The delta's own cursor owns coverage; metadata cursors and incomplete output
+never authorize tombstones. Invalid replies or process failures do not trigger
+an effectful legacy retry.
+Full reconciliation retains the old syntax and accepts canonical descendant
+sources within the invoked subtree. Once v1 is negotiated, full
+`content-discover`, legacy-shaped `content-discover-changed` and
+`content-list-paths` responses must also include the same executing-scope echo.
+It is checked before entries or paths are returned, protecting snapshot-derived
+tombstones as well as explicit deltas. These calls introduce neither new flags
+nor additional metadata probes; direct non-negotiated calls retain the legacy
+baseline. Old callers can ignore the additive echo and metadata; new callers
+handle supported rollback without guessing new syntax. Provider
+hint consumption remains unadvertised. These providers must retain the baseline
+through the consumer-upgrade and provider-rollback window; retirement requires
+a separate contract revision.
+
+Git revision sources use this seam for pinned base-to-target raw diffs and
+bounded new-commit history, without listing unchanged tracked paths, stored
+paths or all historical commits. Renames produce an old-path tombstone and
+new-path upsert; files becoming non-indexable retire their previous content.
+Blob reads use immutable object IDs and enforce the size bound before loading
+content. A missing/unavailable cursor or rewritten history explicitly requests
+a full reindex rather than silently performing an unlimited repair.
+Full reindexing remains the initial reconciliation path.
+Connectors whose current mode cannot prove delta coverage can expose
+`delta_available=False`; Git's working-tree fallback retains its existing
+snapshot path and logs that legacy reconciliation selection. Remote/ref reads
+remain pinned even if the named ref moves during discovery.
+Git paths are decoded per NUL-framed record. Non-UTF-8 paths are explicitly
+logged and excluded in both full and incremental discovery rather than
+inventing lossy stored identities or blocking unrelated items. Commit fields
+and records use NUL framing, so control characters in commit messages remain
+content rather than accidental record boundaries.
+
+Presented files use bounded, exact checkpoint lookups. A normal round reuses
+only complete file fingerprints covering text, language, metadata, chunker
+policy and configured embedding profiles. `IndexConfig.chunker_revision` and
+`ModelProfile.revision` are explicit programmatic invalidation inputs; a chunker
+or model change that preserves its name must advance the corresponding revision.
+Legacy content-only fingerprints deliberately miss once when a file is next
+presented. Full reindexing still forces work, while its retries can reuse
+compatible writes committed within the task window.
+
+Existing file reuse is revoked before mutations begin, including forced rewrites
+at an unchanged fingerprint. Each file checkpoint is published only after all
+its content/vector writes and stale-chunk cleanup succeed. Chunking and deletion
+failures retain the source cursor for
+idempotent replay; legacy vector deletion precedes content deletion so retry can
+still discover canonical chunk IDs. Transactional SQLite triggers maintain
+per-source chunk totals as file checkpoints change, including deletions and
+replayed batches. Existing path databases receive a one-time aggregate backfill;
+ordinary rounds read only these source totals, not unchanged file rows.
+
+Before mutating a nonempty acquired delta, the engine journals its complete
+manifest and target in the existing path-index SQLite database. A retry first
+finishes that pinned acquisition, atomically publishes and flushes the existing
+JSON source cursor, then clears the journal and acquires fresh changes. This
+prevents a newer net delta from omitting an item partially written by an
+interrupted older delta (for example, a file changed and then reverted).
+Source/account configuration changes refuse replay rather than applying old
+work under a new scope. Completed checkpoints also retain the existing
+`recovery_scope` hash in `SourceState.acquisition_scope`, alongside their cursor
+and canonical family. A missing or mismatched checkpoint identity requires an
+explicit full reindex before any new acquisition, in either storage layout;
+a new target cannot reuse an old target's cursor even after its journal clears.
+Successful application and atomic checkpoint publication bind the accepted
+scope, including empty full snapshots with a null cursor. Failed application
+or publication restores the prior in-memory checkpoint and retains any pending
+acquisition for replay. Older state files still load, but their unbound cursors
+require full reconciliation. An already-admitted pending journal with a matching
+scope may finish and bind its checkpoint before fresh acquisition; its existing
+envelope does not change. No additional identity or credential authority is
+introduced. The same constructed connector supplies both acquisition
+and its canonical/effective recovery identity: delta connectors declare a
+nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
+remote target and selected ref, including environment/registry resolution;
+GitHub binds the actual HTTP client's API/repository target, configured initial
+window and authenticated account ID (one cached `/user` metadata probe, so user
+token renewal preserves identity). Installation tokens cannot call `/user`;
+after verifying `/installation/repositories`, their recovery scope conservatively
+binds an opaque credential fingerprint. GitHub exposes no installation ID through
+that token's identity API, so a rotated installation token refuses an existing
+journal rather than guessing that repository ownership proves the same principal.
+Complete pending crawls before rotation; no token bytes are persisted or logged.
+Authentication failures never become anonymous identity. Azure DevOps binds its effective
+HTTP-client endpoint, authenticated account and resolved work-item/pull-request queries.
+Expected permission-only `/user` denials do not incur retry backoff; quota,
+secondary-rate-limit and transient failures retain bounded HTTP retries.
+Legacy CLI providers bind their registered command. Providers remain responsible
+for stable backend identity.
+Credential-bearing URL components are excluded, except SSH usernames remain
+part of the target because they select remote home directories.
+Ambiguous query/fragment target
+semantics refuse recovery rather than silently selecting an identity.
+The journal is not another checkpoint authority.
+Another crawl alias cannot acquire or mutate an overlapping canonical family
+(including ancestor/descendant scopes) while acquired
+work remains pending. Source garbage collection also defers before deletion or
+cursor retirement and reports the pending sources as failures. Restore the
+original source configuration and complete its pending crawl before retiring
+or retargeting it; deleting the journal is not a supported recovery path.
+Pending work must finish through a journal-capable engine before rolling back
+to an older engine; old runtimes do not implement this recovery contract.
+
+When a presented file misses its complete fingerprint, chunk/model selection
+uses derived `embedding_coverage` receipts in the same path-index database.
+Each receipt binds a physical model table and chunk ID to the raw embedding
+text/model policy and a float32 vector digest. Bounded, strict reads must find
+the matching vector before reuse: an absent vector, changed input/profile or
+legacy writer's overwrite requires embedding again. Metadata, language and
+routing changes alone do not invalidate an otherwise required pair; new model
+routes backfill only their missing pairs. A named model whose weights or
+preprocessing change must advance `ModelProfile.revision`.
+
+Receipts are revoked before a potentially partial vector write and published
+only after the stored batch matches the returned embeddings. They survive
+restart and unfinished stale cleanup, without publishing a completed file or
+source cursor early. Obsolete receipts are pruned after that file's successful
+reconciliation; removing a path removes its receipts transactionally. Old
+databases start without coverage and conservatively embed each presented pair
+once. These are optimization receipts, not new source-lock, checkpoint,
+committed-reader or global missing-vector-repair authorities.
+
+Engine readiness is deferred until missing-pair selection produces a nonempty
+embedding plan. An empty delta, wholly reused file set or metadata-only update
+with verified pair coverage does not start embedding engines. Full reindexing
+forces pair writes, except for files already committed within its retry window.
+Completed changed files reconcile against their explicit retained chunk IDs
+before publishing checkpoints, including files that now produce no chunks.
+Unchanged canonical rows keep their original physical write timestamp and table
+version: bounded strict comparisons cover raw text and every persisted metadata
+field, not only the normalized content hash. Failed or incomplete reads cannot
+authorize rewrites or cleanup. Cleanup reads only that file's IDs and deletes
+obsolete IDs in batches; vector deletion precedes canonical deletion for retry.
+Logical processed chunk counts remain independent of actual content writes.
+Identical canonical input records sharing an ID (for example same-line code
+declarations) are coalesced before chunk accounting, embedding and storage.
+Conflicting text or metadata at the same ID is rejected, not arbitrarily chosen.
+Legacy exact stored copies are streamed in bounded batches and rewritten once
+as a single canonical record; conflicting stored copies still fail visibly.
+Cleanup deduplicates IDs only after proving complete physical row enumeration.
+Pre-coalescing file fingerprints miss once when that file is next presented;
+this upgrades unique-chunk accounting without scheduling a corpus scan or
+discarding otherwise reusable chunk/model receipts.
+Direct store calls still refresh timestamps by default for legacy callers;
+`skip_identical=True` is opt-in and requires identity-based rather than
+timestamp-based cleanup. Forced full rebuilds still write every presented row.
+In the selected source layout, content updates change vector provenance only when source or
+language actually differs, preserving vector table versions for metadata-only
+updates. Global vector-gap repair remains owned by its existing mechanism.
+
 ## Process model
+
+Python consumers can call the same `run_reindex` with their `IndexConfig`
+subclass, explicit complete `SourceSpec` list and an optional
+`EmbeddingRuntime` client/lifecycle policy. Connectors continue to use
+`register_connector`; no alternate crawl/embed/checkpoint engine is needed.
+`run_worker` accepts an explicit config and indexing callable, retaining exact
+callable hint negotiation, resume/progress/cancellation and terminal status.
+An explicit worker config is forwarded to the default engine; a custom callable
+owns binding its own matching config.
+
+The [consumer migration recipe](consumer-migration.md) defines ownership,
+compatibility and verification requirements. No CLI/provider negotiation is
+implied by these in-process seams, and custom callable wrappers must not claim
+hint support they do not actually preserve.
 
 ```mermaid
 flowchart LR
@@ -196,6 +391,7 @@ The service binds `AGENT_INDEX_HOST` (default `127.0.0.1`) and
 | `GET /similar` | nearest neighbours for an indexed chunk |
 | `GET /clusters` | near-duplicate cluster artifact |
 | `POST /reindex` | enqueue background indexing unless draining/deps missing |
+| `POST /reindex/hints` | strictly validate and durably union version-1 acquisition hints |
 | `POST /drain`, `/undrain` | zdd cutover drain gates; namespaced calls require the exact instance token |
 | `POST /promote` | instance- and transaction-owned pre-route passive promotion |
 | `POST /shutdown` | ownership-attested service shutdown used by CLI/cutover |
@@ -210,7 +406,7 @@ Public CLI verbs are implemented in `src/agent_index/__main__.py`:
 
 - `stop`, `status`, `version`
 - `start` / `serve`, `restart`, `deploy [--recover]` manage the local service
-- `index [--source S] [--full]`
+- `index [--source S] [--full] [--change-hints-file FILE]`
 - `search <query> [--source S] [--language L] [--repo R] [--limit N] [--json]`
 - `similar <chunk_id> [--limit N] [--source S]`
 - `clusters [--source S] [--bucket B] [--model M] [--exact-dupes-only] [--limit N]`
@@ -240,6 +436,168 @@ SQLite/WAL under `~/.agent-index/data/tasks.db`. Service-triggered reindexes run
 in detached versioned worker subprocesses, so a service cutover does not kill an
 in-flight indexing job; the successor service re-adopts live workers or marks
 dead ones interrupted/resumable.
+
+### Covered derived maintenance
+
+An ordinary FTS update checks existing coverage before launching a builder.
+Source-aware stores use their existing domain receipt and durable index;
+legacy stores use Lance's actual unindexed-row metadata. Unknown coverage keeps
+maintenance due. Explicit full builds still run, and new content versions remain
+eligible for incremental maintenance and the existing failure/retry path.
+
+Similarity clusters persist their coverage key and result counts in the same
+SQLite transaction as the artifact. The key covers refreshed versions of the
+configured content/vector tables, qualified local dataset identity, the existing
+source-domain identity and clustering policy. Database triggers revoke coverage
+on artifact-row mutations, including writes by workers from before the coverage
+schema was introduced. A covered ordinary round checks
+metadata without enumerating items, rewriting the artifact or starting an FTS
+child. Changing inputs or policy invalidates coverage; computation verifies its
+input key again before publishing. Explicit full indexing forces clustering.
+Unqualified remote storage logs the limitation and runs an uncached pass.
+Cluster construction uses complete, failure-propagating item/chunk/vector reads;
+an unsuccessful read cannot publish partial output as covered input.
+
+This is conservative physical-version reuse, not a logical mutation generation,
+source cursor, new reader authority or lock. A real change still invokes the
+global clustering pass; model/bucket-local maintenance remains separate work.
+
+### Durable acquisition hints (queue contract v1)
+
+`indexing.change_hints.ChangeHints` is a typed, immutable version-1 acquisition
+hint envelope. Its exact configured `source`, adapter-supplied
+`canonical_family`, and opaque nonsecret `account_id` form the union scope.
+Adapters own canonical-family selection and stable account identification; the
+queue does not infer aliases, accounts or credentials. Item IDs, event IDs,
+distinct base/target `RefRange` pairs and item-bound `MetadataRevision` pairs
+are deterministically deduplicated and unioned without collapsing differing
+targets or metadata revisions. These are acquisition hints only: no snapshot
+completeness, tombstone, deletion or checkpoint authority is implied. Unknown
+fields, unsupported versions, malformed typed values and corrupt persisted
+JSON fail visibly rather than becoming an empty or full-snapshot request.
+
+`TaskStore.enqueue(source=..., change_hints=...)` accepts these envelopes only
+for a matching exact-source incremental task (`full=False`). The additive
+nullable `tasks.change_hints` column retains payloads across restart, retry and
+recovery. A `BEGIN IMMEDIATE` transaction atomically unions new deliveries into
+one same-scope `queued_hints` row. Processing payloads are immutable; events
+arriving during active work accumulate into a separate trailing row. Retrying
+an older attempt can leave two pending rows; both payloads remain intact and
+new deliveries union into the oldest matching pending row. Different configured
+sources, families or accounts are never coalesced.
+
+Hinted tasks remain conservatively separate from legacy full tasks, including
+`source='all'`: a full task has no proven account/ref/event coverage and cannot
+cancel or swallow hinted work. Unhinted tasks retain queued exact deduplication,
+queued-full supersession, full-first dequeue ordering and the existing rule
+that a processing full task never absorbs a trailing incremental. A capable
+dequeue preserves full-first ordering and FIFO within each tier.
+
+This is a **receiver-first expansion**. `dequeue_next()` retains legacy
+selection; only an explicit `dequeue_next(accept_change_hints=True)` may claim
+parked work. The runner opts in only when the exact engine callable selected in
+this runtime advertises v1 support. It rechecks before launch; the worker checks
+its own selected callable again before execution. A capability loss returns a
+claimed hinted task to `queued_hints`, without calling the engine or advancing
+its checkpoints. An unclaimed hinted task cannot be executed directly by the
+new worker. The monitor preserves intentional re-parking after the worker
+exits, publishes a queue update rather than a terminal failure, and allows
+dequeue after worker capability can be revalidated without requiring a manual
+retry. The worker records refusal atomically in the existing task error field
+when re-parking. A runner retains that refusal against the selected interpreter
+and immutable runtime version. While that selection remains unchanged, it excludes
+hinted dequeue and continues serving ordinary queued tasks. A changed selection
+allows a new worker attempt, whose own callable must still verify v1 support.
+Time passing or another queue notification is not evidence of capability.
+Worker registration uses the existing immutable runtime-version metadata.
+A pending cancellation still cancels the parked row.
+
+The execution seam is
+`agent_index.indexing.engine.run_reindex(..., change_hints: ChangeHints | None = None)`.
+The exact selected callable must explicitly publish
+`run_reindex.change_hints_versions = (1,)` **only after** implementing those
+semantics. A module constant, package version, registered forwarding wrapper,
+permissive `**kwargs`, or newer payload does not establish execution support.
+Replacing the callable with an unadvertised implementation removes support.
+Plain tasks still use the legacy kwargs without `change_hints`. The transport
+and worker preserve the envelope; the capable engine retains responsibility
+for source/account admission, acquisition, checkpoints and all index mutations.
+
+`GET /health` adds `indexing_contract` with stable identity
+`agent-index.change-hints`, `intake_versions: [1]`, and separately computed
+`execution_versions` (`[]` unless the selected callable advertises v1).
+Advertising durable intake is not a claim that hinted execution is available.
+`POST /reindex/hints` accepts only `source`, optional `full: false`, and required
+`change_hints` containing the complete v1 envelope. It refuses unknown fields,
+versions, duplicate JSON keys, mismatched scopes and oversized bodies before
+queue effects. Ordinary runner/dependency/drain availability checks still apply.
+Accepted responses include the stored task and its complete unioned payload.
+SQLite admission runs off the service event loop. Request cancellation does
+not release drain admission until the queue write and runner notification
+settle; the service remains responsive while a database writer is contended.
+The legacy `/reindex` source/full contract is unchanged, but extra properties
+are rejected rather than silently discarding required hints.
+
+`AgentIndexClient.reindex(change_hints=...)` negotiates intake support from the
+running service's health response before posting to the dedicated hinted path.
+A legacy or invalid advertisement refuses before a POST. A rollback between
+discovery and submission yields an unsupported endpoint, never a source-only
+fallback. An invalid accepted receipt is reported as an unknown acceptance
+outcome and is not replayed. Source-only client calls do not need discovery.
+The direct local CLI form `index --source S --change-hints-file FILE` strictly
+reads the same v1 JSON and requires callable execution capability before
+calling the engine; it never retries without hints. Older CLIs reject the new
+option. With no hints file, the existing direct CLI execution path is retained.
+Split-runtime forwarding makes relative hint-file paths absolute in the
+caller's working directory before the hosted child changes directory. Both
+`--change-hints-file FILE` and `--change-hints-file=FILE` retain that binding.
+The intake DTO and transport additions retain the declared Python 3.10 floor,
+using postponed concrete annotations rather than newer `typing` exports.
+
+Deploy receivers before producers, and enable hinted execution only with a
+qualified capable engine. The shared engine now advertises v1 execution and
+preflights one exact configured source, the actual connector's
+`discover_hints` callable capability, and its explicit
+`hint_scope == (canonical_family, account_id)` before opening stores or embedding
+clients. Aliases, synthesized sources and unsupported connectors are refused;
+there is no source-only polling fallback. The same connector supplies recovery
+identity and acquisition. Hinted failures propagate to a failed retryable task,
+not terminal partial success. Acquired manifests retain existing replay and
+store-before-checkpoint ordering.
+
+An in-process connector opts in by advertising `change_hints_versions = (1,)`
+on its actual `discover_hints(hints, last_commit, *, cancel_check=None)` callable.
+It must return a complete validated `SourceDelta` and preserve `last_commit`
+exactly, including `None`: targeted events do not prove coverage of intervening
+poll changes. An unchanged or changed polling cursor is not inferred from event
+IDs. Existing unadvertised workers still park hinted tasks after rollback.
+External CLI providers and Git ref-range hint acquisition remain unsupported.
+
+GitHub implements targeted positive canonical decimal issue/PR numbers, unioned
+from `item_ids` and `metadata_revisions.item_id`. For this connector, metadata
+revisions are timezone-qualified API `updated_at` timestamps; an older item
+response fails retryably. Event IDs are retained delivery annotations, not
+fetch identities. Ref ranges and event-only envelopes with no resolvable item
+are refused. The effective account uses the existing recovery identity probe;
+anonymous access has the explicit key `anonymous`. Every unique selected item
+and its complete issue-comment pages are fetched fresh, without ETag-only
+304 suppression. Repository/item identity, comment counts and distinct comment
+IDs must agree before the delta is usable. A 404 is not deletion authority.
+This does not enumerate repository paths or history. A changed item may still
+require all its comments; resumable hosted page acquisition remains separate
+work, not a claim of this event-targeting contract.
+
+The storage migration atomically installs durable SQLite triggers with the new
+column. The triggers preserve `queued_hints` even when an older runtime's
+retry, release or generic status update writes `queued`; older dequeue SQL
+therefore cannot claim hinted work after rollback. Existing plain rows retain
+their old defaults and behavior. New queue queries, pending counts, cancellation
+and retry include parked rows. Older diagnostic/cancellation code may not list
+or cancel parked work; use a capable TaskStore to manage it. Keep the nullable
+column, parked status and rollback-fencing triggers throughout the supported
+upgrade/rollback window; this expansion retires no legacy form. Existing source
+locks, committed-reader state, checkpoints and vector-gap repair retain their
+own authorities.
 
 Step 6 has two independent GC passes. `gc_stale_sources` purges abandoned
 crawler NAMING SCHEMES (a stale generation, e.g. an old `forge:*` variant) and

@@ -31,6 +31,10 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .runtime_source import ResolvedSource
 
 from . import __version__
 from .catalog import load_catalog
@@ -1469,31 +1473,49 @@ def _cmd_update(rest: list[str]) -> int:
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source
+    from .runtime_source import SourceAcquisitionError
+    from .runtime_source_update import repair_selection
 
-    if not preflight_runtime_source(suite=rest[:1] != ["--repair-engine"]):
+    if not preflight_runtime_source(suite=True):
         return 1
-    prepared = prepare_update(rest)
-    if prepared.exit_code:
-        return prepared.exit_code
-    run = UpdateRun()
+    run = None
     try:
-        return run.finish(_cmd_update_steps(
-            prepared.arguments, run, fresh_manager=prepared.fresh_manager,
-            environment=prepared.environment,
-        ))
+        with repair_selection(rest) as runtime_source:
+            source_arguments = (
+                {"runtime_source": runtime_source} if runtime_source is not None else {}
+            )
+            prepared = prepare_update(rest, **source_arguments)
+            if prepared.exit_code:
+                return prepared.exit_code
+            run = UpdateRun()
+            rc = _cmd_update_steps(
+                prepared.arguments, run, fresh_manager=prepared.fresh_manager,
+                environment=prepared.environment, **source_arguments,
+            )
+        return run.finish(rc)
+    except (OSError, ValueError, SourceAcquisitionError) as error:
+        if run is None:
+            print(f"Runtime source: {error}", file=sys.stderr)
+            return 1
+        run.say(f"Runtime source: {error}", state="failed")
+        run.record_engine_error(str(error), missing=False)
+        return run.finish(1)
     except BaseException as exc:
-        run.abort(exc)
+        if run is not None:
+            run.abort(exc)
         raise
 
 
 def _cmd_update_steps(
     rest: list[str], run, *, fresh_manager: bool = False,
     environment: dict[str, str] | None = None,
+    runtime_source: ResolvedSource | None = None,
 ) -> int:
     from .update_orchestration import run_update_steps
 
     return run_update_steps(
         rest, run, version=__version__, fresh_manager=fresh_manager, environment=environment,
+        **({"runtime_source": runtime_source} if runtime_source is not None else {}),
     )
 
 
@@ -1536,6 +1558,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  launch-attempts [ID] [--json] [--include-input] [--sweep-project NAME --source-machine ID]")
+        print("                         read local intent/receipts or explicit configured SSH metadata; never retry")
         print("  terminal-fragment <project> [--machine K] [--explain|--doctor|--migrate-selections]")
         print("                         preview the Windows Terminal fragment a project would emit")
         print("  profiles <project> get|apply [--machine K] [--set '<json>'] [--json]")
@@ -1568,6 +1592,9 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "launch-attempts":
+        from .launch_history_cli import main as launch_history
+        return launch_history(args[1:])
     if args and args[0] == "terminal-fragment":
         return _cmd_terminal_fragment(args[1:])
     if args and args[0] == "profiles":

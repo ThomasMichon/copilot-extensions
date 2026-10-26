@@ -471,7 +471,7 @@ function Invoke-AgentWorktreesRuntime([string]$Python) {
 }
 
 $python = Resolve-AgentWorktreesRuntime
-if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION) {
+if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION -and -not $_awUpdateDiagnostic) {
     Assert-PluginRuntimePublication
 }
 # Commit to self-provisioning (and, in doing so, permit the boot-trace
@@ -481,7 +481,7 @@ if (-not $python -and -not $env:AGENT_WORKTREES_NO_SELFPROVISION) {
 # strictly before `provision-start`'s own `New-Item`, are captured on a
 # genuine first-ever launch instead of silently dropped (Copilot review
 # follow-up, PR #3310).
-$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION)
+$script:willProvision = (-not $python) -and (-not $env:AGENT_WORKTREES_NO_SELFPROVISION) -and (-not $_awUpdateDiagnostic)
 Write-BootTrace 'resolver-loaded'
 # Log the outer dispatcher template's own 'shim-start' phase here, now
 # that $runtimeRoot reflects whichever root (legacy or an active
@@ -496,6 +496,10 @@ if ($env:COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS) {
 if ($python) {
     Write-BootTrace 'dispatch' 'fast'
     Invoke-AgentWorktreesRuntime $python
+}
+if ($_awUpdateDiagnostic) {
+    [Console]::Error.WriteLine('[agent-worktrees] selected update phase requires a provisioned runtime; use ordinary update to repair it.')
+    exit 127
 }
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(

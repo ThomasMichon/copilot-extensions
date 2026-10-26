@@ -212,6 +212,7 @@ def start_sweep_thread(
     *,
     interval: float = SWEEP_INTERVAL_SECONDS,
     stop_event: threading.Event | None = None,
+    finished_event: threading.Event | None = None,
 ) -> threading.Thread:
     """Start a daemon thread that periodically calls
     ``cache.sweep_due(refresh=refresh)`` until ``stop_event`` is set.
@@ -229,11 +230,15 @@ def start_sweep_thread(
     stop = stop_event if stop_event is not None else threading.Event()
 
     def _loop() -> None:
-        while not stop.wait(interval):
-            try:
-                cache.sweep_due(refresh=refresh)
-            except Exception:
-                continue
+        try:
+            while not stop.wait(interval):
+                try:
+                    cache.sweep_due(refresh=refresh)
+                except Exception:
+                    continue
+        finally:
+            if finished_event is not None:
+                finished_event.set()
 
     thread = threading.Thread(
         target=_loop, name="worktree-status-sweep", daemon=True
@@ -382,6 +387,7 @@ class InProcessRuntime:
         self.server: CoalescingServer | None = None
         self.cache: WorktreeStatusCache | None = None
         self._sweep_stop = threading.Event()
+        self._sweep_finished = threading.Event()
         self._sweep_thread: threading.Thread | None = None
 
     def start(self, cache_path: Path, assemble: Callable[[str, str], dict]) -> None:
@@ -390,19 +396,23 @@ class InProcessRuntime:
             self.server = start_server(build_cached_compute(self.cache, assemble))
             self.server.start()
             self._sweep_thread = start_sweep_thread(
-                self.cache, validated_refresh(assemble), stop_event=self._sweep_stop
+                self.cache, validated_refresh(assemble), stop_event=self._sweep_stop,
+                finished_event=self._sweep_finished,
             )
-        except Exception:
+        except BaseException as exc:
             # A partial failure (e.g. the sweep thread fails to start after
             # the cache/server already came up) must not leak an open SQLite
             # connection or a still-running server/threads -- degrade to a
             # fully torn-down, all-``None`` runtime via the same shutdown
             # path a normal stop uses, not just clearing `self.server`.
-            self.shutdown()
+            self.shutdown_and_wait()
             self.server = None
             self.cache = None
             self._sweep_thread = None
             self._sweep_stop = threading.Event()
+            self._sweep_finished = threading.Event()
+            if not isinstance(exc, Exception):
+                raise
 
     def lock_extra(self) -> dict:
         """Rendezvous fields to merge into the monitor's lock file, or an
@@ -426,6 +436,8 @@ class InProcessRuntime:
 
     def shutdown(self) -> None:
         self._sweep_stop.set()
+        if self.server is not None:
+            self.server.close_admission("shutdown")
         if self._sweep_thread is not None:
             # Join before closing the server/cache: `sweep_due` (running on
             # this thread) may be mid-`_persist` right now, and closing the
@@ -447,3 +459,61 @@ class InProcessRuntime:
             self.server.close()
         if self.cache is not None:
             self.cache.close()
+
+    def shutdown_and_wait(self) -> None:
+        """Stop boundedly, then settle owned work before host admission ends.
+
+        ``shutdown`` remains bounded and the cache's closed fence stays valid.
+        Neither proves retirement of an already-running assembly or sweep.
+        Keep the concrete owners across teardown, including partial startup,
+        and wait outside all cache/server locks. Call only from the host, not
+        from one of the workers being settled.
+        """
+        server, sweep_thread, cache = self.server, self._sweep_thread, self.cache
+        sweep_finished, sweep_stop = self._sweep_finished, self._sweep_stop
+        error = None
+        traceback = None
+
+        def complete(operation):
+            nonlocal error, traceback
+            retry = False
+            while True:
+                try:
+                    if retry:
+                        time.sleep(0.01)
+                    return operation()
+                except BaseException as exc:
+                    if error is None:
+                        error, traceback = exc, exc.__traceback__
+                    retry = True
+
+        try:
+            self.shutdown()
+        except BaseException as exc:
+            error, traceback = exc, exc.__traceback__
+            # A failing close_admission/close has not certified intake closed.
+            # Retain the concrete owners and require a successful stop before
+            # a zero handler count can authorize host admission release.
+            complete(sweep_stop.set)
+            if server is not None:
+                complete(lambda: server.close_admission("shutdown"))
+                complete(server.close)
+
+        def settle():
+            while True:
+                if sweep_thread is not None:
+                    # Interrupted Thread.join can mark a live CPython thread
+                    # stopped; require its target's finally before joining.
+                    if not sweep_finished.wait(0.01):
+                        continue
+                    sweep_thread.join()
+                if server is not None and server.active_handler_count():
+                    time.sleep(0.01)
+                    continue
+                return
+
+        complete(settle)
+        if error is not None:
+            if cache is not None:
+                complete(cache.close)
+            raise error.with_traceback(traceback)

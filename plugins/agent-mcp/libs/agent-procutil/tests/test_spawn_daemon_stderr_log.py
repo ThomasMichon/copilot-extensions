@@ -34,14 +34,16 @@ class _Popen:
 
 
 @pytest.fixture()
-def fake_popen(monkeypatch):
+def fake_popen(monkeypatch, declared_mock_daemon):
     from agent_procutil import daemon, daemon_broker
 
     fake = _Popen()
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
     monkeypatch.setattr(
-        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError("fixture")),
+        daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
+            "fixture", process_created=False, admission_sent=False,
+        )),
     )
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
@@ -155,7 +157,7 @@ def test_contained_fallback_keeps_the_stderr_log(tmp_path, fake_popen, monkeypat
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes do not apply on Windows")
-def test_stderr_log_is_private_on_posix(tmp_path, monkeypatch):
+def test_stderr_log_is_private_on_posix(tmp_path, monkeypatch, declared_mock_daemon):
     seen = []
 
     def popen(argv, **kwargs):

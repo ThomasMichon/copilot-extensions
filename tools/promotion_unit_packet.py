@@ -198,6 +198,12 @@ def verify_packet(
     _verify_coverage(coverage, manifest)
     if source_root is not None:
         verify_sources(source_root.resolve(), manifest["sources"])
+        if "tools/promotion_release_helpers.py" in manifest["sources"]:
+            from promotion_release_helpers import verify_helper_coverage
+
+            verify_helper_coverage(
+                source_root.resolve(), manifest, coverage, development_root=development_root,
+            )
     if manifest["profile"] == CANDIDATE_PROFILE:
         if source_root is None or development_root is None:
             raise UnitEvidenceError("candidate packet requires both authoritative source roots")

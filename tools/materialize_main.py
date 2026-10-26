@@ -604,6 +604,8 @@ def _find_symlink(tree: Path) -> str | None:
     if not tree.is_dir():
         return None
     for entry in sorted(tree.rglob("*")):
+        if ".test-runs" in entry.relative_to(tree).parts:
+            continue
         if entry.is_symlink():
             return str(entry.relative_to(tree))
     return None
@@ -676,7 +678,7 @@ def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
 
 def _ignore(_dir: str, names: list[str]) -> set[str]:
     return {n for n in names if n in {
-        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
+        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs", "build", "dist",
     } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
 
 

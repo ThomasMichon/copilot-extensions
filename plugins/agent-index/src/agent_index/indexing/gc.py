@@ -60,6 +60,7 @@ class GCSummary(TypedDict):
 
 class GCDecision(GCSummary, total=False):
     deferred: list[str]
+    pending_crawls: list[str]
 
 _FORGE_SUBTYPES = frozenset({"code", "issues", "pulls", "commits"})
 _SERVICE_SOURCES = frozenset({"service-feed:clips", "analysis-feed:videos"})
@@ -146,6 +147,14 @@ def gc_configured_snapshot(
     configured_names: frozenset[str], source_aware: bool,
 ) -> GCDecision:
     """Retain canonical rows separately from active configured crawl identities."""
+    from agent_index.indexing.pending_crawl import PendingCrawls
+
+    pending = PendingCrawls(path_index).sources()
+    if pending:
+        log.warning("Source GC deferred: complete pending crawls with original configuration: %s",
+                    pending)
+        return {"purged": {}, "kept": [], "chunks_deleted": 0, "dry_run": False,
+                "deferred": pending, "pending_crawls": pending}
     if not source_aware:
         return gc_unconfigured_sources(
             multi_store, path_index, state, configured_names=configured_names,
@@ -211,6 +220,9 @@ def gc_unconfigured_sources(
 
     total_deleted = 0
     if not dry_run:
+        from agent_index.indexing.pending_crawl import PendingCrawls
+
+        PendingCrawls(path_index).assert_gc_available()
         for source in purged:
             try:
                 removed = multi_store.delete_by_source_exact(source)
@@ -266,6 +278,9 @@ def gc_stale_sources(
 
     total_deleted = 0
     if not dry_run:
+        from agent_index.indexing.pending_crawl import PendingCrawls
+
+        PendingCrawls(path_index).assert_gc_available()
         for source in purged:
             try:
                 removed = multi_store.delete_by_source_exact(source)

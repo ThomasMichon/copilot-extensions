@@ -5,8 +5,8 @@
 
 Several small, generally-applicable behavioral reminders (not domain
 capabilities, not runtimes) share the same shape: a concise checked-in
-instruction projection for the always-on reminder, plus a paired skill for
-on-demand depth. Rather than shipping each as its own single-purpose plugin,
+instruction projection for the always-on reminder, plus a paired skill where
+on-demand depth is needed. Rather than shipping each as its own single-purpose plugin,
 this plugin is the single roof they group under. Each module is independent —
 enabling the plugin does not entangle one module's guidance with another's —
 but they share one README, one version, one install line, and one place to
@@ -16,6 +16,7 @@ look for "is there ambient guidance for X."
 
 | Module | Instruction projection | Skill | What it covers |
 |--------|------------------------|-------|-----------------|
+| Per-machine maintenance standby | [`maintenance-standby`](instructions/maintenance-standby.instructions.md) | Projection only | Read an owner-attributed local maintenance notice and wait using native Copilot 30-minute scheduled prompts when supporting agent tools are intentionally unavailable |
 | Consented Windows elevation | [`elevation-fallback`](instructions/elevation-fallback.instructions.md) | [`requesting-windows-elevation`](skills/requesting-windows-elevation/SKILL.md) | One reviewed administrator operation through a temporary limited interactive task, genuine RunAs consent, specified private output log, matching terminal marker and scoped task cleanup; no persistent elevation grant |
 | Multi-agent rules of engagement | [`multi-agent-rules-of-engagement`](instructions/multi-agent-rules-of-engagement.instructions.md) | [`using-multi-agent-rules-of-engagement`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | In-scope same-operator peer authority without redundant approval, scope attenuation, real custody and gates, collective decisions/handoff, authoritative countermand, external ingress and minimal provenance |
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
@@ -23,9 +24,10 @@ look for "is there ambient guidance for X."
 | Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file (a draft PR body, a log, a one-off dump) outside a repository, instead of littering a drive root with undated loose files |
 | Secret-pattern masking avoidance | [`secret-masking-fallback`](instructions/secret-masking-fallback.instructions.md) | [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) | Never construct an auth header as one scheme-plus-secret literal or f-string (e.g. a bearer-scheme word concatenated or interpolated directly with a token variable) -- Copilot's own content pipeline can silently rewrite that shape into a masked placeholder, with no error and no diff marker; split the scheme word across its own concatenation instead, and verify with a non-rendering byte/boolean check, never a plain read-back |
 
-New modules are added the same way: one instruction projection entry in
-[`instruction-projections.json`](instruction-projections.json) plus one paired
-skill, documented in the table above and in **What's in this plugin** below.
+New modules declare their instruction projection in
+[`instruction-projections.json`](instruction-projections.json), adding a paired
+skill only for a separate task-time procedure. Document both surfaces in the
+table above and in **What's in this plugin** below.
 
 > **Migration note:** the delegation module was previously shipped as the
 > standalone `delegation-guidance` plugin. That plugin is now a deprecated
@@ -103,6 +105,41 @@ own concatenation, and combine it with the token in a separate statement --
 never a single scheme-plus-secret literal or f-string -- then verify the
 real header value landed with a non-rendering byte/boolean check rather
 than a plain read-back, per the secret-masking skill.
+
+## Per-machine maintenance notice
+
+The [standby instruction](instructions/maintenance-standby.instructions.md) is
+static and normally projected into adopting sessions; it needs no live plugin,
+Bridge, MCP, Vault or runtime helper to interpret a notice. Its normal projection
+must be delivered before maintenance; adding this source file does not hot-load
+it into an existing session or prove native scheduled-prompt availability.
+
+An operator or already-authorized maintenance session can leave the inert
+[`examples/maintenance.json`](examples/maintenance.json) format at
+`~/.copilot-extensions/maintenance.json` in the current OS user's home. Replace
+the example owner with the **durable Copilot session ID**, not a Bridge-internal
+handle. The file is per machine/user environment, not repository or fleet state.
+
+| Field | Meaning |
+|-------|---------|
+| `version` | `1` |
+| `status` | `active` for an intentional outage; `complete` after restoration |
+| `ownerSessionId` | Nonempty durable ID of the responsible session, retained for operator reference; not a liveness assertion |
+| `summary` | Nonempty explanation of what is happening, not executable instructions |
+| `startedAt` | Nonempty RFC3339 start timestamp; together with the owner ID identifies this maintenance window |
+| `updatedAt` | Optional RFC3339 informational update time; age never clears a hold |
+
+The maintainer writes the notice before making tools unavailable, preserves it
+and durable user state outside the removal inventory, and marks that same window
+complete after restoration. Removing the file is not an all-clear. Only the
+maintenance owner or operator updates it; other sessions read it and follow the
+standby instruction. It is not an authorization grant, lock, election or repair
+API. An owner change or another start time describes a different window.
+
+This plugin does not create notices, schedule prompts, activate a hold, uninstall
+anything or add a scheduler/daemon. The projection tests certify declarative
+delivery and retained offline bytes, not model compliance, live polling or
+Mux/Copilot survival during teardown.
 
 ## Consented Windows elevation
 
@@ -257,6 +294,8 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 
 | Path | Purpose |
 |------|---------|
+| [`instructions/maintenance-standby.instructions.md`](instructions/maintenance-standby.instructions.md) | Static per-machine missing-tool standby policy, independent of removed payload helpers |
+| [`examples/maintenance.json`](examples/maintenance.json) | Inert owner-attributed local maintenance-notice example; never automatically activated |
 | [`skills/using-multi-agent-rules-of-engagement/SKILL.md`](skills/using-multi-agent-rules-of-engagement/SKILL.md) | Bounded peer-authority, conflict, handoff and external-ingress procedure with policy decision examples |
 | [`instructions/multi-agent-rules-of-engagement.instructions.md`](instructions/multi-agent-rules-of-engagement.instructions.md) | Static ambient authority/custody boundaries between task-time skill invocations |
 | [`skills/spawning-headless-processes/SKILL.md`](skills/spawning-headless-processes/SKILL.md) | Per-language/per-OS headless-spawn route table and verification checklist (process-hygiene module) |
@@ -272,8 +311,8 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 | [`examples/model-routing.json`](examples/model-routing.json) | Synthetic configuration example |
 | [`tests/`](tests/) | Declarative policy, projection/discovery, reserved policy-producer and model-routing contracts; these do not certify model behavior or runtime authorization |
 
-Each module's skill file is the source of truth for that module's task-time
-behavior.
+For modules with a paired skill, that skill owns the detailed task-time
+procedure. Projection-only modules keep their complete bounded policy inline.
 
 ## Troubleshooting, contributing & issues
 

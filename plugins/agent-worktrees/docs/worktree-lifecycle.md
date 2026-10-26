@@ -47,6 +47,14 @@ full verb catalog, see [cli-reference.md](cli-reference.md).
 deployment; **deployed** means a running system reflects it (a separate install
 step for runtime plugins). Don't call a merged change "deployed."
 
+### Background status freshness
+
+The resident status monitor uses a 30-second default correctness backstop.
+Existing lifecycle and advisory pushes interrupt that wait immediately; this
+does not delay pushed updates or change request, lease, or shutdown deadlines.
+The explicit `status-monitor --interval <seconds>` override remains available
+with its existing two-second minimum.
+
 ### Creation starts from freshly resolved repository state
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the

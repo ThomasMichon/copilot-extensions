@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 import zipfile
 
 from packaging.markers import default_environment
@@ -65,6 +66,27 @@ def candidate(adopter, source, target, tmp_path, *, wheel_witness=False, **chang
     )
     retain = locks.retain_source_wheel_lock if wheel_witness else locks.retain_source_lock
     return retain(plan(adopter), **(arguments | changes))
+
+
+@pytest.mark.parametrize("failure", ["timeout", "success"])
+def test_expired_outer_source_transaction_preserves_active_timeout_and_diagnostics(
+    adopter, source, target, tmp_path, monkeypatch, failure,
+):
+    import installer_wheel_inputs as inputs
+
+    deadline = time.monotonic() + 60
+    clock = [time.monotonic()]
+    monkeypatch.setattr(inputs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    timeout = subprocess.TimeoutExpired(["fixture-backend"], 60, output=b"output", stderr=b"diagnostics")
+    expected = subprocess.TimeoutExpired if failure == "timeout" else inputs.WheelError
+    with pytest.raises(expected) as observed:
+        with candidate(adopter, source, target, tmp_path, deadline=deadline):
+            clock[0] = deadline + 1
+            if failure == "timeout":
+                raise timeout
+    if failure == "timeout":
+        assert observed.value is timeout
+        assert observed.value.output == b"output" and observed.value.stderr == b"diagnostics"
 
 
 @pytest.mark.parametrize("wheel_witness", [False, True])

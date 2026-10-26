@@ -57,8 +57,15 @@ def sync_content_projection(db, chunks) -> None:
         for (source, language), ids in groups.items():
             for start in range(0, len(ids), PAGE_SIZE):
                 selected = ", ".join(f"'{_sql_str(cid)}'" for cid in ids[start:start + PAGE_SIZE])
+                changed = (
+                    f"chunk_id IN ({selected}) AND "
+                    f"(source IS NULL OR source != '{_sql_str(source)}' OR "
+                    f"language IS NULL OR language != '{_sql_str(language)}')"
+                )
+                if not table.search().where(changed).select(["chunk_id"]).limit(1).to_list():
+                    continue
                 table.update(
-                    where=f"chunk_id IN ({selected})",
+                    where=changed,
                     values={"source": source, "language": language},
                 )
 

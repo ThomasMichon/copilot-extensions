@@ -63,6 +63,17 @@ def _report(request, as_json: bool = False) -> None:
         "recovery_authority": getattr(request, "recovery_authority", None),
         "released_at": getattr(request, "released_at", None),
     }
+    flags = getattr(getattr(request, "spec", None), "argv", ())
+    phase = next((
+        flags[index + 1] for index, flag in enumerate(flags[:-1])
+        if flag == "--phase" and flags[index + 1] in update_cli.update_options.UPDATE_PHASES
+    ), None)
+    if phase:
+        data.update(
+            phase=phase,
+            plugins=[flags[index + 1] for index, flag in enumerate(flags[:-1]) if flag == "--plugin"],
+            full_update=False,
+        )
     if as_json:
         print(json.dumps(data))
     else:

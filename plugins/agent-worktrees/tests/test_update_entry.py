@@ -149,6 +149,9 @@ def test_update_entry_fetches_before_python(update_entry_case, front, runtime, n
         ["--project", "sample", "status"],
         ["update", "--no-manager"],
         ["update", "--auth-report"],
+        ["update", "--phase", "preflight", "--plugin", "agent-example"],
+        ["update", "--phase=runtimes", "--plugin=agent-example"],
+        ["update", "--plugin", "agent-example"],
         ["update", "--request-status", "synthetic-request"],
         ["update", "--request-status=synthetic-request"],
         ["update", "--recovery-status"],
@@ -168,6 +171,56 @@ def test_update_entry_leaves_other_calls_unchanged(update_entry_case, native_bas
     assert result.returncode == 19, result.stderr.decode()
     assert (tmp / "resolved").exists()
     assert not (tmp / "curl.args").exists()
+
+
+@pytest.mark.parametrize("front", ["global", "installed-project"])
+@pytest.mark.parametrize("ready", [False, True])
+@pytest.mark.parametrize("flags", [
+    ["--phase", "preflight", "--plugin", "agent-example"],
+    ["--phase=runtimes", "--plugin=agent-example"],
+    ["--plugin", "agent-example"],
+])
+def test_selected_update_phase_refuses_implicit_posix_bootstrap(
+    update_entry_case, monkeypatch, native_bash, front, ready, flags,
+):
+    tmp, home, resolver = update_entry_case
+    monkeypatch.delenv("AGENT_WORKTREES_NO_SELFPROVISION")
+    installer = home / ".copilot/installed-plugins/fixture/agent-worktrees/scripts/install.sh"
+    installer.parent.mkdir(parents=True)
+    installer.write_text(
+        '#!/bin/sh\nprintf unexpected > "$MANAGER_CALLED"\nexit 99\n',
+    )
+    if not ready:
+        resolver.unlink()
+    if front == "installed-project":
+        user_bin = home / ".local/bin"
+        user_bin.mkdir(parents=True)
+        for name in (
+            "agent-worktrees", "agent-worktrees-update-entry.sh",
+            "agent-worktrees-update-entry.ps1",
+        ):
+            shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+        rendered = project_command_templates.render(
+            "sample", PLUGIN, windows=False, user_bin=user_bin,
+        )
+        entry = tmp / "sample"
+        entry.write_text(rendered["sample"])
+        command = [native_bash, str(entry)]
+    else:
+        command = [native_bash, str(PLUGIN / "bin/agent-worktrees"), "--project", "sample"]
+    result = subprocess.run(
+        [*command, "update", *flags], capture_output=True, timeout=15,
+    )
+    assert result.returncode == (19 if ready else 127), result.stderr.decode()
+    if ready:
+        assert _arguments(tmp / "python.args") == [
+            "-m", "agent_worktrees", "--project", "sample", "update", *flags,
+        ]
+    else:
+        assert not (tmp / "python.args").exists()
+    assert not (tmp / "curl.args").exists()
+    assert not (tmp / "manager-called").exists()
+    assert not (home / ".agent-worktrees/.provision-status").exists()
 
 
 def test_update_entry_preserves_download_failure(update_entry_case, monkeypatch, native_bash):

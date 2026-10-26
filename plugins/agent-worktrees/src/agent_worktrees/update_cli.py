@@ -207,19 +207,11 @@ def cmd_reconcile_request(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    """Update the harness -- via the Worktree Manager when present (the seam).
+    """Update registered payloads/runtimes, integration and managed anchors.
 
-    ``update`` is the harness's *plugin updater/aligner*: it refreshes every
-    registered copilot-extensions plugin payload + runtime, reconciles binstubs,
-    and fast-forwards managed anchors. The founding intent hands that role to the
-    out-of-plugin **Worktree Manager** (the Configurator's "plugin update +
-    cross-plugin alignment"). So, mirroring the bare-launch seam (DQ7/DQ8): when
-    a *usable* Manager is on PATH, hand off to ``worktree-manager update`` (which
-    self-updates the Manager, then drives the mechanics back through
-    ``agent-worktrees update --no-manager``); otherwise run the in-plugin update
-    directly. ``--no-manager`` is the seam bypass -- both the Manager's own
-    re-entry and an operator escape hatch -- and the DQ8 fallback whenever the
-    Manager is absent or fails its health check, so ``update`` never dead-ends.
+    Ordinary updates use a usable Manager for self-update and ``--no-manager``
+    re-entry. An absent/unhealthy Manager or explicit bypass uses the engine.
+    Phase/target requests stay with the engine, preserving queue custody.
     """
     update_options.validate_auth_flags(args)
     if getattr(args, "auth_report", False):
@@ -232,7 +224,7 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 def manager_handoff(args: argparse.Namespace) -> int | None:
     """Preserve the existing Manager seam without executing a fallback install."""
-    if getattr(args, "target", None) is not None:
+    if getattr(args, "target", None) is not None or getattr(args, "phase", None):
         return None
     if not getattr(args, "no_manager", False):
         mgr = _usable_worktree_manager()
@@ -262,92 +254,95 @@ def manager_handoff(args: argparse.Namespace) -> int | None:
 
 def _update_flags(args: argparse.Namespace) -> list[str]:
     """Forward update flags through the Manager, excluding its re-entry bypass."""
-    flags: list[str] = []
-    if getattr(args, "force", False):
-        flags.append("--force")
-    if getattr(args, "no_anchor_sync", False):
-        flags.append("--no-anchor-sync")
-    if getattr(args, "no_prune_pivots", False):
-        flags.append("--no-prune-pivots")
-    if getattr(args, "recreate_venv", False):
-        flags.append("--recreate-venv")
-    for name in ("detach", "wait", "supervised_debug"):
-        if getattr(args, name, False):
-            flags.append("--" + name.replace("_", "-"))
-    if getattr(args, "json", False) and getattr(args, "detach", False):
-        flags.append("--json")
-    flags.extend(update_options.forwarded_flags(args))
-    skip = getattr(args, "skip_modules", None)
-    if skip is not None:
-        flags.append("--skip-modules")
-        flags.extend(skip)
-    return flags
+    return update_options.update_flags(args)
 
 
 def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     """Run the update with auth scopes, outcome telemetry and human framing."""
-    with output.human_operation("update/engine") as human:
+    phase = getattr(args, "phase", None)
+    with output.human_operation(f"update/phase/{phase}" if phase else "update/engine") as human:
         _events.start("engine")
         try:
             rc = _auth.run_update(args, _update_in_plugin_steps)
         except BaseException as exc:
             _events.finish(None, exc)
             raise
-        rc = _events.finish(rc)
+        rc = _events.finish(rc, partial=True) if phase else _events.finish(rc)
         if human is not None:
-            human.complete("done" if rc == 0 else "failed", f"exit {rc}")
+            detail = f"partial phase {phase}; full update not attempted; exit {rc}" if phase else f"exit {rc}"
+            human.complete("done" if rc == 0 else "failed", detail)
         return rc
 
 
 def _update_in_plugin_steps(args: argparse.Namespace) -> int:
-    from .update_runtime_source import check_source_coverage, parse_sources
+    sources = None
+    if getattr(args, "runtime_sources", None) is not None:
+        from .update_runtime_source import parse_sources
 
-    try:
-        sources = parse_sources(getattr(args, "runtime_sources", None))
-    except (OSError, ValueError) as error:
-        output.err(f"Runtime source selection: {error}")
-        _events.record("runtime_preflight", "runtime-sources", f"invalid source selection: {error}")
-        return 1
+        try:
+            sources = parse_sources(args.runtime_sources)
+        except (OSError, ValueError) as error:
+            output.err(f"Runtime source selection: {error}")
+            _events.record("runtime_preflight", "runtime-sources", f"invalid source selection: {error}")
+            return 1
     if getattr(args, "target", None) is not None:
         from .installation_updates import update_target
 
         return update_target(args.target)
+    phase = getattr(args, "phase", None)
+    selected = frozenset(getattr(args, "plugin", None) or ())
+    if phase in {"anchors", "prune"}:
+        _events.enter("anchor_sync" if phase == "anchors" else "prune")
+        name, helper = (
+            ("_fast_forward_project_anchors", _fast_forward_project_anchors)
+            if phase == "anchors" else
+            ("_prune_stale_pivots_after_update", _prune_stale_pivots_after_update)
+        )
+        _core_helper(name, helper)()
+        return 0
     if getattr(args, "recreate_venv", False):
         output.warn(
             "--recreate-venv is not supported by the plugin-based "
             "update flow; use 'agent-worktrees install' instead"
         )
 
-    registered_targets = dict(_core_helper(
+    registered_targets = {} if phase == "integration" else dict(_core_helper(
         "_registered_plugin_targets", _registered_plugin_targets
     )())
+    if selected:
+        registered_targets = update_options.select_plugin_targets(selected, registered_targets)
+        if registered_targets is None:
+            return 1
     plugin_ref = "agent-worktrees@copilot-extensions"
-    _events.enter("payload_refresh")
-    output.info(f"Updating plugin: {plugin_ref}")
-    update_context = _auth._marketplace_context()
-    payload_status = update_acquisition.acquire(
-        "agent-worktrees", "copilot-extensions", _resolve_copilot() or "copilot",
-        cwd=update_context, engine=True,
-    )
-    payloads_ok = payload_status.startswith("OK")
-    _events.record("payload_refresh", plugin_ref, payload_status)
-
-    if (
-        payloads_ok
-        and _core_helper("_update_registered_plugins", _update_registered_plugins)(
-            {name: target for name, target in registered_targets.items()
-             if name != "agent-worktrees"}
-        )
-        is False
-    ):
-        payloads_ok = False
-
-    if not payloads_ok:
-        output.err(
-            "Required payload acquisition failed; no runtime installers or local "
-            "integration will run. Resolve the reported failure and retry update."
-        )
-        return 1
+    payloads_ok = True
+    if phase in (None, "payloads"):
+        _events.enter("payload_refresh")
+        if not selected or "agent-worktrees" in selected:
+            output.info(f"Updating plugin: {plugin_ref}")
+            payload_status = update_acquisition.acquire(
+                "agent-worktrees", "copilot-extensions", _resolve_copilot() or "copilot",
+                cwd=_auth._marketplace_context(), engine=True,
+            )
+            payloads_ok = payload_status.startswith("OK")
+            _events.record("payload_refresh", plugin_ref, payload_status)
+        peers = {name: target for name, target in registered_targets.items() if name != "agent-worktrees"}
+        if (
+            payloads_ok
+            and (phase is None or peers)
+            and _core_helper("_update_registered_plugins", _update_registered_plugins)(
+                peers, **({"allow_project_fallback": False} if phase == "payloads" and selected else {}),
+            )
+            is False
+        ):
+            payloads_ok = False
+        if not payloads_ok:
+            output.err(
+                "Required payload acquisition failed; no runtime installers or local "
+                "integration will run. Resolve the reported failure and retry update."
+            )
+            return 1
+        if phase == "payloads":
+            return 0
 
     plugin_dir = _core_helper("_find_installed_plugin_dir", _find_installed_plugin_dir)()
     if not plugin_dir:
@@ -358,17 +353,26 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
 
     output.info(f"Plugin source: {plugin_dir}")
     _events.enter("runtime_preflight")
-
     plat = cfg.detect_platform()
+    if phase == "integration":
+        from .update_integration import run_selected
+
+        return 0 if run_selected(plugin_dir, plat) else 1
     force = getattr(args, "force", False)
     forced = update_options.forced_runtimes(args)
     skip_modules = getattr(args, "skip_modules", None)
     engine_step, module_plan, registered_plan = update_runtime_plan.plan_portfolio(
         plugin_dir, plat, skip_modules, force=force,
         targets=registered_targets, force_runtimes=forced, sources=sources,
+        **({"selected_plugins": selected} if selected else {}),
+        **({"isolated_engine": True} if phase in {"preflight", "runtimes"} else {}),
     )
-    portfolio = (engine_step, *module_plan, *registered_plan)
+    portfolio = tuple(
+        step for step in (engine_step, *module_plan, *registered_plan) if step is not None
+    )
     if sources is not None:
+        from .update_runtime_source import check_source_coverage
+
         try:
             check_source_coverage(sources, portfolio)
         except ValueError as error:
@@ -395,53 +399,65 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
         )
         return 1
 
-    _events.enter("engine_runtime")
-    if engine_step.status:
-        output.ok(
-            f"Runtime already at {engine_step.target_version} -- skipping installer "
-            "(use --force to re-deploy)"
-        )
-        _events.record("engine_runtime", plugin_ref, "SKIPPED (current)", changed=False)
-    else:
-        rc = _run_engine_installer(
-            list(engine_step.argv), plugin_dir, engine_step.deadline_s,
-            engine_step.environment, runtime_root=engine_step.runtime_root,
-            target_version=engine_step.target_version,
-            **({"source_step": engine_step} if engine_step.source is not None else {}),
-        )
-        if rc != 0:
-            return rc
+    if selected and not update_options.check_selected_runtimes(selected, portfolio):
+        return 1
+    if phase == "preflight":
+        for step in portfolio:
+            output.info(f"Runtime plan: {step.name}: {step.status or 'ready'} (not executed)")
+        return 0
+    if engine_step is not None:
+        _events.enter("engine_runtime")
+        if engine_step.status:
+            output.ok(
+                f"Runtime already at {engine_step.target_version} -- skipping installer "
+                "(use --force to re-deploy)"
+            )
+            _events.record("engine_runtime", plugin_ref, "SKIPPED (current)", changed=False)
+        else:
+            rc = _run_engine_installer(
+                list(engine_step.argv), plugin_dir, engine_step.deadline_s,
+                engine_step.environment, runtime_root=engine_step.runtime_root,
+                target_version=engine_step.target_version,
+                **({"source_step": engine_step} if engine_step.source is not None else {}),
+            )
+            if rc != 0:
+                return rc
 
-    _events.enter("module_update")
     runtimes_ok = True
-    if (
-        _core_helper("_update_modules", _update_modules)(
-            plugin_dir,
-            plat,
-            skip_modules,
-            force=force,
-            targets=registered_targets,
-            force_runtimes=forced,
-            plan=module_plan,
-        )
-        is False
-    ):
-        runtimes_ok = False
+    if phase is None or module_plan:
+        _events.enter("module_update")
+        if (
+            _core_helper("_update_modules", _update_modules)(
+                plugin_dir,
+                plat,
+                skip_modules,
+                force=force,
+                targets=registered_targets,
+                force_runtimes=forced,
+                plan=module_plan,
+            )
+            is False
+        ):
+            runtimes_ok = False
 
-    _events.enter("runtime_reconcile")
-    if (
-        _core_helper("_reconcile_registered_runtimes", _reconcile_registered_runtimes)(
-            plugin_dir,
-            plat,
-            skip_modules,
-            force=force,
-            targets=registered_targets,
-            force_runtimes=forced,
-            plan=registered_plan,
-        )
-        is False
-    ):
-        runtimes_ok = False
+    if phase is None or registered_plan:
+        _events.enter("runtime_reconcile")
+        if (
+            _core_helper("_reconcile_registered_runtimes", _reconcile_registered_runtimes)(
+                plugin_dir,
+                plat,
+                skip_modules,
+                force=force,
+                targets=registered_targets,
+                force_runtimes=forced,
+                plan=registered_plan,
+            )
+            is False
+        ):
+            runtimes_ok = False
+
+    if phase == "runtimes":
+        return 0 if runtimes_ok else 1
 
     if not getattr(args, "no_anchor_sync", False):
         _events.enter("anchor_sync")

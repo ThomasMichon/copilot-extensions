@@ -461,7 +461,8 @@ assert_plugin_runtime_publication() {
 }
 
 resolve_runtime
-if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" &&
+      "${_aw_update_diagnostic:-0}" != 1 ]]; then
     assert_plugin_runtime_publication
 fi
 # Commit to self-provisioning (and, in doing so, permit boot_trace_log to
@@ -471,7 +472,8 @@ fi
 # strictly before `provision-start`'s own `mkdir -p`, are captured on a
 # genuine first-ever launch instead of silently dropped (Copilot review
 # follow-up, PR #3310).
-if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
+if [[ -z "${AGENT_RT_PY:-}" && -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" &&
+      "${_aw_update_diagnostic:-0}" != 1 ]]; then
     WILL_PROVISION=1
 fi
 boot_trace resolver-loaded
@@ -488,6 +490,10 @@ fi
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     boot_trace dispatch fast
     run_runtime "$@"
+fi
+if [[ "${_aw_update_diagnostic:-0}" == 1 ]]; then
+    printf '%s\n' '[agent-worktrees] selected update phase requires a provisioned runtime; use ordinary update to repair it.' >&2
+    exit 127
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-worktrees] runtime not provisioned (AGENT_WORKTREES_NO_SELFPROVISION set).\n' >&2

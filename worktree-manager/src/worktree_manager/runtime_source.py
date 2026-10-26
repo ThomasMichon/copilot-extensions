@@ -71,9 +71,13 @@ def _remaining(deadline: float | None, cap: float = 120) -> float:
     return min(cap, remaining)
 
 
-def _git(checkout: Path, *arguments: str, deadline: float | None = None) -> str:
+def _git(
+    checkout: Path, *arguments: str, deadline: float | None = None,
+    environment: dict[str, str] | None = None,
+) -> str:
     environment = {
-        key: value for key, value in os.environ.items() if key.upper() not in _GIT_ROUTING_ENV
+        key: value for key, value in (os.environ if environment is None else environment).items()
+        if key.upper() not in _GIT_ROUTING_ENV
     }
     environment.update(
         GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0",
@@ -98,9 +102,14 @@ def _git(checkout: Path, *arguments: str, deadline: float | None = None) -> str:
     return result.stdout.strip()
 
 
-def _validate(checkout: Path, owner: dict[str, str], *, deadline: float | None = None) -> str:
+def _validate(
+    checkout: Path, owner: dict[str, str], *, deadline: float | None = None,
+    environment: dict[str, str] | None = None,
+) -> str:
     _remaining(deadline)
-    git_command = _git if deadline is None else partial(_git, deadline=deadline)
+    git_command = _git if deadline is None and environment is None else partial(
+        _git, deadline=deadline, environment=environment,
+    )
     _ordinary(checkout)
     git = checkout / ".git"
     if not git.is_dir():
@@ -130,11 +139,14 @@ def _validate(checkout: Path, owner: dict[str, str], *, deadline: float | None =
 @contextmanager
 def acquire(
     selection: RuntimeSource, *, root: Path | None = None, deadline: float | None = None,
+    environment: dict[str, str] | None = None,
 ) -> Iterator[ResolvedSource]:
     from .self_install import _runtime_installer, default_root
 
     _remaining(deadline)
-    git_command = _git if deadline is None else partial(_git, deadline=deadline)
+    git_command = _git if deadline is None and environment is None else partial(
+        _git, deadline=deadline, environment=environment,
+    )
     if selection.channel == "marketplace":
         raise SourceAcquisitionError("Marketplace runtime delivery has no independent source checkout")
     installation = (root or default_root()).absolute()
@@ -160,11 +172,11 @@ def acquire(
                 marker = staging / ".git" / "runtime-source-owner.json"
                 _ordinary(marker)
                 marker.write_text(json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8")
-                _validate(staging, owner, deadline=deadline)
+                _validate(staging, owner, deadline=deadline, environment=environment)
                 if checkout.exists() or checkout.is_symlink():
                     raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
                 staging.rename(checkout)
-        head = _validate(checkout, owner, deadline=deadline)
+        head = _validate(checkout, owner, deadline=deadline, environment=environment)
         branch = selection.branch
         remote_ref = f"refs/remotes/origin/{branch}"
         git_command(checkout, "fetch", "--no-tags", "origin", f"+refs/heads/{branch}:{remote_ref}")
@@ -181,8 +193,8 @@ def acquire(
         if git_command(checkout, "merge-base", commit, tip) != commit:
             raise SourceAcquisitionError(f"Runtime source selection is not merged into fetched {branch}")
         tree = git_command(checkout, "rev-parse", "--verify", f"{commit}^{{tree}}")
-        if _validate(checkout, owner, deadline=deadline) != head:
+        if _validate(checkout, owner, deadline=deadline, environment=environment) != head:
             raise SourceAcquisitionError("Runtime source checkout moved during acquisition")
         yield ResolvedSource(selection, checkout, commit, tree, tip)
-        if _validate(checkout, owner, deadline=deadline) != head:
+        if _validate(checkout, owner, deadline=deadline, environment=environment) != head:
             raise SourceAcquisitionError("Runtime source checkout changed while consuming the selection")

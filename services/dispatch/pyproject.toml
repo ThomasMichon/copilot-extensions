@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-dispatch-service"
-version = "0.1.2-dev1"
+version = "0.1.3-dev1"
 description = "Standalone, Copilot-independent distribution of the agent-dispatch coordinator daemon."
 readme = "README.md"
 license = "MIT"

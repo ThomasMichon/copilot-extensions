@@ -21,6 +21,16 @@ def prepare_runtime_candidate(data: dict) -> None:
         source, slot / "payload",
         mark_complete=not (source / "runtime-source.json").exists(),
     )
+    from .self_install import _expected_binstub_contents, _expected_control_plane_provider_manifest
+    from .self_install import _runtime_installer
+
+    _runtime_installer()
+    from runtime_uninstall import seal_inventory
+
+    seal_inventory(
+        slot, frontdoors=_expected_binstub_contents(),
+        provider=_expected_control_plane_provider_manifest(root=slot.parent.parent),
+    )
 
 
 def verify_runtime_candidate() -> None:

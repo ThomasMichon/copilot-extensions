@@ -387,8 +387,10 @@ def test_venv_install_invokes_resolved_uv_path():
 @pytest.mark.parametrize("complete", [False, True])
 @pytest.mark.parametrize("exit_code", [0, 7])
 @pytest.mark.parametrize("contextual", [False, True])
+@pytest.mark.parametrize("targeted", [False, True])
 def test_python_runtime_resolves_one_uv_application(
     tmp_path: Path, host: str | None, complete: bool, exit_code: int, contextual: bool,
+    targeted: bool,
 ):
     if os.name != "nt" or host is None:
         pytest.skip("native Windows PowerShell application discovery")
@@ -447,7 +449,10 @@ function Invoke-Hidden {
     if ($ArgList[$payloadIndex + 1] -ne $env:FIXTURE_ORIGIN) {
         throw 'update lost its original payload provenance'
     }
-    if ($ArgList -notcontains '--recover-adopted-manager') { throw 'missing recovery handoff' }
+    $expectedRecovery = $env:AGENT_WORKTREES_TARGETED_UPDATE -ne '1'
+    if (($ArgList -contains '--recover-adopted-manager') -ne $expectedRecovery) {
+        throw 'incorrect Manager recovery scope'
+    }
     $resultIndex = [Array]::IndexOf($ArgList, '--result')
     $result = @{
         runtime_version = 'fixture'; runtime_python = $env:FIXTURE_PYTHON
@@ -479,6 +484,7 @@ if (@((Get-Command uv -CommandType Application).Source).Count -ne $before.Count)
             "FIXTURE_ORIGIN": str(original if contextual else staged),
             "FIXTURE_PYTHON": sys.executable, "FIXTURE_EXIT": str(exit_code),
             "FIXTURE_COMPLETE": str(int(complete)),
+            "AGENT_WORKTREES_TARGETED_UPDATE": "1" if targeted else "",
             "COPILOT_PLUGIN_STAGED_FROM": str(original) if contextual else "",
             "PATH": os.pathsep.join([str(tmp_path / "first"), str(tmp_path / "second"),
                                     os.environ.get("PATH", "")]),

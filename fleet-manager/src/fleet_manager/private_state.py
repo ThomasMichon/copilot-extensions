@@ -7,6 +7,49 @@ import stat
 from .planning import PlanError
 
 
+def validate_private_file(path: Path) -> None:
+    """Check one explicitly selected private file without repairing permissions."""
+    if not path.is_absolute() or ".." in path.parts:
+        raise PlanError("private input requires an absolute ordinary path")
+    for component in (path, *path.parents):
+        info = component.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise PlanError("private input cannot traverse indirection")
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise PlanError("private input is not a regular file")
+    if os.name == "nt":
+        windows_private(path)
+    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise PlanError("private input is not private to its owner")
+
+
+def read_private_file(path: Path, maximum: int) -> bytes:
+    """Validate custody of the actual opened file, not a replaceable path baseline."""
+    from .artifacts import _content_stamp, _file_stat, _identity, _reader
+
+    validate_private_file(path)
+    try:
+        with _reader(path) as stream:
+            opened = os.fstat(stream.fileno())
+            if not stat.S_ISREG(opened.st_mode) or not 1 <= opened.st_size <= maximum:
+                raise PlanError("private input is not a bounded regular file")
+            if os.name == "nt":
+                windows_private(path, descriptor=stream.fileno())
+            elif opened.st_uid != os.getuid() or opened.st_mode & 0o077:
+                raise PlanError("private input is not private to its owner")
+            data = stream.read(maximum + 1)
+            after, named = os.fstat(stream.fileno()), _file_stat(path)
+            if (len(data) != opened.st_size or len(data) > maximum
+                    or _content_stamp(after) != _content_stamp(opened)
+                    or _identity(named) != _identity(opened)
+                    or _content_stamp(named) != _content_stamp(opened)):
+                raise PlanError("private input changed during admission")
+            return data
+    except OSError:
+        raise PlanError("private input could not be read") from None
+
+
 def _windows_identity():
     import ctypes as c
     from ctypes import wintypes as w
@@ -51,7 +94,7 @@ def _windows_identity():
     return kernel, security, user, sid_text
 
 
-def windows_private(path, *, privileged_owner: bool = False):
+def windows_private(path, *, privileged_owner: bool = False, descriptor: int | None = None):
     """Keep the admission ACL policy; recovery may select a privileged OS owner."""
     import ctypes as c
     from ctypes import wintypes as w
@@ -64,10 +107,22 @@ def windows_private(path, *, privileged_owner: bool = False):
     security.GetNamedSecurityInfoW.restype = w.DWORD
     security.GetAce.argtypes = [w.LPVOID, w.DWORD, c.POINTER(w.LPVOID)]
     security.GetAce.restype = w.BOOL
-    owner, acl, descriptor = (w.LPVOID() for _ in range(3))
-    error = security.GetNamedSecurityInfoW(
-        str(path), 1, 5, c.byref(owner), None, c.byref(acl), None, c.byref(descriptor),
-    )
+    owner, acl = (w.LPVOID() for _ in range(2))
+    security_descriptor = w.LPVOID()
+    if descriptor is None:
+        error = security.GetNamedSecurityInfoW(
+            str(path), 1, 5, c.byref(owner), None, c.byref(acl), None, c.byref(security_descriptor))
+    else:
+        import msvcrt
+
+        security.GetSecurityInfo.argtypes = [
+            w.HANDLE, c.c_int, w.DWORD, c.POINTER(w.LPVOID), w.LPVOID,
+            c.POINTER(w.LPVOID), w.LPVOID, c.POINTER(w.LPVOID),
+        ]
+        security.GetSecurityInfo.restype = w.DWORD
+        error = security.GetSecurityInfo(
+            msvcrt.get_osfhandle(descriptor), 1, 5, c.byref(owner), None, c.byref(acl),
+            None, c.byref(security_descriptor))
     if error:
         raise c.WinError(error)
     try:
@@ -86,7 +141,7 @@ def windows_private(path, *, privileged_owner: bool = False):
             if kind != 0 or sid_text(ace.value + 8) not in allowed:
                 raise PlanError("state root has an unsupported or shared access grant")
     finally:
-        kernel.LocalFree(descriptor)
+        kernel.LocalFree(security_descriptor)
 
 
 def _windows_create(path: Path, *, directory: bool) -> int | None:

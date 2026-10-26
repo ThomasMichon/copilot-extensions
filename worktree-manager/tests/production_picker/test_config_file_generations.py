@@ -299,6 +299,7 @@ def test_invalidated_config_never_reclassifies_configured_local_alias_as_remote(
         "    ssh:\n      environments:\n        - name: Win\n          alias: host\n",
     )
     monkeypatch.setattr(data_local, "LOCAL", ("raw-host", "Win"))
+    monkeypatch.setattr(data_local, "local_execution_platform", lambda: "windows")
     assert data_local.is_local("host", "Win") is True
     cfg.clear_caches()
 

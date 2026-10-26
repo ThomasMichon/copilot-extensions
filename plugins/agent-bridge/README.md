@@ -603,14 +603,26 @@ inherited as bytes, including framed carrier traffic and quoted, multiline
 `--prompt-file -` bodies; an actual PowerShell object pipeline remains text
 input rather than a binary transport.
 
-Cold first use checks the selected installation's runtime-deployment policy
-before provision traces, status, roots or locks, then revalidates after acquiring
-the provision lock. Healthy managed runtimes remain callable without publication
-permission. Missing or older admission/resolver support reports readiness instead
-of provisioning. Generated global wrappers retain the exact publisher or an
-owned snapshot; if neither is available, only a healthy legacy runtime may run
-through its deployed resolver. A requested installation context never falls
-back to that legacy runtime.
+Cold legacy first use checks the selected installation's runtime-deployment
+policy before acquisition, queue or plugin writes, then submits the fixed
+`provision` action through its packaged installation driver and synchronously
+observes that caller-independent owner. It owns no outer provisioning lock or
+private provision-status writer. The `::agent-provisioning::` stderr cue points
+to driver-owned progress; it is not readiness or a completion estimate.
+Healthy managed runtimes remain callable read-only without publication permission
+or a new request. Pinned/nested calls, cold cells/custom roots and missing or
+older dispatch/admission/driver support refuse rather than falling back to a
+direct installer.
+
+Generated global wrappers retain the exact publisher or their source-qualified
+selected snapshot; unreceipted Windows copies require their exact publisher
+for cold execution. If that source is unavailable, only a healthy legacy runtime
+may run through its qualified deployed resolver. A requested installation context
+never falls back to that legacy runtime. Both primary wrappers clear ambient
+`PYTHONPATH`/`PYTHONHOME` before resolver-only fallback, matching the payload gate.
+Explicit installers and bootstrap have
+their own action contracts; command adoption does not change their service
+options or enroll maintenance.
 
 The legacy global wrappers remain explicit compatibility and management
 boundaries for callers that do not inherit session catalogs: daemon and service

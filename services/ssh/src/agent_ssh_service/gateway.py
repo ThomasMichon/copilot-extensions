@@ -62,9 +62,10 @@ class SSHService:
         check(request.context.expires_at > time.time(), "caller-context-expired")
         check((request.context.fleet, request.context.gateway, request.context.slot)
               == self.owner, "caller-owner-mismatch")
-        self.store.config.binding(request.context.principal)
+        self.store.config.authorize_caller(request.context.principal)
 
     async def _directory(self, request: ServiceRequest, query: str) -> ServiceResponse:
+        self.store.config.binding(request.context.principal)
         arguments = parse_qs(query, strict_parsing=True)
         check(set(arguments) <= {"after", "wait"}
               and all(len(values) == 1 for values in arguments.values()), "invalid-directory-query")
@@ -104,25 +105,41 @@ class SSHService:
             check(not target.scheme and not target.netloc and not target.fragment, "invalid-target")
             if request.method == "GET" and target.path == "/directory":
                 return await self._directory(request, target.query)
+            if request.method == "GET":
+                if target.path == "/enrollment" and not target.query:
+                    return ServiceResponse(200, (), canonical(self.store.approval.contract()))
+                if target.path == "/enrollment/pending":
+                    arguments = parse_qs(target.query, strict_parsing=True, keep_blank_values=True)
+                    check(set(arguments) <= {"after"}
+                          and all(len(values) == 1 for values in arguments.values()),
+                          "invalid-pending-query")
+                    result = await self._disk(
+                        self.store.approval.pending, request.context.principal,
+                        after=arguments.get("after", [None])[0])
+                    self._checkpoint(request)
+                    return ServiceResponse(200, (), canonical(result))
+                if target.path.startswith("/enrollment/requests/") and not target.query:
+                    result = await self._disk(
+                        self.store.approval.status, request.context.principal,
+                        target.path.removeprefix("/enrollment/requests/"),
+                        checkpoint=lambda: self._checkpoint(request))
+                    self._checkpoint(request)
+                    return ServiceResponse(200, (), canonical(result))
             if request.method == "POST" and target.path == "/enroll" and not target.query:
                 value = decode(request.body)
-                result, changed = await self._disk(
+                result, _ = await self._disk(
                     self.store.enroll, request.context.principal, value,
                     checkpoint=lambda: self._checkpoint(request),
                 )
-                if self.reconcile_relay is not None:
-                    # Even an original-ID retry reconciles an already committed join.
-                    try:
-                        await self._disk(self.reconcile_relay)
-                    except (OSError, SSHServiceError) as exc:
-                        logging.getLogger(__name__).error(
-                            "ssh-native-relay-reconcile-failed code=local-authorization-unavailable")
-                        raise SSHServiceError("native-relay-unavailable") from exc
-                if changed:
-                    async with self.changed:
-                        self.changed.notify_all()
-                self._checkpoint(request)
-                return ServiceResponse(200, (), canonical(result))
+                return await self._activated(request, result)
+            if (request.method == "POST" and not target.query
+                    and target.path in ("/enrollment/approve", "/enrollment/recover")):
+                result, _ = await self._disk(
+                    self.store.approval.decide, request.context.principal, decode(request.body),
+                    recovery=target.path.endswith("/recover"),
+                    checkpoint=lambda: self._checkpoint(request),
+                )
+                return await self._activated(request, result)
             return ServiceResponse(404)
         except SSHServiceError as exc:
             code = str(exc)
@@ -132,6 +149,23 @@ class SSHService:
             return ServiceResponse(status, (), canonical({"error": code}))
         except (PlanError, UnicodeError, ValueError, RecursionError):
             return ServiceResponse(400, (), canonical({"error": "invalid-request"}))
+
+    async def _activated(self, request: ServiceRequest, result: dict) -> ServiceResponse:
+        pending = result.get("status") == "pending"
+        if not pending:
+            if self.reconcile_relay is not None:
+                # Even an original-ID retry reconciles an already committed join.
+                try:
+                    await self._disk(self.reconcile_relay)
+                except (OSError, SSHServiceError) as exc:
+                    logging.getLogger(__name__).error(
+                        "ssh-native-relay-reconcile-failed code=local-authorization-unavailable")
+                    raise SSHServiceError("native-relay-unavailable") from exc
+            # A successful retry may reconcile an earlier committed, unannounced revision.
+            async with self.changed:
+                self.changed.notify_all()
+        self._checkpoint(request)
+        return ServiceResponse(202 if pending else 200, (), canonical(result))
 
     async def close(self) -> None:
         self.closed = True

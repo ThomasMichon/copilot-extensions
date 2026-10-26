@@ -325,11 +325,11 @@ source_kind_for_path() {
     esac
 }
 
-write_deploy_manifest() {
+render_deploy_manifest() {
     local service="$1" plugin="$2" install_path="$3" plugin_path="$4" venv_path="$5"
     local additional_json="${6:-}" source_path_override="${7:-}" version_override="${8:-}"
     local manifest="$install_path/deploy-manifest.json"
-    local kind ver commit branch dirty content_hash tmp provenance_path provenance_json_path
+    local kind ver commit branch dirty content_hash provenance_path provenance_json_path
     if [[ -d "$manifest" ]]; then
         _fail "Deploy manifest destination must be a file: $manifest"
         return 1
@@ -375,14 +375,7 @@ write_deploy_manifest() {
             _fail "Deploy manifest payload hash failed"; return 1;
         }
     fi
-    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
-        _runtime_publication_stage "$manifest" tmp || return 1
-    else
-        tmp="$(mktemp "$manifest.tmp.XXXXXX")" || {
-            _fail "Deploy manifest staging failed: $manifest"; return 1;
-        }
-    fi
-    if ! cat > "$tmp" <<EOF
+    cat <<EOF
 {
   "schema_version": 3,
   "service": "$service",
@@ -402,7 +395,27 @@ write_deploy_manifest() {
   "runtime": "python"$( [[ -n "$additional_json" ]] && printf ',\n%s' "$additional_json" )
 }
 EOF
-    then
+}
+
+write_deploy_manifest() {
+    local manifest="$3/deploy-manifest.json" tmp manifest_json kind
+    if ! manifest_json="$(render_deploy_manifest "$@")"; then
+        _fail "Deploy manifest rendering failed: $manifest_json"
+        return 1
+    fi
+    if [[ -n "${7:-}" ]]; then
+        kind="$(source_kind_for_path "$7")" || return 1
+    else
+        kind="$(_source_kind "$4")" || return 1
+    fi
+    if [[ -n "${_RUNTIME_PUBLICATION_EVIDENCE:-}" ]]; then
+        _runtime_publication_stage "$manifest" tmp || return 1
+    else
+        tmp="$(mktemp "$manifest.tmp.XXXXXX")" || {
+            _fail "Deploy manifest staging failed: $manifest"; return 1;
+        }
+    fi
+    if ! printf '%s\n' "$manifest_json" > "$tmp"; then
         rm -f "$tmp"
         _fail "Deploy manifest write failed: $manifest"
         return 1

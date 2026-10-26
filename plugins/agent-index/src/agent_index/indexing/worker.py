@@ -18,9 +18,11 @@ import signal
 import sys
 import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from agent_index.index_config import IndexConfig
     from agent_index.indexing.task_store import TaskStore
 
 log = logging.getLogger(__name__)
@@ -119,20 +121,30 @@ def _install_signal_handlers(cancelled: threading.Event) -> None:
             pass
 
 
-def run_worker(task_id: str) -> int:
+def run_worker(
+    task_id: str, *, config: IndexConfig | None = None,
+    indexer: Callable[..., dict[str, object]] | None = None,
+) -> int:
     """Entry point for ``agent-index index-worker --task <id>``.
 
     Claims the task's worker identity, runs the reindex, and writes the terminal
     status + result stats to the queue. Returns a process exit code.
+
+    Consumers may supply their config and bound indexing callable without a
+    process-global engine replacement. Hint support is checked on that exact
+    callable; binding a capable function does not implicitly copy its capability.
     """
-    from agent_index import __version__
     from agent_index import config as _config
     from agent_index.index_config import IndexConfig
     from agent_index.indexing import engine as indexing_engine
+    from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL, execution_versions
     from agent_index.indexing.runner import IndexingCancelled
     from agent_index.indexing.task_store import TaskStatus, TaskStore
+    from agent_index.runtime_version import current_runtime_version
 
-    store = TaskStore(IndexConfig().data_dir / "tasks.db")
+    forward_config = config is not None and indexer is None
+    config = config if config is not None else IndexConfig()
+    store = TaskStore(config.data_dir / "tasks.db")
     task = store.get_task(task_id)
     if task is None:
         print(f"[FAIL] worker: task {task_id} not found", file=sys.stderr)
@@ -144,6 +156,16 @@ def run_worker(task_id: str) -> int:
     }:
         return 0  # already terminal — idempotent no-op
 
+    run_reindex = indexer if indexer is not None else indexing_engine.run_reindex
+    if task.change_hints is not None:
+        if task.status != TaskStatus.PROCESSING.value:
+            print("[FAIL] worker: hinted task must be claimed before execution", file=sys.stderr)
+            return 2
+        if not execution_versions(run_reindex):
+            store.release_processing(task_id, error=WORKER_HINT_REFUSAL)
+            print("[FAIL] worker: selected callable cannot execute change-hints v1; task parked", file=sys.stderr)
+            return 2
+
     # Host-resource good citizen: this worker is a dedicated indexing subprocess,
     # so lower its OWN CPU/IO priority up front (before run_reindex spawns any
     # embedding/FTS threads or children, which then inherit it). Background
@@ -152,7 +174,7 @@ def run_worker(task_id: str) -> int:
     # unsupported platforms. Disable with AGENT_INDEX_INDEXER_NICE=0.
     from agent_index.indexing.priority import lower_current_process_priority
 
-    lower_current_process_priority(IndexConfig().indexer_nice)
+    lower_current_process_priority(config.indexer_nice)
 
     try:
         host = _config.machine_id()
@@ -160,7 +182,7 @@ def run_worker(task_id: str) -> int:
         import platform
 
         host = platform.node()
-    store.set_worker(task_id, os.getpid(), host, __version__)
+    store.set_worker(task_id, os.getpid(), host, current_runtime_version())
 
     cancelled = threading.Event()
     _install_signal_handlers(cancelled)
@@ -178,9 +200,13 @@ def run_worker(task_id: str) -> int:
         resume_since = task.first_started_at or task.created_at
         log.info("worker: task %s resuming (attempt %d)", task_id, task.attempt_count)
     try:
-        result = indexing_engine.run_reindex(
-            full=task.full, source=src, progress_cb=cb, resume_since=resume_since
-        )
+        cb.check_cancelled()
+        kwargs = {"full": task.full, "source": src, "progress_cb": cb, "resume_since": resume_since}
+        if forward_config:
+            kwargs["config"] = config
+        if task.change_hints is not None:
+            kwargs["change_hints"] = task.change_hints
+        result = run_reindex(**kwargs)
         if isinstance(result, dict):
             store.set_result_stats(task_id, result)
         sources_failed = result.get("sources_failed") if isinstance(result, dict) else None

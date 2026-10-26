@@ -224,7 +224,7 @@ def _native_acquisition(
 ) -> subprocess.CompletedProcess[str]:
     """Bound output and keep native descendants in caller-owned containment."""
     if not _WINDOWS:
-        command = [sys.executable, "-I", "-S", "-c", _NATIVE_EXEC]
+        command = [sys.executable, "-I", "-S", "-B", "-c", _NATIVE_EXEC]
         request = json.dumps({"argv": argv, "environment": environment, "cwd": str(cwd)})
         if sys.platform.startswith("linux"):
             result = run_caller_owned(

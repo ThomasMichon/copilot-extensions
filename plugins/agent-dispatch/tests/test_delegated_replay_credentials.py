@@ -36,8 +36,9 @@ pytestmark = [
 
 
 @pytest.mark.timeout(180 if sys.platform == "win32" else 120)
+@pytest.mark.parametrize("provider", ["github", "azure-devops"])
 def test_watch_service_preserves_dispatch_waits_across_native_credential_loss(
-    tmp_path, monkeypatch, capsys, caplog,
+    tmp_path, monkeypatch, capsys, caplog, provider,
 ):
     repository = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(repository / "fleet-manager" / "tests"))
@@ -45,19 +46,21 @@ def test_watch_service_preserves_dispatch_waits_across_native_credential_loss(
     from gateway_service_transport_fixtures import Rig, eventually
     from test_gateway_pr_credentials import ScopedProvider, configured, forge, responding, worker_policy
     from test_gateway_runtime import running as credential_gateway
-    from watch_credential_transport_fixtures import native_reader
+    from watch_credential_transport_fixtures import ado_native_reader, native_reader
 
     denied = threading.Event()
     source = ScopedProvider(lambda material: None if denied.is_set() else material)
-    scope = replace(
-        forge("github"), api_base="https://api.github.com", repository="example/project",
-    )
+    scope = replace(forge(provider), repository="example/project")
+    if provider == "github":
+        scope = replace(scope, api_base="https://api.github.com")
     credential_root = tmp_path / "credentials"
     credential_root.mkdir()
     fixture, parameters = configured(credential_root, scope)
-    prefix, requests, snapshot = native_reader(tmp_path / "native", repository, scope)
+    reader = native_reader if provider == "github" else ado_native_reader
+    prefix, requests, snapshot = reader(tmp_path / "native", repository, scope)
     monkeypatch.setenv("GH_TOKEN", "ambient-credential-must-not-win")
     monkeypatch.setenv("GITHUB_TOKEN", "ambient-credential-must-not-win")
+    monkeypatch.setenv("AZURE_DEVOPS_EXT_PAT", "ambient-credential-must-not-win")
 
     def renew_fixture_access():
         access = credential_root / "typed-access.jwt"
@@ -202,9 +205,10 @@ def test_watch_service_preserves_dispatch_waits_across_native_credential_loss(
             denied.set()
             renew_fixture_access()
             replacement = snapshot.with_suffix(".pending")
-            replacement.write_text(json.dumps({
-                "state": "closed", "merged": True, "head": {"sha": "head"}, "title": "Fixture",
-            }), encoding="utf-8")
+            merged = json.loads(snapshot.read_text(encoding="utf-8"))
+            merged.update({"state": "closed", "merged": True} if provider == "github"
+                          else {"status": "completed"})
+            replacement.write_text(json.dumps(merged), encoding="utf-8")
             replacement.replace(snapshot)
             successor = service()
             current_owner = successor
@@ -241,7 +245,7 @@ def test_watch_service_preserves_dispatch_waits_across_native_credential_loss(
             finally:
                 denied.clear()
                 await successor.close(timeout=10)
-        assert len(records()) >= before + 4
+        assert len(records()) >= before + (4 if provider == "github" else 1)
         assert len({r["credential"] for r in records()}) == len(records())
         assert all(call == parameters for call in source.calls)
         persisted = repr([queue.list_run_waiter_wakes(task_id) for task_id in task_ids]).encode()

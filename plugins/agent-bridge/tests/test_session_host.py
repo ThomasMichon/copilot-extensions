@@ -30,6 +30,44 @@ from agent_bridge.session_host.client import SessionHostClient
 from agent_bridge.session_host.host import SessionHost
 
 
+def _write_hosting_policy(checkout, *, allowed):
+    (checkout / ".git").mkdir(exist_ok=True)
+    policy = checkout / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(f"expose_agent: {str(allowed).lower()}\n", encoding="utf-8")
+
+
+@pytest.fixture
+def hosted_workspace(tmp_path, monkeypatch):
+    """Real local hosts execute only inside this explicitly eligible checkout."""
+    _write_hosting_policy(tmp_path, allowed=True)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.delenv("AGENT_BRIDGE_INSTALL_DIR", raising=False)
+    return tmp_path
+
+
+@pytest.fixture
+def mocked_codespace_admission(tmp_path, monkeypatch):
+    """Only the synthetic cs-one guest replaces its remote policy transport."""
+    from repository_policy import require_agent_hosting
+
+    from agent_bridge.session_host.codespace_transport import parse_codespace_target
+
+    guest = tmp_path / "cs-one-policy-checkout"
+    guest.mkdir()
+    _write_hosting_policy(guest, allowed=True)
+    checks = []
+
+    async def query(target, *, operation):
+        metadata = target.codespace or parse_codespace_target(target.spawn_command)
+        assert metadata is not None and metadata["name"] == "cs-one"
+        checks.append((target, operation))
+        return {**require_agent_hosting(guest, operation=operation).to_dict(), "allowed": True}
+
+    monkeypatch.setattr("agent_bridge.provider_hosting.query_provider_policy", query)
+    return guest, checks
+
+
 @pytest.fixture(autouse=True)
 def _stub_tree_kill(monkeypatch):
     """Stub the in-host reap's tree-kill so a ``_FakeChild`` pid never reaches a
@@ -198,6 +236,134 @@ async def _serve(child: _FakeChild) -> tuple[SessionHost, int]:
     host = SessionHost(child)
     port = await host.serve(port=0)
     return host, port
+
+
+def _host_instance_row(receipt):
+    from agent_procutil.daemon_instances import inspect_instances
+
+    return next(
+        row for row in inspect_instances(receipt.registry_root)
+        if row["instance_id"] == receipt.instance_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_retains_admission_until_cross_task_close_finishes(monkeypatch):
+    child = _FakeChild()
+    host = SessionHost(child)
+    reader_stopping = asyncio.Event()
+    finish_reader = asyncio.Event()
+    real_reader = host._reader_loop
+    observed = []
+
+    async def reader():
+        observed.append(_host_instance_row(host._instance_guard.receipt)["state"])
+        try:
+            await real_reader()
+        finally:
+            reader_stopping.set()
+            await finish_reader.wait()
+
+    monkeypatch.setattr(host, "_reader_loop", reader)
+    client = None
+    closing = None
+    try:
+        port = await asyncio.create_task(host.serve())
+        receipt = host._instance_guard.receipt
+        client = await SessionHostClient.connect(port=port)
+        assert (await client.attach(0)).child_pid == child.pid
+        assert observed == ["running"]
+        assert _host_instance_row(receipt)["state"] == "running"
+        closing = asyncio.create_task(host.close())
+        await asyncio.wait_for(reader_stopping.wait(), timeout=5)
+        assert _host_instance_row(receipt)["state"] == "running"
+        closing.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert _host_instance_row(receipt)["state"] == "running"
+        finish_reader.set()
+        await asyncio.wait_for(asyncio.create_task(host.close()), timeout=5)
+        assert host._reader_task.done()
+        assert not host._connections
+        assert not host._server.is_serving()
+        assert _host_instance_row(receipt)["state"] == "finished"
+        await host.close()
+        assert _host_instance_row(receipt)["state"] == "finished"
+        with pytest.raises(OSError):
+            await asyncio.open_connection("127.0.0.1", port)
+    finally:
+        finish_reader.set()
+        await host.close()
+        if client is not None:
+            await client.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_borrows_launcher_admission_without_duplicate_record():
+    from agent_procutil.daemon_instances import admit_daemon_instance, inspect_instances
+
+    guard = admit_daemon_instance(
+        "agent-bridge-session-host", source=__file__, purpose="production",
+    )
+    receipt = guard.receipt
+    before = {row["instance_id"] for row in inspect_instances(receipt.registry_root)}
+    host = SessionHost(_FakeChild())
+    try:
+        await asyncio.create_task(host.serve())
+        assert host._instance_guard.receipt == receipt
+        assert {row["instance_id"] for row in inspect_instances(receipt.registry_root)} == before
+        await asyncio.create_task(host.close())
+        assert _host_instance_row(receipt)["state"] == "running"
+    finally:
+        await host.close()
+        guard.close()
+    assert _host_instance_row(receipt)["state"] == "finished"
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_bind_failure_finishes_admission_without_reader(monkeypatch):
+    import socket
+
+    from agent_bridge.session_host import host as host_module
+
+    real_admit = host_module.admit_daemon_instance
+    receipts = []
+
+    def admit(*args, **kwargs):
+        guard = real_admit(*args, **kwargs)
+        receipts.append(guard.receipt)
+        return guard
+
+    monkeypatch.setattr(host_module, "admit_daemon_instance", admit)
+    host = SessionHost(_FakeChild())
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        with pytest.raises(OSError):
+            await host.serve(port=listener.getsockname()[1])
+    assert len(receipts) == 1
+    assert host._reader_task is None
+    assert _host_instance_row(receipts[0])["state"] == "finished"
+    await host.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_serve_admission_refusal_precedes_listener_and_reader(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    from agent_bridge.session_host import host as host_module
+
+    monkeypatch.setattr(
+        host_module, "admit_daemon_instance", Mock(side_effect=ValueError("admission refused")),
+    )
+    listener = AsyncMock()
+    monkeypatch.setattr(asyncio, "start_server", listener)
+    host = SessionHost(_FakeChild())
+    with pytest.raises(ValueError, match="admission refused"):
+        await host.serve()
+    listener.assert_not_awaited()
+    assert host._reader_task is None
+    await host.close()
 
 
 async def _read_n(gen, n: int, client: SessionHostClient) -> list[int]:
@@ -2149,17 +2315,32 @@ async def test_legacy_remote_record_keeps_fresh_spawn_fallback(
     assert await session_manager._try_reattach_live_host(session) is False
 
 
+def _persist_stopped_remote_session(manager, target):
+    manager.db.create_session(
+        session_id="s1", name="one", agent_name=None, target_dir=target.cwd,
+        target_type=target.type, status="stopped", now=time.time(),
+        target_json=target.to_json(), acp_session_id="acp-1",
+    )
+    manager.db.flush()
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("policy_allowed", [True, False])
 async def test_codespace_resume_replacement_uses_new_session_host(
     session_manager,
     monkeypatch,
-    permitted_provider_hosting,
+    mocked_codespace_admission,
+    policy_allowed,
 ):
     from unittest.mock import AsyncMock, MagicMock
 
     from agent_bridge.models import SessionStatus
     from agent_bridge.session_manager import Session
     from agent_bridge.transport import SpawnTarget
+    from repository_policy import AgentHostingError
+
+    guest, checks = mocked_codespace_admission
+    _write_hosting_policy(guest, allowed=policy_allowed)
 
     target = SpawnTarget(
         type="command",
@@ -2175,11 +2356,8 @@ async def test_codespace_resume_replacement_uses_new_session_host(
     session.acp_session_id = "acp-1"
     session.status = SessionStatus.STOPPED
     session.event_log = MagicMock()
-    session_manager.db.create_session(
-        "s1", "one", session.agent_name, "/workspaces/repo", "command", "stopped", 1.0,
-        acp_session_id="acp-1",
-    )
     session_manager._sessions["s1"] = session
+    _persist_stopped_remote_session(session_manager, target)
     monkeypatch.setattr(
         session_manager,
         "_try_reattach_live_host",
@@ -2198,24 +2376,35 @@ async def test_codespace_resume_replacement_uses_new_session_host(
         AsyncMock(side_effect=AssertionError("raw stdio must not spawn")),
     )
 
-    resumed = await session_manager.resume_session("s1")
-
-    assert resumed.status is SessionStatus.IDLE
-    assert resumed.client is client
-    host_resume.assert_awaited_once()
+    if policy_allowed:
+        resumed = await session_manager.resume_session("s1")
+        assert resumed.status is SessionStatus.IDLE
+        assert resumed.client is client
+        host_resume.assert_awaited_once()
+    else:
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            await session_manager.resume_session("s1")
+        host_resume.assert_not_awaited()
+    assert checks and all(checked == target and operation == "resume" for checked, operation in checks)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("policy_allowed", [True, False])
 async def test_legacy_codespace_resume_replacement_uses_session_host(
     session_manager,
     monkeypatch,
-    permitted_provider_hosting,
+    mocked_codespace_admission,
+    policy_allowed,
 ):
     from unittest.mock import AsyncMock, MagicMock
 
     from agent_bridge.models import SessionStatus
     from agent_bridge.session_manager import Session
     from agent_bridge.transport import SpawnTarget
+    from repository_policy import AgentHostingError
+
+    guest, checks = mocked_codespace_admission
+    _write_hosting_policy(guest, allowed=policy_allowed)
 
     target = SpawnTarget(
         type="command",
@@ -2232,11 +2421,8 @@ async def test_legacy_codespace_resume_replacement_uses_session_host(
     session.acp_session_id = "acp-1"
     session.status = SessionStatus.STOPPED
     session.event_log = MagicMock()
-    session_manager.db.create_session(
-        "s1", "one", session.agent_name, "/workspaces/repo", "command", "stopped", 1.0,
-        acp_session_id="acp-1",
-    )
     session_manager._sessions["s1"] = session
+    _persist_stopped_remote_session(session_manager, target)
     monkeypatch.setattr(
         session_manager,
         "_try_reattach_live_host",
@@ -2267,10 +2453,15 @@ async def test_legacy_codespace_resume_replacement_uses_session_host(
         AsyncMock(side_effect=AssertionError("raw stdio must not spawn")),
     )
 
-    resumed = await session_manager.resume_session("s1")
-
-    assert resumed.status is SessionStatus.IDLE
-    connect.assert_awaited_once()
+    if policy_allowed:
+        resumed = await session_manager.resume_session("s1")
+        assert resumed.status is SessionStatus.IDLE
+        connect.assert_awaited_once()
+    else:
+        with pytest.raises(AgentHostingError, match="expose_agent: false"):
+            await session_manager.resume_session("s1")
+        connect.assert_not_awaited()
+    assert checks and all(checked == target and operation == "resume" for checked, operation in checks)
 
 
 def test_host_index_corrupt_file_is_ignored(tmp_path):
@@ -2374,7 +2565,7 @@ _FAKE_AGENT_SRC = (
 
 
 @pytest.mark.asyncio
-async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch):
+async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch, hosted_workspace):
     import os
     import sys
 
@@ -2430,7 +2621,7 @@ async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch):
+async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch, hosted_workspace):
     import os
     import sys
 
@@ -2600,7 +2791,7 @@ async def test_recovery_settles_attached_client_after_child_exit(
 
 
 @pytest.mark.asyncio
-async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkeypatch):
+async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkeypatch, hosted_workspace):
     """In-session liveness-driven reattach: a RUNNING host-backed session whose
     transport dropped (host + child alive) is redialed and resumed by cursor by
     ``recover_disconnected_hosts`` -- no restart, same child, same ACP session.
@@ -2671,16 +2862,24 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
 
 
 @pytest.mark.asyncio
-async def test_launch_session_host_process_owns_child(tmp_path):
+@pytest.mark.parametrize("state_selection", ["absolute", "parent"])
+async def test_launch_session_host_process_owns_child(
+    tmp_path, hosted_workspace, monkeypatch, state_selection,
+):
     import signal
     import sys
 
     from agent_bridge.session_host.launcher import launch_session_host
 
+    state_dir = str(tmp_path)
+    if state_selection == "parent":
+        launch = tmp_path / "launch"
+        launch.mkdir()
+        monkeypatch.chdir(launch)
+        state_dir = "../state"
     handle = await asyncio.to_thread(
         launch_session_host, [sys.executable, "-c", _STREAMER],
-        state_dir=str(tmp_path),
-        cwd=str(tmp_path),
+        state_dir=state_dir, cwd=str(hosted_workspace),
     )
     try:
         assert handle.child_pid > 0 and handle.port > 0
@@ -2707,6 +2906,32 @@ async def test_launch_session_host_process_owns_child(tmp_path):
             import os as _os
             with contextlib.suppress(Exception):
                 _os.kill(handle.child_pid, signal.SIGKILL)
+
+
+def test_launch_session_host_linked_state_root_refuses_before_spawn(tmp_path, monkeypatch):
+    import sys
+
+    from agent_bridge.session_host import launcher
+
+    state = tmp_path / "state"
+    state.mkdir()
+    linked = tmp_path / "linked"
+    try:
+        linked.symlink_to(state, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"native directory symlink unavailable: {error}")
+    spawned = []
+
+    def forbidden(*args, **kwargs):
+        spawned.append(args)
+        raise AssertionError("linked state root reached process creation")
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", forbidden)
+    with pytest.raises((OSError, ValueError, RuntimeError)):
+        launcher.launch_session_host(
+            [sys.executable, "-c", "pass"], state_dir=str(linked),
+        )
+    assert spawned == []
 
 
 @pytest.mark.asyncio
@@ -2736,7 +2961,7 @@ async def test_host_rejects_wrong_nonce():
 
 
 @pytest.mark.asyncio
-async def test_local_spawner_secures_with_nonce(tmp_path):
+async def test_local_spawner_secures_with_nonce(tmp_path, hosted_workspace):
     """LocalSpawner mints a connect nonce; only a client presenting it can drive
     the spawned host (the P2a Spawner-seam + nonce, end to end)."""
     import signal
@@ -2744,7 +2969,9 @@ async def test_local_spawner_secures_with_nonce(tmp_path):
 
     from agent_bridge.session_host.spawner import LocalSpawner
 
-    spawned = await LocalSpawner().spawn([sys.executable, "-c", _STREAMER], cwd=str(tmp_path))
+    spawned = await LocalSpawner().spawn(
+        [sys.executable, "-c", _STREAMER], cwd=str(hosted_workspace),
+    )
     try:
         assert spawned.boundary == "local"
         assert spawned.nonce and spawned.local_port > 0
@@ -2812,7 +3039,7 @@ async def test_startup_poll_observes_readable_state_not_only_existence(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
+async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch, hosted_workspace):
     """The far-side runner resolves an agent locally, hosts it in a Session Host,
     and secures the endpoint with the nonce -- the program every boundary Spawner
     launches (elevation / ssh / CodeSpace), validated in-process."""
@@ -2877,6 +3104,109 @@ async def test_far_side_runner_resolves_and_hosts(tmp_path, monkeypatch):
                     _os.kill(child_pid, signal.SIGKILL)
 
 
+def test_session_host_bundle_preserves_procutil_and_portable_receiver_closures(tmp_path):
+    import ast
+    import zipfile
+    from pathlib import Path
+    from agent_procutil import no_window_kwargs
+    from agent_bridge.session_host import bundle
+
+    archive, _digest = bundle.build_session_host_bundle(tmp_path / "bundle")
+    with zipfile.ZipFile(archive) as contents:
+        names = set(contents.namelist())
+        for module in bundle._PROCUTIL_MODULES:
+            assert "agent_procutil/" + module in names
+        assert contents.read("agent_bridge/hosting_policy.py") == (
+            Path(bundle.__file__).with_name("receiver_policy.py").read_bytes()
+        )
+        procutil_root = Path(bundle.agent_procutil.__file__).resolve().parent
+        for module in bundle._PROCUTIL_MODULES:
+            for node in ast.walk(ast.parse((procutil_root / module).read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ImportFrom) and node.level == 1:
+                    dependencies = [node.module.split(".")[0]] if node.module else [
+                        alias.name for alias in node.names
+                    ]
+                    for dependency in dependencies:
+                        if (procutil_root / (dependency + ".py")).is_file():
+                            assert dependency + ".py" in bundle._PROCUTIL_MODULES
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-c",
+            "import sys;sys.path.insert(0,sys.argv[1]);"
+            "import agent_procutil.daemon_instances;"
+            "import agent_bridge.hosting_policy as policy;"
+            "import agent_bridge.session_host.launcher;"
+            "assert callable(policy.require_path_hosting);print('both-closures-ok')",
+            str(archive),
+        ],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "both-closures-ok"
+
+
+def _bundle_policy_owner(tmp_path, monkeypatch, *, allowed=True):
+    """Supply only the guest policy-owner contract, not an admission bypass."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    workspace = tmp_path / "fixture-workspace"
+    workspace.mkdir()
+    owner_dir = tmp_path / "fixture-owner"
+    owner_dir.mkdir()
+    expected = [
+        "agent-policy", "check", "--path", str(workspace),
+        "--operation", "launch", "--json",
+    ]
+    answer = {
+        "version": 1, "allowed": allowed, "repository": "fixture/workspace",
+        "expose_agent": allowed, "sources": [str(owner_dir / "policy.json")],
+        "denied_by": [] if allowed else ["fixture-policy"],
+    }
+    script = owner_dir / "policy-owner.py"
+    script.write_text(
+        "import json,sys\n"
+        f"assert sys.argv[1:] == {expected!r}, sys.argv[1:]\n"
+        f"print({json.dumps(answer)!r})\n",
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        (owner_dir / "agent-worktrees.cmd").write_text(
+            "@echo off\n" + subprocess.list2cmdline([sys.executable, str(script)]) + " %*\n",
+            encoding="utf-8",
+        )
+    else:
+        owner = owner_dir / "agent-worktrees"
+        owner.write_text("#!/usr/bin/env python3\n" + script.read_text(), encoding="utf-8")
+        owner.chmod(0o700)
+    monkeypatch.setenv("PATH", str(owner_dir) + os.pathsep + os.environ.get("PATH", ""))
+    return workspace
+
+
+def test_session_host_bundle_policy_refuses_denial(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    from agent_bridge.session_host.bundle import build_session_host_bundle
+
+    workspace = _bundle_policy_owner(tmp_path, monkeypatch, allowed=False)
+    path, _ = build_session_host_bundle(dest_dir=str(tmp_path / "bundles"))
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-c",
+            "import sys;sys.path.insert(0,sys.argv[1]);"
+            "from agent_bridge.hosting_policy import require_path_hosting;"
+            "require_path_hosting(sys.argv[2])",
+            str(path), str(workspace),
+        ],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode != 0
+    assert "did not return an explicit version-1 allow" in result.stderr
+
+
 @pytest.mark.asyncio
 async def test_session_host_bundle_runs_and_secures(tmp_path, monkeypatch):
     """The content-hashed zipapp bundle builds with a stable hash, runs as a host
@@ -2886,7 +3216,6 @@ async def test_session_host_bundle_runs_and_secures(tmp_path, monkeypatch):
     import signal
     import subprocess
     import sys
-    import shlex
 
     from agent_bridge.session_host.bundle import (
         build_session_host_bundle,
@@ -2898,34 +3227,12 @@ async def test_session_host_bundle_runs_and_secures(tmp_path, monkeypatch):
     # Stable + reused (the cache-by-hash property the CS relies on).
     assert build_session_host_bundle(dest_dir=str(tmp_path / "bundles")) == (path, sha)
 
-    # The synthetic far side still needs an enforcing repository-policy owner.
-    receiver = tmp_path / "policy-owner.py"
-    receiver.write_text(
-        "import json, sys\n"
-        "from repository_policy import require_agent_hosting\n"
-        "assert sys.argv[1:4] == ['agent-policy', 'check', '--path']\n"
-        "assert sys.argv[5] == '--operation' and sys.argv[7] == '--json'\n"
-        "policy = require_agent_hosting(sys.argv[4], operation=sys.argv[6])\n"
-        "print(json.dumps({'allowed': True, **policy.to_dict()}))\n",
-        encoding="utf-8",
-    )
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    if os.name == "nt":
-        owner = bin_dir / "agent-worktrees.cmd"
-        owner.write_text(f'@"{sys.executable}" "{receiver}" %*\r\n', encoding="utf-8")
-    else:
-        owner = bin_dir / "agent-worktrees"
-        owner.write_text(
-            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(receiver))} \"$@\"\n",
-            encoding="utf-8",
-        )
-        owner.chmod(0o755)
-    monkeypatch.setenv("PATH", str(bin_dir) + os.pathsep + os.environ.get("PATH", ""))
     sf = tmp_path / "state.json"
+    workspace = _bundle_policy_owner(tmp_path, monkeypatch)
     env = dict(os.environ, AGENT_BRIDGE_SESSION_HOST_NONCE="bundlenonce")
     proc = subprocess.Popen(
-        [sys.executable, "-S", str(path), "--port", "0", "--state-file", str(sf), "--cwd", str(tmp_path),
+        [sys.executable, "-S", str(path), "--port", "0", "--state-file", str(sf),
+         "--cwd", str(workspace),
          "--", sys.executable, "-c", _STREAMER], env=env)
     child_pid = None
     try:
@@ -3194,7 +3501,7 @@ def test_apply_host_survival_skips_when_contained(monkeypatch):
     assert not called
 
 
-def test_containment_reaps_real_session_host_tree(tmp_path, capfd):
+def test_containment_reaps_real_session_host_tree(tmp_path, capfd, hosted_workspace):
     import sys
     import time
     from pathlib import Path
@@ -3214,7 +3521,7 @@ def test_containment_reaps_real_session_host_tree(tmp_path, capfd):
         "from agent_bridge.session_host.launcher import launch_session_host;"
         "h=launch_session_host("
         "[sys.executable,'-c','import time;time.sleep(60)'],"
-        f"state_dir={str(state_dir)!r},ready_timeout=10);"
+        f"state_dir={str(state_dir)!r},cwd={str(hosted_workspace)!r},ready_timeout=10);"
         f"pathlib.Path({str(pid_file)!r}).write_text("
         "json.dumps({'host':h.host_pid,'child':h.child_pid}),encoding='ascii');"
         "root=pathlib.Path("
@@ -3259,7 +3566,7 @@ _STREAMER = (
 
 
 @pytest.mark.asyncio
-async def test_run_host_end_to_end_reattach(tmp_path):
+async def test_run_host_end_to_end_reattach(tmp_path, hosted_workspace):
     """run_host spawns a real child process; a front reattaches mid-stream."""
     import sys
 
@@ -3268,7 +3575,7 @@ async def test_run_host_end_to_end_reattach(tmp_path):
     task = asyncio.create_task(
         launcher.run_host(
             [sys.executable, "-c", _STREAMER],
-            port=0, state_file=str(state), ready=ready, cwd=str(tmp_path),
+            port=0, state_file=str(state), ready=ready, cwd=str(hosted_workspace),
         )
     )
     try:
@@ -3314,7 +3621,7 @@ async def test_run_host_end_to_end_reattach(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_run_host_persists_child_exit_state(tmp_path):
+async def test_run_host_persists_child_exit_state(tmp_path, hosted_workspace):
     """The host authority record stops claiming a dead child is running."""
     import sys
 
@@ -3323,7 +3630,7 @@ async def test_run_host_persists_child_exit_state(tmp_path):
     task = asyncio.create_task(
         launcher.run_host(
             [sys.executable, "-c", "raise SystemExit(7)"],
-            port=0, state_file=str(state), ready=ready, cwd=str(tmp_path),
+            port=0, state_file=str(state), ready=ready, cwd=str(hosted_workspace),
         )
     )
     try:
@@ -3416,7 +3723,7 @@ def test_host_record_from_state_file_protocol_version(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypatch):
+async def test_reattach_strands_then_reaps_incompatible_host(tmp_path, monkeypatch, hosted_workspace):
     """An incompatible-protocol host is left running while its child lives
     (goal 1), then reaped once the child stops -- the Phase-4 version-mux."""
     import os
@@ -3516,7 +3823,7 @@ def test_config_stale_reap_default_is_disabled():
 
 
 @pytest.mark.asyncio
-async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch):
+async def test_sweep_strands_then_force_reaps_over_bound(tmp_path, monkeypatch, hosted_workspace):
     """The periodic sweep leaves an incompatible host with a live child alone
     under the bound (goal 1), then force-reaps it once it outlives the bound."""
     import os
@@ -3832,7 +4139,7 @@ async def _wait_dead(pid, timeout=5.0):
 
 
 @pytest.mark.asyncio
-async def test_end_session_reaps_host(tmp_path, monkeypatch):
+async def test_end_session_reaps_host(tmp_path, monkeypatch, hosted_workspace):
     """end_session (the CLI `end` / DELETE) must REAP the host-backed child and
     drop the index record -- not detach-and-orphan like stop (#1786)."""
     import os
@@ -3876,7 +4183,7 @@ async def test_end_session_reaps_host(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
+async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch, hosted_workspace):
     """A live host whose session is gone (row deleted / pre-#1786 orphan) is
     reaped on reattach instead of leaking forever."""
     import os

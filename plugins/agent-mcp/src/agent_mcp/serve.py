@@ -28,6 +28,8 @@ keyed by bridge config, reused across requests.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import contextlib
 import json
@@ -90,6 +92,18 @@ log = logging.getLogger("agent-mcp.serve")
 _SWEEP_INTERVAL = 30.0  # seconds between idle sweeps
 _DEFAULT_IDLE_TIMEOUT = 300.0  # evict a warm session unused this long
 _LATE_LEASE_RETRY_INTERVAL = 1.0  # seconds between promoted-passive lease retries
+
+
+async def _join_cleanup(task: asyncio.Task) -> None:
+    interrupted = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            interrupted = True
+    await task
+    if interrupted:
+        raise asyncio.CancelledError
 
 # The serve IPC transport + client-attach primitives now live in agent_mcp.ipc
 # (stdlib-only) so the thin forwarder can import them without dragging in this
@@ -294,7 +308,7 @@ class Server:
                  control_port: int | None = None,
                  control_token: str | None = None,
                  version: str | None = None) -> None:
-        self.socket_path = Path(socket_path)
+        self.socket_path = Path(os.path.abspath(socket_path))
         self.pool = pool or WarmPool(idle_timeout=idle_timeout)
         self._idle_timeout = idle_timeout
         self._stop = asyncio.Event()
@@ -330,6 +344,9 @@ class Server:
         self._draining = False
         self._control_port_request = control_port
         self._control_server: asyncio.AbstractServer | None = None
+        self._connections: set[asyncio.Task] = set()
+        self._busy_connections: set[asyncio.Task] = set()
+        self._closing = False
         # A caller-supplied token (the cutover CLI injects one via
         # AGENT_MCP_CONTROL_TOKEN so it knows the token of a daemon it spawns
         # *before* that daemon publishes anything) always wins; otherwise mint
@@ -355,8 +372,10 @@ class Server:
 
     async def _handle(self, reader: asyncio.StreamReader,
                       writer: asyncio.StreamWriter) -> None:
+        owner = asyncio.current_task()
+        self._connections.add(owner)
         try:
-            while not reader.at_eof():
+            while not self._closing and not reader.at_eof():
                 line = await reader.readline()
                 if not line:
                     break
@@ -365,6 +384,7 @@ class Server:
                 except (ValueError, TypeError):
                     await self._send(writer, {"ok": False, "error": "invalid JSON"})
                     continue
+                self._busy_connections.add(owner)
                 # A full-session attach hands the whole connection over to a
                 # resident BridgeSession (the work-coalescing multiplexer, #744):
                 # after this the stream carries raw MCP JSON-RPC, not ops.
@@ -387,14 +407,18 @@ class Server:
                     return
                 resp = await self._dispatch(req)
                 await self._send(writer, resp)
+                self._busy_connections.discard(owner)
                 if req.get("op") == "shutdown" and resp.get("ok"):
                     self._stop.set()
                     break
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            with contextlib.suppress(Exception):
-                writer.close()
+            self._busy_connections.discard(owner)
+            try:
+                await _join_cleanup(asyncio.create_task(aclose_writer(writer)))
+            finally:
+                self._connections.discard(owner)
 
     async def _dispatch(self, req: dict) -> dict:
         # Loopback-TCP transport: authorize every request against the daemon's
@@ -523,10 +547,7 @@ class Server:
             try:
                 cleanup = asyncio.create_task(session.aclose())
                 try:
-                    await asyncio.shield(cleanup)
-                except asyncio.CancelledError:
-                    await asyncio.gather(cleanup, return_exceptions=True)
-                    raise
+                    await _join_cleanup(cleanup)
                 except Exception as exc:
                     log.warning("session aclose error for %s: %s", bridge, exc)
             finally:
@@ -608,13 +629,17 @@ class Server:
                      "single-instance lease; one-host-per-home restored")
             return
 
+    @daemon_entrypoint(
+        "agent-mcp", source=__file__, purpose="production",
+        runtime_root=lambda self: self.socket_path.parent,
+    )
     async def serve_forever(self) -> None:
         # Take the single-instance lease before binding so a losing host never
         # touches the winner's socket handle. Standing down is a clean no-op exit.
         if not self._acquire_lease():
             return
-        self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            self.socket_path.parent.mkdir(parents=True, exist_ok=True)
             if _HAS_AF_UNIX:
                 # Clear a stale socket from a previous run (safe: we hold the
                 # lease). Path.exists() follows symlinks and returns False for
@@ -646,30 +671,31 @@ class Server:
             # _start_control_listener() itself, before the sweep loop or the
             # stop-wait ever start. `_stop_control_listener()` is a safe no-op
             # if the control listener never finished binding.
+            sweeper = late_lease = None
             try:
                 await self._start_control_listener()
                 sweeper = asyncio.create_task(self._sweep_loop())
                 late_lease = asyncio.create_task(self._late_lease_loop())
-                try:
-                    await self._stop.wait()
-                finally:
-                    sweeper.cancel()
-                    late_lease.cancel()
-                    # Await both after cancelling: under asyncio.run() an
-                    # unawaited cancelled task can log "Task was destroyed
-                    # but it is pending" and skip any cleanup inside the
-                    # coroutine (e.g. a late_lease retry mid-acquire). Errors
-                    # from cancellation itself are expected and swallowed.
-                    await asyncio.gather(sweeper, late_lease,
-                                        return_exceptions=True)
+                await self._stop.wait()
             finally:
-                self._server.close()
-                await self._server.wait_closed()
-                await self._stop_control_listener()
-                await self.pool.close_all()
-                self._cleanup_endpoint()
+                await _join_cleanup(asyncio.create_task(self._close(sweeper, late_lease)))
         finally:
             self._release_lease()
+
+    async def _close(self, sweeper, late_lease) -> None:
+        self._closing = True
+        self._server.close()
+        if self._control_server is not None:
+            self._control_server.close()
+        background = {task for task in (sweeper, late_lease) if task is not None}
+        connections = set(self._connections)
+        for task in background | (connections - self._busy_connections):
+            task.cancel()
+        await asyncio.gather(*background, *connections, return_exceptions=True)
+        await self._server.wait_closed()
+        await self._stop_control_listener()
+        await self.pool.close_all()
+        self._cleanup_endpoint()
 
     async def _start_control_listener(self) -> None:
         """Bind the always-on lifecycle control listener (loopback TCP),
@@ -758,8 +784,10 @@ class Server:
         """Serve the lifecycle control op set: ``ping``, ``drain``, ``undrain``,
         ``shutdown``. Deliberately does not carry ``call``/``list``/``attach`` --
         those stay data-plane-only; control exists purely for cutover signaling."""
+        owner = asyncio.current_task()
+        self._connections.add(owner)
         try:
-            while not reader.at_eof():
+            while not self._closing and not reader.at_eof():
                 line = await reader.readline()
                 if not line:
                     break
@@ -768,15 +796,21 @@ class Server:
                 except (ValueError, TypeError):
                     await self._send(writer, {"ok": False, "error": "invalid JSON"})
                     continue
+                self._busy_connections.add(owner)
                 resp = self._control_dispatch(req)
                 await self._send(writer, resp)
+                self._busy_connections.discard(owner)
                 if req.get("op") == "shutdown" and resp.get("ok"):
                     self._stop.set()
                     break
         except (ConnectionResetError, BrokenPipeError):
             pass
         finally:
-            await aclose_writer(writer)
+            self._busy_connections.discard(owner)
+            try:
+                await _join_cleanup(asyncio.create_task(aclose_writer(writer)))
+            finally:
+                self._connections.discard(owner)
 
     def _control_dispatch(self, req: dict) -> dict:
         if req.get("token") != self._control_token:

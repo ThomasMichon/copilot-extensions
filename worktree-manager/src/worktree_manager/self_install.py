@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import worktree_manager
+from .source_config import default_root as default_root
 
 MARKER = "current-version"
 VERSIONS_DIR = "versions"
@@ -122,15 +123,6 @@ def fetch_remote_version(
         return None
     m = _VERSION_RE.search(text)
     return m.group(1) if m else None
-
-
-def default_root() -> Path:
-    """Install root, mirroring ``~/.agent-worktrees`` for the core installer."""
-    env = os.environ.get("WORKTREE_MANAGER_ROOT")
-    if env:
-        return Path(env)
-    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
-    return home / ".worktree-manager"
 
 
 def local_bin() -> Path:
@@ -752,19 +744,27 @@ def _complete_candidate(
 ) -> SelfInstallResult:
     slot = ready.slot
     version = payload_version(payload)
-    if before_publish is not None:
-        before_publish()
-    cleaned = tuple(clean_legacy_artifacts(root))
-    stubs = _deploy_binstubs()
-    _write_control_plane_provider_manifest(payload, root=root)
+    cleaned: tuple[str, ...] = ()
+    stubs: list[Path] = []
+
+    def publish_frontdoors() -> None:
+        nonlocal cleaned, stubs
+        publication = installer.runtime._runtime_component("versioned_runtime_publication")
+        targets = [*(local_bin() / name for name in _binstub_files()),
+                   _control_plane_provider_manifest_path(payload, root=root)]
+        with publication.target_leases(root, targets):
+            if before_publish is not None:
+                before_publish()
+            cleaned = tuple(clean_legacy_artifacts(root))
+            stubs = _deploy_binstubs()
+            _write_control_plane_provider_manifest(payload, root=root)
+
     installer = _runtime_installer()
-    if transactional_activation:
-        installer.activate(
-            root, slot.name, expected=previous,
-            after_publish=(lambda: after_activate(slot)) if after_activate is not None else None,
-        )
-    else:
-        installer.activate(root, slot.name, expected=previous)
+    installer.activate(
+        root, slot.name, expected=previous, before_publish=publish_frontdoors,
+        after_publish=(lambda: after_activate(slot))
+        if transactional_activation and after_activate is not None else None,
+    )
     if after_activate is not None and not transactional_activation:
         after_activate(slot)
     return SelfInstallResult(
@@ -780,9 +780,10 @@ def self_install(
     *,
     root: Path | None = None,
     dry_run: bool = True,
-    _after_activate=None,
-    _before_publish=None,
-    _transactional_activation: bool = False,
+    _after_activate=None, _before_publish=None,
+    _transactional_activation: bool = False, _reconcile_instances: bool = True,
+    _wheel_inputs=None, _local_packages: tuple[str, ...] | None = None, _validate_candidate=None,
+    _raise_candidate_errors: bool = False, _base_python: Path | None = None, _uv: Path | None = None,
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     r = (root or default_root()).resolve()
@@ -806,14 +807,28 @@ def self_install(
                                      slot=str(slot), reason="dry-run", cleaned=would_clean)
         previous = current_version(r)
         was_current = not needs_install(version, r)
-        with installer.candidate(pd, r, assemble=_copy_payload) as ready:
+        if _reconcile_instances and not (
+            os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+            or os.environ.get("PYTEST_CURRENT_TEST")
+        ):
+            from installer_instance_reconcile import reconcile_installer_instances
+
+            reconcile_installer_instances(running_payload_dir() / "scripts")
+        candidate_options = {key: value for key, value in (
+            ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
+            ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),
+        ) if value is not None}
+        with installer.candidate(pd, r, assemble=_copy_payload, **candidate_options) as ready:
             slot = ready.slot
             return _complete_candidate(
-                ready, pd, r, previous=previous, was_current=was_current,
+                ready, pd, r, previous=previous,
+                was_current=was_current or (_wheel_inputs is not None and previous == slot.name),
                 before_publish=_before_publish, after_activate=_after_activate,
                 transactional_activation=_transactional_activation,
             )
     except (OSError, ImportError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        if _raise_candidate_errors:
+            raise
         return SelfInstallResult(
             version=version, action="error", root=str(r), slot=str(slot), reason=str(error),
         )
@@ -990,7 +1005,8 @@ def self_update(
 ) -> SelfUpdateResult:
     """Fetch and version-install the Manager through its existing source authority.
 
-    Fetch uses Git or GitHub codeload; non-GitHub sources without Git are skipped.
+    Dev uses clean, merged Git acquisition and the running Manager's preparer.
+    Other refs use Git or GitHub codeload; non-GitHub sources without Git are skipped.
     Prepared source payloads select their exact immutable generation, not merely
     an equal package version. A healthy matching selection can be reused.
 
@@ -1007,15 +1023,26 @@ def self_update(
     previous = current_version(r)
 
     staging = r / STAGING_DIR
+    payload = staging / "worktree-manager"
     use_git = shutil.which("git") is not None
     try:
         from . import engine_client, source_config, update_auth
 
         repo = source_config.absolute_local_source(repo)
-        staging.mkdir(parents=True, exist_ok=True)
-        auth_env = update_auth.environment(repo, cwd=staging) if use_git else None
+        if ref == "dev" and not use_git:
+            return SelfUpdateResult(
+                action="skipped", previous=previous,
+                reason="Manager merged-Dev acquisition requires git; no unqualified tarball fallback",
+            )
+        fetch_root = r / "manager-source" if ref == "dev" else staging
+        fetch_root.mkdir(parents=True, exist_ok=True)
+        auth_env = update_auth.environment(repo, cwd=fetch_root) if use_git else None
         environment = {"env": auth_env} if auth_env is not None else {}
-        if use_git:
+        if ref == "dev":
+            from .runtime_source_self_update import fetch
+
+            payload = fetch(repo, r, environment=auth_env)
+        elif use_git:
             if (staging / ".git").is_dir():
                 subprocess.run(["git", "-C", str(staging), "fetch", "--depth", "1",
                                 repo, ref], check=True, capture_output=True,
@@ -1040,11 +1067,10 @@ def self_update(
             _fetch_via_tarball(staging, url)
     except update_auth.AuthRequired as e:
         return SelfUpdateResult(action="auth_required", previous=previous, reason=str(e))
-    except (OSError, subprocess.SubprocessError, engine_client.EngineError) as e:
+    except (OSError, ValueError, subprocess.SubprocessError, engine_client.EngineError) as e:
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetch failed: {e}")
 
-    payload = staging / "worktree-manager"
     if not (payload / "pyproject.toml").is_file():
         return SelfUpdateResult(action="error", previous=previous,
                                 reason=f"fetched payload not found at {payload}")

@@ -18,7 +18,7 @@ TIMEOUT = "timeout"
 COMMAND_FAILED = "command_failed"
 SKIPPED = "skipped"
 
-# Higher is worse. ``skipped`` has no severity: it never affects a fold.
+# Higher is worse. Target skips are neutral; an explicit final skip retains scope.
 SEVERITY = {
     VERIFIED_CURRENT: 0,
     REQUIRES_RESTART: 1,
@@ -52,6 +52,7 @@ EXIT_INTERRUPTED = 130
 EXIT_CODES = {
     VERIFIED_CURRENT: 0,
     REQUIRES_RESTART: 0,
+    SKIPPED: 0,
     COMMAND_FAILED: 1,
     CONFIGURATION_LIMITATION: 3,
     AUTH_REQUIRED: 4,

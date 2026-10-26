@@ -10,6 +10,7 @@ import sys
 from agent_procutil import no_window_kwargs
 
 from .source_layout import SourceLayoutError
+from .content_fts_coverage import _ContentFtsCoverageMixin
 
 
 def fts_retryable(message: str) -> bool:
@@ -18,7 +19,7 @@ def fts_retryable(message: str) -> bool:
     return "retryable" in message or "commit conflict" in message
 
 
-class _ContentFtsWorkerMixin:
+class _ContentFtsWorkerMixin(_ContentFtsCoverageMixin):
     """Own child-process execution and file-lock lifetime; state stays on the store."""
 
     @contextlib.contextmanager
@@ -98,6 +99,8 @@ class _ContentFtsWorkerMixin:
         raise, causing the subprocess to exit non-zero and the caller's
         existing retry/backoff logic to treat it as a genuine failure.
         """
+        if not full and self.fts_current():
+            return
         if self._source_domain is not None:
             with self._source_domain.fts_handoff() as nonce:
                 code = (

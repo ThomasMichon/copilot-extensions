@@ -28,6 +28,17 @@ def _target_scope(payload, *, manifest=None):
     return scope
 
 
+def isolated_engine_step(step):
+    # The actual execution source may be a separately prepared payload.
+    for extension in ("sh", "ps1"):
+        script = step.artifact / "scripts" / f"install.{extension}"
+        if not script.is_file() or "AGENT_WORKTREES_TARGETED_UPDATE" not in script.read_text("utf-8"):
+            raise ValueError("Installed engine installer lacks targeted-update support; update the suite first")
+    return dataclasses.replace(step, environment={
+        **step.environment, "AGENT_WORKTREES_TARGETED_UPDATE": "1",
+    })
+
+
 def target_plan(name, target):
     payload = reconcile.core_installed_payload_dir(name)
     if payload is not None:
@@ -38,15 +49,7 @@ def target_plan(name, target):
         if payload is None:
             raise ValueError("Engine payload is missing; use the explicit setup/repair flow")
         step = update_runtime_plan.plan_engine(payload, platform, force=False)
-        # Old installers recover Manager as a finishing effect. Never pass them
-        # a scoped request: the provider must advertise the narrow contract.
-        for extension in ("sh", "ps1"):
-            script = payload / "scripts" / f"install.{extension}"
-            if not script.is_file() or "AGENT_WORKTREES_TARGETED_UPDATE" not in script.read_text("utf-8"):
-                raise ValueError("Installed engine installer lacks targeted-update support; update the suite first")
-        return dataclasses.replace(step, environment={
-            **step.environment, "AGENT_WORKTREES_TARGETED_UPDATE": "1",
-        })
+        return isolated_engine_step(step)
     engine = reconcile.core_installed_payload_dir(reconcile.SELF_PLUGIN)
     if engine is not None and name in update_options._module_dirs(engine) and _target_scope(payload) != "none":
         step = update_runtime_plan.plan_module(
@@ -72,6 +75,7 @@ def _target(name, targets):
 
 def inventory():
     from .update_runtime_source import SOURCES_CONTRACT, SOURCES_SCHEMA
+    from .update_runtime_target import TARGET_CONTRACT, TARGET_SCHEMA
 
     targets = update_runtime._registered_plugin_targets()
     names = set(targets) | {name for name, _ in reconcile.discover_core_payload_dirs()}
@@ -116,7 +120,10 @@ def inventory():
     return {
         "contract": TARGET_CONTRACT, "entries": rows,
         "execution_source": str(config.install_dir().resolve()),
-        "runtime_sources": {"schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT},
+        "runtime_sources": {
+            "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
+            "target_contract": {"schema": TARGET_SCHEMA, "version": TARGET_CONTRACT},
+        },
     }
 
 

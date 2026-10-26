@@ -5,7 +5,7 @@
 - **Branch(es):** serial, independently reviewed slices targeting `dev`
 - **Created:** 2026-10-24
 - **Status:** Active
-- **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
+- **Vision:** `visions/session-hosting/README.md` - installation-independent-running-sessions; `visions/plugin-services/disposable-runtimes/README.md` - shared-maintenance-banner and service-independent-agent-standby; `visions/plugin-services/README.md` - process-count-scales-with-services-not-sessions and hooks-and-callbacks-are-transient
 - **Umbrella issue:** #8669
 - **Related issues:** #5579 (existing launch-depth owner), #8410 (Linux uninstall), #8312 (Windows updater handoff), #8864 (supported Manager uninstall)
 
@@ -22,6 +22,13 @@ Completion means production implementation plus actual same-process,
 interactive survival and correct final lifecycle handling across real
 uninstall/reinstall and update, not a copied-fixture demonstration or a merged
 source change alone.
+
+During an intentional maintenance window, the surviving agent can understand
+why its tools disappeared without invoking those tools. It preserves progress
+and obligations, pauses affected operations, reads the local-machine banner
+through native facilities, waits for the window to clear, and resumes against
+the restored capabilities. Maintenance-aware standby complements process
+survival; neither substitutes for the other.
 
 ## Participants
 
@@ -46,8 +53,15 @@ source change alone.
   and the current journal; preserve open PRs, test resources and unresolved
   lifecycle effects. A phase or release is not whole-effort completion.
 - No host uninstall, shared-daemon restart or installed rollout is authorized
-  merely by this plan. Destructive tests use explicitly disposable roots and
-  owned processes. Installed acceptance uses the target's normal approval flow.
+  merely by this plan. The operator subsequently authorized one selected live
+  Windows test host for the [live round trip](live-roundtrip.md), including
+  backups, uninstall/reinstall, re-release and necessary promotion fixes.
+  This does not authorize effects on other hosts or waive repository, OS
+  privilege, connectivity, custody or data-preservation gates.
+- Reuse #9022's conduct-guidance companion and #9040's reviewed shared YAML
+  banner contract, including their retained automatic-maintenance owners.
+  This effort integrates standby with session survival; it does not introduce
+  a second banner, scheduler, updater or maintenance authority.
 
 ## Context
 
@@ -92,9 +106,34 @@ The selected contract and its explicitly agent-recommended refinements are in
 [manager-uninstall.md](manager-uninstall.md). This adds a prerequisite, not a
 replacement for the continuing installation-survival objective.
 
+**2026-10-25 priority and maintenance-window direction (summary):** prioritize
+this isolation work and extend the vision so an agent whose supporting tools
+disappear can pause, read a local-machine maintenance banner without those
+tools, wait while the YAML window is active, and resume once it clears.
+The [literal follow-up](inception-transcript.md#operator---priority-and-maintenance-window)
+is retained without converting the priority statement into permission for a
+host update, removal or rollout.
+
+The standing intent already includes this extension through reviewed #9042.
+The existing [shared YAML banner contract](../source-managed-runtime-installs/maintenance-banner.md)
+is the implementation-contract owner. Its explicit same-window completion and
+native 30-minute standby policy are **agent-recommended bindings**, not extra
+literal requirements added to this request.
+
 The detailed fencing, negative controls and rollout admission below are
 **agent-recommended implementation/validation refinements**, not additional
 verbatim operator requirements.
+
+**2026-10-26 selected live-host direction (summary):** use the explicitly
+selected Windows test machine to audit the install footprint, separate durable
+state from reconstructible runtime data, back up the data first, and carefully
+uninstall services/tools while preserving SSH-Gateway connectivity and muxed
+Copilot. Prove a clean middle, then reinstall and reconnect to the retained data
+so execution carries on. The operator explicitly authorized uninstall,
+reinstall, re-release and necessary Main-promotion workflow repairs until this
+round trip works. The [literal follow-up](inception-transcript.md#operator---selected-live-test-host)
+redacts only the private host name. Concrete host identity and operational
+records remain private; the generic execution contract is [live-roundtrip.md](live-roundtrip.md).
 
 ## Plan
 
@@ -114,7 +153,7 @@ verbatim operator requirements.
 
 ### Phase 2 - Literal disposable-installation reproduction
 
-- [ ] Review and implement the supported Manager uninstall prerequisite
+- [x] Review and implement the supported Manager uninstall prerequisite
   (#8864) in [manager-uninstall.md](manager-uninstall.md), then return to this
   same real-removal baseline.
 - [ ] Reproduce current behavior with real installed A, an interactive owned
@@ -153,12 +192,33 @@ verbatim operator requirements.
 - [ ] Fix failures found in the touched contract; transfer only genuinely
   independent work to named tracked objectives without dropping acceptance.
 
+### Phase 4b - Maintenance-aware session standby
+
+- [x] Reconcile the expanded request with the already reviewed disposable-runtime
+  vision and shared YAML-banner proposal; retain #9022/#9040 and existing
+  maintenance implementation ownership rather than opening a competing design.
+- [ ] Coordinate the YAML reader/guidance migration with those owners before
+  exercising it. The earlier JSON-only source guidance is not YAML capability
+  or evidence of delivery to an already-running session.
+- [ ] Integrate the normal conduct projection and native-tool banner read with
+  the actual surviving Copilot session; no runtime, service, command, network
+  path or credential broker under maintenance may be needed to enter standby.
+- [ ] Preserve progress, exact launch identity, claims and pending effects while
+  affected operations pause. Do not reinstall, reprovision, repeatedly retry
+  missing commands, launch replacement agents or take over the maintenance.
+- [ ] Exercise the reviewed native standby/all-clear contract, then refresh
+  selected invocation/capability evidence before resuming. Clearing the banner
+  does not replay unknown mutations or enable independently disabled policy.
+
 ### Phase 5 - Release, installed acceptance and closure
 
 - [ ] Verify containing normal Main release and exact released behavior.
 - [ ] Obtain any required selected-host rollout approval, use the canonical
   updater, and validate a fresh native launch/exit. Existing sessions may
   still carry their older wrapper and are not rollout evidence.
+- [ ] Execute the explicitly authorized selected-host [live round trip](live-roundtrip.md):
+  protected connectivity and consistent backups first, attributable removal,
+  recorded clean middle, reinstall/state reconciliation and same-session proof.
 - [ ] Re-read every Plan/Validation item, promote durable truth to owner docs,
   settle owned test/PR resources, mark Done and archive through normal review.
 
@@ -194,11 +254,28 @@ operator's installation-survival contract.
 - [ ] Removing the containing wrapper genuinely tears down its owned children
   where required; survival is not achieved by discarding kernel containment.
 - [ ] Measure persistent process ancestry and boundary latency; no new resident
-  waiter, polling loop or unowned detached process replaces the removed coupling.
+  waiter, helper polling loop or unowned detached process replaces the removed
+  coupling. Sparse native agent standby prompts are a separate maintenance
+  behavior, not a resident session-lifetime dependency.
+- [ ] The same running agent receives usable guidance before an intentional
+  outage, detects missing tools, reads the retained YAML banner natively, pauses
+  affected operations and waits without repair or dependency on the removed
+  payload, service, binstub or credential broker.
+- [ ] In isolated Windows/Linux maintenance controls, the reviewed single native
+  standby poll reports material changes without a helper daemon or busy loop.
+  Unavailable native scheduling is explicit rather than silently substituted.
+- [ ] An active, stale, malformed, unreadable or replaced window cannot
+  accidentally release an established hold. Applicable clearance ends only the
+  owned standby poll; restored capability is verified before continuation,
+  independent disables stay disabled, and unknown effects are not replayed.
 - [ ] Existing exit-noise controls still pass: successful finalization stays
   quiet, cleanup remains a bounded summary and updated batch tails remain valid.
 - [ ] Normal release, explicitly approved selected-host installed validation,
   durable evidence and final effort review pass before declaring Done.
+- [ ] Selected live host: verified restorable backups precede removal;
+  SSH-Gateway and the same mux/Copilot processes remain usable at every phase;
+  owned runtime/services are absent at the clean middle with explicit protected
+  exceptions; reinstall preserves durable state and pending-effect custody.
 
 ## Proposal
 
@@ -213,7 +290,26 @@ end semantics. The actual uninstall test decides whether the mux executable,
 wrapper or inherited process resources still depend on removable installations.
 Keeping a version directory alive is not an acceptable substitute.
 
+The maintenance strategy consumes the existing shared banner and normally
+projected conduct guidance. Its outage explanation and hold remain readable
+outside removable supporting installations. It adds no new execution authority,
+and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
+notice; the existing bounded/quiet absent-handler contract remains intact.
+
 ## Journal
+
+### 2026-10-26 - Selected live-host round trip authorized
+
+- The operator selected one live Windows test host and explicitly authorized
+  audit, state separation, backups, careful uninstall/reinstall, re-release and
+  necessary Main-promotion repairs until a real clean-middle round trip works.
+  Preserve SSH-Gateway connectivity and muxed Copilot; no other host is covered.
+- Added the generic live-roundtrip charter and validation obligations for
+  review before effects. Read-only preflight reached the declared host through
+  its existing Gateway forward; the remote shell is not elevated.
+- No host files, services, installations or maintenance banner have been
+  changed. The supported Manager uninstall prerequisite is source-merged;
+  the complete parent process-survival and maintenance-standby gates remain open.
 
 ### 2026-10-24 - Canonical proposal
 
@@ -409,3 +505,121 @@ Keeping a version directory alive is not an acceptable substitute.
   and qualify supported Manager removal, then resume the same real interactive
   two-product baseline and production copied-wrapper/current-handler work.
   The parent effort, release and approved installed validation remain open.
+
+### 2026-10-25 - Native argument prerequisite merged
+
+- #8906 merged as `bea4d7bb70c2ec727b2f38caeff9ec84eaca26c2` after
+  exact-head approval without findings and required green CI. The fresh
+  Windows run `40173234492` exercised published source
+  `cbd2966ed527b29cc37579685e8e6d2b0a4993d6`: all three real PSMux
+  controls passed without skips, including both file-based producers and
+  owned teardown. The rebased ordinary pane packet also passed 53 tests;
+  both workflow-contract checks and the install-contract guard passed.
+- Re-read the parent plan after merge. This closes only the literal Windows
+  argument-delivery prerequisite. It does not implement the copied shell,
+  current start/end handlers, actual two-product removal, update survival,
+  release or approved selected-host validation.
+- The first supported Manager uninstall implementation is under integration
+  review. Its focused ownership/custody controls pass, but real installed
+  removal on Linux/Windows, mixed-version controls and full assembly
+  validation are still required before returning to the interactive baseline.
+
+### 2026-10-25 - Priority resumed with maintenance-window intent
+
+- The operator prioritized installation-independent sessions and added
+  local-machine maintenance notification, native standby and resumption after
+  the YAML window clears. The literal follow-up is in the inception transcript.
+- Reconciled the canonical source workspace through guarded sync, preserving
+  the committed parent journal. Found #9036's already merged JSON-only conduct
+  guidance and #9042's reviewed disposable-runtime/shared-YAML vision and plan.
+  Reuse those owners and contracts; do not create another banner or protocol.
+- The expanded Plan and Validation Plan connect actual process survival to
+  tool-independent banner reading, preserved obligations, sparse native standby
+  and safe capability revalidation after clearance. Normal guidance delivery
+  and native behavior still need proof; reviewed intent alone is not acceptance.
+- Supported Manager uninstall remains a prerequisite. Its three review fixes
+  are committed locally but unpublished; the Windows synthetic-payload fixture
+  timeout and revised native qualification remain unresolved. This update
+  neither declares them passing nor authorizes host maintenance or rollout.
+
+### 2026-10-24 - Uninstall contract reviewed
+
+- #8871 merged after an exact-head Copilot approval with no open issues and
+  successful required CI. Managed completion used the live-confirmed
+  Maintainer exception for an additional CODEOWNER approval; no CI or reviewer
+  finding was bypassed.
+- Re-read the parent plan and prerequisite after merge. #8864 remains open:
+  the contract is reviewed, but implementation, actual Linux/Windows removal
+  and the parent installation-survival acceptance are still outstanding.
+- Next, inventory the concrete installer/ownership/lifecycle seams and
+  implement the smallest supported removal operation. No operator-host
+  uninstall, live-session intervention or rollout follows from plan approval.
+
+### 2026-10-26 - Maintenance integration intent merged
+
+- #9045 merged as `2687e35fa9216bb93c0907d4547d5f1b264e8ae2` after
+  exact-head Copilot approval with no findings and required green CI. The
+  managed merge used the repository-authorized exception for an additional
+  CODEOWNER vote, not a waiver of findings or status checks.
+- Re-read the canonical Plan and Validation Plan after guarded pull-forward.
+  The maintenance extension is reviewed intent only: normal YAML guidance
+  delivery, native standby and safe resumption remain unchecked, as do the
+  original actual two-product session-survival gates.
+- Resume the supported Manager uninstall prerequisite first. Preserve its
+  three review fixes while reconciling current native qualification portfolios;
+  resolve the real test failure and rerun changed-head native acceptance before
+  returning to production wrapper/current-handler migration.
+
+### 2026-10-26 - Supported Manager uninstall source merged
+
+- #8955 merged as `c2cc00e92b47f1e9036b3ae4d9e8f329ee796309` after
+  exact-head Copilot approval, resolution of every review thread and required
+  green CI. The metadata-triggered CI run also passed before managed completion;
+  the repository-authorized additional-CODEOWNER exception did not waive CI.
+- Qualified source `0d78da44bffbb5120fc45d4b1e0fcefc1d21f9d6` passed
+  203 affected Windows tests with three POSIX-only skips, all 206 Linux tests
+  without skips, and actual installed daemon/configuration-list/removal/reinstall
+  flows on both platforms. The fresh Windows lane was `40292624279`; the
+  Linux native test passed in 58.20 seconds. Artifact and installed/source
+  identities, durable-state bytes and exact disposable cleanup were verified.
+- This closes the supported-uninstaller source prerequisite only. Normal
+  containing release, approved installed acceptance, actual same-process
+  interactive two-product survival, copied wrappers/current handlers and YAML
+  maintenance standby remain open.
+- Re-read the canonical Plan and Validation Plan. Return to the real
+  interactive baseline and current launch-contract inventory, preserving
+  #5579's forwarding ownership. Do not treat this merged prerequisite as
+  completion or retire the continuing parent worktree.
+
+### 2026-10-26 - Real interactive baseline and read-only probe repair
+
+- The supported Manager uninstaller from #8955 is merged. A disposable ARM64
+  Linux container installed Manager and Worktrees non-editably at merged
+  source `e4dcb7226c2b928d53f4cd0ba184b1f1619d7ee5`, then ran the actual
+  installed Manager launch script with a terminal attachment. The observed
+  mux server, installed pane shell and native Copilot remained live while a
+  literal no-tools witness answered the initial readiness prompt.
+- The uninstall preview refused before reaching quiescence. The launch-time
+  maintenance policy probe had created three bytecode files and their cache
+  directory inside the sealed Manager payload. Original file bytes and
+  inventory identities were unchanged. Do not weaken the inventory check,
+  delete the cache manually, or label that refusal a survival pass.
+- The bounded repair disables bytecode writes in the probe before its first
+  Manager import. Four subprocess controls exercise absent, enabled, disabled
+  and malformed policy twice with the runner's bytecode environment ignored.
+  They preserve payload bytes and the existing exit codes and diagnostics.
+- Extended native uninstall acceptance executes the real installed probe
+  with an external base interpreter and no bytecode-disable flag, compares
+  the sealed slot, and continues through actual removal and reinstall.
+  The native Windows cycle passed, including daemon start/stop, configuration
+  listing, unchanged durable data and idempotent repeated removal; the
+  combined bounded assertion run passed 32 tests.
+- The initial source-install clean-room failed because its base image lacked
+  the C compiler required by the native process helper. Providing the
+  explicitly recorded build prerequisites inside that disposable fixture
+  allowed the real installation. That is not pristine-image acceptance.
+- Actual removal of both systems around the interactive session, a copied
+  installation-independent shell, replacement-handler exit, the full suite,
+  shared YAML standby, native Windows survival and released/installed
+  acceptance remain open. The next slice resumes that same real-removal
+  baseline after the read-only probe repair.

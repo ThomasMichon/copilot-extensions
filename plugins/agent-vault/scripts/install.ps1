@@ -859,7 +859,7 @@ function Install-Runtime {
     }
 
     Invoke-VersionedSlotClean
-    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true -WithoutPip)) {
         Write-Fail "Failed to create venv at $VenvDir"
         exit 1
     }
@@ -1425,6 +1425,10 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 
 try {
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
+    if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
+        . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    }
     switch ($Action) {
         'install'   { Invoke-Install }
         'update'    { Invoke-Update }

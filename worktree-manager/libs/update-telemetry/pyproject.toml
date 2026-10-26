@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # dependency-confusion; the import module is ``update_telemetry``.
 # Mirrors agent-remote-login-shell / agent-procutil.
 name = "agent-update-telemetry"
-version = "0.1.0-dev1"
+version = "0.1.1-dev1"
 description = "Shared update-run telemetry (JSONL events, folded status file, exit codes) across Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

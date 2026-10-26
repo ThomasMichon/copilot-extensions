@@ -228,7 +228,7 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
         current = current.parent
 
 
-def _find_symlink(tree: Path) -> str | None:
+def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
     """The first path (relative to ``tree``, or ``"."`` when ``tree``
     itself is the symlink) under ``tree`` that is a symlink, or ``None`` if
     none is found. Mirrors ``materialize_main.py``'s and
@@ -239,12 +239,16 @@ def _find_symlink(tree: Path) -> str | None:
     somewhere below it (e.g. ``libs/<lib>/src/foo.py -> /external/file``)
     is a distinct hazard this catches: the live `uv`-editable reference
     would expose that nested link directly on `dev`, and a byte comparison
-    (``lib_tree_matches()``) would silently follow it too."""
+    (``lib_tree_matches()``) would silently follow it too. Unfiltered build
+    consumers set ``skip_test_runs=False``; filtered copies and hashes omit
+    that subtree before consuming any of its files."""
     if tree.is_symlink():
         return "."
     if not tree.is_dir():
         return None
     for entry in sorted(tree.rglob("*")):
+        if skip_test_runs and ".test-runs" in entry.relative_to(tree).parts:
+            continue
         if entry.is_symlink():
             return str(entry.relative_to(tree))
     return None
@@ -450,11 +454,13 @@ def _file_hashes(root: Path) -> dict[str, str]:
     *located* under a directory named e.g. ``build`` would have every
     file's ``.parts`` match that ancestor name too, silently emptying the
     whole result and making any two trees compare as falsely equal."""
-    ignored_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist"}
+    ignored_dirs = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".test-runs", "build", "dist"}
     out: dict[str, str] = {}
     if not root.is_dir():
         return out
     for f in root.rglob("*"):
+        if ".test-runs" in f.relative_to(root).parts:
+            continue
         if not f.is_file():
             continue
         rel_parts = set(f.relative_to(root).parts)

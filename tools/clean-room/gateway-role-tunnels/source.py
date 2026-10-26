@@ -15,15 +15,15 @@ from pathlib import Path, PurePosixPath
 PROOF = "tools/clean-room/gateway-role-tunnels/"
 IMAGE = "fleet-manager/containers/gateway/"
 PACKAGE_MODULES = frozenset("""
-__init__ __main__ allocation arc_owner artifact_staging artifacts client_activation client_admission client_command_removal client_construction client_deactivation client_diagnostics client_frontdoor client_recovery client_runtime_removal credential_references enrolled_identity
-gateway_auth gateway_broker gateway_client gateway_cloudflare gateway_contract gateway_controller
+__init__ __main__ allocation arc_owner artifact_staging artifacts client_activation client_admission client_command_removal client_construction client_deactivation client_diagnostics client_frontdoor client_recovery client_runtime_removal continuity_bootstrap credential_references enrolled_identity enrollment_journal
+gateway_auth gateway_broker gateway_client gateway_cloudflare gateway_contract gateway_controller gateway_enrollment
 gateway_identity_provider gateway_index gateway_local_handler gateway_manifest gateway_reconcile gateway_server
 gateway_service_caller gateway_service_channel gateway_service_connector gateway_service_context gateway_service_handler
 gateway_service_listener gateway_service_policy gateway_service_server
 gateway_ssh_policy gateway_ssh_provider gateway_ssh_runtime gateway_transport gateway_worker host_profile komodo_roles ledger
 loadout_gateway loadout_preparation loadout_sources loadout_templates loadouts
-node_journal observation_reader observation_store observations operations planning private_state release release_assembly release_auth
-release_selection reverse_listener_reservations role_bindings role_deployment role_plan runtime_admission runtime_identity ssh_directory staging_cleanup trusted_systemd_profile
+machine_identity node_journal observation_reader observation_store observations operations planning private_state release release_assembly release_auth
+release_selection reverse_listener_reservations role_bindings role_deployment role_plan runtime_admission runtime_identity ssh_approval ssh_directory ssh_machine ssh_machine_config staging_cleanup trusted_systemd_profile
 """.split())
 RESOURCES = frozenset("""
 standalone_build.py versioned_runtime.py versioned_runtime_leases.py
@@ -33,13 +33,28 @@ RUNNER_FILES = frozenset({
     "run.py", "source.py", "architecture.py", "engine.py", "witness.py",
     "fixture_auth.py", "fixture_service.py", "probe.py",
 })
+PROCUTIL_MODULES = frozenset("""
+__init__ _async _build_native _caller_owned _daemon_instance_child
+_daemon_instance_identity _daemon_instance_native _daemon_instance_owner
+_daemon_instance_store _darwin_caller_owned _interactive_groups
+_interactive_session _interactive_terminal _interpreter _linux_pidfd
+_windows_caller_owned daemon daemon_broker daemon_instances diagnostics
+interactive metrics metrics_accounting native_child owned_process startup streaming wsl
+""".split())
+PROCUTIL_RESOURCES = frozenset("""
+daemon_instance_native.c daemon_instances.ps1 daemon_instances.sh
+native_daemon.ps1 native_daemon.sh native_owned.ps1 native_owned.sh
+""".split())
 REQUIRED = frozenset({
     "fleet-manager/pyproject.toml", "fleet-manager/setup.py", "fleet-manager/README.md",
     *(f"fleet-manager/src/fleet_manager/{name}.py" for name in PACKAGE_MODULES),
     *(f"libs/versioned-runtime/{name}" for name in RESOURCES),
     "libs/installer-engine/installer_engine_process.py",
     "libs/installer-engine/runtime_launcher.py",
-    "libs/agent-procutil/src/agent_procutil/__init__.py",
+    "libs/agent-procutil/pyproject.toml", "libs/agent-procutil/setup.py",
+    "libs/agent-procutil/README.md",
+    *(f"libs/agent-procutil/src/agent_procutil/{name}.py" for name in PROCUTIL_MODULES),
+    *(f"libs/agent-procutil/src/agent_procutil/{name}" for name in PROCUTIL_RESOURCES),
     *(PROOF + name for name in RUNNER_FILES),
     IMAGE + "Dockerfile", IMAGE + "Dockerfile.dockerignore",
 })
@@ -123,6 +138,8 @@ def materialize(repository: Path, ref: str, run: Path) -> dict:
         mode, kind, oid = metadata.decode().split()
         if (name.startswith("fleet-manager/src/") and name not in REQUIRED):
             raise ProofError("unknown-package-source", "repo-config")
+        if name.startswith("libs/agent-procutil/src/") and name not in REQUIRED:
+            raise ProofError("unknown-procutil-source", "repo-config")
         if name in REQUIRED:
             if mode not in ("100644", "100755") or kind != "blob":
                 raise ProofError("source-not-regular-blob", "repo-config")

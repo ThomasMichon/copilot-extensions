@@ -46,6 +46,9 @@ def providers(monkeypatch, *, ready: bool = True) -> list[str]:
 @pytest.mark.parametrize("argv", [
     ["--repository-target", "somewhere"],
     ["--repository-target", ""],
+    ["--context", "harness-a"],
+    ["--repository", URL, "--context", ""],
+    ["--repository", URL, "--context", "../invalid"],
     ["--trust-repository-setup"],
     ["--repository-commit", "a" * 40],
     ["--repository", URL, "--repository-commit", ""],
@@ -179,8 +182,8 @@ raise SystemExit(repository.run(repository.parse([
     assert dict(os.environ) == before
 
 
-@pytest.mark.parametrize("pinned", [False, True])
-def test_prior_engine_parser_preserves_baseline_and_refuses_pin_without_replay(tmp_path, pinned) -> None:
+@pytest.mark.parametrize("selection", ["baseline", "pin", "context"])
+def test_prior_engine_parser_preserves_baseline_and_refuses_pin_without_replay(tmp_path, selection) -> None:
     engine = tmp_path / "prior engine.py"
     calls = tmp_path / "calls.json"
     effect = tmp_path / "effect"
@@ -209,16 +212,18 @@ raise SystemExit(repository.run(repository.parse([
 """
     result = subprocess.run(
         [sys.executable, "-c", driver, str(engine), str(calls), str(effect), URL,
-         *(["--repository-commit", "a" * 40] if pinned else [])],
+         *(["--repository-commit", "a" * 40] if selection == "pin" else []),
+         *(["--context", "harness-a"] if selection == "context" else [])],
         capture_output=True, text=True, timeout=120, **no_window_kwargs(),
     )
-    assert result.returncode == (2 if pinned else 0), result.stdout + result.stderr
-    assert effect.exists() is not pinned
+    assert result.returncode == (0 if selection == "baseline" else 2), result.stdout + result.stderr
+    assert effect.exists() == (selection == "baseline")
     invocations = [json.loads(line) for line in calls.read_text().splitlines()]
     assert len(invocations) == 1
-    if pinned:
-        assert "unrecognized arguments: --commit" in result.stderr
-        assert "--commit" in invocations[0]
+    if selection != "baseline":
+        flag = "--commit" if selection == "pin" else "--context"
+        assert "unrecognized arguments: " + flag in result.stderr
+        assert flag in invocations[0]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native windowless Manager boundary")

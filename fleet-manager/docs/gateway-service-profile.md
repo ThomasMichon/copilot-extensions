@@ -14,6 +14,10 @@ The command is a foreground service. The selected external deployment manager
 owns its supervision, storage and eventual lifecycle; CLI invocation does not
 install dependencies, enroll machines or open provider policies.
 
+The separate opt-in [machine-key and delegated continuity
+profile](continuity-bootstrap.md) adds same-owner first-touch caller enrollment
+and a normal setup consumer. It does not broaden the token profiles below.
+
 ## In-process deployment owners
 
 An SDK embedding may explicitly supply `local_handlers=(LocalHandlerBinding(...),)`
@@ -67,6 +71,10 @@ registration retires an agent lease or authorizes replacing an incumbent release
 
 ## Bootstrap and coherent live policy
 
+CLI and embedded startup bind the policy to its lexical absolute selection.
+Initial loading, later reloads and instance admission use that same path;
+normalizing parent components cannot make the reader follow a different tree.
+
 Listener configuration is strict bounded JSON with schema
 `fleet-manager.gateway-service-listener`, version `1`, stable `fleet`/`gateway`
 identifiers, `host`, `port`, `origin`, `certificate`, `key` and `remote`.
@@ -86,6 +94,12 @@ private-origin restrictions and the separate application-authentication boundary
 
 SDK tests may call `await start(Listener(...), policy_path)` with port zero;
 the returned handle supplies the actual origin, app and asynchronous `close()`.
+Embedded and app-runner startup acquire instance attribution before background
+reload or listener work. Production has no lease expiry; explicit test-owner
+contexts retain their test lease. Await `close()` to join complete cleanup:
+concurrent callers share one shielded cleanup task, and cancelling a waiter
+does not release admission while cleanup is still running. Nested CLI/app
+admission borrows the existing process record rather than creating a duplicate.
 Foreground CLI serving requires an explicitly selected nonzero port.
 Changing bootstrap/listener settings requires a controlled runtime change;
 ordinary service policy reload does not.
@@ -127,9 +141,13 @@ its channel across unrelated updates; changed slots or caller grants lose their
 old handles. Changed issuer trust replaces its nonce epoch and invalidates
 previous handles/proofs rather than resetting replay state under old authority.
 
-Revision custody remains process-local. The source/lifecycle owner must retain
+Without the enrollment envelope, revision custody remains process-local.
+The source/lifecycle owner must retain
 accepted revision authority across restart; this implementation does not claim
 a durable publication fence or automatic accepted-operation recovery.
+The opt-in [enrollment envelope](continuity-bootstrap.md#same-owner-enrollment-producer)
+instead retains its accepted floors and exact public bindings in the existing
+operation journal.
 
 ### Code-registered identity-provider trust adapter
 

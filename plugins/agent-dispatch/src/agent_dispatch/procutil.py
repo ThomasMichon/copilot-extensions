@@ -18,6 +18,8 @@ allocate their own consoles.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, spawn_finite_worker
+
 import os
 import re
 import shutil
@@ -727,8 +729,9 @@ def spawn_dispatch_daemon(
     env: dict[str, str] | None = None,
     console_children: bool = True,
     cwd: Path | None = None,
+    finite_worker: bool = False,
 ) -> subprocess.Popen:
-    """Launch a long-lived agent-dispatch process through ``spawn_daemon``.
+    """Launch a resident or explicitly finite process with the same survival policy.
 
     Runs from the runtime root (or ``cwd``), breaks away from a kill-on-close
     Job around the caller, and appends stdout/stderr to ``<runtime root>/
@@ -747,15 +750,20 @@ def spawn_dispatch_daemon(
         if str(arg).startswith("-"):
             break
         words.append(str(arg))
-    return spawn_daemon(
-        argv,
-        cwd=cwd or root,
-        log_path=root / log_name,
-        env=env,
-        console_children=console_children,
-        # The subcommand only: later arguments may carry a credential.
-        display=" ".join(["agent_dispatch", *words]),
-    )
+    options = {
+        "instance": DaemonInstanceSpec(
+            "agent-dispatch", root, Path(__file__).resolve(),
+            lifecycle="finite-worker" if finite_worker else "resident",
+        ),
+        "cwd": cwd or root,
+        "log_path": root / log_name,
+        "env": env,
+        "console_children": console_children,
+        "display": " ".join(["agent_dispatch", *words]),
+    }
+    if finite_worker:
+        return spawn_finite_worker(argv, **options)
+    return spawn_daemon(argv, **options)
 
 
 def relocate_off_payload() -> None:

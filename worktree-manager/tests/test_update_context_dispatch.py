@@ -39,6 +39,16 @@ def test_cell_only_repair_does_not_require_a_shared_manifest(
     assert not (case.runtime / "bin").exists()
 
 
+def test_independent_source_repair_refuses_cell_before_native_refresh(repair_case, monkeypatch):
+    case = repair_case
+    _activate_scope(case, monkeypatch)
+    before = case.manifest.read_bytes()
+    with pytest.raises(RuntimeError, match="authorized legacy installation"):
+        case.update._refresh_source(case.source, dict(os.environ), independent=True)
+    assert case.acquisitions == [] and not case.effect.exists()
+    assert case.manifest.read_bytes() == before
+
+
 def _complete_slot(root: Path, version: str) -> Path:
     slot = root / "versions" / version
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

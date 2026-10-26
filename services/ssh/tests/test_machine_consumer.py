@@ -1,6 +1,7 @@
 """Installed Fleet role, real authenticated Gateway and both native local writers."""
 
 import asyncio
+import builtins
 from contextlib import AsyncExitStack
 import importlib.util
 import json
@@ -23,7 +24,7 @@ from fleet_manager.ssh_directory import SSHDirectoryClient
 from fleet_manager.ssh_machine import run as run_machine
 from fleet_manager.ssh_machine_config import SSHMachineConfig
 
-from conftest import document, enrollment, key
+from conftest import RealtimeClock, document, enrollment, key
 from test_gateway_integration import Rig, eventually
 
 
@@ -54,7 +55,9 @@ def proof_file(path, key):
 @pytest.mark.parametrize("destination", [
     "config_d", "ssh_config", "authorization_dir", "source-state", "lock-state",
 ])
-def test_installed_cli_rejects_lease_tree_outputs_before_credentials(tmp_path, destination):
+def test_installed_cli_rejects_lease_tree_outputs_before_credentials(
+    tmp_path, monkeypatch, destination,
+):
     value = {
         "schema": "fleet-manager.ssh-client", "version": 1,
         "gateway_origin": "https://gateway.example.test", "gateway_ca": None,
@@ -74,6 +77,19 @@ def test_installed_cli_rejects_lease_tree_outputs_before_credentials(tmp_path, d
         value[destination] = str(Path(value["state_dir"]) / "nested" / "output")
     selected = tmp_path / "client.json"
     selected.write_text(json.dumps(value), encoding="utf-8")
+    original_import = builtins.__import__
+
+    def guarded(name, *args, **kwargs):
+        if name.rsplit(".", 1)[-1] in {
+            "credential_references", "gateway_service_caller", "ssh_directory",
+        }:
+            raise AssertionError("Credential runtime imported before local scope refusal")
+        return original_import(name, *args, **kwargs)
+
+    with monkeypatch.context() as imports:
+        imports.setattr(builtins, "__import__", guarded)
+        with pytest.raises(ValueError, match="requires a dedicated state directory"):
+            asyncio.run(run_machine(SSHMachineConfig.from_dict(value)))
     result = subprocess.run(
         [sys.executable, "-I", "-m", "fleet_manager", "serve",
          "--role", "ssh-client", "--config", str(selected)],
@@ -149,6 +165,7 @@ async def test_installed_fleet_role_converges_live_and_catches_up_after_restart(
     tmp_path, disconnected,
 ):
     rig = Rig(tmp_path)
+    rig.h.clock = RealtimeClock()
     rig.h.keys += (ECKey.generate_key("P-256"),)
     rig.h.document["manifest"]["key_sources"].append({
         "name": "caller-b", "provider": "owner-store", "reference": "keys/caller-b",

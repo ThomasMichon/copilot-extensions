@@ -13,6 +13,7 @@ EXTERNAL_TEST_ROOTS = {
     "worktree-identity": Path("libs/worktree-identity"),
     "repository-policy": Path("libs/repository-policy"),
     "update-driver": Path("libs/update-driver"),
+    "agent-procutil": Path("libs/agent-procutil"),
 }
 
 

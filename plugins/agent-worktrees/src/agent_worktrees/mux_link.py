@@ -1,33 +1,17 @@
-"""Resident manager-observation IPC seam (Phase 3b Slice 2 Sub-slice 3, Step 1
--- ``worktree-manager-control-plane`` effort).
+"""Resident managed-mux observation IPC and its fenced persistent cache.
 
-Additive-only groundwork for the two-daemon mux-status split: the resident
-``agent-worktrees`` status-monitor gains a dedicated wire surface that lets an
-external Worktree Manager mux-companion daemon **push** live mux-mapping
-observations for the sessions *it* owns, plus an in-process cache that stores
-them. Nothing in this module changes who writes a session's status bar or
-which sessions get served -- ``status_monitor_cli.cmd_status_monitor`` only
-starts this endpoint and merges its (currently always-empty, since no
-Worktree Manager daemon exists yet to push into it) observations into the
-resident monitor's existing catalog-observation call, per this step's own
-scope in
-``efforts/active/worktree-manager-control-plane/phase-3b-substatus-monitor-relocation.md``.
-
-Mirrors ``classify_daemon.py``/``worktree_status_daemon.py`` structurally: a
-``work_coalescing_singleton.CoalescingServer`` wraps a ``compute(kind,
-payload)`` callback, rendezvous fields are namespaced so they never collide
-with the other daemons already published in the same ``status-monitor.lock``
-file, and the client-side ``mux_live_via_daemon``/``mux_live_with_boot``
-helpers mirror ``worktree_status_daemon.status_via_daemon``/
-``status_with_boot`` exactly -- kept here (not yet called by anything) so the
-full wire contract is pinned in one step, ready for the Worktree Manager
-mux-companion daemon (a later sub-slice) to call.
+The status-monitor cohosts this wire surface for Worktree Manager observations.
+Its runtime retains host admission beyond shutdown until the concrete server's
+native threads and all accepted handlers retire; cache fencing alone is not
+application-work settlement. Routing, election and status-bar authority remain
+with their existing owners.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import math
 import os
 import sys
@@ -38,6 +22,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from agent_procutil.daemon_instances import admit_daemon_instance
 from work_coalescing_singleton import CoalescingServer
 from work_coalescing_singleton import client as wcs_client
 
@@ -121,6 +106,7 @@ BOOT_WAIT_S = 6.0
 #: mappings change, not hold one long-lived subscription.
 LINGER_SECONDS = 5.0
 SUBSCRIBER_TTL_SECONDS = 30.0
+_NATIVE_CLOSE_WAIT_S = 20.0  # Observation bound only; never an admission expiry.
 
 #: A live mapping with no fresh observation in this long is treated as
 #: stale/unconfirmed (excluded from :meth:`ManagedMuxCache.live_session_names`
@@ -820,37 +806,104 @@ def mux_live_with_boot(
         wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
 
 
-class InProcessRuntime:
-    """Owns the in-process manager-observation seam's whole lifecycle for
-    ``cmd_status_monitor``: the coalescing server plus its
-    :class:`ManagedMuxCache` -- factored out the same way
-    ``worktree_status_daemon.InProcessRuntime`` is, so ``cmd_status_monitor``
-    only has a handful of call sites, not the full start/shutdown wiring.
+class _MuxRetirement:
+    """One concrete generation's server/cache/admission, retained after return."""
 
-    Independent of the monitor's other daemons -- a failure in :meth:`start`
-    degrades to an all-``None`` runtime (never fatal to the monitor itself),
-    mirroring the ``try/except`` guard already applied to
-    ``HookIpcServer``/``classify_daemon``/``worktree_status_daemon``.
-    """
+    def __init__(self, persist_path) -> None:
+        self.server = self.cache = None
+        self.guard = admit_daemon_instance(
+            "status-monitor-managed-mux", source=__file__,
+            runtime_root=Path(persist_path).absolute().parent if persist_path is not None else None,
+        )
+        self._lock = threading.Lock()
+        self.requested, self.closed, self.settled = (threading.Event() for _ in range(3))
+        self._server_closed = self._cache_closed = False
+        try:
+            self.thread = threading.Thread(target=self._retire, name="managed-mux-retirement", daemon=True)
+            self.thread.start()
+        except BaseException:
+            self.guard.close()
+            raise
+
+    def close(self) -> None:
+        with self._lock:
+            error = None
+            try:
+                if not self._server_closed:
+                    if self.server is not None:
+                        self.server.close_admission("shutdown")
+                        self.server.close()
+                        serve = self.server._serve_thread
+                        # An interrupted Thread.start() can precede the
+                        # server's started-flag commit. Actual loop readiness,
+                        # not that flag, authorizes this owner's native stop.
+                        if not self.server._serve_started and serve.is_alive() and self.server._serve_running.is_set():
+                            if serve is threading.current_thread():
+                                raise RuntimeError("native accept loop cannot stop itself")
+                            self.server._server.shutdown()
+                            serve.join(timeout=2)
+                    self._server_closed = self.server is None or (
+                        self.server._server.fileno() == -1 and not any(
+                            thread.is_alive() for thread in (self.server._serve_thread, self.server._reap_thread)
+                        )
+                    )
+            except BaseException as caught:
+                error = caught
+            try:
+                if not self._cache_closed:
+                    if self.cache is not None:
+                        self.cache.close()
+                    self._cache_closed = self.cache is None or self.cache._closed is True
+            except BaseException as caught:
+                error = caught if error is None else error
+            if self._server_closed and self._cache_closed:
+                self.closed.set()
+            if error is not None:
+                raise error
+
+    def _retire(self) -> None:
+        self.requested.wait()
+        pause, reported = threading.Event(), False
+        while True:
+            try:
+                self.close()
+                count = 0 if self.server is None else self.server.active_handler_count()
+                if self.closed.is_set() and type(count) is int and count == 0:
+                    self.guard.close()
+                    self.settled.set()
+                    return
+            except BaseException:
+                if not reported:
+                    logging.getLogger(__name__).exception("Managed-mux cleanup incomplete; retaining host admission")
+                    reported = True
+            pause.wait(0.05)
+
+
+class InProcessRuntime:
+    """Cohost observation IPC; startup failures degrade without orphaning work."""
 
     def __init__(self) -> None:
         self.server: CoalescingServer | None = None
         self.cache: ManagedMuxCache | None = None
+        self._lifecycle_lock = threading.RLock()
+        self._retirement: _MuxRetirement | None = None
 
     def start(self, persist_path: Path | str | None = None) -> None:
-        try:
-            cache = ManagedMuxCache(persist_path=persist_path)
-            server = start_server(build_compute(cache))
-            # Assign before `server.start()`: `CoalescingServer.__init__`
-            # already binds+listens its loopback socket, so a failure in
-            # `.start()` (thread spawn) after construction must still be
-            # reachable from the `except` branch below to close that
-            # already-bound server -- never leave it running unadvertised.
-            self.cache = cache
-            self.server = server
-            server.start()
-        except Exception:
-            self.shutdown()
+        with self._lifecycle_lock:
+            if self.server is not None:
+                raise RuntimeError("managed-mux runtime is already serving")
+            try:
+                self._retirement = owner = _MuxRetirement(persist_path)
+                self.cache = owner.cache = ManagedMuxCache(persist_path=persist_path)
+                self.server = owner.server = start_server(build_compute(self.cache))
+                self.server.start()
+            except BaseException as error:
+                try:
+                    self.shutdown()
+                except BaseException:
+                    raise error
+                if not isinstance(error, Exception):
+                    raise
 
     def lock_extra(self) -> dict:
         """Rendezvous fields to merge into the monitor's lock file, or an
@@ -901,16 +954,24 @@ class InProcessRuntime:
             self.cache.close()
 
     def shutdown(self) -> None:
-        if self.server is not None:
-            # Stop accepting new work first. `CoalescingServer.close()`
-            # does not wait for an already-dispatched handler thread to
-            # finish, so `cache.close()` below is what actually makes a
-            # late handler's write safe (see `ManagedMuxCache`'s own
-            # docstring) -- ordering `server.close()` first here is belt-
-            # and-suspenders (no new handler can be dispatched after this),
-            # not itself the safety guarantee.
-            self.server.close()
-        if self.cache is not None:
-            self.cache.close()
-        self.server = None
-        self.cache = None
+        with self._lifecycle_lock:
+            owner, error = self._retirement, None
+            try:
+                if owner is not None:
+                    owner.close()
+            except BaseException as caught:
+                error = caught
+            finally:
+                if owner is not None:
+                    owner.requested.set()
+                self.server = self.cache = None
+            if error is not None:
+                # Preserve the first failure while native-close retries finish;
+                # a bounded observation never expires the retained admission.
+                deadline = time.monotonic() + _NATIVE_CLOSE_WAIT_S
+                while not owner.closed.is_set() and time.monotonic() < deadline:
+                    try:
+                        owner.closed.wait(0.05)
+                    except KeyboardInterrupt:
+                        pass
+                raise error

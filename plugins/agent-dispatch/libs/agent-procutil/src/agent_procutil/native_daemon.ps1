@@ -68,7 +68,8 @@ function Start-NativeDaemon {
         [Parameter(Mandatory)][string]$Script,
         [Parameter(Mandatory)][string[]]$Arguments,
         [Parameter(Mandatory)][string]$WorkingDirectory,
-        [Parameter(Mandatory)][string]$LogPath
+        [Parameter(Mandatory)][string]$LogPath,
+        [string]$RegistryRoot = $env:COPILOT_EXTENSIONS_DAEMON_REGISTRY
     )
     if ($env:OS -ne 'Windows_NT') { throw 'Native PowerShell daemon admission requires Windows.' }
     foreach ($path in @($Script, $WorkingDirectory, $script:NativeDaemonSource)) {
@@ -88,6 +89,11 @@ function Start-NativeDaemon {
     $shell = Join-Path $PSHOME 'powershell.exe'
     if (-not [IO.File]::Exists($shell)) { throw 'Native daemon admission cannot resolve its interpreter.' }
     $contained = $env:COPILOT_EXTENSIONS_TEST_CONTAINED -eq '1'
+    $instances = Join-Path ([IO.Path]::GetDirectoryName($script:NativeDaemonSource)) 'daemon_instances.ps1'
+    . $instances
+    $receipt = New-DaemonInstanceReservation -Service ([IO.Path]::GetFileNameWithoutExtension($Script)) `
+        -RuntimeRoot $WorkingDirectory -Source $Script -RegistryRoot $RegistryRoot
+    $Script = $receipt.source
     $channel = 'ce-native-daemon-' + [Guid]::NewGuid().ToString('N')
     $security = New-Object IO.Pipes.PipeSecurity
     $security.SetAccessRuleProtection($true, $false)
@@ -108,6 +114,10 @@ function Start-NativeDaemon {
         log = $LogPath
         channel = $channel
         parent = $PID
+        instance = $receipt.instance_id
+        registry = $receipt.registry_root
+        instances = $instances
+        working = $WorkingDirectory
     } | ConvertTo-Json -Compress
     $data = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($description))
     $body = @"
@@ -131,6 +141,11 @@ try {
         `$ack = Read-NativeDaemonFrame -Pipe `$pipe -Length 1
         if (`$ack[0] -ne 1) { throw 'Native daemon adoption was refused.' }
     } finally { `$pipe.Dispose() }
+    . `$d.instances
+    `$env:COPILOT_EXTENSIONS_DAEMON_INSTANCE = `$d.instance
+    `$env:COPILOT_EXTENSIONS_DAEMON_REGISTRY = `$d.registry
+    `$instanceGuard = Enter-DaemonInstance -Service ([IO.Path]::GetFileNameWithoutExtension(`$d.script)) ``
+        -RuntimeRoot `$d.working -Source `$d.script
     `$forward = [string[]]`$d.arguments
     & `$d.script @forward
     if (`$null -ne `$LASTEXITCODE) { exit `$LASTEXITCODE }
@@ -203,6 +218,7 @@ try {
         }
         # Once any acknowledgement may have reached the child, a lost return
         # is ambiguous. Its caller must consult the durable operation outcome.
+        $null = Set-DaemonInstanceProcess $receipt $process
         $adopted = $true
         $server.WriteByte(1)
         $server.Flush()

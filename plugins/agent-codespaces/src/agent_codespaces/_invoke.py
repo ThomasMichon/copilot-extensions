@@ -23,11 +23,11 @@ def _runtime_root() -> Path:
     _legacy_dirname = ".agent-codespaces"  # marketplace-isolation: allow legacy compatibility root
     override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
     if override:
-        return Path(override).expanduser()
+        return Path(os.path.abspath(Path(override).expanduser()))
     sandbox = os.environ.get("AGENT_HOME", "").strip()
     if sandbox:
-        return Path(sandbox).expanduser() / _legacy_dirname
-    return Path.home() / _legacy_dirname
+        return Path(os.path.abspath(Path(sandbox).expanduser() / _legacy_dirname))
+    return Path(os.path.abspath(Path.home() / _legacy_dirname))
 
 
 def _slot_python(root: Path, version: str) -> Path | None:

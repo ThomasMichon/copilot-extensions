@@ -229,6 +229,34 @@ def test_worker_and_continuation_use_frozen_selection(private_root, monkeypatch)
     asyncio.run(run())
 
 
+def test_retention_failure_keeps_draft_and_refuses_launch_with_sanitized_notice(private_root, monkeypatch):
+    from worktree_manager import launch_retention
+
+    async def run():
+        monkeypatch.setattr(
+            launch_retention, "maintain",
+            lambda: "Private-input retention maintenance failed for prompt history.",
+        )
+        monkeypatch.setattr(
+            LaunchAttempts, "record_intent",
+            lambda *_a, **_kw: pytest.fail("retention failure must not release a launch"),
+        )
+        app, outcomes, notices = App(), [], []
+        dialog = resume_dialog()
+        monkeypatch.setattr(dialog, "notify", lambda text, **_: notices.append(text))
+        async with app.run_test() as pilot:
+            app.push_screen(dialog, outcomes.append)
+            await pilot.pause()
+            field = dialog.query_one(SeedPromptField)
+            field.load_text("original private draft")
+            activate(dialog)
+            await settled(pilot, lambda: bool(notices))
+            assert app.screen is dialog and outcomes == []
+            assert field.text == "original private draft"
+            assert "prompt history" in notices[0] and "original private draft" not in notices[0]
+    asyncio.run(run())
+
+
 def test_separate_explicit_actions_get_separate_attempts(private_root):
     async def run():
         app, calls = App(), []

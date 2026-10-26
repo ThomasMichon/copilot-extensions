@@ -4,9 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from agent_index.sources.delta import SourceDelta
+
+
+def nonsecret_target(url: str) -> str:
+    """Keep the transport target while excluding URL-carried credentials."""
+    if "://" not in url:
+        return url
+    parts = urlsplit(url)
+    if parts.query or parts.fragment:
+        raise ValueError("Recovery target URL must not have ambiguous query or fragment semantics")
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    if parts.scheme in {"ssh", "git+ssh", "ssh+git"} and parts.username is not None:
+        # SSH usernames select remote home directories, unlike HTTP credentials.
+        authority = f"{parts.username}@{authority}"
+    return urlunsplit((parts.scheme, authority, parts.path, "", ""))
 
 
 @dataclass(frozen=True)
@@ -84,4 +101,26 @@ class SourceConnector(Protocol):
 
     def current_commit(self) -> str | None:
         """Return the current HEAD commit SHA, or None if not git-tracked."""
+        ...
+
+
+class DeltaSourceConnector(SourceConnector, Protocol):
+    """Opt-in complete-delta acquisition; legacy connectors remain supported."""
+
+    @property
+    def recovery_identity(self) -> tuple[str, ...]:
+        """Stable nonsecret effective targets, distinct across source/account domains."""
+        ...
+
+    def discover_delta(
+        self,
+        last_commit: str | None,
+        cancel_check: Callable[[], None] | None = None,
+    ) -> SourceDelta:
+        """Return versioned changes/tombstones without whole-corpus enumeration.
+
+        A successful result owns its target checkpoint and complete change
+        coverage. Unsupported or incomplete acquisition must fail explicitly,
+        never masquerade as an empty delta.
+        """
         ...

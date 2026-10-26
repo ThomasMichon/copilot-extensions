@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint, spawn_instance
+from functools import partial
+
 import argparse
 import asyncio
 import os
@@ -258,7 +261,11 @@ def ensure_running(
                 "--host-relay-port",
                 str(int(host_relay_port)),
             ]
-        env = {**os.environ, **windowless_python_env()}
+        state_root = Path(os.path.abspath(_STORE.state_dir))
+        env = {
+            **os.environ, **windowless_python_env(),
+            "AGENT_CONTAINERS_HOME": str(state_root.parent),
+        }
         state = spawn_keeper(
             argv,
             env,
@@ -271,7 +278,12 @@ def ensure_running(
                 "relay_port": int(relay_port) if relay_port else None,
                 "host_relay_port": int(host_relay_port) if host_relay_port else None,
             },
-            popen=popen,
+            popen=partial(
+                spawn_instance, popen=popen,
+                instance=DaemonInstanceSpec(
+                    "agent-containers-forward-keeper", state_root, Path(__file__).resolve(),
+                ),
+            ),
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),
         )
         latest_holds = holds.read_holds(_STORE.read(name) or {})
@@ -420,5 +432,9 @@ def add_subparser(sub) -> None:
     p.set_defaults(func=cmd_forward_keeper)
 
 
+@daemon_entrypoint(
+    "agent-containers-forward-keeper", source=__file__, purpose="production",
+    runtime_root=lambda args: Path(os.path.abspath(_STORE.state_dir)),
+)
 def cmd_forward_keeper(args: argparse.Namespace) -> int:
     return asyncio.run(_run(args))

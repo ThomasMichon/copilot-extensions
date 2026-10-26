@@ -1,0 +1,488 @@
+"""Live Windows regression for :func:`agent_procutil.spawn_daemon`.
+
+Per ``docs/patterns/windows-background-process-launch.md`` § Review and
+validation, mocked ``creationflags`` assertions prove wiring, not behavior.
+This drives the real ``spawn_daemon`` from a real windowless parent
+(``pythonw.exe``) that itself runs inside a kill-on-close Job, the way an
+installer, updater or hook launches a resident daemon. The daemon is a real
+console-subsystem ``python.exe``; in ``console_children`` mode it also starts
+a real console child on every periodic tick. Each scenario runs two full
+launch/stop cycles while the pytest side observes actual Win32 top-level
+window and foreground state (the same EnumWindows/foreground observer as
+``plugins/agent-mcp/tests/test_windows_launch_integration.py``).
+
+Lifetime: the parent exits and its Job is then closed (parent exit alone is
+insufficient). Outside contained test mode the daemon must have broken away
+and keep ticking; in contained test mode (``COPILOT_EXTENSIONS_TEST_CONTAINED=1``)
+breakaway is deliberately suppressed, so the daemon must instead die with the
+caller's Job.
+
+Windows-only; skipped everywhere else.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+import agent_procutil as pu
+
+pytestmark = pytest.mark.skipif(sys.platform != "win32", reason="Windows console integration")
+
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
+
+_SURFACED_PROCESS_NAMES = {
+    "python.exe", "pythonw.exe", "powershell.exe", "conhost.exe",
+    "openconsole.exe", "windowsterminal.exe", "cmd.exe",
+}
+_SYNCHRONIZE = 0x00100000
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_WAIT_OBJECT_0 = 0
+_WAIT_TIMEOUT = 0x102
+_CYCLES = 2
+
+# Runs under a windowless pythonw.exe inside a kill-on-close Job: launches the
+# daemon through spawn_daemon, records its pid, and exits without waiting.
+_PARENT_SCRIPT = """
+import json, os, subprocess, sys, time, traceback
+spec = json.loads(sys.argv[1])
+try:
+    import agent_procutil
+    from agent_procutil.daemon_instances import DaemonInstanceSpec, DaemonLeasePolicy, spawn_finite_worker
+    from pathlib import Path
+    if spec.get("bootstrap_redirector"):
+        agent_procutil.windowless_python = lambda _exe: spec["bootstrap_redirector"]
+    if spec.get("direct_venv"):
+        python, extra = agent_procutil.direct_python(spec["argv"][0])
+        spec["argv"] = [python, *spec["argv"][1:]]
+        spec["env_overrides"].update(extra)
+    launch = spawn_finite_worker if spec.get("finite_worker") else agent_procutil.spawn_daemon
+    proc = launch(
+        spec["argv"],
+        cwd=spec["cwd"],
+        log_path=spec["log_path"],
+        console_children=spec["console_children"],
+        display="spawn-daemon-probe",
+        stderr_log_path=spec["stderr_log_path"],
+        env_overrides=spec["env_overrides"],
+        instance=DaemonInstanceSpec(
+            "windows-launch-probe", Path(spec["cwd"]), Path(__file__).resolve()
+            if "__file__" in globals() else Path(agent_procutil.__file__).resolve(),
+            purpose="unattended-test", registry_root=Path(spec["cwd"])/"instances",
+            lease=DaemonLeasePolicy(15, 60),
+        ),
+    )
+    result = {"pid": proc.pid, "instance_id": proc.instance_receipt.instance_id,
+              "registry_root": str(proc.instance_receipt.registry_root)}
+    if spec.get("direct_venv"):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                with open(spec["worker_status"], encoding="utf-8") as fh:
+                    result["worker"] = json.loads(fh.readlines()[-1])
+                break
+            except (OSError, ValueError, IndexError):
+                time.sleep(0.02)
+        assert result.get("worker", {}).get("pid") == proc.pid, "worker PID mismatch"
+    if spec.get("terminate"):
+        try:
+            proc.wait(timeout=0)
+        except subprocess.TimeoutExpired:
+            result["wait_timed_out"] = True
+        proc.terminate()
+        result["returncode"] = proc.wait(timeout=5)
+        result["poll"] = proc.poll()
+except agent_procutil.DaemonSpawnError as exc:
+    result = {"daemon_spawn_error": str(exc), "cause": str(exc.__cause__)}
+except BaseException:
+    result = {"error": traceback.format_exc()}
+with open(spec["result"], "w", encoding="utf-8") as fh:
+    json.dump(result, fh)
+"""
+
+# The daemon: a console-subsystem python.exe that ticks periodically, writing
+# its pid/cwd/tick count, optionally running a real console child per tick,
+# until the stop file appears (or a safety deadline passes).
+_DAEMON_SCRIPT = """
+import importlib.util, json, os, subprocess, sys, time
+state, console_children = sys.argv[1], sys.argv[2] == "1"
+status = os.path.join(state, "status.jsonl")
+stop = os.path.join(state, "stop")
+ticks = 0
+deadline = time.monotonic() + 90
+while time.monotonic() < deadline and not os.path.exists(stop):
+    if console_children:
+        subprocess.run([sys.executable, "-c", "import time; time.sleep(0.1)"], check=True)
+    ticks += 1
+    # Append-only, so the observing reader never blocks a rename.
+    with open(status, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({
+            "pid": os.getpid(), "cwd": os.getcwd(), "ticks": ticks,
+            "argv": sys.argv[3:], "environment": os.environ.get("BROKER_ENV_FIXTURE"),
+            "bootstrap_env": [key for key in os.environ if key.startswith("_CE_DAEMON_BROKER_")],
+            "prefix": sys.prefix,
+            "pytest": getattr(importlib.util.find_spec("pytest"), "origin", None),
+        }) + "\\n")
+    time.sleep(0.1)
+print("daemon stopped after", ticks, "ticks", flush=True)
+print("daemon stderr complete", file=sys.stderr, flush=True)
+"""
+
+
+def _configure_win32():
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32.GetForegroundWindow.restype = wintypes.HWND
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
+    kernel32.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.IsProcessInJob.argtypes = [
+        wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL),
+    ]
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    return user32, kernel32, callback_type
+
+
+def _visible_windows(user32, callback_type):
+    windows = set()
+
+    @callback_type
+    def visit(hwnd, _):
+        if user32.IsWindowVisible(hwnd):
+            windows.add(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return windows
+
+
+def _process_name(user32, kernel32, hwnd) -> str:
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not handle:
+        return ""
+    try:
+        length = wintypes.DWORD(32768)
+        name = ctypes.create_unicode_buffer(length.value)
+        if kernel32.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(length)):
+            return Path(name.value).name.lower()
+        return ""
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+class _WindowObserver:
+    """Polls visible top-level windows and foreground changes in the background."""
+
+    def __init__(self, user32, kernel32, callback_type):
+        self._user32, self._kernel32, self._callback_type = user32, kernel32, callback_type
+        self.baseline = _visible_windows(user32, callback_type)
+        self.foreground = user32.GetForegroundWindow()
+        self.surfaced: dict[int, str] = {}
+        self.focus_changes: dict[int, str] = {}
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _attributable(self, hwnd) -> str:
+        name = _process_name(self._user32, self._kernel32, hwnd)
+        return name if name in _SURFACED_PROCESS_NAMES else ""
+
+    def _run(self):
+        while not self._stop.is_set():
+            for hwnd in _visible_windows(self._user32, self._callback_type) - self.baseline:
+                if hwnd not in self.surfaced and (name := self._attributable(hwnd)):
+                    self.surfaced[hwnd] = name
+            current = self._user32.GetForegroundWindow()
+            if current and current != self.foreground and current not in self.baseline:
+                if current not in self.focus_changes and (name := self._attributable(current)):
+                    self.focus_changes[current] = name
+            time.sleep(0.02)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._thread.join(timeout=5)
+
+
+def _wait_for(predicate, timeout: float, what: str, log_path: Path):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(0.05)
+    try:
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        log_text = "<no daemon log>"
+    pytest.fail(f"timed out waiting for {what}; daemon log:\n{log_text}")
+
+
+def _read_json(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _latest_status(path: Path):
+    try:
+        lines = path.read_text(encoding="utf-8").split("\n")
+    except OSError:
+        return None
+    complete = [line for line in lines[:-1] if line.strip()]
+    return json.loads(complete[-1]) if complete else None
+
+
+def _console_python() -> str:
+    """A real console-subsystem interpreter that does not re-exec itself."""
+    base = getattr(sys, "_base_executable", "") or sys.executable
+    return base if os.path.isfile(base) else sys.executable
+
+
+def _run_cycle(
+    tmp_path: Path, cycle: int, console_children: bool, kernel32,
+    *, allow_breakaway: bool = True, terminate: bool = False, redirector: bool = False,
+    venv: bool = False, finite_worker: bool = False,
+) -> None:
+    root = tmp_path / f"cycle-{cycle}"
+    workdir = root / "home with spaces"
+    state = root / "state"
+    workdir.mkdir(parents=True)
+    state.mkdir()
+    daemon_script = root / "daemon's probe.py"
+    daemon_script.write_text(_DAEMON_SCRIPT, encoding="utf-8")
+    parent_script = root / "parent.py"
+    parent_script.write_text(_PARENT_SCRIPT, encoding="utf-8")
+    result_path = root / "parent-result.json"
+    log_path = root / "logs" / "daemon.log"
+    err_path = root / "logs" / "daemon-err.log"
+    arguments = ["spaces & 'quotes'", "unicode-\u65e5", ""]
+    environment = "quotes ' \" ; & = \n \u65e5"
+    spec = {
+        "argv": [sys.executable if venv else _console_python(), str(daemon_script), str(state),
+                 "1" if console_children else "0", *arguments],
+        "cwd": str(workdir),
+        "log_path": str(log_path),
+        "console_children": console_children,
+        "result": str(result_path),
+        "stderr_log_path": str(err_path),
+        "env_overrides": {"BROKER_ENV_FIXTURE": environment},
+        "terminate": terminate,
+        "direct_venv": venv,
+        "finite_worker": finite_worker,
+        "worker_status": str(state / "status.jsonl"),
+        "bootstrap_redirector": str(Path(sys.executable).with_name("pythonw.exe"))
+        if redirector else None,
+    }
+    if redirector:
+        assert Path(spec["bootstrap_redirector"]).is_file(), "a real venv redirector is required"
+
+    env = os.environ.copy()
+    env.pop("__PYVENV_LAUNCHER__", None)
+    src = str(Path(pu.__file__).resolve().parents[1])
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    pythonw = pu.windowless_python(sys.executable)
+    if not pythonw.lower().endswith("pythonw.exe"):
+        pytest.skip("pythonw.exe is unavailable on this interpreter")
+
+    parent, job = pu.spawn_sync_in_kill_on_close_job(
+        [pythonw, str(parent_script), json.dumps(spec)], env=env,
+        require_job=True, allow_breakaway=allow_breakaway,
+    )
+    daemon_handle = None
+    try:
+        assert job is not None, "could not place the windowless parent in a Job"
+        assert parent.wait(timeout=30) == 0
+        result = _read_json(result_path)
+        assert result is not None, "parent did not record a result"
+        if "daemon_spawn_error" in result:
+            if not allow_breakaway:
+                pytest.fail(result["daemon_spawn_error"] + "; " + result.get("cause", ""))
+            pytest.skip(
+                "this runner's own Job forbids breakaway: " + result["daemon_spawn_error"]
+            )
+        assert "pid" in result, result.get("error")
+        if venv:
+            worker = result["worker"]
+            assert worker["pid"] == result["pid"]
+            assert os.path.samefile(worker["prefix"], sys.prefix)
+            assert os.path.samefile(worker["pytest"], pytest.__file__)
+        if terminate:
+            assert result["wait_timed_out"] is True
+            assert result["returncode"] == result["poll"] == 1
+            return
+        daemon_pid = result["pid"]
+        daemon_handle = kernel32.OpenProcess(
+            _SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION | _PROCESS_TERMINATE,
+            False, daemon_pid,
+        )
+        assert daemon_handle, f"daemon {daemon_pid} exited before it could be observed"
+
+        status_path = state / "status.jsonl"
+        status = _wait_for(
+            lambda: (s := _latest_status(status_path)) and s["ticks"] >= _CYCLES and s,
+            30, "the daemon's first periodic ticks", log_path,
+        )
+        assert status["pid"] == daemon_pid
+        assert os.path.samefile(status["cwd"], workdir)
+        assert status["argv"] == arguments
+        assert status["environment"] == environment
+        assert status["bootstrap_env"] == []
+
+        in_job = wintypes.BOOL()
+        assert kernel32.IsProcessInJob(daemon_handle, job.handle, ctypes.byref(in_job))
+        contained = pu.contained_test_mode()
+        assert bool(in_job.value) is contained
+
+        # The parent has already exited; now close the caller's containment.
+        job.close()
+        job = None
+        if contained:
+            assert kernel32.WaitForSingleObject(daemon_handle, 5000) == _WAIT_OBJECT_0, (
+                "a contained-mode daemon must die with its caller's Job"
+            )
+            return
+
+        assert kernel32.WaitForSingleObject(daemon_handle, 0) == _WAIT_TIMEOUT, (
+            "the daemon must survive its caller's kill-on-close Job"
+        )
+        ticks_at_close = _latest_status(status_path)["ticks"]
+        _wait_for(
+            lambda: (s := _latest_status(status_path)) and s["ticks"] >= ticks_at_close + _CYCLES,
+            30, "post-Job periodic ticks", log_path,
+        )
+        assert kernel32.WaitForSingleObject(daemon_handle, 0) == _WAIT_TIMEOUT
+
+        (state / "stop").write_text("", encoding="utf-8")
+        assert kernel32.WaitForSingleObject(daemon_handle, 30000) == _WAIT_OBJECT_0
+        code = wintypes.DWORD()
+        assert kernel32.GetExitCodeProcess(daemon_handle, ctypes.byref(code))
+        assert code.value == 0
+        if finite_worker:
+            from agent_procutil.daemon_instances import (
+                DaemonInstanceReceipt, inspect_instances, cleanup_instance,
+            )
+            receipt = DaemonInstanceReceipt(result["instance_id"], Path(result["registry_root"]))
+            row = next(
+                item for item in inspect_instances(receipt.registry_root)
+                if item["instance_id"] == receipt.instance_id
+            )
+            assert row["lifecycle"] == "finite-worker"
+            assert row["state"] == "finished"
+            assert cleanup_instance(receipt, terminate=False).status == "settled"
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        assert "spawn_daemon cwd=" in log_text
+        assert "display=spawn-daemon-probe" in log_text
+        assert "daemon stopped after" in log_text
+        err_text = err_path.read_text(encoding="utf-8", errors="replace")
+        assert "daemon stderr complete" in err_text
+        assert "daemon stderr complete" not in log_text
+        assert "daemon stopped after" not in err_text
+        for text in (log_text, err_text):
+            assert "spawn_daemon cwd=" in text
+            assert environment not in text and arguments[0] not in text
+    finally:
+        if daemon_handle:
+            if kernel32.WaitForSingleObject(daemon_handle, 0) != _WAIT_OBJECT_0:
+                kernel32.TerminateProcess(daemon_handle, 1)
+                kernel32.WaitForSingleObject(daemon_handle, 5000)
+            kernel32.CloseHandle(daemon_handle)
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        if job is not None:
+            job.close()
+
+
+@pytest.mark.parametrize("console_children", [False, True], ids=["detached", "console-children"])
+@pytest.mark.parametrize("allow_breakaway", [True, False], ids=["direct", "broker"])
+def test_spawn_daemon_is_headless_and_outlives_caller_job(
+    tmp_path, console_children, allow_breakaway,
+):
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, console_children, kernel32,
+                allow_breakaway=allow_breakaway,
+            )
+        time.sleep(0.5)
+
+    assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+def test_broker_handle_wait_timeout_and_termination_control_the_actual_child(tmp_path):
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        _run_cycle(
+            tmp_path, 0, True, kernel32, allow_breakaway=False, terminate=True,
+        )
+    assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+def test_broker_outlives_job_when_windowless_selection_falls_back_to_venv_redirector(tmp_path):
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, True, kernel32, allow_breakaway=False, redirector=True,
+            )
+    assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+@pytest.mark.parametrize("terminate", [False, True], ids=["survival", "termination"])
+def test_broker_direct_venv_controls_worker_pid_and_preserves_imports(tmp_path, terminate):
+    if sys.prefix == sys.base_prefix:
+        pytest.skip("requires a real Windows venv")
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, True, kernel32, allow_breakaway=False,
+                terminate=terminate, venv=True,
+            )
+    assert observer.surfaced == {}, f"visible windows surfaced: {observer.surfaced}"
+    assert observer.focus_changes == {}, f"foreground transitions: {observer.focus_changes}"
+
+
+def test_finite_worker_outlives_caller_job_then_closes_control_record(tmp_path, monkeypatch):
+    # Keep the explicit test-owner lease; only exercise real outside-Job launch.
+    assert os.environ.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    user32, kernel32, callback_type = _configure_win32()
+    with _WindowObserver(user32, kernel32, callback_type) as observer:
+        for cycle in range(_CYCLES):
+            _run_cycle(
+                tmp_path, cycle, True, kernel32, allow_breakaway=False,
+                finite_worker=True,
+            )
+    assert observer.surfaced == {}
+    assert observer.focus_changes == {}

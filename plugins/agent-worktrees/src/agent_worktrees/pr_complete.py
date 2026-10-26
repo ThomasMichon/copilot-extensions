@@ -123,11 +123,13 @@ def _merged_pr_head(
 
     A recorded PR boundary lets reconciliation exclude the PR's original
     commits and replay only later local work. The boundary is trusted only when
-    its effective aggregate patch-id shortlists a commit reachable on upstream
+    its context-free aggregate patch-id shortlists a commit reachable on upstream
     and applying that PR diff to the candidate's parent produces the candidate's
     exact tree. The effective base is recomputed from the current upstream: a
     PR's recorded creation-time base can become stale while the open PR remains
-    mergeable. Returns ``None`` when no recorded merged PR boundary can be
+    mergeable. Unchanged diff context can also move independently before the
+    squash, so it is excluded only from shortlisting, never from the exact
+    tree proof. Returns ``None`` when no recorded merged PR boundary can be
     proven safe.
     """
     record = tracking.load_record_by_id(worktree_id)
@@ -166,14 +168,14 @@ def _merged_pr_head(
         if effective_base_result.returncode != 0 or not effective_base:
             continue
         effective_patch_id = pr_ops._patch_id(
-            effective_base, pr.head_sha, cwd=cwd,
+            effective_base, pr.head_sha, cwd=cwd, ignore_context=True,
         )
         if not effective_patch_id:
             continue
 
         if effective_base not in upstream_patch_ids:
             upstream_patch_ids[effective_base] = pr_ops._commit_patch_ids(
-                effective_base, upstream, cwd=cwd,
+                effective_base, upstream, cwd=cwd, ignore_context=True,
             )
         patch_ids = upstream_patch_ids[effective_base]
         candidates_for_patch = patch_ids.get(effective_patch_id, set())

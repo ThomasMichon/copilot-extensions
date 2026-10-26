@@ -35,6 +35,10 @@ or changes refs. Modified, untracked and ignored working files are refused;
 inherited Git repository/configuration selectors cannot redirect the probes.
 The selected commit is archived by object identity, not copied from mutable
 working files. Source admission is checked again before publication.
+Archive creation fixes `tar.umask=0022` for that Git invocation, independent
+of repository configuration: tracked executables retain mode `0755` and
+ordinary files `0644`. Native support therefore does not become group-writable
+and fail its runtime custody checks. No checkout configuration is changed.
 Configured source acquisition and preparation explicitly disable Git's ambient
 automatic line-ending conversion, so their clean-checkout checks observe the
 same literal source bytes on Windows and POSIX. Repository-owned attributes

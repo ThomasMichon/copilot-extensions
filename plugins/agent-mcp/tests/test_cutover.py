@@ -153,7 +153,7 @@ def test_spawn_passive_daemon_real_spawn_logs_and_runs_from_data_root(
         old_control_token=None, token_by_port={},
     )
     proc = _cutover.spawn_passive_daemon(ctx, 23456)
-    assert proc.wait(timeout=60) == 0
+    assert proc.wait(timeout=60) == 0, (home / "g3.log").read_text(encoding="utf-8")
     lines = (home / "g3.log").read_text(encoding="utf-8").splitlines()
     assert "spawn_daemon cwd=" in lines[0]
     assert "display=agent_mcp serve --passive --control-port 23456" in lines[0]

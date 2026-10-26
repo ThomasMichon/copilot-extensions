@@ -415,8 +415,8 @@ class FederationRunner:
         )
         self._thread.start()
 
-    def stop(self, *, resign: bool = True, timeout: float = 5.0) -> None:
-        """Stop the background loop and (by default) give up our directory entry.
+    def stop(self, *, resign: bool = True, timeout: float = 5.0) -> bool:
+        """Bounded stop; True confirms the loop and intake transport have retired.
 
         Closing this runner's work-intake `DispatchClient` must never race a
         still-running tick using it: if the bounded `join()` below returns
@@ -430,14 +430,14 @@ class FederationRunner:
         self._stop.set()
         thread_exited = True
         if self._thread is not None:
-            self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                self._thread.join(timeout=timeout)
             thread_exited = not self._thread.is_alive()
             if thread_exited:
                 self._thread = None
         if resign:
             self.resign()
-        if thread_exited:
-            self._close_work_intake_client(timeout=timeout)
+        return thread_exited and self._close_work_intake_client(timeout=timeout)
 
     def resign(self) -> None:
         """Give up this node's standing: release the lease (eligible) or deregister

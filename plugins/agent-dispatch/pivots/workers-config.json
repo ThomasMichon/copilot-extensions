@@ -53,45 +53,45 @@
       "key": "edit-save",
       "label": "Edit — Save only",
       "kind": "form",
-      "fields_from": "fields",
+      "fields_from": "operator_fields",
       "title_from": "save_card.title",
       "body_from": "save_card.body",
-      "when": {"editable": "true"},
+      "when": {"operator_editable": "true", "operator_contract_version": "1"},
       "confirm": true,
-      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}"]
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "--operator-inputs", "{fields}"]
     },
     {
       "key": "edit-activate",
       "label": "Edit — Save and Activate",
       "kind": "form",
-      "fields_from": "fields",
+      "fields_from": "operator_fields",
       "title_from": "activate_card.title",
       "body_from": "activate_card.body",
-      "when": {"editable": "true"},
+      "when": {"operator_editable": "true", "operator_contract_version": "1"},
       "confirm": true,
-      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}", "--activate", "--consent", "activate-local-worker"]
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "--operator-inputs", "{fields}", "--activate", "--consent", "activate-local-worker"]
     },
     {
       "key": "instantiate-save",
       "label": "Instantiate — Save only",
       "kind": "form",
-      "fields_from": "fields",
+      "fields_from": "operator_fields",
       "title_from": "save_card.title",
       "body_from": "save_card.body",
-      "when": {"instantiable": "true"},
+      "when": {"operator_instantiable": "true", "operator_contract_version": "1"},
       "confirm": true,
-      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}"]
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "--operator-inputs", "{fields}"]
     },
     {
       "key": "instantiate-activate",
       "label": "Instantiate — Save and Activate",
       "kind": "form",
-      "fields_from": "fields",
+      "fields_from": "operator_fields",
       "title_from": "activate_card.title",
       "body_from": "activate_card.body",
-      "when": {"instantiable": "true"},
+      "when": {"operator_instantiable": "true", "operator_contract_version": "1"},
       "confirm": true,
-      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "{fields}", "--activate", "--consent", "activate-local-worker"]
+      "run": ["agent-dispatch", "workers", "save", "{id}", "--revision", "{revision}", "--operator-inputs", "{fields}", "--activate", "--consent", "activate-local-worker"]
     }
   ]
 }

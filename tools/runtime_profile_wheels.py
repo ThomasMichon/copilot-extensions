@@ -6,7 +6,7 @@ import json
 import time
 from typing import TYPE_CHECKING, BinaryIO, Mapping
 
-from promotion_python_artifacts import PromotionArtifactError, inspect_wheel
+from runtime_wheel_inspection import PromotionArtifactError, inspect_wheel
 from installer_wheel_inputs import WheelLimits, _check_deadline
 from packaging.utils import canonicalize_name
 from runtime_profile import ProfileError, RuntimeProfile, validate_profile

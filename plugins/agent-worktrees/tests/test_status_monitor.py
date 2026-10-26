@@ -4798,17 +4798,29 @@ def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
     monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **k: None)
 
     events: list[tuple[str, str]] = []
+    classify_servers = []
+    closed_servers = []
+    real_start = classify_daemon.start_server
     real_close_admission = classify_daemon.CoalescingServer.close_admission
     real_close = classify_daemon.CoalescingServer.close
 
+    def _record_start(*args, **kwargs):
+        server = real_start(*args, **kwargs)
+        classify_servers.append(server)
+        return server
+
     def _spy_close_admission(self, reason="superseded"):
-        events.append(("close_admission", reason))
+        if self in classify_servers:
+            events.append(("close_admission", reason))
         real_close_admission(self, reason)
 
     def _spy_close(self):
-        events.append(("close", ""))
+        closed_servers.append(self)
+        if self in classify_servers:
+            events.append(("close", ""))
         real_close(self)
 
+    monkeypatch.setattr(classify_daemon, "start_server", _record_start)
     monkeypatch.setattr(classify_daemon.CoalescingServer, "close_admission", _spy_close_admission)
     monkeypatch.setattr(classify_daemon.CoalescingServer, "close", _spy_close)
 
@@ -4824,7 +4836,7 @@ def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
     # once each (classify_server + worktree_status_server + managed_mux_server
     # + tracking_write_server), same invariant as the sibling test above --
     # soft-closing never skips the eventual real teardown.
-    assert kinds.count("close") == 4
+    assert len(closed_servers) == len(set(closed_servers)) == 4
 
 
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(

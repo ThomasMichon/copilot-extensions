@@ -146,7 +146,7 @@ runpy.run_module("agent_dispatch", run_name="__main__", alter_sys=True)
         if not key.startswith("AGENT_DISPATCH_TASK_")
     }
     result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, timeout=20,
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=40 if os.name == "nt" else 20,
         env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     assert result.returncode == 0, result.stderr

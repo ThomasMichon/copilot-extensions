@@ -275,7 +275,7 @@ held #6859 / #7833 lifetime work remain independently owned.
   same history consumer after caller exit. A faster source probe alone is not
   successful archival retrieval; retain any subsequent availability,
   configuration or lifecycle failure as its own unresolved gate.
-- [ ] Drive required review, CI and normal containing release; keep authorized
+- [x] Drive required review, CI and normal containing release; keep authorized
   installed rollout and parent-effort completion separate from source merge.
 
 ### Compatibility detour - Keep normal launches usable across version drift
@@ -397,6 +397,32 @@ Bridge serving-version gap and supervisor framing defect survived that
 bounded source delta inspection.
 
 ## Journal
+
+### 2026-10-25 - Fresh integration accepted; bootstrap source merged
+
+- The fresh full-plugin consumer passed all six stages and independent literal
+  evaluation against committed development source. Real normal installers,
+  harness/knowledge pairing, registrar/emitter/evaluator/pool discovery, two
+  original first-attempt workers, trusted confirmations and both original
+  native histories are corroborated. There were no parent work submissions,
+  self-repairs, resends or setup-recovery entries in this fresh run.
+- #8889 actually merged as `86c5e69c5e26412fbcce6c7a031061b4d75d0ae8`
+  after exact-head Copilot approval with no open findings and all required CI
+  green. Published head `cd47ef39ba60837fee814666c90fb45a798c2ffe`
+  additionally passed the complete native 76-case selection with one
+  intentional skip after canonical-owner integration. The existing budgets
+  were not increased.
+- Re-read the Plan and Validation Plan. #8828 is contained in normal promotion
+  #8850, Main `76adf54f21a9dc48029fb5b230a4e8e27d84d3e2`, from Dev
+  `fc31c399a2e7b2375bb560ec6188f84ff054067f`; the annotated promotion tag
+  agrees. Its exact changed directory-evidence function and parser body match
+  that snapshot. Additional unrelated released helper changes are not
+  misrepresented as whole-file equality.
+- #8889's containing promotion and both slices' qualified installed rollout
+  remain open. The managed post-merge sync safely refused an unavailable
+  deleted PR head; no forced reconciliation or finalization followed.
+  The independent registration-root warning, one-minute startup, normal
+  retirement, native Manager cost and the broader effort remain unresolved.
 
 ### 2026-10-24 - Directory repair merged; integrated bootstrap proof continues
 

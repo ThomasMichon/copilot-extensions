@@ -12,18 +12,10 @@ the relay ``-R`` bind (dotfiles#561) and the exclusive claim (dotfiles#897). The
 fix is to give those a single durable **Connection Owner** and make the three
 consumers non-owning **tenants**.
 
-This module is **increment 1** of that design (dotfiles#1333): the registry +
-lease / ref-count lifecycle *only*. It records, per (machine, CodeSpace), which
-tenants currently need the durable connection and whether the relay is *pinned*,
-and answers :func:`should_hold` ("keep the connection up?"). It does **not** open
-or own a connection yet -- a later increment attaches the self-healing
-``SupervisedRelayForward`` under this registry. Because nothing consumes it yet,
-this module is purely additive and safe to land without a daemon cutover.
-
-State of record mirrors :mod:`agent_codespaces.lease`: a host-side JSON file
-(``~/.agent-codespaces/connection-owner.json``) guarded by an exclusive lock file
-for race-safety across parallel worktree agents on the same machine, written
-atomically.
+The registry records which tenants need the durable connection and whether its
+relay is pinned. Its host-side JSON file (``~/.agent-codespaces/connection-owner.json``)
+is guarded by an exclusive lock and written atomically. The reconciler below
+owns the channels that realize that intent.
 
 Model
 -----
@@ -42,6 +34,8 @@ may a later increment tear the connection down.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import json
 import logging
@@ -49,6 +43,7 @@ import os
 import platform
 import time
 import uuid
+from pathlib import Path
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields
@@ -58,7 +53,7 @@ from .config import RUNTIME_DIR, ensure_runtime_dir
 from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
-from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, wait_for_owner_startup
+from .owner_startup import DEFAULT_OWNER_STARTUP_TIMEOUT, spawn_owner_process, wait_for_owner_startup
 from . import owner_session_records
 
 if TYPE_CHECKING:
@@ -685,17 +680,7 @@ async def await_owner_relay(
         await asyncio.sleep(poll)
 
 
-# ---------------------------------------------------------------------------
-# Connection Owner reconciler (increment 2)
-# ---------------------------------------------------------------------------
-#
-# The registry above records *intent* (which CodeSpaces should be held). The
-# reconciler below turns that intent into *live* credential-relay channels: it
-# keeps exactly one relay channel per held CodeSpace and tears down channels for
-# CodeSpaces no longer held. The relay transport is supplied by an injected
-# ``factory`` so this stays additive + unit-testable; a later increment wires the
-# real ``ssh_manager.SupervisedRelayForward`` and a daemon loop that periodically
-# (and on hold/release) calls :meth:`ConnectionOwner.reconcile`.
+# The reconciler realizes registry intent using injected, unstarted relay channels.
 
 
 class RelayChannel(Protocol):
@@ -743,6 +728,7 @@ class ConnectionOwner:
         self._ttl = ttl
         self._channels: dict[str, RelayChannel] = {}
         self._sessions = sessions
+        self._shutdown_task: asyncio.Task[None] | None = None
 
     def idle_limit(self, idle: float) -> float:
         """How long it stays up with no hold: longer while a transcript push is owed."""
@@ -770,27 +756,30 @@ class ConnectionOwner:
             return False
         channel = self._channels.get(codespace)
         if channel is None:
-            channel = await asyncio.to_thread(self._factory, codespace)  # runs gh: off the loop
-            self._channels[codespace] = channel
+            from .owner_beacon import build_owner_channel
+
+            channel = await build_owner_channel(
+                self._factory, codespace, retain=lambda ch: self._channels.__setitem__(codespace, ch),
+            )
         if not channel.is_alive:
             try:
                 await channel.start()
-            except Exception:
-                # start() may have spawned the ssh process before failing; stop it
-                # best-effort so we don't leak a relay we've stopped tracking.
-                try:
-                    await channel.stop()
-                except Exception:
-                    log.debug("relay stop after failed start also failed for %s", codespace)
+            except BaseException:
+                from .owner_beacon import stop_owner_channel
+
+                await stop_owner_channel(channel)
                 self._channels.pop(codespace, None)
                 raise
         return True
 
     async def drop(self, codespace: str) -> None:
         """Stop and forget the relay channel for ``codespace`` (idempotent)."""
-        channel = self._channels.pop(codespace, None)
+        from .owner_beacon import stop_owner_channel
+
+        channel = self._channels.get(codespace)
         if channel is not None:
-            await channel.stop()
+            await stop_owner_channel(channel)
+            self._channels.pop(codespace, None)
 
     async def reconcile(self) -> None:
         """Bring live channels in line with the registry: start held, stop unheld.
@@ -816,28 +805,37 @@ class ConnectionOwner:
                     "Connection Owner: failed to ensure relay for %s: %s",
                     codespace, exc,
                 )
-                self._channels.pop(codespace, None)
         if self._sessions is not None:
             await self._sessions.reconcile(holds)
 
     async def shutdown(self) -> None:
         """Stop all relay and daemon channels (daemon shutdown). Registry untouched."""
+        from .owner_beacon import settle_owner_task
+
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(self._shutdown())
+        cancelled = await settle_owner_task(self._shutdown_task)
+        self._shutdown_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
+
+    async def _shutdown(self) -> None:
+        errors: list[Exception] = []
         for codespace in list(self._channels):
-            await self.drop(codespace)
+            try:
+                await self.drop(codespace)
+            except Exception as exc:
+                errors.append(exc)
         if self._sessions is not None:
-            await self._sessions.shutdown()
+            try:
+                await self._sessions.shutdown()
+            except Exception as exc:
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
 
-# ---------------------------------------------------------------------------
-# Real transport factory + daemon runner (increment 3)
-# ---------------------------------------------------------------------------
-#
-# Increment 2 left the relay transport injected. Here we supply the real factory
-# (backed by ssh_manager.SupervisedRelayForward) and the reconcile loop a
-# persistent daemon runs. Both are additive + opt-in: nothing starts the daemon
-# by default. Wiring a CLI entrypoint and actually running it on a machine
-# (making the ssh/dispatch paths defer to the Owner) is the deploy-gated
-# increment that follows (dotfiles#1345).
+# Real transport factory + admitted daemon runner.
 
 
 def make_supervised_relay_factory(
@@ -892,6 +890,10 @@ def _bridge_forwards_of(owner: Any) -> dict[str, int]:
     return method() if callable(method) else {}
 
 
+@daemon_entrypoint(
+    "agent-codespaces-owner", source=__file__, purpose="production",
+    runtime_root=lambda owner, **kwargs: Path(os.path.abspath(RUNTIME_DIR)),
+)
 async def run_owner_daemon(
     owner: ConnectionOwner,
     *,
@@ -923,10 +925,11 @@ async def run_owner_daemon(
         return
     stop = stop_event if stop_event is not None else asyncio.Event()
     idle_since: float | None = None
-    from .owner_beacon import BeaconKeeper  # it builds on this module
+    from .owner_beacon import BeaconKeeper, settle_owner_task
     loop = asyncio.get_running_loop()
-    (keeper := BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))).start()
+    keeper = BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))
     try:
+        keeper.start()
         keeper.beat()
         while not stop.is_set():
             try:
@@ -952,9 +955,19 @@ async def run_owner_daemon(
             except (TimeoutError, asyncio.TimeoutError):
                 pass
     finally:
-        keeper.stop()
-        _clear_liveness()
-        await owner.shutdown()
+        async def finish() -> None:
+            keeper.stop()
+            await keeper.wait_stopped()
+            try:
+                await owner.shutdown()
+            finally:
+                _clear_liveness()
+
+        task = asyncio.create_task(finish())
+        cancelled = await settle_owner_task(task)
+        task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
 
 def ensure_owner_running(
@@ -974,20 +987,7 @@ def ensure_owner_running(
     if is_owner_live():
         return True
     try:
-        import sys
-
-        from agent_procutil import spawn_daemon
-
-        # Relay/SSH children inherit its hidden console; stdio is appended to a
-        # log beside its state so a startup crash leaves a traceback.
-        stdio_log = OWNER_FILE.parent.absolute() / "logs" / "owner-stdio.log"
-        child = spawn_daemon(
-            [sys.executable, "-m", "agent_codespaces", "owner"],
-            cwd=os.path.expanduser("~"),  # never the caller's cwd
-            log_path=stdio_log,
-            console_children=True,
-            display="agent_codespaces owner",
-        )
+        child, stdio_log = spawn_owner_process(RUNTIME_DIR, source=__file__)
     except Exception as exc:
         log.warning("Connection Owner on-demand spin-up failed: %s", exc)
         return False

@@ -16,8 +16,8 @@ Three surfaces are covered:
 from __future__ import annotations
 
 import math
-import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -1097,19 +1097,17 @@ def test_supervisor_daemon_root_hosts_recurring_children_windowlessly(
     # actually running the suite.
     monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(cli.sys, "executable", "python.exe")
-    monkeypatch.setattr(
-        "agent_procutil.windowless_daemon_kwargs",
-        lambda **options: {"creationflags": 0x08000000},
-    )
-    monkeypatch.setattr(
-        subprocess,
-        "Popen",
-        lambda argv, **kwargs: observed.update(argv=argv, kwargs=kwargs),
-    )
+    def launch(argv, **kwargs):
+        observed.update(argv=argv, kwargs=kwargs)
+        return SimpleNamespace(pid=12345)
+
+    monkeypatch.setattr("agent_procutil.spawn_daemon", launch)
 
     assert cli._spawn_supervisor_daemon_detached("host-a", "default")
     assert observed["argv"][0] == "python.exe"
-    assert observed["kwargs"]["creationflags"] == 0x08000000
+    assert observed["kwargs"]["console_children"] is True
+    assert observed["kwargs"].get("breakaway", True) is True
+    assert observed["kwargs"]["instance"].service == "agent-dispatch"
 
 
 def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
@@ -1133,13 +1131,12 @@ def test_supervisor_daemon_root_resolves_installed_slot_not_sys_executable(
     slot_py.write_text("")
     (install_dir / "current-version").write_text("0.1.2-dev49")
     monkeypatch.setattr(cli.sys, "executable", "WRONG-INTERPRETER")
-    monkeypatch.setattr("agent_procutil.windowless_daemon_kwargs", lambda **options: {})
     observed = {}
-    monkeypatch.setattr(
-        subprocess,
-        "Popen",
-        lambda argv, **kwargs: observed.update(argv=argv),
-    )
+    def launch(argv, **kwargs):
+        observed.update(argv=argv, kwargs=kwargs)
+        return SimpleNamespace(pid=12345)
+
+    monkeypatch.setattr("agent_procutil.spawn_daemon", launch)
 
     assert cli._spawn_supervisor_daemon_detached("host-a", "default")
     assert observed["argv"][0] == str(slot_py)

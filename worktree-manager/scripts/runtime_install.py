@@ -51,7 +51,12 @@ def source_install_selection(
 
 
 @contextmanager
-def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
+def candidate(
+    payload: Path, root: Path, *, assemble, uv: Path | None = None,
+    python: Path | None = None,
+    wheel_inputs: engine.WheelInstallInputs | engine.WheelReuseInputs | None = None,
+    local_packages: tuple[str, ...] | None = None, validate_candidate=None,
+):
     """Retain a healthy target; never publish selectors during construction."""
     if os.name == "nt":
         uv = Path(engine._select_uv_executable(str(Path.cwd() / uv) if uv is not None else "uv"))
@@ -77,6 +82,14 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
         ):
             raise ValueError("Manager construction requires its attributed project name and version")
         identity = runtime_source.read_source_identity(payload, version, plugin="worktree-manager")
+        if wheel_inputs is not None:
+            if identity is None:
+                raise ValueError("Manager source wheels require an attributed source identity")
+            if not isinstance(wheel_inputs, (engine.WheelInstallInputs, engine.WheelReuseInputs)):
+                raise ValueError("Manager source wheels require inspected retained inputs")
+            wheel_inputs.verify()
+        elif local_packages is not None:
+            raise ValueError("Manager local-package selection requires closed source wheels")
         prepared = Path(temporary) / "payload"
         if identity is None:
             assemble(payload, prepared)
@@ -85,24 +98,35 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             if runtime_source.read_source_identity(prepared, version, plugin="worktree-manager") != identity:
                 raise RuntimeError("Manager source identity changed during assembly")
         generation = identity.runtime_version if identity is not None else version
+        if wheel_inputs is not None:
+            generation += ".profile." + wheel_inputs.receipt()["lock_id"][7:23]
+        reuse_only = isinstance(wheel_inputs, engine.WheelReuseInputs)
+        if reuse_only:
+            if re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", wheel_inputs.generation) is None:
+                raise ValueError("Manager reuse evidence differs from its source/profile generation")
+            generation = wheel_inputs.generation
         requested_generation = generation
         if generation == "dev":
             raise RuntimeError("Manager mutable dev installation requires an explicit owning lifecycle")
         arguments = dict(
-            plugin=prepared, uv=uv, base_python=base_python(),
+            plugin=prepared, uv=uv, base_python=python or base_python(),
             health_module="worktree_manager.runtime_candidate",
             health_callable="verify_runtime_candidate",
             construction_callable="worktree_manager.runtime_candidate:prepare_runtime_candidate",
             process_retention=True, reuse_generations=identity is None,
             expected_source_identity=runtime_source.manifest_fields(identity),
         )
+        if wheel_inputs is not None:
+            arguments.update(wheel_inputs=wheel_inputs, local_packages=local_packages)
+        if validate_candidate is not None:
+            arguments["validate_candidate"] = validate_candidate
         current = runtime.current_version(root)
         if (
-            identity is not None and current and current.startswith(generation + ".repair.")
+            not reuse_only and identity is not None and current and current.startswith(generation + ".repair.")
             and runtime.is_complete(root, current)
         ):
             generation = current
-        if runtime.version_dir(root, generation).exists() and not runtime.is_complete(root, generation):
+        if not reuse_only and runtime.version_dir(root, generation).exists() and not runtime.is_complete(root, generation):
             family = current and (
                 current == generation or current.startswith(generation + "+repair.")
                 or current.startswith(generation + ".repair.")
@@ -119,6 +143,8 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             try:
                 ready = custody.enter_context(engine.numbered_candidate(root, generation, **arguments))
             except engine.HealthRepairRequired:
+                if reuse_only:
+                    raise
                 separator = "." if "+" in requested_generation else "+"
                 repaired = f"{requested_generation}{separator}repair.{uuid.uuid4().hex}"
                 arguments["reuse_generations"] = False
@@ -126,7 +152,8 @@ def candidate(payload: Path, root: Path, *, assemble, uv: Path | None = None):
             yield ready
 
 
-def activate(root: Path, version: str, *, expected: str | None, after_publish=None) -> None:
+def activate(root: Path, version: str, *, expected: str | None, after_publish=None,
+             before_publish=None) -> None:
     """Publish or recover both selectors without releasing runtime custody."""
     root = root.resolve()
     publication = runtime._runtime_component("versioned_runtime_publication")
@@ -196,6 +223,8 @@ def activate(root: Path, version: str, *, expected: str | None, after_publish=No
                             receipts.append(output)
 
                 try:
+                    if before_publish is not None:
+                        before_publish()
                     runtime._activate(root, version, link_free=True, ownership_receipt=forward)
                     if after_publish is not None:
                         after_publish()
@@ -272,9 +301,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--describe-recovery", action="store_true")
     parser.add_argument("--repair-update", action="store_true")
     parser.add_argument("--recover-for-repair", action="store_true")
+    parser.add_argument("--uninstall", action="store_true")
+    parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
+    if args.uninstall:
+        if (
+            args.root is None or args.recover_adopted or args.describe_recovery
+            or args.repair_update or args.recover_for_repair or args.command
+            or args.payload.resolve() != SCRIPTS.parent
+        ):
+            parser.error("--uninstall requires --root and only accepts --apply and --json")
+        from runtime_uninstall import uninstall
+
+        return uninstall(args.root, apply=args.apply, as_json=args.json)
+    if args.apply:
+        parser.error("--apply requires --uninstall")
     if args.recover_for_repair:
         if args.recover_adopted or args.describe_recovery or args.repair_update or args.command:
             parser.error("Repair recovery cannot be combined with installation or application commands")
@@ -294,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.root is None:
         parser.error("--root is required for installation")
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    reconcile = not command or command[:1] in (["update"], ["self-install"])
     if args.repair_update and command[:1] != ["update"]:
         parser.error("Bootstrap repair is only valid for update")
     os.environ.pop("__PYVENV_LAUNCHER__", None)
@@ -301,10 +345,14 @@ def main(argv: list[str] | None = None) -> int:
     # Bootstrap update must honor the same policy before installing Manager.
     sys.path.insert(0, str(args.payload / "src"))
     if command[:1] == ["update"]:
-        from worktree_manager.runtime_source_config import require_marketplace
+        from worktree_manager.runtime_source_config import configured_source, require_marketplace
 
         try:
-            require_marketplace(args.root)
+            targeted = any(arg == "--target" or arg.startswith("--target=") for arg in command)
+            if args.repair_update and not targeted:
+                configured_source(args.root)
+            else:
+                require_marketplace(args.root)
         except (OSError, ValueError) as error:
             print(f"Runtime source: {error}", file=sys.stderr)
             return 1
@@ -316,6 +364,15 @@ def main(argv: list[str] | None = None) -> int:
     # happens below under the constructed interpreter and retention bootstrap.
     from worktree_manager.self_install import self_install
 
+    install_payload = args.payload
+    if args.recover_adopted is None:
+        from source_acquisition import manager_payload
+
+        try:
+            install_payload = manager_payload(args.payload, args.root)
+        except (OSError, ValueError, RuntimeError, ImportError) as error:
+            print(f"Manager source acquisition refused: {error}", file=sys.stderr)
+            return 1
     if args.recover_adopted is not None:
         evidence = json.loads(args.recover_adopted.read_text(encoding="utf-8"))
         if evidence.get("root") != str(args.root.resolve()):
@@ -357,15 +414,18 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if args.repair_update:
             result = self_install(
-                args.payload, root=args.root, dry_run=False,
+                install_payload, root=args.root, dry_run=False,
                 _before_publish=lambda: validate_manager_ownership(
                     args.root, args.payload, expected=prior_commands,
                 ),
                 _after_activate=lambda slot: _activate_after_bootstrap_update(args.root, slot),
                 _transactional_activation=True,
+                _reconcile_instances=reconcile,
             )
         else:
-            result = self_install(args.payload, root=args.root, dry_run=False)
+            result = self_install(
+                install_payload, root=args.root, dry_run=False, _reconcile_instances=reconcile,
+            )
         if result.action == "error":
             print(result.reason, file=sys.stderr)
             return 1

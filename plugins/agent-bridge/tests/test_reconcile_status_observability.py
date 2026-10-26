@@ -2,9 +2,9 @@
 (agent-bridge-unified-zdd-cutover Phase 0's observability item) -- an
 operator should never have to reconstruct "how long since the last
 successful reconcile, is background reconcile enabled" from a raw log
-file. Background reconcile is now always-on (the opt-in gate was removed;
-see test_bootstrap_check_reconcile_always_on.py), so "enabled" is a
-constant; what genuinely varies is staleness.
+file. These compatibility diagnostics retain the historical reconcile record;
+the bootstrap now submits through the ordinary installation queue and never
+rewrites that history. The reader's existing "enabled" field remains a constant.
 """
 
 from __future__ import annotations

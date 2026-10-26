@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import sys
+from typing import TYPE_CHECKING
 
 from .update_events import UpdateRun
+
+if TYPE_CHECKING:
+    from .runtime_source import ResolvedSource
 
 
 def preflight_runtime_source(run: UpdateRun | None = None, *, suite: bool = False) -> bool:
@@ -38,17 +42,21 @@ def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
 def run_update_steps(
     rest: list[str], run: UpdateRun, *, version: str, fresh_manager: bool = False,
     environment: dict[str, str] | None = None,
+    runtime_source: ResolvedSource | None = None,
 ) -> int:
     from . import engine_client as ec
     from .self_install import SelfUpdateResult, self_update
     from .runtime_source_update import prepare_suite
     from .runtime_source import SourceAcquisitionError
 
-    if not preflight_runtime_source(run, suite=not fresh_manager):
+    if not preflight_runtime_source(run, suite=not fresh_manager or runtime_source is not None):
         return 1
     project, forwarded = extract_project(rest)
     try:
-        prepared = prepare_suite(project, forwarded, environment=environment)
+        prepared = prepare_suite(
+            project, forwarded, environment=environment,
+            **({"runtime_source": runtime_source} if runtime_source is not None else {}),
+        )
     except (ec.EngineError, OSError, ValueError, SourceAcquisitionError) as error:
         run.say(f"Runtime source: {error}", state="failed")
         run.record_engine_error(str(error), missing=bool(getattr(error, "install_hint", False)))

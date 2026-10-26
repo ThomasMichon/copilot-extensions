@@ -216,13 +216,21 @@ def start(
         raise BridgeUnavailable("ordinary startup task prompt must be a string")
     if assignment:
         prompt = f"{assignment}\n\n{prompt}"
+    from .spawn_diagnostics import SpawnDiagnostics
+
+    diagnostics = SpawnDiagnostics(
+        task_id=task.get("id"), generation=task["generation"], reservation_key=key,
+        secrets={"TASK_PROMPT_SECRET": assignment or "", "STARTUP_PROMPT_SECRET": prompt},
+    )
     try:
-        reservation = client.get_reservation(key)
+        with diagnostics.stage("ordinary_read_reservation"):
+            reservation = client.get_reservation(key)
     except (DispatchError, TaskError) as exc:
         raise BridgeCarriedSessionBusy(f"ordinary startup reservation cannot be read: {exc}") from exc
     if reservation.get("state") != "reserving" or reservation.get("release_requested"):
         raise BridgeUnavailable("ordinary startup reservation is not admitted")
     info = reservation.get("agent_info")
+    diagnostics.creation_key = reservation.get("creation_key")
     assigned = bool(reservation.get("worktree") and not info) or bool(
         info and info.get("fact_kind") == "resumed"
     )
@@ -254,20 +262,13 @@ def start(
     def run(
         argv: list[str], *, prompt_input: str | None = None, read_only: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        from .launch_debug import begin
-        trace = None if read_only else begin(
-            prefix, argv, prompt_input=prompt_input, input_reference=key, timeout=timeout,
+        from .ordinary_bridge_diagnostics import run as observed_run
+
+        diagnostics.secrets["BRIDGE_INPUT_SECRET"] = prompt_input or ""
+        return observed_run(
+            prefix, argv, diagnostics=diagnostics, runner=subprocess.run,
+            prompt_input=prompt_input, read_only=read_only, timeout=timeout,
         )
-        try:
-            result = subprocess.run([*prefix, *argv], input=prompt_input, capture_output=True,
-                                    text=True, encoding="utf-8", check=False, timeout=timeout, **no_window_kwargs())
-        except (subprocess.TimeoutExpired, OSError) as exc:
-            if trace:
-                trace.finish(error=exc)
-            raise
-        if trace:
-            trace.finish(result=result)
-        return result
 
     def resumed_info(session_id: str) -> dict:
         result = run(["--json", "status", session_id, "--full"])
@@ -291,7 +292,7 @@ def start(
             raise BridgeCarriedSessionBusy(str(exc)) from exc
         return record
 
-    def store_info() -> None:
+    def _store_info() -> None:
         from .ordinary_invocation import prepare, same_facts
         record = None
         if assigned:
@@ -315,6 +316,10 @@ def start(
         if not isinstance(readback, dict) or not same_facts(readback.get("startup_invocation"), invocation):
             raise CreatedAgentUnrecorded("ordinary invocation storage/read-back capability is unproven")
         info["startup_invocation"] = invocation
+
+    def store_info() -> None:
+        with diagnostics.stage("ordinary_store_readback"):
+            _store_info()
 
     if info:
         try:

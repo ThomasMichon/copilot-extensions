@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 from agent_procutil import no_window_kwargs
@@ -14,6 +15,72 @@ from test_update_entry import update_entry_case as shared_update_entry_case
 update_entry_case = shared_update_entry_case
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="native Windows security/process contract")
+
+
+@pytest.mark.parametrize("front", ["global", "installed-project"])
+@pytest.mark.parametrize("available", [False, True])
+@pytest.mark.parametrize("flags", [
+    ["--phase", "preflight", "--plugin", "agent-example"],
+    ["--phase=runtimes", "--plugin=agent-example"],
+    ["--plugin", "agent-example"],
+])
+def test_selected_update_phase_bypasses_native_repair_and_implicit_provision(
+    update_entry_case, native_powershell, monkeypatch, front, available, flags,
+):
+    from agent_worktrees import project_command_templates
+
+    tmp, home, _resolver = update_entry_case
+    monkeypatch.delenv("AGENT_WORKTREES_NO_SELFPROVISION", raising=False)
+    capture = tmp / "phase-capture.py"
+    capture.write_text(
+        "import json, os, sys\n"
+        "with open(os.environ['PHASE_ARGUMENTS'], 'w') as stream:\n"
+        "    json.dump(sys.argv[1:], stream)\n"
+        "raise SystemExit(29)\n",
+    )
+    command = tmp / "phase-python.cmd"
+    command.write_text(f'@"{sys.executable}" -I -S -B "{capture}" %*\n@exit /b %ERRORLEVEL%\n')
+    if available:
+        resolver = home / ".agent-worktrees" / "bin" / "resolve-runtime.ps1"
+        resolver.parent.mkdir(parents=True, exist_ok=True)
+        resolver.write_text("$AwPy = '" + str(command).replace("'", "''") + "'\n")
+    entry = PLUGIN / "bin" / "agent-worktrees.ps1"
+    arguments = ["--project", "sample", "update", *flags]
+    if front == "installed-project":
+        user_bin = home / ".local" / "bin"
+        user_bin.mkdir(parents=True)
+        for name in ("agent-worktrees.ps1", "agent-worktrees-update-entry.ps1"):
+            shutil.copy2(PLUGIN / "bin" / name, user_bin / name)
+        entry = tmp / "sample.ps1"
+        entry.write_text(project_command_templates.render(
+            "sample", PLUGIN, windows=True, user_bin=user_bin,
+        )["sample.ps1"])
+        arguments = ["update", *flags]
+    proof = tmp / "phase-arguments.json"
+    escaped = lambda text: "'" + str(text).replace("'", "''") + "'"
+    harness = tmp / "phase-entry.ps1"
+    harness.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Invoke-WebRequest { throw 'phase attempted bootstrap download' }\n"
+        "function Add-Type { throw 'phase attempted source compilation' }\n"
+        f"$env:PHASE_ARGUMENTS = {escaped(proof)}\n"
+        f"$phaseArgs = @({','.join(escaped(value) for value in arguments)})\n"
+        f"& {escaped(entry)} @phaseArgs\n"
+        "exit $LASTEXITCODE\n",
+    )
+    result = subprocess.run(
+        [native_powershell, "-NoProfile", "-File", str(harness)],
+        capture_output=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == (29 if available else 127), result.stdout + result.stderr
+    if available:
+        assert json.loads(proof.read_text()) == [
+            "-m", "agent_worktrees", "--project", "sample", "update", *flags,
+        ]
+    else:
+        assert not proof.exists()
+        assert b"requires a provisioned runtime" in result.stderr
+    assert not list(tmp.glob("agent-update-*"))
 
 
 @pytest.mark.parametrize("original", ["absent", "empty", "selected"])

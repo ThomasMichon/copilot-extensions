@@ -10,10 +10,11 @@ function Ensure-Uv {
 }
 
 function New-SignedVenv {
-    param([string]$VenvDir, [string]$VenvPython, [string]$PythonVersion, [version]$MinimumSignedBaseVersion, [string]$UvCommand)
+    param([string]$VenvDir, [string]$VenvPython, [string]$PythonVersion, [version]$MinimumSignedBaseVersion, [string]$UvCommand, [switch]$WithoutPip)
     if ($PythonVersion -ne '3.11' -or $MinimumSignedBaseVersion -ne [version]'3.11') {
         throw 'Foundation lost its bootstrap interpreter floor.'
     }
+    if (-not $WithoutPip) { throw 'UV-owned foundation must not seed pip.' }
     & $env:FOUNDATION_FIXTURE_PYTHON -I -B -m venv --copies --without-pip $VenvDir
     if ($LASTEXITCODE -ne 0) { throw 'Fixture interpreter construction failed.' }
     return [IO.File]::Exists($VenvPython)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -13,13 +14,25 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOKS = (ROOT / "tools" / "hooks" / "pre-commit", ROOT / "tools" / "hooks" / "pre-push")
 
 
-def test_pre_push_keeps_only_publication_safety_checks():
+def test_pre_push_keeps_only_branch_policy():
     hook = HOOKS[1].read_text(encoding="utf-8")
     invoked = set(re.findall(r'"\$ROOT/tools/([^"]+\.py)"', hook))
-    assert invoked == {"check-no-internal-identifiers.py"}
-    assert '--git-ref "$head" --no-live-sweep' in hook
-    assert '--base "$base"' in hook
-    assert 'check_ref "$local_sha" "$remote_sha"' in hook
+    assert invoked == set()
+    assert ". ./plugins/agent-worktrees/src/agent_worktrees/pre_push.sh" in hook
+    policy = (ROOT / "plugins/agent-worktrees/src/agent_worktrees/pre_push.sh").read_text()
+    assert "aw_check_update" in policy
+    for command in ("python", "agent-worktrees hook", "check-publication", "bootstrap", "uv "):
+        assert command not in hook + policy
+
+
+def test_branch_only_template_is_self_contained_runtime_package_data():
+    plugin = ROOT / "plugins" / "agent-worktrees"
+    package = plugin / "src" / "agent_worktrees"
+    manifest = tomllib.loads((plugin / "pyproject.toml").read_text(encoding="utf-8"))
+    assert "pre_push.sh" in manifest["tool"]["setuptools"]["package-data"]["agent_worktrees"]
+    installer = (package / "hooks.py").read_text(encoding="utf-8")
+    assert 'Path(__file__).with_name("pre_push.sh")' in installer
+    assert (package / "pre_push.sh").is_file()
 
 
 def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
@@ -45,6 +58,28 @@ def test_repository_guards_remain_in_ci_and_staged_checks_in_pre_commit():
     assert "check-large-files.py" not in pre_commit
 
 
+def test_removed_publication_validators_are_in_the_existing_required_trusted_job():
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/workflow-lockdown-guard.yml").read_text(encoding="utf-8")
+    )
+    job = workflow["jobs"]["workflow-lockdown-guard"]
+    assert job["name"] == "workflow-lockdown-guard"
+    assert job["if"] == "github.event_name == 'pull_request_target'"
+    steps = job["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert checkout["with"]["persist-credentials"] is False
+    fetch = next(step for step in steps if step.get("name") == "Fetch publication candidates as inert Git objects")
+    assert '--no-tags --no-recurse-submodules origin "$BASE" "$HEAD"' in fetch["run"]
+    check = next(step for step in steps if step.get("name") == "Required identifier and final-diff size publication checks")
+    assert 'check-no-internal-identifiers.py --ci --base "$BASE" --git-ref "$HEAD"' in check["run"]
+    assert 'check-large-files.py --base "$BASE" --head "$HEAD"' in check["run"]
+    assert "continue-on-error" not in check and "if" not in check
+    assert check["env"]["COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"] == "1"
+    assert "secrets.FORBIDDEN_IDS_FACILITY" in check["env"]["COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"]
+    assert "secrets.FORBIDDEN_IDS_WORK" in check["env"]["COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"]
+
+
 def test_large_file_ci_checks_final_event_diff_and_full_audit_is_explicit():
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
     steps = [
@@ -62,7 +97,7 @@ def test_large_file_ci_checks_final_event_diff_and_full_audit_is_explicit():
     assert audit["if"] == "github.event_name == 'workflow_dispatch'"
 
 
-@pytest.mark.parametrize("hook", HOOKS)
+@pytest.mark.parametrize("hook", HOOKS[:1])
 def test_git_hooks_pin_platform_bash(hook: Path) -> None:
     """The hooks must re-exec under a real bash before using bash-only syntax.
 

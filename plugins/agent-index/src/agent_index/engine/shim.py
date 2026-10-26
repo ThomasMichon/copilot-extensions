@@ -25,6 +25,9 @@ unloading the model.
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint, spawn_instance
+from pathlib import Path
+
 import asyncio
 import json
 import logging
@@ -131,7 +134,12 @@ class WorkerSupervisor:
             cmd = _worker_command(self._host, self._port)
             logger.info("Shim: starting GPU worker: %s", " ".join(cmd))
             try:
-                self._proc = subprocess.Popen(cmd, env=self._spawn_env())  # noqa: ASYNC220 - non-blocking spawn; worker driven over HTTP, blocking waits offloaded via to_thread
+                self._proc = spawn_instance(
+                    cmd, env=self._spawn_env(),
+                    instance=DaemonInstanceSpec(
+                        "agent-index-engine", Path(os.path.abspath(__file__)).parent, Path(__file__).resolve(),
+                    ),
+                )
             except OSError as exc:
                 # Misconfiguration (bad AGENT_INDEX_ENGINE_WORKER_CMD, missing
                 # interpreter) -- normalize to RuntimeError so the proxy maps it
@@ -249,6 +257,15 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        """Admit direct framework hosts before their startup work."""
+        from agent_procutil.daemon_instances import admit_daemon_instance
+
+        with admit_daemon_instance("agent-index-engine-shim", source=__file__, purpose="production"):
+            async with _lifespan(app):
+                yield
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
         client = httpx.AsyncClient(
             timeout=httpx.Timeout(connect=5.0, read=300.0, write=30.0, pool=5.0)
         )
@@ -389,6 +406,7 @@ async def _forward(client: httpx.AsyncClient, base_url: str, request: Request) -
     )
 
 
+@daemon_entrypoint("agent-index-engine-shim", source=__file__, purpose="production")
 def run_shim(*, host: str = "127.0.0.1", port: int = 8421, worker_port: int | None = None) -> None:
     """Start the shim server with uvicorn.
 

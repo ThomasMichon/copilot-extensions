@@ -75,6 +75,9 @@ helpers for a required-context installer's admission without changing command
 catalogs or enabling their additive binding field. The installer must invoke
 that admission before staging and authenticate a borrowed ticket on reentry;
 packaging alone does not enforce it. Logger is the first installer-only adopter.
+All current required-context Python runtime payloads package this SDK for
+installed-owner source-update validation and lifecycle execution. This does not
+convert the legacy version-1 manifest or change any command/catalog rendering.
 Its real managed-first-stamp regression and standalone/custody checks run in the
 ordinary suite. The full policy/action/root matrix is an explicit T3 portfolio:
 `python tools/run-plugin-tests.py payload-invocation --test-file

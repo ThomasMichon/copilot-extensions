@@ -65,7 +65,15 @@ class DirectoryStore:
                 machine TEXT NOT NULL, environment TEXT NOT NULL,
                 generation INTEGER NOT NULL, public_key TEXT NOT NULL,
                 PRIMARY KEY(machine, environment, generation))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS enrollment_pending (
+                principal TEXT NOT NULL, request_id TEXT NOT NULL,
+                request BLOB NOT NULL, candidate BLOB NOT NULL,
+                fingerprint TEXT NOT NULL, decision BLOB,
+                PRIMARY KEY(principal, request_id))""")
             self._relay_snapshot(db)
+        from .approval import PeerApproval
+
+        self.approval = PeerApproval(self)
 
     @contextmanager
     def _transaction(self):
@@ -177,11 +185,15 @@ class DirectoryStore:
         with self._transaction() as db:
             return self._relay_snapshot(db)
 
-    def enroll(self, principal: str, request: dict, *, checkpoint=lambda: None) -> tuple[dict, bool]:
-        check(isinstance(request, dict) and set(request) == {
+    def _validate_enrollment(self, principal: str, request: dict) -> dict:
+        required = {
             "request_id", "machine", "environment", "generation", "public_key", "host_key",
-        } | ({"relay_public_key"} if "relay_public_key" in request else set()),
+        }
+        check(isinstance(request, dict) and required <= request.keys()
+              and not request.keys() - required - {"relay_public_key", "enrollment_policy"},
               "invalid-enrollment")
+        check(request.get("enrollment_policy", "configured-bindings")
+              == self.config.enrollment_mode, "enrollment-policy-mismatch")
         identifier(request["request_id"], "SSH enrollment request")
         integer(request["generation"], "SSH enrollment generation", minimum=1)
         binding = self.config.binding(principal)
@@ -195,50 +207,68 @@ class DirectoryStore:
         public_key(request["public_key"])
         if request["host_key"] is not None:
             public_key(request["host_key"])
+        check(not decision["effective_inbound"] or request["host_key"] is not None,
+              "inbound-host-pin-required")
         relay_key = request.get("relay_public_key")
         if relay_key is not None:
             public_key(relay_key)
+            check(relay_key != request["public_key"], "relay-key-must-be-distinct")
         check("relay" not in self.config.to_dict() or relay_key is not None,
               "relay-public-key-required")
+        return binding
+
+    def _activate(self, db, principal: str, request: dict) -> tuple[dict, bool]:
+        binding = self._validate_enrollment(principal, request)
+        relay_key = request.get("relay_public_key")
         encoded = canonical(request)
+        self._remember_request(db, principal, request["request_id"], encoded)
+        row = db.execute(
+            "SELECT public_key,host_key FROM enrollments "
+            "WHERE machine=? AND environment=? AND generation=?",
+            (binding["machine"], binding["environment"], binding["generation"]),
+        ).fetchone()
+        check(row is None or row == (request["public_key"], request["host_key"]),
+              "key-change-requires-new-generation")
+        previous_relay = db.execute(
+            "SELECT public_key FROM relay_keys "
+            "WHERE machine=? AND environment=? AND generation=?",
+            (binding["machine"], binding["environment"], binding["generation"]),
+        ).fetchone()
+        check(row is None or (previous_relay[0] if previous_relay else None) == relay_key,
+              "relay-key-change-requires-new-generation")
+        changed = row is None
+        if changed:
+            db.execute("INSERT INTO enrollments VALUES (?,?,?,?,?)", (
+                binding["machine"], binding["environment"], binding["generation"],
+                request["public_key"], request["host_key"],
+            ))
+            db.execute("UPDATE metadata SET revision=revision+1 WHERE id=1")
+            if relay_key is not None:
+                db.execute("INSERT INTO relay_keys VALUES (?,?,?,?)", (
+                    binding["machine"], binding["environment"], binding["generation"], relay_key,
+                ))
+        result = self._snapshot(db)
+        self._relay_snapshot(db)
+        return result, changed
+
+    def _remember_request(self, db, principal: str, request_id: str, encoded: bytes) -> None:
+        previous = db.execute(
+            "SELECT content FROM requests WHERE principal=? AND request_id=?",
+            (principal, request_id),
+        ).fetchone()
+        check(previous is None or previous[0] == encoded, "request-content-conflict")
+        if previous is None:
+            count = db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+            check(count < MAX_REQUESTS, "enrollment-journal-full")
+            db.execute("INSERT INTO requests VALUES (?,?,?)", (principal, request_id, encoded))
+
+    def enroll(self, principal: str, request: dict, *, checkpoint=lambda: None) -> tuple[dict, bool]:
+        self._validate_enrollment(principal, request)
         with self._transaction() as db:
             checkpoint()
-            previous = db.execute(
-                "SELECT content FROM requests WHERE principal=? AND request_id=?",
-                (principal, request["request_id"]),
-            ).fetchone()
-            check(previous is None or previous[0] == encoded, "request-content-conflict")
-            row = db.execute(
-                "SELECT public_key,host_key FROM enrollments "
-                "WHERE machine=? AND environment=? AND generation=?",
-                (binding["machine"], binding["environment"], binding["generation"]),
-            ).fetchone()
-            check(row is None or row == (request["public_key"], request["host_key"]),
-                  "key-change-requires-new-generation")
-            previous_relay = db.execute(
-                "SELECT public_key FROM relay_keys "
-                "WHERE machine=? AND environment=? AND generation=?",
-                (binding["machine"], binding["environment"], binding["generation"]),
-            ).fetchone()
-            check(row is None or (previous_relay[0] if previous_relay else None) == relay_key,
-                  "relay-key-change-requires-new-generation")
-            if previous is None:
-                count = db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
-                check(count < MAX_REQUESTS, "enrollment-journal-full")
-                db.execute("INSERT INTO requests VALUES (?,?,?)",
-                           (principal, request["request_id"], encoded))
-            changed = row is None
-            if changed:
-                db.execute("INSERT INTO enrollments VALUES (?,?,?,?,?)", (
-                    binding["machine"], binding["environment"], binding["generation"],
-                    request["public_key"], request["host_key"],
-                ))
-                db.execute("UPDATE metadata SET revision=revision+1 WHERE id=1")
-                if relay_key is not None:
-                    db.execute("INSERT INTO relay_keys VALUES (?,?,?,?)", (
-                        binding["machine"], binding["environment"], binding["generation"], relay_key,
-                    ))
-            result = self._snapshot(db)
-            self._relay_snapshot(db)
+            if self.config.enrollment_mode == "peer-approval":
+                result, changed = self.approval.submit(db, principal, request)
+            else:
+                result, changed = self._activate(db, principal, request)
             checkpoint()
             return result, changed

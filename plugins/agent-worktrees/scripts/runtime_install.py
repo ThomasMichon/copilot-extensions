@@ -508,19 +508,40 @@ def install(
         previous = _selected(root)
         if previous is not None:
             custody.enter_context(runtime.retention_lease(root, previous, timeout=wait_timeout))
-        with governance.held(timeout=wait_timeout):
-            if source_identity is not None:
-                plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
-            candidate = custody.enter_context(engine.numbered_candidate(
-                root, version, plugin=plugin, uv=uv, base_python=base_python,
-                health_module="agent_worktrees.runtime_candidate", health_callable="verify_runtime_candidate",
-                construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
-                construction_data=provenance,
-                process_retention=True,
-                reuse_generations=source_identity is None,
-                expected_source_identity=runtime_source.manifest_fields(source_identity),
+        try:
+            with governance.held(timeout=wait_timeout):
+                if source_identity is not None:
+                    plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
+                    if previous and previous.startswith(version + ".repair."):
+                        manifest = governance.helper.read_deployment_manifest(root / "deploy-manifest.json")
+                        if (
+                            manifest.get("runtime_source") == source_identity.document()
+                            and manifest.get("runtime_version") == previous
+                            and isinstance(manifest.get("venv"), str)
+                            and Path(manifest["venv"]) == runtime.version_dir(root, previous)
+                        ):
+                            version = previous
+                candidate = custody.enter_context(engine.numbered_candidate(
+                    root, version, plugin=plugin, uv=uv, base_python=base_python,
+                    health_module="agent_worktrees.runtime_candidate", health_callable="verify_runtime_candidate",
+                    construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
+                    construction_data=provenance,
+                    process_retention=True,
+                    reuse_generations=source_identity is None,
+                    expected_source_identity=runtime_source.manifest_fields(source_identity),
+                    wait_timeout=wait_timeout, child_timeout=child_timeout,
+                ))
+        except engine.HealthRepairRequired:
+            if source_identity is None:
+                raise
+            import runtime_install_modes as modes
+
+            return modes.run(
+                root, plugin, payload=payload, uv=uv, base_python=base_python, mode="repair",
                 wait_timeout=wait_timeout, child_timeout=child_timeout,
-            ))
+                expected_source_identity=runtime_source.manifest_fields(source_identity),
+                frontend=frontend, recover_adopted_manager=recover_adopted_manager,
+            )
         version = candidate.slot.name
         print(
             f"Runtime {version}: candidate healthy (reused={candidate.reused}); "
@@ -809,6 +830,7 @@ def main(argv: list[str] | None = None) -> int:
             {"expected_governance": arguments.governance_generation}
             if arguments.mode_owner else {}
         )
+        mode_arguments["recover_adopted_manager"] = arguments.recover_adopted_manager
         if not arguments.mode_owner:
             mode_arguments["expected_source_identity"] = arguments.expected_source_identity
         if arguments.frontend is not None:

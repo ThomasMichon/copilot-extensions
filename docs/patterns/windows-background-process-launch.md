@@ -25,8 +25,8 @@ change the symptom, but it is never part of the launch contract.
 | Short-lived child with captured or redirected stdio | A console-subsystem root plus `agent_procutil.no_window_kwargs()` / `no_window_flags()`, or the owning shared library's equivalent | `CREATE_NO_WINDOW`; pipes and exit status preserved; timeout owns the complete tree |
 | Non-interactive OpenSSH transport with redirected stdio | `ssh_manager.proxy.create_ssh_subprocess()` | `DETACHED_PROCESS` for the SSH root; a configured native proxy runs through an owned loopback broker; pipes, exit status, and cleanup remain owned |
 | Console descendant controlled by a third-party OpenSSH `ProxyCommand` | A windowless binary stdio client connects to an owned loopback broker; the broker launches the console child with `no_window_kwargs()` | Preserve SSH's original host/port and token expansion; authenticate the local channel; protocol bytes and child cleanup remain owned |
-| Long-lived Python daemon with no recurring console descendants | `agent_procutil.spawn_daemon(argv, cwd=..., log_path=...)` with `windowless_python()` (or `windowless_python()` plus `detached_kwargs(breakaway=True)` at sites not yet migrated) | No root console; lifetime escape is explicit; explicit durable cwd; output logged; occasional captured console children use the short-lived primitive |
-| Long-lived Python daemon with recurring console descendants | `spawn_daemon(..., console_children=True)` with a console-subsystem Python (or `windowless_daemon_kwargs(breakaway=True)` at sites not yet migrated) | One inherited hidden console contains descendants; durable lifetime is separate from headlessness |
+| Long-lived Python daemon with no recurring console descendants | `agent_procutil.spawn_daemon(argv, instance=..., cwd=..., log_path=...)` with `windowless_python()` | Attributable launch/startup custody; no root console; explicit durable cwd; output logged; occasional captured console children use the short-lived primitive |
+| Long-lived Python daemon with recurring console descendants | `spawn_daemon(..., instance=..., console_children=True)` with a console-subsystem Python | Attributable custody; one inherited hidden console contains descendants; durable lifetime is separate from headlessness |
 | PowerShell startup or scheduled launcher whose output is not captured | `conhost.exe --headless <interpreter> ...` | Headless console inherited by descendants; stable installed target; explicit stop/cutover ownership |
 | Intentional interactive terminal | An explicit interactive launcher | Reviewable exception with `# headless-guard: allow <reason>` when low-level flags are necessary |
 
@@ -76,9 +76,10 @@ closed. Successful installer exit is therefore not a durable-service witness.
 Keep bounded helpers and their descendants inside caller-owned containment.
 For a durable daemon whose contract requires it to outlive the installer or
 request, opt out explicitly with the owning primitive:
-`agent_procutil.spawn_daemon()` (breakaway by default; `console_children=True`
-for recurring console descendants), or, at sites not yet migrated to it,
-`windowless_daemon_kwargs(breakaway=True)` / `detached_kwargs(breakaway=True)`.
+`agent_procutil.spawn_daemon()` with its instance descriptor (breakaway by
+default; `console_children=True` for recurring console descendants), or the
+corresponding native attributed launch/startup boundary. Flags-only
+`windowless_daemon_kwargs` / `detached_kwargs` are not daemon admission.
 `spawn_daemon` also requires an explicit durable `cwd` (the runtime root or
 home, never the caller's cwd or a plugin payload) and appends the daemon's
 output to a `log_path` (stderr optionally to its own `stderr_log_path`) instead
@@ -106,6 +107,12 @@ start inside the caller's Job, with a warning and log entry. That daemon does
 not outlive the Job. Explicit `breakaway=False` and contained test mode never
 invoke the broker.
 Contained tests deliberately suppress escape and retain process-tree cleanup.
+They still carry instance ownership. A `daemon_test_lifecycle` scope supplies
+runner-owned renewal and exact cleanup: 10-minute renewable leases and a
+4-hour unattended maximum, with an explicit pause-tolerant policy for
+interactive tests. Source-only test daemons do not become unbounded production
+instances by omission; native supervisors and service entrypoints participate
+in the same admission contract. See `libs/agent-procutil/README.md`.
 The native survival regression separately exercises Jobs with and without
 breakaway permission, with two complete launch/stop cycles, exact argv and
 environment delivery, split logs and foreground/window observation. The
@@ -162,6 +169,8 @@ check into recurring self-SSH process churn.
 `agent_procutil.spawn_daemon` is an approved headless primitive: a launch
 through it is windowless by construction. It approves only its own call; a raw
 `subprocess` spawn beside it in the same function is still checked.
+`tools/check-daemon-coverage.py` separately audits shipped entrypoint custody
+and callable classifications; headless flags do not establish that coverage.
 
 Canonical shared libraries and every shipped vendored copy are scanned directly.
 The vendored-library synchronization guard is also required in CI and pre-push,

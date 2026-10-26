@@ -47,7 +47,7 @@ if ($Mode -eq 'prerequisite-helpers') {
         [IO.File]::WriteAllText((Join-Path $VenvDir 'pyvenv.cfg'), 'fixture')
         return @{ ExitCode = 0; Output = '' }
     }
-    if (-not (New-SignedVenv -VenvDir $venv -VenvPython $python -PythonVersion '3.11' -MinimumSignedBaseVersion '3.11' -UvCommand 'never-executed')) {
+    if (-not (New-SignedVenv -VenvDir $venv -VenvPython $python -PythonVersion '3.11' -MinimumSignedBaseVersion '3.11' -UvCommand 'never-executed' -WithoutPip)) {
         throw 'canonical managed fallback did not retain its requested interpreter'
     }
     Save 'prerequisite-helpers-ok' 'legacy default, signed preference and managed fallback verified'

@@ -737,7 +737,12 @@ class PickerScreenRuntimeMixin:
                     cancel()
                 except Exception:
                     pass
-        self.data = payload.data
+        if self.live and self.loader is not None:
+            # A new loader starts empty. Keep only surviving sources' rows until
+            # its stream commits, using the same prefix merge as ordinary polls.
+            self._apply_loader_records(source_tabs=self.source_tabs[1:])
+        else:
+            self.data = payload.data
         if self.live:
             self.load_delay = {}
         else:

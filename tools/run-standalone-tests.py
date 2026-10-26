@@ -188,6 +188,7 @@ def prepare(component: str, python: Path, *, smoke: bool = False) -> None:
         ]
     elif component == "services/ssh":
         sources = [
+            "--no-editable",
             str(REPO / "fleet-manager") + "[service-gateway,ssh-client]",
             str(REPO / "plugins" / "agent-ssh"),
             str(REPO / "libs" / "single-instance-lease"),

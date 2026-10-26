@@ -30,6 +30,8 @@ plugin targets already reports check state through ``check_suite``/
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import hashlib
 import hmac
 import json
@@ -151,6 +153,7 @@ def build_app(
     return app
 
 
+@daemon_entrypoint("agent-dispatch-review-webhook", source=__file__, purpose="production")
 def serve(
     store: PRObservationStore,
     observe: Observer,

@@ -27,7 +27,7 @@ def assert_source_unit_checkout(declared):
         "persist-credentials": False,
     } for depth in (0, "0"))
     assert helper["with"] == {
-        "ref": "${{ env.RELEASE_HELPERS_SHA }}", "path": "reviewed-helpers",
+        "ref": "${{ needs.gate.outputs.sha }}", "path": "reviewed-helpers",
         "persist-credentials": False,
     }
 

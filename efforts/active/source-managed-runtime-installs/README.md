@@ -70,9 +70,16 @@ separate from self-update configuration, plus a shipped trusted canonical toolki
 that prepares plugin and standalone Manager payloads. The normal source-backed
 suite caller now qualifies the exact executing engine, acquires one source
 commit/tree and prepares its runtime portfolio before either update stage.
-Bootstrap/repair and targeted service-source execution still refuse rather than
-silently deploying marketplace code. Plugin bootstrap paths still need complete
+Fresh legacy suite repair now retains that same independent service selection
+through native engine recovery and subsequent suite preparation. Targeted and
+non-repair bootstrap service-source paths still refuse rather than silently
+deploying marketplace code. Plugin bootstrap paths still need complete
 publication-boundary qualification.
+The collected updater now preserves Containers' existing dependency profile
+through installed-owner target planning, native construction and selected
+source-qualified currentness, separately from the original source pin. Its
+native same-root witnesses do not qualify the complete eligible portfolio or an
+adopter's production data/serving transition.
 Worktrees now retains its original global command owner through collected
 prepared-source updater execution, native publication and installed source-unavailable
 restoration. Those bounded providers do not qualify an adopter's actual
@@ -149,6 +156,41 @@ Installation-cell/custom-root capability is separate work, not a prerequisite
 for this wholesale transition. The [verbatim clarification](inception-transcript.md#wholesale-same-installation-cutover)
 preserves all three operator statements. Exact native change/rollback consent,
 candidate health and data-format compatibility remain required.
+
+**Teardown-readiness priority (2026-10-25), summary:** prepare intentional
+per-machine tool outages before further installed transition. The existing
+installation-independent-sessions owner (#8669) retains wrappers, supported
+removal and actual process-survival qualification. The bounded companion #9022
+adds normally projected conduct guidance and a retained local notice identifying
+the maintenance owner, with native Copilot 30-minute standby polling and no
+supporting-service dependency. This does not activate a hold, replace native
+survival evidence or authorize host restart/removal.
+
+**Disposable-service alignment (2026-10-25), summary:** noncritical supporting services,
+including Manager's replaceable tooling, must be disposable while durable work and independently
+hosted Copilot sessions survive. One retained per-machine **YAML** maintenance
+banner both vetoes automatic updates/reprovisioning and explains missing
+`agent-*` catalog tools to agents. Normally projected conduct guidance prohibits
+self-repair during an explained hold and uses one native scheduled prompt every
+30 minutes until applicable clearance. This extends the earlier JSON-only
+source companion; it is not an already-implemented updater veto. The
+[reviewed-contract proposal](maintenance-banner.md) carries binding details,
+compatibility and consumer validation under #9040, preserving the existing
+maintenance, driver and #8669 survival owners. The
+[verbatim request](inception-transcript.md#disposable-services-and-yaml-maintenance-banner)
+is the authoritative capture; filename and parser/admission safeguards marked
+agent-recommended are proposed realization, not additional operator requests.
+
+**Critical-connectivity correction (2026-10-25), summary:** spare the actual
+machine-to-machine SSH host/client/proxy/tunnel/Gateway dependency closure from
+supporting-suite uninstall/reinstall, including forced removal over SSH.
+Treat that closure like critical Copilot/Mux/session-host substrate and audit
+each route instead of assuming that agent-ssh provisioning code serves requests.
+Credential relays are explicitly disposable. The [source audit and retention
+contract](connectivity-retention.md), tracked by #9048, distinguishes required
+transport from provisioning and agent credential brokerage; the
+[verbatim capture](inception-transcript.md#critical-connectivity-exemption)
+retains both operator messages. No live transport or uninstall action is authorized.
 
 **Execution follow-through summary:** the requested outcome covers all installed
 services and tools, including their management tools, rather than ending at a
@@ -270,7 +312,20 @@ publication and command-ownership boundaries; it does not disable whole hooks.
 - [ ] Route the selected source through the same assembly, readiness, activation and observable update-outcome path.
 - [ ] Preserve exact selection across retries and source failures; never fall back to an ambient checkout or marketplace payload.
 - [ ] Qualify Manager's own clean-source, immutable non-editable installation and recovery independently of the selected service-runtime source.
-- [ ] **Agent-recommended prepared Manager slice:** qualify exact-source dry-run/currentness, distinct installed-health repair and reuse of its healthy source generation, preserving the existing default config/data and global command through compatible-state recovery. Keep clean-source self-update acquisition, production migration compatibility and actual adoption separate.
+- [x] **Agent-recommended prepared Manager slice:** qualify exact-source dry-run/currentness, distinct installed-health repair and reuse of its healthy source generation, preserving the existing default config/data and global command through compatible-state recovery. Keep clean-source self-update acquisition, production migration compatibility and actual adoption separate.
+- [x] **Agent-recommended independent Manager acquisition slice:** route explicit Manager `[source] ref = "dev"` through the existing clean merged-source acquisition and trusted preparer, independently of service policy, into the same immutable installer and cutover owner. Qualify native Windows/Linux acquisition, source refusal, exact repair/reuse and fixture-default data continuity without changing Main/custom-ref/Git-optional behavior. Keep standalone bootstrap acquisition, production data compatibility and actual adoption separate.
+- [x] **Agent-recommended standalone Manager bootstrap slice:** reuse that acquisition and trusted preparation from the isolated base-interpreter bootstrap before Manager construction. Preserve explicit prepared inputs without reselecting Dev, recovery-only/adopted recovery, the original ownership SDK and all service-source repair refusal guards. Qualify actual native Windows/Linux construction, refusal, installed health and fixture-default continuity; keep shell prerequisite/download transport, service-source repair and production rollout separate.
+- [x] **Agent-recommended bounded service-source repair slice:** retain the incumbent legacy engine owner and default data root while preparing its independent service source for native runtime-only repair. Hold one original commit/tree and acquisition lease through repaired-engine inventory and suite preparation/execution; preserve targeted/non-repair bootstrap refusal and reject unsupported scoped source repair before native refresh. Qualify actual Windows/Linux construction, installed/global commands, fixture data continuity and an upstream advance between repair and inventory. Keep final portfolio execution, production migration compatibility and rollout separate.
+- [x] **Agent-recommended bounded existing-profile qualification:** preserve an installation's existing Containers dependency profile through prepared-source updater planning, native construction and source-qualified currentness. Qualify the actual selected profile/generation, unchanged-source reuse and explicit unsupported/foreign/incomplete outcomes without changing its root, enabling an unused role or substituting a base-profile runtime. Retain the full source pin and canonical native profile owner; existing profile support in a standalone installer is not collected-updater qualification.
+- [ ] **Agent-recommended bounded portfolio follow-through:** qualify source-backed updater readiness and actual execution across the eligible runtime owners rather than inferring a complete portfolio from the engine/profile witnesses. Preserve each installed command owner, canonical lifecycle tooling, existing default root, configured role and independent Manager/service/plugin selections. Use the existing collected updater and driver, retain one exact service commit and complete packet, and keep production data/serving cutover and recurring-maintenance consent separate.
+- [x] **Agent-recommended bounded source-owner SDK readiness:** ship the existing canonical lifecycle SDK in every current required-context Python runtime payload and qualify actual materialization plus the installed owner's source validator. Preserve command/catalog bytes and legacy compatibility; this finite prerequisite does not close whole-portfolio execution or adoption.
+- [x] **Agent-recommended bounded service-less execution witness:** qualify actual collected prepared-source updates through SSH's native install/update and Machines' native init frontends, retaining their original command owner, default fixture root/state, installed consumers, selected-source currentness, healthy reuse and source-unavailable global dispatch. Preserve Machines' CMD-only Windows contract and actual persistent-environment containment; this pair does not close the complete eligible portfolio or production adoption.
+- [x] **Agent-recommended bounded MCP execution witness:** qualify native construction and collected prepared-source updates while retaining its original global command owner, default fixture state, exact installed source/currentness and completion-preserving reuse. Explicitly disable cutover and version reaping in the fixture; do not infer live daemon replacement, serving readiness or whole-portfolio completion from construction/publication evidence.
+- [x] Qualify the bounded #9022 JSON maintenance-standby source projection and owner-attributed per-machine notice, retaining the native 30-minute polling instruction and explicit unsupported/missing-notice outcomes without a service dependency. This is static source delivery, not native polling or the subsequent YAML/update-veto contract. Preserve #8669's wrapper/removal/survival owner and every release/adoption/approval gate.
+- [x] Align the disposable-service visions and review the [shared YAML maintenance-banner contract](maintenance-banner.md), tracked by #9040, before consumer implementation.
+- [ ] Realize that single banner across automatic-update admission and normally projected conduct standby; qualify the actual consumer matrix, legacy notice transition and native 30-minute hold behavior. Preserve #8645/#7694/#7496/#7758 implementation ownership and #8669/#8864 session/removal acceptance.
+- [x] Audit and align [critical connectivity retention](connectivity-retention.md) under #9048, separating source observations from unqualified native removal behavior.
+- [ ] Enforce that contract for active and reconnectable machine access through normal/force/purge/reinstall, while leaving credential relays disposable; qualify actual platform consumers before removing the rest of the suite.
 
 ### Phase 4a - Manager-owned opt-in background maintenance
 The [maintenance slice](maintenance.md) owns the detailed proposal and evidence
@@ -523,7 +578,7 @@ transaction execution from the existing recurring-maintenance assignment.
   isolated registration/start outcomes. Ordinary publishers, selected
   snapshots, cells/custom roots, live service deployment and rollout remain
   separate.
-- [ ] **Agent-recommended bounded bootstrap adoption:** route Bridge's
+- [x] **Agent-recommended bounded bootstrap adoption:** route Bridge's
   legacy first stamp and drift `install` through the qualified fixed actions,
   packaged canonical foundation and same queue. Preserve actual selected/
   completed source-aware readiness, own controls/publication, originating
@@ -537,6 +592,40 @@ transaction execution from the existing recurring-maintenance assignment.
   execution custody and direct installer fallback. Commands, explicit
   installers, selected snapshots, cells/custom roots, live bridge sessions,
   service deployment, macOS and rollout remain separate.
+- [x] **Agent-recommended bounded source prerequisite:** qualify Bridge's
+  canonical source-qualified selected legacy snapshot for the existing single
+  `provision` recipe through the same native foundation, staged-origin reader,
+  queue and frozen-input owner before adopting ordinary commands. Preserve
+  exact selected source/root/project, actual Bridge context and native
+  provisioning effects, source-independent installed consumers, immutable
+  failure safety and no-write refusal. The
+  [bounded plan](bridge-selected-snapshot.md) retains canonical-installed-only
+  `stamp`/`install`/bootstrap, ordinary unreceipted compatibility and all existing
+  source/publication/lifetime custody. Command/explicit-installer adoption,
+  cold cells/custom roots, live deployment and rollout remain separate.
+- [x] **Agent-recommended bounded publisher adoption:** route Bridge's actual
+  legacy primary and payload cold commands through its qualified single
+  `provision` recipe, packaged foundation and the same ordinary queue.
+  Preserve exact selected-source ownership and ordinary unreceipted
+  exact-publisher compatibility, actual Bridge context/native effects,
+  healthy read-only dispatch and original argument/stdin/stdout/exit behavior.
+  The [bounded proposal](bridge-commands.md) requires real native
+  Windows/Linux command, caller-loss/concurrency, installed-consumer and
+  no-write refusal proof before removing cold outer locks/status/direct
+  installer execution. Keep bootstrap `install`, explicit installers,
+  unsupported cold cells/custom roots, live service/session and rollout
+  separate; review and actually merge this proposal before implementation.
+- [ ] **Agent-recommended bounded next-adopter prerequisite:** qualify Dispatch's
+  fixed legacy `stamp` and `provision` actions through the same native foundation,
+  canonical queue and frozen-input owner before changing ordinary Dispatch
+  publishers. Preserve its required-context direct command, CMD catalog front,
+  exact canonical source/default root/project, native staging, own controls and
+  actual coordinator/supervisor installation semantics. The
+  [bounded proposal](dispatch-first-use.md) requires materialized Windows/Linux
+  construction, safe installed consumers, caller loss/concurrency, immutable
+  failure safety and no-write refusal with isolated native effects. Command/
+  bootstrap/explicit-installer adoption, selected snapshots, scoped publication
+  under #7030, live task processing, service deployment and rollout remain separate.
 - [ ] Establish the standalone execution foundation before plugin provisioning without requiring an existing Python runtime, Manager or another plugin.
 - [ ] Migrate first-use publishers onto that foundation, retaining the canonical installer, publication admission, healthy dispatch and precise skew/recovery outcomes.
 - [ ] Qualify foundation genesis, caller loss, concurrent cold callers, failed construction, upgrade and subsequent first-use requests on native supported platforms.
@@ -810,6 +899,10 @@ implementation, rollout or parent completion is declared.
   service/process/credential or configuration action through this intake.
 
 ## Validation Plan
+
+- [ ] **Critical connectivity:** resolve the [route/removal matrix and retention acceptance](connectivity-retention.md), distinguishing provisioning code from actual SSH/Gateway transport and protecting its complete live/reconnect dependency closure. Force or purge cannot bypass it; credential relays can be removed. Source audit/vision alignment is not installed survival proof.
+
+- [ ] **Disposable services and shared maintenance hold:** resolve the [YAML banner implementation/validation sequence](maintenance-banner.md#implementation-and-validation-sequence). Prove the same applicable banner blocks actual automatic updates/reprovisioning and explains agent standby, including Manager, queued execution and missing catalog tools. Retain durable state and independently hosted session continuity, native 30-minute polling and no self-repair during an explained hold; source text, an unrelated kill switch or a merged vision is not acceptance.
 
 - [ ] **Wholesale same-installation cutover:** every inventoried global binstub and applicable serving process executes its selected immutable merged-Dev slot while retaining the Main installation's existing runtime data/configuration identity. Prove actual installed/serving code identity and continuity of representative existing state; a new cell, copied database, changed data root or synthetic fresh profile does not satisfy this gate. Qualify data-format compatibility and supported recovery before a rollback; do not assume that sharing data makes arbitrary older code compatible.
 

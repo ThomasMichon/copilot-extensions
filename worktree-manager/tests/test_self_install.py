@@ -65,11 +65,15 @@ def test_payload_version_reads_init(tmp_path):
 
 
 def test_copy_payload_preserves_bundled_dbus_next_wheel(tmp_path):
-    payload = Path(__file__).resolve().parents[1]
+    source = Path(__file__).resolve().parents[1]
+    payload = _fake_payload(tmp_path, "1.2.3")
+    wheel = Path("vendor") / "dbus_next-0.2.3-py3-none-any.whl"
+    (payload / "vendor").mkdir()
+    shutil.copyfile(source / wheel, payload / wheel)
     slot = tmp_path / "slot"
     si._copy_payload(payload, slot)
-    wheel = Path("vendor") / "dbus_next-0.2.3-py3-none-any.whl"
-    assert (slot / wheel).read_bytes() == (payload / wheel).read_bytes()
+    assert (slot / wheel).read_bytes() == (source / wheel).read_bytes()
+    assert (slot / si._SLOT_COMPLETE_MARKER).is_file()
 
 
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):

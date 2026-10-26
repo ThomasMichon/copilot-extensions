@@ -18,6 +18,7 @@ from process_telemetry.diagnostic_logs import (
 from single_instance_lease import OperationLock, OperationLockedError
 
 from . import __version__, install_paths
+from .spawn_diagnostics import current_inputs, diagnostic_text, exception_detail
 
 COMPONENTS = ("coordinator", "supervisor")
 
@@ -58,6 +59,36 @@ class DiagnosticLog(SharedDiagnosticLog):
                          "runtime_prefix": sys.prefix},
             clock=clock, max_bytes=max_bytes,
         )
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            filtered = logging.makeLogRecord(record.__dict__.copy())
+            secrets = current_inputs()
+            # Spawn records are structured and already filtered by their producer.
+            filtered.msg = (record.getMessage() if record.name == "agent-dispatch.spawn"
+                            else diagnostic_text(record.getMessage(), secrets))
+            filtered.args = ()
+            filtered.exc_info = None
+            filtered.exc_text = None
+            filtered._dispatch_exception = None
+            if record.exc_info:
+                _kind, error, trace = record.exc_info
+                if error is not None:
+                    filtered._dispatch_exception = exception_detail(error, trace, secrets)
+            for key in ("operation_id", "correlation_id", "generation"):
+                value = getattr(filtered, key, None)
+                if isinstance(value, str):
+                    setattr(filtered, key, diagnostic_text(value, secrets))
+        except Exception as error:
+            self._degraded(error)
+            return
+        super().emit(filtered)
+
+    def _record_fields(self, record: logging.LogRecord) -> dict:
+        event = super()._record_fields(record)
+        if getattr(record, "_dispatch_exception", None) is not None:
+            event["exception"] = record._dispatch_exception
+        return event
 
 
 def maintain_file_logging() -> None:

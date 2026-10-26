@@ -1,209 +1,137 @@
-"""Publication checks inspect the actual pushed tree and published tip."""
+"""Actual Git publication is branch-only; source checks belong to required CI."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-PRIVATE = "private-fixture-token"
-
-
-def native_bash() -> str:
-    git = shutil.which("git")
-    if os.name == "nt" and git:
-        candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
-        if candidate.is_file():
-            return str(candidate)
-    bash = shutil.which("bash")
-    if bash is None:
-        pytest.skip("Native Bash is unavailable")
-    return bash
 
 
 class Repository:
-    def __init__(self, root: Path, *, unrelated_dev: bool):
-        self.root = root
+    def __init__(self, root: Path):
+        self.root = root / "source"
+        self.root.mkdir()
+        self.remote = root / "remote.git"
+        self.calls = root / "forbidden-calls"
+        binaries = root / "bin"
+        binaries.mkdir()
+        for name in ("python", "python3", "py", "uv", "ruff", "agent-worktrees",
+                     "copilot-extensions", "curl", "ssh", "gh", "bootstrap", "lint"):
+            command = binaries / name
+            command.write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$0 $*" >> "$FORBIDDEN_CALLS"\nexit 91\n',
+                encoding="utf-8", newline="\n",
+            )
+            command.chmod(0o755)
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         self.env.update({
-            "HOME": str(root / "home"), "USERPROFILE": str(root / "home"),
             "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
-            "COPILOT_EXTENSIONS_FORBIDDEN_IDS": PRIVATE,
-            "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": "",
-            "COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP": "1",
-            "PATH": str(Path(sys.executable).parent) + os.pathsep + self.env.get("PATH", ""),
+            "AGENT_WORKTREES_PR_PUSH": "1",
+            "FORBIDDEN_CALLS": self.calls.as_posix(),
+            "PATH": str(binaries) + os.pathsep + self.env.get("PATH", ""),
         })
-        self.env.pop("BASH_ENV", None)
-        self.env.pop("COPILOT_EXTENSIONS_GUARD_BASE", None)
-        (root / "tools" / "hooks").mkdir(parents=True)
-        for name in ("check-no-internal-identifiers.py", "hooks/pre-push"):
-            shutil.copyfile(ROOT / "tools" / name, root / "tools" / name)
-        self.git("init", "-q", "-b", "main")
+        for key in ("BASH_ENV", "ENV", "COPILOT_EXTENSIONS_HOOK_BASH"):
+            self.env.pop(key, None)
+        self.git("init", "-q", "-b", "fixture")
         self.git("config", "user.name", "Fixture")
         self.git("config", "user.email", "fixture@example.invalid")
-        (root / "legacy.txt").write_text(PRIVATE, encoding="utf-8")
+        self.git("init", "--bare", str(self.remote))
+        self.git("remote", "add", "origin", str(self.remote))
+        for relative in (
+            "tools/hooks/pre-push",
+            "plugins/agent-worktrees/src/agent_worktrees/pre_push.sh",
+        ):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, target)
+            target.chmod(0o755)
+        (self.root / "file.txt").write_text("fixture\n", encoding="utf-8")
         self.git("add", ".")
-        self.git("commit", "-qm", "published baseline")
-        self.base = self.git("rev-parse", "HEAD")
-        empty = self.git("mktree", data=b"")
-        unrelated = self.git("commit-tree", empty, "-m", "unrelated dev")
-        self.git("update-ref", "refs/remotes/origin/main", self.base)
-        self.git("update-ref", "refs/remotes/origin/dev", unrelated if unrelated_dev else self.base)
+        self.git("commit", "-qm", "fixture")
+        self.head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("config", "core.hooksPath", "tools/hooks")
 
-    def git(self, *arguments: str, data: bytes | None = None) -> str:
+    def git(self, *args, check=True, data=None):
         result = subprocess.run(
-            ["git", "-C", str(self.root), *arguments], input=data, env=self.env,
-            capture_output=True, check=True, timeout=20,
+            ["git", "-C", str(self.root), *args], env=self.env, input=data,
+            capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        return result.stdout.decode("utf-8").strip()
+        if check:
+            assert result.returncode == 0, result.stdout + result.stderr
+        return result
 
-    def file_commit(self, name: str, content: str) -> str:
-        (self.root / name).write_text(content, encoding="utf-8")
-        self.git("add", "--", name)
-        self.git("commit", "-qm", "incoming change")
-        return self.git("rev-parse", "HEAD")
-
-    def tree_commit(self, name: str, content: str) -> str:
-        blob = self.git("hash-object", "-w", "--stdin", data=content.encode("utf-8"))
-        tree = self.git("mktree", "-z", data=f"100644 blob {blob}\t{name}\0".encode("utf-8"))
-        return self.git("commit-tree", tree, "-p", self.base, "-m", "unselected incoming tree")
-
-    def hook(self, *updates: tuple[str, str]):
-        records = "".join(
-            f"refs/heads/local-{index} {head} refs/heads/remote-{index} {old}\n"
-            for index, (head, old) in enumerate(updates)
-        )
-        result = subprocess.run(
-            [native_bash(), str(self.root / "tools" / "hooks" / "pre-push")],
-            cwd=self.root, env=self.env, input=records.encode("utf-8"), capture_output=True,
-            # Include all ref updates under the actual managed publication deadline.
-            timeout=30,
-        )
-        return subprocess.CompletedProcess(
-            result.args, result.returncode, result.stdout.decode("utf-8", "replace"),
-            result.stderr.decode("utf-8", "replace"),
-        )
+    def pushed(self, ref):
+        return self.git("ls-remote", "origin", ref).stdout.strip()
 
 
-def test_existing_main_ref_does_not_rescan_unrelated_legacy_tree(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=True)
-    head = repo.file_commit("change.txt", "public change")
-    result = repo.hook((head, repo.base))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Internal-identifier guard OK" in result.stdout
-    assert "skipping" not in result.stdout.lower()
+@pytest.mark.parametrize("ref,authorized,accepted", [
+    ("refs/heads/feature", False, True),
+    ("refs/heads/dev", False, False),
+    ("refs/heads/main", False, False),
+    ("refs/heads/dev", True, True),
+    ("refs/heads/main", True, True),
+    ("refs/heads/worktree/private", False, False),
+    ("refs/heads/worktree/private", True, False),
+    ("refs/tags/fixture", False, True),
+])
+def test_real_push_branch_policy_and_zero_runtime_work(tmp_path, ref, authorized, accepted):
+    repo = Repository(tmp_path)
+    if not authorized:
+        repo.env.pop("AGENT_WORKTREES_PR_PUSH")
+    result = repo.git("push", "origin", "HEAD:" + ref, check=False)
+    assert (result.returncode == 0) is accepted, result.stdout + result.stderr
+    assert bool(repo.pushed(ref)) is accepted
+    assert not repo.calls.exists(), "branch-only publication must perform ZERO runtime/tool calls"
 
 
-@pytest.mark.parametrize("name", ["private.txt", "unicode-\u00e9.txt", "tab\tfile", "line\nfile"])
-def test_identifier_check_reads_unselected_pushed_tree_losslessly(tmp_path, name):
-    repo = Repository(tmp_path, unrelated_dev=False)
-    pushed = repo.tree_commit(name, PRIVATE)
-    result = repo.hook((pushed, repo.base))
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert "forbidden identifier" in result.stdout
+@pytest.mark.parametrize("ref,accepted", [
+    ("refs/heads/feature", True), ("refs/tags/fixture", True),
+    ("refs/heads/main", False), ("refs/heads/dev", False),
+])
+def test_real_push_deletion_policy(tmp_path, ref, accepted):
+    repo = Repository(tmp_path)
+    repo.git("push", "origin", "HEAD:" + ref)
+    result = repo.git("push", "origin", ":" + ref, check=False)
+    assert (result.returncode == 0) is accepted, result.stdout + result.stderr
+    assert bool(repo.pushed(ref)) is not accepted
+    assert not repo.calls.exists()
 
 
-def test_every_ref_is_checked(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=False)
-    safe = repo.tree_commit("public.txt", "public")
-    unsafe = repo.tree_commit("private.txt", PRIVATE)
-    result = repo.hook((safe, repo.base), (unsafe, repo.base))
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert "forbidden identifier" in result.stdout
-
-
-@pytest.mark.parametrize("size", [1024 * 1024, 1024 * 1024 + 1])
-def test_pre_push_leaves_file_size_enforcement_to_ci(tmp_path, size):
-    repo = Repository(tmp_path, unrelated_dev=True)
-    head = repo.file_commit("sized.txt", "x" * size)
-    result = repo.hook((head, repo.base))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Internal-identifier guard OK" in result.stdout
-
-
-@pytest.mark.parametrize("unrelated", [False, True])
-def test_first_publication_uses_a_related_protected_base(tmp_path, unrelated):
-    repo = Repository(tmp_path, unrelated_dev=unrelated)
-    head = repo.file_commit("public.txt", "public")
-    result = repo.hook((head, "0" * len(head)))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Internal-identifier guard OK" in result.stdout
-
-
-def test_deletion_does_not_rescan_the_current_checkout(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=True)
-    result = repo.hook(("0" * len(repo.base), repo.base))
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_rewritten_main_ref_uses_release_base_instead_of_unrelated_old_tip(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=True)
-    head = repo.file_commit("public.txt", "public")
-    result = repo.hook((head, repo.git("rev-parse", "origin/dev")))
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_rebased_dev_ref_does_not_rescan_newly_published_default_changes(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=False)
-    old = repo.tree_commit("old-public.txt", "public")
-    published = repo.file_commit("protected-private.txt", PRIVATE)
-    repo.git("update-ref", "refs/remotes/origin/dev", published)
-    head = repo.file_commit("new-public.txt", "public")
-    result = repo.hook((head, old))
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_unavailable_pushed_commit_fails_closed(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=False)
-    result = repo.hook(("f" * len(repo.base), repo.base))
+def test_multiref_refusal_checks_all_refs_and_preserves_remote(tmp_path):
+    repo = Repository(tmp_path)
+    repo.env.pop("AGENT_WORKTREES_PR_PUSH")
+    result = repo.git("push", "origin", "HEAD:refs/heads/feature",
+                      "HEAD:refs/heads/main", check=False)
     assert result.returncode != 0
+    assert not repo.pushed("refs/heads/feature") and not repo.pushed("refs/heads/main")
+    assert not repo.calls.exists()
 
 
-def test_fallback_base_is_pinned_when_another_worktree_fetches(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=True)
-    head = repo.file_commit("private.txt", PRIVATE)
-    guard = tmp_path / "tools" / "check-no-internal-identifiers.py"
-    source = guard.read_text(encoding="utf-8")
-    source = source.replace(
-        "REPO = Path(__file__).resolve().parent.parent",
-        "REPO = Path(__file__).resolve().parent.parent\n"
-        "subprocess.run(['git', '-C', str(REPO), 'update-ref', "
-        "'refs/remotes/origin/main', 'refs/remotes/origin/dev'], check=True)",
-        1,
-    )
-    guard.write_text(source, encoding="utf-8")
-    result = repo.hook((head, "0" * len(head)))
-    assert result.returncode != 0, result.stdout + result.stderr
-    assert "forbidden identifier" in result.stdout + result.stderr
+def test_worktree_requires_managed_publication_without_runtime(tmp_path):
+    repo = Repository(tmp_path)
+    worktree = tmp_path / "worktree"
+    repo.git("worktree", "add", "-b", "worktree/local", str(worktree))
+    repo.root = worktree
+    repo.env.pop("AGENT_WORKTREES_PR_PUSH")
+    refused = repo.git("push", "origin", "HEAD:refs/heads/feature", check=False)
+    assert refused.returncode != 0 and not repo.pushed("refs/heads/feature")
+    repo.env["AGENT_WORKTREES_PR_PUSH"] = "1"
+    repo.git("push", "origin", "HEAD:refs/heads/feature")
+    assert repo.pushed("refs/heads/feature")
+    assert not repo.calls.exists()
 
 
-@pytest.mark.parametrize("reuse_published_blob", [True, False])
-def test_rewritten_ref_does_not_run_blob_history_checks(tmp_path, reuse_published_blob):
-    repo = Repository(tmp_path, unrelated_dev=False)
-    old = repo.tree_commit("previously-published.json", "x" * (1024 * 1024 + 1))
-    content = ("x" if reuse_published_blob else "y") * (1024 * 1024 + 1)
-    head = repo.file_commit("rebased.json", content)
-    result = repo.hook((head, old))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Internal-identifier guard OK" in result.stdout
-
-
-def test_pre_push_never_invokes_live_cross_repo_discovery(tmp_path):
-    repo = Repository(tmp_path, unrelated_dev=False)
-    repo.env.pop("COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP")
-    guard = tmp_path / "tools" / "check-no-internal-identifiers.py"
-    text = guard.read_text(encoding="utf-8").replace(
-        'if __name__ == "__main__":',
-        'def _load_live_sweep_identifiers():\n'
-        '    raise AssertionError("pre-push started discovery")\n\n'
-        'if __name__ == "__main__":',
-    )
-    guard.write_text(text, encoding="utf-8")
-    head = repo.file_commit("safe.txt", "public")
-    result = repo.hook((head, repo.base))
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "Internal-identifier guard OK" in result.stdout
+def test_source_validation_is_not_a_transport_gate(tmp_path):
+    repo = Repository(tmp_path)
+    # Both checks remain enforceable explicitly and in CI, not before transport.
+    (repo.root / "large.txt").write_text("x" * (1024 * 1024 + 1), encoding="utf-8")
+    repo.git("add", "large.txt")
+    repo.git("commit", "-qm", "oversized candidate for CI")
+    repo.env["COPILOT_EXTENSIONS_FORBIDDEN_IDS"] = "fixture"
+    repo.git("push", "origin", "HEAD:refs/heads/feature")
+    assert not repo.calls.exists()

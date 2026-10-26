@@ -145,6 +145,18 @@ Supervisor transitions have a [structured lifecycle audit](docs/supervisor-lifec
 that separates runtime-slot readiness from service reconciliation and preserves
 observed native disablement without guessing its author.
 
+Ordinary supervisor exit, including `once=True` and interruption, retains its
+daemon admission, client and singleton until tracked local work finishes and
+owned executor threads retire. Borrowed executors are not shut down.
+`shutdown()` itself remains bounded; its cached grace verdict is not proof of
+later retirement. Committed self-update keeps its existing bounded force-exit
+authority. If force-exit returns or is refused, the old admission remains until
+local settlement. Committed handoff checks owned worker termination, including
+callbacks after a future finishes, within that same grace budget; an unrelated
+borrowed idle pool is not a reason to force-exit. Client-close or singleton-release
+interruptions cannot bypass retirement, and the first interruption is preserved.
+Production receives no new expiry.
+
 `agent-dispatch` is a standalone runtime plugin. Enabling the plugin installs the
 payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
 the first `agent-dispatch` invocation self-provisions the runtime. Repos that use
@@ -2857,6 +2869,13 @@ new SSH command. Prompt turn-end wakeups will return only through a cursor-based
 Agent Bridge event subscription over a shared persistent carrier; until then,
 `--no-reactive` and `--reactive-interval` are accepted as compatibility no-ops.
 
+When a Bridge event wake is attached, lane shutdown retains admission and the
+original worker/stream objects until native worker retirement and confirmed
+stream closure. The wake's `close()` remains bounded; the lane's final cleanup
+waits through interruptions or failed close attempts and rethrows the first
+error only after settlement. Thread facade state is not retirement proof.
+This adds no event replay, cursor change, credential store or production expiry.
+
 The bare `supervise` above runs the loop in the foreground. The
 `supervise register|status|list|remove` subcommands instead manage durable
 **registrations** — a caller registers a unit (a lane, schedule, emitter, or
@@ -3129,6 +3148,12 @@ or changing/removing its shared URL or credential retires the subscription
 and waits for an in-flight intake before closing its client; replacement is
 deferred rather than racing two intakes. Credential-command resolution runs
 only on the owning federation tick, never in the per-event reader predicate.
+`FederationRunner.stop()` remains bounded and returns `False` while its tick
+thread or assignment intake is retiring. Coordinator hosting retains its daemon
+admission until a later bounded stop confirms both have settled; retries do not
+repeat directory resignation. Cleanup interruptions/errors propagate only after
+local settlement, and a partial federation startup settles its retained work
+before falling back to serving without federation. Production gains no expiry.
 Route ownership is refreshed on owner ticks and actual reconciliation
 admission, not per frame; the reader only checks the cached snapshot.
 Actual intake rechecks the live route inside the counted drain boundary;

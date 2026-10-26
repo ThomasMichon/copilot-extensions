@@ -15,6 +15,8 @@ Endpoints:
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import daemon_entrypoint
+
 import asyncio
 import logging
 import os
@@ -22,7 +24,7 @@ import signal
 import threading
 import time
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -149,8 +151,10 @@ def _get_pipeline():
 # counter guards against exiting while a request (e.g. a long batch embed) is
 # still running, even if it has outlived the idle window.
 _activity_lock = threading.Lock()
+_activity_changed = threading.Condition(_activity_lock)
 _last_activity: float = time.monotonic()
 _inflight: int = 0
+_stopping = False
 _idle_task: asyncio.Task[None] | None = None
 
 
@@ -158,6 +162,8 @@ def _activity_begin() -> None:
     """Mark the start of an embed/spinup request (keeps the engine alive)."""
     global _inflight
     with _activity_lock:
+        if _stopping:
+            raise HTTPException(status_code=503, detail="Engine is shutting down")
         _inflight += 1
 
 
@@ -167,6 +173,7 @@ def _activity_end() -> None:
     with _activity_lock:
         _inflight = max(0, _inflight - 1)
         _last_activity = time.monotonic()
+        _activity_changed.notify_all()
 
 
 def _is_idle(timeout: float) -> bool:
@@ -200,30 +207,101 @@ async def _idle_monitor(timeout: float) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Retain process admission across the complete engine application lifetime."""
+    from agent_procutil.daemon_instances import admit_daemon_instance
+
+    with admit_daemon_instance("agent-index-engine", source=__file__, purpose="production"):
+        async with _lifespan(app):
+            yield
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
     """Engine lifespan -- load config and clean up on shutdown."""
-    global _config, _idle_task
-    from agent_index.index_config import IndexConfig
-    _config = IndexConfig()
+    global _config, _idle_task, _stopping
+    with _activity_lock:
+        _stopping = False
+    try:
+        from agent_index.index_config import IndexConfig
+        _config = IndexConfig()
+
+        logger.info("agent-index engine starting (model will load on first embed)")
+
+        idle_timeout = _idle_timeout_seconds()
+        if idle_timeout > 0:
+            _idle_task = asyncio.create_task(_idle_monitor(idle_timeout))
+            logger.info("Idle auto-stop enabled: %.0fs", idle_timeout)
+
+        yield
+    finally:
+        original = sys.exc_info()[1]
+        try:
+            await _shutdown_engine()
+        except BaseException as error:
+            if original is None:
+                raise
+            if not isinstance(error, asyncio.CancelledError):
+                with suppress(BaseException):
+                    logger.error("Engine cleanup failed; preserving the original application error")
 
 
-    logger.info("agent-index engine starting (model will load on first embed)")
+async def _settle_engine_future(future: asyncio.Future[Any]) -> BaseException | None:
+    interrupted = None
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except BaseException as failure:
+            if future.cancelled():
+                break
+            if future.done() and future.exception() is failure:
+                break
+            if interrupted is None:
+                interrupted = failure
+    return interrupted
 
-    idle_timeout = _idle_timeout_seconds()
-    if idle_timeout > 0:
-        _idle_task = asyncio.create_task(_idle_monitor(idle_timeout))
-        logger.info("Idle auto-stop enabled: %.0fs", idle_timeout)
 
-    yield
-
-    # Stop the idle monitor before teardown
-    if _idle_task is not None:
-        _idle_task.cancel()
-        _idle_task = None
-
-    # Unload model on shutdown
-    if _pipeline is not None:
-        with _gpu_lock:
+def _unload_after_inference() -> None:
+    with _activity_changed:
+        while _inflight:
+            _activity_changed.wait()
+    with _gpu_lock:
+        if _pipeline is not None:
             _pipeline.unload()
+
+
+async def _shutdown_engine() -> None:
+    global _idle_task, _stopping
+    with _activity_lock:
+        _stopping = True
+    error = None
+    idle = _idle_task
+    if idle is not None:
+        idle.cancel()
+        completion = asyncio.gather(idle, return_exceptions=True)
+        error = await _settle_engine_future(completion)
+        failure = completion.result()[0]
+        if error is None and isinstance(failure, BaseException) and not isinstance(
+            failure, asyncio.CancelledError,
+        ):
+            error = failure
+        if _idle_task is idle:
+            _idle_task = None
+    with _activity_lock:
+        pending = _inflight > 0 or _pipeline is not None
+    if pending:
+        # A private executor Future, not a cancellable to_thread Task, retains
+        # native completion even if all of the loop's Tasks are cancelled.
+        native = asyncio.get_running_loop().run_in_executor(None, _unload_after_inference)
+        interruption = await _settle_engine_future(native)
+        if error is None:
+            error = interruption
+        try:
+            native.result()
+        except BaseException as failure:
+            if error is None:
+                error = failure
+    if error is not None:
+        raise error
     logger.info("agent-index engine shut down")
 
 
@@ -367,6 +445,7 @@ def _systemd_socket_fd() -> int | None:
     return _SD_LISTEN_FDS_START
 
 
+@daemon_entrypoint("agent-index-engine", source=__file__, purpose="production")
 def run_engine(*, host: str = "127.0.0.1", port: int = 8421) -> None:
     """Start the agent-index engine server with uvicorn.
 
@@ -522,4 +601,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

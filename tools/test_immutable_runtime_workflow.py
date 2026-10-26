@@ -55,6 +55,10 @@ def test_manual_selection_preserves_every_existing_route_and_default():
     routes = {
         "immutable_runtime": {"immutable-runtime-linux", "immutable-runtime-macos"},
         "guardian_followthrough": {"guardian-followthrough-macos"},
+        "interactive_completion": {
+            "interactive-completion-linux", "interactive-completion-macos",
+            "interactive-completion-windows",
+        },
         "watch_owner": {
             "watch-owner-native-linux", "watch-owner-native-windows",
             "watch-owner-macos-refusal",
@@ -62,13 +66,23 @@ def test_manual_selection_preserves_every_existing_route_and_default():
         },
         "dispatch_delegation": {"dispatch-delegation-linux", "dispatch-delegation-windows"},
         "pr_service": {"pr-service-linux", "pr-service-windows"},
+        "ssh_service": {"ssh-service-linux", "ssh-service-windows"},
         "pr_artifacts": {"pr-artifacts-linux", "pr-artifacts-windows"},
-        "dependency_compile": {"dependency-compile-linux", "dependency-compile-windows"},
+        "dependency_compile": {
+            "dependency-compile-linux", "dependency-compile-windows",
+            "source-build-linux", "source-build-windows",
+            "installer-latency-linux", "installer-latency-windows",
+            "logger-installer-latency-linux", "logger-installer-latency-windows",
+        },
         "candidate_profiles": {"candidate-profiles-linux", "candidate-profiles-windows"},
         "chat_construction": {"chat-construction-linux", "chat-construction-windows"},
         "ssh_snapshot": {"ssh-snapshot-native-linux", "ssh-snapshot-native-windows"},
-        "wheel_inputs": {"wheel-inputs-linux", "wheel-inputs-windows"},
+        "wheel_inputs": {
+            "wheel-inputs-linux", "wheel-inputs-windows",
+            "source-profiles-linux", "source-profiles-windows", "source-profiles-macos",
+        },
         "runtime_profiles": {"runtime-profile-policy-linux", "runtime-profile-policy-windows"},
+        "update_diagnostics": {"update-diagnostics-linux", "update-diagnostics-windows"},
     }
     defaults = {
         name: entry["default"] for name, entry in inputs.items()
@@ -92,7 +106,7 @@ def test_manual_selection_preserves_every_existing_route_and_default():
                 expected | routes["immutable_runtime"]
             )
     assert set(WORKFLOW["jobs"]) == diagnostics | set().union(*routes.values())
-    assert len(WORKFLOW["jobs"]) == 28
+    assert len(WORKFLOW["jobs"]) == 44
 
 
 @pytest.mark.parametrize("requested", ["", "A" * 40, "0123456789abcdef" * 2 + "01234567"])

@@ -7,6 +7,34 @@ The implementation plan is a separate interpretation, not part of these quotes.
 Assistant design responses are summarized separately below; they are not
 additional operator instructions.
 
+## Disposable services and YAML maintenance banner
+
+Operator direction, 2026-10-25:
+
+> Okay, focus on getting the upstream vision alignment to support the notion of all copilot-extensions services being properly "disposable", with support for a yaml "maintenance banner" file that simultaneously acts as a killswitch against auto-update, and a notification to all agents about what is going on. We'll need to pair that with an instructions file in agent-conduct-guidance which informs agents that if the tools they need to invoke from the agent-* catalogs appear to be missing, they need to look at the provided yaml file for instructions, polling every 30 minutes via scheduled prompt until the blockage clears. Agents are not to attempt their own self-repair if the maintenance banner is up and has an explanation for the outage.
+
+The [alignment contract](maintenance-banner.md) distinguishes this requested
+shared YAML control from the earlier JSON-only source companion. Its proposed
+filename, compatibility ordering and parser/admission safeguards are
+agent-recommended implementation detail. No activation or host teardown is
+authorized by this request capture.
+
+## Critical connectivity exemption
+
+Operator direction, 2026-10-25:
+
+> One thing we should ensure: machine-to-machine connectivity services must be spared from any uninstall/reinstall snenanigans and must be treated like "critical" session-state holders, similar to Copilot mux or session-host wrappers. We should audit whether each form of SSH host/client/gateway mechanics would be impacted if we attempted a "complete uninstall" of all other copilot-extensions services on a machine. For example, agent-ssh *positions* keys and performs OpenSSH setup, but in theory it isn't itself the service which manages SSH requests. We should draw clear boundaries there. We don't want a force uninstall over SSH to suddenly kill SSH.
+
+Follow-up scope clarification:
+
+> credential relays are fair game for uninstall. credential relays aren't needed for direct machine management, so it's okay if an uninstall takes those out.
+
+This qualifies the earlier all-supporting-services disposability statement.
+Protect actual access-bearing connectivity, not every component that provisions
+it or brokers agent credentials. Source audit and reviewed intent correction
+are tracked in #9048; neither statement authorizes a live uninstall or transport
+change.
+
 ## Initial request
 
 > We have a general problem that when we try to stabilize copilot-extensions in main, we have no good way of uniformly validating the suite against live usage. Presently, our installation package is coupled to `copilot plugin update`, and the sessionStart hooks in the various plugins bootstrap the version-slot install folders for the payload.

@@ -24,17 +24,316 @@ on:
           - logger-bootstrap
           - logger-commands
           - bridge-recipes
+          - bridge-bootstrap
+          - bridge-snapshots
+          - bridge-commands
           - bridge-contracts
           - bridge-binding
           - dispatch-binding
           - promotion-controls
           - pane-argv
+          - manager-uninstall
         default: context
 
 permissions:
   contents: read
 
 jobs:
+  bridge-commands-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge commands (Ubuntu, ${{ matrix.packet.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        packet: &bridge-command-packets
+          - name: refusal-driver
+            select: refusal and (missing-driver or old-driver or old-resolver or old-dispatcher)
+          - name: refusal-policy
+            select: refusal and (managed or malformed-policy or no-self or nested)
+          - name: refusal-source
+            select: refusal and (unselected or unavailable or missing-provenance or malformed-provenance)
+          - name: refusal-context
+            select: refusal and (pinned or custom-root or cell or ordinary-copy)
+          - {name: payload, select: original_operation and payload}
+          - {name: primary, select: original_operation and primary}
+          - {name: ordinary, select: original_operation and ordinary}
+          - {name: concurrent, select: concurrent}
+          - {name: failed, select: failed}
+          - {name: transport, select: cold_wait}
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify one bounded real command packet
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_command.py
+          -k "${{ matrix.packet.select }}" --test-timeout 900 --timeout 1080
+  bridge-commands-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge commands (Windows, ${{ matrix.packet.name }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        packet: *bridge-command-packets
+        include:
+          - packet: {name: cmd, select: original_operation and cmd}
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-steps
+  bridge-command-publication-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge publication (Ubuntu, ${{ matrix.packet }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy: &bridge-command-publication-packets
+      fail-fast: false
+      matrix:
+        packet:
+          - "cell_stamp and available"
+          - "cell_stamp and pointer and not publisher"
+          - "cell_stamp and publisher and not pointer"
+          - "cell_stamp and publisher-and-pointer and not deactivated"
+          - "cell_stamp and deactivated"
+          - "actual and legacy and payload"
+          - "actual and selected-cell and payload"
+          - "actual and catalog"
+          - "actual and stamped-global"
+          - "actual and stamped-unavailable"
+          - "actual and stamped-no-pointer"
+    env:
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-publication-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Preserve one bounded publication and selected-cell packet
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_bridge_first_use_publication.py
+          -k "${{ matrix.packet }}" --test-timeout 60 --timeout 900
+  bridge-command-publication-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge publication (Windows, ${{ matrix.packet }})
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy: *bridge-command-publication-packets
+    env:
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-publication-steps
+  bridge-command-controls-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge command controls (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UV_PYTHON: "3.12"
+    steps: &bridge-command-control-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Preserve native binary, prompt and exit contracts
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge --allow-explicit-tiers
+          --test-file tests/test_payload_invocation.py
+          --test-timeout 120 --timeout 600
+      - name: Preserve canonical bootstrap and source recipe admission
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py -k "not actual"
+          --test-timeout 90 --timeout 600
+  bridge-command-controls-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-commands'
+    name: Bridge command controls (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UV_PYTHON: "3.12"
+    steps: *bridge-command-control-steps
+  bridge-snapshots-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
+    name: Bridge selected snapshots (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-snapshots-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify selected-source admission and frozen-input refusals
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k "not actual" --test-timeout 90 --timeout 600
+      - name: Qualify actual source preparation, caller loss and native consumers
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k "actual and not actual_stamp" --test-timeout 900 --timeout 1080
+      - name: Preserve canonical source archive and immutable preparation
+        run: >-
+          python tools/run-plugin-tests.py runtime-source
+          --test-file tests/test_prepare_runtime_source.py
+          --test-file tests/test_source_snapshot_publication.py
+          --test-timeout 120 --timeout 600
+      - name: Preserve native waitable owner exit status
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_native_daemon_shell.py
+          -k waitable --test-timeout 90 --timeout 180
+      - name: Qualify source-qualified native stamp in its own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_snapshot.py
+          -k actual_stamp --test-timeout 900 --timeout 1080
+      - name: Preserve installed-source fixed recipes and native lifecycle
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss" --test-timeout 900 --timeout 900
+      - name: Preserve shared Logger selected-source refusal behavior
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_logger_snapshot.py
+          -k "not actual" --test-timeout 90 --timeout 600
+      - name: Preserve canonical-installed-only bootstrap publication
+        env:
+          UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_driver.py
+          --test-timeout 60 --timeout 180
+  bridge-snapshots-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-snapshots'
+    name: Bridge selected snapshots (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-snapshots-steps
+  bridge-bootstrap-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
+    name: Bridge bootstrap (Ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_LINUX_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: &bridge-bootstrap-steps
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify actual materialization, refusal and independent guidance
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_bootstrap.py
+          -k "not hook_deadline" --test-timeout 900 --timeout 900
+      - name: Qualify actual cold hooks within their own storage boundary
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge_bootstrap.py
+          -k hook_deadline --test-timeout 900 --timeout 1080
+      - name: Preserve fixed recipes, native lifecycle and hook contracts
+        run: >-
+          python tools/run-plugin-tests.py update-driver
+          --test-file tests/test_first_use_bridge.py
+          -k "not native_caller_loss" --test-timeout 900 --timeout 900
+      - name: Prepare bounded readiness test tooling
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest packaging
+      - name: Qualify source-aware selected readiness
+        run: >-
+          python -m pytest -q libs/versioned-runtime/tests/test_bootstrap_selected_readiness.py
+      - name: Preserve bootstrap and unattended repair boundaries
+        run: >-
+          python tools/run-plugin-tests.py agent-bridge
+          --test-file tests/test_bootstrap_driver.py
+          --test-file tests/test_install_ps1_s4u_recovery.py
+          --test-file tests/test_install_lifecycle_emit.py
+          --test-timeout 60 --timeout 360
+      - name: Preserve Bridge bootstrap publication admission
+        run: >-
+          python tools/run-plugin-tests.py payload-invocation --allow-explicit-tiers
+          --test-file tests/test_bootstrap_publication.py -k agent-bridge
+          --test-timeout 120 --timeout 600
+  bridge-bootstrap-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-bootstrap'
+    name: Bridge bootstrap (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      UPDATE_DRIVER_BRIDGE_BOOTSTRAP_ACCEPTANCE: "1"
+      UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
+      UV_PYTHON: "3.12"
+    steps: *bridge-bootstrap-steps
+  manager-uninstall-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-uninstall'
+    name: Manager installed uninstall (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact native source
+        env:
+          EXPECTED_SOURCE: ${{ github.sha }}
+        run: |
+          python -c "import os,subprocess,sys; actual=subprocess.check_output(['git','rev-parse','HEAD'],creationflags=subprocess.CREATE_NO_WINDOW,text=True).strip(); assert actual == os.environ['EXPECTED_SOURCE']; print('Source:',actual); print('Python:',sys.version)"
+      - name: Qualify actual installed removal and reinstall
+        run: >-
+          python tools\run-manager-runtime-acceptance.py --root .validation --contract uninstall
+
   mux-companion-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'mux-companion'
     name: Mux Companion native tmux 3.4 (isolated session)
@@ -344,9 +643,18 @@ jobs:
 
   bridge-binding-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
-    name: Bridge scoped-stamp binding (Ubuntu)
+    name: Bridge scoped-stamp binding (Ubuntu, ${{ matrix.packet }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy: &bridge-binding-packets
+      fail-fast: false
+      matrix:
+        packet:
+          - available
+          - pointer and not publisher
+          - publisher and not pointer
+          - publisher-and-pointer and not deactivated
+          - deactivated
     steps:
       - uses: actions/checkout@v4
         with:
@@ -361,14 +669,15 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_first_use_publication.py
-          -k test_bridge_cell_stamp_preserves_global_ownership
+          -k "test_bridge_cell_stamp_preserves_global_ownership and (${{ matrix.packet }})"
           --allow-explicit-tiers --test-timeout 60 --timeout 540
 
   bridge-binding-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'bridge-binding'
-    name: Bridge scoped-stamp binding (Windows)
+    name: Bridge scoped-stamp binding (Windows, ${{ matrix.packet }})
     runs-on: windows-latest
     timeout-minutes: 10
+    strategy: *bridge-binding-packets
     steps:
       - uses: actions/checkout@v4
         with:
@@ -383,7 +692,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py payload-invocation
           --test-file tests/test_bridge_first_use_publication.py
-          -k test_bridge_cell_stamp_preserves_global_ownership
+          -k "test_bridge_cell_stamp_preserves_global_ownership and (${{ matrix.packet }})"
           --allow-explicit-tiers --test-timeout 60 --timeout 540
 
   logger-bootstrap-linux:

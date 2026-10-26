@@ -13,10 +13,10 @@ def default_home_dir() -> Path:
 
     An unset or empty ``AGENT_MCP_HOME`` uses ``~/.agent-mcp``. Explicit
     relative paths retain their launch-directory meaning. Make them absolute
-    without collapsing parent components, dereferencing symlinks or expanding
-    literal path text.
+    while collapsing parent components lexically, without dereferencing symlinks
+    or expanding literal path text.
     A process changing cwd must bind this selection before doing so.
     """
     raw = os.environ.get("AGENT_MCP_HOME")
     path = raw if raw else Path.home() / _LEGACY_ROOT
-    return Path(path).absolute()
+    return Path(os.path.abspath(path))

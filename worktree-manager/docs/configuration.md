@@ -184,6 +184,13 @@ Older bootstrap responses without provenance retain their historical strict
 roster behavior; their detected `machine` scalar is not promoted to a new
 configured binding.
 
+Live setup reloads retain rows for sources still in the resolved roster while
+their replacement loader is pending or streaming an incomplete prefix. New
+rows update matching identities in place; only a complete source listing
+removes absent rows, including an explicitly empty listing. Sources removed
+from configuration lose their retained rows immediately. Retaining a row does
+not mark its source ready or skip the Actions menu's current liveness check.
+
 This is a read-only compatibility projection, not a persisted-state migration:
 historical rows are not rewritten, existing canonical-over-legacy merge
 precedence remains intact, and no bridge-address or environment dimension is

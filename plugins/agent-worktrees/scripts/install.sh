@@ -3308,6 +3308,12 @@ if ! $CONTEXTUAL_INSTALL; then
 fi
 
 case "$ACTION" in
+    install|update|provision)
+        . "$SCRIPT_DIR/installer-instance-reconcile.sh"
+        reconcile_installer_instances "$SCRIPT_DIR"
+        ;;
+esac
+case "$ACTION" in
     publish-runtime-helpers)
         publication="$("$RUNTIME_PUBLICATION_PYTHON" -I -B -X utf8 "$SCRIPT_DIR/runtime_install.py" \
             --root "$INSTALL_DIR" --plugin "$PLUGIN_DIR" \

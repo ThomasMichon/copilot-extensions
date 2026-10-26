@@ -91,6 +91,15 @@ supervision.
   elevation, so a plain install/update survives the next interactive login.
 - The durable engine remains decoupled from ordinary service updates, so a
   routine service bump does not rebuild torch or reload the model.
+- Service shutdown retains admission until the task runner's already-admitted
+  queue operations, worker launch/registration, and monitor-side native calls
+  finish, including under repeated cancellation. An unlaunched dequeued claim
+  is returned through the existing queue release operation; a launched worker
+  keeps its persisted PID and survives for adoption by the successor. Shutdown
+  does not wait for those independent indexing workers to finish or terminate
+  them. Startup cancellation/failure settles recovery and adopted monitors
+  before unwinding admission. Existing store timeouts and governance fences
+  still apply; no process-wide executor shutdown is used.
 
 Logon startup and an explicit `ensure` action are not continuous crash
 supervision. A host that requires unattended restart needs a configured

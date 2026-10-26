@@ -67,13 +67,17 @@ on:
         description: Exercise actual owner-bound runtime-profile policy readers without installation
         type: boolean
         default: false
+      update_diagnostics:
+        description: Qualify native update auth, queue and diagnostic front doors without deployment
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   derived-diagnostics-posix:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
     name: Native POSIX copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: ubuntu-latest
     timeout-minutes: 4
@@ -94,7 +98,7 @@ jobs:
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
 
   derived-diagnostics-windows:
-    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles }}
+    if: ${{ !inputs.interactive_completion && !inputs.immutable_runtime && !inputs.guardian_followthrough && !inputs.watch_owner && !inputs.dispatch_delegation && !inputs.pr_service && !inputs.ssh_service && !inputs.pr_artifacts && !inputs.dependency_compile && !inputs.candidate_profiles && !inputs.chat_construction && !inputs.ssh_snapshot && !inputs.wheel_inputs && !inputs.runtime_profiles && !inputs.update_diagnostics }}
     name: Native Windows copies (${{ matrix.mode }}, ${{ matrix.pointer }})
     runs-on: windows-latest
     timeout-minutes: 4
@@ -117,6 +121,74 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pytest -q --durations=15 libs/payload-invocation/tests/test_derived_diagnostic_cli.py -k "${{ matrix.mode }} and ${{ matrix.pointer }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  update-diagnostics-linux:
+    if: ${{ inputs.update_diagnostics }}
+    name: Update diagnostic contracts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps: &update-diagnostics-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Record exact update qualification source
+        id: source
+        run: >-
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['GITHUB_SHA']; print('source='+actual)"
+      - name: Prepare isolated update test tooling
+        id: tooling
+        run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Qualify bounded native credential routing
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_auth.py
+      - name: Qualify real queued engine and fixed launch requests
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_driver.py
+          --test-file tests/test_update_launch_cli.py
+      - name: Qualify scoped acquisition and actual installer recovery boundary
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_runtime_plan.py
+          --test-file tests/test_installation_updates.py
+          --test-file tests/test_installer_powershell51.py
+          -k "engine_phase or failed_payload_refresh or execution_artifact or recovery_matches or python_runtime_resolves_one_uv_application"
+      - name: Qualify outer updater through native Bridge completed-slot serving owner
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_serving_reconcile.py
+      - name: Qualify POSIX selected-phase front doors
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Linux' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_entry.py -k selected_update_phase
+      - name: Qualify Windows selected-phase front doors
+        if: ${{ !cancelled() && steps.tooling.outcome == 'success' && runner.os == 'Windows' }}
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
+          --test-file tests/test_update_entry_windows.py -k selected_update_phase
+  update-diagnostics-windows:
+    if: ${{ inputs.update_diagnostics }}
+    name: Update diagnostic contracts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: "3.12"
+    steps: *update-diagnostics-steps
 
   immutable-runtime-linux:
     if: ${{ inputs.immutable_runtime }}
@@ -753,9 +825,18 @@ jobs:
 
   source-build-linux:
     if: ${{ inputs.dependency_compile }}
-    name: Admitted source build (Linux)
+    name: Admitted source build (Linux, ${{ matrix.suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: &source-build-matrix
+        suite: [profiles, refusals, manager]
+        include:
+          - suite: profiles
+            expression: not (unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy)
+          - suite: refusals
+            expression: unadmitted_source_build_inputs or rejected_native_source_settings or built_metadata_must_match or backend_timeout or revoked_source_policy
     steps: &source-build-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -765,14 +846,156 @@ jobs:
       - name: Validator tooling only
         run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
       - name: Real authenticated source, admitted tools, offline build and health
-        run: python -m pytest -q tools/test_runtime_source_build.py
+        if: ${{ matrix.suite != 'manager' }}
+        run: >-
+          python -m pytest -q
+          tools/test_runtime_source_build.py
+          -k "${{ matrix.expression }}"
+      - name: Persisted Manager admission and fresh-process offline reuse
+        if: ${{ matrix.suite == 'manager' }}
+        run: >-
+          python -m pytest -q
+          tools/test_manager_source_install.py
+          tools/test_manager_source_native.py
+          tools/test_runtime_source_reuse.py
+          worktree-manager/tests/test_manager_update_check.py
+          libs/versioned-runtime/tests/test_runtime_source_identity.py::test_source_and_repair_slots_preserve_the_declared_package_version
+
+  packaging-seed-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Stdlib Packaging seed (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &packaging-seed-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - name: Native governed seed, immutable health and isolated first touch
+        run: python -m pytest -q tools/test_installer_packaging_seed.py
+
+  packaging-seed-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Stdlib Packaging seed (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *packaging-seed-steps
+
+  marketplace-source-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Registered marketplace source (Linux, ${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: &marketplace-source-matrix
+        include:
+          - suite: provider-selection
+            test: tools/test_runtime_marketplace_source.py
+            expression: not source_and_configuration
+          - suite: provider-mutation
+            test: tools/test_runtime_marketplace_source.py
+            expression: source_and_configuration
+          - suite: inventory-cache
+            test: libs/plugin-resolve/tests/test_native_git_inventory.py
+            expression: native_git_cache and not (refuse or prevents or permission or invalid or timeout or cyclic or excluded)
+          - suite: inventory-selection
+            test: libs/plugin-resolve/tests/test_native_git_inventory.py
+            expression: not native_git_cache and not (refuse or prevents or permission or invalid or timeout or cyclic or excluded)
+          - suite: inventory-refusal
+            test: libs/plugin-resolve/tests/test_native_git_inventory.py
+            expression: refuse or prevents or permission or invalid or timeout or cyclic or excluded
+    steps: &marketplace-source-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml packaging
+      - name: Actual registered Git source and independent exact acquisition
+        run: python -m pytest -q ${{ matrix.test }} -k "${{ matrix.expression }}"
+
+  marketplace-source-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Registered marketplace source (Windows, ${{ matrix.suite }})
+    runs-on: windows-latest
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: *marketplace-source-matrix
+    steps: *marketplace-source-steps
 
   source-build-windows:
     if: ${{ inputs.dependency_compile }}
-    name: Admitted source build (Windows)
+    name: Admitted source build (Windows, ${{ matrix.suite }})
     runs-on: windows-latest
     timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix: *source-build-matrix
     steps: *source-build-steps
+
+  installer-latency-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Installer latency contracts (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &installer-latency-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Validator tooling only
+        run: python tools/seasoned_uv.py --uv uv --registry-only -- --system pytest pyyaml
+      - name: Signed-copy seeding policy and actual unseeded UV install
+        run: python -m pytest -q tools/test_installer_venv_seeding.py
+      - name: Short TEMP alias reaches real daemon-registry admission
+        if: runner.os == 'Windows'
+        run: python -m pytest -q tools/test_run_plugin_tests.py::test_short_temp_alias_reaches_real_daemon_registry
+      - name: Exact batched closure, retries, warm edits and recovery
+        run: >-
+          python tools/run-plugin-tests.py agent-codespaces
+          --allow-explicit-tiers
+          --test-file tests/test_installer_engine_adoption.py
+          -k "library_install_order_retry_and_errors or native_batch_installs_cold or signed_venv_recovery"
+          --test-timeout 180 --timeout 300
+
+  installer-latency-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Installer latency contracts (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *installer-latency-steps
+
+  logger-installer-latency-linux:
+    if: ${{ inputs.dependency_compile }}
+    name: Logger installer batches (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps: &logger-installer-latency-steps
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Two governed batches, failure refusal, reuse and native warm refresh
+        run: >-
+          python tools/run-plugin-tests.py agent-logger
+          --allow-explicit-tiers
+          --test-file tests/test_install_batch.py
+          --test-timeout 300 --timeout 300
+
+  logger-installer-latency-windows:
+    if: ${{ inputs.dependency_compile }}
+    name: Logger installer batches (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    steps: *logger-installer-latency-steps
 
   wheel-inputs-linux:
     if: ${{ inputs.wheel_inputs }}

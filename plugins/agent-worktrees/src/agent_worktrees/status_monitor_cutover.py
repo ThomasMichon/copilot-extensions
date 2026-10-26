@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from agent_procutil.daemon_instances import DaemonInstanceSpec
+
 import json
 import os
 import secrets
@@ -419,6 +421,9 @@ def spawn_monitor(argv: list[str], env: dict[str, str], *, console_children: boo
     cwd = smr._daemon_cwd()
     return spawn_daemon(
         argv, cwd=cwd, log_path=monitor_log_path(cwd), env=env,
+        instance=DaemonInstanceSpec(
+            "agent-worktrees-status-monitor", Path(cwd), Path(__file__).resolve(),
+        ),
         console_children=console_children,
         display="agent_worktrees " + " ".join(argv[3:5]),
     )

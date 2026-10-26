@@ -86,7 +86,7 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
-from artifact_source_build import parse_wheel_identity
+from artifact_source_build import PromotionArtifactError, parse_wheel_identity
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
@@ -228,7 +228,7 @@ def _validate_in_tree_lib_dir(label: str, unresolved: Path) -> Path:
         )
     if not (canonical / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{label}: {canonical}/pyproject.toml is missing")
-    nested = uer._find_symlink(canonical)
+    nested = uer._find_symlink(canonical, skip_test_runs=False)
     if nested is not None:
         where = canonical if nested == "." else canonical / nested
         raise ArtifactBuildError(
@@ -285,7 +285,7 @@ def _validate_editable_canonical_ref(
             f"{consumer_dir}: {name} -> {raw_path} (resolved {canonical}): "
             "pyproject.toml is missing"
         )
-    nested = uer._find_symlink(canonical)
+    nested = uer._find_symlink(canonical, skip_test_runs=False)
     if nested is not None:
         where = canonical if nested == "." else canonical / nested
         raise ArtifactBuildError(
@@ -431,7 +431,7 @@ def resolve_vendored_libs(consumer_dir: Path) -> list[tuple[str, Path]]:
 
 _PAYLOAD_IGNORE_DIR_NAMES = {
     ".git", ".venv", "__pycache__", ".pytest_cache", "build", "dist",
-    ".mypy_cache", ".ruff_cache",
+    ".mypy_cache", ".ruff_cache", ".test-runs",
 }
 _PAYLOAD_IGNORE_SUFFIXES = (".pyc", ".pyo")
 
@@ -452,6 +452,8 @@ def directory_content_hash(d: Path) -> str:
     the very input that produced it."""
     entries: list[tuple[str, str]] = []
     for p in sorted(d.rglob("*")):
+        if ".test-runs" in p.relative_to(d).parts:
+            continue
         if not p.is_file():
             continue
         rel_parts = p.relative_to(d).parts
@@ -686,8 +688,10 @@ def build_wheel(
         strip_package_source_env_vars(build_env, strip_credentials=True)
 
         def run(argv):
+            # UV receives its source explicitly; Windows cannot launch with a
+            # deeply retained source directory as the process working directory.
             return run_owned(
-                argv, cwd=source_dir, env=build_env, timeout=deadline - time.monotonic(),
+                argv, cwd=out_dir, env=build_env, timeout=deadline - time.monotonic(),
                 deadline=deadline, procutil=procutil, construction_fd=construction_fd,
                 runtime_root=retained_runtime[0], runtime_version=retained_runtime[1],
                 runtime_path=retained_runtime[2],
@@ -820,7 +824,7 @@ def build_plugin_artifacts(
     plugin_dir = PLUGINS_DIR / plugin
     if not (plugin_dir / "pyproject.toml").is_file():
         raise ArtifactBuildError(f"{plugin_dir}: no pyproject.toml -- not a plugin")
-    plugin_nested_symlink = uer._find_symlink(plugin_dir)
+    plugin_nested_symlink = uer._find_symlink(plugin_dir, skip_test_runs=False)
     if plugin_nested_symlink is not None:
         where = plugin_dir if plugin_nested_symlink == "." else plugin_dir / plugin_nested_symlink
         raise ArtifactBuildError(
@@ -830,6 +834,12 @@ def build_plugin_artifacts(
         )
 
     vendored_libs = resolve_vendored_libs(plugin_dir)
+    if plugin == "agent-containers":
+        from plugin_runtime_resources import build_inputs
+        try:
+            build_inputs(plugin_dir, root=REPO)
+        except PromotionArtifactError as exc:
+            raise ArtifactBuildError(f"invalid Containers runtime build inputs: {exc}") from exc
 
     return build_source_artifacts(
         identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,

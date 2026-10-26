@@ -64,8 +64,8 @@ def _runtime_dir() -> Path:
     """The selected runtime root for this process."""
     override = os.environ.get("AGENT_CODESPACES_HOME", "").strip()
     if override:
-        return Path(override).expanduser()
-    return _home() / ".agent-codespaces"  # marketplace-isolation: allow legacy compatibility root
+        return Path(os.path.abspath(Path(override).expanduser()))
+    return Path(os.path.abspath(_home() / ".agent-codespaces"))  # marketplace-isolation: allow legacy compatibility root
 
 
 # Canonical paths

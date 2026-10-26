@@ -75,6 +75,7 @@ def _run(repository: Path, ref: str, root: Path, build_timeout: int,
         engine.journal()
         engine.preflight()
         image = engine.build(receipt["source_commit"], build_timeout)
+        engine.open_runner_lifetime()
         engine.deadline = time.monotonic() + 300
         witness = Witness(engine, image, report, receipt)
         witness.passed(f"Pinned canonical source closure built for inspected {architecture} image", {

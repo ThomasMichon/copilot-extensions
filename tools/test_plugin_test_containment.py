@@ -15,6 +15,97 @@ from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
 
 
+def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    monkeypatch.setattr(
+        plugin_test_containment, "_run_contained_process",
+        lambda *args, **kwargs: pytest.fail("must refuse before starting a test"),
+    )
+    with pytest.raises(ValueError, match="explicit"):
+        plugin_test_containment.run_contained(
+            ["unused"], cwd=tmp_path, env={}, sandbox=tmp_path,
+            limits=Limits(), daemon_purpose="interactive-test",
+        )
+
+
+def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    events = []
+    policy = plugin_test_containment.DaemonLeasePolicy(90000, 172800)
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        events.append(("enter", kwargs))
+        yield {"DAEMON_TEST_CONTEXT": "owned"}
+        events.append(("exit", None))
+
+    def run(command, **kwargs):
+        events.append(("run", kwargs["env"]))
+        return 0
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", run)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    assert plugin_test_containment.run_contained(
+        ["unused"], cwd=tmp_path, env={"KEEP": "yes"}, sandbox=tmp_path,
+        limits=Limits(), daemon_purpose="interactive-test", daemon_lease=policy,
+    ) == 0
+    assert [event for event, _ in events] == ["enter", "run", "exit"]
+    assert events[0][1]["purpose"] == "interactive-test"
+    assert events[0][1]["lease"] is policy
+    assert events[0][1]["registry_root"] == tmp_path.resolve() / "daemon-instances"
+    assert events[1][1] == {"KEEP": "yes", "DAEMON_TEST_CONTEXT": "owned"}
+
+
+@pytest.mark.parametrize("alias", [
+    "parent-reference",
+    "missing-child",
+    pytest.param("short-name", marks=pytest.mark.skipif(os.name != "nt", reason="Windows short path")),
+])
+def test_runner_canonicalizes_its_owned_sandbox_before_daemon_admission(tmp_path, monkeypatch, alias):
+    from contextlib import contextmanager
+
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    sandbox = parent / ".." / "sandbox"
+    if alias == "missing-child":
+        sandbox = parent / "pending" / "sandbox"
+        assert not sandbox.exists()
+    else:
+        sandbox.mkdir()
+    expected = sandbox.resolve() / "daemon-instances"
+    if alias == "short-name":
+        import ctypes
+
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = ctypes.windll.kernel32.GetShortPathNameW(str(sandbox.resolve()), buffer, len(buffer))
+        assert 0 < length < len(buffer)
+        sandbox = Path(buffer.value)
+        if sandbox == sandbox.resolve():
+            pytest.skip("volume does not expose an alternate short path")
+    admitted = []
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        from agent_procutil._daemon_instance_store import _root
+
+        root = kwargs["registry_root"]
+        admitted.append(_root(root, create=True))
+        yield {}
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    assert plugin_test_containment.run_contained(
+        ["unused"], cwd=tmp_path, env={}, sandbox=sandbox, limits=Limits(),
+    ) == 0
+    assert admitted == [expected]
+
+
 def test_tree_size_counts_nested_files_without_repeated_path_stats(tmp_path, monkeypatch):
     (tmp_path / "nested").mkdir()
     (tmp_path / "a").write_bytes(b"abc")

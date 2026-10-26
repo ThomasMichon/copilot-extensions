@@ -12,7 +12,7 @@ agent-procutil = { path = "libs/agent-procutil" }
 
 [project]
 name = "agent-chat-service"
-version = "0.1.26-dev1"
+version = "0.1.27-dev1"
 description = "Bounded conversation core with explicit installed client and local hosting roles."
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-service = ["agent-single-instance-lease>=0.1.0.dev1", "agent-endpoint-rendezvous>=0.1.0.dev6"]
+service = ["agent-procutil>=0.1.0.dev7", "agent-single-instance-lease>=0.1.0.dev1", "agent-endpoint-rendezvous>=0.1.0.dev6"]
 client = ["agent-procutil>=0.1.0.dev7", "agent-endpoint-rendezvous>=0.1.0.dev6"]
 dev = [
     "pytest>=8", "setuptools>=83.0.0", "wheel", "psutil>=7.0",

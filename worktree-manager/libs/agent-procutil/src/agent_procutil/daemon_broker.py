@@ -258,6 +258,7 @@ def _cleanup_process(
 def spawn_brokered_daemon(
     command: list[str], *, cwd: str, env: dict[str, str], creationflags: int,
     log_path: str, stderr_log_path: str | None,
+    instance_receipt=None,
 ) -> WindowsDaemonProcess:
     """Launch through WMI only after the direct Job-breakaway request failed."""
     from . import DaemonSpawnError
@@ -265,6 +266,8 @@ def spawn_brokered_daemon(
     deadline = time.monotonic() + _TIMEOUT
     child = bootstrap = None
     staging_started = False
+    admission_sent = False
+    child_identity = None
     cookie = secrets.token_hex(32)
     stage = "activation"
     problems = []
@@ -305,9 +308,18 @@ def spawn_brokered_daemon(
                 if type(child_pid) is not int or child_pid <= 0:
                     raise OSError("daemon broker did not stage a child")
                 child = WindowsDaemonProcess(child_pid, command)
+                from ._daemon_instance_identity import created_process_identity
+                child_identity = created_process_identity(child)
                 stage = "child-adoption"
                 if not _outside_job(child):
                     raise OSError("daemon broker child still belongs to a Job")
+                if instance_receipt is not None:
+                    from ._daemon_instance_store import bind_process
+                    if child_identity is None:
+                        bind_process(instance_receipt, child_pid)
+                    else:
+                        bind_process(instance_receipt, child_pid, observed_birth=child_identity[1])
+                admission_sent = True
                 _send(connection, {"start": child_pid}, deadline)
                 if _receive(connection, deadline) != {"started": child_pid}:
                     raise OSError("daemon broker did not confirm child startup")
@@ -333,6 +345,9 @@ def spawn_brokered_daemon(
         raise DaemonSpawnError(
             "spawn_daemon: Windows lifetime broker failed (" + ", ".join(problems) + ")",
             cleanup_confirmed=cleanup_confirmed,
+            process_created=True if child is not None else (None if staging_started else False),
+            admission_sent=admission_sent,
+            process_identity=child_identity,
         ) from None
     if child is None:
         raise DaemonSpawnError("spawn_daemon: Windows lifetime broker did not return a child")

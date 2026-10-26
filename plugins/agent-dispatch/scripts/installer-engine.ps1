@@ -402,7 +402,8 @@ function New-SignedVenv {
         [string]$UvCommand = 'uv',
         [bool]$RequireSignedBase = $false,
         [bool]$AllowExisting = $true,
-        [version]$MinimumSignedBaseVersion = [version]'3.10'
+        [version]$MinimumSignedBaseVersion = [version]'3.10',
+        [switch]$WithoutPip
     )
 
     $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
@@ -426,7 +427,9 @@ function New-SignedVenv {
 
     $signedBase = Get-SignedBasePython -MinimumVersion $MinimumSignedBaseVersion
     if ($signedBase) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+        $venvArguments = @('-m', 'venv', '--copies')
+        if ($WithoutPip) { $venvArguments += '--without-pip' }
+        & $signedBase @venvArguments $VenvDir 2>&1 | Out-Null
         if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
             Write-Ok "Venv created from signed Python ($signedBase)"
             return $true

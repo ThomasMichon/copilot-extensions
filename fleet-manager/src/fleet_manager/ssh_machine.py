@@ -70,12 +70,12 @@ async def run(
     stop = stop if stop is not None else asyncio.Event()
     if stop.is_set():
         return
+    config = SSHMachineConfig.from_dict(config.to_dict())
+    accept = _consumer(config)
     from .credential_references import load_service_credentials
     from .gateway_service_caller import ServiceCaller
     from .ssh_directory import SSHDirectoryClient
 
-    config = SSHMachineConfig.from_dict(config.to_dict())
-    accept = _consumer(config)
     value = config.to_dict()
     credentials = load_service_credentials(
         proof_key_file=absolute(value["proof_key_file"]),

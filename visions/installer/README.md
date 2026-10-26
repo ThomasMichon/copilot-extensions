@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-26
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -178,6 +178,31 @@ needed; access failure is not permission to substitute another account or source
 An unfinished repository stage remains explicit without discarding a completed
 core installation or claiming full adoption.
 
+### harness-selected-continuity-bootstrap
+
+A harness README can compose the standard upstream setup with a portable
+selection of its harness/worktree configuration context. That context declares
+the expected user-owned continuity source; an adopter does not need a copied
+installer or machine-specific setup command to express the arrangement.
+Standalone installation remains available without a harness, continuity store
+or Gateway.
+
+For a selected integrated fleet, setup consumes the user's already-established
+authenticated access to that source to obtain Gateway discovery and the
+delegated authority needed to provision this machine. Source/provider selection,
+current credentials and enrollment remain with their existing owners.
+Access to public configuration or a similarly named local folder is not
+bootstrap authority. An already-authorized source does not trigger a redundant
+human ceremony; an actual provider or enrollment challenge stays explicit.
+
+Cloud synchronization, private repositories and other protected user-state
+providers compose through the same contract without a mandatory storage or
+identity vendor. A managed machine can authenticate outbound to its Gateway
+before SSH is available; an existing authorized SSH provisioning path remains
+usable. Initial reach, source access, enrollment and complete connectivity have
+separate, truthful outcomes. Setup does not create a session or expand fleet
+administration merely because it selected a harness.
+
 ### prerequisite-provisioning
 Detects and installs the foundational prerequisites, and **prompts to restart**
 when a change requires it before continuing.
@@ -295,6 +320,18 @@ One owner maintains the suite. An explicitly selected external controller is
 an alternative to Manager-owned maintenance, not a concurrent updater.
 Ownership changes preserve the existing installation and update authorities;
 general machine/dependency convergence remains independent.
+
+The [shared local maintenance banner](../plugin-services/disposable-runtimes/README.md#shared-maintenance-banner)
+vetoes automatic updates, including Manager self-update and already queued
+background work at effect admission. Manager and an external controller consume
+that same hold; neither keeps a competing banner or bypasses it by calling an
+installer directly. Clearing it does not enroll maintenance or override an
+independent disable. Manager itself remains disposable while the retained banner,
+configuration and durable work survive, except for any actual critical
+machine-management transport closure that must remain independently available.
+Complete, forced and purge removal/reinstall exclude that closure rather than
+sever the SSH or Gateway path used to manage the host. Agent credential relays
+may be removed; they are not automatically protected transport.
 
 ### single-installation-execution-owner
 An installation has one background execution owner for its complete update
@@ -527,6 +564,9 @@ one-line bootstrap and its own auto-update — **out-of-band from any Copilot
 session and from the plugin pipe**. It never relies on a session, an agent, or a
 plugin to install or refresh the launcher; a plugin, conversely, never relies on
 the app to keep *itself* current.
+
+Out-of-band self-maintenance still honors the shared maintenance hold. It is not
+an exemption that recreates Manager during an operator's intentional removal.
 
 ## Non-Goals / Boundaries
 
