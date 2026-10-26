@@ -169,6 +169,7 @@ def native(request, tmp_path, monkeypatch):
         model_profiles={"a": ModelProfile("a", "fixture", dim=2)},
     )
     calls = []
+    item_updates = {}
 
     def handler(req):
         calls.append(req)
@@ -177,7 +178,7 @@ def native(request, tmp_path, monkeypatch):
         if req.url.path.endswith("/comments"):
             return httpx.Response(200, json=[])
         number = int(req.url.path.rsplit("/", 1)[1])
-        return httpx.Response(200, json=issue(number))
+        return httpx.Response(200, json=issue(number, **item_updates))
 
     provider = connector(handler)
     constructions = []
@@ -220,6 +221,7 @@ def native(request, tmp_path, monkeypatch):
         )
 
     run.change_hints_versions = (1,)
+    run.item_updates = item_updates
     return config, run, calls, clients, callbacks, events, constructions
 
 
@@ -235,12 +237,15 @@ def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     table = db.content_store._get_or_create_table()
     version = table.version
     assert run(source=SOURCE, change_hints=hints())["chunks_total"] == 0
-    assert table.version == version
+    assert db.content_store._get_or_create_table().version == version
     assert not clients[-1].texts
     assert events.count("ensure") == events.count("stop") == 1
     assert IndexState.load(config.state_file).sources[SOURCE].last_commit == "prior-poll"
     assert len(constructions) == 2  # Preflight and crawl use the same instance each round.
     assert len(calls) == 5  # One account probe; two item/comment requests each round.
+    run.item_updates["title"] = "Changed title"
+    assert run(source=SOURCE, change_hints=hints())["chunks_total"] > 0
+    assert db.content_store._get_or_create_table().version > version
 
 
 def _worker_fixture(native, monkeypatch):

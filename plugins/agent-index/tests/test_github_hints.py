@@ -80,6 +80,25 @@ def test_unique_items_revisions_events_and_fresh_paginated_comments():
     assert all(request.url.path != "/repos/acme/widgets/issues" for request in requests)
 
 
+@pytest.mark.parametrize("repository", ["Acme/Widgets", "ACME/widgets"])
+def test_canonical_response_casing_preserves_exact_configured_scope(repository):
+    canonical_url = "https://api.github.com/repos/" + repository
+
+    def handler(request):
+        if request.url.path == "/user":
+            return httpx.Response(200, json={"id": 123})
+        if request.url.path.endswith("/comments"):
+            return httpx.Response(200, json=[])
+        return httpx.Response(200, json=issue(
+            repository_url=canonical_url, url=canonical_url + "/issues/1",
+        ))
+
+    result = connector(handler).discover_hints(hints(), "prior")
+    assert result.upserts[0].source == SOURCE + ":issues"
+    assert result.upserts[0].metadata["repo"] == repository
+    assert result.commit == "prior"
+
+
 @pytest.mark.parametrize("overrides", [
     {"item_ids": ("01",)}, {"item_ids": ("-1",)}, {"item_ids": ("٠١",)},
     {"ref_ranges": (RefRange("before", "after"),)},

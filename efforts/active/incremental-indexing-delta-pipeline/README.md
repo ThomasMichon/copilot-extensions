@@ -489,6 +489,10 @@ source-owner coordination rather than one large rewrite.
 - Final acquisition/store compatibility qualification passed 242 tests,
   including cancellation before connector construction. Helper types, changed
   Python lint, runtime install contracts and documentation consistency pass.
+- Review corrections accept canonical GitHub repository-name casing without
+  admitting a different endpoint or item, and refresh the source-aware reader
+  before no-op version assertions. A real changed-title control proves that
+  the same assertion detects writes. The final review-fix packet passed 125.
 - Phase 4's content/vector write-avoidance item is resolved. Exact hinted
   acquisition, hosted pagination recovery, unchanged-item model backfill,
   per-stage counters and logical/sliced maintenance remain next work; no

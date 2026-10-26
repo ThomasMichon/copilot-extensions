@@ -63,11 +63,15 @@ def acquire_hints(
         path = f"{repository_path}/issues/{number}"
         result = connector._http.get_json(path, etag=False)
         item = result.data
+        actual_repository = item.get("repository_url") if isinstance(item, dict) else None
+        actual_url = item.get("url") if isinstance(item, dict) else None
         if (
             result.not_modified or not isinstance(item, dict)
             or type(item.get("number")) is not int or item["number"] != number
-            or item.get("repository_url") != repository_url
-            or item.get("url") != repository_url + f"/issues/{number}"
+            or not isinstance(actual_repository, str)
+            or actual_repository.casefold() != repository_url.casefold()
+            or not isinstance(actual_url, str)
+            or actual_url.casefold() != (repository_url + f"/issues/{number}").casefold()
         ):
             raise ValueError("GitHub hinted response did not match the requested repository/item")
         updated = _revision(item.get("updated_at"))
