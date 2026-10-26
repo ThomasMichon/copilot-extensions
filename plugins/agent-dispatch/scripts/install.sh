@@ -2578,11 +2578,7 @@ _dispatch_uninstall_preflight() {
     local unit
     for unit in "$UNIT_DIR/$SYSTEMD_UNIT" "$UNIT_DIR/$SUPERVISOR_UNIT" "$UNIT_DIR/${SUPERVISOR_UNIT%.service}-"*.service; do
         [[ -e "$unit" || -L "$unit" ]] || continue
-        [[ -f "$unit" && ! -L "$unit" ]] &&
-            grep -F -- "$INSTALL_DIR/" "$unit" >/dev/null &&
-            grep -E -- 'ExecStart=.*(-m agent_dispatch|supervise-service\.sh)' "$unit" >/dev/null || {
-                _fail "Refusing unowned Dispatch systemd unit: $unit"; return 1;
-            }
+        _finite_stop_tool check-unit --unit "$unit" || return 1
         if command -v systemctl >/dev/null 2>&1; then
             local fragment
             fragment="$(systemctl --user show --property=FragmentPath --value "${unit##*/}")" || return 1

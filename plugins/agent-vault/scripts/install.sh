@@ -988,11 +988,7 @@ _vault_uninstall_preflight() {
     local unit
     unit="$UNIT_DIR/$SYSTEMD_UNIT"
     if [[ -e "$unit" || -L "$unit" ]]; then
-        [[ -f "$unit" && ! -L "$unit" ]] &&
-            grep -F -- "$INSTALL_DIR/" "$unit" >/dev/null &&
-            grep -E -- 'ExecStart=.*-m agent_vault\.service' "$unit" >/dev/null || {
-                _fail "Refusing unowned Vault systemd unit"; return 1;
-            }
+        _finite_stop_tool check-unit --unit "$unit" || return 1
         if command -v systemctl >/dev/null 2>&1; then
             local fragment
             fragment="$(systemctl --user show --property=FragmentPath --value "$SYSTEMD_UNIT")" || return 1

@@ -101,11 +101,34 @@ def admits_argv(argv: list[str], root: str | Path, plugin: str) -> bool:
 
 def check_unit(unit: Path, root: str | Path, plugin: str) -> None:
     """Validate the installed registration against the same argv admission."""
+    if not _posix(root).is_absolute() or ".." in _posix(root).parts:
+        raise StopRefused("Service ownership requires an absolute root without traversal")
     if unit.is_symlink() or not unit.is_file():
         raise StopRefused("The service unit must be an ordinary file")
-    lines = unit.read_text(encoding="utf-8-sig").splitlines()
+    lines = []
+    section = ""
+    for raw in unit.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = line
+        elif section == "[Service]":
+            lines.append(line)
     starts = [line.removeprefix("ExecStart=") for line in lines if line.startswith("ExecStart=")]
-    if len(starts) != 1 or not admits_argv(shlex.split(starts[0]), root, plugin):
+    if len(starts) != 1:
+        raise StopRefused("The service unit does not name this installation's daemon")
+    argv = shlex.split(starts[0])
+    owned = admits_argv(argv, root, plugin)
+    if plugin == "agent-dispatch":
+        coordinator = (
+            bool(argv) and _runtime_path(argv[0], root, {"python", "python3"})
+            and argv[1:] == ["-m", "agent_dispatch", "serve"]
+        )
+        supervisor = (
+            len(argv) == 3 and _posix(argv[0]) == _posix(root) / "supervise-service.sh"
+            and argv[1:] == ["--systemd-unit", unit.name]
+        )
+        owned = coordinator or supervisor
+    if not owned:
         raise StopRefused("The service unit does not name this installation's daemon")
     directories = [line.removeprefix("WorkingDirectory=") for line in lines
                    if line.startswith("WorkingDirectory=")]

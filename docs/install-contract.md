@@ -2459,6 +2459,16 @@ Unknown child/transport ownership and unavailable kernel-bound signaling refuse.
 Admission records contain no plaintext command arguments. Bridge console
 entrypoints and their shebang-expanded form, and Vault's persistent foreground
 handoff arguments, use the same admission as their actual native unit writers.
+Before service control, unit admission validates the active `[Service]`
+executable/launcher and root-bound working directory together. Comments cannot
+establish ownership. Dispatch's coordinator and supervisor registrations have
+separate exact writer forms; a supervisor registration must name its own unit.
+
+CodeSpaces, SSH and Pull Requests removal select only an already available
+interpreter whose executable, prefix, base prefix and base interpreter remain
+outside the removable root. Admission-only and dry-run paths use that same
+non-provisioning selector; absence refuses without invoking `uv` or downloading
+Python. Construction's bootstrap resolver retains its separate behavior.
 
 Installation-cell/managed roots, mutable development claims, linked ancestry,
 unrecognized legacy venv directories, foreign ownership, conflicting leases

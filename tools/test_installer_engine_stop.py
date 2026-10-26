@@ -92,6 +92,105 @@ def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plug
         STOP.check_unit(unit, _posix(root), plugin)
 
 
+def _written_unit(tmp_path: Path, kind: str) -> tuple[Path, Path, Path, str]:
+    plugin = "agent-vault" if kind == "vault" else "agent-dispatch"
+    source = REPO / "plugins" / plugin / "scripts" / "install.sh"
+    root = tmp_path / "runtime"
+    root.mkdir()
+    units = tmp_path / "units"
+    units.mkdir()
+    supervisor = kind == "supervisor"
+    name = "fixture-supervisor.service" if supervisor else "fixture.service"
+    writer = "_install_supervisor_unit" if supervisor else "_install_service"
+    invoke = (
+        '_install_supervisor_unit fixture-supervisor.service "$INSTALL_DIR/supervisor.env" fixture'
+        if supervisor else "_install_service"
+    )
+    result = _shell(tmp_path, "\n".join((
+        "set -euo pipefail",
+        '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
+        'systemctl() { [[ "${2:-}" != is-active ]]; }',
+        "_is_wsl() { return 1; }; _supervisor_mode() { echo serve; }",
+        "_supervisor_labels_configured() { return 1; }; _supervisor_action() { :; }",
+        "_supervisor_audit() { :; }",
+        f"INSTALL_DIR={shlex.quote(_posix(root))};UNIT_DIR={shlex.quote(_posix(units))}",
+        'VENV_DIR="$INSTALL_DIR/versions/1.0"; VENV_PYTHON="$VENV_DIR/bin/python"',
+        'ENV_FILE="$INSTALL_DIR/service.env"',
+        'LINK_PYTHON="$VENV_PYTHON"; SYSTEMD_UNIT=fixture.service; NO_SERVICE=0',
+        'SUPERVISOR_LAUNCHER="$INSTALL_DIR/supervise-service.sh"; SUPERVISOR_PATH="$PATH"',
+        'RUN_DIR="$INSTALL_DIR/run"; SOCKET_PATH="$RUN_DIR/vault.sock"; PIPE_PATH=fixture',
+        'PID_FILE="$RUN_DIR/service.pid"; LOG_FILE="$INSTALL_DIR/logs/service.log"',
+        "SERVICE_SUFFIX=''; INSTALLATION_ID=fixture; PORT_ENV_LINE=''",
+        _function(source, writer),
+        invoke,
+    )))
+    assert result.returncode == 0, result.stdout + result.stderr
+    return units / name, root, source, plugin
+
+
+@pytest.mark.parametrize("kind", ("coordinator", "supervisor", "vault"))
+@pytest.mark.parametrize("mutation", (
+    "none", "foreign-executable-comment", "foreign-workdir", "wrong-module",
+    "duplicate-executable", "commented-executable",
+))
+def test_real_uninstall_preflight_binds_generated_unit_not_comment(
+    tmp_path: Path, kind: str, mutation: str,
+) -> None:
+    unit, root, source, plugin = _written_unit(tmp_path, kind)
+    original = unit.read_text(encoding="utf-8")
+    start = next(line for line in original.splitlines() if line.startswith("ExecStart="))
+    changed = original
+    if mutation == "foreign-executable-comment":
+        changed = original.replace(start, start.replace(_posix(root), _posix(root) + "-foreign"))
+        changed = f"# historical owner: {_posix(root)}/\n" + changed
+    elif mutation == "foreign-workdir":
+        changed = original.replace(
+            f"WorkingDirectory={_posix(root)}", f"WorkingDirectory={_posix(root)}-foreign",
+        )
+    elif mutation == "wrong-module":
+        changed = (
+            original.replace("supervise-service.sh", "unrelated-service.sh")
+            if kind == "supervisor" else
+            original.replace("-m " + plugin.replace("-", "_"), "-m unrelated_module")
+        )
+    elif mutation == "duplicate-executable":
+        changed = original.replace(start, start + "\n" + start)
+    elif mutation == "commented-executable":
+        changed = original.replace(start, "#" + start)
+    unit.write_text(changed, encoding="utf-8")
+    before = unit.read_bytes(), unit.stat().st_mtime_ns
+    inspected = tmp_path / "process-inspected"
+    control = tmp_path / "unexpected-native-control"
+    preflight = "_vault_uninstall_preflight" if kind == "vault" else "_dispatch_uninstall_preflight"
+    result = _shell(tmp_path, "\n".join((
+        "set -euo pipefail",
+        f"INSTALL_DIR={shlex.quote(_posix(root))};UNIT_DIR={shlex.quote(_posix(unit.parent))}",
+        "SYSTEMD_UNIT=fixture.service;SUPERVISOR_UNIT=fixture-supervisor.service",
+        f"PY={shlex.quote(_posix(Path(sys.executable)))};STOP_HELPER={shlex.quote(_posix(SOURCE))}",
+        f"INSPECTED={shlex.quote(_posix(inspected))};CONTROL={shlex.quote(_posix(control))}",
+        '_fail() { echo "$1" >&2; }',
+        'systemctl() { if [[ "${2:-}" != show ]]; then : > "$CONTROL"; return 99; fi; '
+        'local name="${@: -1}"; printf "%s\\n" "$UNIT_DIR/$name"; }',
+        f'_finite_stop_tool() {{ "$PY" -I -B "$STOP_HELPER" "$@" --root "$INSTALL_DIR" --plugin {plugin}; }}',
+        '_finite_owned_pids() { : > "$INSPECTED"; }',
+        _function(source, preflight),
+        preflight,
+    )))
+    assert (result.returncode == 0) is (mutation == "none"), result.stdout + result.stderr
+    assert inspected.exists() is (mutation == "none")
+    assert not control.exists(), "Preflight must never stop, disable, restart, or remove a service"
+    assert (unit.read_bytes(), unit.stat().st_mtime_ns) == before
+
+
+def test_dispatch_supervisor_registration_cannot_name_another_unit(tmp_path: Path) -> None:
+    unit, root, _, plugin = _written_unit(tmp_path, "supervisor")
+    unit.write_text(unit.read_text().replace(
+        "--systemd-unit fixture-supervisor.service", "--systemd-unit foreign.service",
+    ))
+    with pytest.raises(RuntimeError, match="does not name"):
+        STOP.check_unit(unit, _posix(root), plugin)
+
+
 @pytest.mark.parametrize("historical", ("venv", ".venv"))
 @pytest.mark.parametrize("plugin", ("agent-bridge", "agent-dispatch", "agent-vault"))
 def test_closed_historical_inspection_is_not_a_launch(tmp_path: Path, historical: str, plugin: str) -> None:

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 SOURCE = Path(__file__).resolve().parents[4]
-PLUGINS = ("agent-pull-requests", "agent-ssh")
+PLUGINS = ("agent-pull-requests", "agent-ssh", "agent-codespaces")
 HOSTS = (
     pytest.param(
         "pwsh", marks=pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell 7 lane")
@@ -128,7 +128,9 @@ def _environment(home: Path, paths: list[Path]) -> dict[str, str]:
     return env
 
 
-def _case(tmp_path: Path, plugin: str, layout: str) -> tuple[Path, Path, Path, dict[str, bytes]]:
+def _case(
+    tmp_path: Path, plugin: str, layout: str, *, provisioned: bool = True
+) -> tuple[Path, Path, Path, dict[str, bytes]]:
     """Use current parent bytes, including its actual vendored helper closure."""
     original = SOURCE / "plugins" / plugin
     fixture_source = tmp_path / "source"
@@ -159,7 +161,8 @@ def _case(tmp_path: Path, plugin: str, layout: str) -> tuple[Path, Path, Path, d
     assert version_match
     version = version_match.group(1)
     internal = root / "versions" / version if layout == "versions" else root / layout
-    venv.EnvBuilder(with_pip=False, symlinks=False).create(internal)
+    if provisioned:
+        venv.EnvBuilder(with_pip=False, symlinks=False).create(internal)
     marker = root / "deploy-manifest.json"
     marker.write_text(
         json.dumps(
@@ -256,6 +259,8 @@ $InstallDir={q(root)}
 $VenvDir={q(internal)}
 $LinkDir={q(internal)}
 $script:uvPath=$null
+$OwnerTaskName='fixture-owner'
+function Get-ScheduledTask {{ param($ErrorAction) }}
 . {q(scripts / "versioned_runtime_native.ps1")}
 {_bootstrap(payload, shell)}
 . {q(scripts / "uninstall-runtime.ps1")}
@@ -288,6 +293,44 @@ def _retained(root: Path, durable: dict[str, bytes]) -> None:
         assert (root / name).read_bytes() == value, name
 
 
+def _install_command(
+    tmp_path: Path, payload: Path, root: Path, shell: str, *, dry_run: bool = False
+) -> list[str]:
+    if shell == "bash":
+        return [
+            _host(shell),
+            str(payload / "scripts" / "install.sh"),
+            "uninstall",
+            "--install-dir",
+            str(root),
+            *(["--dry-run"] if dry_run else []),
+        ]
+    command = [
+        _host(shell),
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        str(payload / "scripts" / "install.ps1"),
+        "-Action",
+        "uninstall",
+        "-InstallDir",
+        str(root),
+        *(["-DryRun"] if dry_run else []),
+    ]
+    if payload.name == "agent-codespaces":
+        wrapper = tmp_path / "native-install-caller.ps1"
+        wrapper.write_text(
+            "function Get-ScheduledTask { param($ErrorAction) }\n"
+            f"& {_quote(payload / 'scripts' / 'install.ps1', shell)} "
+            f"-Action uninstall -InstallDir {_quote(root, shell)} "
+            + ("-DryRun\n" if dry_run else "\n")
+            + "exit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
+        return [*command[:4], str(wrapper)]
+    return command
+
+
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("shell", HOSTS)
 @pytest.mark.parametrize("layout", (".venv", "versions"))
@@ -309,28 +352,12 @@ def test_real_native_installer_removes_internal_runtime_using_external_python(
     assert control.returncode == 0, control.stdout + control.stderr
     selected = control.stdout.strip().splitlines()
     assert len(selected) == 2, control.stdout + control.stderr
-    assert Path(selected[0]).resolve() == _python(internal).resolve()
-    assert not Path(selected[1]).resolve().is_relative_to(root.resolve())
-    if shell == "bash":
-        command = [
-            _host(shell),
-            str(payload / "scripts" / "install.sh"),
-            "uninstall",
-            "--install-dir",
-            str(root),
-        ]
+    if plugin != "agent-codespaces":
+        assert Path(selected[0]).resolve() == _python(internal).resolve()
     else:
-        command = [
-            _host(shell),
-            "-NoProfile",
-            "-NonInteractive",
-            "-File",
-            str(payload / "scripts" / "install.ps1"),
-            "-Action",
-            "uninstall",
-            "-InstallDir",
-            str(root),
-        ]
+        assert _python(internal).is_file()
+    assert not Path(selected[1]).resolve().is_relative_to(root.resolve())
+    command = _install_command(tmp_path, payload, root, shell)
     result = _run(command, root.parent, paths, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not internal.exists()
@@ -378,7 +405,10 @@ def test_real_selector_enforces_executable_and_prefix_closure(
         assert result.returncode == 0, result.stdout + result.stderr
         selected = result.stdout.strip().splitlines()
         assert len(selected) == 2, result.stdout
-        assert Path(selected[0]).resolve() == _python(internal).resolve()
+        if plugin != "agent-codespaces":
+            assert Path(selected[0]).resolve() == _python(internal).resolve()
+        else:
+            assert _python(internal).is_file()
         assert not Path(selected[1]).resolve().is_relative_to(root.resolve())
     _retained(root, durable)
 
@@ -448,4 +478,88 @@ def test_external_venv_with_internal_base_prefix_is_refused(
     assert result.returncode != 0
     assert "existing external Python" in result.stdout + result.stderr
     assert copied_base.is_file()
+    _retained(root, durable)
+
+
+def _uv_only(directory: Path, events: Path) -> Path:
+    """Make every attempted uv invocation observable without running uv."""
+    directory = _path_bin(directory, None)
+    if os.name == "nt":
+        (directory / "uv.cmd").write_text(
+            f'@echo off\n>>"{events}" echo invoked\nexit /b 99\n', encoding="utf-8"
+        )
+    else:
+        stub = directory / "uv"
+        stub.write_text(
+            "#!/bin/sh\nprintf '%s\\n' invoked >> " + _quote(events, "bash") + "\nexit 99\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
+    return directory
+
+
+@pytest.mark.parametrize("shell", HOSTS)
+@pytest.mark.parametrize(
+    "mode",
+    ("admission", "preview", "native-dry-run", "native-remove", "foreign", "foreign-external"),
+)
+def test_codespaces_uv_only_never_provisions_before_admission(
+    tmp_path: Path,
+    shell: str,
+    mode: str,
+) -> None:
+    _host(shell)
+    payload, root, internal, durable = _case(
+        tmp_path, "agent-codespaces", ".venv", provisioned=False
+    )
+    if mode.startswith("foreign"):
+        marker = root / "deploy-manifest.json"
+        data = json.loads(marker.read_text())
+        data["source"]["plugin"] = "foreign-plugin"
+        marker.write_text(json.dumps(data), encoding="utf-8")
+    if shell != "bash":
+        # A real construction-resolver control proves the uv tripwire catches
+        # the provisioning fallback which uninstall must never reach.
+        control_events = tmp_path / "construction-uv-events"
+        control_path = _uv_only(tmp_path / "construction-path", control_events)
+        _run(
+            _selector_harness(tmp_path, payload, root, internal, shell, invoke=False),
+            root.parent,
+            [control_path],
+            tmp_path,
+        )
+        assert control_events.read_text().splitlines(), "real bootstrap did not hit uv tripwire"
+    events = tmp_path / "uninstall-uv-events"
+    paths = [_uv_only(tmp_path / "uninstall-path", events)]
+    if mode == "foreign-external":
+        paths.append(Path(sys._base_executable).parent)
+    if mode in ("admission", "preview"):
+        command = _selector_harness(tmp_path, payload, root, internal, shell, invoke=True)
+        if mode == "preview":
+            script = Path(command[-1])
+            text = script.read_text()
+            text = text.replace("-AdmissionOnly", "-Preview")
+            text = text.replace(
+                "uninstall_state_preserving_runtime 1 validate",
+                "uninstall_state_preserving_runtime 1",
+            )
+            script.write_text(text, encoding="utf-8")
+    else:
+        command = _install_command(tmp_path, payload, root, shell, dry_run=mode != "native-remove")
+    before = {
+        str(path.relative_to(root)): None if path.is_dir() else path.read_bytes()
+        for path in root.rglob("*")
+    }
+    result = _run(command, root.parent, paths, tmp_path)
+    assert result.returncode != 0, result.stdout + result.stderr
+    detail = result.stdout + result.stderr
+    if mode == "foreign-external":
+        assert any(word in detail.lower() for word in ("ownership", "foreign", "belongs")), detail
+    else:
+        assert "existing external Python" in detail
+    assert not events.exists(), "uninstall invoked uv before admission"
+    assert before == {
+        str(path.relative_to(root)): None if path.is_dir() else path.read_bytes()
+        for path in root.rglob("*")
+    }
     _retained(root, durable)
