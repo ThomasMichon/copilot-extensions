@@ -5,7 +5,7 @@ Back to [Linux role fleet](README.md) and the
 Complements the merged [first causal-record source](dispatch-spawn-causal-logging.md).
 
 **Status: plan reviewed in #9069; first pure controls merged in #9071;
-ordinary-volume storage amendment proposed below.**
+ordinary-volume storage amendment reviewed in #9101.**
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -167,7 +167,7 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 
 1. Land this source proposal through independent review and required CI before
    implementation. Preserve #8377, native capture and released/running gates.
-2. Review this storage amendment, then extend pure configuration/boundary
+2. Following the #9101 storage review, extend pure configuration/boundary
    controls with explicit monitored thresholds, fresh usage/free-space refusal
    and honest unavailable-measurement outcomes. Add synthetic positive and
    negative controls without starting Docker.
@@ -225,14 +225,17 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 
 The first [pure controls](../../../tools/reproducer-lab/README.md) parse the
 declaration and identify known unsafe or missing static Docker observations.
-They retain explicit unavailable backend, egress, custody and guest/runtime
+They retain explicit separate monitoring, egress, custody and guest/runtime
 requirements, never a lab-ready result. The bounded source merged in #9071;
-it still carries the earlier unimplemented capacity-backend requirement.
-That implementation must be revised after this amendment's review, not credited
-as monitored-volume support. Synthetic tests cannot close step 2's
-real boundary qualification or any persistence/fault gate.
+the current candidate replaces the superseded capacity-backend requirement
+with separate monitored-volume measurements following #9101.
+`reader.py` inspects exact physical selections and uses the existing finite
+process owner for a fixed non-root guest probe. `storage.py` refuses new work
+on missing/stale/failed measurements, thresholds, reserve or lifetime expiry.
+The candidate's synthetic controls do not close real boundary qualification,
+native capture or any persistence/fault gate.
 
-Review this storage amendment, then implement the finite host reader and
-ordinary-volume usage/free-space monitoring before a provisioning path.
+Review and merge that finite reader/monitoring source, then implement the
+remaining network/custody and guest/runtime prerequisites before a provisioning path.
 Keep persistent provisioning blocked until the exact resources, thresholds,
 case lifetime and actions receive separate approval.

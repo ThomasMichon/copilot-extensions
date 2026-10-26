@@ -797,11 +797,19 @@ test supervisor and selected Python/pytest environment. It invokes no Docker,
 service, network, dependency installation or resource lifecycle operation.
 Exact integer budget boundaries, forbidden/missing exposures, foreign or
 duplicate mounts, minimal environment and physical-identity fields are tested.
-Even a clean synthetic observation retains explicit unavailable capacity,
+Even a clean synthetic observation retains explicit unavailable measurement,
 egress, exclusive-custody and guest/runtime qualification requirements; this
-is not an admission result or persistence proof. Actual host readers, bounded
-storage backend, strict pre-effect support and separately authorized native
-experiments remain open. No unconditional promotion or platform matrix is added.
+is not an admission result or persistence proof.
+`tools/test_reproducer_lab_monitoring.py` adds storage-only threshold, reserve,
+cadence, lifetime, loss/resume and failed-refresh controls, mocked finite
+Docker-reader seams and local synthetic guest-traversal files. Run both selectors
+through the same bounded supervisor. The actual reader reuses `agent-procutil`
+for bounded caller-owned Docker clients; its guest probe has a separate deadline.
+The controls invoke no real Docker or service action and do not qualify
+persistence, egress, exclusive custody, native capture or strict pre-effect
+support. Ordinary-volume thresholds are monitored, never hard quotas. Those
+separately authorized native experiments remain open. No unconditional promotion
+or platform matrix is added.
 
 ## Wheel-input inspection
 
