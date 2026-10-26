@@ -94,6 +94,11 @@ Preserve the additive nested [`work_counts`](work-counts.md) result when
 adapting statistics. It distinguishes logical processing from measured primary
 row writes; unavailable provider measurements must not be rendered as zeros.
 
+Consumers planning strict current-ID validation can use the opt-in
+[prepared chunk-ID read path](chunk-id-index.md) within an already participating
+source store. Preparation has explicit row/segment budgets; it is not automatic
+legacy adoption or a substitute for existing embedding-coverage ownership.
+
 Hint capability belongs to the exact selected callable. A wrapper or partial
 does not inherit it just because the underlying function supports it. Advertise
 only versions the wrapper actually accepts, validates and forwards unchanged;

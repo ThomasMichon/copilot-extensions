@@ -236,7 +236,9 @@ class VectorTable:
         return arr
 
     @source_read
-    def get_vectors(self, chunk_ids: list[str], *, strict: bool = False) -> dict[str, np.ndarray]:
+    def get_vectors(
+        self, chunk_ids: list[str], *, strict: bool = False, bounded: bool = False,
+    ) -> dict[str, np.ndarray]:
         """Batch-read stored embeddings for *chunk_ids* present in this table.
 
         Returns ``{chunk_id: vector}`` for the ids that exist here; ids absent
@@ -245,21 +247,27 @@ class VectorTable:
         """
         if not chunk_ids:
             return {}
-        table = self._get_or_create_table()
-        id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-        try:
-            rows = (
-                table.search()
-                .where(f"chunk_id IN ({id_list})")
-                .select(["chunk_id", "vector"])
-                .limit(len(chunk_ids))
-                .to_list()
-            )
-        except Exception:
-            if strict:
-                raise
-            logger.warning("Vector batch read failed", exc_info=True)
-            return {}
+        strict = strict or bounded
+        if bounded:
+            from .chunk_id_index import indexed_chunk_rows
+
+            rows = indexed_chunk_rows(self, chunk_ids, columns=["chunk_id", "vector"])
+        else:
+            table = self._get_or_create_table()
+            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+            try:
+                rows = (
+                    table.search()
+                    .where(f"chunk_id IN ({id_list})")
+                    .select(["chunk_id", "vector"])
+                    .limit(len(chunk_ids))
+                    .to_list()
+                )
+            except Exception:
+                if strict:
+                    raise
+                logger.warning("Vector batch read failed", exc_info=True)
+                return {}
         out: dict[str, np.ndarray] = {}
         for r in rows:
             vec = r.get("vector")
