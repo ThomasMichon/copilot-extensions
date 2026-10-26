@@ -372,6 +372,19 @@ Build admission and source mapping both require the exact static
 before any candidate build or trusted attestation.
 Candidate-root modules that shadow the standard library, locked tooling or
 Python startup customization hooks are rejected as well.
+
+Containers has one registered exception for its package-owned runtime resources.
+The trusted helper generation retains the reviewed hook as data in
+`tools/registered_build_hooks/agent-containers.py`; static admission requires
+byte-identical candidate `setup.py` and canonical build-helper bytes. Its five
+runtime modules and runtime profile must exist in the candidate scripts, and any
+included copies must match. Wheel validation binds all six injected members to
+those canonical inputs without executing the hook. Missing, changed or linked
+inputs refuse admission; no other plugin gains a build-hook exception. Keeping
+this reference outside the plugin avoids changing the pinned helper generation's
+own plugin packaging merely to admit a newer candidate. Selecting this helper
+generation still requires an independently reviewed Main workflow pin update.
+
 This candidate-executing job has only `contents: read`, no OIDC or attestation
 permissions, and no persisted checkout credentials. Every Python plugin
 shares one toolchain venv; every bundle contains only its

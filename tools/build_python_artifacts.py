@@ -85,7 +85,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from artifact_source_build import parse_wheel_identity
+from artifact_source_build import PromotionArtifactError, parse_wheel_identity
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
@@ -765,6 +765,12 @@ def build_plugin_artifacts(
         )
 
     vendored_libs = resolve_vendored_libs(plugin_dir)
+    if plugin == "agent-containers":
+        from plugin_runtime_resources import build_inputs
+        try:
+            build_inputs(plugin_dir, root=REPO)
+        except PromotionArtifactError as exc:
+            raise ArtifactBuildError(f"invalid Containers runtime build inputs: {exc}") from exc
 
     return build_source_artifacts(
         identity={"plugin": plugin}, source_dir=plugin_dir, dependencies=vendored_libs,
