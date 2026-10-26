@@ -179,8 +179,11 @@ def test_update_entry_leaves_other_calls_unchanged(update_entry_case, native_bas
     ["--phase", "preflight", "--plugin", "agent-example"],
     ["--phase=runtimes", "--plugin=agent-example"],
     ["--plugin", "agent-example"],
+    ["--inventory", "--json"],
+    ["--target", "agent-example"],
+    ["--target=agent-example"],
 ])
-def test_selected_update_phase_refuses_implicit_posix_bootstrap(
+def test_selected_update_operation_refuses_implicit_posix_bootstrap(
     update_entry_case, monkeypatch, native_bash, front, ready, flags,
 ):
     tmp, home, resolver = update_entry_case

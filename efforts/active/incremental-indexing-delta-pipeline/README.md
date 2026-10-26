@@ -772,3 +772,23 @@ source-owner coordination rather than one large rewrite.
 - This qualifies serialization and retained-reader behavior only. Scheduled
   full-run admission, identity repair, consumer migration, release and rollout
   remain open; neither existing source-lock nor coverage authority is replaced.
+- PR #9142 merged as `f36bc9731b5ec6737df3226bda546325f249887a` after the
+  exact-head Copilot review's sole low documentation-impact finding was fixed
+  in the published description and refreshed required checks passed.
+  Reconciled the source worktree and re-read the Plan and Validation Plan.
+  Continue source-bound embedding backfill; this encoding slice does not close
+  the complete checkpoint/source-lock or consumer rollout gates.
+
+### 2026-10-26 - Current canonical input before backfill vector writes
+
+- Extend the claimed pair-reuse prerequisite with opt-in `bounded_input=True`.
+  Reuse prepared canonical reads and the existing canonical-record comparison,
+  checking raw text and every persisted chunk field under writer exclusion.
+  Normalized IDs and matching provenance alone never certify current input.
+- Native tests retain clean pre-effect refusals after intervening raw-input
+  changes, conservative post-effect risk and unchanged ordinary/provenance-only
+  defaults. The composed packet passes 90 tests, including prepared native
+  100/10,000/100,000-row point reads and actual selected vector writes.
+- Selected storage-owner type checks, changed Python lint and the 13-plugin
+  install-contract gate pass. Model/profile selection, shared pair-writer
+  factoring, source-bound cursor/backfill and whole vector-write I/O remain open.

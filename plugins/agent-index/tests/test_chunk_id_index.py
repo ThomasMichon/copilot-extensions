@@ -243,7 +243,7 @@ def test_actual_content_vector_point_reads_at_scale(
     content_version = content._get_or_create_table().version
     assert store.upsert_vectors(
         "a", selected, np.array([[42, 1], [43, 1]], dtype=np.float32),
-        bounded_provenance=True,
+        bounded_input=True,
     ) == 2
     assert content._get_or_create_table().version == content_version
     assert store._source_domain.receipt()["state"] == "clean"

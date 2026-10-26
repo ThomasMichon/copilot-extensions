@@ -87,6 +87,67 @@ paths, discovery schema and synchronous behavior.
 Maintenance attempts are debounced even when storage is unavailable; only an
 explicit forced retry bypasses that window.
 
+### Explicit strict pre-effect write
+
+`DiagnosticLog.write_event_strict(event)` is a separate synchronous API, not a
+change to `write_event`, logging handlers, legacy/retained spool callbacks or
+buffer delivery. `process_telemetry.append.strict_write_capability()` reports
+`linux-file-directory-fsync-v1` only when the executing implementation has the
+Linux primitives; other platforms return `None` and strict writes raise
+`NotImplementedError` before custody or file effects. Package version, a queue
+offer, callback count and later readback are not this capability or readiness.
+Windows append-only writes are unchanged; no `FlushFileBuffers` or Windows
+strict-durability support is claimed.
+
+The caller supplies an already provisioned persistent local directory, bounded
+privacy-filtered JSON fields with an explicit aware timestamp, and the same
+participating custody owner used for rotation/retention. Strict writes create
+no parent directory, perform no history maintenance, and refuse expired or
+unparseable timestamps rather than silently skipping them. Equality at the
+30-day cutoff and future timestamps retain the existing policy. The encoded
+record must be one complete UTF-8 JSONL object, preserve the caller's fields,
+contain no nonfinite JSON numbers, and fit **65,536 bytes including newline**.
+Field preservation compares exact primitive JSON types recursively, including
+booleans versus numbers and integers versus floats. Nonfinite literal tokens
+and overflow notation such as `1e400` refuse, as do duplicate object fields,
+unsupported input types and lossy custom encoders.
+Finite primitive input is validated and deeply snapshotted before any callback.
+The timestamp decoder and encoder each receive an independent deep copy;
+encoded fields are compared with the untouched snapshot, not an event that
+the encoder could modify. Mutations that alter serialized fields refuse
+before custody, including timestamp or nested correlation changes.
+This bounds the submitted write, not arbitrary caller encoder work or heap use;
+owners must bound inputs before encoding.
+
+Under that existing custody, rollover preserves an interrupted old tail, and
+the append owner opens the directory and no-follow plain single-link file,
+performs exactly one `O_APPEND` write, checks its complete byte count, syncs
+the file and then its containing directory, and closes both descriptors before
+return. This includes active-file creation/rollover name changes. Any failure,
+including custody, encoding, append, short write, sync or close, is reported as
+degraded and propagated. A failure can leave a partial or complete record;
+there is no suffix retry, rollback, automatic replay or grant to call a backend.
+
+Call the backend only after the direct method returns successfully. An async
+owner must await this synchronous operation off the event loop; a timeout or
+lost reply is unknown, never permission to continue or repeat accepted work.
+Successful return means these kernel sync calls completed, not a hardware
+power-loss guarantee, network-filesystem guarantee, mounted-volume proof,
+permanent authority ledger or completion of the following effect. Caller
+provisioning must durably establish ancestors and exclude nonparticipating
+writers, foreign mounts and concurrent namespace replacement. Existing
+diagnostic age retention still applies: authoritative task/operation state
+remains in its existing journal/database, not this log.
+
+Synthetic syscall and caller-ordering tests live in
+`tests/test_strict_diagnostics.py`. The separately selected
+`tests/native_strict_diagnostics.py` exercises actual Linux local-file append,
+sync, lock contention, interrupted-tail rollover and refusal fixtures. Its
+sync failures are injected, not real disk exhaustion. Actual shared-volume,
+crash/interrupted-driver, storage-failure and other-platform qualification remain
+separate integration work; this API does not automatically wire or admit a
+reproducer case. Neither file expands the required unit-only CI packet.
+
 Bridge's optional `BufferedDiagnosticLog` uses the **existing** `BufferedSink`
 writer, not another collector or service. Its producer copies bounded primitives
 without a blocking logging-handler lock, formatting, file access or history work.

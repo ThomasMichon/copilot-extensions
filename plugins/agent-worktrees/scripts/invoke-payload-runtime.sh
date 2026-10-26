@@ -492,7 +492,7 @@ if [[ -n "${AGENT_RT_PY:-}" ]]; then
     run_runtime "$@"
 fi
 if [[ "${_aw_update_diagnostic:-0}" == 1 ]]; then
-    printf '%s\n' '[agent-worktrees] selected update phase requires a provisioned runtime; use ordinary update to repair it.' >&2
+    printf '%s\n' '[agent-worktrees] selected update operation requires a provisioned runtime; use ordinary update to repair it.' >&2
     exit 127
 fi
 if [[ -n "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]]; then

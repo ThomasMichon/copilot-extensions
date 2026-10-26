@@ -274,7 +274,8 @@ def test_load_config_uses_registry_default_branch_when_inrepo_config_missing(
     assert cfg.default_repo.default_branch == "dev"
 
 
-def test_machines_yaml_path_uses_knowledge_repo_overlay(monkeypatch, tmp_path):
+@pytest.mark.parametrize("adopted", [True, False])
+def test_machines_yaml_path_uses_knowledge_repo_overlay(monkeypatch, tmp_path, adopted):
     launch_root = tmp_path / "launch"
     launch_root.mkdir()
     knowledge_root = tmp_path / "knowledge"
@@ -286,7 +287,12 @@ def test_machines_yaml_path_uses_knowledge_repo_overlay(monkeypatch, tmp_path):
     registry = tmp_path / ".agent-worktrees"
     registry.mkdir()
     (registry / "projects.yaml").write_text(yaml.safe_dump({
-        "projects": {"knowledge": {"anchor": str(knowledge_root)}},
+        "projects": {"knowledge": {"anchor": str(knowledge_root)}} if adopted else {},
+    }))
+    (registry / "repos.yaml").write_text(yaml.safe_dump({
+        "repos": {"knowledge": {
+            "class": "knowledge", harness_state._platform_key(): str(knowledge_root),
+        }},
     }))
     config_dir = tmp_path / "accepted-config"
     config_dir.mkdir()

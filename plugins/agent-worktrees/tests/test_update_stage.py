@@ -431,6 +431,23 @@ def test_fingerprint_ignores_pycache(tmp_path: Path):
     assert fp1 == fp2
 
 
+@pytest.mark.parametrize("source", ["src", "libs/example/src"])
+@pytest.mark.parametrize("metadata", ["example.egg-info", "example-1.0.dist-info"])
+def test_fingerprint_ignores_generated_package_metadata(tmp_path, source, metadata):
+    home = tmp_path / "home"
+    payload = _make_marketplace(home, {
+        "plugin.json": '{"version":"1"}',
+        f"{source}/example/__init__.py": "VALUE = 1\n",
+    })
+    before = us.fingerprint(payload)
+    generated = payload / source / metadata
+    generated.mkdir()
+    (generated / "PKG-INFO").write_text("generated during wheel construction\n")
+    assert us.fingerprint(payload) == before
+    (payload / source / "example" / "__init__.py").write_text("VALUE = 2\n")
+    assert us.fingerprint(payload) != before
+
+
 # ---------------------------------------------------------------------------
 # stage() end to end (copilot mocked)
 # ---------------------------------------------------------------------------

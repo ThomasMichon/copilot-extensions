@@ -85,18 +85,20 @@ class VectorTable:
     # -- write ---------------------------------------------------------------
 
     def upsert(
-        self, chunks: list[Chunk], vectors: np.ndarray, *, bounded_provenance: bool = False,
+        self, chunks: list[Chunk], vectors: np.ndarray, *,
+        bounded_provenance: bool = False, bounded_input: bool = False,
     ) -> int:
         """Insert or update vectors by chunk_id.
 
         Args:
-            chunks: Chunk objects (only chunk_id is used).
+            chunks: Chunk objects; selected bounded modes validate canonical fields.
             vectors: Embedding vectors, shape ``(n, dim)``, float32.
+            bounded_input: Also verify raw canonical input under writer exclusion.
 
         Returns:
             Number of rows written.
         """
-        if not bounded_provenance:
+        if not (bounded_provenance or bounded_input):
             return self._upsert(chunks, vectors)
         from .chunk_id_index import ChunkIdIndexPreparationRequired
         from .content_store import ContentStore
@@ -116,12 +118,14 @@ class VectorTable:
         with domain.read(self._db):
             projection_records(
                 self._db, self._content_table, chunks, bounded_content=content,
+                require_current_input=bounded_input,
             )
         refusal: ChunkIdIndexPreparationRequired | SourceLayoutError
         with domain.write(self._db):
             try:
                 canonical = projection_records(
                     self._db, self._content_table, chunks, bounded_content=content,
+                    require_current_input=bounded_input,
                 )
             except (ChunkIdIndexPreparationRequired, SourceLayoutError) as exc:
                 refusal = exc

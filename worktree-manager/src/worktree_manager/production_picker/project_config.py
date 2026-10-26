@@ -578,7 +578,9 @@ def machines_yaml_path(repo_dir: str | Path) -> Path:
                 return candidate
         knowledge_repo = str(_load_project_yaml(project).get("knowledge_repo") or "").strip()
         if knowledge_repo:
-            selection = harness_state.project_anchor_selection(knowledge_repo, reader=_read_yaml)
+            selection = harness_state.project_anchor_selection(
+                knowledge_repo, reader=_read_yaml, require_project=False,
+            )
             overlay_root = Path(selection.anchor) if selection.anchor else None
         else:
             overlay_root = None

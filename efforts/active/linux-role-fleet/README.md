@@ -488,13 +488,28 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
-- Prepared the fixed guest-state operation consumer using the existing shared
-  primitive and mount-table parser. The context checks state/lock posture before
-  acquisition, before consequential stages and on exit; failures retain partial
-  work and release only the operation descriptor. Synthetic controls and local
-  directory fixtures cover refusal and cleanup, not real shared-volume custody,
-  crash settlement or case admission. Continue independent source review, then
-  the existing-owner guest/case prerequisites. No resources were created.
+- Prepared explicit strict pre-effect records through the existing shared
+  diagnostic writer, append primitive and participating operation custody.
+  The direct Linux capability checks a complete bounded JSONL record and
+  file-plus-directory sync before successful return; failures propagate
+  without permitting a backend call. Ordinary logging, buffering, legacy
+  append and diagnostic retention stay unchanged. Synthetic syscall/caller
+  controls and an explicitly selected Linux local-file lane are source
+  evidence, not mounted-volume readiness or actual case/crash settlement.
+  Continue independent source review and the existing-owner case prerequisite
+  wiring; no image, container, volume or guest was provisioned.
+- #9134 merged fixed guest-state operation exclusion as
+  `8999e89ab263b270a7ca78063ea5d48af87cfb15` after passing current-head
+  Copilot review, resolved mount and documentation feedback, and all required
+  checks. The owner-authored clean-Comment rule supplied the review gate;
+  an author's inline reply was not counted as independent review.
+  The bounded selectors passed 512 controls, including 50 new synthetic/local
+  directory controls and two existing explicitly selected real local-Git cases.
+  Re-read this complete Plan and Validation Plan. Actual shared-volume custody,
+  crash settlement, complete guest/runtime/source, native output and strict
+  pre-effect qualification remain open. Continue the strict pre-effect writer
+  and guest/case prerequisites through their existing owners; ordinary logging
+  must retain its fail-open behavior. No resources were created.
 - #9128 merged explicit offline-mode declaration and finite loopback/no-route
   observations as `c08ddfc5cced923802128fe92bcec32e4afcb87e` after exact-head
   Copilot approval, no findings and all required checks. The bounded combined

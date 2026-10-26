@@ -99,6 +99,23 @@ write, explicit tail preparation is still required before bounded vector reads.
 A backfill caller must retain its source/account/profile binding and revalidate
 the full current embedding input before publishing vectors and progress.
 
+### Current canonical input before vector writes
+
+The additional `bounded_input=True` keyword on those same methods includes the
+prepared provenance checks and compares every persisted canonical chunk field
+except the physical write timestamp. The existing `content_record` owner defines
+this comparison, including raw text, metadata, type, path and line boundaries.
+It catches raw-text changes that retain the normalized chunk ID, both before
+writer entry and after an intervening content commit under writer exclusion.
+Known pre-effect mismatches preserve clean state; post-effect failures remain
+uncertain. Ordinary and provenance-only calls retain their previous behavior.
+
+This is current canonical input at vector publication, not model/profile
+selection authority or a resumable backfill cursor. It prepares no index,
+rewrites no content, and publishes no embedding receipt. Explicit vector-tail
+preparation, verified coverage and source/account/profile binding remain the
+backfill caller's obligations; whole vector-mutation I/O is not certified.
+
 ## Qualification and limits
 
 `tests/test_chunk_id_index.py` exercises actual content/vector stores at 100,

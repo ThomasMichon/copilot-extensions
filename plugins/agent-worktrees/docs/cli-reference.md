@@ -1373,6 +1373,11 @@ It does not enqueue work, acquire
 payloads, start services or request credentials. Missing running evidence is
 unknown, not the on-disk package version.
 
+Both inventory and targeted requests bypass suite bootstrap at the public
+project and payload entry points. They require an already provisioned engine;
+an absent or older unsupported engine reports an explicit error instead of
+installing a replacement before validating the request.
+
 `update --target <plugin> [--detach --json]` submits a durable operation for one
 already installed, eligible component. It refreshes the selected marketplace
 catalog, acquires only that plugin payload, and invokes only its owning runtime
