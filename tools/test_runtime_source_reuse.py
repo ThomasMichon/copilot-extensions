@@ -262,7 +262,7 @@ def test_corrupt_slot_never_degrades_to_source_availability(existing, monkeypatc
             raise
     context = retain(existing)
     if entry == "manager":
-        import runtime_source_build as builds
+        import runtime_source_manager as builds
 
         @contextmanager
         def authenticate(*args, **kwargs):

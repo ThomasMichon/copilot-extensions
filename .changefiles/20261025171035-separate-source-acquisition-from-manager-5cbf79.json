@@ -1,0 +1,9 @@
+{
+  "comment": "Separate source acquisition from Manager installation and package canonical runtime admission tooling",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

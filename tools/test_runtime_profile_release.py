@@ -12,7 +12,7 @@ import zipfile
 import pytest
 
 import promotion_python_artifacts as artifacts
-import publish_python_artifacts as publisher
+import artifact_attestation as publisher
 import runtime_profile_release as authority
 from runtime_profile import ProfileError, validate_profile
 from runtime_profile_cases import _record, _wheel
