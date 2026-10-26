@@ -594,12 +594,13 @@ def test_posix_logger_default_root_alias_uses_default_units_and_commands(tmp_pat
     log = tmp_path / "systemctl-calls"
     env["LOGGER_TEST_CALLS"] = str(log)
     env["LOGGER_TEST_ACTIVE"] = "0" if active else "3"
+    env["LOGGER_TEST_SERVICE"] = "agent-logger-sync.service"
     systemctl = fakebin / "systemctl"
     systemctl.write_text(
         '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOGGER_TEST_CALLS"\n'
         'case "$2" in\n'
         'disable|daemon-reload) exit 0;;\n'
-        'is-active) exit "$LOGGER_TEST_ACTIVE";;\n'
+        'is-active) if [ "${4:-}" = "$LOGGER_TEST_SERVICE" ]; then exit "$LOGGER_TEST_ACTIVE"; fi; exit 4;;\n'
         '*) exit 1;;\nesac\n',
     )
     systemctl.chmod(0o755)
@@ -767,12 +768,13 @@ def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(tmp_path,
     log = tmp_path / "systemctl-calls"
     env["LOGGER_TEST_CALLS"] = str(log)
     env["LOGGER_TEST_ACTIVE"] = "0" if active else "3"
+    env["LOGGER_TEST_SERVICE"] = legacy_name + ".service"
     systemctl = fakebin / "systemctl"
     systemctl.write_text(
         '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOGGER_TEST_CALLS"\n'
         'case "$2" in\n'
         'disable|daemon-reload) exit 0;;\n'
-        'is-active) exit "$LOGGER_TEST_ACTIVE";;\n'
+        'is-active) if [ "${4:-}" = "$LOGGER_TEST_SERVICE" ]; then exit "$LOGGER_TEST_ACTIVE"; fi; exit 4;;\n'
         '*) exit 1;;\nesac\n',
     )
     systemctl.chmod(0o755)
@@ -795,3 +797,69 @@ def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(tmp_path,
     assert timer.exists() is active
     assert foreign.read_text() == "Environment=AGENT_LOGGER_HOME=/another/installation\n"
     _assert_state(root, durable, removed=not active)
+
+
+def test_posix_logger_refuses_external_python_running_rooted_script(tmp_path):
+    if os.name == "nt" or not sys.platform.startswith("linux"):
+        pytest.skip("native Linux process inspection")
+    root, durable, env = _fixture(tmp_path, "owned")
+    script = root / "versions" / "1.0.0" / "sync-consumer.py"
+    script.parent.mkdir()
+    script.write_text("print('ready', flush=True)\ninput()\n")
+    consumer = subprocess.Popen(
+        [sys.executable, "-I", str(script)], env=env, stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert consumer.stdout.readline().strip() == "ready"
+        assert not Path(os.readlink(f"/proc/{consumer.pid}/exe")).is_relative_to(root)
+        assert b"agent_logger" not in Path(f"/proc/{consumer.pid}/cmdline").read_bytes()
+        result = subprocess.run(
+            [shutil.which("bash"), str(INSTALLERS / "install.sh"), "uninstall",
+             "--install-dir", str(root)],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        assert result.returncode != 0
+        assert "Active Logger runtime process" in result.stderr, result.stdout + result.stderr
+        assert consumer.poll() is None
+        assert script.is_file()
+        _assert_state(root, durable, removed=False)
+    finally:
+        consumer.communicate("\n", timeout=15)
+    assert consumer.returncode == 0
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_posix_logger_disables_loaded_timer_without_unit_files(tmp_path, preview):
+    bash = shutil.which("bash") if os.name != "nt" else None
+    if bash is None:
+        pytest.skip("native POSIX Bash required")
+    root, durable, env = _fixture(tmp_path, "owned")
+    suffix = hashlib.sha256(str(root).lower().encode()).hexdigest()[:12]
+    name = f"agent-logger-sync-{suffix}.timer"
+    disabled = tmp_path / "timer-disabled"
+    env.update(LOGGER_TEST_TIMER=name, LOGGER_TEST_DISABLED=str(disabled))
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    systemctl = fakebin / "systemctl"
+    systemctl.write_text(
+        '#!/bin/sh\ncase "$2" in\n'
+        'is-active) if [ "${4:-}" = "$LOGGER_TEST_TIMER" ] && '
+        '[ ! -f "$LOGGER_TEST_DISABLED" ]; then exit 0; fi; exit 3;;\n'
+        'disable) [ "$4" = "$LOGGER_TEST_TIMER" ] || exit 2; '
+        'printf disabled > "$LOGGER_TEST_DISABLED"; exit 0;;\n'
+        'daemon-reload) exit 0;;\n*) exit 1;;\nesac\n',
+    )
+    systemctl.chmod(0o755)
+    env["PATH"] = str(fakebin) + os.pathsep + env["PATH"]
+    assert not (root.parent / ".config" / "systemd" / "user").exists()
+    result = subprocess.run(
+        [bash, str(INSTALLERS / "install.sh"), "uninstall", "--install-dir", str(root),
+         *(["--dry-run"] if preview else [])],
+        capture_output=True, text=True, timeout=45, env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert disabled.exists() is not preview
+    if preview:
+        assert f"would disable + remove: {name.removesuffix('.timer')}.service / .timer" in result.stdout
+    _assert_state(root, durable, removed=not preview)

@@ -194,6 +194,12 @@ ConvertTo-Json -InputObject $rows -Compress
                 continue
             except PermissionError as error:
                 raise RuntimeError("Cannot inspect a current-user Logger runtime consumer") from error
+            image = runtime._pid_image_path(pid)
+            python = image is None or re.fullmatch(
+                r"(?:python|pythonw|pypy|pypy3)[0-9.]*", Path(image).name,
+            )
+            if python and prefix in os.fsdecode(command).casefold():
+                raise RuntimeError(f"Active Logger runtime process {pid}; uninstall refused")
             if b"agent_logger" in command:
                 raise RuntimeError(f"Unattributed Logger runtime process {pid}; uninstall refused")
 

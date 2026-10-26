@@ -1665,6 +1665,7 @@ case "${ACTION}" in
       echo "(dry run -- nothing will be changed)"
       while IFS= read -r unit; do
         if systemctl --user is-enabled "${unit}.timer" >/dev/null 2>&1 || \
+           systemctl --user is-active --quiet "${unit}.timer" >/dev/null 2>&1 || \
            [[ -f "${UNIT_DIR}/${unit}.timer" ]]; then
           echo "[dry-run] would disable + remove: ${unit}.service / .timer"
         fi
@@ -1679,8 +1680,10 @@ case "${ACTION}" in
       echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
       while IFS= read -r unit; do
-        if [[ -f "${UNIT_DIR}/${unit}.timer" || -f "${UNIT_DIR}/${unit}.service" ]]; then
-          if [[ -f "${UNIT_DIR}/${unit}.timer" ]]; then
+        timer_active=0
+        if systemctl --user is-active --quiet "${unit}.timer" >/dev/null 2>&1; then timer_active=1; fi
+        if [[ "$timer_active" == 1 || -f "${UNIT_DIR}/${unit}.timer" || -f "${UNIT_DIR}/${unit}.service" ]]; then
+          if [[ "$timer_active" == 1 || -f "${UNIT_DIR}/${unit}.timer" ]]; then
             systemctl --user disable --now "${unit}.timer" || exit 1
           fi
           service_state=0
