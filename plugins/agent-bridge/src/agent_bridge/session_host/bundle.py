@@ -50,7 +50,7 @@ _MAIN = "agent_bridge.session_host.launcher:main"
 _PROCUTIL_MODULES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_darwin_caller_owned.py",
     "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
-    "_daemon_instance_owner.py",
+    "_daemon_instance_owner.py", "_daemon_instance_clock.py",
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_windows_caller_owned.py",
     "daemon.py", "daemon_broker.py", "daemon_instances.py", "native_child.py",
     "owned_process.py", "startup.py", "streaming.py",

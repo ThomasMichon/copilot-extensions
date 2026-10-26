@@ -185,8 +185,19 @@ routing changes alone do not invalidate an otherwise required pair; new model
 routes backfill only their missing pairs. A named model whose weights or
 preprocessing change must advance `ModelProfile.revision`.
 
-Receipts are revoked before a potentially partial vector write and published
-only after the stored batch matches the returned embeddings. They survive
+The content-first pipeline delegates routing and vector publication to the
+shared `indexing.embedding_batch.embed_and_store_pairs` helper. Its direct
+stored-content path performs no canonical writes and returns actual vector
+rows upserted, not the content-first caller's logical processed-chunk total.
+The opt-in [prepared pair path](chunk-id-index.md#stored-content-pair-writer)
+checks current canonical input before engine readiness and under vector-writer
+exclusion; the caller still owns discovery and source/account/profile progress.
+
+Ordinary writes revoke receipts before a potentially partial vector write.
+Prepared pair writes retain old receipts through pre-effect refusal, then
+invalidate after the vector commit and before explicitly budgeted preparation.
+Old receipts still require actual input/vector matches before reuse.
+New receipts publish only after the stored batch matches the returned embeddings. They survive
 restart and unfinished stale cleanup, without publishing a completed file or
 source cursor early. Obsolete receipts are pruned after that file's successful
 reconciliation; removing a path removes its receipts transactionally. Old

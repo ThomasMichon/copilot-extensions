@@ -53,6 +53,8 @@ def test_limit_progress_past_production_and_eof_wrap(inventory, monkeypatch):
         row = store._read(path)
         row.update(purpose="unattended-test", protected="0", pid="4321", birth="fixture",
                    deadline="1", hard_deadline="2", ttl="1")
+        if sys.platform.startswith("linux"):
+            row.update(store.lease_clock.fields(1, 2, 0))
         store._write(path, row)
     monkeypatch.setattr(store, "identity_state", lambda *_: "dead")
     assert store.reconcile(root, 128, 5) == []

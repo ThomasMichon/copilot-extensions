@@ -157,7 +157,7 @@ def validate_static_build(source_dir: Path, *, trusted_setup: bytes | None = Non
     native = native_setup(source_dir, data)
     if native is not None:
         if trusted_setup is not None and trusted_setup != native:
-            raise PromotionArtifactError("conflicting trusted native build ownership")
+            raise PromotionArtifactError("conflicting trusted process owner setup")
         trusted_setup = native
     for name in ("setup.py", "setup.cfg"):
         if (source_dir / name).exists() or (source_dir / name).is_symlink():

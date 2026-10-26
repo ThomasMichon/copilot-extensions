@@ -40,8 +40,7 @@ ENV PIP_INDEX_URL=${PYTHON_INDEX_URL} \
     UV_DEFAULT_INDEX=${PYTHON_INDEX_URL}
 
 RUN pip install --no-cache-dir uv
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN ! command -v cc && ! command -v gcc
 
 WORKDIR /src
 # Only the sources agent-dispatch's own pyproject.toml [tool.uv.sources]

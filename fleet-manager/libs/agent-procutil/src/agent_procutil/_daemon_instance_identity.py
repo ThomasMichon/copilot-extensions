@@ -208,13 +208,13 @@ def stop_identity(pid: int, birth: str, timeout: float = 5, *, graceful: bool = 
         finally:
             process.close()
     if sys.platform.startswith("linux"):
-        from ._linux_pidfd import open_pidfd
+        from ._linux_pidfd import open_pidfd, send_pidfd_signal
 
         descriptor = open_pidfd(pid)
         try:
             if birth_identity(pid) != birth:
                 return False
-            signal.pidfd_send_signal(descriptor, signal.SIGTERM if graceful else signal.SIGKILL)
+            send_pidfd_signal(descriptor, signal.SIGTERM if graceful else signal.SIGKILL)
             observer = select.poll()
             observer.register(descriptor, select.POLLIN)
             return bool(observer.poll(math_milliseconds(timeout)))

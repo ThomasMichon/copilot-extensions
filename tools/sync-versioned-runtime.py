@@ -42,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer
 import installer_engine_ref as ier
+from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -56,7 +57,7 @@ COMPONENT_NAMES = (
 INSTALLER_INSTANCE_NAMES = (
     "installer-instance-reconcile.ps1", "installer-instance-reconcile.sh",
     "installer_instance_reconcile.py",
-    "daemon_instances.ps1", "daemon_instances.sh", "daemon_instance_native.c",
+    "daemon_instances.ps1", "daemon_instances.sh",
 )
 DEPENDENCY_POLICY = REPO / "libs" / "installer-engine" / "installer_dependency_policy.py"
 DEPENDENCY_CONFIG = DEPENDENCY_POLICY.with_name("installer_dependency_config.py")
@@ -131,11 +132,7 @@ def main() -> int:
     )
     ap.add_argument(
         "--only-installer-instances", action="store_true",
-        help="synchronize only the disposable-instance installer adapters and native bindings",
-    )
-    ap.add_argument(
-        "--native-wheel", type=Path,
-        help="explicitly assemble a source-verified prebuilt procutil native asset; never builds at startup",
+        help="synchronize only the disposable-instance installer adapters and source archive",
     )
     args = ap.parse_args()
 
@@ -191,7 +188,6 @@ def main() -> int:
             pairs.append((resolver_bytes[name], plugin / "scripts" / name))
 
     instance_pairs: list[tuple[bytes, Path]] = []
-    executable_paths: set[Path] = set()
     for name, source in installer_instance_sources(REPO).items():
         if uer._find_symlinked_ancestor(source, REPO.resolve()) is not None or not source.is_file():
             print(f"canonical installer instance helper missing or linked: {name}", file=sys.stderr)
@@ -203,20 +199,16 @@ def main() -> int:
             wsl / "wsl-keepalive.ps1"
         ).is_file():
             instance_pairs.append((data, wsl / name))
-    if args.native_wheel is not None:
-        from native_daemon_artifacts import wheel_assets
-
-        source = REPO / "libs" / "agent-procutil"
-        try:
-            assets = wheel_assets(args.native_wheel, source_dir=source)
-        except (OSError, ValueError, RuntimeError) as error:
-            print(f"native artifact assembly refused: {error}", file=sys.stderr)
-            return 1
-        for relative, data in assets.items():
-            for consumer in consumers:
-                destination = consumer / "scripts" / relative
-                instance_pairs.append((data, destination))
-                executable_paths.add(destination)
+    try:
+        archive = lifecycle_archive(REPO)
+    except (OSError, ValueError) as error:
+        print(f"lifecycle source archive refused: {error}", file=sys.stderr)
+        return 1
+    instance_pairs.extend((archive, consumer / "scripts" / ARCHIVE_NAME) for consumer in consumers)
+    archive_paths = {consumer / "scripts" / ARCHIVE_NAME for consumer in consumers}
+    package_archive = REPO / "libs" / "agent-procutil" / "src" / "agent_procutil" / ARCHIVE_NAME
+    instance_pairs.append((archive, package_archive))
+    archive_paths.add(package_archive)
     pairs = instance_pairs if args.only_installer_instances else [*pairs, *instance_pairs]
 
     for _want_bytes, dest in pairs:
@@ -230,8 +222,8 @@ def main() -> int:
     for want_bytes, dest in pairs:
         current = dest.read_bytes() if dest.exists() else None
         mode_matches = (
-            dest not in executable_paths or sys.platform == "win32"
-            or bool(dest.stat().st_mode & 0o111)
+            dest not in archive_paths or sys.platform == "win32"
+            or not dest.stat().st_mode & 0o022
         ) if current is not None else False
         if current is not None and _sha(current) == _sha(want_bytes) and mode_matches:
             continue
@@ -241,8 +233,8 @@ def main() -> int:
             continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(want_bytes)
-        if dest in executable_paths:
-            dest.chmod(0o755)
+        if dest in archive_paths:
+            dest.chmod(0o644)
         written.append(rel)
 
     n_plugins = len(plugins)

@@ -145,17 +145,18 @@
   },
   "native_helpers": [
     {
-      "source": "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c",
+      "source": "libs/agent-procutil/src/agent_procutil/_daemon_instance_cli.py",
       "entrypoint": "main",
       "owner": "agent_procutil.daemon_instances",
       "protocol": 1,
       "commands": {
         "supervise": "supervised-service-child",
         "cleanup": "finite-worker",
-        "check": "finite-worker"
+        "check": "finite-worker",
+        "lease-fields": "finite-worker"
       },
-      "resource": "agent_procutil/native/linux-<machine>/daemon-instance",
-      "machines": ["x86_64", "aarch64"]
+      "resource": "daemon_instance_runtime.pyz",
+      "platforms": ["linux"]
     }
   ],
   "finite_helpers": {
@@ -163,7 +164,7 @@
       "classification": "finite-worker",
       "commands": {
         "test_session_host_capsule_contains_instance_closure_without_site_packages": 1,
-        "test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc": 5
+        "test_real_pure_wheel_and_source_archive_need_only_selected_python": 5
       }
     },
     "t:test_cleanroom_daemon_fixtures.py": {

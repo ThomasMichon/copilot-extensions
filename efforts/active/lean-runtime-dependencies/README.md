@@ -179,9 +179,9 @@ sequencing. It does not authorize installed changes.
 
 ### Phase 7 - Compiler-free first-party execution
 
-- [ ] Review the [compiler-free execution amendment](compiler-free-execution.md)
+- [x] Review the [compiler-free execution amendment](compiler-free-execution.md)
   and `plugin-services/compiler-free-first-party-execution` intent before
-  implementation.
+  implementation (#9120).
 - [ ] Complete the shared daemon replacement through the reactivated
   [leased-daemon instance owner](../leased-daemon-instances/README.md), preserving
   its existing registry, lifecycle protocol and safety guarantees.
@@ -198,6 +198,11 @@ sequencing. It does not authorize installed changes.
 - [ ] Reconcile source-managed maintenance and native adopter gates from
   actual evidence. A source merge does not authorize rollout or close their
   independent acceptance.
+
+Current candidate: the leased-daemon owner's
+[Linux implementation journal](../leased-daemon-instances/journal/2026/10.26%20compiler-free-amendment.md#linux-implementation-candidate)
+records compiler-absent construction and lifecycle qualification. Source review
+and the Windows bootstrap/embedded-code replacement remain open.
 
 ## Validation Plan
 
@@ -237,6 +242,12 @@ sequencing. It does not authorize installed changes.
 Approved and merged in #6235. Implementation proceeds in reviewed slices.
 Shared reuse is a design investigation; neither one global ZDD process nor one
 shared mutable venv is presumed acceptable.
+
+The compiler-free Phase 7 amendment merged in #9120 after current-head approval
+with no findings and successful required CI. Its next source slice replaces
+shared compiled instance custody with Python while preserving the complete
+bootstrap and safety gates. This closes only review of the amendment, not its
+implementation, qualification, release or adoption.
 
 ### Current execution boundary
 

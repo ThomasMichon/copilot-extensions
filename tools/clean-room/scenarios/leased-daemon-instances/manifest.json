@@ -16,8 +16,7 @@
   "validates": "attributed-daemon-instances",
   "config": {
     "CR_DAEMON_SOURCE_ROOT": "Candidate source mounted read-only; defaults to CR_HARNESS_MOUNT or /harness.",
-    "CR_DAEMON_NATIVE_HELPER_ROOT": "Prebuilt helper bundle containing daemon_instances.sh and native/linux-ARCH/daemon-instance.",
-    "CR_DAEMON_SOURCE_BUILD": "Set to 1 only to select explicit native source construction in a build-toolchain image; never a daemon-startup fallback."
+    "CR_DAEMON_HELPER_ROOT": "Source-only helper bundle containing daemon_instances.sh and daemon_instance_runtime.pyz; defaults to the candidate update-driver scripts."
   },
   "expected_artifacts": ["cr-report.json", "cr-logs/daemon-instance-probe.log"],
   "stages": [

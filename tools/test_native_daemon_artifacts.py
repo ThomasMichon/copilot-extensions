@@ -1,4 +1,4 @@
-"""Native artifact closure stays explicit, source-bound, and compiler-free at runtime."""
+"""Process-owner construction and source closure remain compiler-free."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import ast
 import io
 import os
 from pathlib import Path
-import platform
 import shutil
 import stat
 import subprocess
@@ -33,8 +32,7 @@ PREFIX = "agent_procutil-1.0.dist-info/"
 def project(tmp_path):
     target = tmp_path / "procutil"
     (target / native.PACKAGE).mkdir(parents=True)
-    for relative in (Path("setup.py"), native.PACKAGE / native.BUILD, native.PACKAGE / native.SOURCE):
-        shutil.copyfile(PROCUTIL / relative, target / relative)
+    shutil.copyfile(PROCUTIL / "setup.py", target / "setup.py")
     (target / "pyproject.toml").write_text(
         '[build-system]\nrequires=["setuptools>=83"]\nbuild-backend="setuptools.build_meta"\n'
         '[project]\nname="agent-procutil"\nversion="1.0"\n'
@@ -50,10 +48,13 @@ def _elf():
     return bytes(value)
 
 
-def _bundle(data=None, *, mode=0o100755, member=MEMBER):
+def _bundle(data=None, *, mode=0o100755, member=MEMBER, platform="any", pure=True):
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
-        archive.writestr(PREFIX + "WHEEL", "Root-Is-Purelib: false\nTag: py3-none-linux_x86_64\n")
+        archive.writestr(
+            PREFIX + "WHEEL",
+            f"Root-Is-Purelib: {str(pure).lower()}\nTag: py3-none-{platform}\n",
+        )
         if data is not None:
             info = zipfile.ZipInfo(member)
             info.external_attr = mode << 16
@@ -75,16 +76,14 @@ def test_foreign_project_cannot_borrow_native_setup_authority(project):
         validate_static_build(project)
 
 
-def test_native_source_cannot_downgrade_missing_hook_to_legacy_static_package(project):
+def test_static_procutil_requires_no_executable_setup(project):
     (project / "setup.py").unlink()
-    with pytest.raises(PromotionArtifactError, match="ownership is incomplete"):
-        validate_static_build(project)
+    assert validate_static_build(project)["project"]["name"] == "agent-procutil"
 
 
 @pytest.mark.parametrize("fault", ("missing", "wrong-arch", "non-executable", "directory-kind", "forged"))
 def test_native_assets_refuse_missing_foreign_or_self_asserted_bytes(project, monkeypatch, fault):
     expected = _elf()
-    monkeypatch.setattr(native, "_compile_expected", lambda *args: expected)
     actual = expected
     if fault == "wrong-arch":
         actual = expected[:18] + (183).to_bytes(2, "little") + expected[20:]
@@ -93,19 +92,41 @@ def test_native_assets_refuse_missing_foreign_or_self_asserted_bytes(project, mo
     mode = 0o40755 if fault == "directory-kind" else 0o100644 if fault == "non-executable" else 0o100755
     with _bundle(
         None if fault == "missing" else actual,
-        mode=mode,
+        mode=mode, platform="linux_x86_64", pure=False,
     ) as bundle, pytest.raises(PromotionArtifactError):
         native.generated_members(
             bundle, source_dir=project, data=validate_static_build(project), prefix=PREFIX,
         )
 
 
-def test_native_asset_matches_independent_explicit_build(project, monkeypatch):
-    monkeypatch.setattr(native, "_compile_expected", lambda *args: _elf())
-    with _bundle(_elf()) as bundle:
+def test_pure_source_wheel_has_no_native_generated_members(project, monkeypatch):
+    def refuse(*args, **kwargs):
+        pytest.fail("pure source verification cannot execute a compiler")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    with _bundle() as bundle:
         assert native.generated_members(
             bundle, source_dir=project, data=validate_static_build(project), prefix=PREFIX,
-        ) == {MEMBER: _elf()}
+        ) == {}
+    assert not hasattr(native, "_compile_expected")
+
+
+def test_process_owner_has_no_native_source_or_executable_build_hook():
+    package = PROCUTIL / "src" / "agent_procutil"
+    assert not (package / "_build_native.py").exists()
+    assert not any(package.glob("*.c"))
+    for pattern in (
+        "plugins/*/scripts/daemon_instance_native.c",
+        "libs/*/scripts/daemon_instance_native.c",
+        "worktree-manager/scripts/daemon_instance_native.c",
+    ):
+        assert not any(ROOT.glob(pattern))
+    tree = ast.parse((PROCUTIL / "setup.py").read_text())
+    assert all(isinstance(node, (ast.Expr, ast.ImportFrom)) for node in tree.body)
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    assert len(calls) == 1
+    assert isinstance(calls[0].func, ast.Name) and calls[0].func.id == "setup"
+    assert not calls[0].args and not calls[0].keywords
 
 
 @pytest.mark.parametrize("module_path", (
@@ -240,6 +261,9 @@ def test_gateway_pinned_context_and_docker_allowlist_include_exact_procutil_clos
     source = _gateway_source()
     package = PROCUTIL / "src" / "agent_procutil"
     assert source.PROCUTIL_MODULES == {path.stem for path in package.glob("*.py")}
+    assert source.PROCUTIL_RESOURCES == set(
+        validate_static_build(PROCUTIL)["tool"]["setuptools"]["package-data"]["agent_procutil"]
+    )
     recipe_root = ROOT / "fleet-manager" / "containers" / "gateway"
     patterns = (recipe_root / "Dockerfile.dockerignore").read_text().splitlines()
 
@@ -265,7 +289,9 @@ def test_gateway_pinned_context_and_docker_allowlist_include_exact_procutil_clos
     assert "COPY libs/agent-procutil/src/agent_procutil/ " in recipe
     assert "--out-dir /wheels ./libs/agent-procutil" in recipe
     assert '"${wheel}[service-gateway]" /wheels/agent_procutil-*.whl' in recipe
-    assert recipe.index("apt-get install") < recipe.index("FROM python:3.13-slim\nARG SOURCE_COMMIT")
+    assert "gcc libc6-dev" not in recipe
+    assert "! command -v cc && ! command -v gcc" in recipe
+    assert "from agent_procutil._daemon_instance_linux import check; check()" in recipe
 
 
 @pytest.mark.parametrize("name,code", (
@@ -291,7 +317,8 @@ def test_dispatch_source_image_builds_local_procutil_wheel_only_in_builder():
     recipe = (ROOT / "services" / "dispatch" / "Dockerfile").read_text().replace("\\\n", " ")
     builder, runtime = recipe.split("\nFROM python:3.12-slim\n", 1)
     assert "COPY libs/agent-procutil libs/agent-procutil" in builder
-    assert "apt-get install -y --no-install-recommends gcc libc6-dev" in builder
+    assert "gcc libc6-dev" not in builder
+    assert "! command -v cc && ! command -v gcc" in builder
     assert "--out-dir /wheels /src/libs/agent-procutil" in builder
     assert "/wheels/agent_procutil-*.whl /src/plugins/agent-dispatch" in builder
     assert "gcc" not in runtime and "libc6-dev" not in runtime
@@ -299,12 +326,12 @@ def test_dispatch_source_image_builds_local_procutil_wheel_only_in_builder():
 
 
 @pytest.mark.skipif(
-    not sys.platform.startswith("linux") or platform.machine() not in native.MACHINES
+    not sys.platform.startswith("linux")
     or (hasattr(os, "getuid") and os.getuid() == 0)
     or os.environ.get("PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE") != "1",
-    reason="requires the explicit non-root supported-Linux artifact construction lane",
+    reason="requires the explicit non-root Linux artifact construction lane",
 )
-def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp_path, monkeypatch):
+def test_real_pure_wheel_and_source_archive_need_only_selected_python(tmp_path, monkeypatch):
     import build_python_artifacts as builder
     from build_toolchain_lock import ToolchainLock
     from promotion_python_artifacts import validate_wheel
@@ -321,8 +348,7 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
         PROCUTIL, source,
         ignore=shutil.ignore_patterns(".test-runs", ".pytest_cache", "__pycache__", "build", "dist", "*.egg-info", "native"),
     )
-    foreign_arch = "aarch64" if platform.machine() == "x86_64" else "x86_64"
-    stale = source / native.PACKAGE / "native" / f"linux-{foreign_arch}" / "daemon-instance"
+    stale = source / native.PACKAGE / "native" / "linux-unused" / "daemon-instance"
     stale.parent.mkdir(parents=True)
     stale.write_bytes(b"stale foreign-architecture source output must not be adopted\n")
     for library in ("versioned-runtime", "installer-engine"):
@@ -339,6 +365,9 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
         name: importlib.metadata.version(name) for name in ("setuptools", "wheel", "packaging")
     })
     wheel = builder.build_wheel(source, tmp_path / "wheels", toolchain=toolchain)
+    assert wheel.name.endswith("-py3-none-any.whl")
+    with zipfile.ZipFile(wheel) as archive:
+        assert not any(name.startswith("agent_procutil/native/") for name in archive.namelist())
     assert stale.read_bytes() == b"stale foreign-architecture source output must not be adopted\n"
     with wheel.open("rb") as stream:
         validate_wheel(
@@ -357,12 +386,11 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
     }.items():
         monkeypatch.setattr(sync, key, value)
     monkeypatch.setattr(sys, "argv", [
-        str(spec.origin), "--only-installer-instances", "--native-wheel", str(wheel),
+        str(spec.origin), "--only-installer-instances",
     ])
     assert sync.main() == 0
-    member = f"native/linux-{platform.machine()}/daemon-instance"
-    binary = scripts / member
-    assert binary.is_file() and os.access(binary, os.X_OK)
+    from daemon_lifecycle_assets import ARCHIVE_NAME
+    assert (scripts / ARCHIVE_NAME).is_file()
     uv = shutil.which("uv")
     assert uv
     venv = tmp_path / "installed"
@@ -370,12 +398,20 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
     python = venv / "bin" / "python"
     subprocess.run(
         [uv, "pip", "install", "--python", str(python), "--no-deps", "--no-index", str(wheel)],
-        check=True,
+        check=True, umask=0o077,
     )
+    ambient = tmp_path / "ambient-imports"
+    ambient.mkdir()
+    (ambient / "agent_procutil.py").write_text(
+        "raise RuntimeError('ambient imports cannot qualify the installed wheel')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(ambient))
     installed = subprocess.check_output(
-        [str(python), "-c", "import pathlib,agent_procutil;print(pathlib.Path(agent_procutil.__file__).parent)"],
+        [str(python), "-I", "-c", "import pathlib,agent_procutil;print(pathlib.Path(agent_procutil.__file__).parent)"],
         text=True,
     ).strip()
+    assert Path(installed).resolve().is_relative_to(venv.resolve())
     runtime_bin = tmp_path / "runtime-bin"
     runtime_bin.mkdir()
     for name in ("bash", "dirname", "uname", "readlink", "stat", "id"):
@@ -386,12 +422,13 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
         result = subprocess.run(
             [str(runtime_bin / "bash"), "--noprofile", "--norc", "-c",
              '. "$1"; ! command -v cc && ! command -v python && ! command -v python3 || exit 81; '
-             'native="$(_di_native)" || exit; "$native" check && printf native-ok',
+             '_di_lifecycle check && printf compiler-free-ok',
              "runtime-proof", str(binding)],
-            env={"PATH": str(runtime_bin)}, text=True, capture_output=True, timeout=15,
+            env={"PATH": str(runtime_bin), "COPILOT_EXTENSIONS_DAEMON_PYTHON": str(python)},
+            text=True, capture_output=True, timeout=15,
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout == "native-ok"
+        assert result.stdout == "compiler-free-ok"
     denied = tmp_path / "unreadable-registry"
     denied.mkdir()
     denied_proof = denied / ("a" * 32 + ".instance")
@@ -415,17 +452,25 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
     selected = [
         tests / "test_daemon_instances_linux.py",
         tests / "test_daemon_reconcile_cursor.py",
+        tests / "test_daemon_instance_clock.py",
     ]
     for path in selected:
         shutil.copyfile(PROCUTIL / "tests" / path.name, path)
+    shutil.copyfile(PROCUTIL / "tests" / "conftest.py", tests / "conftest.py")
     qualified = subprocess.run(
-        [sys.executable, "-I", "-c",
-         "import sys;sys.path.insert(0,sys.argv[1]);import pytest;raise SystemExit(pytest.main(sys.argv[2:]))",
-         str(Path(installed).parent), *(str(path) for path in selected),
+        [str(python), "-I", "-c",
+         "import sys;from pathlib import Path;"
+         "sys.path.append(sys.argv.pop(1));expected=Path(sys.argv.pop(1)).resolve();"
+         "import agent_procutil;"
+         "assert Path(agent_procutil.__file__).resolve().parent==expected;"
+         "import pytest;"
+         "raise SystemExit(pytest.main(sys.argv[1:]))",
+         str(Path(pytest.__file__).parent.parent), installed, *(str(path) for path in selected),
          "--basetemp", str(tmp_path / "lifecycle-roots"), "-q"],
         env={
-            **os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
-            "PROCUTIL_REQUIRE_NATIVE": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+            **{key: value for key, value in os.environ.items() if not key.startswith("PYTHON")},
+            "COPILOT_EXTENSIONS_TEST_CONTAINED": "1",
+            "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1", "PYTHONDONTWRITEBYTECODE": "1",
         },
         text=True, capture_output=True, timeout=60,
     )
@@ -434,8 +479,7 @@ def test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc(tmp
     export = os.environ.get("NATIVE_ARTIFACT_PROBE_OUT")
     if export:
         output = Path(export)
-        (output / member).parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(binary, output / member)
-        (output / member).chmod(0o755)
+        output.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(scripts / ARCHIVE_NAME, output / ARCHIVE_NAME)
         shutil.copyfile(scripts / "daemon_instances.sh", output / "daemon_instances.sh")
         shutil.copyfile(wheel, output / wheel.name)

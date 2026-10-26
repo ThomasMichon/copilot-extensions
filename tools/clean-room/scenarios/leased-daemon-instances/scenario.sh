@@ -24,15 +24,18 @@ if [ -e "$WORK_ROOT" ]; then
     cr_finalize
     exit 1
 fi
+if [ "${CR_DAEMON_SOURCE_BUILD:-0}" != 0 ] || [ -n "${CR_DAEMON_NATIVE_HELPER_ROOT:-}" ]; then
+    jam "repo-config" "compiled helper input modes are retired" \
+        "use the compiler-free source archive or CR_DAEMON_HELPER_ROOT"
+    cr_finalize
+    exit 1
+fi
 pass "fresh workspace; candidate source is available without host runtime state"
 
 phase 1 "real instance lifetime and installer cleanup"
 PROBE_ARGS=()
-if [ -n "${CR_DAEMON_NATIVE_HELPER_ROOT:-}" ]; then
-    PROBE_ARGS+=(--native-helper-root "$CR_DAEMON_NATIVE_HELPER_ROOT")
-fi
-if [ "${CR_DAEMON_SOURCE_BUILD:-0}" = "1" ]; then
-    PROBE_ARGS+=(--build-native-helper)
+if [ -n "${CR_DAEMON_HELPER_ROOT:-}" ]; then
+    PROBE_ARGS+=(--helper-root "$CR_DAEMON_HELPER_ROOT")
 fi
 capture "daemon-instance-probe" -- python3 "$_SELF_DIR/fixtures/probe.py" \
     --source "$SOURCE_ROOT" --work-root "$WORK_ROOT" "${PROBE_ARGS[@]}"

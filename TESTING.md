@@ -700,16 +700,20 @@ warm-worker birth identity retain the cold path and skip this packet.
 
 `tools/clean-room/scenarios/leased-daemon-instances` is a credential-free Tier-P
 source/native consumer proof. Use a fresh disposable Linux container, a
-read-only candidate and either a prebuilt helper bundle or an explicitly
-selected source-build toolchain. Its README defines the inputs and actual
-process/filesystem assertions; no normal startup invokes a compiler.
+read-only candidate and its generated Python source archive, with compilers
+absent. Its README defines the source publication and actual process/filesystem
+assertions; neither construction nor normal startup compiles a native helper.
 
 Run `python -m pytest tools/test_native_daemon_artifacts.py` for the artifact
 contract controls. On a supported, prepared Linux build host, explicitly select
 `PROCUTIL_NATIVE_ARTIFACT_ACCEPTANCE=1` and
-`test_real_built_wheel_and_source_fanout_find_native_with_no_python_or_cc`
-for real construction, installed lifecycle and compiler/Python-free execution.
-That native lane remains opt-in rather than enlarging required unit-only CI.
+`test_real_pure_wheel_and_source_archive_need_only_selected_python`
+for pure-wheel construction/source binding and lifecycle qualification through
+the actual installed interpreter. Its shell controls have no compiler or Python
+command on PATH and explicitly select the supported interpreter. Installed tests
+retain the canonical per-test inventory fixture; outer-tool imports are not
+substitutes for the installed interpreter. This lane remains opt-in rather than
+enlarging required unit-only CI.
 
 `python -m pytest tools/test_cleanroom_daemon_fixtures.py` checks finite
 Gateway-fixture custody and environment restoration on success/failure, plus

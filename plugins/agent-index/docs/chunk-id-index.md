@@ -116,6 +116,39 @@ rewrites no content, and publishes no embedding receipt. Explicit vector-tail
 preparation, verified coverage and source/account/profile binding remain the
 backfill caller's obligations; whole vector-mutation I/O is not certified.
 
+### Stored-content pair writer
+
+`indexing.embedding_batch.embed_and_store_pairs` is the same routed pair
+planner/writer used by the content-first pipeline, without canonical content
+upserts. It coalesces exact duplicate inputs, rejects conflicting canonical
+IDs, preserves unclaimed-type routing and counts actual vector rows written.
+An empty/reused plan does not call engine readiness or embedding.
+
+Its opt-in `bounded=True` requires explicit model profiles, an existing
+`EmbeddingCoverage` and an `after_store(vector_table, selected_row_count)`
+callback. The caller supplies already selected current chunks and prepared
+canonical indices. Current raw canonical input is checked before missing-pair
+selection/readiness, even for cached pairs, and under existing vector-writer
+exclusion immediately before vector publication.
+
+The callback runs only after a vector commit; it must perform the caller's
+explicitly budgeted vector-index preparation. The row count is the selected
+batch size, **not evidence of the actual unindexed physical-row budget**:
+pre-existing tails and intervening writes can require more, and preparation
+must refuse when the authorized budget is insufficient. The helper never
+prepares an index itself. Verified bounded coverage publication follows the
+callback; any failure propagates without a success result or progress update.
+Old receipts are not invalidated before embedding or a known pre-effect vector
+refusal. After a vector commit they are invalidated before the callback; partial
+vector failures cannot make stale receipts reusable without actual input and
+vector-hash verification.
+
+This helper is not an operational backfill. Its caller still owns a pinned
+source/account/config/profile binding, resumable snapshot discovery, retention,
+source exclusion and coverage-before-progress ordering. Whole vector-mutation
+I/O remains unqualified. Without the keyword, the content-first pipeline retains
+its existing writes, receipt invalidation, batching and compatibility defaults.
+
 ## Qualification and limits
 
 `tests/test_chunk_id_index.py` exercises actual content/vector stores at 100,

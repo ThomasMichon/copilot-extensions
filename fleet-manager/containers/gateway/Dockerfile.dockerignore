@@ -34,10 +34,12 @@ libs/agent-procutil/src/**
 libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/__init__.py
 !libs/agent-procutil/src/agent_procutil/_async.py
-!libs/agent-procutil/src/agent_procutil/_build_native.py
 !libs/agent-procutil/src/agent_procutil/_caller_owned.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_child.py
+!libs/agent-procutil/src/agent_procutil/_daemon_instance_cli.py
+!libs/agent-procutil/src/agent_procutil/_daemon_instance_clock.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_identity.py
+!libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_native.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_store.py
@@ -60,9 +62,9 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/startup.py
 !libs/agent-procutil/src/agent_procutil/streaming.py
 !libs/agent-procutil/src/agent_procutil/wsl.py
-!libs/agent-procutil/src/agent_procutil/daemon_instance_native.c
 !libs/agent-procutil/src/agent_procutil/daemon_instances.ps1
 !libs/agent-procutil/src/agent_procutil/daemon_instances.sh
+!libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
 !libs/agent-procutil/src/agent_procutil/native_daemon.ps1
 !libs/agent-procutil/src/agent_procutil/native_daemon.sh
 !libs/agent-procutil/src/agent_procutil/native_owned.ps1

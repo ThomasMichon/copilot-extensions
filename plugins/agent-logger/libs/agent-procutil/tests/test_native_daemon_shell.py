@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-import platform
 import shutil
 import signal
 import subprocess
@@ -25,14 +24,10 @@ def test_native_daemon_waitable_child_preserves_real_exit_status(tmp_path, dispo
     source = Path(__file__).parents[1] / "src/agent_procutil"
     helpers = tmp_path / "helpers"
     helpers.mkdir()
-    for name in ("native_daemon.sh", "daemon_instances.sh", "_build_native.py", "daemon_instance_native.c"):
+    for name in ("native_daemon.sh", "daemon_instances.sh"):
         shutil.copy2(source / name, helpers / name)
-    artifact = helpers / "native" / f"linux-{platform.machine()}" / "daemon-instance"
-    built = subprocess.run(
-        [sys.executable, str(helpers / "_build_native.py"), "--output", str(artifact)],
-        capture_output=True, text=True, timeout=90,
-    )
-    assert built.returncode == 0, built.stdout + built.stderr
+    from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
+    (helpers / ARCHIVE_NAME).write_bytes(lifecycle_archive(Path(__file__).parents[3]))
     worker = tmp_path / "worker.sh"
     worker.write_text("#!/usr/bin/env bash\nsleep .1\nexit 37\n", encoding="utf-8")
     env = dict(os.environ)

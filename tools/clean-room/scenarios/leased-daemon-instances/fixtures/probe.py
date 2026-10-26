@@ -7,7 +7,6 @@ import base64
 import json
 import os
 from pathlib import Path
-import platform
 import shutil
 import subprocess
 import sys
@@ -214,9 +213,7 @@ def abrupt_owner_loss(api, source, root):
 
 
 def installer_reclamation(api, source, root, helpers):
-    assert helpers is not None, (
-        "provide a prebuilt --native-helper-root or select --build-native-helper explicitly"
-    )
+    assert helpers is not None, "the source-only lifecycle helper root must be selected"
     sys.path.insert(0, str(source / "libs" / "installer-engine"))
     from installer_instance_reconcile import reconcile_installer_instances
 
@@ -250,34 +247,34 @@ def main() -> int:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--work-root", type=Path, required=True)
     parser.add_argument("--owner-fixture", action="store_true")
-    parser.add_argument("--native-helper-root", type=Path)
-    parser.add_argument("--build-native-helper", action="store_true")
+    parser.add_argument("--helper-root", type=Path)
     args = parser.parse_args()
     if sys.platform != "linux" or not Path("/.dockerenv").is_file():
         parser.error("run this proof in its disposable Linux Docker container")
     if args.owner_fixture:
         owner_fixture(args)
         return 0
+    assert not any(shutil.which(name) for name in ("cc", "gcc", "clang", "c++")), (
+        "the compiler-free proof requires compilers absent, not merely unused"
+    )
     assert not args.work_root.exists(), "proof requires a fresh workspace"
     args.work_root.mkdir(mode=0o700, parents=True)
     api = load_api(args.source)
-    helpers = args.native_helper_root
-    if args.build_native_helper:
-        from agent_procutil import no_window_flags
-
-        package = args.source / "libs" / "agent-procutil" / "src" / "agent_procutil"
-        helpers = args.work_root / "explicit-source-build"
+    helpers = args.helper_root
+    if helpers is None:
+        helpers = args.work_root / "source-helpers"
         helpers.mkdir(mode=0o700)
-        shutil.copy2(package / "daemon_instances.sh", helpers / "daemon_instances.sh")
-        (helpers / "daemon_instances.sh").chmod(0o644)
-        output = helpers / "native" / f"linux-{platform.machine()}" / "daemon-instance"
-        result = subprocess.run(
-            [sys.executable, str(package / "_build_native.py"), "--output", str(output)],
-            capture_output=True, text=True, timeout=90, creationflags=no_window_flags(),
-        )
-        assert result.returncode == 0, result.stderr[-2000:]
-        assert output.is_file(), "the explicit source build produced no native helper"
-        print("PROBE: explicit-native-source-build PASS canonical build step", flush=True)
+        source_helpers = args.source / "libs" / "update-driver" / "scripts"
+        for name in ("daemon_instances.sh", "daemon_instance_runtime.pyz"):
+            original = source_helpers / name
+            assert original.is_file() and not original.is_symlink(), "unsafe source helper"
+            destination = helpers / name
+            destination.write_bytes(original.read_bytes())
+            destination.chmod(0o644)
+            assert destination.read_bytes() == original.read_bytes(), "source publication differs"
+    assert (helpers / "daemon_instances.sh").is_file()
+    assert (helpers / "daemon_instance_runtime.pyz").is_file()
+    print("PROBE: compiler-free-source-inputs PASS Python sources and no compiler", flush=True)
     checks = [
         ("interactive-policy-and-unattended-defaults", explicit_interactive_policy),
         ("cross-root-renewal-hard-cap", hard_cap_and_cross_root),

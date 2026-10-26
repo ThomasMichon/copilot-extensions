@@ -379,14 +379,41 @@ def verify(root: Path = ROOT, census_path: Path | None = None) -> list[str]:
         except OSError:
             problems.append(f"{helper['source']}: missing native helper entrypoint")
             continue
+        if source.suffix == ".py":
+            try:
+                tree = ast.parse(code)
+            except SyntaxError:
+                problems.append(f"{helper['source']}: invalid shared Python helper source")
+                continue
+            bodies = [
+                node for node in tree.body
+                if isinstance(node, ast.FunctionDef) and node.name == helper["entrypoint"]
+            ]
+            entrypoint_present = len(bodies) == 1
+            commands = set()
+            for body in bodies:
+                for node in ast.walk(body):
+                    if (
+                        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "add_parser"
+                    ):
+                        commands.add(
+                            node.args[0].value if node.args
+                            and isinstance(node.args[0], ast.Constant)
+                            and isinstance(node.args[0].value, str) else "<dynamic>"
+                        )
+        else:
+            entrypoint_present = bool(re.search(
+                r"\bint\s+" + re.escape(helper["entrypoint"]) + r"\s*\(", code,
+            ))
+            commands = set(re.findall(r'strcmp\s*\(\s*argv\[1\]\s*,\s*"([^"]+)"', code))
         if (
             helper.get("owner") != "agent_procutil.daemon_instances"
             or helper.get("protocol") != 1
-            or not re.search(r"\bint\s+" + re.escape(helper["entrypoint"]) + r"\s*\(", code)
+            or not entrypoint_present
             or any(kind not in CLASSIFICATIONS for kind in helper["commands"].values())
         ):
             problems.append(f"{helper['source']}: invalid shared native helper classification")
-        commands = set(re.findall(r'strcmp\s*\(\s*argv\[1\]\s*,\s*"([^"]+)"', code))
         if commands != set(helper["commands"]):
             problems.append(f"{helper['source']}: native command census differs: {sorted(commands)}")
     for key, helper in document.get("finite_helpers", {}).items():
