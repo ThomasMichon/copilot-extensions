@@ -8,6 +8,8 @@ Complements the merged [first causal-record source](dispatch-spawn-causal-loggin
 ordinary-volume amendment reviewed in #9101; finite observations and
 storage-only monitoring merged in #9104; network inventory and static
 volatile checks merged in #9111.**
+Immutable local source staging merged in #9115; image/guest qualification
+remains open.
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -241,11 +243,19 @@ native capture or any persistence/fault gate.
 for explicit subject/peer IDs and exact static `/tmp`/`/run` configuration
 checks. Those observations remain non-atomic and do not establish egress,
 exclusive custody, peer posture or guest mount/runtime qualification.
-The next source prepares a shallow immutable local source input using native
+#9115 prepares a shallow immutable local source input using native
 Git through the existing bounded process owner, without copying dirty/index
 bytes, source credentials/configuration/hooks or older history.
 Synthetic controls and an explicitly selected local-Git lane cover that
-preparation; no image build, guest copy or running-source claim follows.
+preparation. Host system/user attributes are excluded; destination object format
+matches the selected commit. Preflight rejects case/normalization path aliases
+and bounds both the listing and retained prefix-entry/byte inventory.
+The combined selectors passed 339 controls, including two real local-Git cases.
+No image build, guest copy or running-source claim follows.
+The next source adds a finite fixed guest probe and host checks for effective
+read-only root and private bounded `/tmp`/`/run` posture. Its synthetic tables,
+mocked Docker calls and local descriptor fixtures are not a real container
+qualification or a complete guest mount/runtime/source policy.
 Implement the remaining source-to-image/guest qualification, controlled egress,
 resource and interrupted-driver custody prerequisites before provisioning.
 Reuse existing finite process, source and service owners;
