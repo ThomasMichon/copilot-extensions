@@ -44,6 +44,12 @@ def validate(root: Path):
     _plain(root)
     if root == Path(root.anchor) or root == Path.home() or root in Path.home().parents:
         raise RuntimeError("Logger uninstall refuses a filesystem root or home ancestor")
+    stage = root / ".install-stage"
+    if SCRIPTS.is_relative_to(root) and not SCRIPTS.is_relative_to(stage):
+        raise RuntimeError("Logger uninstall helpers are inside removable runtime content")
+    interpreter = Path(sys.executable).absolute()
+    if interpreter.is_relative_to(root) and not interpreter.is_relative_to(stage):
+        raise RuntimeError("Logger uninstall requires an interpreter outside removable runtime content")
     for name in ("install.json", "runtime-deployment.json"):
         if os.path.lexists(root / name):
             raise RuntimeError("Legacy Logger uninstall refuses cell or managed deployment metadata")
@@ -115,6 +121,23 @@ def refuse_live_runtime(root: Path) -> None:
         for path in (runtime._pid_image_path(pid), runtime._pid_cmdline_argv0(pid)):
             if path and path.replace("\\", "/").casefold().startswith(prefix):
                 raise RuntimeError(f"Active Logger runtime process {pid}; uninstall refused")
+    if os.name != "nt":
+        if not sys.platform.startswith("linux") or not Path("/proc").is_dir():
+            raise RuntimeError("Logger uninstall requires supported native process inspection")
+        for pid in runtime._iter_all_pids():
+            if pid == os.getpid():
+                continue
+            directory = Path("/proc") / str(pid)
+            try:
+                if directory.stat().st_uid != os.getuid():
+                    continue
+                command = (directory / "cmdline").read_bytes().replace(b"\0", b" ")
+            except FileNotFoundError:
+                continue
+            except PermissionError as error:
+                raise RuntimeError("Cannot inspect a current-user Logger runtime consumer") from error
+            if b"agent_logger" in command:
+                raise RuntimeError(f"Unattributed Logger runtime process {pid}; uninstall refused")
 
 
 def remove_runtime(root: Path, shell: str) -> None:

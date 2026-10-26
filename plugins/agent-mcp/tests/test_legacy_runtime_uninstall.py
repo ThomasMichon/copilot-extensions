@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -508,3 +509,153 @@ def test_review_partial_cleanup_retains_owner_and_retries(
     assert not (root.parent / ".local" / "bin" / "agent-mcp").exists()
     for name, content in durable.items():
         assert (root / name).read_bytes() == content
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    (
+        ("uninstall", "--dry-run"),
+        ("uninstall", "--install-dir={custom}"),
+        ("uninstall", "--unknown-option"),
+        ("uninstall", "--install-dir"),
+        ("uninstall", "--install-dir", ""),
+        ("uninstall", "--install-dir", "--force"),
+        ("uninstall", "--install-dir", "{custom}", "--install-dir", "{default}"),
+        ("uninstall", "stamp"),
+        ("provision", "uninstall"),
+    ),
+)
+def test_round2_posix_rejects_arguments_without_root_mutation(
+    tmp_path: Path, arguments: tuple[str, ...],
+) -> None:
+    if os.name == "nt" or not shutil.which("bash"):
+        pytest.skip("native POSIX Bash required")
+    root, env, _ = _fixture(tmp_path)
+    custom = root.parent / "custom-runtime"
+    shutil.copytree(root, custom)
+    before = {
+        path.relative_to(root.parent): path.read_bytes()
+        for path in root.parent.rglob("*") if path.is_file()
+    }
+    result = subprocess.run(
+        [shutil.which("bash"), str(SCRIPTS / "init.sh"),
+         *(value.format(custom=custom, default=root) for value in arguments)],
+        env=env, cwd=SCRIPTS.parent, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert {
+        path.relative_to(root.parent): path.read_bytes()
+        for path in root.parent.rglob("*") if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("action", ("install", "init", "stamp", "provision"))
+def test_round2_posix_known_actions_still_dispatch(tmp_path: Path, action: str) -> None:
+    if os.name == "nt" or not shutil.which("bash"):
+        pytest.skip("native POSIX Bash required")
+    root, env, _ = _fixture(tmp_path)
+    env.update(
+        AGENT_MCP_ACTION="uninstall", COPILOT_PLUGIN_INSTALL_SMOKE="1",
+        COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP="0",
+    )
+    result = subprocess.run(
+        [shutil.which("bash"), str(SCRIPTS / "init.sh"), action],
+        env=env, cwd=SCRIPTS.parent, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "smoke.json").is_file()
+    _assert_derived(root, present=True)
+
+
+def test_round2_posix_rejects_inherited_uninstall(tmp_path: Path) -> None:
+    if os.name == "nt" or not shutil.which("bash"):
+        pytest.skip("native POSIX Bash required")
+    root, env, _ = _fixture(tmp_path)
+    env["AGENT_MCP_ACTION"] = "uninstall"
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    result = subprocess.run(
+        [shutil.which("bash"), str(SCRIPTS / "init.sh")],
+        env=env, cwd=SCRIPTS.parent, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
+
+
+def test_round2_posix_trailing_root_uninstall_succeeds(tmp_path: Path) -> None:
+    if os.name == "nt" or not shutil.which("bash"):
+        pytest.skip("native POSIX Bash required")
+    root, env, durable = _fixture(tmp_path)
+    result = subprocess.run(
+        [shutil.which("bash"), str(SCRIPTS / "init.sh"), "uninstall",
+         "--install-dir", str(root) + "/"],
+        env=env, cwd=SCRIPTS.parent, capture_output=True, text=True, timeout=90,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    _assert_derived(root, present=False)
+    for name, content in durable.items():
+        if name != ".install.lock":
+            assert (root / name).read_bytes() == content
+
+
+@pytest.mark.parametrize("invalid", ("none", "pid", "script", "action", "root", "flag", "image"))
+def test_round2_only_verified_installer_parent_is_excluded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, invalid: str,
+) -> None:
+    helper, root, _ = _review_adapter(monkeypatch, tmp_path)
+    monkeypatch.setattr(helper.os, "getppid", lambda: 123)
+    arguments = ["bash", str(SCRIPTS / "init.sh"), "uninstall", "--install-dir", str(root) + os.sep]
+    pid = 124 if invalid == "pid" else 123
+    image = str((root if invalid == "image" else Path(sys.executable).parent) / "bash")
+    if invalid == "script":
+        arguments[1] = str(tmp_path / "unrelated.sh")
+    elif invalid == "action":
+        arguments[2] = "provision"
+    elif invalid == "root":
+        arguments[-1] = str(tmp_path / "different-runtime")
+    elif invalid == "flag":
+        arguments.append("--dry-run")
+    assert helper._verified_uninstall_parent(root, pid, arguments, image) is (invalid == "none")
+
+
+def test_round2_windows_launcher_only_bootstrap(tmp_path: Path, review_shell: str) -> None:
+    if os.name != "nt":
+        pytest.skip("native Windows Python launcher boundary")
+    launcher = shutil.which("py")
+    if launcher is None or Path(launcher).suffix.casefold() != ".exe":
+        pytest.skip("existing native py.exe unavailable")
+    root, env, _ = _fixture(tmp_path)
+    bin_dir = tmp_path / "launcher-only"
+    bin_dir.mkdir()
+    shutil.copyfile(launcher, bin_dir / "py.exe")
+    env["PATH"] = str(bin_dir)
+    assert shutil.which("python", path=env["PATH"]) is None
+    assert shutil.which("python3", path=env["PATH"]) is None
+    absent = tmp_path / "never-installed"
+    result = _run(review_shell, absent, env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not absent.exists()
+    _assert_derived(root, present=True)
+    # Exercise the same resolver with an existing runtime candidate that must
+    # never be selected by uninstall, without executing or modifying that runtime.
+    text = (SCRIPTS / "init.ps1").read_text(encoding="utf-8")
+    match = re.search(r"(?ms)^function Get-BootstrapPython \{.*?^\}", text)
+    assert match is not None
+    candidate = root / "versions" / "1.0.0" / "Scripts" / "python.exe"
+    candidate.parent.mkdir()
+    candidate.write_bytes(b"not an executable")
+    quoted_scripts = str(SCRIPTS).replace("'", "''")
+    quoted_slot = str(candidate.parent.parent).replace("'", "''")
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        f". '{quoted_scripts}\\versioned_runtime_native.ps1'; "
+        f"$VenvDir='{quoted_slot}'; $LinkDir=$VenvDir; "
+        + match.group() + "; Get-BootstrapPython -ExternalOnly"
+    )
+    resolved = subprocess.run(
+        [review_shell, "-NoProfile", "-NonInteractive", "-Command", command],
+        env=env, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert resolved.returncode == 0, resolved.stdout + resolved.stderr
+    assert Path(resolved.stdout.strip()).is_file()
+    assert not Path(resolved.stdout.strip()).is_relative_to(root)

@@ -142,6 +142,37 @@ def _run(command: list[str]) -> str:
     return result.stdout
 
 
+def _verified_uninstall_parent(root: Path, pid: int, arguments: list[str], image: str) -> bool:
+    """Exclude only our source installer, not arbitrary ancestors or root users."""
+    if pid != os.getppid() or len(arguments) < 3 or Path(arguments[0]).name != "bash":
+        return False
+    executable = Path(image)
+    if not executable.is_absolute() or executable.name != "bash" or executable.is_relative_to(root):
+        return False
+    if Path(arguments[1]).resolve() != SCRIPTS / "init.sh":
+        return False
+    selected = Path.home() / ".agent-mcp"  # marketplace-isolation: allow legacy teardown
+    explicit = False
+    selected_once = False
+    index = 2
+    while index < len(arguments):
+        value = arguments[index]
+        if value == "uninstall":
+            explicit = True
+        elif value == "--force":
+            pass
+        elif value == "--install-dir" and not selected_once and index + 1 < len(arguments):
+            index += 1
+            if not arguments[index] or arguments[index].startswith("-"):
+                return False
+            selected = Path(os.path.abspath(arguments[index]))
+            selected_once = True
+        else:
+            return False
+        index += 1
+    return explicit and selected == root
+
+
 def refuse_active(root: Path, shell: str, runtime: Any) -> None:
     """Refuse ambiguous inspection, never terminate a process or an upstream."""
     if os.name == "nt":
@@ -178,10 +209,14 @@ ConvertTo-Json -InputObject $rows -Compress
             try:
                 if directory.stat().st_uid != os.getuid():
                     continue
-                command = (directory / "cmdline").read_bytes().replace(b"\0", b" ").decode(
-                    "utf-8", errors="surrogateescape",
-                )
+                arguments = [
+                    value.decode("utf-8", errors="surrogateescape")
+                    for value in (directory / "cmdline").read_bytes().split(b"\0") if value
+                ]
                 image = runtime._pid_image_path(pid) or ""
+                if _verified_uninstall_parent(root, pid, arguments, image):
+                    continue
+                command = " ".join(arguments)
                 rows.append({"pid": pid, "image": image, "command": command})
             except FileNotFoundError:
                 continue

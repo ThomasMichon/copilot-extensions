@@ -101,6 +101,11 @@ Run `scripts/init.ps1 uninstall [-InstallDir PATH]` on Windows or
 the same transaction lock as install/provision/stamp and requires an existing
 Python 3.10+ interpreter outside the installation. It does not provision a
 runtime, reconcile instances, terminate processes, or stop upstream services.
+Windows also supports a launcher-only `py.exe` installation; uninstall skips
+installed-runtime interpreter candidates. Bash accepts `--install-dir PATH`,
+not `--install-dir=PATH`; unsupported flags (including `--dry-run`), missing
+values, repeated root selections and conflicting actions are rejected before
+dispatch. Uninstall must be explicit, never inherited from the environment.
 Windows requires native CIM process inspection; Linux requires readable
 current-user `/proc` process information. Other platforms and unavailable or
 ambiguous inspection fail closed. A base-interpreter MCP process without an

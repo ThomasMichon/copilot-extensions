@@ -374,3 +374,68 @@ def test_logger_preserves_busy_generation_custody(tmp_path, host, custody):
     expected = "construction" if custody == "snapshot" else "retention"
     assert expected in result.stdout + result.stderr, result.stdout + result.stderr
     _assert_state(root, durable, removed=False)
+
+
+def test_logger_refuses_removable_in_root_helpers(tmp_path):
+    root, durable, env = _fixture(tmp_path, "owned")
+    scripts = root / "snapshots" / "1.0.0" / "scripts"
+    scripts.mkdir(parents=True)
+    helper = scripts / "uninstall_guard.py"
+    helper.write_bytes((INSTALLERS / "uninstall_guard.py").read_bytes())
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(helper), "--root", str(root)],
+        capture_output=True, text=True, timeout=15, env=env, **kwargs,
+    )
+    assert result.returncode != 0
+    assert "helpers are inside removable runtime content" in result.stderr
+    _assert_state(root, durable, removed=False)
+
+
+def test_logger_allows_preserved_in_root_staging_helpers(tmp_path):
+    home = tmp_path / "home"
+    root = home / "runtime"
+    scripts = root / ".install-stage" / "owner" / "scripts"
+    scripts.mkdir(parents=True)
+    helper = scripts / "uninstall_guard.py"
+    helper.write_bytes((INSTALLERS / "uninstall_guard.py").read_bytes())
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(helper), "--root", str(root)],
+        capture_output=True, text=True, timeout=15,
+        env={**os.environ, "HOME": str(home), "USERPROFILE": str(home)}, **kwargs,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert helper.is_file()
+
+
+def test_posix_logger_refuses_path_launched_ambiguous_runtime(tmp_path):
+    if os.name == "nt" or not sys.platform.startswith("linux"):
+        pytest.skip("native Linux PATH/symlink process attribution")
+    root, durable, env = _fixture(tmp_path, "owned")
+    slot = root / "versions" / "1.0.0"
+    venv.EnvBuilder(with_pip=False, symlinks=True).create(slot)
+    site = next((slot / "lib").glob("python*/site-packages"))
+    (site / "agent_logger.py").write_text("print('ready', flush=True)\ninput()\n")
+    process_env = {**env, "PATH": str(slot / "bin") + os.pathsep + env["PATH"]}
+    process = subprocess.Popen(
+        ["python", "-m", "agent_logger"], env=process_env,
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert process.stdout.readline().strip() == "ready"
+        assert (slot / "bin" / "python").is_symlink()
+        assert Path(f"/proc/{process.pid}/cmdline").read_bytes().split(b"\0")[0] == b"python"
+        assert not Path(os.readlink(f"/proc/{process.pid}/exe")).is_relative_to(root)
+        result = subprocess.run(
+            [shutil.which("bash"), str(INSTALLERS / "install.sh"),
+             "uninstall", "--install-dir", str(root)],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+        assert result.returncode != 0
+        assert "Unattributed Logger runtime process" in result.stderr, result.stdout + result.stderr
+        assert process.poll() is None
+        _assert_state(root, durable, removed=False)
+    finally:
+        process.communicate("\n", timeout=15)
+    assert process.returncode == 0

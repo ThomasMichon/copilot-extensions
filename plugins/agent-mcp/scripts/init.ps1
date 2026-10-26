@@ -347,12 +347,14 @@ function Remove-ConsoleTrampolines {
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
+    param([switch]$ExternalOnly)
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
        Prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
     foreach ($d in @($VenvDir, $LinkDir)) {
+        if ($ExternalOnly) { break }
         # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
@@ -653,10 +655,7 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir 'source-runtime.ps1')
 $UninstallPython = $null
 if ($Action -eq 'uninstall') {
-    foreach ($candidate in @('python3', 'python')) {
-        $found = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($found -and $found.Source -notmatch 'WindowsApps') { $UninstallPython = $found.Source; break }
-    }
+    $UninstallPython = Get-BootstrapPython -ExternalOnly
     if (-not $UninstallPython) { throw 'Uninstall requires an existing Python 3.10+ outside the runtime' }
     $nativeError = ''
     $status = Invoke-Hidden -FilePath $UninstallPython -ArgList @(

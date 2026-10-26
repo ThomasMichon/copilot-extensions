@@ -24,13 +24,32 @@ INSTALL_DIR=""
 # be lost across the staging boundary. Carry it through the exec via the env.
 ACTION="${AGENT_MCP_ACTION:-init}"
 UNINSTALL_REQUESTED=0
+EXPLICIT_ACTION=""
+INSTALL_DIR_SET=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
-        --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-        uninstall) ACTION="$1"; UNINSTALL_REQUESTED=1; shift ;;
-        stamp|provision|init) ACTION="$1"; shift ;;
-        *) shift ;;
+        --install-dir)
+            if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+                _fail '--install-dir requires a nonempty path value'
+                exit 2
+            fi
+            if [[ "$INSTALL_DIR_SET" == 1 ]]; then
+                _fail 'Duplicate --install-dir is not supported'
+                exit 2
+            fi
+            INSTALL_DIR="$2"; INSTALL_DIR_SET=1; shift 2 ;;
+        uninstall|install|stamp|provision|init)
+            if [[ -n "$EXPLICIT_ACTION" && "$EXPLICIT_ACTION" != "$1" ]]; then
+                _fail 'Conflicting installer actions are not supported'
+                exit 2
+            fi
+            ACTION="$1"; EXPLICIT_ACTION="$1"
+            [[ "$1" != uninstall ]] || UNINSTALL_REQUESTED=1
+            shift ;;
+        *)
+            _fail "Unsupported installer argument: $1"
+            exit 2 ;;
     esac
 done
 if [[ "$ACTION" == uninstall && "$UNINSTALL_REQUESTED" != 1 ]]; then

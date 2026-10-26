@@ -81,6 +81,11 @@ construction/retention custody. Persistent snapshot coordination inodes remain.
 Validated stamped-only ownership is recorded in the existing deployment
 manifest before destructive cleanup; ownership metadata is removed last so a
 partial removal can be retried without requiring the deleted snapshot.
+Uninstall helpers/interpreters must be outside removable content (the retained
+installer staging area is allowed). Linux checks full current-user command
+lines and refuses ambiguously attributed Logger processes, including PATH
+launches through symlinked virtualenv interpreters; unavailable native process
+inspection refuses removal.
 
 ## Source-qualified runtimes
 
