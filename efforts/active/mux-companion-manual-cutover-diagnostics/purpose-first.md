@@ -37,6 +37,17 @@ equivalence and shared-data constraint are unchanged.
 > to support showing CLAIMS information explicitly, and adding clickable tab
 > support for the different views.
 
+**Operator revision, 2026-10-25:**
+
+> We can instead show some hotkey guides to switch modes.
+
+This replaces the required clickable CLI/Summary view tabs with visible
+keyboard guides. The permanent second Claims row and same-window pane layout
+are unchanged. Guides must name working, context-appropriate controls rather
+than implying that a popup-summon key directly toggles persistent panes.
+This does not authorize an unreleased mux build, a runtime update or a live
+binding change.
+
 ## Implementation sequence
 
 The sequencing and safeguards below are **agent-recommended**, realizing the
@@ -68,8 +79,11 @@ requested feature set without creating another data or session authority.
    is not complete until original CLI identity, repeated switches, observer
    close and detach/reattach are tested through the real consumer.
 4. **Attention and status chrome.** Consume the existing attention/turn-state
-   source for questions and idle. Add named CLI/Summary click targets and a
-   permanent claims row through the existing relay. Keep session-scoped
+   source for questions and idle. Show actionable CLI/Summary hotkey guides
+   and a permanent claims row through the existing relay. Reuse existing
+   keyboard controls where their meaning fits; preserve the Ctrl+K popup
+   contract and distinguish it from persistent-pane navigation.
+   Keep session-scoped
    psmux configuration distinct from tmux's shared-server boundary. A backend
    lacking a required status feature needs a truthful capability result and
    a tracked qualification gap, not a silent one-line substitute.
@@ -77,7 +91,7 @@ requested feature set without creating another data or session authority.
    and claim labels, empty/error/stale data, hierarchy cycles and fan-out,
    successful and failed tool calls, user questions, idle and active CLI,
    repeated switches, detach/reattach and observer exit. Prove real mux-client
-   key/click handling separately from pty `send-keys` and registration tables.
+   mode-switch key handling separately from pty `send-keys` and registration tables.
    First-provision and live installed lanes remain separate from source tests.
 
 ## Scope and coordination
@@ -87,6 +101,9 @@ requested feature set without creating another data or session authority.
   window; switch between CLI and summary panes." Separate CLI/Summary mux
   windows are not an accepted substitute. This is requested intent, not
   agent-recommended sequencing.
+- **Operator chrome decision:** hotkey guides replace required clickable mode
+  tabs. The relay's older clickable-popup summon work retains its separately
+  accepted deferral; it is not a prerequisite for keyboard-guided view switching.
 - The same Companion app effort owns this continuation. The existing
   `mux-bind-relay` effort remains the owner for command wrappers, registration,
   popup focus/lifetime and platform-specific relay safety. Neither effort's

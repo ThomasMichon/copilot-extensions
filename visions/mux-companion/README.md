@@ -5,7 +5,7 @@
   that delivers them.
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-24
+- **Last revised:** 2026-10-25
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -67,9 +67,10 @@ the Worktree Manager, not to `agent-worktrees` directly.
   phases and high-level states. It distinguishes a dependency or allocation
   from evidence of progress or completion.
 - **Mux views and attention** — the CLI and summary are views of the same
-  worktree, not separate agent sessions. Clickable view tabs and keyboard
-  switching preserve the CLI; question and idle indicators keep requests for
-  operator attention visible even while the CLI is hidden.
+  worktree, not separate agent sessions. Visible hotkey guides make keyboard
+  view switching discoverable while preserving the CLI; question and idle
+  indicators keep requests for operator attention visible even while the
+  CLI is hidden.
 - **Session lineage** — the worktree's durable head/succession chain
   (`agent-worktrees`' authoritative head-and-lineage). The Companion presents
   it read-only, plus — for situational awareness only — the headline of any
@@ -98,13 +99,14 @@ meaning, identity and freshness rather than growing competing backends.
 
 ### switchable-cli-and-summary-views
 The operator can flip between the running Copilot CLI and an overall summary
-pane in the same mux window, through keyboard controls and clickable view
-tabs. Switching does not restart, replace, type into or take custody of the
-CLI session. Returning to the CLI restores its existing interaction.
+pane in the same mux window through keyboard controls explained by visible,
+mode-specific hotkey guides. Mode switching does not depend on mouse support.
+Switching does not restart, replace, type into or take custody of the CLI
+session. Returning to the CLI restores its existing interaction.
 
 ### permanent-claims-status-line
 The mux status bar reserves a second permanent line for explicit Claims
-information. View tabs and question/idle attention indicators remain
+information. View-switching hotkey guides and question/idle attention indicators remain
 discoverable alongside that information, including while Summary is shown.
 
 ### cli-attention-while-summarizing
@@ -247,6 +249,13 @@ Refreshing a visible view is bounded and does not create a second fleet
 poller when an owning producer already supplies the data. An alternate pane
 has an explicit mux-owned lifetime, separate from the disposable popup.
 
+### mode-guides-describe-real-actions
+Hotkey guides describe controls actually available in the current view and
+selected backend. Summoning a popup and switching to the persistent summary
+pane are distinguishable actions, not interchangeable labels. Unavailable
+controls are not advertised as working shortcuts. Guides never send input to
+the CLI or grant permission to answer on its behalf.
+
 ### one-seam-many-commands
 A new Mux-bound custom command is a Mux-bind registration, not a bespoke
 wiring job repeated per command. The Companion is the seam's first consumer,
@@ -278,6 +287,9 @@ not its only possible one.
 
 ## Provenance
 
+- **2026-10-25** — Replaced required clickable view tabs with the operator's
+  selected visible hotkey guides for mode switching. The same-window pane
+  layout, permanent second Claims row and attention boundary are unchanged.
 - **2026-10-24** — Expanded from recovery-first popup to purpose-first
   Summary and Claims, a compact work-topology view, switchable CLI/summary
   panes, explicit attention, two-line status and view tabs. Session-selection
