@@ -1471,11 +1471,15 @@ def _cmd_update(rest: list[str]) -> int:
     return guarded_update(rest, _cmd_update_recorded)
 
 
-def _cmd_update_recorded(rest: list[str], trigger: str = "manual") -> int:
+def _cmd_update_recorded(
+    rest: list[str], trigger: str = "manual", automatic_trigger: str | None = None,
+) -> int:
     if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
         from .installation_updates import run_targeted_update
 
-        return run_targeted_update(rest, trigger=trigger)
+        return run_targeted_update(
+            rest, trigger=trigger, automatic_trigger=automatic_trigger,
+        )
     from .update_bootstrap import prepare_update
     from .update_events import UpdateRun
     from .update_orchestration import preflight_runtime_source
@@ -1493,7 +1497,7 @@ def _cmd_update_recorded(rest: list[str], trigger: str = "manual") -> int:
             prepared = prepare_update(rest, **source_arguments)
             if prepared.exit_code:
                 return prepared.exit_code
-            run = UpdateRun(trigger=trigger)
+            run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
             rc = _cmd_update_steps(
                 prepared.arguments, run, fresh_manager=prepared.fresh_manager,
                 environment=prepared.environment, **source_arguments,

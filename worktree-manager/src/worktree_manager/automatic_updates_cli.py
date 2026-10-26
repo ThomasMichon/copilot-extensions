@@ -26,35 +26,45 @@ from .automatic_updates_policy import (
 from .self_install import default_root
 
 
-def guarded_update(rest: list[str], execute: Callable[[list[str], str], int]) -> int:
+def guarded_update(
+    rest: list[str], execute: Callable[[list[str], str, str | None], int],
+) -> int:
     """All Manager updates share custody, including foreground and legacy calls."""
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("--automatic-trigger",
                         choices=("manager", "external", "legacy-agent-machines"))
     parser.add_argument("--controller")
     trigger = "manual"
+    automatic_trigger = None
     try:
         args, forwarded = parser.parse_known_args(rest)
-        if args.automatic_trigger:
-            trigger = f"automatic:{args.automatic_trigger}"
+        automatic_trigger = args.automatic_trigger
+        if automatic_trigger:
+            trigger = "schedule"
         if bool(args.controller) != (args.automatic_trigger == "external"):
             raise PolicyError("--controller is required only with --automatic-trigger external")
         root = default_root().absolute()
         with CutoverLock(state_dir(root) / "update-transaction"):
             admit_trigger(root, args.automatic_trigger, args.controller)
-            return execute(forwarded, trigger)
+            return execute(forwarded, trigger, automatic_trigger)
     except SystemExit:
         return 2
     except PolicyError as exc:
-        return _report_admission_failure(str(exc), locked=False, trigger=trigger)
+        return _report_admission_failure(
+            str(exc), locked=False, trigger=trigger, automatic_trigger=automatic_trigger,
+        )
     except CutoverLockedError as exc:
-        return _report_admission_failure(str(exc), locked=True, trigger=trigger)
+        return _report_admission_failure(
+            str(exc), locked=True, trigger=trigger, automatic_trigger=automatic_trigger,
+        )
 
 
-def _report_admission_failure(message: str, *, locked: bool, trigger: str) -> int:
+def _report_admission_failure(
+    message: str, *, locked: bool, trigger: str, automatic_trigger: str | None,
+) -> int:
     from .update_events import UpdateRun
 
-    run = UpdateRun(trigger=trigger)
+    run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
     run.say(f"Update deferred before installation: {message}", state="failed")
     run.record_admission_error(message, locked=locked)
     return run.finish(5 if locked else 3)

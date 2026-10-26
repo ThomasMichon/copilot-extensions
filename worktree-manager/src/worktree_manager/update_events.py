@@ -26,7 +26,9 @@ except ImportError:  # pragma: no cover - a slot built before the library existe
 class UpdateRun:
     """The Manager's view of one update run."""
 
-    def __init__(self, *, trigger: str = "manual") -> None:
+    def __init__(
+        self, *, trigger: str = "manual", automatic_trigger: str | None = None,
+    ) -> None:
         self._human = HumanOperation("update/manager") if HumanOperation else None
         self._self_update_human = None
         if self._human is not None:
@@ -35,6 +37,11 @@ class UpdateRun:
             self._run = (
                 _ut.Run.from_env_or_new("manager", trigger=trigger) if _ut is not None else None
             )
+            if self._run is not None and automatic_trigger is not None:
+                self._run.emit(
+                    "run", "manager", "info", action="automatic_trigger",
+                    details={"automatic_trigger": automatic_trigger},
+                )
         except BaseException as exc:
             if self._human is not None:
                 self._human.__exit__(type(exc), exc, exc.__traceback__)
@@ -109,7 +116,7 @@ class UpdateRun:
         outcome = _ut.BLOCKED_BY_LOCK if locked else _ut.CONFIGURATION_LIMITATION
         code = "update_transaction_held" if locked else "automatic_policy_refused"
         self._run.target(
-            "update_admission", "manager", outcome, detail=message,
+            "lock", "manager", outcome, action="update_admission", detail=message,
             error={"code": code, "message": message},
         )
 

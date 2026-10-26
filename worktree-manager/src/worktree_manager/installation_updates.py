@@ -55,7 +55,9 @@ def _engine_rows(payload):
     return rows
 
 
-def run_targeted_update(rest: list[str], *, trigger: str = "manual") -> int:
+def run_targeted_update(
+    rest: list[str], *, trigger: str = "manual", automatic_trigger: str | None = None,
+) -> int:
     from .update_driver_cli import parse_options
     from .update_events import UpdateRun
 
@@ -67,7 +69,7 @@ def run_targeted_update(rest: list[str], *, trigger: str = "manual") -> int:
     parser.add_argument("--no-anchor-sync", action="store_true")
     parser.add_argument("--no-prune-pivots", action="store_true")
     args = parser.parse_args(forwarded)
-    run = UpdateRun(trigger=trigger)
+    run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
     try:
         if args.target == "worktree-manager":
             from .self_install import self_update
