@@ -5,6 +5,12 @@ Parent: [Linux role fleet](README.md). Integration: #8377. Standing intent:
 This records the reviewed plan and bounded source progress, not a running-state
 or whole-fleet retention claim.
 
+The [keyed attribution continuation](telemetry-attribution.md) extends this same
+#8377 sub-plan with truthful producer/subject/collector context, user-held-key
+self-lookup and a pre-shared-storage privacy projection. It is a proposal, not
+implemented configuration, deployed instrumentation or a second collector.
+Installer #8370 and formatter #6812 custody remain unchanged.
+
 ## Operator direction and scope
 
 The operator requested an audit of existing logging, predictable convention-based
