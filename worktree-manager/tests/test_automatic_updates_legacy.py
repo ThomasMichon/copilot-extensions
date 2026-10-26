@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -128,4 +129,101 @@ def test_orphaned_manual_lock_is_not_ignored(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     with pytest.raises(PolicyError, match="requires verification"):
+        legacy.require_legacy_retired()
+
+
+@pytest.fixture
+def native_inventory(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(agent_plugin_runtime, "resolve_installed_plugin_command", lambda plugin: None)
+    monkeypatch.setattr(agent_plugin_runtime, "legacy_plugin_root", lambda plugin: tmp_path / plugin)
+    monkeypatch.setattr(legacy, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    calls = []
+    replies = {
+        unit: SimpleNamespace(returncode=0, stdout="LoadState=not-found\nActiveState=inactive\n", stderr="")
+        for unit in (f"{legacy.LEGACY_NAME}.timer", f"{legacy.LEGACY_NAME}.service",
+                     f"{legacy.SELF_NAME}.service")
+    }
+
+    def run(argv, **kwargs):
+        unit = argv[3]
+        assert argv == [
+            "systemctl", "--user", "show", unit, "--property=LoadState,ActiveState", "--no-pager",
+        ]
+        calls.append(unit)
+        reply = replies[unit]
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(legacy.subprocess, "run", run)
+    return calls, replies
+
+
+@pytest.mark.parametrize("state", ["active", "activating", "deactivating", "reloading"])
+def test_cached_fleet_timer_blocks_even_with_inactive_services(
+    native_inventory, tmp_path: Path, state: str,
+) -> None:
+    calls, replies = native_inventory
+    timer = f"{legacy.LEGACY_NAME}.timer"
+    replies[timer].stdout = f"LoadState=loaded\nActiveState={state}\n"
+    before = list(tmp_path.rglob("*"))
+    with pytest.raises(PolicyError, match=rf"{timer} \({state}\)"):
+        legacy.require_legacy_retired()
+    assert calls == list(replies)
+    assert list(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("stdout", [
+    "", "LoadState=loaded\n", "LoadState=loaded\nActiveState=unknown\n",
+    "LoadState=unknown\nActiveState=inactive\n",
+])
+def test_unverifiable_cached_timer_blocks_adoption(native_inventory, stdout: str) -> None:
+    calls, replies = native_inventory
+    timer = f"{legacy.LEGACY_NAME}.timer"
+    replies[timer].stdout = stdout
+    with pytest.raises(PolicyError, match="activity could not be verified"):
+        legacy.require_legacy_retired()
+    assert calls == [timer]
+
+
+@pytest.mark.parametrize("load_state", ["not-found", "loaded", "masked"])
+@pytest.mark.parametrize("active_state", ["inactive", "failed"])
+def test_known_inactive_cached_units_allow_adoption(
+    native_inventory, load_state: str, active_state: str,
+) -> None:
+    calls, replies = native_inventory
+    for reply in replies.values():
+        reply.stdout = f"LoadState={load_state}\nActiveState={active_state}\n"
+    legacy.require_legacy_retired()
+    assert calls == list(replies)
+
+
+@pytest.mark.parametrize("failure", [
+    OSError("inspection denied"), subprocess.TimeoutExpired("systemctl", 10),
+    SimpleNamespace(returncode=1, stdout="", stderr="user bus unavailable"),
+])
+def test_timer_inspection_failure_blocks_adoption(native_inventory, failure) -> None:
+    calls, replies = native_inventory
+    timer = f"{legacy.LEGACY_NAME}.timer"
+    replies[timer] = failure
+    with pytest.raises(PolicyError, match="legacy user-unit inventory"):
+        legacy.require_legacy_retired()
+    assert calls == [timer]
+
+
+def test_missing_systemctl_preserves_optional_absence(native_inventory) -> None:
+    calls, replies = native_inventory
+    replies[f"{legacy.LEGACY_NAME}.timer"] = FileNotFoundError("systemctl")
+    legacy.require_legacy_retired()
+    assert calls == [f"{legacy.LEGACY_NAME}.timer"]
+
+
+def test_missing_systemctl_does_not_discard_observed_timer(native_inventory) -> None:
+    _calls, replies = native_inventory
+    replies[f"{legacy.LEGACY_NAME}.timer"].stdout = "LoadState=loaded\nActiveState=active\n"
+    replies[f"{legacy.LEGACY_NAME}.service"] = FileNotFoundError("systemctl")
+    with pytest.raises(PolicyError, match="timer"):
         legacy.require_legacy_retired()

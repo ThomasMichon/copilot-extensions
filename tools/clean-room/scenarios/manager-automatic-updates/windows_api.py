@@ -18,6 +18,15 @@ CONSOLE_IMAGES = {
 }
 
 
+class ProcessEntry(ct.Structure):
+    _fields_ = [
+        ("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("pid", wt.DWORD),
+        ("heap", ct.c_size_t), ("module", wt.DWORD), ("threads", wt.DWORD),
+        ("parent", wt.DWORD), ("priority", wt.LONG), ("flags", wt.DWORD),
+        ("exe", wt.WCHAR * 260),
+    ]
+
+
 class NativeBlocked(UnsupportedNative):
     def __init__(self, code: str, message: str) -> None:
         self.code = code
@@ -167,6 +176,9 @@ class WinAPI:
             (k.GetProcessTimes, [wt.HANDLE, *([ct.POINTER(ct.c_ulonglong)] * 4)], wt.BOOL),
             (k.QueryFullProcessImageNameW,
              [wt.HANDLE, wt.DWORD, wt.LPWSTR, ct.POINTER(wt.DWORD)], wt.BOOL),
+            (k.CreateToolhelp32Snapshot, [wt.DWORD, wt.DWORD], wt.HANDLE),
+            (k.Process32FirstW, [wt.HANDLE, ct.POINTER(ProcessEntry)], wt.BOOL),
+            (k.Process32NextW, [wt.HANDLE, ct.POINTER(ProcessEntry)], wt.BOOL),
             (a.OpenProcessToken, [wt.HANDLE, wt.DWORD, ct.POINTER(wt.HANDLE)], wt.BOOL),
             (a.GetTokenInformation,
              [wt.HANDLE, ct.c_int, wt.LPVOID, wt.DWORD, ct.POINTER(wt.DWORD)], wt.BOOL),
@@ -254,23 +266,12 @@ class WinAPI:
         )
 
     def refresh_processes(self) -> None:
-        class Entry(ct.Structure):
-            _fields_ = [
-                ("dwSize", wt.DWORD), ("cntUsage", wt.DWORD), ("pid", wt.DWORD),
-                ("heap", ct.c_size_t), ("module", wt.DWORD), ("threads", wt.DWORD),
-                ("parent", wt.DWORD), ("priority", wt.LONG), ("flags", wt.DWORD),
-                ("exe", wt.WCHAR * 260),
-            ]
-        snapshot = self.kernel.CreateToolhelp32Snapshot
-        snapshot.argtypes, snapshot.restype = [wt.DWORD, wt.DWORD], wt.HANDLE
         first, next_entry = self.kernel.Process32FirstW, self.kernel.Process32NextW
-        for function in (first, next_entry):
-            function.argtypes, function.restype = [wt.HANDLE, ct.POINTER(Entry)], wt.BOOL
-        handle = snapshot(2, 0)
+        handle = self.kernel.CreateToolhelp32Snapshot(2, 0)
         if not handle or handle == ct.c_void_p(-1).value:
             raise NativeBlocked("process-snapshot-failed", "CreateToolhelp32Snapshot failed")
         try:
-            entry = Entry()
+            entry = ProcessEntry()
             entry.dwSize = ct.sizeof(entry)
             parents = {}
             available = first(handle, ct.byref(entry))
