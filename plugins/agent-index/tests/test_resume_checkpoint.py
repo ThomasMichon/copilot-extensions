@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import types
 
+from agent_index.chunking.base import Chunk
 from agent_index.indexing import engine
 from agent_index.indexing.path_index import PathIndex
 
@@ -16,8 +17,8 @@ class _FakeChunker:
     def __init__(self, n: int) -> None:
         self._n = n
 
-    def chunk(self, content: object, path: str, source: str | None = None) -> list[object]:
-        return [object() for _ in range(self._n)]
+    def chunk(self, content: str, path: str, source: str = "") -> list[Chunk]:
+        return [Chunk(content, path, "text", "text", i, i, source) for i in range(self._n)]
 
 
 def _run(

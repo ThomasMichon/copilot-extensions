@@ -18,6 +18,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from .embedding_coverage import SCHEMA as _EMBEDDING_SCHEMA
+
 log = logging.getLogger(__name__)
 
 _SCHEMA = """\
@@ -56,7 +58,7 @@ class PathIndex:
     def _init_schema(self) -> None:
         conn = self._connect()
         try:
-            conn.executescript(_SCHEMA)
+            conn.executescript(_SCHEMA + _EMBEDDING_SCHEMA)
             conn.execute("BEGIN IMMEDIATE")
             if conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'source_chunk_totals'",

@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from agent_index.chunking.base import Chunk
     from agent_index.engine.client import EngineClient
     from agent_index.index_config import IndexConfig, ModelProfile
+    from agent_index.indexing.embedding_coverage import EmbeddingCoverage
     from agent_index.indexing.manifest import CrawlManifest
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.runner import ProgressCallback
@@ -759,8 +760,10 @@ def _embed_and_store_files(
     files, so Phase 3 stale-cleanup does not delete their still-valid chunks.
     """
     from agent_index.chunking import get_chunker
+    from agent_index.indexing.embedding_coverage import EmbeddingCoverage
     from agent_index.indexing.fingerprints import file_fingerprint
 
+    coverage = EmbeddingCoverage(path_index)
     batch: list[Chunk] = []
     total_chunks = 0
     total_stored = 0
@@ -775,8 +778,12 @@ def _embed_and_store_files(
 
     def _checkpoint() -> None:
         nonlocal pending
+        retained: dict[tuple[str, str], set[str]] = {}
+        for chunk in batch:
+            retained.setdefault((chunk.source, chunk.file_path), set()).add(chunk.chunk_id)
         for source, path, _hash, _count in pending:
             reconcile_file(source, path)
+            coverage.retain(source, path, retained.get((source, path), set()))
         path_index.mark_indexed_batch(pending)
         pending = []
 
@@ -789,13 +796,12 @@ def _embed_and_store_files(
             return
         if progress_cb:
             progress_cb.check_cancelled()
-        if before_store:
-            before_store()
         path_index.invalidate_batch([(s, p) for s, p, _h, _n in pending])
         total_stored += _embed_and_store_batch(
             batch, multi_store, multi_clients,
             model_profiles,
             stream_batch_size=stream_batch_size,
+            coverage=coverage, force=force, before_embed=before_store,
         )
         if pending:
             _checkpoint()
@@ -857,6 +863,9 @@ def _embed_and_store_batch(
     model_profiles: dict[str, ModelProfile] | None = None,
     *,
     stream_batch_size: int = STREAM_BATCH_SIZE,
+    coverage: EmbeddingCoverage | None = None,
+    force: bool = False,
+    before_embed: Callable[[], None] | None = None,
 ) -> int:
     """Embed a batch of chunks via the engine(s) and upsert into stores.
 
@@ -898,10 +907,21 @@ def _embed_and_store_batch(
             if not model_chunks:
                 continue
 
+            table = multi_store.get_vector_table(model_id) if coverage else None
+            if coverage and table is not None and profile is not None and not force:
+                model_chunks = coverage.missing(table, model_chunks, profile)
+            if not model_chunks:
+                continue
             model_texts = [c.content for c in model_chunks]
             try:
+                if before_embed:
+                    before_embed()
+                if coverage and table is not None:
+                    coverage.invalidate(table, model_chunks)
                 model_vectors = client.embed_texts(model_texts)
                 multi_store.upsert_vectors(model_id, model_chunks, model_vectors)
+                if coverage and table is not None and profile is not None:
+                    coverage.record(table, model_chunks, profile, model_vectors)
             except EngineUnavailableError:
                 # Fail loud -- never silently skip vectorization (#775). The
                 # client already retried once (re-activating a transiently-idle

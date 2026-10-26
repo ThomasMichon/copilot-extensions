@@ -160,12 +160,35 @@ or retargeting it; deleting the journal is not a supported recovery path.
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 
-Engine readiness is deferred until the first nonempty embedding batch; an empty
-delta or wholly reused file set does not start embedding engines. Reused files
-are excluded from timestamp-based stale cleanup. Metadata/model changes are
-currently conservative whole-file invalidations: selective chunk/model reuse,
-coverage backfill and metadata-only vector preservation remain subsequent
-slices, not guarantees of the file-level checkpoint path.
+When a presented file misses its complete fingerprint, chunk/model selection
+uses derived `embedding_coverage` receipts in the same path-index database.
+Each receipt binds a physical model table and chunk ID to the raw embedding
+text/model policy and a float32 vector digest. Bounded, strict reads must find
+the matching vector before reuse: an absent vector, changed input/profile or
+legacy writer's overwrite requires embedding again. Metadata, language and
+routing changes alone do not invalidate an otherwise required pair; new model
+routes backfill only their missing pairs. A named model whose weights or
+preprocessing change must advance `ModelProfile.revision`.
+
+Receipts are revoked before a potentially partial vector write and published
+only after the stored batch matches the returned embeddings. They survive
+restart and unfinished stale cleanup, without publishing a completed file or
+source cursor early. Obsolete receipts are pruned after that file's successful
+reconciliation; removing a path removes its receipts transactionally. Old
+databases start without coverage and conservatively embed each presented pair
+once. These are optimization receipts, not new source-lock, checkpoint,
+committed-reader or global missing-vector-repair authorities.
+
+Engine readiness is deferred until missing-pair selection produces a nonempty
+embedding plan. An empty delta, wholly reused file set or metadata-only update
+with verified pair coverage does not start embedding engines. Full reindexing
+forces pair writes, except for files already committed within its retry window.
+Reused files are excluded from timestamp-based stale cleanup. Changed files
+still refresh canonical content for that cleanup; identical-content write
+avoidance and keep-ID reconciliation remain subsequent work. In the selected
+source layout, content updates change vector provenance only when source or
+language actually differs, preserving vector table versions for metadata-only
+updates. Global vector-gap repair remains owned by its existing mechanism.
 
 ## Process model
 

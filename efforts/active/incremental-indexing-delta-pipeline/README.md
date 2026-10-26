@@ -141,7 +141,7 @@ After the reviewed proposal, the operator admitted execution:
   and batched stale/deleted chunk cleanup.
 - [ ] Publish a logical mutation result/generation once per committed delta.
   Only actual projection changes mark FTS or cluster slices dirty.
-- [ ] Preserve the existing incremental FTS path; coalesce work and distinguish
+- [x] Preserve the existing incremental FTS path; coalesce work and distinguish
   ordinary updates from first-build/recovery rebuilds.
 - [ ] Scope cluster invalidation by affected model/bucket where safe. Keep
   inherently global repair/compaction explicit and amortized rather than
@@ -336,3 +336,42 @@ source-owner coordination rather than one large rewrite.
   hosted pagination/recovery, full source-lease ownership, shared embedding
   reuse and downstream adoption remain open. Continue those planned slices;
   this merge is not an effort completion or deployment.
+
+### 2026-10-26 - Covered-maintenance slice merged; shared reuse continues
+
+- PR #9060 merged as `ccd939ebd46005d06f2774bc35cd5bcf09eba76d`
+  after current-head Copilot approval and required green CI. This includes
+  native covered-round counts, mixed-version artifact invalidation and strict
+  failure-propagating clustering reads.
+- The merged provider/checkpoint/strict-maintenance composition passed 414
+  focused tests with one Windows-only skip. This verifies the two independently
+  reviewed source slices together, not just their isolated pre-merge branches.
+- The existing incremental FTS/coalescing/full-repair gate is resolved. The
+  logical mutation generation, identical-write avoidance and model/bucket-local
+  maintenance gates remain open; physical-version coverage does not substitute
+  for them.
+- Continue the shared chunk/model reuse slice and supported consumer injection
+  seams, then qualify downstream adoption and the remaining count matrix.
+  Release, consumption and a separately authorized rollout are still required.
+
+### 2026-10-26 - Chunk/model reuse implementation slice
+
+- Presented files that miss their whole-file fingerprint now select only
+  missing or invalid routed chunk/model pairs. Derived SQLite receipts bind
+  raw embedding input/model policy to the actual stored float32 vector digest;
+  bounded strict presence checks reject missing or legacy-overwritten vectors.
+- Invalidate before potentially partial vector writes and publish only after
+  verifying the completed batch. Restart, failed-cleanup replay and profile
+  A/B/A rollback preserve conservative recovery; full repair forces writes.
+- Metadata-only updates retain vectors and skip readiness when coverage
+  matches. Source-aware provenance synchronization avoids even a native table
+  update when source/language already match. Changed files still refresh
+  canonical content for timestamp cleanup; content no-op writes, logical
+  mutation generations and global gap repair remain their own open gates.
+- Pair/routing/checkpoint/recovery/native source-store regressions passed
+  (130). Selected-receipt fixtures at 100, 10,000 and 100,000 unrelated rows
+  retain fewer than 100 SQLite VM steps and one selected vector lookup.
+  Native metadata-only tests preserve vector table versions in both layouts;
+  routing, bounded large-batch reads and interrupted-cleanup retry also pass.
+- This implements another bounded Phase 2 slice, not the full count matrix,
+  consumer adoption, release or authorized rollout.

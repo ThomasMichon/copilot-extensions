@@ -64,7 +64,10 @@ def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_f
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
     chunker = SimpleNamespace(
-        chunk=lambda content, path, **k: [SimpleNamespace(path=path, content=content)] * 2,
+        chunk=lambda content, path, source: [
+            SimpleNamespace(path=path, file_path=path, content=content, source=source,
+                            chunk_id=f"{source}:{path}:{i}") for i in range(2)
+        ],
     )
     monkeypatch.setattr("agent_index.chunking.get_chunker", lambda path: (chunker, "text"))
 

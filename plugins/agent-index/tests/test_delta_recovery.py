@@ -36,7 +36,9 @@ def setup_round(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     state.sources["alias"].acquisition_scope = recovery_scope("alias", connector)
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
-    chunker = SimpleNamespace(chunk=lambda *a, **k: [object(), object()])
+    chunker = SimpleNamespace(chunk=lambda content, path, source: [
+        Chunk(content, path, "text", "text", i, i, source) for i in range(2)
+    ])
     monkeypatch.setattr("agent_index.chunking.get_chunker", lambda path: (chunker, "text"))
     monkeypatch.setattr(engine, "_embed_and_store_batch", lambda batch, *a, **k: len(batch))
     store = SimpleNamespace(
