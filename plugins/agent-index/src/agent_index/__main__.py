@@ -6,7 +6,6 @@ from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoin
 
 import argparse
 import contextlib
-import io
 import json
 import os
 import signal
@@ -1153,18 +1152,9 @@ def cmd_stop(_args: argparse.Namespace) -> int:
 
 
 def cmd_index(args: argparse.Namespace) -> int:
-    try:
-        from agent_index.indexing import engine as indexing_engine
+    from agent_index.index_command import run_index_command
 
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            result = indexing_engine.run_reindex(full=args.full, source=args.source)
-        _emit(result)
-        # A per-source failure is swallowed by the run loop (so other sources
-        # still index); surface it here as a non-zero exit rather than letting a
-        # wholly-failed reindex look like a clean run (#1350).
-        return 1 if result.get("sources_failed") else 0
-    except Exception as exc:
-        return _emit_error(exc)
+    return run_index_command(args, _emit, _emit_error)
 
 
 def cmd_index_worker(args: argparse.Namespace) -> int:
@@ -1727,6 +1717,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_index = sub.add_parser("index", help="populate or refresh the durable index")
     p_index.add_argument("--source", help="source name to index instead of configured defaults")
     p_index.add_argument("--full", action="store_true", help="run a full reindex")
+    p_index.add_argument("--change-hints-file", type=Path, help="v1 acquisition-hint JSON (requires --source)")
     p_index.set_defaults(func=cmd_index)
 
     # Internal: run a single queued task in a detached versioned worker process

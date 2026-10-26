@@ -129,6 +129,7 @@ def run_worker(task_id: str) -> int:
     from agent_index import config as _config
     from agent_index.index_config import IndexConfig
     from agent_index.indexing import engine as indexing_engine
+    from agent_index.indexing.change_hints_contract import execution_versions
     from agent_index.indexing.runner import IndexingCancelled
     from agent_index.indexing.task_store import TaskStatus, TaskStore
 
@@ -143,6 +144,16 @@ def run_worker(task_id: str) -> int:
         TaskStatus.CANCELLED.value,
     }:
         return 0  # already terminal — idempotent no-op
+
+    run_reindex = indexing_engine.run_reindex
+    if task.change_hints is not None:
+        if task.status != TaskStatus.PROCESSING.value:
+            print("[FAIL] worker: hinted task must be claimed before execution", file=sys.stderr)
+            return 2
+        if not execution_versions(run_reindex):
+            store.release_processing(task_id)
+            print("[FAIL] worker: selected callable cannot execute change-hints v1; task parked", file=sys.stderr)
+            return 2
 
     # Host-resource good citizen: this worker is a dedicated indexing subprocess,
     # so lower its OWN CPU/IO priority up front (before run_reindex spawns any
@@ -178,9 +189,11 @@ def run_worker(task_id: str) -> int:
         resume_since = task.first_started_at or task.created_at
         log.info("worker: task %s resuming (attempt %d)", task_id, task.attempt_count)
     try:
-        result = indexing_engine.run_reindex(
-            full=task.full, source=src, progress_cb=cb, resume_since=resume_since
-        )
+        cb.check_cancelled()
+        kwargs = {"full": task.full, "source": src, "progress_cb": cb, "resume_since": resume_since}
+        if task.change_hints is not None:
+            kwargs["change_hints"] = task.change_hints
+        result = run_reindex(**kwargs)
         if isinstance(result, dict):
             store.set_result_stats(task_id, result)
         sources_failed = result.get("sources_failed") if isinstance(result, dict) else None

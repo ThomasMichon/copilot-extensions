@@ -196,6 +196,7 @@ The service binds `AGENT_INDEX_HOST` (default `127.0.0.1`) and
 | `GET /similar` | nearest neighbours for an indexed chunk |
 | `GET /clusters` | near-duplicate cluster artifact |
 | `POST /reindex` | enqueue background indexing unless draining/deps missing |
+| `POST /reindex/hints` | strictly validate and durably union version-1 acquisition hints |
 | `POST /drain`, `/undrain` | zdd cutover drain gates; namespaced calls require the exact instance token |
 | `POST /promote` | instance- and transaction-owned pre-route passive promotion |
 | `POST /shutdown` | ownership-attested service shutdown used by CLI/cutover |
@@ -210,7 +211,7 @@ Public CLI verbs are implemented in `src/agent_index/__main__.py`:
 
 - `stop`, `status`, `version`
 - `start` / `serve`, `restart`, `deploy [--recover]` manage the local service
-- `index [--source S] [--full]`
+- `index [--source S] [--full] [--change-hints-file FILE]`
 - `search <query> [--source S] [--language L] [--repo R] [--limit N] [--json]`
 - `similar <chunk_id> [--limit N] [--source S]`
 - `clusters [--source S] [--bucket B] [--model M] [--exact-dupes-only] [--limit N]`
@@ -272,14 +273,52 @@ queued-full supersession, full-first dequeue ordering and the existing rule
 that a processing full task never absorbs a trailing incremental. A capable
 dequeue preserves full-first ordering and FIFO within each tier.
 
-This is a **receiver-first expansion**, not producer or worker adoption.
-`dequeue_next()` retains legacy selection; only an explicit
-`dequeue_next(accept_change_hints=True)` may claim parked work. That opt-in
-asserts the caller preserves and consumes v1 hints throughout execution; package
-version or presence of a newer payload is not execution support. The current
-runner, worker, CLI and HTTP intake do not opt in or emit hints. They require a
-separate capability-aware migration before hinted tasks can be executed.
-No new transport syntax or runtime capability advertisement is introduced here.
+This is a **receiver-first expansion**. `dequeue_next()` retains legacy
+selection; only an explicit `dequeue_next(accept_change_hints=True)` may claim
+parked work. The runner opts in only when the exact engine callable selected in
+this runtime advertises v1 support. It rechecks before launch; the worker checks
+its own selected callable again before execution. A capability loss returns a
+claimed hinted task to `queued_hints`, without calling the engine or advancing
+its checkpoints. An unclaimed hinted task cannot be executed directly by the
+new worker.
+
+The execution seam is
+`agent_index.indexing.engine.run_reindex(..., change_hints: ChangeHints | None = None)`.
+The exact selected callable must explicitly publish
+`run_reindex.change_hints_versions = (1,)` **only after** implementing those
+semantics. A module constant, package version, registered forwarding wrapper,
+permissive `**kwargs`, or newer payload does not establish execution support.
+Replacing the callable with an unadvertised implementation removes support.
+Plain tasks still use the legacy kwargs without `change_hints`. The transport
+and worker preserve the envelope; the capable engine retains responsibility
+for source/account admission, acquisition, checkpoints and all index mutations.
+
+`GET /health` adds `indexing_contract` with stable identity
+`agent-index.change-hints`, `intake_versions: [1]`, and separately computed
+`execution_versions` (`[]` unless the selected callable advertises v1).
+Advertising durable intake is not a claim that hinted execution is available.
+`POST /reindex/hints` accepts only `source`, optional `full: false`, and required
+`change_hints` containing the complete v1 envelope. It refuses unknown fields,
+versions, duplicate JSON keys, mismatched scopes and oversized bodies before
+queue effects. Ordinary runner/dependency/drain availability checks still apply.
+Accepted responses include the stored task and its complete unioned payload.
+The legacy `/reindex` source/full contract is unchanged, but extra properties
+are rejected rather than silently discarding required hints.
+
+`AgentIndexClient.reindex(change_hints=...)` negotiates intake support from the
+running service's health response before posting to the dedicated hinted path.
+A legacy or invalid advertisement refuses before a POST. A rollback between
+discovery and submission yields an unsupported endpoint, never a source-only
+fallback. An invalid accepted receipt is reported as an unknown acceptance
+outcome and is not replayed. Source-only client calls do not need discovery.
+The direct local CLI form `index --source S --change-hints-file FILE` strictly
+reads the same v1 JSON and requires callable execution capability before
+calling the engine; it never retries without hints. Older CLIs reject the new
+option. With no hints file, the existing direct CLI execution path is retained.
+
+Deploy receivers before producers, and enable hinted execution only with a
+qualified capable engine. This transport expansion does not itself add engine
+acquisition support; without that implementation hinted rows remain parked.
 
 The storage migration atomically installs durable SQLite triggers with the new
 column. The triggers preserve `queued_hints` even when an older runtime's

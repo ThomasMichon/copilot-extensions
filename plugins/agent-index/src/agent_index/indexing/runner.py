@@ -32,6 +32,7 @@ from agent_procutil import (
 )
 
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
+from agent_index.indexing.change_hints_contract import current_execution_versions
 
 if TYPE_CHECKING:
     from agent_index.indexing.task_store import TaskRecord, TaskStore
@@ -583,7 +584,10 @@ class TaskRunner:
             )
             return _GOVERNANCE_BACKOFF_SECONDS
 
-        task = await asyncio.to_thread(self.store.dequeue_next)
+        if current_execution_versions():
+            task = await asyncio.to_thread(self.store.dequeue_next, accept_change_hints=True)
+        else:
+            task = await asyncio.to_thread(self.store.dequeue_next)
         if task is None:
             return 10.0
         if self._shutdown:
@@ -601,6 +605,9 @@ class TaskRunner:
             )
             return _GOVERNANCE_BACKOFF_SECONDS
 
+        if getattr(task, "change_hints", None) is not None and not current_execution_versions():
+            await asyncio.to_thread(self.store.release_processing, task.id)
+            return _GOVERNANCE_BACKOFF_SECONDS
         await self._launch_worker(task)
         return None
 
