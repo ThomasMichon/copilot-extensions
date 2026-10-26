@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from http.client import HTTPException
 from typing import Any
 
 from .client import BridgeClientError, BridgeConnectionError
@@ -142,7 +143,7 @@ def run_resume(
             )
         except BridgeClientError as exc:
             _worktree_conflict(exc, "Worktree", target)
-        except (BridgeConnectionError, OSError, ValueError) as exc:
+        except (BridgeConnectionError, HTTPException, OSError, ValueError) as exc:
             _fail(
                 f"Exact worktree resume outcome is unconfirmed: {exc}. "
                 "The request may have started; it was not replayed.",

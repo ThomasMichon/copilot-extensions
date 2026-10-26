@@ -2399,7 +2399,9 @@
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_exact_hosting_success_keeps_the_receivers_capability_fence",
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_disclosure_keeps_unknown_argument_rejection",
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_selected_cli_rollback_refuses_unsupported_syntax_before_dispatch[exact-selector]",
-        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_selected_cli_rollback_refuses_unsupported_syntax_before_dispatch[support-disclosure]"
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_selected_cli_rollback_refuses_unsupported_syntax_before_dispatch[support-disclosure]",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[ordinary]",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[hosting-fenced]"
     ],
     "sources": {
         ".devcontainer/trusted-harness-base/build.py": "4d96b40567c1135bf82d117f6b54a41ac88b5ddf6fe6d033835a42e88203966d",
@@ -2683,10 +2685,10 @@
         "plugins/agent-bridge/src/agent_bridge/client.py": "825ff5eff203729c31019d5f733805e9c400d7a64036d69ce4e9ec6d342b3a50",
         "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "012f5ce84d92342b518b6cdb591e4d210acb7652b36052401f8766e735b05999",
         "plugins/agent-bridge/src/agent_bridge/service_start_cli.py": "89ca9c9d23a093d7c35c8f94bb2064771fdaaf2ee299bb1bc00cc637cb04a65a",
-        "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py": "2dd7a71fe479c298dcc783c6712bc53b2cdb7114a58a143ee870e3e396b8d1e9",
+        "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py": "30ca48f63ea5b71d0e4148875da8d7a16963193f208a105ac74da4ddfd13674f",
         "plugins/agent-bridge/src/agent_bridge/resume_cli_contract.py": "ac9d6f5d80d004bd99fe84104948adb29299c4ccda0db86ec35a54d27038f7b5",
         "libs/agent-procutil/src/agent_procutil/startup.py": "986b9973485ea50e00c52e8292316bd811062e59b652f514d9829d4a8d66bee0",
-        "tools/promotion_unit_tests/test_resume_cli_contract.py": "83677ed735d8e453d6f69a01fc03d11cae4637a8ef37d1880e11615eb126f2f9",
+        "tools/promotion_unit_tests/test_resume_cli_contract.py": "e3b59ef42655e36b3098c19644262c10fd06ae2e6b861ddadcc08d1da5cf2e01",
         "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd"
     },
     "coverage_targets": [

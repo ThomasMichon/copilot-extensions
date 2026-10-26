@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import http.client
 import importlib.util
+import io
 import json
 import sys
 from dataclasses import dataclass
@@ -427,3 +429,47 @@ def test_selected_cli_rollback_refuses_unsupported_syntax_before_dispatch(
     assert "unrecognized arguments" in capsys.readouterr().err
     assert boundary.calls == []
     assert boundary.discovered == []
+
+
+@pytest.mark.parametrize("hosting", [False, True], ids=["ordinary", "hosting-fenced"])
+def test_truncated_http_body_is_unconfirmed_without_replay(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, capsys: Any, hosting: bool,
+) -> None:
+    requests: list[tuple[str, str]] = []
+
+    def urlopen(request: Any, *, timeout: float) -> http.client.HTTPResponse:
+        requests.append((request.get_method(), request.full_url))
+        if request.get_method() == "POST":
+            assert timeout == 17.0
+            wire = b'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{"session'
+        else:
+            body = json.dumps(boundary.health).encode()
+            wire = (
+                b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(body)).encode()
+                + b"\r\n\r\n" + body
+            )
+        response = http.client.HTTPResponse(
+            SimpleNamespace(makefile=lambda mode: io.BytesIO(wire)),
+        )
+        response.begin()
+        return response
+
+    monkeypatch.setattr(boundary.errors.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(
+        boundary.client, "_request",
+        boundary.errors.BridgeClient._request.__get__(boundary.client),
+    )
+    args = ["--json", "resume", "--worktree-id", "worktree-123", "--strict"]
+    args += ["--require-agent-hosting"] if hosting else []
+    with pytest.raises(SystemExit) as raised:
+        boundary.invoke(*args)
+    assert raised.value.code == 1
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result["reason"] == "resume_outcome_unknown"
+    assert "IncompleteRead" in result["error"]
+    assert "may have started" in result["error"]
+    assert "Traceback" not in output.err
+    assert [url for method, url in requests if method == "POST"] == [
+        "http://example.invalid/api/v1/worktrees/worktree-123/resume/acp?strict=true",
+    ]
