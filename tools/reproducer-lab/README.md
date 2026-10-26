@@ -378,7 +378,10 @@ attachment, acquisition, session, turn, message or supported creation/recovery
 history refuses the initial case. This includes independent acquisition
 markers/receipts, accepted producer requests, fallback attempts, launch gates
 and retired conversation bindings, not just rows joinable to current tasks or
-sessions. Even terminal or refused rows are not a
+sessions. Dispatch's lazily prepared `cleanup_recoveries` table is checked
+when present, without creating it; an empty fresh queue need not already have
+that table. A same-named view or unreadable existing table refuses.
+Even terminal or refused rows are not a
 descendant-settlement certificate. Orphaned operation history is checked
 independently of task/session joins; missing tables and read failures propagate.
 Dispatch uses its existing connection owner with a five-second SQLite progress
@@ -436,6 +439,8 @@ a lost create reply retains one task and refuses a second initial create.
 Orphan-only fixtures use the actual queue/store schemas independently of the
 production history lists; schema-key coverage checks catch omitted task,
 reservation, assignment, delivery, worktree or session tables.
+The cleanup-recovery fixture prepares its receipt through the actual existing
+owner's preview/apply flow before simulating orphaned rows in the temporary DB.
 Only guest path/mount admission is synthetic in this lane. The filename is
 outside default test discovery; no real container, mounted volume, backend
 spawn, crash/power-loss or running-service qualification is claimed.

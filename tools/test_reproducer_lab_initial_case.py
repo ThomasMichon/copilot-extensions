@@ -337,3 +337,27 @@ def test_lost_custody_after_create_preserves_unknown_outcome(seams: SimpleNamesp
     with pytest.raises(ValueError, match="Dispatch work"):
         submit(seams)
     assert len(seams.queue.creates) == 1
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_optional_cleanup_history_is_checked_when_present(
+    seams: SimpleNamespace, retained: bool,
+) -> None:
+    with sqlite3.connect(seams.queue.db_path) as connection:
+        connection.execute("CREATE TABLE cleanup_recoveries (request_id TEXT)")
+        if retained:
+            connection.execute("INSERT INTO cleanup_recoveries VALUES ('orphan')")
+    if retained:
+        with pytest.raises(ValueError, match="Dispatch work"):
+            submit(seams)
+        assert not seams.entries and not seams.queue.creates
+    else:
+        assert submit(seams).disposition == "created"
+
+
+def test_optional_cleanup_view_is_not_treated_as_missing(seams: SimpleNamespace) -> None:
+    with sqlite3.connect(seams.queue.db_path) as connection:
+        connection.execute("CREATE VIEW cleanup_recoveries AS SELECT 'orphan' AS request_id")
+    with pytest.raises(ValueError, match="not a supported table"):
+        submit(seams)
+    assert not seams.entries and not seams.queue.creates

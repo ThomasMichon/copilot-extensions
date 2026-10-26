@@ -24,6 +24,7 @@ DIAGNOSTICS = Path("/lab/evidence/diagnostics")
 CASE = "offline-dispatch-bridge-v1"
 LANE = "github.com/example/reproducer-lab"
 MAX_OBSERVATION_SECONDS = 5.0
+OPTIONAL_DISPATCH_HISTORY = ("cleanup_recoveries",)
 
 # Include retained history, not only currently active or highest-attempt rows.
 DISPATCH_HISTORY = (
@@ -101,6 +102,18 @@ def _require_initial_journals(queue: TaskQueue, journal: AcquisitionJournal) -> 
         )
         try:
             retained = connection.execute(_history_query(DISPATCH_HISTORY)).fetchone()
+            if retained is None:
+                for table in OPTIONAL_DISPATCH_HISTORY:
+                    entry = connection.execute(
+                        "SELECT type FROM sqlite_master WHERE name=?", (table,),
+                    ).fetchone()
+                    if entry is None:
+                        continue
+                    if entry[0] != "table":
+                        raise ValueError("optional Dispatch history is not a supported table")
+                    retained = connection.execute(_history_query((table,))).fetchone()
+                    if retained is not None:
+                        break
         finally:
             connection.set_progress_handler(None, 0)
     if retained is not None:

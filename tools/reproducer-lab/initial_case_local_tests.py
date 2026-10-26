@@ -217,7 +217,7 @@ def test_actual_queue_task_keyed_schema_is_covered_independently(owners: Any) ->
                 row[1] for row in connection.execute(f"PRAGMA table_info({table})")
             }
         }
-    assert task_history <= set(initial_case.DISPATCH_HISTORY)
+    assert task_history <= set(initial_case.DISPATCH_HISTORY + initial_case.OPTIONAL_DISPATCH_HISTORY)
     assert {"acquisition_markers", "acquisition_receipts", "producer_create_requests",
             "handoff_fallback_attempts"} <= task_history
 
@@ -235,3 +235,56 @@ def test_actual_bridge_operation_keyed_schema_is_covered_independently(owners: A
     }
     assert operation_history <= set(initial_case.BRIDGE_HISTORY)
     assert {"acquisition_launch_gates", "acquisition_bindings"} <= operation_history
+
+
+def test_actual_cleanup_owner_orphan_receipt_refuses(owners: Any) -> None:
+    queue = owners.queue
+    task = queue.create(
+        "Completed synthetic cleanup fixture", repo=initial_case.LANE,
+        exclusive_key="synthetic-cleanup",
+    )
+    reservation, inserted = queue.reserve_spawn(task.id, now=10)
+    assert inserted
+    queue.record_spawn_worktree(
+        reservation.key, "synthetic-worker", ownership="created",
+        creating_host="synthetic-host", driver="supervisor",
+        allocation_project="synthetic-project", worktree_path="synthetic-workspace",
+    )
+    queue.record_spawn(reservation.key, session_handle="synthetic-session")
+    worker = "synthetic-host/synthetic-worker"
+    queue.claim_one(worker, task_id=task.id)
+    queue.start(task.id, worker, owner_session_id="synthetic-native")
+    queue.complete(task.id, worker, result_ref="artifact:synthetic-result")
+    queue.confirm(task.id, actor="operator")
+    queue.settle_spawn(
+        reservation.key, conclusion_state="held", release_requested=True,
+        conclusion_detail=json.dumps({
+            "action": "preserved", "reason": "synthetic-cleanup-held",
+            "cleanup_kind": "attempt", "attempts": 1, "next_attempt_at": 0,
+            "session_end": {"state": "complete", "session_id": "synthetic-native"},
+            "worktree_cleanup": {"state": "held"},
+        }),
+    )
+    generation = queue.get(task.id).generation
+    preview = queue.recover_held_cleanup(
+        reservation.key, expected_generation=generation, current_host="synthetic-host",
+    )
+    result = queue.recover_held_cleanup(
+        reservation.key, expected_generation=generation, current_host="synthetic-host",
+        apply=True, expected_preview=preview["preview_token"],
+        request_id="synthetic-cleanup-request", reason="synthetic-owner-fixture",
+    )
+    assert result["scheduled"] is True
+    # Simulate orphaned history only in this test's temporary, owner-prepared DB.
+    with queue._connect() as connection:
+        for table in reversed(initial_case.DISPATCH_HISTORY):
+            connection.execute(f"DELETE FROM {table}")
+        assert connection.execute("SELECT 1 FROM tasks").fetchone() is None
+        assert connection.execute("SELECT 1 FROM spawn_reservations").fetchone() is None
+        retained = dict(connection.execute("SELECT * FROM cleanup_recoveries").fetchone())
+    test_actual_queue_task_keyed_schema_is_covered_independently(owners)
+    with pytest.raises(ValueError, match="Dispatch work"):
+        submit(owners)
+    assert not owners.log.path.exists() and queue.list(limit=1) == []
+    with queue._connect() as connection:
+        assert dict(connection.execute("SELECT * FROM cleanup_recoveries").fetchone()) == retained
