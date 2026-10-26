@@ -3,6 +3,20 @@
 GitHub Codespaces lifecycle management, SSH transport, and credential relay
 for Copilot CLI.
 
+Default native `uninstall` removes only explicitly named runtime code and
+selectors. Operator configuration, databases, adoption/account bindings, locks,
+SSH configuration, sockets, logs and unknown entries remain in the install
+root. Removal requires matching deployment ownership and an installer-engine
+with entry-list support. Foreign roots and linked ancestry refuse before
+removal; unowned binstubs remain untouched. Connection Owner registration and active/reconnect transport
+receipts also refuse; uninstall does not stop the owner or close SSH masters.
+The canonical uninstall engine holds runtime, snapshot and redirect-publication
+custody throughout finite native cleanup. Persistent lease files alone are not
+busy and retain their inodes; actual conflicting owners refuse admission.
+Every native mutating lifecycle action shares the install transaction inode;
+Bash uses an attached standard-library owner rather than depending on `flock`.
+Existing native dry runs perform read-only admission and remove nothing.
+
 ## Overview
 
 A copilot-extensions plugin that provides:

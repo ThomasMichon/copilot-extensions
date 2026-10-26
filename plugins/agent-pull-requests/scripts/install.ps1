@@ -747,6 +747,10 @@ function Invoke-Stamp {
     Write-Ok 'Stamped: agent-pull-requests binstub on PATH; runtime provisions on first use.'
 }
 
+if ($Action -eq 'uninstall') {
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -AdmissionOnly
+}
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -773,10 +777,9 @@ try {
     }
 
     if ($Action -eq 'uninstall') {
-        Remove-Item (Join-Path $LocalBin 'agent-pull-requests.ps1') -Force -ErrorAction SilentlyContinue
-        Remove-Item (Join-Path $LocalBin 'agent-pull-requests.cmd') -Force -ErrorAction SilentlyContinue
-        Remove-InstallRuntimeContent -InstallRoot $InstallDir
-        Write-Ok 'agent-pull-requests runtime removed (transaction/staging coordination retained)'
+        . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+        Invoke-StatePreservingUninstall
+        Write-Ok 'agent-pull-requests runtime removed (durable, unknown and coordination state retained)'
         exit 0
     }
 

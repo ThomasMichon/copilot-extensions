@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -123,9 +124,14 @@ def test_valid_namespaced_actual_hook_stamps_only_cell_metadata(
     assert result.stdout == "{}"
     assert "default-installation-only" not in result.stderr
     after = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
-    assert set(after) - set(before) == {
+    expected = {
         Path("payload-dir"), Path("stamped-version"), Path(".publication.lock"),
     }
+    if sys.platform == "win32" and shell == "powershell":
+        lease = Path(".publication-leases") / (hashlib.sha256(b"redirects").hexdigest() + ".lock")
+        expected.add(lease)
+        assert after[lease] == b""
+    assert set(after) - set(before) == expected
     assert all(after[path] == contents for path, contents in before.items())
     assert after[Path("stamped-version")] == b"9.9.9\n"
     assert after[Path("payload-dir")].decode().strip() == environment["AGENT_INDEX_PAYLOAD_ROOT"]

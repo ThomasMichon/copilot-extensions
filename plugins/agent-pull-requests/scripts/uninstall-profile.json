@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "root_entries": [".venv", "current-version", "last-known-good", "running-version.json", "payload-dir", "stamped-version", "deploy-manifest.json", ".provision-status"],
+  "bin_entries": ["resolve-runtime.ps1", "resolve-runtime.sh", "bootstrap-check.ps1", "bootstrap-check.sh", "bootstrap-killswitch-guard.ps1", "bootstrap-killswitch-guard.sh"],
+  "script_entries": [],
+  "local_bin_entries": ["agent-pull-requests", "agent-pull-requests.ps1", "agent-pull-requests.cmd"],
+  "module": "agent_pull_requests",
+  "guard_module": "uninstall-state.py",
+  "guard_function": "check_under_custody"
+}

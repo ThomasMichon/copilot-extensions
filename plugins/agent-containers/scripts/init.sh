@@ -31,19 +31,20 @@ parse_arguments() {
             --force) FORCE=1; shift ;;
             --install-dir) INSTALL_DIR="${2:?--install-dir requires a path}"; shift 2 ;;
             --profile) PROFILE="${2:?--profile requires base or provider-exec}"; shift 2 ;;
-            stamp|provision|init) ACTION="$1"; shift ;;
+            install|uninstall|stamp|provision|init) ACTION="$1"; shift ;;
             *) _fail "Unknown installer argument: $1"; exit 2 ;;
         esac
     done
 }
 # Resolve caller-relative roots before self-staging changes the working directory.
 parse_arguments "$@"
-if [[ "$ACTION" != stamp && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" &&
+if [[ "$ACTION" != stamp && "$ACTION" != uninstall && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" &&
     -z "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET+x}" ]]; then
     _fail "Prepared-source transaction requires a frozen source target; upgrade the update engine before profile construction."
     exit 1
 fi
 case "$PROFILE" in ""|base|provider-exec) ;; *) _fail "Unknown runtime profile: $PROFILE"; exit 2 ;; esac
+case "/$INSTALL_DIR/" in */../*) _fail 'Legacy runtime paths must not contain raw .. components'; exit 1 ;; esac
 case "$INSTALL_DIR" in ""|/*) ;; *) INSTALL_DIR="$PWD/$INSTALL_DIR" ;; esac
 set -- "$ACTION"
 if [[ "$FORCE" == 1 ]]; then set -- "$@" --force; fi
@@ -53,6 +54,11 @@ export AGENT_CONTAINERS_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ "$ACTION" == uninstall ]]; then
+    [[ "$FORCE" == 0 && -z "$PROFILE" ]] || { _fail 'Legacy uninstall does not accept force or profile'; exit 2; }
+    exec bash "$SCRIPT_DIR/legacy-uninstall.sh" "${INSTALL_DIR:-$HOME/.agent-containers}"
+fi
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,

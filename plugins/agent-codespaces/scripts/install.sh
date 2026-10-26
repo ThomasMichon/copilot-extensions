@@ -1060,56 +1060,13 @@ do_uninstall() {
     _header "$SERVICE_NAME Uninstall"
     $DRY_RUN && echo "(dry run -- nothing will be changed)"
 
-    if $DRY_RUN; then
-        [[ -f "$HOME/.config/systemd/user/agent-codespaces-owner.service" ]] && \
-            echo "[dry-run] would stop + remove Connection Owner systemd unit"
-        local socket_dir="$INSTALL_DIR/sockets"
-        [[ -d "$socket_dir" ]] && echo "[dry-run] would stop managed SSH connections under: $socket_dir"
-    else
-        # Remove the Connection Owner systemd unit (if provisioned).
-        _remove_owner_service
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    local preview=0
+    $DRY_RUN && preview=1
+    uninstall_state_preserving_runtime "$preview" || return 1
 
-        # Stop managed SSH ControlMaster connections before removing files. They
-        # multiplex connections to CodeSpaces via sockets under
-        # ~/.agent-codespaces/sockets. Close each via `ssh -O exit` (best-effort),
-        # then kill any lingering ssh master referencing the socket dir.
-        local socket_dir="$INSTALL_DIR/sockets"
-        if [[ -d "$socket_dir" ]]; then
-            for sock in "$socket_dir"/*; do
-                [[ -e "$sock" ]] || continue
-                ssh -o "ControlPath=$sock" -O exit placeholder >/dev/null 2>&1 || true
-            done
-        fi
-        if command -v pkill &>/dev/null; then
-            pkill -f "ControlPath=$INSTALL_DIR/sockets" 2>/dev/null && \
-                _changed "Stopped managed SSH ControlMaster processes" || true
-        fi
-    fi
-
-    # Remove binstub
-    local stub_path="$LOCAL_BIN/agent-codespaces"
-    if [[ -f "$stub_path" ]]; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove binstub: $stub_path"
-        else
-            rm -f "$stub_path"
-            _changed "Removed binstub: $stub_path"
-        fi
-    else
-        _skip "Binstub not found"
-    fi
-
-    # Remove install directory (config, DB, venv -- agent-codespaces has no
-    # --purge distinction; uninstall always removes the whole install dir).
-    if [[ -d "$INSTALL_DIR" ]]; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove (config + DB + venv): $INSTALL_DIR"
-        else
-            rm -rf "$INSTALL_DIR"
-            _changed "Removed: $INSTALL_DIR"
-        fi
-    else
-        _skip "Install directory not found"
+    if ! $DRY_RUN; then
+        _changed "Owned runtime removed; durable and unknown state retained: $INSTALL_DIR"
     fi
 
     if $DRY_RUN; then
@@ -1294,6 +1251,15 @@ do_provision() {
 source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
+if [[ "$ACTION" == uninstall ]]; then
+    source "$SCRIPT_DIR/uninstall-runtime.sh"
+    uninstall_state_preserving_runtime 1 validate || exit 1
+fi
+source "$SCRIPT_DIR/install-transaction.sh"
+if codespaces_requires_install_transaction "$ACTION" "$DRY_RUN"; then
+    enter_codespaces_install_transaction || exit 1
+    trap 'exit_codespaces_install_transaction' EXIT
+fi
 case "$ACTION" in
     install|update|provision|stamp|dev)
         _initialize_source_runtime || exit 1

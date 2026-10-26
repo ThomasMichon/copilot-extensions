@@ -1,0 +1,25 @@
+{
+  "comment": "Ship canonical finite uninstall custody and serialize Index runtime publishers without deleting durable state during ordinary removal.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

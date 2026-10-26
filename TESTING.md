@@ -3,6 +3,30 @@
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
 
+The optional native runtime-removal portfolio includes
+`tools/test_installer_engine_uninstall.py`,
+`tools/test_installer_engine_commands.py`,
+`tools/test_runtime_uninstall_process.py`, CodeSpaces'
+`tests/native_uninstall/`, Machines' `test_legacy_runtime_uninstall.py` and
+`test_legacy_publisher_transaction.py`, Containers'
+`test_containers_legacy_runtime_uninstall.py`, Index's
+`test_native_runtime_uninstall.py` and `test_legacy_transaction_admission.py`,
+and Vault's cross-adapter `test_native_uninstall_adapters.py`.
+They use disposable roots and real native removal/custody boundaries; service
+registration adapters remain isolated from host tasks and units. Controls cover
+durable/unknown-byte preservation, retained lock identities, idle retry,
+construction/retention/publication contention, default nested-engine removal,
+managed/foreign-root refusal and live/reconnect transport negatives.
+The command packet derives current native writer bodies from trusted sources
+and covers exact owned forms, custom/foreign roots, comments and modified
+programs, independently executable cmd forms and delegating-peer refusal.
+Pull Requests' `test_install_lock_fallback.py` additionally exercises cold
+materialized staging on Windows PowerShell 5 and 7, including source hashing
+without the optional `Get-FileHash` command. Native platform skips are not
+acceptance evidence for those platforms. These tests do not qualify abrupt
+caller death, whole-suite removal around a running Copilot mux, fresh SSH/Gateway
+reconnection or deployment, and do not enlarge the required unit-only packet.
+
 The opt-in `installation-context-acceptance.yml` dependency-compile selection
 also runs independent registered-marketplace provider and inventory partitions
 on Linux and Windows, each retaining a six-minute job ceiling.

@@ -1973,6 +1973,9 @@ do_uninstall() {
     $DRY_RUN && echo "(dry run -- nothing will be changed)"
     echo ""
 
+    . "$SCRIPT_DIR/uninstall-runtime.sh"
+    _finite_runtime_uninstall --check || return 1
+    _bridge_uninstall_preflight || return 1
     if $DRY_RUN; then
         if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
             echo "[dry-run] would stop agent-bridge (pid=$(cat "$PID_FILE"))"
@@ -1980,11 +1983,11 @@ do_uninstall() {
             _skip "agent-bridge not running"
         fi
     else
-        do_stop
+        _bridge_uninstall_stop_owned || return 1
     fi
 
     # systemd unit
-    if command -v systemctl &>/dev/null; then
+    if command -v systemctl &>/dev/null && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
         if $DRY_RUN; then
             echo "[dry-run] would disable + remove systemd unit: $SYSTEMD_UNIT"
         else
@@ -1995,48 +1998,18 @@ do_uninstall() {
         fi
     fi
 
-    if $PUBLISH_GLOBAL_BINSTUBS; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove binstub: $BINSTUB"
-        else
-            rm -f "$BINSTUB"
-            _ok "Binstub removed"
-        fi
-    else
-        _ok "Scoped install left the legacy global binstub unchanged"
-    fi
-
     $DRY_RUN || _remove_sibling_binstubs
-
-    # Remove the runtime venv. In the versioned layout this means the `venv`
-    # symlink AND the whole versions/ tree; otherwise the single real venv dir.
-    if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if $DRY_RUN; then
-            [[ -L "$LINK_DIR" || -d "$LINK_DIR" ]] && echo "[dry-run] would remove: $LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && echo "[dry-run] would remove: $INSTALL_DIR/versions"
-        else
-            [[ -L "$LINK_DIR" ]] && rm -f "$LINK_DIR"
-            [[ -d "$LINK_DIR" && ! -L "$LINK_DIR" ]] && rm -rf "$LINK_DIR"
-            [[ -d "$INSTALL_DIR/versions" ]] && rm -rf "$INSTALL_DIR/versions"
-            _ok "Venv removed"
-        fi
-    elif [[ -d "$VENV_DIR" ]]; then
-        if $DRY_RUN; then
-            echo "[dry-run] would remove venv: $VENV_DIR"
-        else
-            rm -rf "$VENV_DIR"
-            _ok "Venv removed"
-        fi
-    fi
 
     if $PURGE; then
         if $DRY_RUN; then
             echo "[dry-run] would PURGE config/DB/auth at: $INSTALL_DIR"
         else
             _warn "Purging config, DB, and auth"
-            rm -rf "$INSTALL_DIR"
+            _finite_runtime_uninstall --remove-runtime || return 1
+            remove_install_runtime_content "$INSTALL_DIR" || return 1
         fi
     else
+        _remove_bridge_runtime_code || return 1
         _skip "Preserved config/DB at $INSTALL_DIR (use --purge to remove)"
     fi
 
@@ -2045,6 +2018,99 @@ do_uninstall() {
     else
         _ok "agent-bridge uninstalled"
     fi
+}
+
+_bridge_uninstall_preflight() {
+    local unit="$HOME/.config/systemd/user/$SYSTEMD_UNIT"
+    if [[ -e "$unit" || -L "$unit" ]]; then
+        [[ -f "$unit" && ! -L "$unit" ]] &&
+            grep -F -- "$INSTALL_DIR/" "$unit" >/dev/null &&
+            grep -E -- 'ExecStart=.*-m agent_bridge (start|service start --direct)' "$unit" >/dev/null || {
+                _fail "Refusing unowned Bridge systemd unit"; return 1;
+            }
+        if command -v systemctl >/dev/null 2>&1; then
+            local fragment
+            fragment="$(systemctl --user show --property=FragmentPath --value "$SYSTEMD_UNIT")" || return 1
+            [[ "$fragment" == "$unit" ]] || { _fail "Bridge loaded unit is not this installation"; return 1; }
+        fi
+    fi
+    _bridge_uninstall_processes >/dev/null
+}
+
+_bridge_uninstall_processes() {
+    local inventory line pid command
+    inventory="$(ps -eo pid=,args=)" || { _fail "Cannot inspect Bridge process ownership"; return 1; }
+    while IFS= read -r line; do
+        read -r pid command <<< "$line"
+        case "$command" in
+            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ start|\
+            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ start|\
+            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ service\ start\ --direct|\
+            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ service\ start\ --direct)
+                printf '%s\n' "$pid" ;;
+            "$INSTALL_DIR"/*)
+                _fail "Bridge runtime still in use by an unclassified process (pid=$pid)" >&2
+                return 1 ;;
+        esac
+    done <<< "$inventory"
+    if [[ -f "$PID_FILE" ]]; then
+        local receipt
+        receipt="$(cat "$PID_FILE")"
+        [[ "$receipt" =~ ^[1-9][0-9]*$ ]] || { _fail "Invalid Bridge PID receipt"; return 1; }
+        command="$(ps -p "$receipt" -o args= 2>/dev/null)" || return 0
+        case "$command" in
+            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ start|\
+            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ start|\
+            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ service\ start\ --direct|\
+            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ service\ start\ --direct) ;;
+            *) _fail "Bridge PID receipt names a foreign process" >&2; return 1 ;;
+        esac
+    fi
+}
+
+_bridge_uninstall_stop_owned() {
+    local owned pid before now children waited
+    owned="$(_bridge_uninstall_processes)" || return 1
+    for pid in $owned; do
+        children="$(ps -eo ppid=,pid= | awk -v p="$pid" '$1 == p { print $2 }')" || return 1
+        [[ -z "$children" ]] || { _fail "Bridge still owns a live child/transport"; return 1; }
+    done
+    if command -v systemctl >/dev/null 2>&1 && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
+        systemctl --user stop "$SYSTEMD_UNIT" || return 1
+    fi
+    for pid in $owned; do
+        before="$(ps -p "$pid" -o lstart=,args=)" || continue
+        now="$(ps -p "$pid" -o lstart=,args=)" || continue
+        [[ "$before" == "$now" ]] || { _fail "Bridge process identity changed"; return 1; }
+        kill "$pid" || return 1
+        for waited in {1..15}; do
+            now="$(ps -p "$pid" -o lstart=,args=)" || break
+            [[ "$now" == "$before" ]] || break
+            sleep 1
+        done
+        [[ "$now" != "$before" ]] || { _fail "Owned Bridge daemon did not stop"; return 1; }
+    done
+}
+
+_remove_bridge_runtime_code() {
+    if $DRY_RUN; then
+        echo "[dry-run] would remove owned runtime code at: $INSTALL_DIR"
+        return 0
+    fi
+    _finite_runtime_uninstall --remove-runtime
+}
+
+_remove_bridge_helper_files() {
+    local directory="$1" name
+    shift
+    [[ -d "$directory" && ! -L "$directory" ]] || { _fail "Refusing linked runtime helpers"; return 1; }
+    for name in "$@"; do
+        [[ -e "$directory/$name" || -L "$directory/$name" ]] || continue
+        [[ -f "$directory/$name" && ! -L "$directory/$name" ]] || {
+            _fail "Refusing linked/non-file runtime helper"; return 1;
+        }
+    done
+    for name in "$@"; do rm -f -- "$directory/$name" || return 1; done
 }
 
 do_start() {

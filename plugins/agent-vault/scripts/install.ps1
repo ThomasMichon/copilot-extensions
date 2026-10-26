@@ -1288,10 +1288,28 @@ function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-vault uninstall ===' -ForegroundColor Cyan
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    $ownedProcesses = @(Get-VaultUninstallProcesses)
     if ($DryRun) {
         Write-Host '[dry-run] would stop agent-vault'
     } else {
-        Invoke-Stop
+        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+            Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+        }
+        foreach ($row in $ownedProcesses) {
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
+                throw 'Vault process identity changed; refusing uninstall'
+            }
+            if ($now) {
+                Stop-Process -Id $row.ProcessId -ErrorAction Stop
+                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
+                    throw 'Owned Vault daemon did not stop'
+                }
+            }
+        }
     }
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         if ($DryRun) {
@@ -1301,46 +1319,114 @@ function Invoke-Uninstall {
             Write-Ok 'Scheduled task removed'
         }
     }
-    foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
-        if (Test-Path $stub) {
-            if ($DryRun) {
-                Write-Host "[dry-run] would remove binstub: $stub"
-            } else {
-                Remove-Item $stub -Force -ErrorAction SilentlyContinue
-                Write-Ok "Binstub removed: $stub"
-            }
-        }
-    }
     if ($Purge) {
         if (Test-Path $InstallDir) {
             if ($DryRun) { Write-Host "[dry-run] would purge runtime/config contents (coordination retained): $InstallDir" }
             else {
+                Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
                 Remove-InstallRuntimeContent -InstallRoot $InstallDir
                 Write-Ok "Runtime purged (transaction/staging coordination retained): $InstallDir"
             }
         }
     } else {
-        # Remove the runtime venv. In the versioned layout this is the `.venv`
-        # link AND the whole versions/ tree; otherwise the single real venv dir.
-        if ($VersionedRuntime) {
-            if ($DryRun) {
-                if ((Test-VenvIsLink $LinkDir) -or (Test-Path $LinkDir)) { Write-Host "[dry-run] would remove: $LinkDir" }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Write-Host "[dry-run] would remove: $verRoot" }
-            } else {
-                if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
-                elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
-            }
-        } elseif (Test-Path $VenvDir) {
-            if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
-            else { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
-        }
+        Remove-VaultRuntimeCode
         if ($DryRun) { Write-Host "[dry-run] state at $InstallDir would be kept (-Purge to delete)" }
         else { Write-Ok 'Venv removed (state kept; -Purge to delete)' }
     }
     if ($DryRun) { Write-Host 'agent-vault uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
+}
+
+function Get-VaultUninstallProcesses {
+    Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+    if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
+    $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+    if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\', '/') -or
+        $root -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\', '/')) {
+        throw 'Refusing uninstall of a filesystem or home root'
+    }
+    $ancestor = $root
+    while ($ancestor) {
+        $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing linked uninstall root' }
+        $ancestor = Split-Path -Parent $ancestor
+    }
+    $manifest = Join-Path $root 'deploy-manifest.json'
+    if (Test-Path -LiteralPath $manifest) {
+        $item = Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+        if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+            throw 'Refusing linked or non-file Vault deploy manifest'
+        }
+        $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($record.service -ne 'agent-vault' -or $record.source.plugin -ne 'agent-vault') {
+            throw 'Refusing foreign Vault deploy manifest'
+        }
+    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        if (@($task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
+        foreach ($taskAction in $task.Actions) {
+            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                -not ([string]$taskAction.Arguments).Contains((Join-Path $root 'service.ps1'))) {
+                throw 'Refusing foreign Vault scheduled task'
+            }
+        }
+    }
+    $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+    $owned = @()
+    foreach ($row in $rows) {
+        if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
+                $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ([string]$row.CommandLine -notmatch '(?i)(?:^|\s)-m\s+agent_vault\.service(?:\s+--foreground)?(?:\s+--persistent)?\s*$') {
+            throw "Runtime still in use by an unclassified process (pid=$($row.ProcessId))"
+        }
+        $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+        if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+            throw 'Vault daemon user ownership cannot be validated'
+        }
+        $owned += $row
+    }
+    $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+    foreach ($row in $rows) {
+        if ([int]$row.ParentProcessId -in $ownedIds -and [int]$row.ProcessId -notin $ownedIds) {
+            throw "Vault still owns a live child (pid=$($row.ProcessId)); refusing uninstall"
+        }
+    }
+    if (Test-Path -LiteralPath $PidFile) {
+        $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+        if ($value -notmatch '^[1-9][0-9]*$') { throw 'Refusing invalid Vault PID receipt' }
+        if (@($rows | Where-Object { $_.ProcessId -eq [int]$value }).Count -and [int]$value -notin $ownedIds) {
+            throw 'Vault PID receipt names a foreign process; refusing uninstall'
+        }
+    }
+    return $owned
+}
+
+function Remove-VaultRuntimeCode {
+    if ($DryRun) {
+        Write-Host "[dry-run] would remove owned runtime code at: $InstallDir"
+        return
+    }
+    Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+}
+
+function Remove-VaultHelperFiles {
+    param([string]$Directory, [string[]]$Names)
+    $item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Refusing linked or non-directory runtime helpers'
+    }
+    foreach ($name in $Names) {
+        $path = Join-Path $Directory $name
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+            throw "Refusing linked or non-file runtime helper: $path"
+        }
+    }
+    foreach ($name in $Names) {
+        $path = Join-Path $Directory $name
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+    }
 }
 
 # === install-transaction lock (fail-closed) ===

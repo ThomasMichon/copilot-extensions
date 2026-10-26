@@ -1076,6 +1076,10 @@ function Exit-InstallLock {
 
 $PackageVersion = $SrcVersion
 Initialize-SourceRuntime
+if ($Action -eq 'uninstall') {
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -AdmissionOnly
+}
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -1102,20 +1106,13 @@ if ($Action -eq 'status') {
 }
 
 if ($Action -eq 'uninstall') {
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
+    Invoke-StatePreservingUninstall -Preview:$DryRun
     if ($DryRun) {
-        Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow
-        $ps1 = Join-Path $LocalBin 'agent-ssh.ps1'
-        $cmd = Join-Path $LocalBin 'agent-ssh.cmd'
-        if (Test-Path $ps1) { Write-Host "[dry-run] would remove binstub: $ps1" }
-        if (Test-Path $cmd) { Write-Host "[dry-run] would remove binstub: $cmd" }
-        if (Test-Path $InstallDir) { Write-Host "[dry-run] would remove runtime/config contents (coordination retained): $InstallDir" }
         Write-Host 'agent-ssh uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
         exit 0
     }
-    Remove-Item (Join-Path $LocalBin 'agent-ssh.ps1') -Force -ErrorAction SilentlyContinue
-    Remove-Item (Join-Path $LocalBin 'agent-ssh.cmd') -Force -ErrorAction SilentlyContinue
-    Remove-InstallRuntimeContent -InstallRoot $InstallDir
-    Write-Ok 'agent-ssh runtime removed (transaction/staging coordination retained)'
+    Write-Ok 'agent-ssh runtime removed (durable, unknown and coordination state retained)'
     exit 0
 }
 

@@ -71,8 +71,10 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie
 ### Source-qualified command binding
 
 `installerLifecycle: true` packages the existing command-binding/lifecycle
-helpers for a required-context installer's admission without changing command
-catalogs or enabling their additive binding field. The installer must invoke
+helpers for a required-context or legacy version-1 installer's admission without
+changing command catalogs or enabling their additive binding field. A legacy
+installer still requires its vendored installation primitive; SDK packaging
+does not enable installation cells or required-context dispatch. The installer must invoke
 that admission before staging and authenticate a borrowed ticket on reentry;
 packaging alone does not enforce it. Logger is the first installer-only adopter.
 All current required-context Python runtime payloads package this SDK for

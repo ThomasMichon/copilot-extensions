@@ -2430,6 +2430,37 @@ runtime process-utility dependency; without a construction descriptor it does
 not establish storage-custody retention after abrupt caller death. Existing
 construction callers retain their descriptor-backed contract.
 
+The state-preserving native adapters share
+`libs/installer-engine/installer_engine_uninstall.py`, packaged through the
+existing installer-engine synchronization/materialization owner. Native callers
+retain their whole-install transaction, service STOP and registration handling.
+The helper owns a finite, payload-declared artifact plan, typed or stamped
+product ownership, read-only policy guards and canonical generation/snapshot/
+redirect custody through selective native deletion. Its `--check` performs
+structural admission only; deletion repeats ownership, inventory, guards and
+current-user process attribution under custody. A matching deploy manifest is
+removed last and retained as retry proof on cleanup failure.
+Global command selection uses the co-packaged
+`installer_engine_commands.py` and exact current native-writer templates, not
+root/module strings in comments. Modified, foreign and unrecognized programs
+remain. Cmd wrappers that delegate to PowerShell require their exact owned
+peer; independently executable MCP/Machines cmd programs are checked against
+their complete native templates. Index separately admits its exact installed
+and product-verified session-stamped lifecycle-gate forms at the default root.
+
+Installation-cell/managed roots, mutable development claims, linked ancestry,
+unrecognized legacy venv directories, foreign ownership, conflicting leases
+and unattributed live consumers refuse explicitly. Released coordination files
+remain; their existence is not proof of a live holder. Product profiles preserve
+unknown contents, databases, configuration, authentication and transport state
+by default. A transport guard may refuse removal until its active/reconnect
+dependency closure has independent custody. Index's default nested engine is
+included in the same ownership admission, including nested cell/managed/foreign
+metadata refusal under custody; an external engine override is not silently
+enrolled. Explicit purge remains a separate, destructive native caller action.
+Finite writer timeout settlement does not qualify whole-transaction custody
+after abrupt caller death, live Copilot survival or fresh SSH reconnection.
+
 `agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
 `flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through
 Python, so it still excludes PowerShell and `flock` holders of `.install.lock`;

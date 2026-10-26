@@ -2788,13 +2788,104 @@ function Invoke-Uninstall {
     Write-Host '=== agent-bridge uninstall ===' -ForegroundColor Cyan
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
 
+    function Get-BridgeUninstallProcesses {
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+        if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
+        $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+        if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\', '/') -or
+            $root -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\', '/')) {
+            throw 'Refusing uninstall of a filesystem or home root'
+        }
+        $ancestor = $root
+        while ($ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing linked uninstall root: $ancestor"
+            }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+        $manifest = Join-Path $root 'deploy-manifest.json'
+        if (Test-Path -LiteralPath $manifest) {
+            $item = Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw 'Refusing linked or non-file Bridge deploy manifest'
+            }
+            $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($record.service -ne 'agent-bridge' -or $record.source.plugin -ne 'agent-bridge') {
+                throw 'Refusing foreign Bridge deploy manifest'
+            }
+        }
+        $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $owned = @()
+        foreach ($row in $rows) {
+            if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
+                    $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            if ([string]$row.CommandLine -notmatch '(?i)(?:^|\s)-m\s+agent_bridge\s+(?:start|service\s+start\s+--direct)\s*$') {
+                throw "Runtime still in use by an unclassified process (pid=$($row.ProcessId))"
+            }
+            $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+            if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+                throw 'Bridge daemon user ownership cannot be validated'
+            }
+            $owned += $row
+        }
+        $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+        foreach ($row in $rows) {
+            if ([int]$row.ParentProcessId -in $ownedIds -and [int]$row.ProcessId -notin $ownedIds) {
+                throw "Bridge still owns a live child/transport (pid=$($row.ProcessId)); refusing uninstall"
+            }
+        }
+        if (Test-Path -LiteralPath $PidFile) {
+            $value = (Get-Content -LiteralPath $PidFile -Raw).Trim()
+            if ($value -notmatch '^[1-9][0-9]*$') { throw 'Refusing invalid Bridge PID receipt' }
+            if (@($rows | Where-Object { $_.ProcessId -eq [int]$value }).Count -and [int]$value -notin $ownedIds) {
+                throw 'Bridge PID receipt names a foreign process; refusing uninstall'
+            }
+        }
+        if ((Test-Path -LiteralPath (Join-Path $InstallDir 'active.json')) -and -not (Test-ActiveIsForward)) {
+            foreach ($portNumber in @((Get-ActiveEndpoint).Port, $RelayPort)) {
+                foreach ($listener in @(Get-NetTCPConnection -LocalPort $portNumber -ErrorAction SilentlyContinue |
+                        Where-Object { $_.State -eq 'Listen' })) {
+                    if ([int]$listener.OwningProcess -notin $ownedIds) {
+                        throw 'Bridge endpoint is owned by an unclassified process; refusing uninstall'
+                    }
+                }
+            }
+        }
+        return $owned
+    }
+
+    $ownedProcesses = @(Get-BridgeUninstallProcesses)
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        if (@($existing.Actions).Count -ne 1) { throw 'Refusing ambiguous Bridge scheduled task actions' }
+        foreach ($taskAction in $existing.Actions) {
+            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                -not ([string]$taskAction.Arguments).Contains((Join-Path $InstallDir 'start-agent-bridge.ps1'))) {
+                throw "Refusing foreign scheduled task: $TaskName"
+            }
+        }
+    }
     if ($DryRun) {
-        $proc = Get-RunningProcess
-        if ($proc) { Write-Host "[dry-run] would stop agent-bridge (pid=$($proc.Id))" }
+        if ($ownedProcesses.Count) { Write-Host "[dry-run] would stop owned agent-bridge processes" }
         else { Write-Skip 'agent-bridge not running' }
     } else {
-        Invoke-Stop
+        foreach ($row in $ownedProcesses) {
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
+                throw 'Bridge process identity changed; refusing uninstall'
+            }
+            if ($now) {
+                Stop-Process -Id $row.ProcessId -ErrorAction Stop
+                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
+                    throw 'Owned Bridge daemon did not stop'
+                }
+            }
+        }
     }
 
     # Scheduled task
@@ -2810,30 +2901,45 @@ function Invoke-Uninstall {
         Write-Skip "Scheduled task not present: $TaskName"
     }
 
-    if ($publishGlobalBinstubs) {
-        foreach ($stub in @($BinstubPs1, $BinstubCmd)) {
-            if (Test-Path $stub) {
-                if ($DryRun) { Write-Host "[dry-run] would remove binstub: $stub" }
-                else { Remove-Item -Force $stub; Write-Ok "Binstub removed: $stub" }
-            }
-        }
-    } else {
-        Write-Ok 'Scoped install left the legacy global binstub unchanged'
-    }
-
     if (-not $DryRun) { Remove-SiblingBinstubs }
 
-    if (Test-Path $VenvDir) {
-        if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
-        else { Remove-Item -Recurse -Force $VenvDir; Write-Ok 'Venv removed' }
-    } else {
-        Write-Skip "Venv not present: $VenvDir"
+    function Remove-BridgeRuntimeCode {
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove owned runtime code at: $InstallDir"
+            return
+        }
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+    }
+
+    function Remove-BridgeHelperFiles {
+        param([string]$Directory, [string[]]$Names)
+        $item = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Refusing linked or non-directory runtime helpers'
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw "Refusing linked or non-file runtime helper: $path"
+            }
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+        }
     }
 
     if ($Purge -and (Test-Path $InstallDir)) {
         if ($DryRun) { Write-Host "[dry-run] would PURGE config/DB/auth at: $InstallDir" }
-        else { Write-Warn 'Purging config, DB, and auth'; Remove-Item -Recurse -Force $InstallDir }
+        else {
+            Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+            Write-Warn 'Purging config, DB, and auth'
+            Remove-InstallRuntimeContent -InstallRoot $InstallDir
+        }
     } else {
+        Remove-BridgeRuntimeCode
         Write-Skip "Preserved config/DB at $InstallDir (use -Purge to remove)"
     }
 

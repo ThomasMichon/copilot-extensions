@@ -160,8 +160,13 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypa
         ).read_text(encoding="utf-8")
 
 
-def test_installer_lifecycle_does_not_change_command_catalog(tmp_path: Path) -> None:
-    manifest = _required_context_multi_manifest(tmp_path)
+@pytest.mark.parametrize("required_context", (False, True))
+def test_installer_lifecycle_does_not_change_command_catalog(
+    tmp_path: Path, required_context: bool,
+) -> None:
+    manifest = (
+        _required_context_multi_manifest(tmp_path) if required_context else _manifest(tmp_path)
+    )
     data = json.loads(manifest.read_text(encoding="utf-8"))
     before = generator.expected_files(manifest)
     primitive = manifest.parent / "scripts/installation-context/installation_context.py"
@@ -188,16 +193,12 @@ def test_installer_lifecycle_requires_boolean(tmp_path: Path, value: object) -> 
 
 
 @pytest.mark.parametrize("required_context", [False, True])
-def test_installer_lifecycle_requires_context_and_vendored_primitive(
+def test_installer_lifecycle_requires_vendored_primitive(
     tmp_path: Path, required_context: bool,
 ) -> None:
     manifest = (
         _required_context_manifest(tmp_path) if required_context else _manifest(tmp_path)
     )
-    if not required_context:
-        primitive = manifest.parent / "scripts/installation-context/installation_context.py"
-        primitive.parent.mkdir()
-        primitive.write_text("# fixture\n", encoding="utf-8")
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["installerLifecycle"] = True
     manifest.write_text(json.dumps(data), encoding="utf-8")

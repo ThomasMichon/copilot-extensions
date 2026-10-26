@@ -4271,7 +4271,91 @@ function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan
     if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
     Write-Host ''
+    . (Join-Path $PSScriptRoot 'uninstall-runtime.ps1')
 
+    function Get-DispatchUninstallProcesses {
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
+        if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
+        $root = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+        if ($root -eq [IO.Path]::GetPathRoot($root).TrimEnd('\', '/') -or
+            $root -eq [IO.Path]::GetFullPath($env:USERPROFILE).TrimEnd('\', '/')) {
+            throw 'Refusing uninstall of a filesystem or home root'
+        }
+        $ancestor = $root
+        while ($ancestor) {
+            $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing linked uninstall root' }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+        $manifest = Join-Path $root 'deploy-manifest.json'
+        if (Test-Path -LiteralPath $manifest) {
+            $item = Get-Item -LiteralPath $manifest -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw 'Refusing linked or non-file Dispatch deploy manifest'
+            }
+            $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($record.service -ne 'agent-dispatch' -or $record.source.plugin -ne 'agent-dispatch') {
+                throw 'Refusing foreign Dispatch deploy manifest'
+            }
+        }
+        $tasks = @(Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) +
+            @(Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) +
+            @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+        foreach ($task in $tasks) {
+            $launcher = if ($task.TaskName -eq $TaskName) { 'serve-service.ps1' } else { 'supervise-service.ps1' }
+            if (@($task.Actions).Count -ne 1) { throw 'Refusing ambiguous Dispatch task actions' }
+            foreach ($taskAction in $task.Actions) {
+                if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                    -not ([string]$taskAction.Arguments).Contains((Join-Path $root $launcher))) {
+                    throw "Refusing foreign Dispatch scheduled task: $($task.TaskName)"
+                }
+                $autoruns = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue
+                if ($autoruns) {
+                    foreach ($entry in $autoruns.PSObject.Properties) {
+                        if ($entry.Name -eq $TaskName -or $entry.Name -eq $SupervisorTaskName -or $entry.Name -like "$SupervisorTaskName-*") {
+                            $launcher = if ($entry.Name -eq $TaskName) { 'serve-service.ps1' } else { 'supervise-service.ps1' }
+                            if (-not ([string]$entry.Value).Contains((Join-Path $root $launcher))) {
+                                throw 'Refusing foreign Dispatch autorun binding'
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $owned = @()
+        foreach ($row in $rows) {
+            if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
+                    $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+            $controller = [string]$row.CommandLine -match '(?i)(?:^|\s)-m\s+agent_dispatch\s+(?:--local\s+)?(?:serve|supervise(?:\s+serve)?)(?:\s|$)'
+            $registrar = [string]$row.CommandLine -match '(?i)(?:^|\s)-m\s+agent_dispatch\s+(?:emitter|schedule|webhook)\s+(?:serve\s+)?'
+            $ownedSpec = ([string]$row.CommandLine).IndexOf(
+                (Join-Path $root 'run\supervisor\'), [StringComparison]::OrdinalIgnoreCase) -ge 0
+            if (-not $controller -and -not ($registrar -and $ownedSpec)) {
+                throw "Runtime still in use by an unclassified process (pid=$($row.ProcessId))"
+            }
+            $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid -ErrorAction Stop
+            if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+                throw 'Dispatch daemon user ownership cannot be validated'
+            }
+            $owned += $row
+        }
+        $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+        foreach ($row in $rows) {
+            if ([int]$row.ParentProcessId -in $ownedIds -and [int]$row.ProcessId -notin $ownedIds) {
+                throw "Dispatch still owns a live worker/transport (pid=$($row.ProcessId)); refusing uninstall"
+            }
+        }
+        $endpoint = Join-Path $root 'run\endpoint.json'
+        if (Test-Path -LiteralPath $endpoint) {
+            $record = Get-Content -LiteralPath $endpoint -Raw | ConvertFrom-Json -ErrorAction Stop
+            if ($record.pid -and @($rows | Where-Object { $_.ProcessId -eq [int]$record.pid }).Count -and
+                [int]$record.pid -notin $ownedIds) { throw 'Dispatch endpoint names a foreign process' }
+        }
+        return $owned
+    }
+
+    $ownedProcesses = @(Get-DispatchUninstallProcesses)
     if ($DryRun) {
         Write-Host '[dry-run] would stop supervisors + retire supervisor processes'
         if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
@@ -4285,8 +4369,20 @@ function Invoke-Uninstall {
         }
     } else {
         Invoke-SupervisorsStop
-        $retired = Retire-SupervisorProcesses
-        if ($retired -gt 0) { Write-Ok "Embody supervisor stopped ($retired process(es))" }
+        foreach ($row in $ownedProcesses) {
+            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
+                throw 'Dispatch process identity changed; refusing uninstall'
+            }
+            if ($now) {
+                Stop-Process -Id $row.ProcessId -ErrorAction Stop
+                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
+                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
+                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
+                    throw 'Owned Dispatch daemon did not stop'
+                }
+            }
+        }
         Remove-AllSupervisorTasks
         Write-Ok 'Embody supervisor tasks removed'
     }
@@ -4322,54 +4418,55 @@ function Invoke-Uninstall {
         }
     }
 
-    foreach ($n in @(
-        'agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch',
-        'agent-dispatch-board.cmd', 'agent-dispatch-board.ps1'
-    )) {
-        $p = Join-Path $LocalBin $n
-        if (Test-Path $p) {
-            if ($DryRun) { Write-Host "[dry-run] would remove binstub: $p" }
-            else { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+    function Remove-DispatchRuntimeCode {
+        if ($DryRun) {
+            Write-Host "[dry-run] would remove owned runtime code at: $InstallDir"
+            return
         }
+        Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
     }
-    if (-not $DryRun) { Write-Ok 'Binstub removed' }
 
-    $pivot = Join-Path $env:USERPROFILE '.agent-worktrees\pivots\agent-dispatch.json'
-    if (Test-Path $pivot) {
-        if ($DryRun) { Write-Host "[dry-run] would remove pivot: $pivot" }
-        else { Remove-Item $pivot -Force -ErrorAction SilentlyContinue }
+    function Remove-DispatchHelperFiles {
+        param([string]$Directory, [string[]]$Names)
+        $ancestor = $Directory
+        while ($ancestor -and $ancestor -ne $InstallDir) {
+            $item = Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop
+            if (-not $item.PSIsContainer -or $item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Refusing linked or non-directory runtime helpers'
+            }
+            $ancestor = Split-Path -Parent $ancestor
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (-not (Test-Path -LiteralPath $path)) { continue }
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+            if ($item.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+                throw "Refusing linked or non-file runtime helper: $path"
+            }
+        }
+        foreach ($name in $Names) {
+            $path = Join-Path $Directory $name
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+        }
     }
 
     if ($Purge) {
         if (Test-Path $InstallDir) {
             if ($DryRun) { Write-Host "[dry-run] would PURGE (config + DB): $InstallDir" }
-            else { Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue; Write-Ok "Runtime purged: $InstallDir (config + DB deleted)" }
+            else {
+                Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir
+                Remove-InstallRuntimeContent -InstallRoot $InstallDir
+                Write-Ok "Runtime purged: $InstallDir (config + DB deleted; coordination retained)"
+            }
         }
     } else {
-        # Remove the runtime venv. Versioned: the `.venv` link + the versions/
-        # tree; otherwise the single real venv dir.
-        if ($VersionedRuntime) {
-            if ($DryRun) {
-                if ((Test-VenvIsLink $LinkDir) -or (Test-Path $LinkDir)) { Write-Host "[dry-run] would remove: $LinkDir" }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Write-Host "[dry-run] would remove: $verRoot" }
-            } else {
-                if (Test-VenvIsLink $LinkDir) { & cmd /c rmdir "$LinkDir" 2>$null }
-                elseif (Test-Path $LinkDir) { Remove-Item -Recurse -Force $LinkDir -ErrorAction SilentlyContinue }
-                $verRoot = Join-Path $InstallDir 'versions'
-                if (Test-Path $verRoot) { Remove-Item -Recurse -Force $verRoot -ErrorAction SilentlyContinue }
-            }
-        } elseif (Test-Path $VenvDir) {
-            if ($DryRun) { Write-Host "[dry-run] would remove venv: $VenvDir" }
-            else { Remove-Item -Recurse -Force $VenvDir -ErrorAction SilentlyContinue }
-        }
+        Remove-DispatchRuntimeCode
         if ($DryRun) {
             Write-Host "[dry-run] config + DB at $InstallDir would be kept (-Purge to delete)"
         } else {
             Write-Ok 'Venv removed (config + DB kept; -Purge to delete)'
         }
     }
-
     if ($DryRun) { Write-Host 'agent-dispatch uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
 }
 

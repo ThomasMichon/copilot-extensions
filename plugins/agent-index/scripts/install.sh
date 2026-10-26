@@ -20,6 +20,19 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 unset __index_publication_root
 . "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
+_finite_index_uninstall() {
+    local mode="$1" root="$2" candidate python="" helper="$SCRIPT_DIR/installer_engine_uninstall.py"
+    [[ -f "$helper" ]] || helper="$SCRIPT_DIR/../../../libs/installer-engine/installer_engine_uninstall.py"
+    for candidate in python3 python; do
+        python="$(command -v "$candidate")" || continue
+        case "$python" in "$root"/*) python=""; continue ;; esac
+        break
+    done
+    [[ -n "$python" ]] || { _fail 'Index uninstall requires an external metadata Python'; return 1; }
+    "$python" -I -B "$helper" --payload-root "$PLUGIN_DIR" --plugin-id agent-index \
+        --root "$root" --shell "$BASH" "$mode"
+}
+
 # Refuse every mutating lifecycle action before self-staging touches the legacy
 # runtime. Parse only the action and install-dir override here; the canonical
 # parser below still owns full argument validation.
@@ -33,8 +46,19 @@ for ((__legacy_i = 1; __legacy_i < ${#__legacy_args[@]}; __legacy_i++)); do
             exit 1
         }
         __legacy_install_dir="${__legacy_args[$((__legacy_i + 1))]}"
+        [[ -n "$__legacy_install_dir" && "$__legacy_install_dir" != -* ]] || {
+            _fail '--install-dir requires a directory'; exit 2;
+        }
+        if [[ "$__legacy_action" == uninstall ]]; then
+            case "/$__legacy_install_dir/" in
+                */../*) _fail 'Index uninstall refuses parent-traversal components'; exit 2 ;;
+            esac
+        fi
+        [[ "$__legacy_install_dir" == /* ]] || __legacy_install_dir="$PWD/$__legacy_install_dir"
+        __legacy_args[$((__legacy_i + 1))]="$__legacy_install_dir"
     fi
 done
+set -- "${__legacy_args[@]}"
 if [[ "$__legacy_action" != status &&
       "$__legacy_action" != cell-provision &&
       "$__legacy_action" != cell-recover &&
@@ -59,6 +83,9 @@ if [[ "$__legacy_action" != status &&
     set -e
     if [[ "$LEGACY_PROBE_STATUS" -ne 0 ]]; then
         exit "$LEGACY_PROBE_STATUS"
+    fi
+    if [[ "$__legacy_action" == uninstall ]]; then
+        _finite_index_uninstall --check "$__legacy_root" || exit 1
     fi
 fi
 
@@ -1304,9 +1331,13 @@ _with_index_advisory_lock() (
     previous_umask="$(umask)"
     umask 077
     parent="$(dirname "$target")"
-    if [[ "$descriptor" == 9 ]]; then
+    if [[ "$descriptor" == 6 || "$descriptor" == 9 ]]; then
         lock_python="$(_bootstrap_python)" || lock_python="$(_find_python)" || return 1
-        "$lock_python" -I "$SCRIPT_DIR/session-stamp.py" prepare-lock "$parent" || return 1
+        if [[ "$descriptor" == 6 ]]; then
+            "$lock_python" -I "$SCRIPT_DIR/session-stamp.py" prepare-install-lock "$parent" || return 1
+        else
+            "$lock_python" -I "$SCRIPT_DIR/session-stamp.py" prepare-lock "$parent" || return 1
+        fi
     fi
     mkdir -p "$parent" || return 1
     lock="$parent/.$(basename "$target").lock"
@@ -1352,7 +1383,9 @@ except OSError as error:
     sys.exit(1)
 PY
     }
-    if [[ "$descriptor" == 7 ]]; then
+    if [[ "$descriptor" == 6 ]]; then
+        exec 6<>"$lock" || return 1
+    elif [[ "$descriptor" == 7 ]]; then
         exec 7>"$lock" || return 1
     elif [[ "$descriptor" == 8 ]]; then
         exec 8>"$lock" || return 1
@@ -1372,18 +1405,18 @@ PY
         else
             if ! _python_index_build_lock unlock; then _warn "Cannot unlock runtime build admission: $lock"; [[ "$rc" != 0 ]] || rc=1; fi
         fi
-        if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+        if [[ "$descriptor" == 6 ]]; then exec 6>&-; elif [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
         exit "$rc"
     }
     if [[ "$use_flock" == 1 ]]; then
         if ! flock -w "$timeout" "$descriptor"; then
             _warn "Timed out waiting for runtime build admission: $target"
-            if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            if [[ "$descriptor" == 6 ]]; then exec 6>&-; elif [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
             return 1
         fi
     else
         if ! _python_index_build_lock lock; then
-            if [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
+            if [[ "$descriptor" == 6 ]]; then exec 6>&-; elif [[ "$descriptor" == 7 ]]; then exec 7>&-; elif [[ "$descriptor" == 8 ]]; then exec 8>&-; else exec 9>&-; fi
             return 1
         fi
     fi
@@ -2086,6 +2119,8 @@ _stop() {
 }
 
 _uninstall() {
+    _finite_index_uninstall --check "$INSTALL_DIR" || return 1
+    [[ -d "$INSTALL_DIR" ]] || { _ok 'Index runtime already absent'; return 0; }
     [[ "$DRY_RUN" -eq 1 ]] && echo '(dry run -- nothing will be changed)'
     if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "[dry-run] would stop agent-index"
@@ -2096,7 +2131,7 @@ _uninstall() {
             [[ -d "$ENGINE_HOME" ]] && echo "[dry-run] would PURGE engine home: $ENGINE_HOME"
             [[ -d "$INSTALL_DIR" ]] && echo "[dry-run] would PURGE: $INSTALL_DIR"
         else
-            echo "[dry-run] engine home + install dir would be kept (--purge to delete)"
+            echo "[dry-run] would remove owned runtime generations, snapshots, selectors and helpers; data kept"
         fi
         echo "agent-index uninstall dry run complete -- nothing was changed"
         return 0
@@ -2113,10 +2148,10 @@ _uninstall() {
         rm -f "$UNIT_DIR/$ENGINE_SYSTEMD_UNIT"
         systemctl --user daemon-reload 2>/dev/null || true
     fi
-    rm -f "$STUB"
+    _finite_index_uninstall --remove-runtime "$INSTALL_DIR" || return 1
     if [[ "$PURGE" -eq 1 ]]; then
-        rm -rf "$ENGINE_HOME"
-        rm -rf "$INSTALL_DIR"
+        if [[ -d "$ENGINE_HOME" ]]; then remove_install_runtime_content "$ENGINE_HOME" || return 1; fi
+        remove_install_runtime_content "$INSTALL_DIR" || return 1
     fi
     _ok 'agent-index uninstalled'
 }
@@ -2231,6 +2266,7 @@ _service_cutover() {
     return 1
 }
 
+_run_index_action() {
 source "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
@@ -2290,4 +2326,22 @@ case "$ACTION" in
     stop) _stop ;;
     uninstall) _uninstall ;;
     *) _fail "Unknown action: $ACTION"; exit 2 ;;
+esac
+}
+
+case "$ACTION" in
+    status) _run_index_action ;;
+    uninstall)
+        if [[ "$DRY_RUN" == 1 || ! -d "$INSTALL_DIR" ]]; then
+            _run_index_action
+        else
+            _with_index_advisory_lock "$INSTALL_DIR/install" 6 \
+                "${INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS:-20}" _run_index_action
+        fi
+        ;;
+    install|update|provision|stamp|engine|engine-update|ensure|start|stop)
+        _with_index_advisory_lock "$INSTALL_DIR/install" 6 \
+            "${INDEX_TRANSACTION_LOCK_TIMEOUT_SECONDS:-20}" _run_index_action
+        ;;
+    *) _run_index_action ;;
 esac

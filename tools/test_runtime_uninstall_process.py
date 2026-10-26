@@ -41,7 +41,13 @@ def test_uninstall_timeout_settles_descendant_writer_before_return(tmp_path):
             procutil=None, construction_fd=None,
         )
     pid = int(identity.read_text())
-    assert not Path(f"/proc/{pid}").exists()
+    try:
+        state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
+    except FileNotFoundError:
+        pass
+    else:
+        # Container PID 1 may defer reaping; terminal children cannot resume writes.
+        assert state in {"Z", "X"}
     time.sleep(1.6)
     assert not marker.exists()
 
