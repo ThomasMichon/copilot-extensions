@@ -345,7 +345,7 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
   inside each selected runtime; no live records or services were modified by
   the probes. This does not close the live Manager-source, creation/resume or
   later activation gates below.
-- [ ] Review any ordinary-default activation separately, only after retained
+- [x] Review any ordinary-default activation separately, only after retained
   replay, one-term equivalence and installed-reader gates pass. Actual rollout
   remains separately authorized; no historical-record migration is implied.
   Installed preflight exposed the initial gated implementation's unnecessary
@@ -354,6 +354,10 @@ Do not rewrite old receipts or backfill identity merely by replaying them.
   through the [local-identity amendment](manifest-independent-local-identity.md),
   rather than copying registries, inferring authority from suffixes or silently
   retaining a legacy new-record format.
+  The separate proposal, source review, natural qualification and explicit
+  ordinary rollout/acceptance consent are complete. Actual native/guest
+  ordinary entry points pass with the four low-level legacy defaults retained;
+  the October 26 journal records the exact delivery and cleanup boundaries.
 
 ### Reviewed source coverage map
 
@@ -419,6 +423,9 @@ coverage, not native or installed-consumer acceptance.
   The current journal records eight actual allocations, sixteen exact keyed
   replays, six allowed non-preview Resume plans and two source-only hosting
   refusals, alongside existing-record previews and actual Manager entry.
-- [ ] Queue, session, head, title, flags, paths, claims and owner/ref bytes are
+- [x] Queue, session, head, title, flags, paths, claims and owner/ref bytes are
   preserved through the authorized rollout. Any necessary data migration is a
   separately reviewed, explicitly approved operation.
+  The ordinary rollout changes no historical identity or allocation. Actual
+  installed fixture comparisons retain pre-existing tracking bytes; only
+  explicitly authorized new validation resources change lifecycle.
