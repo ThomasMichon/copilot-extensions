@@ -2,7 +2,9 @@
 
 Parent: [Dev/Main Release Pipeline](README.md#phase-9e---source-coherent-release-implementations).
 Tracker: #8983. Participant: Release implementation coherence contributor.
-Status: Active; plan #9054 merged, implementation and Main activation open.
+Status: Done for bounded Phase 9e; plan #9054, source implementation #9061,
+Main bootstrap #9078 and qualified release #9080 merged; authorized local
+selected/running-state proof passed. The parent campaign remains Active.
 
 ## Operator direction and bounded ownership
 
@@ -106,52 +108,89 @@ expression while leaving incompatible call sites.
       in release. Preserve the positive unit/effect/coverage and time budgets;
       actual native/build integration remains in its existing development or
       periodic lane.
-- [ ] Validate the complete prepared Main workflow with the existing
+- [x] Validate the complete prepared Main workflow with the existing
       publication-boundary and merge-wait controls plus focused source/identity
       and privilege regressions. Do not credit tests of only legacy/default
       YAML as proof of the prepared control.
-- [ ] Land ordinary implementation/tests/docs through Dev review. Land only
-      the authorized critical workflow/control delta through a separate Main
-      PR, with current-head review and required checks.
-- [ ] Follow the existing single release writer through a real composed
+- [x] Land ordinary implementation/tests/docs through Dev review: #9061,
+      `3e1dba5cf3d84c9809eb74e1d99caaf89fb94637`.
+- [x] Land only the authorized critical workflow/control delta through a separate
+      Main PR, with current-head review and required checks: #9078,
+      `f6a1acf9592ef574f83ae2de5c2cc5fe0e84400a`.
+- [x] Follow the existing single release writer through a real composed
       candidate, source units, artifact construction and verification,
       attestation, complete-source publication/readback, final PR, atomic Main
       merge and release tag. Diagnose actual failures without bypasses or
-      competing publishers.
-- [ ] Perform the authorized local updater flow and verify selected and
+      competing publishers: natural run `40315448433`, final PR #9080.
+- [x] Perform the authorized local updater flow and verify selected and
       running state. Preserve unrelated worktrees, claims, backups and ongoing
       operations; do not infer cleanup or unrelated restart authority.
 
 ## Validation Plan
 
-- [ ] Prove every bootstrap/helper checkout uses the intended immutable
+- [x] Prove every bootstrap/helper checkout uses the intended immutable
       Main/admitted-source identity; no literal helper-version constant,
       mutable branch or candidate-controlled import can substitute.
-- [ ] Prove fork/manual-feature refs, forged dispatch payloads, missing source
+- [x] Prove fork/manual-feature refs, forged dispatch payloads, missing source
       qualification, failed/skipped units and wrong owning run cannot enter
       privileged implementation execution or release landing.
-- [ ] Prove a newly added privileged helper or dynamic executable input cannot
+- [x] Prove a newly added privileged helper or dynamic executable input cannot
       be omitted from the qualified source/coverage contract. Positive units
       cover new native/resource decision rules without invoking real actors.
-- [ ] Prove that a source helper change reaches its matching producer/verifier
+- [x] Prove that a source helper change reaches its matching producer/verifier
       in the next admitted run without editing a Main helper pin. Required
       controller capabilities and complete-source inputs still fail visibly
       when missing.
-- [ ] Preserve exact six-resource Containers wheel/source/independent-sdist
+- [x] Preserve exact six-resource Containers wheel/source/independent-sdist
       behavior and procutil's source-bound native artifact verification; no
       generic setup-hook exemption or self-asserted binary digest.
-- [ ] Exercise actual frozen-candidate artifact construction with both reviewed
+- [x] Exercise actual frozen-candidate artifact construction with both reviewed
       build-hook contracts, then the complete prepared controller qualification.
       Component tests or a successful composition are not release completion.
-- [ ] Verify a natural/manual authorized Main run publishes and reads back all
+- [x] Verify a natural/manual authorized Main run publishes and reads back all
       required subjects before its generated PR, then actually merges and tags
       the admitted source. Retain pause, strict-base freshness, concurrent
       Main-control handling and non-administrator landing.
-- [ ] Verify the authorized local rollout consumes that released source and
+- [x] Verify the authorized local rollout consumes that released source and
       reports real selected/running versions, not merely a merged PR.
 
 ## Journal
 
+- 2026-10-26: The unified local updater exited 0 and refreshed all fifteen
+  enabled payloads. Native manager/monitor, Bridge, coordinator and MCP cutovers
+  completed cleanly without forced termination or lost in-flight claims.
+  Independent checks confirm selected manager/live monitor `1.24.293-dev1`,
+  ready Bridge `0.9.174.dev1`, healthy non-draining coordinator
+  `0.18.112-dev1`, and actual MCP serving interpreter `0.2.96-dev1` with a
+  successful ping. The dirty anchor and newer status owner were left untouched.
+  All bounded Plan/Validation items are complete; parent and other participants
+  retain their wider obligations.
+- 2026-10-26: Natural first-activation run `40315448433` passed every build,
+  source-unit, exact-reuse, attestation, complete-source publication/readback,
+  nonadministrator atomic merge and tagging gate in twelve minutes. Source
+  `3e1dba5cf3d84c9809eb74e1d99caaf89fb94637` owns the nineteen-asset
+  `python-artifacts-3e1dba5cf3d84c9809eb74e1d99caaf89fb94637` release.
+  Complete source was published for qualified candidate
+  `9c17ba85e17e32b5600da3d1ab7ce30eefe3c60d` before final PR #9080
+  merged as `dd6e548fa7009852a5d8c5a02b44c797f0a8dc79`. Its immutable
+  promotion tag independently peels to that landing. Main control and pause
+  boundaries remain preserved. Queued manual run `40315520821` correctly
+  skipped duplicate work. The authorized unified local update is running;
+  actual installation/running-state proof remains open.
+- 2026-10-26: Main bootstrap #9078 merged as
+  `f6a1acf9592ef574f83ae2de5c2cc5fe0e84400a` through a normal direct
+  merge after clean current-head review and the required Main source gate.
+  Only the qualified workflow delta landed. One authorized, normal manual
+  dispatch started the existing serialized writer as run `40315520821`; actual
+  signing, publication/readback, atomic Main landing/tagging and local rollout
+  are still pending, not inferred from the bootstrap merge.
+- 2026-10-26: Source implementation #9061 merged as
+  `3e1dba5cf3d84c9809eb74e1d99caaf89fb94637` after current-head review
+  with no open findings and all required checks. The final admitted packet
+  passed 2,352 cases in 26.244 seconds; exact frozen composition passed the same
+  portfolio in 27.177 seconds. The independent workflow-only Main bootstrap
+  passes 25 explicit boundary controls but remains unactivated. Main review,
+  actual release and local running-state proof are the next gates.
 - 2026-10-26: Hosted review follow-up closes non-tools and already-visited
   file-loader decision enrollment, narrows native `exec` admission to its exact
   declared-input site, and refuses captured helper calls beside valid calls.

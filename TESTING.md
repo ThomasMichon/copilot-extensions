@@ -1528,6 +1528,20 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+`tools/promotion_unit_tests/test_resume_cli_contract.py` exercises the real
+Bridge resume/version declarations, target dispatch and HTTP client against
+retained prior parser declarations and synthetic current/prior daemon responses.
+Only external transport, discovery,
+server/logging plumbing and unrelated entrypoint glue are substituted.
+Exact-target cases cover parser refusal before discovery, session/singleton
+collisions, ACP/CLI identity and full response preservation, hosting/protocol
+fences, unconfirmed responses and no effectful replay. Positional routing and
+plain version output retain their compatibility controls; executing-CLI
+disclosure is independent of daemon availability. The manifest positively
+admits these exact nodes, source closure and production coverage targets.
+This is in-process contract evidence, not installed CLI, native conversation,
+process-exit, transport availability or deployment qualification.
+
 `tools/promotion_unit_tests/test_namespace_contract.py` joins the actual
 Containers `namespace-list` CLI and `ContainerResolver.list_specs` output to
 Bridge's `CliNamespaceResolver._enumerate_once` and `NamespaceAgentInfo`.

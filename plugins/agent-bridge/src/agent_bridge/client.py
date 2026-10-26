@@ -1019,7 +1019,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
         *,
         reclaim: bool = False,
         strict: bool = False,
-        mode: str = "acp",
+        mode: str = "acp", allow_retry: bool = True,
         request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """Resume the authoritative native head in explicit ACP or CLI mode.
@@ -1057,7 +1057,7 @@ class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin
                 "POST",
                 f"/api/v1/worktrees/{worktree_id}/resume/{mode}",
                 params=params or None,
-                request_timeout=request_timeout,
+                request_timeout=request_timeout, allow_retry=allow_retry,
             )
             or {}
         )
