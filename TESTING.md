@@ -820,6 +820,16 @@ the exact private `/tmp` and `/run` flags and declared byte sizes.
 These are mocked network inspections and static tmpfs configuration assertions,
 not actual egress, guest mount-table, peer-runtime or custody qualification.
 
+`tools/test_reproducer_lab_source.py` adds in-process immutable-source metadata
+and mocked materializer controls. The separately selected
+`tools/reproducer-lab/source_native_tests.py` uses actual local Git against a
+fresh synthetic repository to prove one-commit source closure, dirty/untracked
+exclusion and no copied source config/hooks or older history.
+Run either through the bounded supervisor; the native filename is outside
+default discovery and does not join required PR/promotion CI.
+Neither lane builds an image, creates Docker resources, installs dependencies
+or qualifies an executing guest's source or service runtime.
+
 ## Wheel-input inspection
 
 `tools/test_installer_dependency_compile.py` covers both ordinary metadata-only
