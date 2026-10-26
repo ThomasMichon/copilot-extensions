@@ -36,6 +36,7 @@ resource acquisition and identity bindings remain external adapters.
 | `crooked-circuit` | Bounded SSH-service peer-approval source, client contract and isolated qualification | #8888; [peer-approval plan](peer-approval.md) |
 | `squeaky-buckle` | Completed bounded foreground Fleet SSH directory/local-writer consumer after merged #8000; no installation or deployment | Merged #8910; bounded source reservation settled |
 | `restless-actuator` | Non-editable installed SSH runtime and source-denying native consumer qualification | #6681 source reservation6397956631 |
+| `patient-bearing` | Operator-allocated continuity-backed public-key machine enrollment and normal Manager/engine setup consumer | #6681 source allocation6408998175; [implementation boundary](continuity-bootstrap.md#selected-executable-slice) |
 
 ## Coordination
 
@@ -52,6 +53,12 @@ resource acquisition and identity bindings remain external adapters.
   Gateway/SSH onboarding integration and validation matrix.
 - No edits to reserved installer, authentication, ledger, controller or shared
   CLI files before their retained owners agree the integration seam.
+- The operator subsequently allocated the bounded missing first-touch enrollment
+  operation and its normal setup consumer to `patient-bearing` within those
+  existing authorities. This is the narrow exception recorded in
+  #6681 comment6408998175, not a transfer of broader construction, publication,
+  lifecycle, provider or SSH custody. Review the selected executable slice
+  before changing runtime semantics.
 - The bounded normal SSH consumer continuation is now selected under #6681:
   `squeaky-buckle` drives new `ssh_machine.py`/`ssh_machine_config.py`, focused
   tests/docs and narrow `serve --role ssh-client`/optional-closure wiring.
@@ -352,6 +359,10 @@ onboarded merely because its source is published.
 - [ ] Review and implement the [continuity/bootstrap contract](continuity-bootstrap.md)
   through the retained installer, credential/enrollment and human-session
   adapters; preserve existing machine-proof and peer-approval requirements.
+- [ ] Review the [selected executable slice](continuity-bootstrap.md#selected-executable-slice):
+  explicit public-key machine authentication, a real current-policy producer
+  and original-operation enrollment in the existing journal, followed by the
+  normal Manager/engine setup consumer. No new issuer or parallel registry.
 
 ### Phase 2 - Driver and directional policy
 
@@ -445,6 +456,10 @@ not installation, credential or live-adoption authority.
 - [ ] Qualify the [continuity bootstrap validation](continuity-bootstrap.md#validation-obligations),
   including source/account/grant refusal, Gateway-first targets, pairing
   recovery and the separate normal human-session boundary.
+- [ ] Qualify the selected public-key profile and actual source-to-setup-to-Gateway
+  path, including restart/lost replies, current-source revocation and rollback
+  floors, private local key custody, mixed-version refusal and unchanged token
+  profiles. Installed and live acceptance remain distinct.
 - [x] Peer-approval selection: pending public identities never enter active
   directory or native relay authorization before exact authenticated approval;
   explicit recovery cannot become a missing-approver fallback.
@@ -455,10 +470,23 @@ not installation, credential or live-adoption authority.
 
 The proposal is reviewed and merged. Accepted policy/runtime source leaves are
 being implemented independently; shared setup integration remains with its
-retained owner. No managed setup/apply, enrollment, live rollout, lifecycle
-takeover or implementation completion is asserted.
+retained authority, with the bounded operator allocation above. No managed
+setup/apply, enrollment, live rollout, lifecycle takeover or implementation
+completion is asserted.
 
 ## Journal
+
+### 2026-10-25 - Continuity bootstrap and human-session contract source
+
+- #9038 merged the three governing vision refinements and proposed
+  continuity-bootstrap contract to `dev` as
+  `5bd6275d19f409ed4e6515eec5d86c1f7040414e`, after current-head Copilot
+  approval and required CI. The parent Plan/Validation Plan remains open.
+- The amendment adds no executable setup, verifier, issuer, enrollment or
+  provider behavior. Existing peer approval and retained implementation owners
+  remain unchanged. The next slice is the normal installer/adoption and
+  receiving identity/enrollment integration, not a new private installer or
+  live adoption inferred from a documentation merge.
 
 ### 2026-10-25 - Peer-approval source merged; integration remains open
 

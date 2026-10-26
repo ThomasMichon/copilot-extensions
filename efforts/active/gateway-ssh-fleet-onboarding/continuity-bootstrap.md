@@ -140,9 +140,88 @@ not require browser-key persistence or a Service Worker.
 
 ## Implementation sequence and compatibility
 
+### Selected executable slice
+
+**Operator-selected direction, summarized:** implement the missing first-touch
+enrollment operation and its normal setup consumer within the existing
+Fleet/Manager authorities. Use independently revocable public-key machine
+enrollment rather than require a new external application-token issuer.
+The bounded source allocation is recorded in #6681 comment6408998175.
+This selects implementation work, not live credential access or deployment.
+
+**Agent-recommended realization, proposed for review before runtime changes:**
+
+1. Add an explicit opt-in public-key machine-authentication profile to the
+   existing Gateway service authority. Keep `jwt-pop-v1` and `enrolled-pop-v1`
+   unchanged, including their defaults, independent issuer requirements and
+   proof checks. The new profile authenticates a configured principal through
+   its currently enrolled public key; it is not a self-issued application
+   token disguised as either existing profile, a bearer fallback or human SSO.
+   Use maintained cryptographic operations, authenticated encrypted transport,
+   exact principal/resource/method/target and request-content binding, bounded
+   challenges/proofs, atomic replay protection and explicit capacity refusal.
+2. Implement the actual first-touch receiver in the existing Gateway serving
+   owner. A selected protected source conveys a high-entropy delegated grant,
+   not mere discovery. Current owner-authenticated configuration binds that
+   grant to its source/account/container, harness, destination, machine,
+   principal, permitted capabilities and expiry. Validate that delegation
+   before enrollment or sensitive lookup; a request cannot select broader
+   grants, another source or its own trust. The machine generates its unique
+   signing key locally and proves possession over the exact enrollment intent.
+   No raw grant or private key enters source policy, logs or operation receipts.
+3. Extend the existing operation/receipt journal for the real enrollment
+   operation, not `workspace.allocate` under a new label. It retains the
+   original operation, exact public-key/scope binding and accepted generations.
+   Concurrent/repeated requests cannot allocate another identity or silently
+   replace the key. A lost reply or process restart inspects that operation and
+   its actual publication outcome; an uncertain effect is not blindly retried.
+   Required journal changes need an explicit compatible migration/refusal
+   contract, without breaking unrelated existing operations or silently
+   changing an old command's meaning.
+4. Implement the missing enrollment producer under the same current-policy
+   authority. Today's `ServiceAuthority` source callback only reads complete
+   policy; it is not a publication API. Compose configured desired grants and
+   journal-owned admitted public-key bindings through that authority rather
+   than mutate an adopter's desired repository or introduce another enrollment
+   database. Persist accepted revision/generation floors in the existing owner
+   so delayed source copies and restarts cannot revive a revoked or superseded
+   enrollment. Configuration, admission, publication and authenticated
+   connection retain distinct outcomes and one writer per owned resource.
+5. Consume the implemented receiver through the normal upstream Manager and
+   engine adoption path. Extend explicit harness/worktree context selection
+   through the existing repository-setup boundary; do not create a private
+   installer or make a repository script contain the reusable enrollment
+   engine. The trusted selected context declares its continuity provider and
+   source references. Begin with an explicitly selected already-authenticated
+   local continuity projection, suitable for a user-managed sync provider;
+   this is not a claim of a new cloud-login or sync implementation.
+   Keep source provenance and the local key/operation state separate. Only an
+   actual authenticated outbound Gateway connection permits advancing to
+   separately selected SSH/lifecycle work.
+
+Publish support from the actual serving/runtime generation, expand the receiver
+first, then migrate the caller conditionally. No new setup syntax is advertised
+as runnable by this proposal. An incapable receiver, provider or journal reports
+the unsupported requirement before effects and retains completed core work.
+Absent selection preserves existing setup, token-authenticated Gateway and
+trusted direct-SSH behavior. Rollback cannot reinterpret new credentials as
+old tokens or discard accepted enrollment/current-policy floors.
+
+Focused qualification must exercise the actual setup parser/process and TLS
+receiver, not just a descriptor or injected success callback. It must include
+wrong source/account/container/harness/destination/machine/scope, discovery-only
+and expired/revoked grants, forged or content-mismatched proofs, replay and
+capacity, concurrent first touch, crash/lost-reply recovery with the same key,
+stale-source/restart rollback refusal, private local custody and mixed-version
+controls. Separate installed source-denying, native platform/provider and live
+adoption results; a synthetic grant is not production enrollment. Existing
+selected peer approval and ordinary human-session validation remain open.
+
+### Delivery order
+
 - Review this shared intent/contract amendment before implementing new runtime
   semantics. Retained setup, identity, credential, operation and SSH owners
-  agree the narrow receiving and consuming seams.
+  retain their authorities, with the bounded allocation above.
 - Extend the existing installer/adoption contract for explicit harness context
   and continuity-provider selection without forking it. Do not advertise a
   runnable new argument until the owning executable implements it.
