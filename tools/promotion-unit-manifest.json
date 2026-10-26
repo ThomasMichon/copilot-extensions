@@ -2568,7 +2568,7 @@
         "tools/promotion_unit_tests/test_peer_environment.py": "e816bedb5935365405818dabb0a12116c6965d0d40104763b9c8cb9630567cae",
         "tools/promotion_unit_tests/test_plugin_resolve.py": "57ca4d8f030c2d0919e600595e06ff8cb91f7133cad6aea9fb343824ce39738f",
         "tools/promotion_unit_tests/test_qualification.py": "f45b7627614f25543f4f1175f3d9038cc92e2e518df857377b3b2b244b6aa1de",
-        "tools/promotion_unit_tests/test_release_build_admission.py": "f4e66660c36a4dfc039b49e5696acfdeacbed85f1a3fb8a7a1876d4342ec9a6b",
+        "tools/promotion_unit_tests/test_release_build_admission.py": "e468f9212b3f982f9129d876425ecd423755ba745f550b161a22bc5e0f8e3277",
         "tools/promotion_unit_tests/test_release_controller_shell.py": "1b69a06dd230c1f63040fccbf71b1e0fd12e6d3078e8794d5baf7eeb61b9b4c8",
         "tools/promotion_unit_tests/test_release_dynamic_decisions.py": "961ee6951789981ce9bb975dab62093d548942c5cc1df0762fc9fe74284c40db",
         "tools/promotion_unit_tests/test_release_evidence.py": "29d60373a2e04f4c53dbfbb401630e0b4e36b5ba2fdc2523960eefe729eb14e2",
