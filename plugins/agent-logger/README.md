@@ -64,6 +64,17 @@ session-to-log pipeline out of any single bespoke service:
 - **Three deployment topologies** from one plugin — see
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
+`install.ps1 uninstall` / `install.sh uninstall` removes the owned sync task or
+timer, compatibility commands, runtime generations, payload snapshots and
+generated dispatchers. Digests, configuration, session state, databases and
+unrecognized root content remain for reinstall. `-DryRun` / `--dry-run`
+previews removal without deleting those artifacts. The installer transaction
+lock remains in place; uninstall does not purge the runtime home.
+Removal requires the deployment manifest to identify Logger, or a Logger
+project snapshot addressed inside that runtime home's snapshot directory.
+Missing, malformed, foreign or externally redirected ownership refuses removal
+before changing the task or commands.
+
 ## Source-qualified runtimes
 
 The legacy/default-root session bootstrap uses its packaged installation Driver

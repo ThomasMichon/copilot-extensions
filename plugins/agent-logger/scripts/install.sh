@@ -1612,6 +1612,44 @@ case "${ACTION}" in
     ok "package + units updated"
     ;;
   uninstall)
+    runtime_entries=(versions .venv snapshots bin current-version last-known-good
+      payload-dir stamped-version deploy-manifest.json running-version.json)
+    for entry in "${runtime_entries[@]}"; do
+      if [[ -e "$INSTALL_DIR/$entry" || -L "$INSTALL_DIR/$entry" ]]; then
+        py="$(_bootstrap_python)" || {
+          _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
+        }
+        "$py" -I -B - "$INSTALL_DIR" <<'PY' || exit 1
+import json
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+manifest = root / "deploy-manifest.json"
+if manifest.exists() or manifest.is_symlink():
+    if not manifest.is_file() or manifest.is_symlink():
+        raise SystemExit("Logger uninstall refused: a plain deployment manifest is required")
+    record = json.loads(manifest.read_text(encoding="utf-8-sig"))
+    if not isinstance(record, dict) or record.get("service") != "agent-logger":
+        raise SystemExit("Logger uninstall refused: deployment manifest belongs to another product")
+else:
+    marker = root / "payload-dir"
+    if not marker.is_file() or marker.is_symlink():
+        raise SystemExit("Logger uninstall refused: no deployment or stamped ownership")
+    payload = Path(marker.read_text(encoding="utf-8-sig").strip()).resolve(strict=True)
+    if not payload.is_relative_to(root / "snapshots"):
+        raise SystemExit("Logger uninstall refused: stamped payload is outside its snapshot root")
+    project = payload / "pyproject.toml"
+    if not project.is_file() or project.is_symlink():
+        raise SystemExit("Logger uninstall refused: stamped project metadata is not a plain file")
+    section = re.search(r"(?ms)^\[project\][ \t]*$\s*(.*?)(?=^\[|\Z)", project.read_text(encoding="utf-8-sig"))
+    if section is None or re.search(r'''(?m)^name[ \t]*=[ \t]*(["'])agent-logger\1[ \t]*(?:\#.*)?$''', section[1]) is None:
+        raise SystemExit("Logger uninstall refused: stamped payload belongs to another product")
+PY
+        break
+      fi
+    done
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "(dry run -- nothing will be changed)"
       if systemctl --user is-enabled "${TIMER_NAME}.timer" >/dev/null 2>&1 || \
@@ -1623,6 +1661,7 @@ case "${ACTION}" in
           [[ -e "${LOCAL_BIN}/${name}" ]] && echo "[dry-run] would remove binstub: ${LOCAL_BIN}/${name}"
         done
       fi
+      echo "[dry-run] would remove runtime generations, snapshots, generated dispatchers and runtime selectors"
       echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
       echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
@@ -1638,6 +1677,8 @@ case "${ACTION}" in
       else
         chg "scoped install left legacy global binstubs unchanged"
       fi
+      remove_install_runtime_content "$INSTALL_DIR" "${runtime_entries[@]}" || exit 1
+      chg "runtime generations and generated dispatchers removed (config/session-state kept)"
     fi
     ;;
   status)

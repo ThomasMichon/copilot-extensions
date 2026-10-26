@@ -114,9 +114,24 @@ public static class CeInstallerDirectoryIdentity {
 }
 
 function Remove-InstallRuntimeContent {
-    <# The caller holds the install transaction lock. Never unlink that lock or
-       another invocation's staged source while removing runtime/config data. #>
-    param([Parameter(Mandatory)][string]$InstallRoot)
+    <# The caller holds the install transaction lock. Optional EntryNames limit
+       removal to those immediate children; omission retains purge semantics.
+       Never unlink the held lock or another invocation's staged source. #>
+    param(
+        [Parameter(Mandatory)][string]$InstallRoot,
+        [string[]]$EntryNames = @()
+    )
+
+    if ($PSBoundParameters.ContainsKey('EntryNames') -and
+        ($null -eq $EntryNames -or $EntryNames.Count -eq 0)) {
+        throw 'Selective runtime removal requires at least one entry'
+    }
+    foreach ($name in $EntryNames) {
+        if ($name -cnotmatch '\A[A-Za-z0-9._+-]+\z' -or
+            $name -in @('.', '..', '.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
+            throw "Invalid runtime removal entry: $name"
+        }
+    }
 
     $full = [System.IO.Path]::GetFullPath($InstallRoot)
     $root = $full.TrimEnd([char[]]@('\', '/'))
@@ -137,6 +152,9 @@ function Remove-InstallRuntimeContent {
     }
     foreach ($entry in @(Get-ChildItem -LiteralPath $full -Force -ErrorAction Stop)) {
         if ($entry.Name -in @('.install.lock', '.install.lock.pid', '.install.lock.pid.reap', '.install-stage')) {
+            continue
+        }
+        if ($EntryNames.Count -gt 0 -and $entry.Name -cnotin $EntryNames) {
             continue
         }
         Remove-InstallRuntimeEntry -Entry $entry

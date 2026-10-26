@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'uninstall')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [switch]$Force
@@ -80,6 +80,7 @@ function Set-CopilotPersistentEnvironmentVariable {
 }
 # === end install-contract:test-persistent-environment ===
 
+if ($Action -ne 'uninstall') {
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -211,7 +212,9 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED -or
     }
 }
 # === end install-contract:v4 self-stage ===
+}
 
+if ($Action -ne 'uninstall') {
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
 # the self-stage/lock behavior WITHOUT a heavy venv build: this (post-stage)
@@ -249,6 +252,7 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
     exit 0
 }
 # === end install-contract:v4 smoke seam ===
+}
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -647,7 +651,23 @@ function Exit-InstallLock {
 
 $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir 'source-runtime.ps1')
-Initialize-SourceRuntime
+$UninstallPython = $null
+if ($Action -eq 'uninstall') {
+    foreach ($candidate in @('python3', 'python')) {
+        $found = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($found -and $found.Source -notmatch 'WindowsApps') { $UninstallPython = $found.Source; break }
+    }
+    if (-not $UninstallPython) { throw 'Uninstall requires an existing Python 3.10+ outside the runtime' }
+    $nativeError = ''
+    $status = Invoke-Hidden -FilePath $UninstallPython -ArgList @(
+        '-I', '-B', (Join-Path $ScriptDir 'uninstall_runtime.py'), 'check',
+        '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw $nativeError }
+    if ($status.Trim() -eq 'absent') { Write-Ok 'Legacy MCP runtime is already absent'; exit 0 }
+} else {
+    Initialize-SourceRuntime
+}
 if (-not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
     exit 1
@@ -655,6 +675,16 @@ if (-not (Enter-InstallLock)) {
 
 $script:McpInstallFailure = $null
 try {
+if ($Action -eq 'uninstall') {
+    $nativeError = ''
+    $result = Invoke-Hidden -FilePath $UninstallPython -ArgList @(
+        '-I', '-B', (Join-Path $ScriptDir 'uninstall_runtime.py'), 'remove',
+        '--root', $InstallDir, '--shell', (Get-Process -Id $PID).Path
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw $nativeError }
+    Write-Ok $result.Trim()
+    exit 0
+}
 Assert-SourceRuntime
 if ($Action -in @('install', 'init', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')

@@ -200,6 +200,77 @@ def _purge_bash(tmp_path, root, body):
     )
 
 
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_selective_runtime_removal_preserves_state_and_is_idempotent(tmp_path, host):
+    root, outside = _purge_fixture(tmp_path)
+    result = _purge_ps(tmp_path, host, root, r"""
+New-Item -ItemType Junction -Path (Join-Path $Root 'versions\outside') -Target $Outside | Out-Null
+Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames @('versions', '.venv', 'current-version')
+Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames @('versions', '.venv', 'current-version')
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (root / "versions").exists()
+    for name in (".hidden-state", "a[1]", "-state"):
+        assert (root / name).read_text() == "state"
+    assert (root / ".install-stage" / "owner" / "running.ps1").read_text() == "active"
+    assert (outside / "sentinel").read_text() == "outside"
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("selection", ["@()", "$null"])
+def test_native_empty_selection_never_becomes_a_purge(tmp_path, host, selection):
+    root, _ = _purge_fixture(tmp_path)
+    result = _purge_ps(
+        tmp_path, host, root,
+        f"Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames {selection}",
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Selective runtime removal requires at least one entry" in result.stderr
+    assert (root / "versions" / "old" / "data").read_text() == "runtime"
+    assert (root / ".hidden-state").read_text() == "state"
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("entry", ["../outside", "versions/old", ".", "..", ".install-stage", "versions*", ""])
+def test_native_selective_runtime_removal_validates_entire_list_first(tmp_path, host, entry):
+    root, _ = _purge_fixture(tmp_path)
+    result = _purge_ps(
+        tmp_path, host, root,
+        f"Remove-InstallRuntimeContent -InstallRoot $Root -EntryNames @('versions', '{entry}')",
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Invalid runtime removal entry" in result.stderr
+    assert (root / "versions" / "old" / "data").read_text() == "runtime"
+    assert (root / ".hidden-state").read_text() == "state"
+
+
+def test_posix_selective_runtime_removal_preserves_state_and_is_idempotent(tmp_path):
+    root, outside = _purge_fixture(tmp_path)
+    result = _purge_bash(tmp_path, root, r"""
+ln -s "$OUTSIDE" "$ROOT/versions/outside"
+remove_install_runtime_content "$ROOT" versions .venv current-version
+remove_install_runtime_content "$ROOT" versions .venv current-version
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (root / "versions").exists()
+    for name in (".hidden-state", "a[1]", "-state"):
+        assert (root / name).read_text() == "state"
+    assert (root / ".install-stage" / "owner" / "running.ps1").read_text() == "active"
+    assert (outside / "sentinel").read_text() == "outside"
+
+
+@pytest.mark.parametrize("entry", ["../outside", "versions/old", ".", "..", ".install-stage", "versions*", ""])
+def test_posix_selective_runtime_removal_validates_entire_list_first(tmp_path, entry):
+    root, _ = _purge_fixture(tmp_path)
+    result = _purge_bash(
+        tmp_path, root, f"remove_install_runtime_content \"$ROOT\" versions '{entry}'",
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "Invalid runtime removal entry" in result.stderr
+    assert (root / "versions" / "old" / "data").read_text() == "runtime"
+    assert (root / ".hidden-state").read_text() == "state"
+
+
 def test_posix_purge_keeps_the_locked_inode_and_link_target(tmp_path):
     if shutil.which("flock") is None:
         pytest.skip("native flock unavailable")

@@ -94,6 +94,34 @@ plugin-root interpolation contract and may run before or independently of
 session command-catalog context. That surface cannot consume the payload-local
 argv until the host provides a plugin-root-capable MCP launcher contract.
 
+### Removing a legacy runtime
+
+Run `scripts/init.ps1 uninstall [-InstallDir PATH]` on Windows or
+`bash scripts/init.sh uninstall [--install-dir PATH]` on Linux. Uninstall uses
+the same transaction lock as install/provision/stamp and requires an existing
+Python 3.10+ interpreter outside the installation. It does not provision a
+runtime, reconcile instances, terminate processes, or stop upstream services.
+Windows requires native CIM process inspection; Linux requires readable
+current-user `/proc` process information. Other platforms and unavailable or
+ambiguous inspection fail closed. A base-interpreter MCP process without an
+attributable runtime path also blocks removal, even if it may belong to another
+installation. Close active MCP runtime processes through their normal owner
+before retrying. Concurrent launches must remain quiescent; this is not
+reference-safe whole-harness removal or a session shutdown command.
+
+The action removes only installed generations, `.venv`, source snapshots,
+selected-runtime markers and the deploy manifest, plus generated resolvers and
+recognizable default-root compatibility wrappers. It preserves the install root,
+lock/lease files, bridge configuration, databases, authentication, caches,
+materialized fleets and unknown content. It refuses linked roots/ancestors,
+unrecognized generation/snapshot inventory, missing or foreign deployment/stamped
+ownership, foreign lifecycle ownership, installation-cell or managed-deployment
+metadata, and mutable `dev` generations. Stamped ownership must identify this
+plugin inside the runtime home's own snapshots. An absent installation
+is a no-op; the same source can be installed again. Disable automatic bootstrap
+in the consuming harness first if removal should persist. Installation-cell
+lifecycle and harness reference accounting remain separate operations.
+
 ## Reliable transport: one bridge, two surfaces
 
 After `customizing-copilot:defining-subagents` establishes the agent contract,

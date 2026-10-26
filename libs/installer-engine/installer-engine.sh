@@ -15,7 +15,18 @@ INSTALLER_ENGINE_DEPENDENCY_POLICY="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 
 
 remove_install_runtime_content() {
     # The caller holds the transaction lock; retain its inode and staged owners.
+    # Optional immediate-child names limit removal; omission retains purge semantics.
     local root="${1:-}" entry name home
+    local -a selected=("${@:2}")
+    for name in "${selected[@]}"; do
+        if [[ ! "$name" =~ ^[A-Za-z0-9._+-]+$ ]] ||
+            [[ "$name" == . || "$name" == .. ]] ||
+            [[ "$name" == .install.lock || "$name" == .install.lock.pid ||
+               "$name" == .install.lock.pid.reap || "$name" == .install-stage ]]; then
+            printf 'Invalid runtime removal entry: %s\n' "$name" >&2
+            return 1
+        fi
+    done
     while [[ "$root" != "/" ]]; do
         case "$root" in
             */) root="${root%/}" ;;
@@ -51,6 +62,12 @@ remove_install_runtime_content() {
         case "$name" in
             .install.lock|.install.lock.pid|.install.lock.pid.reap|.install-stage) continue ;;
         esac
+        if [[ "${#selected[@]}" -gt 0 ]]; then
+            case " ${selected[*]} " in
+                *" $name "*) ;;
+                *) continue ;;
+            esac
+        fi
         if ! rm -rf -- "$entry"; then
             printf 'Runtime purge failed while removing: %s\n' "$entry" >&2
             return 1
