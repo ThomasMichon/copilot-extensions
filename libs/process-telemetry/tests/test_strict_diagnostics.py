@@ -19,13 +19,18 @@ NOW = datetime(2026, 10, 26, tzinfo=timezone.utc)
 EVENT = {"ts": NOW.isoformat(), "operation_id": "synthetic", "stage": "before_effect"}
 
 
+def _synthetic_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name, value in (
+        ("O_DIRECTORY", 0x10000), ("O_NOFOLLOW", 0x20000), ("O_NONBLOCK", 0x40000),
+    ):
+        monkeypatch.setattr(append.os, name, getattr(append.os, name, value), raising=False)
+
+
 @pytest.fixture
 def syscalls(monkeypatch: pytest.MonkeyPatch) -> list:
     calls = []
     monkeypatch.setattr(append, "strict_write_capability", lambda: "synthetic-sync")
-    for name, value in (("O_DIRECTORY", 0x10000), ("O_NOFOLLOW", 0x20000)):
-        monkeypatch.setattr(append.os, name, getattr(append.os, name, value), raising=False)
-
+    _synthetic_flags(monkeypatch)
     def opened(path, flags, mode=0o777, *, dir_fd=None) -> int:
         calls.append(("open", path, flags, mode, dir_fd))
         return 10 if dir_fd is None else 11
@@ -51,6 +56,16 @@ def test_strict_append_orders_single_write_file_sync_and_directory_sync(syscalls
     flags = syscalls[1][2]
     assert flags & os.O_APPEND and flags & os.O_NOFOLLOW and flags & os.O_NONBLOCK
     assert syscalls[1][3] == 0o600
+    assert [call[1] for call in syscalls if call[0] == "sync"] == [11, 10]
+
+
+def test_synthetic_protocol_supplies_all_missing_native_flags(
+    syscalls: list, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"):
+        monkeypatch.delattr(append.os, name)
+    _synthetic_flags(monkeypatch)
+    append.append_bytes_strict("/synthetic/existing/event.jsonl", b"{}\n")
     assert [call[1] for call in syscalls if call[0] == "sync"] == [11, 10]
 
 
@@ -133,11 +148,13 @@ def test_capability_is_platform_not_package_or_readiness(monkeypatch: pytest.Mon
     monkeypatch.setattr(append.sys, "platform", "win32")
     assert append.strict_write_capability() is None
     monkeypatch.setattr(append.sys, "platform", "linux")
-    monkeypatch.setattr(append.os, "O_DIRECTORY", 0x10000, raising=False)
-    monkeypatch.setattr(append.os, "O_NOFOLLOW", 0x20000, raising=False)
+    _synthetic_flags(monkeypatch)
     monkeypatch.setattr(append.os, "fsync", lambda fd: None, raising=False)
     assert append.strict_write_capability() == "linux-file-directory-fsync-v1"
     monkeypatch.delattr(append.os, "fsync")
+    assert append.strict_write_capability() is None
+    monkeypatch.setattr(append.os, "fsync", lambda fd: None, raising=False)
+    monkeypatch.delattr(append.os, "O_NONBLOCK")
     assert append.strict_write_capability() is None
 
 

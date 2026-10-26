@@ -14,7 +14,7 @@ STRICT_RECORD_BYTES = 64 * 1024
 def strict_write_capability() -> str | None:
     """Report this implementation's explicit sync protocol, not storage readiness."""
     if sys.platform == "linux" and all(
-        hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW", "fsync")
+        hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK", "fsync")
     ):
         return "linux-file-directory-fsync-v1"
     return None
