@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from agent_index.indexing.change_hints import ChangeHints
+from agent_index.sources.base import FileEntry
 from agent_index.sources.delta import SourceDelta
 from agent_index.sources.good_citizen_http import has_next_link
 
@@ -54,64 +55,82 @@ def acquire_hints(
         cancel_check()
     if connector.hint_scope != (hints.canonical_family, hints.account_id):
         raise ValueError("GitHub hints do not match the effective family/account scope")
-    repository_path = f"/repos/{connector.owner}/{connector.repo}"
-    repository_url = str(connector._client.base_url).rstrip("/") + repository_path
     entries = []
     for number in sorted(numbers):
-        if cancel_check:
-            cancel_check()
-        path = f"{repository_path}/issues/{number}"
-        result = connector._http.get_json(path, etag=False)
-        item = result.data
-        actual_repository = item.get("repository_url") if isinstance(item, dict) else None
-        actual_url = item.get("url") if isinstance(item, dict) else None
-        if (
-            result.not_modified or not isinstance(item, dict)
-            or type(item.get("number")) is not int or item["number"] != number
-            or not isinstance(actual_repository, str)
-            or actual_repository.casefold() != repository_url.casefold()
-            or not isinstance(actual_url, str)
-            or actual_url.casefold() != (repository_url + f"/issues/{number}").casefold()
-        ):
-            raise ValueError("GitHub hinted response did not match the requested repository/item")
-        updated = _revision(item.get("updated_at"))
-        if number in revisions and updated < revisions[number]:
-            raise ValueError("GitHub hinted response predates a required metadata revision")
-        count = item.get("comments")
-        if type(count) is not int or count < 0:
-            raise ValueError("GitHub hinted response did not include a valid comment count")
-        comments = []
-        seen: set[int] = set()
-        page = 1
-        while True:
-            if cancel_check:
-                cancel_check()
-            result = connector._http.get_json(
-                path + "/comments", params={"per_page": 100, "page": page}, etag=False,
-            )
-            data = result.data
-            if result.not_modified or not isinstance(data, list) or len(data) > 100:
-                raise ValueError("GitHub hinted comments require complete fresh pages")
-            for comment in data:
-                if (
-                    not isinstance(comment, dict) or type(comment.get("id")) is not int
-                    or comment["id"] <= 0 or comment["id"] in seen
-                ):
-                    raise ValueError("GitHub hinted comments include invalid or repeated identities")
-                seen.add(comment["id"])
-                comments.append(comment)
-            more = has_next_link(result.headers.get("Link", ""))
-            if len(comments) > count or (more and (not data or len(comments) >= count)):
-                raise ValueError("GitHub hinted comment pagination is inconsistent")
-            if not more:
-                break
-            page += 1
-        if len(comments) != count:
-            raise ValueError("GitHub hinted comment acquisition is incomplete")
-        entries.append(
-            connector._pull_entry(item, comments) if "pull_request" in item
-            else connector._issue_entry(item, comments),
-        )
+        entries.append(acquire_item(
+            connector, number, minimum_revision=revisions.get(number), cancel_check=cancel_check,
+        ))
     if cancel_check:
         cancel_check()
     return SourceDelta(upserts=entries, commit=last_commit)
+
+
+def validate_item(connector: GitHubConnector, item: object, number: int) -> datetime:
+    """Validate the same repository identity and revision for hints and polling."""
+    repository_url = str(connector._client.base_url).rstrip("/") + (
+        f"/repos/{connector.owner}/{connector.repo}"
+    )
+    actual_repository = item.get("repository_url") if isinstance(item, dict) else None
+    actual_url = item.get("url") if isinstance(item, dict) else None
+    if (
+        not isinstance(item, dict) or type(item.get("number")) is not int
+        or item["number"] != number or number <= 0
+        or not isinstance(actual_repository, str)
+        or actual_repository.casefold() != repository_url.casefold()
+        or not isinstance(actual_url, str)
+        or actual_url.casefold() != (repository_url + f"/issues/{number}").casefold()
+    ):
+        raise ValueError("GitHub hinted response did not match the requested repository/item")
+    count = item.get("comments")
+    if type(count) is not int or count < 0:
+        raise ValueError("GitHub hinted response did not include a valid comment count")
+    return _revision(item.get("updated_at"))
+
+
+def acquire_item(
+    connector: GitHubConnector, number: int, *, minimum_revision: datetime | None = None,
+    cancel_check: Callable[[], None] | None = None,
+) -> FileEntry:
+    if cancel_check:
+        cancel_check()
+    path = f"/repos/{connector.owner}/{connector.repo}/issues/{number}"
+    result = connector._http.get_json(path, etag=False)
+    if result.not_modified:
+        raise ValueError("GitHub hinted acquisition requires a fresh item")
+    item = result.data
+    updated = validate_item(connector, item, number)
+    if minimum_revision is not None and updated < minimum_revision:
+        raise ValueError("GitHub hinted response predates a required metadata revision")
+    count = item["comments"]
+    comments = []
+    seen: set[int] = set()
+    page = 1
+    while True:
+        if cancel_check:
+            cancel_check()
+        result = connector._http.get_json(
+            path + "/comments", params={"per_page": 100, "page": page}, etag=False,
+        )
+        data = result.data
+        if result.not_modified or not isinstance(data, list) or len(data) > 100:
+            raise ValueError("GitHub hinted comments require complete fresh pages")
+        for comment in data:
+            if (
+                not isinstance(comment, dict) or type(comment.get("id")) is not int
+                or comment["id"] <= 0 or comment["id"] in seen
+            ):
+                raise ValueError("GitHub hinted comments include invalid or repeated identities")
+            seen.add(comment["id"])
+            comments.append(comment)
+        more = has_next_link(result.headers.get("Link", ""))
+        if len(comments) > count or (more and (not data or len(comments) >= count)):
+            raise ValueError("GitHub hinted comment pagination is inconsistent")
+        if not more:
+            break
+        page += 1
+    if len(comments) != count:
+        raise ValueError("GitHub hinted comment acquisition is incomplete")
+    return (
+        connector._pull_entry(item, comments) if "pull_request" in item
+        else connector._issue_entry(item, comments)
+    )

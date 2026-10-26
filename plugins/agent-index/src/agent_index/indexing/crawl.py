@@ -30,16 +30,15 @@ def collect_source_changes(
 ) -> CrawlManifest:
     """Prefer explicit deltas; retain full reconciliation for legacy providers."""
     from agent_index.sources import get_connector
-    from agent_index.indexing.pending_crawl import recovery_scope
+    from agent_index.indexing.pending_crawl import PendingCrawls, recovery_scope
 
     if connector is None:
         connector = get_connector(source_name, **(connector_kwargs or {}))
     canonical = connector.source_name if source_aware else None
     if source_aware and (not isinstance(canonical, str) or not canonical):
         raise RuntimeError("connector has no canonical stored family")
-    state.require_acquisition_scope(
-        source_name, recovery_scope(source_scope or source_name, connector), full=full,
-    )
+    scope = recovery_scope(source_scope or source_name, connector)
+    state.require_acquisition_scope(source_name, scope, full=full)
     cancel_check = progress_cb.check_cancelled if progress_cb else None
     src_state = state.sources.get(source_name)
     last_commit = src_state.last_commit if src_state else None
@@ -50,6 +49,23 @@ def collect_source_changes(
         last_commit = None
 
     discover_delta = getattr(connector, "discover_delta", None)
+    discover_page = getattr(connector, "discover_delta_page", None)
+    journal = PendingCrawls(path_index)
+    pending = journal.read_payload(source_name, scope)
+    pages_selected = (
+        not full and change_hints is None and callable(discover_page)
+        and 1 in getattr(discover_page, "acquisition_page_versions", ())
+    )
+    if pending is not None and not pages_selected:
+        raise ValueError("Complete pending paged acquisition before changing acquisition mode")
+    if pages_selected and callable(discover_page):
+        from agent_index.indexing.paged_crawl import acquire_pages
+
+        return acquire_pages(
+            source_name, family=connector.source_name, stored_family=canonical,
+            scope=scope, last_commit=last_commit, journal=journal, discover=discover_page,
+            cancel_check=cancel_check,
+        )
     if change_hints is not None:
         from agent_index.indexing.change_hints_contract import validate_scope
         from agent_index.indexing.hinted_crawl import require_hint_connector

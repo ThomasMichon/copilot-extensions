@@ -64,3 +64,29 @@ class SourceDelta:
                 identities.add(identity)
         if upserts & deleted:
             raise ValueError("Connector delta both upserts and deletes an item")
+
+
+@dataclass
+class AcquisitionPage:
+    """One complete acquisition unit; only a terminal cursor completes the delta.
+
+    Opt-in connectors advertise ``acquisition_page_versions = (1,)`` on their
+    ``discover_delta_page`` method. Cursors are opaque nonsecret strings bound
+    to the effective recovery scope; all pages retain the same target commit.
+    """
+
+    delta: SourceDelta
+    cursor: str | None = None
+    version: int = 1
+
+    def validate(self, family: str) -> None:
+        if type(self.version) is not int or self.version != 1:
+            raise ValueError("Unsupported connector acquisition-page version")
+        if not isinstance(self.delta, SourceDelta):
+            raise ValueError("Connector acquisition page requires a SourceDelta")
+        self.delta.validate(family)
+        if self.cursor is not None and (
+            not isinstance(self.cursor, str) or not self.cursor
+            or len(self.cursor.encode()) > 65536
+        ):
+            raise ValueError("Connector acquisition cursor must be a bounded nonempty string")

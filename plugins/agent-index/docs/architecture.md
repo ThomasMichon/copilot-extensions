@@ -52,6 +52,43 @@ storage layout. The opt-in Python
 protocol is independent of the external provider CLI wire format. External
 providers can opt into the separately negotiated contract below.
 
+In-process connectors can additionally advertise
+`discover_delta_page.acquisition_page_versions = (1,)`. The method receives
+`(last_commit, cursor, *, cancel_check=None)` and returns an `AcquisitionPage`:
+one validated `SourceDelta` plus a nonsecret opaque continuation string, or
+`None` for completion. All units keep one target checkpoint; duplicate/conflicting
+identities, changed targets and non-progressing cursors refuse. The shared
+engine commits each complete unit and its continuation to the **same**
+`pending_crawls` row before requesting another. Nothing reaches indexing or
+source checkpoint publication until the complete manifest is durably ready.
+There is a finite 128-unit invocation budget; exhaustion fails visibly and a
+retry continues the saved plan instead of restarting acquisition. A phase-2
+journal envelope is intentionally incompatible with v1-only readers, which
+refuse it rather than interpreting partial acquisition as a complete manifest.
+Finish pending work before rollback or switching to hints, full reconciliation
+or a connector without paged support. This adds no external-provider CLI flag;
+CLI delta-v1 providers retain their existing complete-result contract.
+
+GitHub ordinary polls use a fresh, **single page of at most 100 identities**
+updated since their committed timestamp, replaying the existing 60-second
+overlap. The immutable captured work plan binds repository/account/base/target;
+each subsequently acquired issue/PR and its complete comments form one durable
+unit. Retry may refetch the interrupted item, not the original listing or
+completed items. Hints and polling reuse the same fresh item, repository,
+minimum-revision and complete-comment validation. The target is the maximum of
+the previous timestamp and observed item revisions; an empty page retains the
+timestamp. No poll enumerates stored paths, infers unseen-item tombstones or
+uses a mutable provider page offset as a recovery cursor. A missing/invalid
+timestamp or a `next` link fails with an explicit reconciliation request; it
+never silently starts a full crawl or advances past an oversized window.
+GitHub's list API is not an immutable snapshot or a deleted-item feed. This
+polling path does not prove complete reconciliation or capture edits invisible
+to the provider's `updated_at` semantics. Explicit full discovery retains the
+legacy reconciliation path and captures a timestamp **before** discovery.
+Budgeted full reconciliation, external paged CLI support and durable recovery
+within one item's comment pages remain separate work; they are not supplied by
+this bounded polling contract.
+
 An external provider's existing `content-current-commit --source SOURCE` reply
 may add `source_delta` with contract `agent-index.source-delta`, explicit
 `versions`, canonical `family`, stable nonsecret `account` and effective
@@ -141,8 +178,8 @@ scope, including empty full snapshots with a null cursor. Failed application
 or publication restores the prior in-memory checkpoint and retains any pending
 acquisition for replay. Older state files still load, but their unbound cursors
 require full reconciliation. An already-admitted pending journal with a matching
-scope may finish and bind its checkpoint before fresh acquisition; its existing
-envelope does not change. No additional identity or credential authority is
+scope may finish and bind its checkpoint before fresh acquisition; complete
+manifest envelopes remain v1. No additional identity or credential authority is
 introduced. The same constructed connector supplies both acquisition
 and its canonical/effective recovery identity: delta connectors declare a
 nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
