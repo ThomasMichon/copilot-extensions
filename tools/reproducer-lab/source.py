@@ -112,6 +112,7 @@ class SourceReader:
         env = {
             "PATH": os.defpath, "HOME": str(target), "LC_ALL": "C.UTF-8",
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_ATTR_NOSYSTEM": "1",
             "GIT_NO_REPLACE_OBJECTS": "1", "GIT_NO_LAZY_FETCH": "1",
             "GIT_TERMINAL_PROMPT": "0", "GIT_ALLOW_PROTOCOL": "file",
             "GIT_AUTHOR_NAME": "Synthetic Lab", "GIT_AUTHOR_EMAIL": "lab@example.invalid",
@@ -120,6 +121,7 @@ class SourceReader:
         deadline = self.clock() + 60
         prefix = [
             str(self.git), "-c", f"core.hooksPath={template}", "-c", "core.fsmonitor=false",
+            "-c", f"core.attributesFile={os.devnull}",
             "-c", "core.autocrlf=false", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
         ]
 
@@ -146,7 +148,11 @@ class SourceReader:
         tree = invoke(repository, "rev-parse", "--verify", "--end-of-options", commit + "^{tree}").strip()
         listing = invoke(repository, "ls-tree", "-rlz", "--full-tree", commit)
         observed = inspect_tree(commit, tree, listing)
-        invoke(target, "init", "--quiet", f"--template={template}", str(checkout))
+        object_format = "sha256" if len(commit) == 64 else "sha1"
+        invoke(
+            target, "init", "--quiet", f"--object-format={object_format}",
+            f"--template={template}", str(checkout),
+        )
         invoke(
             checkout, "fetch", "--quiet", "--depth=1", "--no-tags", "--no-write-fetch-head",
             "--no-recurse-submodules", "--no-auto-maintenance", "--", str(repository), commit,

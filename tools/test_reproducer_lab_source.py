@@ -72,9 +72,10 @@ def test_git_sha256_source_tree_and_mixed_identity_refusal() -> None:
 
 
 class FakeGit:
-    def __init__(self) -> None:
+    def __init__(self, commit: str = COMMIT, tree: str = TREE, listing: str = LISTING) -> None:
         self.calls: list[tuple[list[str], dict[str, Any]]] = []
         self.fail_at = 0
+        self.commit, self.tree, self.listing = commit, tree, listing
 
     def __call__(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         self.calls.append((argv, kwargs))
@@ -83,9 +84,9 @@ class FakeGit:
         operation = argv[argv.index("-C") + 2]
         output = ""
         if operation == "rev-parse":
-            output = TREE if "tree" in argv[-1] else COMMIT
+            output = self.tree if "tree" in argv[-1] else self.commit
         elif operation == "ls-tree":
-            output = LISTING
+            output = self.listing
         return subprocess.CompletedProcess(argv, 0, output, "")
 
 
@@ -96,16 +97,20 @@ def roots(tmp_path: Path) -> tuple[Path, Path]:
     return repository, results
 
 
+@pytest.mark.parametrize("commit,tree,listing,object_format", [
+    (COMMIT, TREE, LISTING, "sha1"),
+    ("a" * 64, "b" * 64, f"100644 blob {'c' * 64} 7\tmodule.py\0", "sha256"),
+])
 def test_materializer_uses_original_commit_clean_environment_and_bounded_owner(
-    tmp_path: Path, monkeypatch: Any,
+    tmp_path: Path, monkeypatch: Any, commit: str, tree: str, listing: str, object_format: str,
 ) -> None:
     repository, results = roots(tmp_path)
     monkeypatch.setenv("SYNTHETIC_PRIVATE_INPUT", "must-not-inherit")
     monkeypatch.setenv("GIT_DIR", "/foreign")
-    runner = FakeGit()
+    runner = FakeGit(commit, tree, listing)
     client = source.SourceReader(Path("/selected/git"), run=runner, clock=lambda: 0)
-    observed = client.materialize(repository, COMMIT, results, "attempt")
-    assert observed.commit == COMMIT
+    observed = client.materialize(repository, commit, results, "attempt")
+    assert observed.commit == commit
     assert len(runner.calls) == 8
     for argv, kwargs in runner.calls:
         assert argv[0] == "/selected/git"
@@ -116,12 +121,16 @@ def test_materializer_uses_original_commit_clean_environment_and_bounded_owner(
         assert env["GIT_ALLOW_PROTOCOL"] == "file"
         assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
         assert env["GIT_TERMINAL_PROMPT"] == "0"
+        assert env["GIT_ATTR_NOSYSTEM"] == "1"
+        assert "core.attributesFile=" + source.os.devnull in argv
     fetch = next(argv for argv, _ in runner.calls if "fetch" in argv)
-    assert fetch[-2:] == [str(repository), COMMIT]
+    assert fetch[-2:] == [str(repository), commit]
     assert {"--depth=1", "--no-tags", "--no-write-fetch-head", "--no-auto-maintenance"} <= set(fetch)
-    assert json.loads((results / "attempt" / "source.json").read_text())["tree"] == TREE
+    init = next(argv for argv, _ in runner.calls if "init" in argv)
+    assert f"--object-format={object_format}" in init
+    assert json.loads((results / "attempt" / "source.json").read_text())["tree"] == tree
     with pytest.raises(FileExistsError):
-        client.materialize(repository, COMMIT, results, "attempt")
+        client.materialize(repository, commit, results, "attempt")
     assert len(runner.calls) == 8
 
 

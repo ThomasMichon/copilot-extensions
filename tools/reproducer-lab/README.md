@@ -160,7 +160,11 @@ No remote URL is configured and no fetch-head source-path record is written.
 The subprocess environment is a fixed synthetic baseline: ambient credentials,
 Git overrides, proxies and service-discovery settings are not inherited.
 Global/system Git config, templates, hooks, lazy fetches and automatic
-maintenance are excluded; only the explicit local-file transport is permitted.
+maintenance are excluded. `GIT_ATTR_NOSYSTEM=1` and an explicit null
+`core.attributesFile` also exclude host system/user attribute policy;
+repository-tracked attributes remain part of the selected source.
+Only the explicit local-file transport is permitted. Destination initialization
+explicitly matches the verified commit's SHA-1 or SHA-256 object format.
 
 Every command uses `process.py`'s existing caller-owned runner with at most
 15 seconds, 4 MiB stdout and 16 KiB stderr within one 60-second preparation
@@ -208,7 +212,7 @@ The explicit local-Git lane is separate from those synthetic selectors:
 <bounded-test-supervisor> -- <python> -m pytest -q tools/reproducer-lab/source_native_tests.py
 ```
 
-Its fresh synthetic repository proves the selected committed bytes survive
+Its fresh SHA-1 and SHA-256 synthetic repositories prove the selected committed bytes survive
 dirty/skip-worktree changes, excludes untracked content, source configuration,
 hooks and older history, and leaves the source checkout untouched. It does not
 use Docker, a remote forge, production credentials or service processes.

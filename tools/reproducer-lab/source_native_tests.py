@@ -8,6 +8,8 @@ import shutil
 import sys
 from pathlib import Path
 
+import pytest
+
 from process import run
 
 spec = importlib.util.spec_from_file_location("reproducer_lab_source_native", Path(__file__).with_name("source.py"))
@@ -17,7 +19,10 @@ sys.modules[spec.name] = source
 spec.loader.exec_module(source)
 
 
-def test_real_git_snapshot_excludes_dirty_untracked_configuration_and_hooks(tmp_path: Path) -> None:
+@pytest.mark.parametrize("object_format", ["sha1", "sha256"])
+def test_real_git_snapshot_excludes_dirty_untracked_configuration_and_hooks(
+    tmp_path: Path, object_format: str,
+) -> None:
     git = shutil.which("git")
     assert git is not None
     repository, results, template = (tmp_path / name for name in ("origin", "results", "template"))
@@ -26,6 +31,7 @@ def test_real_git_snapshot_excludes_dirty_untracked_configuration_and_hooks(tmp_
     env = {
         "PATH": os.defpath, "HOME": str(tmp_path),
         "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_ATTR_NOSYSTEM": "1",
         "GIT_AUTHOR_NAME": "Synthetic Lab", "GIT_AUTHOR_EMAIL": "lab@example.invalid",
         "GIT_COMMITTER_NAME": "Synthetic Lab", "GIT_COMMITTER_EMAIL": "lab@example.invalid",
     }
@@ -35,7 +41,7 @@ def test_real_git_snapshot_excludes_dirty_untracked_configuration_and_hooks(tmp_
         assert result.returncode == 0, "synthetic Git setup/inspection failed"
         return result.stdout.strip()
 
-    invoke("init", "--quiet", f"--template={template}")
+    invoke("init", "--quiet", f"--object-format={object_format}", f"--template={template}")
     (repository / "historical.txt").write_text("synthetic history outside the selected tree\n")
     invoke("add", "historical.txt")
     invoke("commit", "--quiet", "-m", "synthetic older source")
