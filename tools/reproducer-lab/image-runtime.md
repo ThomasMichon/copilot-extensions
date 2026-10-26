@@ -154,7 +154,10 @@ minimal-environment, configuration and no-launch controls. Explicitly selected
 `fixture_owner_tests.py` exercises real local Git, the peer wrapper's argument
 parser and actual owner config loaders on temporary synthetic paths; its guest
 ownership check is substituted. The parser control uses `--help` and never
-enters the peer loop or writes a transcript.
+enters the peer loop or writes a transcript. It first obtains the exact argv
+from the real Bridge `resolve_local_launch()` with `explicit_cwd=True`,
+including ordinary hosting admission. This lane needs the owning projects'
+declared Python dependencies in its isolated test environment.
 It starts no service or backend and is outside default test discovery. Neither
 lane qualifies the actual image, guest mounts, installed runtimes or ordinary
 Dispatch-to-Bridge execution.

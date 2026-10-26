@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import os
@@ -64,8 +65,17 @@ def test_actual_peer_launcher_accepts_protocol_flags_before_extra_args(
 
     launcher = guest_fixture.HOME / "bin/mock-acp"
     assert launcher.stat().st_mode & 0o777 == 0o700
+    transport = importlib.import_module("agent_bridge.transport")
+    target = transport.SpawnTarget(
+        type="local", cwd=str(prepared.workspace / "anchor"),
+        project=guest_fixture.PROJECT, explicit_cwd=True,
+        copilot_path=str(launcher), env=guest_fixture.environment(),
+    )
+    arguments, cwd, _environment = asyncio.run(transport.resolve_local_launch(target))
+    assert arguments == [str(launcher), "--acp", "--stdio", "--no-auto-update"]
+    assert cwd == str(prepared.workspace / "anchor")
     result = run(
-        [str(launcher), "--acp", "--stdio", "--no-auto-update", "--help"],
+        [*arguments, "--help"],
         timeout=5, max_stdout_bytes=16 * 1024, env=guest_fixture.environment(),
     )
     assert result.returncode == 0, result.stderr
