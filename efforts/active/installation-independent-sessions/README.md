@@ -623,3 +623,53 @@ notice; the existing bounded/quiet absent-handler contract remains intact.
   shared YAML standby, native Windows survival and released/installed
   acceptance remain open. The next slice resumes that same real-removal
   baseline after the read-only probe repair.
+
+### 2026-10-26 - Actual Linux round trip and whole-suite prerequisites
+
+- #9075 merged as `144183e71d55a22088b3d1082ac2dac155908190`.
+  A new disposable installation at that exact merged source passed the real
+  read-only launch probe, authenticated metadata-daemon shutdown, supported
+  Manager removal and Worktrees removal, followed by actual reinstall.
+  The same five mux, wrapper, launch and Copilot process incarnations survived.
+  The native assistant transcript records responses before removal, while both
+  primary commands and installed generations were absent, and after reinstall.
+- Six durable files remained byte-identical. The project registry changed
+  only its normal registration timestamp; all other parsed registry data
+  remained identical. Worktrees retained generated helpers and snapshots, and
+  the resident launch interpreter remained alive. This is a bounded two-product,
+  same-source Linux baseline, not whole-suite removal, copied-wrapper,
+  replacement-generation exit, native Windows or installed-release acceptance.
+- The same surviving session then received all 13 declared runtime adopters
+  plus Manager from that merged source. Every selected runtime identified the
+  exact source commit and had completion evidence. The same five process
+  incarnations remained unchanged, and the native transcript recorded another
+  no-tools assistant response after installation.
+- Actual supported Index uninstall returned success and removed its command,
+  but retained generations, snapshots and selectors. Other prerequisite
+  source inspections found missing legacy bootstrap uninstall actions and
+  default state-erasing removal paths. These are removal gaps, not a reason
+  to substitute manual directory deletion or claim the middle state clean.
+- The bounded Logger repair removes only declared reconstructible children
+  under its existing install transaction, preserving configuration, digests,
+  databases, session state and unknown root content. It validates deployment
+  or in-root stamped ownership before removing tasks or commands; foreign,
+  malformed, missing and externally redirected ownership refuses explicitly.
+  Native Windows deployed/stamped ownership and idempotence controls pass,
+  as do the affected existing Logger installer tests and isolated POSIX
+  controls. Whole-suite native removal remains the next acceptance gate.
+- #1886 retains the symmetric harness-wide declaration, shared-reference and
+  confirmed plan/apply contract. Per-product prerequisites do not replace that
+  owner. Containers' runtime-hosted SSH broker and Machines' admission boundary
+  require explicit retention/quiescence handling before their code can be
+  removed; transport, credentials and external resources are not inferred to
+  be disposable from a product name.
+- Keep this effort Active. Continue the supported per-product removal
+  prerequisites, then the real all-absent/reinstall witness around this same
+  session. The protected transport closure, launch-owned shell/current hooks,
+  shared YAML maintenance admission and native standby remain unresolved.
+- The prerequisite review exposed and corrected literal child-name matching,
+  same-product foreign ownership, active Logger syncs, persistent snapshot
+  coordination and retry authentication after partial cleanup. Native
+  task/process/custody controls and isolated Linux integration cover these
+  boundaries. This adds no whole-harness reference-accounting or abrupt-death
+  recovery claim; the real all-absent witness remains open.

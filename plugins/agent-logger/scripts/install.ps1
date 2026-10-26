@@ -49,6 +49,14 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($Action -eq 'uninstall' -and $InstallDir) {
+    if (($InstallDir -split '[\\/]') -contains '..') {
+        throw 'Logger uninstall requires a root without parent-traversal components'
+    }
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
     param([string]$Source, [string]$Destination)
@@ -590,8 +598,14 @@ function Ensure-UvIndex {
 }
 
 $InstallDir = if ($InstallDir) { $InstallDir } else { Join-Path $env:USERPROFILE '.agent-logger' }
+if ($Action -eq 'uninstall' -and ($InstallDir -split '[\\/]' -contains '..')) {
+    throw 'Logger uninstall requires a root without parent-traversal components'
+}
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
-$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger'))
+if ($InstallDir.Length -gt [IO.Path]::GetPathRoot($InstallDir).Length) {
+    $InstallDir = $InstallDir.TrimEnd([char[]]'/\')
+}
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-logger')).TrimEnd([char[]]'/\')
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
     $InstallDir,
     $legacyInstallDir
@@ -1881,6 +1895,37 @@ function Invoke-Stamp {
     }
 }
 
+function Get-LoggerUninstallTaskNames {
+    $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$names.Add($TaskName)
+    foreach ($candidate in @(Get-ScheduledTask -ErrorAction Stop)) {
+        if (-not $candidate.PSObject.Properties['TaskName'] -or
+            -not $candidate.PSObject.Properties['TaskPath'] -or
+            -not $candidate.PSObject.Properties['Actions']) { continue }
+        if ($candidate.TaskPath -ne '\' -or
+            $candidate.TaskName -notmatch '^Agent Logger Session Sync(?: - [a-f0-9]{12})?$') { continue }
+        $bound = $false
+        foreach ($action in @($candidate.Actions)) {
+            if ($action.PSObject.Properties['Arguments'] -and
+                "$($action.Arguments)".IndexOf(('"' + $TaskLauncher + '"'),
+                    [StringComparison]::OrdinalIgnoreCase) -ge 0) { $bound = $true }
+        }
+        if (-not $bound) { continue }
+        if (-not $candidate.PSObject.Properties['Principal'] -or
+            -not $candidate.Principal.UserId) { throw 'Logger task ownership cannot be revalidated' }
+        $owner = $candidate.Principal.UserId
+        if ($owner -notlike 'S-1-*') {
+            $owner = ([Security.Principal.NTAccount]::new($owner)).Translate(
+                [Security.Principal.SecurityIdentifier]).Value
+        }
+        if ($owner -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+            throw 'Logger task runtime is owned by another account; uninstall refused'
+        }
+        [void]$names.Add($candidate.TaskName)
+    }
+    return @($names | Sort-Object)
+}
+
 try {
     . (Join-Path $ScriptDir 'versioned_runtime_native.ps1')
     . (Join-Path $ScriptDir 'source-runtime.ps1')
@@ -1911,16 +1956,34 @@ switch ($Action) {
         Update-SyncTaskBinding
     }
     'uninstall' {
+        $uninstallPython = Get-BootstrapPython
+        if (-not $uninstallPython) { throw 'Logger uninstall requires a bootstrap Python interpreter' }
+        $uninstallGuardArgs = @('-I', '-B', (Join-Path $PSScriptRoot 'uninstall_guard.py'), '--root', $InstallDir)
+        $guardError = ''
+        $null = Invoke-Hidden -FilePath $uninstallPython -ArgList $uninstallGuardArgs -ErrorOutput ([ref]$guardError)
+        if ($LASTEXITCODE -ne 0) { throw $guardError }
         if ($DryRun) { Write-Host '(dry run -- nothing will be changed)' -ForegroundColor Yellow }
-        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-            if ($DryRun) {
-                Write-Host "[dry-run] would remove scheduled task: $TaskName"
+        foreach ($uninstallTaskName in @(Get-LoggerUninstallTaskNames)) {
+            if (Get-ScheduledTask -TaskName $uninstallTaskName -ErrorAction SilentlyContinue) {
+                if ($DryRun) {
+                    Write-Host "[dry-run] would remove scheduled task: $uninstallTaskName"
+                } else {
+                    Disable-ScheduledTask -TaskName $uninstallTaskName -ErrorAction Stop | Out-Null
+                    $task = Get-ScheduledTask -TaskName $uninstallTaskName -ErrorAction Stop
+                    if ($task.State -in @('Running', 'Queued', 'Unknown')) {
+                        throw 'Active Logger sync task; uninstall refused after disabling new scheduled starts'
+                    }
+                    Unregister-ScheduledTask -TaskName $uninstallTaskName -Confirm:$false
+                    Write-Changed "scheduled task removed (config at $InstallDir kept)"
+                }
             } else {
-                Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-                Write-Changed "scheduled task removed (config at $InstallDir kept)"
+                Write-Warn2 "no scheduled task found"
             }
-        } else {
-            Write-Warn2 "no scheduled task found"
+        }
+        if (-not $DryRun) {
+            $guardError = ''
+            $null = Invoke-Hidden -FilePath $uninstallPython -ArgList ($uninstallGuardArgs + @('--idle', '--prepare')) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
         }
         if ($publishGlobalBinstubs) {
             $anyStub = $false
@@ -1930,7 +1993,7 @@ switch ($Action) {
                     if (Test-Path $f) {
                         $anyStub = $true
                         if ($DryRun) { Write-Host "[dry-run] would remove binstub: $f" }
-                        else { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+                        else { Remove-Item $f -Force -ErrorAction Stop }
                     }
                 }
             }
@@ -1939,8 +2002,16 @@ switch ($Action) {
             Write-Changed 'scoped install left legacy global binstubs unchanged'
         }
         if ($DryRun) {
+            Write-Host '[dry-run] would remove runtime generations, snapshots, generated dispatchers and runtime selectors'
             Write-Host "[dry-run] config/session-state at $InstallDir would be kept (agent-logger uninstall never removes it)"
             Write-Host 'agent-logger uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow
+        } else {
+            $guardError = ''
+            $null = Invoke-Hidden -FilePath $uninstallPython -ArgList (
+                $uninstallGuardArgs + @('--idle', '--prepare', '--remove-runtime', '--shell', (Get-Process -Id $PID).Path)
+            ) -ErrorOutput ([ref]$guardError)
+            if ($LASTEXITCODE -ne 0) { throw $guardError }
+            Write-Changed 'runtime generations and generated dispatchers removed (config/session-state kept)'
         }
     }
     'status' {

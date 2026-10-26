@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import os
 from pathlib import Path
 import stat
 import subprocess
@@ -375,6 +376,14 @@ def test_native_builder_preserves_compiler_argv_and_atomic_output(
         monkeypatch.setenv("CC", cc)
     output = tmp_path / "native/daemon-instance"
     _write(output, b"previous output")
+    chmod = Path.chmod
+    modes = []
+
+    def record_mode(path, mode, **options):
+        modes.append((path, mode))
+        return chmod(path, mode, **options)
+
+    monkeypatch.setattr(Path, "chmod", record_mode)
     assert builder.build_native(output, compiler=compiler) == output.absolute()
     assert len(calls) == 1
     command, source = calls[0]
@@ -383,7 +392,9 @@ def test_native_builder_preserves_compiler_argv_and_atomic_output(
     assert Path(command[-3]) == BUILDER.with_name(native.SOURCE)
     assert source == BUILDER.with_name(native.SOURCE).read_bytes()
     assert output.read_bytes() == _elf("x86_64", source)
-    assert stat.S_IMODE(output.stat().st_mode) == 0o755
+    assert modes == [(output.with_name(output.name + f".{os.getpid()}.pending"), 0o755)]
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o755
     assert not list(output.parent.glob("*.pending"))
 
 

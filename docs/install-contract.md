@@ -2394,7 +2394,14 @@ Read-only actions (`status`) and service controls do not take it.
 against the same install/update lock. Vault and SSH uninstall previews do not
 acquire or create the transaction lock or remove runtime/config contents.
 The normal transient payload self-staging protocol still applies.
-`agent-logger` already locks uninstall and keeps its state directory.
+`agent-logger` locks uninstall and removes declared reconstructible runtime
+children while keeping configuration, digests, session state and unknown root
+content. It validates deployment or in-root stamped ownership before changing
+tasks or commands. `agent-mcp` also provides an explicit legacy uninstall under
+its existing install lock, without staging or provisioning a replacement.
+It requires owned deployment/stamped metadata and quiescent, attributable
+runtime processes; unsupported or ambiguous process inspection refuses removal.
+See the plugins' READMEs for their retained contents and platform boundaries.
 
 For those three uninstallers, removing runtime/config contents must **not**
 remove the lock inode or in-flight staged sources. The canonical
@@ -2406,9 +2413,22 @@ invocations, not with purge. Moving the lock to a new
 path would not exclude an older installer holding the original lock, so purge
 preserves the existing identity instead. Removal errors stop that purge rather
 than reporting success. Nested links are unlinked, never traversed; filesystem
-roots, user homes, and linked install roots are refused. This changes no
-uninstaller's config-retention default and introduces no uninstall action for
-init-only plugins.
+roots, user homes, and linked install roots are refused. Callers may instead
+supply immediate-child names (`-EntryNames` on PowerShell; positional names
+after the root on Bash). All names are validated before removal, coordination
+entries cannot be selected, and unselected children remain untouched. Explicit
+empty/null PowerShell selections refuse rather than falling back to purge.
+Omitting the selection preserves existing purge behavior; the helper does not
+establish product ownership, acquire the transaction or retire live processes.
+
+Destructive adapters bind an unambiguous root before acquiring their transaction;
+Logger and MCP refuse parent-traversal components rather than mixing native
+filesystem traversal with Python's lexical normalization. POSIX removal children
+use the existing finite-process supervisor and settle descendant writers before
+returning or propagating a timeout. Its explicit caller-held mode needs no
+runtime process-utility dependency; without a construction descriptor it does
+not establish storage-custody retention after abrupt caller death. Existing
+construction callers retain their descriptor-backed contract.
 
 `agent-bridge` holds the same fail-closed lock for `install` and `update` (POSIX:
 `flock` on fd 8; without a `flock` binary, the same `flock(2)` lock taken through

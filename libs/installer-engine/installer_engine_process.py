@@ -1,4 +1,4 @@
-"""Bounded installer children, with ownership surviving abrupt caller death."""
+"""Bounded installer children, with optional retained construction custody."""
 
 from __future__ import annotations
 
@@ -45,13 +45,21 @@ def _settle(operation: Callable[[], object]) -> None:
 
 def run_owned(
     argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float,
-    procutil: ModuleType, construction_fd: int,
+    procutil: ModuleType | None, construction_fd: int | None,
     runtime_root: Path | None = None, runtime_version: str | None = None,
     runtime_path: Path | None = None,
     deadline: float | None = None,
 ) -> subprocess.CompletedProcess:
+    """Settle owned writers before returning or propagating a timeout.
+
+    POSIX callers may omit procutil. With no construction descriptor, storage
+    custody remains caller-held only; abrupt caller-death retention is not
+    established by this mode.
+    """
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("installer child timeout must be finite and positive")
+    if os.name == "nt" and procutil is None:
+        raise ValueError("Windows installer children require native process utilities")
     if deadline is not None:
         if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
             raise ValueError("installer child deadline must be finite")
@@ -102,7 +110,8 @@ def run_owned(
                 process = subprocess.Popen(
                     [sys.executable, "-I", str(Path(__file__).resolve()),
                      "--owner-fd", str(owner_read), "--", *argv],
-                    pass_fds=(owner_read, construction_fd), start_new_session=True, **options,
+                    pass_fds=(owner_read,) if construction_fd is None else (owner_read, construction_fd),
+                    start_new_session=True, **options,
                 )
             except OSError as error:
                 raise ChildLaunchError(f"Installer child could not start: {error}") from error

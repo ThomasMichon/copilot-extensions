@@ -259,6 +259,7 @@ def unregistered_adopters() -> list[str]:
         candidate.name
         for candidate in plugins_root.iterdir()
         if candidate.name not in ADOPTERS
+        and candidate not in ier.native_adopter_dirs(REPO)
         and (
             any((candidate / "scripts" / name).is_file() for name in FILES)
             or _has_any_ref(candidate.name)
@@ -337,8 +338,12 @@ def verify() -> list[str]:
             problems.append(f"{destination.relative_to(REPO)} differs from canonical evaluator bootstrap")
     plugins = REPO / "plugins"
     for candidate in plugins.iterdir() if plugins.is_dir() else ():
+        native_files = (
+            ier.STANDALONE_NATIVE_FILES if candidate in ier.native_adopter_dirs(REPO) else ()
+        )
         if candidate.name not in PYTHON_ADOPTERS and any(
-            (candidate / "scripts" / name).exists() for name in ier.PYTHON_FILES
+            (candidate / "scripts" / name).exists()
+            for name in ier.PYTHON_FILES if name not in native_files
         ):
             problems.append(f"{candidate.name} has an unregistered Python installer engine")
     return problems

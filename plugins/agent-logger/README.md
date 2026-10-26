@@ -64,6 +64,33 @@ session-to-log pipeline out of any single bespoke service:
 - **Three deployment topologies** from one plugin — see
   [`docs/deployment-topologies.md`](docs/deployment-topologies.md).
 
+`install.ps1 uninstall` / `install.sh uninstall` removes the owned sync task or
+timer, compatibility commands, runtime generations, payload snapshots and
+generated dispatchers. Digests, configuration, session state, databases and
+unrecognized root content remain for reinstall. `-DryRun` / `--dry-run`
+previews removal without deleting those artifacts. The installer transaction
+lock remains in place; uninstall does not purge the runtime home.
+Removal requires the deployment manifest to identify Logger, or a Logger
+project snapshot addressed inside that runtime home's snapshot directory.
+Missing, malformed, foreign or externally redirected ownership refuses removal
+before changing the task or commands.
+Legacy removal also rejects installation-cell/managed metadata and a different
+command source or lifecycle owner. It disables new scheduled starts, refuses
+an active sync task/service or runtime process, and removes generations under
+construction/retention custody. Persistent snapshot coordination inodes remain.
+Validated stamped-only ownership is recorded in the existing deployment
+manifest before destructive cleanup; ownership metadata is removed last so a
+partial removal can be retried without requiring the deleted snapshot.
+Uninstall helpers/interpreters must be outside removable content (the retained
+installer staging area is allowed). Linux checks full current-user command
+lines and refuses ambiguously attributed Logger processes, including PATH
+launches through symlinked virtualenv interpreters; unavailable native process
+inspection refuses removal.
+Uninstall roots cannot contain `..` components. Relative selections are bound
+before installer staging (and against PowerShell's provider location on Windows).
+POSIX removal children use the shared finite-process supervisor so timeout
+settlement completes before the caller releases its install/generation custody.
+
 ## Source-qualified runtimes
 
 The legacy/default-root session bootstrap uses its packaged installation Driver

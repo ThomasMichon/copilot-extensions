@@ -64,6 +64,16 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
         assert declaration == contract.human_output_declaration(script)
 
 
+def test_mcp_cleanup_ships_its_native_engine_and_finite_process_supervisor():
+    contract = sync_installer_engine.ier
+    consumer = REPO / "plugins" / "agent-mcp"
+    assert consumer in contract.native_adopter_dirs(REPO)
+    for name in contract.STANDALONE_NATIVE_FILES:
+        assert (consumer / "scripts" / name).read_bytes() == (
+            REPO / "libs" / "installer-engine" / name
+        ).read_bytes()
+
+
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
 def test_native_deploy_manifest_can_build_without_publishing(tmp_path, shell):
     executable = shutil.which(shell)
@@ -582,6 +592,7 @@ def fake_repo(tmp_path, monkeypatch):
     canonical_dir.mkdir(parents=True)
     (canonical_dir / "installer-engine.ps1").write_text("canonical ps1\n", encoding="utf-8")
     (canonical_dir / "installer-engine.sh").write_text("canonical sh\n", encoding="utf-8")
+    (canonical_dir / "installer_engine_process.py").write_text("canonical process\n", encoding="utf-8")
     monkeypatch.setattr(sync_installer_engine, "REPO", tmp_path)
     monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", canonical_dir)
     monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ("agent-registered",))
