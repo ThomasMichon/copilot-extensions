@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import venv
 from types import SimpleNamespace
 
@@ -651,3 +652,77 @@ def test_logger_bom_manifest_provenance_fallback(tmp_path, monkeypatch, lifecycl
         assert helper.validate(root) == (primitive, None)
     assert manifest.read_bytes() == before
     _assert_state(root, durable, removed=False)
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_logger_refuses_external_python_module_consumer(tmp_path, host):
+    executable = shutil.which(host) if os.name == "nt" else None
+    if executable is None:
+        pytest.skip("native Windows shell required")
+    root, durable, env = _fixture(tmp_path, "owned")
+    modules = root / "versions" / "1.0.0" / "modules"
+    modules.mkdir(parents=True)
+    ready = tmp_path / "consumer-ready"
+    (modules / "agent_logger.py").write_text(
+        "import os, pathlib, time\n"
+        "pathlib.Path(os.environ['LOGGER_TEST_READY']).write_text('ready')\n"
+        "time.sleep(120)\n",
+    )
+    consumer_env = {**env, "PYTHONPATH": str(modules), "LOGGER_TEST_READY": str(ready)}
+    consumer = subprocess.Popen(
+        [sys.executable, "-m", "agent_logger"], cwd=tmp_path, env=consumer_env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while not ready.exists() and consumer.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert ready.exists(), "external module consumer did not become ready"
+        assert consumer.poll() is None
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File",
+             str(INSTALLERS / "install.ps1"), "uninstall", "-InstallDir", str(root)],
+            capture_output=True, text=True, timeout=90, env=env, cwd=tmp_path,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode != 0
+        assert "Unattributed Logger runtime process" in result.stderr, result.stdout + result.stderr
+        assert consumer.poll() is None
+        _assert_state(root, durable, removed=False)
+        assert (modules / "agent_logger.py").is_file()
+    finally:
+        consumer.terminate()
+        consumer.communicate(timeout=10)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows process inventory")
+@pytest.mark.parametrize("outcome", ["failure", "missing-inspector", "ambiguous", "idle"])
+def test_logger_native_process_inventory_refuses_uncertain_consumers(tmp_path, monkeypatch, outcome):
+    spec = importlib.util.spec_from_file_location("logger_windows_census", INSTALLERS / "uninstall_guard.py")
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    runtime = SimpleNamespace(
+        _iter_all_pids=lambda: [os.getpid()], _versions_with_live_process=lambda _: set(),
+    )
+    monkeypatch.setattr(helper, "_load", lambda *args: runtime)
+    monkeypatch.setattr(helper.shutil, "which", lambda _: "powershell.exe")
+    rows = [{"pid": os.getpid(), "image": str(Path(sys.executable)), "command": "inspector"}]
+    if outcome == "missing-inspector":
+        rows = []
+    elif outcome == "ambiguous":
+        rows.append({"pid": os.getpid() + 1, "image": str(Path(sys.executable)),
+                     "command": "python.exe -m agent_logger"})
+    result = subprocess.CompletedProcess(
+        [], 1 if outcome == "failure" else 0, json.dumps(rows), "inspection unavailable",
+    )
+    monkeypatch.setattr(helper.subprocess, "run", lambda *args, **kwargs: result)
+    if outcome == "idle":
+        helper.refuse_live_runtime(tmp_path)
+    else:
+        expected = {
+            "failure": "native process inspection failed: inspection unavailable",
+            "missing-inspector": "native process inventory did not include the inspector",
+            "ambiguous": "Unattributed Logger runtime process",
+        }
+        with pytest.raises(RuntimeError, match=expected[outcome]):
+            helper.refuse_live_runtime(tmp_path)

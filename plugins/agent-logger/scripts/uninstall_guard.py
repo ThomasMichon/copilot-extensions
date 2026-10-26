@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -124,7 +126,60 @@ def refuse_live_runtime(root: Path) -> None:
         for path in (runtime._pid_image_path(pid), runtime._pid_cmdline_argv0(pid)):
             if path and path.replace("\\", "/").casefold().startswith(prefix):
                 raise RuntimeError(f"Active Logger runtime process {pid}; uninstall refused")
-    if os.name != "nt":
+    if os.name == "nt":
+        shell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if shell is None:
+            raise RuntimeError("Logger uninstall requires native Windows process inspection")
+        script = "$rootPrefix = '" + prefix.replace("'", "''") + "'\n"
+        script += f"$inspector = {os.getpid()}\n" + r"""
+$ErrorActionPreference = 'Stop'
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$rows = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'python%.exe' OR Name LIKE 'pypy%.exe'" | ForEach-Object {
+    if ($_.Name -match '^(python|pythonw|pypy|pypy3)([0-9.]*)?\.exe$') {
+        $candidate = $_
+        if ($candidate.ExecutablePath -and $candidate.CommandLine) {
+            $image = $candidate.ExecutablePath.Replace('\', '/').ToLowerInvariant()
+            $command = $candidate.CommandLine.Replace('\', '/').ToLowerInvariant()
+            if ($candidate.ProcessId -ne $inspector -and
+                -not $image.StartsWith($rootPrefix) -and
+                -not $command.Contains($rootPrefix) -and
+                -not $command.Contains('agent_logger')) { return }
+        }
+        try { $owner = Invoke-CimMethod -InputObject $candidate -MethodName GetOwnerSid } catch {
+            if (-not (Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue)) { return }
+            throw
+        }
+        if ($owner.ReturnValue -ne 0) { throw 'Cannot establish Python process ownership' }
+        if ($owner.Sid -eq $sid) {
+            if (-not $_.ExecutablePath -or -not $_.CommandLine) {
+                throw 'Cannot inspect a current-user Python process'
+            }
+            [pscustomobject]@{ pid=$_.ProcessId; image=$_.ExecutablePath; command=$_.CommandLine }
+        }
+    }
+})
+ConvertTo-Json -InputObject $rows -Compress
+"""
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=60, check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if result.returncode:
+            raise RuntimeError(f"Logger native process inspection failed: {result.stderr.strip()}")
+        rows = json.loads(result.stdout)
+        if not any(row["pid"] == os.getpid() for row in rows):
+            raise RuntimeError("Logger native process inventory did not include the inspector")
+        for row in rows:
+            if row["pid"] == os.getpid():
+                continue
+            image = row["image"].replace("\\", "/").casefold()
+            command = row["command"].replace("\\", "/").casefold()
+            if image.startswith(prefix) or prefix in command:
+                raise RuntimeError(f"Active Logger runtime process {row['pid']}; uninstall refused")
+            if "agent_logger" in command:
+                raise RuntimeError(f"Unattributed Logger runtime process {row['pid']}; uninstall refused")
+    else:
         if not sys.platform.startswith("linux") or not Path("/proc").is_dir():
             raise RuntimeError("Logger uninstall requires supported native process inspection")
         for pid in pids:
