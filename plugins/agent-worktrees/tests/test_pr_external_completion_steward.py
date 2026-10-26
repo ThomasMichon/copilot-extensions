@@ -76,7 +76,7 @@ def test_verified_merge_after_external_rebase_preserves_work_and_backup(pr_repo,
 
     assert result["success"], result
     assert _git("rev-parse", "origin/master", cwd=path) == merged
-    assert _git("rev-parse", pr_complete.BACKUP_REF, cwd=path) == state.local_tip
+    assert _git("rev-parse", result["backup_ref"], cwd=path) == state.local_tip
     assert (path / "a.txt").read_text() == "one\n"
     assert (path / "b.txt").read_text() == "two\n"
     if unpublished:

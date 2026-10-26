@@ -111,7 +111,7 @@ def test_concurrent_manifest_boundary_preserves_only_post_pr_commits(
     assert result["action"] == ("rebased" if followups else "reset-past-squash")
     assert result.get("kept", 0) == followups
     assert result["dropped"] == 1
-    assert _git("rev-parse", pr_complete.BACKUP_REF, cwd=worktree) == before
+    assert _git("rev-parse", result["backup_ref"], cwd=worktree) == before
     assert _git("rev-list", "--count", "origin/master..HEAD", cwd=worktree) == str(followups)
     assert _git("show", "HEAD:manifest.txt", cwd=worktree) == _git(
         "show", "origin/master:manifest.txt", cwd=worktree,
@@ -164,4 +164,4 @@ def test_merged_label_cannot_prove_incomplete_concurrent_squash(pr_repo):
     assert result["action"] == "error"
     assert "aborted" in result["error"]
     assert _git("rev-parse", "HEAD", cwd=worktree) == before
-    assert _git("rev-parse", pr_complete.BACKUP_REF, cwd=worktree) == before
+    assert _git("rev-parse", result["backup_ref"], cwd=worktree) == before
