@@ -2,8 +2,9 @@
 
 Back to the [canonical effort](README.md). Tracking issue: #8864.
 
-**Status:** reviewed contract; implementation candidate under validation.
-Actual Linux removal is qualified; native Windows qualification remains open.
+**Status:** reviewed contract; implementation review corrections under validation.
+The earlier candidate qualified actual Linux and Windows removal; the revised
+candidate still requires changed-head native qualification and passing review.
 No release or host operation is asserted by this document.
 
 ## Selected intent
@@ -178,3 +179,21 @@ termination, credential change or installed rollout is authorized by this plan.
   an actual installed daemon start/health/shutdown before removal. The prior
   native proof does not credit these new controls; review and changed-head
   qualification remain open.
+- Current-Dev reconciliation preserves both the pre-existing native portfolios
+  and the new uninstall lane, including source/engine-source contracts and
+  daemon root tests. No other portfolio job changed.
+- The review corrections refuse unreliable process enumeration, create
+  inventories with exclusive `0600` permissions and disable ordinary daemon
+  child bytecode writes. Native removal qualification now includes actual
+  installed daemon start, health and graceful shutdown before removal.
+- A Windows interpreter control had spent its unchanged 30-second budget
+  assembling an unused standalone payload. Its synthetic-program fixture now
+  copies the real shell boundary and complete first-party module closure
+  directly into the isolated prefix. It still executes the production
+  retention bootstrap and verifies the child PID, interpreter prefix and
+  installed program/server module origins; real standalone assembly remains
+  covered by the independent native acceptance owner.
+- The four directly affected Windows test files passed 94 controls with four
+  explicit platform-gated skips under their unchanged item/group limits.
+  Canonical SDK copies and exact admitted source/test hashes also match.
+  Revised-head native removal/reinstall and a fresh review remain open.
