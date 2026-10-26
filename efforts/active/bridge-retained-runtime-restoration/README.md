@@ -157,8 +157,8 @@ require their own review and qualification.
       original binding storage in #8960. Exact selected-slot retention merged
       in #8967; actual immutable invocation, provider/guest admission and native
       integration remain unimplemented.
-      The package-owned executing-slot retention context is an internal
-      prerequisite only; no provider launch path consumes it yet.
+      The package-owned executing-slot retention context merged in #8976 as
+      an internal prerequisite only; no provider launch path consumes it yet.
       Both profiles still declare retained creation unsupported.
 - [ ] Preserve unresolved operations and refuse incomplete or legacy coverage;
       do not synthesize quiescence from an empty projection.
@@ -277,6 +277,10 @@ Full custody, actual native consumer/SDK qualification and restoration remain op
 
 Dated entries preserve the complete source history; the headings below retain
 existing README anchors.
+
+### 2026-10-25 - Executing-runtime resources merged; provider admission next
+
+[Full journal entry](journal/2026/10.25-source-custody-01.md#2026-10-25---executing-runtime-resources-merged-provider-admission-next).
 
 ### 2026-10-25 - Executing-runtime resource prerequisite
 

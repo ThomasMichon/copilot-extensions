@@ -61,6 +61,22 @@ The acquisition-specific proof and receipt rules below govern the CLI and
 legacy acquisition path, not ordinary ACP create/store/send. No legacy
 acquisition marker implicitly grants ordinary-send authority.
 
+Bridge also exposes venue-backed `create --cli --detach` for an observable
+muxed session. That command delegates to the venue's CLI launcher; it is not
+the keyed local workspace-creation contract. The current Bridge CLI explicitly
+rejects combining `--cli` with `--creation-key`. Keyed local workspace creation
+can retain an initial prompt as part of its original request, but Dispatch's
+ordinary path above deliberately sends only after storing the created-agent
+facts. Neither capability alone proves retry-safe first-prompt delivery for
+detached CLI creation. A convergence change must qualify that combination,
+including pending creation and response loss, before replacing these paths.
+It must also distinguish process/mux startup from native session birth:
+waiting for first-prompt-dependent session or extension registration before
+submitting the seed would create a circular readiness dependency. Missing
+registration after submission does not establish nonacceptance.
+See [Bridge's creation contracts](../../agent-bridge/docs/session-acquisition.md)
+and the [spawn diagnostic boundaries](spawn-supervisor.md#allocation-progress-pool-selection-and-diagnostics).
+
 Allocation, reservation recording, task claim/adoption, evaluation, pending
 steers and terminal cleanup keep their original owners. Dispatch conveys
 current generation/reservation, recorded worktree provenance, explicit

@@ -79,6 +79,51 @@ coordinator or coordinator-to-coordinator federation. Container composition,
 authenticated supervisor execution enrollment and running adoption must be
 qualified separately; this description does not install or activate them.
 
+### Allocation progress, pool selection and diagnostics
+
+The supervisor daemon derives desired registrations from the coordinator and
+registrar declarations, then applies operator overrides. A discovered declaration
+is not necessarily enabled, and a running lane process is not proof of an
+available execution destination. Producers enqueue work; they do not allocate
+its agent. Each worker-lane `Supervisor.poll_once()` reconciles existing
+reservations, recovery and redelivery before considering new eligible tasks.
+A blocked reconciliation or backend call can delay later allocations in that
+lane while its process remains alive.
+
+Lane selection applies repository scope, labels, task selectors, holds and
+concurrency. There is no single universal discovery of all execution pools.
+For the explicit remote fleet backend, `FleetSpawner` probes its configured
+ordered host list for reachability and the required command, caches that result
+briefly, and selects the first available candidate. This is not a load-aware
+capacity guarantee. No-capacity deferral happens before reservation; reserved
+attempts are recorded before nontransactional workspace/session creation.
+
+The [local acquisition guide](session-acquisition.md) distinguishes ordinary
+Bridge create/store/send from prepared-workspace acquisition and CLI/fleet
+embodiment. In particular, the ordinary Bridge call can include worktree
+resolution and preparation before a native session is ready. Launch preparation
+is not necessarily just an executable start: the selected Worktrees launcher,
+repository setup hooks and plugin preparation can perform additional work.
+Bridge's local ACP arguments disable Copilot self-update with
+`--no-auto-update`; this does not disable separate runtime reconciliation or
+missing-plugin installation. The
+[reconciler](../../agent-worktrees/src/agent_worktrees/reconcile.py)
+and [Bridge local launch owner](../../agent-bridge/src/agent_bridge/transport.py)
+define those separate behaviors.
+
+Task events, spawn reservations and Bridge creation/acquisition journals retain
+different parts of the sequence. They are not a complete diagnostic transcript
+of every scheduling decision, child process or failed allocation. Ordinary
+Bridge subprocess tracing is implemented by
+[`launch_debug`](../src/agent_dispatch/launch_debug.py): it is opt-in through
+`AGENT_DISPATCH_BRIDGE_CLI_TRACE` or the installation's `launch-debug.json`
+(`bridge_cli_trace`). It records started/finished JSONL files under
+`logs/bridge-cli`, with elapsed time, exit/timeout classification and bounded
+diagnostics. It intentionally omits input content and scrubs sensitive values;
+an unavailable trace sink warns but does not abort launch. Consequently, absence
+of a trace does not prove no call occurred. Source support for these records
+does not establish their availability in a particular deployed runtime.
+
 ## Retained startup and process capacity
 
 Task completion does not prove that an admitted startup has finished. A terminal

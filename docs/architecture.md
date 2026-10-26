@@ -542,12 +542,17 @@ flowchart TB
 
 `agent-dispatch` supplies the portable queue/lease authority agents coordinate
 through: a per-host loopback coordinator (`agent-dispatch serve`), a CLI and MCP
-surface, SSE events, and optional always-on **embody supervisors** that turn
-queued, label-gated tasks into autonomous bodies. The primary supervisor reads
-`~/.agent-dispatch/supervisor.env`; additional named profiles under
-`~/.agent-dispatch/supervisors/<name>.env` install as independent
-`agent-dispatch-supervisor-<name>` units/tasks using the same env schema, while
-the primary `agent-dispatch-supervisor` remains unchanged.
+surface, SSE events, and optional always-on supervisors that turn queued,
+label-gated tasks into autonomous bodies. The coordinator owns queue state;
+the separate supervisor daemon merges stored registrations and discovered
+declarations with operator overrides, then manages producer and worker-lane
+subprocesses. Each worker lane performs its own eligibility/capacity sweep and
+records reservations before invoking a backend. Coordinator garbage collection
+is not that allocation sweep, and an alive supervisor process does not prove
+its lane is advancing. Legacy env-profile launchers remain a separate
+configuration path. The
+[spawn supervisor guide](../plugins/agent-dispatch/docs/spawn-supervisor.md#coordinator-supervisor-daemon-and-worker-lanes)
+owns the process, routing and observability details.
 
 Producer creation can be fenced by a coordinator-owned, durable generation over
 one permanent canonical repo-lane + source scope. An optional immutable required
@@ -577,7 +582,7 @@ coordinator-hosted MCP expose the same status/handoff primitive and structured
 rejections; bounded content-free events make transitions and rejected creates
 observable without exposing task content, capabilities, or control credentials.
 
-Its eight-state lifecycle includes explicit owner-preserving **suspended** work:
+Its nine-state lifecycle includes explicit owner-preserving **suspended** work:
 `started → suspended` parks a dormant, non-claimable task without losing its
 owner/session or durable context; `resume` wakes that same owner, while `release`
 clears ownership and requeues it for replacement embodiment. Suspended tasks are
@@ -593,12 +598,16 @@ lease, so cutover promotion recovers interrupted work without allowing a
 passive candidate to steal an in-flight delivery. The bridge atomically
 rechecks the captured owner-session identity when it enqueues the wake.
 
-Local agent bodies acquire sessions through `agent-bridge`, selecting ACP or
-CLI without a capability fallback that changes mode. Workspace allocation and
-terminal reclamation remain ground-layer responsibilities, not a second
-session-launch implementation in dispatch. The task's queue lane and worker's
-execution project are separate identities; allocation and acquisition must
-retain the same execution workspace. See the
+Local ordinary headless workers use Bridge keyed create without a prompt,
+store/read back the exact returned identities, then send the initial task under
+its native-conversation fence. Bridge internally allocates or resolves the
+workspace before native startup. The explicit acquisition/CLI path instead
+records a prepared workspace before asking Bridge to acquire its session.
+These remain distinct paths; Bridge's separate venue `create --cli --detach`
+interface is not a keyed-creation substitute. Workspace allocation and terminal
+reclamation remain ground-layer responsibilities. The task's queue lane and
+worker's execution project are separate identities; allocation and acquisition
+must retain the same execution workspace. See the
 [shared workspace contract](patterns/workspace-allocation-and-session-acquisition.md)
 and [local session acquisition guide](../plugins/agent-dispatch/docs/session-acquisition.md).
 Ground `create --creation-key` retains allocation intent and its original
