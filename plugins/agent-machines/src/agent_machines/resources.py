@@ -34,16 +34,12 @@ A requirement package declares resources under a top-level ``resources:`` list::
           url = "https://example.invalid/pypi/simple/"
           default = true
 
-Six kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
-``file`` (whole-file *enforce*/*ensure-present* plus a *managed-block* strategy
-that owns only a marked block inside an otherwise user-owned file),
-``registry`` (Windows registry values, via ``reg.exe``), and ``feature``
-(Windows optional features/capabilities via DISM and Linux/WSL units via
-``systemctl``, selected by a ``manager`` field), plus ``power-setting`` (Windows
-power-scheme AC/DC values via ``powercfg``), ``self-update`` (machine-local
-opt-in tiers), and ``copilot-cli-update`` (see ``resource_copilot_cli_update.py``). Adding a type is a new
-``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
-the engine changes.
+Handled kinds include ``package`` (winget/apt/pipx/uv-tool/pip), ``file``
+(whole-file or managed-block), ``registry`` (reg.exe), ``feature`` (DISM or
+systemctl), ``power-setting`` (powercfg), ``self-update`` and ``fleet-update``
+(machine-local opt-ins), ``copilot-cli-update``, and ``gh-account`` (read-only
+prerequisites). Add a ``ResourceHandler`` subclass to :data:`HANDLERS` for a
+new type; the resolution and restore pipeline remain shared.
 
 A whole-file ``enforce`` declaration may set ``marker``: a substring that must
 appear in an *existing* file's content for that file to be recognized as owned
@@ -155,6 +151,8 @@ class ResolvedResource:
 
     def summary(self) -> str:
         """A one-word disposition-ish label for plan output."""
+        if self.type == "gh-account":
+            return "prerequisite-check"
         if self.type == "package":
             state = self.desired.get("state", "present")
             ver = self.desired.get("version")
@@ -1812,6 +1810,7 @@ MANAGERS: dict[str, dict[str, Any]] = {
 def _build_handlers() -> dict[str, ResourceHandler]:
     from .resource_copilot_cli_update import CopilotCliUpdateResourceHandler
     from .resource_fleet_update import FleetUpdateResourceHandler
+    from .resource_gh_account import GhAccountResourceHandler
     from .resource_power import PowerSettingResourceHandler
     from .resource_self_update import SelfUpdateResourceHandler
 
@@ -1824,6 +1823,7 @@ def _build_handlers() -> dict[str, ResourceHandler]:
         "self-update": SelfUpdateResourceHandler(),
         "fleet-update": FleetUpdateResourceHandler(),
         "copilot-cli-update": CopilotCliUpdateResourceHandler(),
+        "gh-account": GhAccountResourceHandler(),
     }
 
 

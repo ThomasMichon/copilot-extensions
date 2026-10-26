@@ -1,6 +1,11 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_gh_account_prerequisite.py::test_explicit_sources_accept_healthy_inactive_accounts_without_switching",
+        "tools/promotion_unit_tests/test_gh_account_prerequisite.py::test_missing_invalid_ambiguous_or_unhealthy_evidence_never_succeeds",
+        "tools/promotion_unit_tests/test_gh_account_prerequisite.py::test_raw_output_and_probe_errors_are_not_exposed",
+        "tools/promotion_unit_tests/test_gh_account_prerequisite.py::test_native_adapter_has_short_owned_limits_and_no_refresh_or_debug",
+        "tools/promotion_unit_tests/test_gh_account_prerequisite.py::test_unconfirmed_process_custody_is_not_swallowed",
         "tools/promotion_unit_tests/test_manager_uninstall.py::test_batch_removal_refuses_invalid_generations_before_custody[empty]",
         "tools/promotion_unit_tests/test_manager_uninstall.py::test_batch_removal_refuses_invalid_generations_before_custody[dev]",
         "tools/promotion_unit_tests/test_manager_uninstall.py::test_batch_removal_refuses_invalid_generations_before_custody[parent]",
@@ -2404,6 +2409,8 @@
         "tools/promotion_unit_tests/test_resume_cli_contract.py::test_truncated_http_body_is_unconfirmed_without_replay[hosting-fenced]"
     ],
     "sources": {
+        "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py": "d8bada832bbbb3b5bba1aa317efdadd9ab4e65c0fa8862ef25f75e8bcdec9d2f",
+        "tools/promotion_unit_tests/test_gh_account_prerequisite.py": "2119a0f2a99998eb02916fe8254382e9d776567851404ecf970999c19cbeada9",
         ".devcontainer/trusted-harness-base/build.py": "4d96b40567c1135bf82d117f6b54a41ac88b5ddf6fe6d033835a42e88203966d",
         ".devcontainer/trusted-harness-base/install.py": "5818d4f7a7dad564cb28496b42a3774d4f924afb95f91d65e1d46629bd05c845",
         ".devcontainer/trusted-harness-base/tests/test_contract.py": "f193ecfa91ba4b24406d38103c1f357367d0229c4d4e036e08f6cb3b9d5deeb4",
@@ -2692,6 +2699,7 @@
         "tools/promotion_unit_tests/fixtures/bridge_resume_parser_v0.py": "66723445ed476c265b03dac68af604b85f709dcda1e55ad42e045df29b1586bd"
     },
     "coverage_targets": [
+        "plugins/agent-machines/src/agent_machines/gh_account_prerequisite.py",
         ".devcontainer/trusted-harness-base/build.py",
         ".devcontainer/trusted-harness-base/install.py",
         "fleet-manager/src/fleet_manager/host_profile.py",

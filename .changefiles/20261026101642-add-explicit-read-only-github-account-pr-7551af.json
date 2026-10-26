@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit read-only GitHub account prerequisites with bounded no-refresh checks and safe failure reporting.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
