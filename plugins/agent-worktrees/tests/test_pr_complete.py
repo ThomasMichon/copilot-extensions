@@ -54,7 +54,8 @@ class TestPrComplete:
             "rev-parse", "origin/master", cwd=wt_path)
         assert _ahead(f"worktree/{wid}", "origin/master", cwd=wt_path) == 0
         # Pre-complete state is recoverable.
-        assert _git("rev-parse", pr_complete.BACKUP_REF, cwd=wt_path) == before
+        assert res["backup_ref"].startswith(f"refs/pre-complete-backups/worktree/{wid}/")
+        assert _git("rev-parse", res["backup_ref"], cwd=wt_path) == before
 
     def test_squash_merge_with_divergent_upstream_no_conflict(self, pr_repo):
         """A squash-merge PLUS an unrelated upstream change: still a clean reset.
@@ -183,7 +184,7 @@ class TestPrComplete:
         real_git = git_ops.git
 
         def fail_backup(*args, **kwargs):
-            if args[:2] == ("update-ref", pr_complete.BACKUP_REF):
+            if args[0] == "update-ref" and args[1].startswith("refs/pre-complete-backups/"):
                 return subprocess.CompletedProcess(args, 1, "", "ref locked")
             return real_git(*args, **kwargs)
 

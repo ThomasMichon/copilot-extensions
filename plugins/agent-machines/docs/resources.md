@@ -57,8 +57,55 @@ realignment back to the declared pinned version as safe drift correction even
 without `maintenance_safe: true`. First install, removal, pin-only metadata
 changes, and package declarations without explicit `pin` + `version` still
 require `maintenance_safe: true` to participate in unattended runs.
+Read-only `gh-account` prerequisites also participate without that mutation
+opt-in, so an unsatisfied required account cannot become a successful skip.
 
 ## Resource types
+
+### `gh-account`
+
+Assert an explicitly declared GitHub CLI account prerequisite. Identity is
+`(host, login)`, case-insensitive. This resource is **check-only**, including
+under `restore --apply`: it never logs in, refreshes credentials, switches the
+active account, writes configuration, stores tokens or backs up a credential.
+
+```yaml
+schema_version: 4
+package: example/auth-prerequisites
+resources:
+  - type: gh-account
+    host: github.example.com
+    login: example-user
+    credential_source: stored
+```
+
+`host`, `login` and `credential_source` are required. There is no inferred
+account or credential-source default. `stored` accepts the CLI's keyring or
+absolute `hosts.yml` source; `environment` accepts its named `GH_TOKEN`,
+`GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` or `GITHUB_ENTERPRISE_TOKEN` source.
+An environment token does not satisfy a stored-account declaration. Unknown
+source formats fail closed. The declaration contains names and expectations,
+never credential values. Mutation selectors such as `state` and `strategy`,
+and credential-bearing or unknown fields, are rejected.
+
+Planning lists the normalized prerequisite without probing accounts. Restore,
+including dry-run and maintenance-safe restore, invokes only
+`gh auth status --hostname <host> --json hosts --no-refresh`. A healthy
+**inactive** matching account satisfies the prerequisite without switching it.
+Missing, unhealthy, ambiguous or malformed evidence produces `status: blocked`,
+`changed: false` and unsuccessful overall convergence. An unrelated account's
+failure does not hide a healthy declared account.
+
+The native probe owns its child process scope, has a five-second execution
+deadline and separate 64 KiB/8 KiB stdout/stderr limits. It disables prompts and
+API debug output. Results retain only safe reason codes, the declaration and
+the read-only command, not raw CLI output, token sources, scopes or credentials.
+CLI versions without `--no-refresh` support are visibly blocked; there is no
+fallback to a potentially refreshing command.
+
+This is a typed prerequisite in the existing resource pipeline, not a generic
+implementation of the `manage` disposition `prerequisite-check`. Authentication
+setup and configuration changes remain separate, explicitly authorized work.
 
 ### `package`
 

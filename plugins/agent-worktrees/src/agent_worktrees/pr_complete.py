@@ -36,11 +36,12 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import tempfile
+import uuid
+
+from agent_procutil import no_window_kwargs
 
 from . import git_ops, pr_ops, tracking
 from .config import Config
-
-BACKUP_REF = "refs/pre-complete-backup"
 
 
 def _is_exact_squash_result(
@@ -60,7 +61,7 @@ def _is_exact_squash_result(
                 "git", "diff", "--binary", "--full-index",
                 effective_base, pr_head,
             ],
-            cwd=cwd, env=env, capture_output=True, timeout=30,
+            cwd=cwd, env=env, capture_output=True, timeout=30, **no_window_kwargs(),
         )
         if patch.returncode != 0 or not patch.stdout:
             return False
@@ -69,7 +70,7 @@ def _is_exact_squash_result(
             read = subprocess.run(
                 ["git", "read-tree", parent.stdout.strip()],
                 cwd=cwd, env=env, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=30,
+                encoding="utf-8", errors="replace", timeout=30, **no_window_kwargs(),
             )
             if read.returncode != 0:
                 return False
@@ -79,14 +80,14 @@ def _is_exact_squash_result(
                     "--whitespace=nowarn",
                 ],
                 cwd=cwd, env=env, input=patch.stdout, capture_output=True,
-                timeout=30,
+                timeout=30, **no_window_kwargs(),
             )
             if apply.returncode != 0:
                 return False
             written = subprocess.run(
                 ["git", "write-tree"],
                 cwd=cwd, env=env, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=30,
+                encoding="utf-8", errors="replace", timeout=30, **no_window_kwargs(),
             )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -358,16 +359,19 @@ def complete_worktree(
                     f"Could not read branch tip for {branch}; "
                     f"the branch is unchanged: {detail}"
                 )}
+    backup_ref = f"refs/pre-complete-backups/{branch}/{uuid.uuid4().hex}"
     backup = git_ops.git(
-        "update-ref", BACKUP_REF, pre, cwd=worktree_path, check=False,
+        "update-ref", backup_ref, pre, "", cwd=worktree_path, check=False,
     )
     if backup.returncode != 0:
         detail = (backup.stderr or backup.stdout or "unknown Git error").strip()
         return {**base, "action": "error",
                 "error": (
-                    f"Could not create recovery ref {BACKUP_REF}; "
+                    f"Could not create recovery ref {backup_ref}; "
                     f"the branch is unchanged: {detail}"
                 )}
+
+    base["backup_ref"] = backup_ref
 
     # A tracked merged PR gives us the exact boundary between the squashed PR
     # commits and later local work. Rebase only the latter; replaying the former
@@ -385,12 +389,12 @@ def complete_worktree(
                             f"{reset.stderr.strip()}"
                         )}
             return {**base, "success": True, "action": "reset-past-squash",
-                    "dropped": ahead, "backup_ref": BACKUP_REF,
+                    "dropped": ahead,
                     "head": _short_head(worktree_path),
                     "message": (
                         f"{branch} reconciled past the verified squash-merge; "
                         f"HEAD now {_short_head(worktree_path)} == {upstream}. "
-                        f"(pre-complete state saved at {BACKUP_REF})"
+                        f"(pre-complete state saved at {backup_ref})"
                     )}
         replay = git_ops.git(
             "rebase", "--onto", upstream, merged_pr_head, branch,
@@ -407,7 +411,6 @@ def complete_worktree(
         return {**base, "success": True, "action": "rebased",
                 "kept": post_merge_commits,
                 "dropped": ahead - post_merge_commits,
-                "backup_ref": BACKUP_REF,
                 "head": _short_head(worktree_path),
                 "message": (
                     f"{branch} reconciled past the verified squash-merge, "
@@ -428,15 +431,14 @@ def complete_worktree(
             # Every local commit was already merged; the rebase dropped them
             # cleanly (no hard reset needed).  Report as the squash-reconcile.
             return {**base, "success": True, "action": "reset-past-squash",
-                    "dropped": ahead, "backup_ref": BACKUP_REF,
+                    "dropped": ahead,
                     "head": _short_head(worktree_path),
                     "message": (f"{branch} reconciled onto {upstream}: all "
                                 f"{ahead} local commit(s) were already merged; "
                                 f"HEAD now {_short_head(worktree_path)} == "
                                 f"{upstream}. (pre-complete state saved at "
-                                f"{BACKUP_REF})")}
+                                f"{backup_ref})")}
         return {**base, "success": True, "action": "rebased", "kept": kept,
-                "backup_ref": BACKUP_REF,
                 "head": _short_head(worktree_path),
                 "message": (f"{branch} rebased onto {upstream}, preserving "
                             f"{kept} new commit(s); HEAD now "
@@ -460,12 +462,12 @@ def complete_worktree(
         return {**base, "action": "error",
                 "error": f"Reset of {branch} to {upstream} failed: {reset.stderr.strip()}"}
     return {**base, "success": True, "action": "reset-past-squash",
-            "dropped": ahead, "backup_ref": BACKUP_REF,
+            "dropped": ahead,
             "head": _short_head(worktree_path),
             "message": (f"{branch} fast-forwarded past the squash-merge: "
                         f"dropped {ahead} redundant local commit(s); HEAD now "
                         f"{_short_head(worktree_path)} == {upstream}. "
-                        f"(pre-complete state saved at {BACKUP_REF})")}
+                        f"(pre-complete state saved at {backup_ref})")}
 
 
 def _short_head(cwd: str) -> str:
