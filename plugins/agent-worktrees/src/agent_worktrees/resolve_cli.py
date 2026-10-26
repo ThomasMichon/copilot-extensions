@@ -733,12 +733,13 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 recovery=getattr(state.args, "recovery", False),
                 pending_seed=getattr(state.args, "seed", None),
                 defer_projections=getattr(state.args, "defer_projections", False),
+                identity_mode="tuple-v1",
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
         except LaunchSeedStagingFailure as exc:
             return exc.emit(json_out=True)
-        except RuntimeError as exc:
+        except (ValueError, RuntimeError) as exc:
             return output._json_error(str(exc))
         output._json_output(result)
         return 0

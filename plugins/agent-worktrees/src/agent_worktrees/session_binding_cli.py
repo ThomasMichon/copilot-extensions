@@ -67,10 +67,6 @@ def _activate_project_for_path(*args, **kwargs):
     return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
 
 
-def _adopt_linked_worktree(*args, **kwargs):
-    return _core()._adopt_linked_worktree(*args, **kwargs)
-
-
 def _resolve_mux_worktree_id(*args, **kwargs):
     return _core_helper("_resolve_mux_worktree_id", status_updater_cli._resolve_mux_worktree_id)(*args, **kwargs)
 
@@ -386,7 +382,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         except Exception:
             wt_id = None
         if not wt_id:
-            wt_id = _adopt_linked_worktree(cwd)
+            try:
+                wt_id = _core()._adopt_linked_worktree(cwd, identity_mode="tuple-v1")
+            except (OSError, ValueError, RuntimeError) as exc:
+                output.err(f"Failed to adopt linked worktree: {exc}")
+                return 1
 
     mux_binding = None
     if not wt_id or not pane_id:

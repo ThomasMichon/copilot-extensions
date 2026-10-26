@@ -50,6 +50,7 @@ class Experiment:
     image: str
     source_sha: str
     budgets: Budgets
+    network_mode: str = "internal"
 
     @property
     def resource_prefix(self) -> str:
@@ -61,6 +62,12 @@ class Experiment:
             destination: f"{self.resource_prefix}-{role}"
             for role, destination in _DESTINATIONS.items()
         }
+
+    @property
+    def network_target(self) -> str:
+        if self.network_mode not in {"internal", "none"}:
+            raise DeclarationError("unsupported experiment network mode")
+        return "none" if self.network_mode == "none" else f"{self.resource_prefix}-internal"
 
 
 @dataclass(frozen=True)
@@ -77,7 +84,10 @@ def _object(value: object, keys: set[str], field: str) -> dict[str, object]:
 
 def parse_declaration(value: object) -> Experiment:
     """Parse finite synthetic inputs, without reading config or ambient state."""
-    doc = _object(value, {"schema", "version", "name", "image", "source_sha", "budgets"}, "declaration")
+    keys = {"schema", "version", "name", "image", "source_sha", "budgets"}
+    if isinstance(value, dict) and "network_mode" in value:
+        keys.add("network_mode")
+    doc = _object(value, keys, "declaration")
     if doc["schema"] != SCHEMA or type(doc["version"]) is not int or doc["version"] != 1:
         raise DeclarationError("unsupported declaration schema/version")
     name = doc["name"]
@@ -89,6 +99,9 @@ def parse_declaration(value: object) -> Experiment:
     source_sha = doc["source_sha"]
     if not isinstance(source_sha, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", source_sha) is None:
         raise DeclarationError("source_sha must be a full immutable Git object ID")
+    network_mode = doc.get("network_mode", "internal")
+    if not isinstance(network_mode, str) or network_mode not in {"internal", "none"}:
+        raise DeclarationError("network_mode must select internal or none")
     raw = _object(doc["budgets"], set(_LIMITS), "budgets")
     budgets: dict[str, int] = {}
     for field, maximum in _LIMITS.items():
@@ -96,7 +109,7 @@ def parse_declaration(value: object) -> Experiment:
         if type(amount) is not int or not 0 < amount <= maximum:
             raise DeclarationError(f"{field} must be a positive integer within the supported ceiling")
         budgets[field] = amount
-    return Experiment(name, image, source_sha, Budgets(**budgets))
+    return Experiment(name, image, source_sha, Budgets(**budgets), network_mode)
 
 
 def inspect_static_boundary(
@@ -150,7 +163,7 @@ def inspect_static_boundary(
     ):
         if type(host.get(field)) is not int or host[field] != expected:
             violations.append(f"resource ceiling differs from declaration: {field}")
-    if host.get("NetworkMode") != f"{experiment.resource_prefix}-internal":
+    if host.get("NetworkMode") != experiment.network_target:
         violations.append("network selection differs from the experiment")
     _check_mounts(experiment, observed.get("Mounts"), violations)
     _check_mount_declarations(experiment, host.get("Mounts"), violations)
@@ -162,7 +175,7 @@ def inspect_static_boundary(
 
 _UNRESOLVED: Final = (
     "fresh persistent/evidence usage and backing free-space monitoring must be measured separately",
-    "effective internal-network membership and egress have not been probed",
+    "effective network isolation and egress have not been probed",
     "exclusive resource and host-driver custody have not been established",
     "guest source, volatile mounts and runtime configuration have not been qualified",
     "no provisioning or strict pre-effect capability is supplied by static inspection",

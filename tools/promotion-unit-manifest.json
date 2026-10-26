@@ -2661,7 +2661,7 @@
         "tools/promotion_unit_tests/test_windows_lease_acl.py": "d0b960fc15dc6ed369dcaa0b2b80aec35bcefbfec8adaafe7b51c0116c5e26f0",
         "tools/promotion_unit_tests/test_worktree_identity.py": "667c4cb239d7254cb4af7fa77faf4d1a711e1b01441bac48c3a01edcf279cecf",
         "tools/public_toolchain_source.py": "a381855e01131577662f7ece2c80ab6942da3a90f3ced242ffc80cc95e14a62f",
-        "tools/publish_python_artifacts.py": "00dec09bd7b869cefa26b7648698498b1ba7680b8825759aec6d59d4f49d9be0",
+        "tools/publish_python_artifacts.py": "ca70aaea60895bd96e160e055bf8c84662559b0a9cc78d9655fb50f87d83f74c",
         "tools/qualify_promotion_candidate.py": "b060a7656f88d32f6f3457d323f192e08af55b8d8a4d9a6c52a6530a17d11b80",
         "tools/release_controller_contract.py": "c7ae2b51563a37f4290ff1fe42f19ba337ae363c82ea5ed329eb63b078e20f78",
         "tools/release_controller_shell.py": "ee579b2867686ea3788e1c22ea9e9c796a3849683988197f87055bef6cce426f",

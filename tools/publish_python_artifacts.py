@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -34,11 +35,16 @@ CONTROLLER_REQUIRED_ARGUMENTS = (
 SOURCE_CANDIDATE_REQUIRED_ARGUMENTS = (
     (("publish-candidate",), ("source-units-v2", "candidate-units-v3"), ("--complete-source-dir",)),
 )
+_ATTESTATION_TIMEOUT = 120
+_PUBLIC_GOOD_INIT_ERROR = (
+    "Error: failed to choose verifier based on provided bundle issuer: "
+    "public good verifier is not available (initialization may have failed)"
+)
 
 
 def _gh(
     argv: list[str], *, verification: bool = False, binary: bool = False,
-    timeout: int = 120,
+    timeout: float = _ATTESTATION_TIMEOUT,
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     if verification and "ARTIFACT_VERIFY_TOKEN" in env:
@@ -79,12 +85,26 @@ def verify_attestation_subject(
         raise PromotionArtifactError("invalid expected attestation identity")
     if path.is_symlink() or not path.is_file():
         raise PromotionArtifactError(f"{path.name}: unsafe attestation subject")
-    _check(_gh([
+    argv = [
         "attestation", "verify", str(path), "--repo", repository,
         "--signer-workflow", f"{repository}/.github/workflows/validate-and-promote.yml",
         "--signer-digest", signer_digest, "--source-digest", source_digest,
         "--source-ref", source_ref, "--deny-self-hosted-runners",
-    ], verification=True))
+    ]
+    deadline = time.monotonic() + _ATTESTATION_TIMEOUT
+    result = _gh(argv, verification=True)
+    if result.returncode == 1 and result.stderr.strip().splitlines()[-1:] == [
+        _PUBLIC_GOOD_INIT_ERROR,
+    ]:
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            print(
+                "gh attestation: Public Good verifier initialization unavailable; "
+                "retrying once with unchanged policy and remaining deadline",
+                file=sys.stderr,
+            )
+            result = _gh(argv, verification=True, timeout=remaining)
+    _check(result)
 
 
 def verify_attestations(

@@ -21,7 +21,7 @@ from . import (
     tracking,
     worktree_identity,
 )
-from . import config as cfg, state_root as state_root_mod
+from . import config as cfg, execution_spaces, state_root as state_root_mod
 
 
 def _core():
@@ -346,7 +346,7 @@ def _coordination_readiness_for_owner_ref(
             f"--owner-ref must be a qualified machine/project/worktree_id ref (got {owner_ref!r})"
         )
     readiness_config = config
-    if parsed_owner.machine == config.machine:
+    if parsed_owner.machine == config.machine or execution_spaces.require_owner_identity(parsed_owner.machine, config):
         try:
             readiness_config = cfg.load_project_config(parsed_owner.project)
         except (OSError, RuntimeError, ValueError) as exc:

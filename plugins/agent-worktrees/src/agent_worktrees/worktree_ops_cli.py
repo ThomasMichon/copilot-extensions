@@ -303,7 +303,6 @@ def cmd_create(args: argparse.Namespace) -> int:
         else (
             getattr(args, "owner_ref", None)
             or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-            or _resolve_owner_ref()
             or None
         )
     )
@@ -358,6 +357,8 @@ def cmd_create(args: argparse.Namespace) -> int:
             if project_state.namespaced():
                 project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
+            if not owner_ref and not (is_system or no_owner):
+                owner_ref = _resolve_owner_ref()
             result = _create_worktree_core(
                 config,
                 no_mux=True,
@@ -376,6 +377,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 pending_seed=getattr(args, "seed", None),
                 creation_key=getattr(args, "creation_key", None),
                 build_launch_plan=False,
+                identity_mode="tuple-v1",
             )
         except CreationRequestFailure as exc:
             if args.json:
@@ -419,7 +421,8 @@ def _resolve_owner_ref() -> str | None:
     except Exception:
         project = config.repo_name
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    return tracking.format_claim_ref(config.machine, project, caller_id, session)
+    machine = worktree_identity.reference_machine(config, caller_id, project=project)
+    return tracking.format_claim_ref(machine, project, caller_id, session)
 
 
 def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
@@ -449,7 +452,8 @@ def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
     except Exception:
         return None
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    return tracking.format_anchor_ref(config.machine, project, session)
+    machine = worktree_identity.reference_machine(config, tracking.ANCHOR_ID, project=project)
+    return tracking.format_anchor_ref(machine, project, session)
 
 
 def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
@@ -501,32 +505,29 @@ def _ensure_anchor_ledger(
     tracking_dir,
 ) -> tracking.WorktreeRecord | None:
     """Lazily materialize a singleton project's ``@anchor`` claim ledger."""
-    try:
-        from . import repos as _repos
+    from types import SimpleNamespace
 
-        config = cfg.load_config()
-    except Exception:
-        return None
-    project = parsed.project or getattr(config, "repo_name", None)
+    from . import execution_spaces, repos as _repos
+
+    project = parsed.project or cfg.project_name()
     if not project:
-        return None
-    anchor = None
-    try:
-        entry = _repos.find_repo(project)
-        anchor = entry.local_path() if entry else None
-    except Exception:
-        anchor = None
-    if not anchor:
-        try:
-            anchor = config.default_repo.anchor
-        except Exception:
-            return None
-    try:
-        return tracking.load_or_create_anchor_record(
-            anchor, project, config.machine, config.platform, tracking_dir
+        raise execution_spaces.ExecutionSpaceError("anchor requires a receiving project")
+    config = execution_spaces.project_record_config(SimpleNamespace(repo=project))
+    anchor = config.default_repo.anchor
+    entry = _repos.find_repo(project)
+    registered_anchor = entry.local_path() if entry else None
+    if registered_anchor and Path(registered_anchor).resolve() != Path(anchor).resolve():
+        raise execution_spaces.ExecutionSpaceError(
+            "registered anchor conflicts with the receiving project configuration",
         )
-    except Exception:
-        return None
+    if parsed.machine and not execution_spaces.require_owner_identity(parsed.machine, config):
+        raise execution_spaces.ExecutionSpaceError(
+            "anchor owner belongs to a different execution space",
+        )
+    return tracking.load_or_create_anchor_record(
+        anchor, project, config.machine, config.platform, tracking_dir,
+        identity_mode="tuple-v1", config=config,
+    )
 
 
 def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | None:
@@ -537,7 +538,10 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    tdir = cfg.tracking_dir()
+    tdir = (
+        cfg.tracking_dir(parsed.project)
+        if parsed.is_anchor and parsed.project else cfg.tracking_dir()
+    )
     rec_path = tdir / f"{parsed.worktree_id}.yaml"
     if not rec_path.exists():
         if parsed.is_anchor:
@@ -603,7 +607,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"machine/project/worktree_id ref (got {owner_ref!r})"
         )
         return 1
-    if parsed_owner.machine != run_config.machine:
+    from .execution_spaces import ExecutionSpaceError, require_owner_identity
+
+    try:
+        local_owner = (
+            parsed_owner.machine == run_config.machine
+            or require_owner_identity(parsed_owner.machine, run_config)
+        )
+    except ExecutionSpaceError as exc:
+        output.err(f"run: cannot resolve owner execution space: {exc}")
+        return 1
+    if not local_owner:
         output.err(
             f"run: cross-machine owner {owner_ref} cannot synchronously reserve "
             "this resource; use a dispatch/lease flow that persists remote "

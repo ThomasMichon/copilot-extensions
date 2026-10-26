@@ -46,12 +46,6 @@ def equivalence_config(
             "ssh": {"environments": [{"name": foreign_platform, "alias": "other-route"}]},
         },
     })
-    actual_core = m._create_worktree_core
-
-    def opted_in(*args, **kwargs):
-        return actual_core(*args, **kwargs, identity_mode="tuple-v1")
-
-    monkeypatch.setattr(resolve_cli, "_create_worktree_core", opted_in)
     return config
 
 
@@ -142,13 +136,13 @@ def observed_config(
         _stub_launch_plumbing(monkeypatch, config)
         monkeypatch.setattr(cfg, "load_config", receiving_config)
         monkeypatch.setattr(cfg, "load_project_config", receiving_config)
-        if identity_mode == "tuple-v1":
+        if identity_mode in ("legacy", "tuple-v1"):
             actual_core = m._create_worktree_core
 
-            def opted_in(*args, **kwargs):
-                return actual_core(*args, **kwargs, identity_mode="tuple-v1")
+            def selected_mode(*args, **kwargs):
+                return actual_core(*args, **{**kwargs, "identity_mode": identity_mode})
 
-            monkeypatch.setattr(resolve_cli, "_create_worktree_core", opted_in)
+            monkeypatch.setattr(resolve_cli, "_create_worktree_core", selected_mode)
         return config
 
     return configure

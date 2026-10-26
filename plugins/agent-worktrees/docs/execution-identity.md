@@ -126,10 +126,16 @@ retain the full tuple while reciprocal references use the execution owner.
 The `run` JSON recognizer also uses that owner; invalid explicit tuple output
 is reported and leaves the pending resource claim unsettled.
 
-### Source-only producer opt-in
+### Ordinary tuple producers and legacy-default source APIs
 
-`_create_worktree_core` has an internal `identity_mode="tuple-v1"` opt-in;
-omitting it retains `legacy`. It derives the physical/environment/owner tuple
+Ordinary Create (session and system), JSON New (session and bridge), interactive
+New, embody New and structured request admission explicitly select the internal
+`identity_mode="tuple-v1"` mode. Interactive prospective/preflight and dry-run
+names use the same physical/environment derivation as actual New. Existing
+lookup, Resume and completed receipt replay retain their original records.
+
+`_create_worktree_core` still defaults to `legacy` when the internal mode is
+omitted. Tuple mode derives the physical/environment/owner tuple
 from existing receiving configuration, the OS hostname and actual platform,
 with optional registry customization, then revalidates it before allocation.
 Absent, empty or unrelated-only maps do not prevent local tuple creation.
@@ -152,6 +158,15 @@ when the map customizes only the native or guest sibling.
 The reciprocal creation claim uses the admitted tuple owner as well; native
 configuration may retain its raw hostname without changing the child's qualified
 reference. Legacy creation and settlement preserve their original owner labels.
+Implicit CWD ownership and the owner reference exported into launch environments
+use the retained record's execution owner, not the detected machine scalar.
+An absent ledger uses validated local execution context; an existing legacy
+ledger is never relabeled to admit a tuple child. Explicit/env foreign owners
+retain precedence and their normal receiving-record fences.
+After locality is established, coordination readiness is loaded from the
+qualified owner's project, even when its tuple execution owner differs from
+the caller's detected scalar. A ready caller project cannot substitute for an
+owner requiring an unbound knowledge repository.
 Creation also checks the child's execution owner against the independently
 loaded parent project's context under the parent record lock. A prospective
 claim that the receiving project cannot later settle refuses before writing.
@@ -260,14 +275,19 @@ competing creation winner, return with their original identity and bytes and
 without requesting a new tuple from the registry. Newly created records retain
 their supplied tracking destination for subsequent path-implicit saves,
 including legacy anchor callers using a nondefault tracking directory.
+Ordinary CWD inference and session registration select tuple mode only for
+previously untracked linked Git worktrees. Ordinary anchor admission loads the
+actual receiving project's configuration and checks its registered anchor and
+qualified execution owner. It passes that configuration into the existing
+if-absent factory, rather than reloading ambient configuration. Receiving
+conflicts remain explicit errors, not a successful claim with no ledger.
 
 The timestamp/suffix-only `allocation` input still cannot admit a new tuple;
 the complete admitted value is required. These source APIs are not CLI flags,
-settings or rollout switches. Ordinary create, anchor admission and externally
-adopted checkout producers still emit legacy records. Installed one-term
-equivalence and reader acceptance stay gated
-before ordinary-default activation. No historical ID, path, stored reference
-or session is rewritten.
+settings or rollout switches. All four low-level APIs retain their omitted-mode
+`legacy` defaults; the ordinary callers select tuple mode explicitly. Source
+activation does not authorize an installed rollout. No historical ID, path,
+stored reference or session is rewritten.
 
 ### Source addressing equivalence
 
@@ -288,9 +308,12 @@ Linux has no inferred legacy `-linux` address: such a spelling must itself be
 declared as a key or compatibility alias. A generated worktree ID ending in
 `-linux-...` is not execution authority.
 
-`test_tuple_resolve_equivalence.py` drives these actual source entry points,
-injecting the existing opt-in only at the new-producer call boundary. It checks
+`test_tuple_resolve_equivalence.py` drives ordinary selection and retains
+explicit legacy/tuple controls for historical records. It checks
 tracking YAML, JSON, short-ID lookup, read-only preview, resume mutation,
 retained nonce/identity and remote plans across Windows/WSL/Linux metadata
-fixtures. It does not activate ordinary tuple creation or claim installed or
-native-platform acceptance.
+fixtures. The `test_tuple_ordinary_*` packets additionally drive ordinary
+creation/admission, receiving-anchor configuration and linked Git adoption
+without test-only mode injection, with retained-key/receipt and legacy-default
+controls. These contained source tests do not claim installed or native-platform
+acceptance.

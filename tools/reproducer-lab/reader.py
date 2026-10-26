@@ -13,6 +13,7 @@ from typing import Callable
 from boundary import Experiment, inspect_static_boundary
 from mounts import VolatileMounts, inspect_volatile_mounts
 from network import NetworkIdentity, inspect_inventory, selected_containers
+from offline import OfflineNetwork, inspect_observation
 from process import run as _run
 from storage import Resources, StorageMonitor, Usage, VolumeIdentity
 
@@ -129,6 +130,8 @@ class DockerReader:
         expected: NetworkIdentity | None = None,
     ) -> NetworkIdentity:
         """Observe exact attachments twice; this does not probe egress or grant custody."""
+        if experiment.network_mode != "internal":
+            raise ValueError("internal network inventory requires the internal mode")
         selected = selected_containers(container_id, peers)
         deadline = self.clock() + 30
         observations: list[NetworkIdentity] = []
@@ -171,5 +174,26 @@ class DockerReader:
             raise ReadError(str(error)) from error
         if self.inspect(experiment, expected.container_id, deadline=deadline) != expected:
             raise ReadError("physical storage changed during mount observation")
+        self._check_deadline(deadline)
+        return observed
+
+    def offline_network(self, experiment: Experiment, expected: Resources) -> OfflineNetwork:
+        """Observe one offline container; no bridge, peer discovery or admission."""
+        if experiment.network_mode != "none":
+            raise ValueError("offline observation requires the explicit none mode")
+        deadline = self.clock() + 30
+        if self.inspect(experiment, expected.container_id, deadline=deadline) != expected:
+            raise ReadError("physical storage selection differs from retained resources")
+        probe = Path(__file__).with_name("offline.py").read_text(encoding="utf-8")
+        value = self._json([
+            "exec", "--user", "1000:1000", expected.container_id,
+            "/usr/bin/python3", "-I", "-c", probe,
+        ], deadline)
+        try:
+            observed = inspect_observation(value)
+        except ValueError as error:
+            raise ReadError(str(error)) from error
+        if self.inspect(experiment, expected.container_id, deadline=deadline) != expected:
+            raise ReadError("physical storage changed during offline observation")
         self._check_deadline(deadline)
         return observed
