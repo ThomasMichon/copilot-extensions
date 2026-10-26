@@ -173,6 +173,19 @@ def test_automatic_body_drift_rebuild_refreshes_uv_and_preserves_other_cache(
     assert (root / ".dep-fingerprint").read_text() == runner._dep_fingerprint("example")
 
 
+def _overlong_private_wheel(root):
+    return root / ".bootstrap-uv-cache" / ("source-" + "s" * 96) / ("build-" + "b" * 96) / (
+        "example_distribution_with_long_metadata-1.0.0-py3-none-any.whl"
+    )
+
+
+@pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
+def test_private_wheel_fixture_exceeds_max_path_with_minimal_root(root):
+    wheel = _overlong_private_wheel(PureWindowsPath(root))
+    assert len(str(wheel)) > 260
+    assert all(len(part) <= 255 for part in wheel.parts[1:])
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows long-path cleanup")
 def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
     graph, monkeypatch,
@@ -183,9 +196,7 @@ def test_rebuild_removes_overlong_private_cache_without_replacing_leased_root(
     python.touch()
     (root / ".dep-fingerprint").write_text("stale")
     cache = root / ".bootstrap-uv-cache"
-    wheel = cache / ("source-" + "s" * 48) / ("build-" + "b" * 48) / (
-        "example_distribution_with_long_metadata-1.0.0-py3-none-any.whl"
-    )
+    wheel = _overlong_private_wheel(root)
     assert len(str(wheel.absolute())) > 260
     native_cache = Path("\\\\?\\" + str(cache.absolute()))
     native_wheel = Path("\\\\?\\" + str(wheel.absolute()))

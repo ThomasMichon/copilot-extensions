@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -1132,12 +1132,23 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
             shutil.rmtree(sandbox.name)
 
 
+def _overlong_sandbox_marker(root):
+    return root / ("nested-" * 25) / ("snapshot-" * 8) / "preserved.txt"
+
+
+@pytest.mark.parametrize("root", ["C:\\", r"C:\t"])
+def test_sandbox_fixture_exceeds_max_path_with_minimal_root(root):
+    marker = _overlong_sandbox_marker(PureWindowsPath(root))
+    assert len(str(marker)) > 260
+    assert all(len(part) <= 255 for part in marker.parts[1:])
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows sandbox paths")
 @pytest.mark.parametrize("unreaped", [False, True])
 def test_windows_long_path_sandbox_cleanup_preserves_unreaped_retention(tmp_path, unreaped):
     sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
     native = Path("\\\\?\\" + str(Path(sandbox.name).absolute()))
-    marker = native / ("nested-" * 15) / ("snapshot-" * 8) / "preserved.txt"
+    marker = _overlong_sandbox_marker(native)
     assert len(str(marker)) > 260
 
     def execute():
