@@ -1502,7 +1502,7 @@ def _run_workflow_validator(repo, directory, dev, main, monkeypatch, *, report=N
     validator = next(
         step for step in workflow["jobs"]["python-artifacts"]["steps"]
         if step.get("name") == (
-            "Validate untrusted bundles using only pinned reviewed helpers" if current
+            "Validate untrusted bundles using qualified admitted-source helpers" if current
             else "Validate untrusted bundles using only trusted default-branch code"
         )
     )
@@ -1637,7 +1637,7 @@ def test_workflow_separates_candidate_execution_signing_and_release_authority():
     validator = next(
         step for step in steps
         if step.get("name") == (
-            "Validate untrusted bundles using only pinned reviewed helpers" if current
+            "Validate untrusted bundles using qualified admitted-source helpers" if current
             else "Validate untrusted bundles using only trusted default-branch code"
         )
     )

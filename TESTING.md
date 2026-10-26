@@ -1638,6 +1638,26 @@ The runner rejects process, network, native-loader,
 Git-storage, thread and sleep effects, including attempted effects caught by a
 test. Test writes are confined to synthetic temporary storage.
 
+Release-helper qualification additionally resolves the canonical repository
+import closure and registered executable build inputs. Every release-tool
+decision module must be enrolled and have positive production call coverage;
+hash binding or import-only coverage cannot substitute. The native C source
+is an explicitly admitted data input, including source-bound materialized
+copies, never a selected unit or Python coverage target.
+`test_release_helper_contract.py`, `test_release_helper_decisions.py` and
+`test_release_build_admission.py` under `tools/promotion_unit_tests/` exercise
+the admission, reuse, materialization, resource and native verification rules.
+Compiler, Git transport and setuptools superclass actors are substituted only
+at their boundaries. These tests do not qualify real compiler/native execution.
+
+`tools/test_release_controller_contract.py` reads the actual complete prepared
+workflow, rather than substituting an older preserved controller. It checks
+immutable Main/bootstrap and admitted-source/helper selection, the existing
+signer qualification dependency, required CLI inputs and complete-source
+producer/attestor/publisher ordering. The PR-time compatibility guard reports
+live Main separately from prepared compatibility; a source-only pass does not
+activate independently owned Main controls.
+
 Use the bounded test supervisor around:
 
 ```text

@@ -22,8 +22,6 @@ permissions:
   contents: write
   pull-requests: write
   actions: read
-env:
-  RELEASE_HELPERS_SHA: 49ff17b255997136885885c78426dd4ad122c5aa
 jobs:
   gate:
     name: gate (confirm this is a dev commit)
@@ -62,19 +60,14 @@ jobs:
             false|"") echo "qualification_only=false" >> "$GITHUB_OUTPUT" ;;
             *) echo "::error::Invalid qualification-only request."; exit 1 ;;
           esac
-      - name: Require an immutable reviewed release-helper pin
-        run: |
-          [[ "$RELEASE_HELPERS_SHA" =~ ^[0-9a-f]{40}$ ]] &&
-          [ "$RELEASE_HELPERS_SHA" != "0000000000000000000000000000000000000000" ] || {
-            echo "::error::A reviewed release-helper commit must be pinned before activation."
-            exit 1
-          }
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.workflow_sha }}
           fetch-depth: '0'
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ github.workflow_sha }}
           path: reviewed-helpers
           persist-credentials: false
       - name: Respect paused Main before expensive source validation
@@ -255,7 +248,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -326,7 +319,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -397,7 +390,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -469,7 +462,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -491,7 +484,7 @@ jobs:
         with:
           name: frozen-promotion-candidate
           path: ${{ runner.temp }}/frozen-candidate
-      - name: Validate untrusted bundles using only pinned reviewed helpers
+      - name: Validate untrusted bundles using qualified admitted-source helpers
         if: needs.build-python-artifacts.outputs.exported == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
@@ -680,7 +673,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -833,7 +826,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -1235,7 +1228,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/checkout@v4
@@ -1444,6 +1437,7 @@ jobs:
   record-promotion:
     name: Record the landed commit for an already qualified and published Dev release
     needs:
+      - gate
       - merge-promotion
       - publish-python-artifacts
     if: needs.merge-promotion.outputs.merge_sha != '' && needs.publish-python-artifacts.outputs.source_release != ''
@@ -1461,7 +1455,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_HELPERS_SHA }}
+          ref: ${{ needs.gate.outputs.sha }}
           path: reviewed-helpers
           persist-credentials: false
       - uses: actions/setup-python@v5

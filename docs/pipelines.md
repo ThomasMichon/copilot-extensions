@@ -254,9 +254,44 @@ Actions artifacts remain the original producing-job evidence, while the
 release copy retains the verified packet after Actions retention expires.
 
 Source support does not itself activate Main. Its independently reviewed
-controller and immutable helper pin select the active qualification contract.
+controller selects the active qualification contract.
 Historical raw-source and legacy-CI packets retain their original verification;
 neither can be relabeled as candidate execution.
+
+### Source-coherent release implementations
+
+The source workflow proposal derives implementation revisions from existing
+admission, not a manually maintained helper-version constant. The read-only
+bootstrap uses the exact executing `github.workflow_sha`. After Main resolves
+and ancestry-checks live Dev once, downstream helper checkouts use that full
+immutable `needs.gate.outputs.sha`, matching the release's source input.
+Neither mutable branch names, dispatch payloads nor the generated candidate
+select implementation code. Helper checkouts do not persist credentials.
+The signer retains its existing successful source-unit prerequisite; Main
+still owns job privileges, pause, lifecycle, publication and exact-head landing.
+
+`promotion_release_helpers.py` resolves the repository-owned static import
+closure and registered dynamic build inputs as data. Qualification requires
+their byte admission, coverage enrollment for release-tool decision bodies,
+and actual test-call coverage rather than import-only observations. Registered
+native compiler source is hash-bound data, not an executable unit or a coverage
+target. Real build/compiler behavior remains separate development validation.
+Synchronized executable copies borrow only their canonical origin's coverage;
+every run first verifies both admitted hashes and hard-refuses byte divergence.
+
+Source PR guards compare helper-required CLI inputs and complete-source
+construction/attestation/publication against both the prepared proposal and
+the actual immutable Main controller. An incompatible prepared proposal fails.
+A compatible prepared proposal with an older incompatible Main reports
+`active_compatible: false` and the required separately reviewed Main bootstrap;
+it never claims activation. This catches new required inputs before release
+without requiring a pin update. Controller-policy changes still need Main
+review. Mode-dependent publisher inputs are declared once and used by both
+the actual CLI validation and the compatibility checker; making an optional
+argparse field mandatory for a publication mode cannot bypass that check.
+Implementation discovery also includes the promoter's indirect `runpy` call.
+Main activation and live release proof are tracked in
+[Phase 9e](../efforts/active/dev-branch-release-pipeline/source-coherent-release-implementations.md).
 
 Chat's enrolled package initializer resolves its version from distribution
 metadata, with a source-project metadata fallback when uninstalled. Its

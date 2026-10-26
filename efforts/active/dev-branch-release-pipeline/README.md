@@ -1016,10 +1016,12 @@ late-control reconciliation, Main activation and live acceptance remain open.)_
 
 _(Agent-recommended realization of the 2026-10-26 operator direction.
 Participant: Release implementation coherence contributor; bounded tracker:
-#8983. Status: Proposed; no source-coherent Main activation yet.)_
+#8983. Status: Active; plan #9054 merged, implementation and Main activation
+remain open.)_
 
-- [ ] Review the [source-coherent implementation plan](source-coherent-release-implementations.md)
-      before changing implementation authority or Main execution.
+- [x] Review the [source-coherent implementation plan](source-coherent-release-implementations.md)
+      before changing implementation authority or Main execution: #9054,
+      `c4868a1bbaab3f822aacc3a2b57d5ad5417a9851`.
 - [ ] Implement coherent immutable source selection and PR-time compatibility
       checks, preserving privilege isolation and the existing unit portfolio.
 - [ ] Drive the independently reviewed Main workflow transaction and one actual

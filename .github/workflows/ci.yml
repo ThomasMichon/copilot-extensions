@@ -181,6 +181,9 @@ jobs:
     - name: Vendored library synchronization
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-vendored-libs-sync.py
+    - name: Release controller and implementation compatibility
+      if: steps.code-impact.outputs.run == 'true'
+      run: python tools/check-release-controller-compatibility.py --main-ref refs/remotes/origin/main
     - name: Picker inbox discipline
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/check-picker-inbox-discipline.py

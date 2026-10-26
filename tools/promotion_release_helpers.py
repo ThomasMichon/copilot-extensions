@@ -1,0 +1,169 @@
+"""Bind release implementations and executable build inputs to qualified units."""
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+from promotion_unit_contract import UnitEvidenceError, verify_sources
+
+ENTRYPOINTS = (
+    "promotion_frozen_candidate", "promote_release", "publish_python_artifacts",
+    "qualify_promotion_candidate", "promotion_source_archive", "promotion_lifecycle",
+    "tag_promotion", "seasoned_uv", "promotion_release_helpers",
+)
+BUILD_INPUTS = (
+    "libs/agent-procutil/setup.py",
+    "libs/agent-procutil/src/agent_procutil/_build_native.py",
+    "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c",
+    "plugins/agent-containers/setup.py",
+    "plugins/agent-containers/scripts/standalone_build.py",
+    "libs/versioned-runtime/standalone_build.py",
+)
+DYNAMIC_INPUTS = {
+    "native_daemon_artifacts": ("libs/agent-procutil/src/agent_procutil/_build_native.py",),
+    "installer_dependency_policy": ("libs/installer-engine/installer_dependency_config.py",),
+}
+BUILD_DECISIONS = {
+    "libs/agent-procutil/src/agent_procutil/_build_native.py",
+    "libs/versioned-runtime/standalone_build.py",
+} | {path for paths in DYNAMIC_INPUTS.values() for path in paths}
+BUILD_ORIGINS = {
+    "plugins/agent-containers/scripts/standalone_build.py": "libs/versioned-runtime/standalone_build.py",
+}
+
+
+def _modules(root: Path) -> dict[str, Path]:
+    result = {}
+
+    def add(name: str, path: Path) -> None:
+        if name in result and result[name] != path:
+            raise UnitEvidenceError(f"ambiguous repository helper module: {name}")
+        result[name] = path
+
+    for path in sorted((root / "tools").glob("*.py")):
+        add(path.stem, path)
+    for initializer in sorted((root / "tools").glob("*/__init__.py")):
+        for path in sorted(initializer.parent.rglob("*.py")):
+            parts = path.relative_to(root / "tools").parts
+            module = ".".join((*parts[:-1], path.stem))
+            add(module.removesuffix(".__init__"), path)
+    for path in sorted((root / "libs").glob("*/*.py")):
+        if not path.name.startswith("test_") and path.stem not in ("setup", "__init__"):
+            add(path.stem, path)
+    for path in sorted((root / "libs").glob("*/src/**/*.py")):
+        parts = path.relative_to(root / "libs").parts[2:]
+        module = ".".join((*parts[:-1], path.stem))
+        if path.stem == "__init__":
+            module = ".".join(parts[:-1])
+        add(module, path)
+    return result
+
+
+def helper_closure(root: Path, *, entrypoints: tuple[str, ...] = ENTRYPOINTS) -> tuple[set[str], set[str]]:
+    """Resolve repository imports as data, including registered dynamic loaders."""
+    modules = _modules(root)
+    pending = list(entrypoints)
+    visited, sources, decisions = set(), set(), set()
+    for name in entrypoints:
+        if name not in modules:
+            raise UnitEvidenceError(f"missing release implementation: {name}")
+    while pending:
+        name = pending.pop()
+        if name.startswith("tools.") and name.removeprefix("tools.") in modules:
+            name = name.removeprefix("tools.")
+        if name in visited or name not in modules:
+            continue
+        visited.add(name)
+        parts = name.split(".")
+        pending.extend(".".join(parts[:index]) for index in range(1, len(parts)))
+        path = modules[name]
+        relative = path.relative_to(root).as_posix()
+        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+            raise UnitEvidenceError(f"indirect release implementation: {relative}")
+        sources.add(relative)
+        try:
+            tree = ast.parse(path.read_bytes(), filename=relative)
+        except (SyntaxError, UnicodeError) as error:
+            raise UnitEvidenceError(f"invalid release implementation: {relative}") from error
+        if relative.startswith("tools/") and any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree)
+        ):
+            decisions.add(relative)
+        package = name if path.name == "__init__.py" else name.rpartition(".")[0]
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                pending.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                target = node.module or ""
+                if node.level:
+                    parts = package.split(".")
+                    if not package or node.level > len(parts):
+                        raise UnitEvidenceError(f"unresolved relative release import: {relative}")
+                    target = ".".join(
+                        parts[:len(parts) - node.level + 1] + ([target] if target else [])
+                    )
+                pending.append(target)
+                pending.extend(f"{target}.{alias.name}" for alias in node.names)
+            elif isinstance(node, ast.Call):
+                operation = getattr(node.func, "id", getattr(node.func, "attr", ""))
+                if operation == "_load_module":
+                    names = [
+                        value.value[:-3] for value in ast.walk(node.args[0])
+                        if isinstance(value, ast.Constant) and isinstance(value.value, str)
+                        and value.value.endswith(".py") and "/" not in value.value
+                    ] if node.args else []
+                    if len(names) != 1 or names[0] not in modules:
+                        raise UnitEvidenceError(f"unbound dynamic release implementation: {relative}")
+                    pending.extend(names)
+                elif relative.startswith("tools/") and operation in (
+                    "exec", "eval", "import_module", "run_path",
+                ):
+                    registered = operation == "exec" and name in DYNAMIC_INPUTS
+                    if not registered:
+                        raise UnitEvidenceError(f"unregistered dynamic release implementation: {relative}")
+        for dynamic in DYNAMIC_INPUTS.get(name, ()):
+            if dynamic not in sources:
+                match = next((key for key, value in modules.items()
+                              if value.relative_to(root).as_posix() == dynamic), None)
+                if match is None:
+                    raise UnitEvidenceError(f"missing dynamic release implementation: {dynamic}")
+                pending.append(match)
+    return sources, decisions
+
+
+def verify_helper_contract(root: Path, manifest: dict) -> set[str]:
+    """Require byte admission and positive decision coverage before privileges."""
+    sources, decisions = helper_closure(root)
+    sources.update(BUILD_INPUTS)
+    sources.update(BUILD_DECISIONS)
+    decisions.update(BUILD_DECISIONS)
+    unbound = sources - set(manifest["sources"])
+    uncovered = decisions - set(manifest["coverage_targets"])
+    if unbound or uncovered:
+        raise UnitEvidenceError(
+            "release helper qualification is incomplete; unbound="
+            + ",".join(sorted(unbound)) + "; uncovered=" + ",".join(sorted(uncovered))
+        )
+    verify_sources(root.resolve(), {name: manifest["sources"][name] for name in sources})
+    for copied, canonical in BUILD_ORIGINS.items():
+        if (root / copied).read_bytes() != (root / canonical).read_bytes():
+            raise UnitEvidenceError(f"executable build input differs from its qualified origin: {copied}")
+    return decisions
+
+
+def verify_helper_coverage(root: Path, manifest: dict, coverage: dict) -> None:
+    """An import-only observation is not a test of a helper's decision rules."""
+    decisions = verify_helper_contract(root, manifest)
+    required = {
+        f"{node}|call" for node in manifest["nodes"]
+    }
+    files = coverage["files"]
+    missing = [
+        name for name in sorted(decisions)
+        if name not in files or not any(
+            required.intersection(contexts)
+            for contexts in files[name]["contexts"].values()
+        )
+    ]
+    if missing:
+        raise UnitEvidenceError("release helper has no positive call coverage: " + ",".join(missing))
