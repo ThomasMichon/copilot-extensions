@@ -26,6 +26,7 @@ reuse is a first-class investigation, not a preselected mandatory global broker.
 |-------------|---------------------|-------------|
 | Coordinator | Proposal, integration, sequential PRs and completion | Managed upstream worktree |
 | Helper investigator | Bounded shared-runtime and ZDD evidence | Read-only delegated investigation |
+| Compiler-free implementer | Compiler-free first-party execution amendment and owner integration | #6234 / #8403; managed source worktree |
 
 ## Coordination
 
@@ -100,6 +101,19 @@ Optional local/knowledge overlays are not prerequisites. This authorizes
 driving source implementation, not production rollout, model/corpus mutation or
 new package feeds.
 
+### 2026-10-26 - Compiler-free execution requirement
+
+Operator verbatim:
+
+> Great. I just want to avoid having to compile anything at either end. No native-code in the repo, and no on-demand native compilation on device.
+
+The operator accepted thin shell launchers with shared standard-library Python
+for process-lifetime safety. This supersedes the earlier prebuilt-C/source-build
+choice in leased-daemon custody; compiling at release time is not a substitute.
+The [amendment](compiler-free-execution.md) preserves the safety contract and
+separates this required subtraction from agent-recommended implementation
+sequencing. It does not authorize installed changes.
+
 ## Plan
 
 ### Phase 1 - Reviewed intent and dependency baseline
@@ -163,6 +177,28 @@ new package feeds.
   experimental ONNX/storage replacements remain separately tracked decisions.
 - [ ] Update reality docs and archive only after the campaign completion gate.
 
+### Phase 7 - Compiler-free first-party execution
+
+- [ ] Review the [compiler-free execution amendment](compiler-free-execution.md)
+  and `plugin-services/compiler-free-first-party-execution` intent before
+  implementation.
+- [ ] Complete the shared daemon replacement through the reactivated
+  [leased-daemon instance owner](../leased-daemon-instances/README.md), preserving
+  its existing registry, lifecycle protocol and safety guarantees.
+- [ ] Replace executable embedded Windows helper compilation and runtime code
+  emission through their existing installation-context, operation-lock,
+  update-driver, process and session-host owners. Qualify genuinely pre-Python
+  bootstrap paths before changing their dependency boundary.
+- [ ] Remove first-party native sources, generated copies, custom compiled
+  artifacts, compiler build hooks and release construction/verification
+  compilation; retain normal integrity and source admission.
+- [ ] Prove compiler-free fresh construction, installed invocation, expiry and
+  cleanup on the supported platforms, with regression guards against both
+  checked-in native code and embedded/on-demand compilation.
+- [ ] Reconcile source-managed maintenance and native adopter gates from
+  actual evidence. A source merge does not authorize rollout or close their
+  independent acceptance.
+
 ## Validation Plan
 
 - [x] Unit and dependency-contract tests cover each changed declaration,
@@ -192,6 +228,9 @@ new package feeds.
   alone do not establish an end-to-end installation speedup.
 - [ ] Publication checks, changefiles, review, merge and release attribution are
   satisfied; rollout authorization and its completion owner are explicit.
+- [ ] The compiler-free amendment's complete source, packaging, bootstrap,
+  kernel-identity, Windows Job/headlessness and minimal-machine checks pass;
+  unsupported lanes remain explicit blockers, not assumed parity.
 
 ## Proposal
 
