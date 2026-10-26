@@ -50,6 +50,14 @@ Legacy content-only fingerprints deliberately miss once when a file is next
 presented. Full reindexing still forces work, while its retries can reuse
 compatible writes committed within the task window.
 
+Each file checkpoint is published only after all its content/vector writes and
+stale-chunk cleanup succeed. Deletion failures retain the source cursor for
+idempotent replay; legacy vector deletion precedes content deletion so retry can
+still discover canonical chunk IDs. Transactional SQLite triggers maintain
+per-source chunk totals as file checkpoints change, including deletions and
+replayed batches. Existing path databases receive a one-time aggregate backfill;
+ordinary rounds read only these source totals, not unchanged file rows.
+
 Engine readiness is deferred until the first nonempty embedding batch; an empty
 delta or wholly reused file set does not start embedding engines. Reused files
 are excluded from timestamp-based stale cleanup. Metadata/model changes are

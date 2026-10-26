@@ -63,6 +63,23 @@ def test_delta_acquisition_does_not_enumerate_existing_corpus(
     assert len(manifest.upserts) == int(changed)
     assert len(manifest.deletions) == int(changed)
     assert state.sources["configured"].last_commit == "previous"
+    steps = 0
+
+    def count_step() -> int:
+        nonlocal steps
+        steps += 1
+        return 0
+
+    connect = paths._connect
+
+    def measured_connection():
+        conn = connect()
+        conn.set_progress_handler(count_step, 1)
+        return conn
+
+    monkeypatch.setattr(paths, "_connect", measured_connection)
+    assert paths.chunk_count_by_family("forge:repo") == corpus_size
+    assert steps < 100  # Count work is independent of unchanged file count.
 
 
 @pytest.mark.parametrize("result", [

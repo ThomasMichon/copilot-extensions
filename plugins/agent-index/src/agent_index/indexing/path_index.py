@@ -57,6 +57,40 @@ class PathIndex:
         conn = self._connect()
         try:
             conn.executescript(_SCHEMA)
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'source_chunk_totals'",
+            ).fetchone() is None:
+                conn.execute(
+                    "CREATE TABLE source_chunk_totals "
+                    "(source TEXT PRIMARY KEY, chunk_count INTEGER NOT NULL)",
+                )
+                conn.execute(
+                    "INSERT INTO source_chunk_totals SELECT source, SUM(chunk_count) "
+                    "FROM indexed_files GROUP BY source",
+                )
+            for name, event, body in (
+                ("insert", "INSERT", """
+                    INSERT INTO source_chunk_totals VALUES (new.source, new.chunk_count)
+                    ON CONFLICT(source) DO UPDATE SET
+                        chunk_count = chunk_count + new.chunk_count;
+                """),
+                ("update", "UPDATE", """
+                    UPDATE source_chunk_totals SET chunk_count = chunk_count - old.chunk_count
+                        WHERE source = old.source;
+                    INSERT INTO source_chunk_totals VALUES (new.source, new.chunk_count)
+                    ON CONFLICT(source) DO UPDATE SET
+                        chunk_count = chunk_count + new.chunk_count;
+                """),
+                ("delete", "DELETE", """
+                    UPDATE source_chunk_totals SET chunk_count = chunk_count - old.chunk_count
+                        WHERE source = old.source;
+                """),
+            ):
+                conn.execute(
+                    f"CREATE TRIGGER IF NOT EXISTS indexed_files_total_{name} "
+                    f"AFTER {event} ON indexed_files BEGIN {body} END",
+                )
             conn.commit()
         finally:
             conn.close()
@@ -169,6 +203,21 @@ class PathIndex:
             conn.close()
 
     # ── Read ─────────────────────────────────────────────────
+
+    def chunk_count_by_family(self, family: str) -> int:
+        """Read transactionally maintained totals, never scan unchanged file rows."""
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """SELECT COALESCE(SUM(chunk_count), 0) AS total
+                   FROM source_chunk_totals
+                   WHERE source = ? COLLATE BINARY
+                      OR (source >= ? COLLATE BINARY AND source < ? COLLATE BINARY)""",
+                (family, f"{family}:", f"{family};"),
+            ).fetchone()
+            return row["total"]
+        finally:
+            conn.close()
 
     def get_paths(self, source: str) -> set[str]:
         """Return all file_paths for an exact source match."""

@@ -318,30 +318,23 @@ class ContentStore(_ContentFtsWorkerMixin):
         # Query chunk_ids before deleting so callers can clean up vector tables
         chunk_ids = self.get_chunk_ids_by_file(source, file_path)
         if chunk_ids:
-            try:
-                table.delete(f"source = '{source}' AND file_path = '{file_path}'")
-            except Exception:
-                logger.warning(
-                    "Failed to delete chunks for %s:%s", source, file_path,
-                    exc_info=True,
-                )
+            table.delete(
+                f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
+            )
         return chunk_ids
 
     @source_read
     def get_chunk_ids_by_file(self, source: str, file_path: str) -> list[str]:
         """Return chunk_ids for a specific file within a source."""
         table = self._get_or_create_table()
-        try:
-            rows = (
-                table.search()
-                .where(f"source = '{source}' AND file_path = '{file_path}'")
-                .select(["chunk_id"])
-                .limit(10000)
-                .to_list()
-            )
-            return [r["chunk_id"] for r in rows]
-        except Exception:
+        predicate = f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}'"
+        count = table.count_rows(predicate)
+        if not count:
             return []
+        rows = table.search().where(predicate).select(["chunk_id"]).limit(count).to_list()
+        if len(rows) != count:
+            raise RuntimeError("Incomplete file chunk lookup")
+        return [r["chunk_id"] for r in rows]
 
     @source_write
     def delete_stale(self, source: str, *, before: float) -> int:
@@ -380,20 +373,17 @@ class ContentStore(_ContentFtsWorkerMixin):
     ) -> list[str]:
         """Return chunk_ids for stale chunks of a specific file."""
         table = self._get_or_create_table()
-        try:
-            rows = (
-                table.search()
-                .where(
-                    f"source = '{source}' AND file_path = '{file_path}' "
-                    f"AND indexed_at < {before}"
-                )
-                .select(["chunk_id"])
-                .limit(10000)
-                .to_list()
-            )
-            return [r["chunk_id"] for r in rows]
-        except Exception:
+        predicate = (
+            f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
+            f"AND indexed_at < {before}"
+        )
+        count = table.count_rows(predicate)
+        if not count:
             return []
+        rows = table.search().where(predicate).select(["chunk_id"]).limit(count).to_list()
+        if len(rows) != count:
+            raise RuntimeError("Incomplete stale chunk lookup")
+        return [r["chunk_id"] for r in rows]
 
     @source_write
     def delete_stale_by_file(
@@ -412,22 +402,14 @@ class ContentStore(_ContentFtsWorkerMixin):
                 f"AND indexed_at < {before}"
             ))
         table = self._get_or_create_table()
-        try:
-            initial = table.count_rows()
-            table.delete(
-                f"source = '{source}' AND file_path = '{file_path}' "
-                f"AND indexed_at < {before}"
-            )
-            remaining = table.count_rows()
-            removed = initial - remaining
-            if removed > 0:
-                logger.info(
-                    "Deleted %d stale chunks for %s:%s",
-                    removed, source, file_path,
-                )
-            return removed
-        except Exception:
-            return 0
+        predicate = (
+            f"source = '{_sql_str(source)}' AND file_path = '{_sql_str(file_path)}' "
+            f"AND indexed_at < {before}"
+        )
+        removed = table.count_rows(predicate)
+        if removed:
+            table.delete(predicate)
+        return removed
 
     # -- maintenance ---------------------------------------------------------
 

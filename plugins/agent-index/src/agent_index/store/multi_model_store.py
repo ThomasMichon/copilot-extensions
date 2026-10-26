@@ -273,10 +273,12 @@ class MultiModelStore(_ItemRepresentationMixin):
         """
         if self._source_domain is not None:
             return self._content.delete_by_file(source, file_path)
-        chunk_ids = self._content.delete_by_file(source, file_path)
+        # Retain canonical IDs until every vector deletion succeeds, for retry.
+        chunk_ids = self._content.get_chunk_ids_by_file(source, file_path)
         for vt in self._vector_tables.values():
             if chunk_ids:
                 vt.delete_by_chunk_ids(chunk_ids)
+        self._content.delete_by_file(source, file_path)
         return chunk_ids
 
     @source_write
@@ -300,11 +302,10 @@ class MultiModelStore(_ItemRepresentationMixin):
         )
         if not stale_ids:
             return 0
-        # Delete from content store
-        self._content.delete_stale_by_file(source, file_path, before=before)
         # Delete from all vector tables
         for vt in self._vector_tables.values():
             vt.delete_by_chunk_ids(stale_ids)
+        self._content.delete_stale_by_file(source, file_path, before=before)
         return len(stale_ids)
 
     @source_write

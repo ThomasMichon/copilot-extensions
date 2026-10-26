@@ -50,6 +50,7 @@ def collect_source_changes(
             deletions=delta.deletions,
             commit=delta.commit,
             stored_family=canonical,
+            accounting_family=connector.source_name,
             stats=CrawlStats(
                 files_scanned=len(delta.upserts) + len(delta.deletions),
                 files_changed=len(delta.upserts),
@@ -89,6 +90,7 @@ def collect_source_changes(
         deletions=deletions,
         commit=commit,
         stored_family=canonical,
+        accounting_family=connector.source_name,
         stats=CrawlStats(
             files_scanned=scanned,
             files_changed=len(upserts),

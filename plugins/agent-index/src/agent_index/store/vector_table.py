@@ -138,13 +138,8 @@ class VectorTable:
         table = self._get_or_create_table()
         if self._source_domain is not None:
             self._source_domain.effect(f"vector-delete:{self._table_name}")
-        try:
-            id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
-            table.delete(f"chunk_id IN ({id_list})")
-        except Exception:
-            if self._source_domain is not None:
-                raise
-            pass
+        id_list = ", ".join(f"'{cid}'" for cid in chunk_ids)
+        table.delete(f"chunk_id IN ({id_list})")
 
     @source_write
     def delete_stale(self, *, before: float) -> int:

@@ -621,18 +621,23 @@ def _index_source(
 
     # ── Phase 2: Embed/Store upserts ────────────────────────
     total_stored = 0
-    upserted_files: set[tuple[str, str]] = set()  # (source, file_path) for stale cleanup
+    stale_cleaned = 0
+
+    def reconcile_file(src: str, path: str) -> None:
+        nonlocal stale_cleaned
+        stale_cleaned += multi_store.delete_stale_by_file(src, path, before=run_start)
 
     if manifest.upserts:
         if progress_cb:
             progress_cb.phase("chunking", msg=f"Chunking {len(manifest.upserts)} files")
 
-        total_stored, upserted_files = _embed_and_store_files(
+        total_stored, _stored_files = _embed_and_store_files(
             manifest.upserts,
             multi_store=multi_store,
             multi_clients=multi_clients,
             model_profiles=config.model_profiles,
             path_index=path_index,
+            reconcile_file=reconcile_file,
             stream_batch_size=config.stream_batch_size,
             progress_cb=progress_cb,
             resume_since=resume_since,
@@ -640,9 +645,6 @@ def _index_source(
             before_store=before_store,
             chunker_revision=getattr(config, "chunker_revision", "1"),
         )
-        # NOTE: ``upserted_files`` holds only files this run actually (re)stored;
-        # files SKIPPED on resume are excluded, so Phase 3b stale-cleanup (which
-        # deletes chunks older than run_start) won't drop their valid chunks.
 
     # ── Phase 3: Reconcile ──────────────────────────────────
     if progress_cb:
@@ -661,35 +663,18 @@ def _index_source(
             path_index.remove(deleted.source, deleted.path)
             total_deleted += 1
         except Exception:
-            if selected_layout():
-                raise
             logger.warning(
                 "Failed to delete %s:%s", deleted.source, deleted.path,
                 exc_info=True,
             )
-
-    # 3b. Stale chunk cleanup for modified files
-    # Modified files produce new chunk_ids (content hash changed), so old
-    # chunks with the same (source, file_path) but indexed before this run
-    # need to be removed.
-    stale_cleaned = 0
-    for src, path in upserted_files:
-        try:
-            removed = multi_store.delete_stale_by_file(src, path, before=run_start)
-            stale_cleaned += removed
-        except Exception:
-            if selected_layout():
-                raise
-            logger.debug("Stale cleanup failed for %s:%s", src, path, exc_info=True)
+            raise
 
     if total_deleted or stale_cleaned:
         print(f"  Reconciled: {total_deleted} files deleted, {stale_cleaned} stale chunks cleaned")
 
     # ── Phase 4: Commit state ───────────────────────────────
-    previous = state.sources.get(source_name)
-    indexed_count = (
-        total_stored if upserted_files or manifest.deletions
-        else previous.chunk_count if previous else 0
+    indexed_count = path_index.chunk_count_by_family(
+        manifest.accounting_family or manifest.stored_family or source_name,
     )
     state.mark_source_indexed(source_name, manifest.commit, indexed_count)
     if manifest.stored_family is not None:
@@ -727,6 +712,7 @@ def _embed_and_store_files(
     multi_clients: dict[str, EngineClient],
     model_profiles: dict[str, ModelProfile] | None = None,
     path_index: PathIndex,
+    reconcile_file: Callable[[str, str], None],
     stream_batch_size: int = STREAM_BATCH_SIZE,
     progress_cb: ProgressCallback | None = None,
     resume_since: float | None = None,
@@ -736,8 +722,8 @@ def _embed_and_store_files(
 ) -> tuple[int, set[tuple[str, str]]]:
     """Phase 2: Chunk files, embed via the engine, upsert to stores.
 
-    Checkpoints ``path_index`` after EACH batch flush (with content hashes) so an
-    interruption leaves a crash-consistent record of what is stored. Compatible
+    Reconciles stale chunks before checkpointing EACH completed batch, so an
+    interruption never publishes reusable work with unfinished cleanup. Compatible
     file checkpoints are reused on normal rounds. An explicit full rebuild
     forces writes, except for compatible work committed in its retry window.
 
@@ -760,12 +746,18 @@ def _embed_and_store_files(
     # size check), so every pending file is fully persisted once the batch stores.
     pending: list[tuple[str, str, str, int]] = []
 
+    def _checkpoint() -> None:
+        nonlocal pending
+        for source, path, _hash, _count in pending:
+            reconcile_file(source, path)
+        path_index.mark_indexed_batch(pending)
+        pending = []
+
     def _flush() -> None:
         nonlocal batch, total_stored, pending
         if not batch:
             if pending:
-                path_index.mark_indexed_batch(pending)
-                pending = []
+                _checkpoint()
             return
         if progress_cb:
             progress_cb.check_cancelled()
@@ -777,8 +769,7 @@ def _embed_and_store_files(
             stream_batch_size=stream_batch_size,
         )
         if pending:
-            path_index.mark_indexed_batch(pending)  # crash-consistent checkpoint
-        pending = []
+            _checkpoint()
         batch = []
         if progress_cb:
             progress_cb.batch_complete(total_stored, total_chunks)
