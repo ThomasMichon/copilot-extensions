@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import os
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
@@ -74,6 +75,7 @@ class GitHubConnector:
         self._client = self._http.client
         self._owns_client = self._http.owns_client
         self._default_since = since
+        self._recovery_account: str | None = None
 
     @property
     def source_name(self) -> str:
@@ -82,7 +84,21 @@ class GitHubConnector:
 
     @property
     def recovery_identity(self) -> tuple[str, ...]:
-        return nonsecret_target(self.api_base), self.owner, self.repo
+        if self._recovery_account is None:
+            if self._token or self._token_provider is not None or (
+                self._client.auth is not None or "authorization" in self._client.headers
+            ):
+                data = self._http.get_json("/user").data
+                user_id = data.get("id") if isinstance(data, dict) else None
+                if type(user_id) not in (int, str) or not str(user_id):
+                    raise ValueError("GitHub /user did not include an authenticated account id")
+                self._recovery_account = str(user_id)
+            else:
+                self._recovery_account = "anonymous"
+        return (
+            nonsecret_target(self.api_base), self.owner, self.repo,
+            self._recovery_account, json.dumps(self._default_since),
+        )
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover all issues and pull requests."""

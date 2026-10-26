@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from agent_index.indexing import engine
@@ -18,6 +19,7 @@ from agent_index.sources.base import FileEntry
 from agent_index.sources.base import nonsecret_target
 from agent_index.sources.delta import SourceDelta
 from agent_index.sources.git_repo import GitRepoConnector
+from agent_index.sources.github import GitHubConnector
 from agent_index.sources.azure_devops import AzureDevOpsConnector
 
 
@@ -317,6 +319,42 @@ def test_ado_effective_scope_change_refuses_pending_replay(
         account = "account-b"
     if change == "queries":
         after._work_item_queries = [{"saved_query_id": "different-query"}]
+    with pytest.raises(ValueError, match="configuration"):
+        journal.load(before.source_name, recovery_scope("same-spec", after))
+
+
+@pytest.mark.parametrize("change", ["endpoint", "account", "since"])
+def test_github_effective_scope_change_refuses_pending_replay(tmp_path: Path, change: str) -> None:
+    account = 1
+    probes: list[str] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/user"
+        probes.append(str(request.url))
+        return httpx.Response(200, json={"id": account})
+
+    def connector(endpoint: str = "https://example.test", since: str | None = None):
+        return GitHubConnector(
+            "github:org/repo", api_base=endpoint, since=since,
+            token="fixture-placeholder", transport=httpx.MockTransport(transport), min_interval_s=0,
+        )
+
+    before = connector()
+    old_scope = recovery_scope("same-spec", before)
+    assert recovery_scope("same-spec", before) == old_scope
+    assert len(probes) == 1
+    journal = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    manifest = CrawlManifest(
+        source=before.source_name, accounting_family=before.source_name,
+        upserts=[FileEntry("a.md", "pending", "markdown", before.source_name)],
+    )
+    journal.save(manifest, scope=old_scope, full=False)
+    if change == "account":
+        account = 2
+    after = connector(
+        endpoint="https://other.example.test" if change == "endpoint" else before.api_base,
+        since="2026-01-01T00:00:00Z" if change == "since" else None,
+    )
     with pytest.raises(ValueError, match="configuration"):
         journal.load(before.source_name, recovery_scope("same-spec", after))
 
