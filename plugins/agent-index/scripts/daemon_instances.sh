@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Python-free Linux binding of agent_procutil.daemon_instances schema 1.
+# Linux shell binding of agent_procutil.daemon_instances schema 1.
 # Sourcing is inert. No installer, service, process scan or implicit sweep.
 
 daemon_instance_root() {
@@ -11,19 +11,47 @@ daemon_instance_root() {
     printf '%s\n' "$home/.local/state/copilot-extensions/daemon-instances"
 }
 
-_di_native() {
+_di_python() {
+    local target owner mode
+    if [[ -n "${COPILOT_EXTENSIONS_DAEMON_PYTHON:-}" ]]; then
+        target="$COPILOT_EXTENSIONS_DAEMON_PYTHON"
+        [[ "$target" == /* ]] || {
+            printf '%s\n' 'daemon lifecycle interpreter must be absolute' >&2; return 1;
+        }
+    else
+        target="$(command -v python3)" || {
+            printf '%s\n' 'daemon lifecycle requires a supported Python interpreter' >&2; return 1;
+        }
+    fi
+    target="$(readlink -e -- "$target")" || return 1
+    [[ -f "$target" && -x "$target" ]] || return 1
+    owner="$(stat -c '%u' -- "$target")"; mode="$(stat -c '%a' -- "$target")"
+    if [[ "$owner" == 0 || "$owner" == "$(id -u)" ]] && (( (8#$mode & 06022) == 0 )); then
+        printf '%s\n' "$target"; return
+    fi
+    printf '%s\n' 'daemon lifecycle interpreter custody unavailable' >&2
+    return 1
+}
+
+_di_lifecycle_source() {
     local target owner mode source_root
     source_root="$(readlink -e -- "$(dirname -- "${BASH_SOURCE[0]}")")" || return 1
-    target="$source_root/native/linux-$(uname -m)/daemon-instance"
-    if [[ -f "$target" && -x "$target" && ! -L "$target" &&
-        "$(readlink -e -- "$target")" == "$target" ]]; then
+    target="$source_root/daemon_instance_runtime.pyz"
+    if [[ -f "$target" && ! -L "$target" && "$(readlink -e -- "$target")" == "$target" ]]; then
         owner="$(stat -c '%u' -- "$target")"; mode="$(stat -c '%a' -- "$target")"
-        if [[ "$owner" == 0 || "$owner" == "$(id -u)" ]] && (( (8#$mode & 06022) == 0 )); then
+        if [[ "$owner" == 0 || "$owner" == "$(id -u)" ]] && (( (8#$mode & 0022) == 0 )); then
             printf '%s\n' "$target"; return
         fi
     fi
-    printf '%s\n' 'daemon instance native artifact unavailable' >&2
+    printf '%s\n' 'daemon lifecycle source custody unavailable' >&2
     return 1
+}
+
+_di_lifecycle() {
+    local python target
+    python="$(_di_python)" || return 1
+    target="$(_di_lifecycle_source)" || return 1
+    "$python" -I -S -B "$target" "$@"
 }
 
 _di_plain() {
@@ -183,7 +211,7 @@ enter_daemon_instance() {
 }
 
 run_daemon_instance() {
-    local service="$1" runtime="$2" source="$3" native
+    local service="$1" runtime="$2" source="$3"
     shift 3
     [[ "${1:-}" == -- ]] || return 1
     shift
@@ -204,12 +232,15 @@ run_daemon_instance() {
         export COPILOT_EXTENSIONS_DAEMON_REGISTRY="$__daemon_instance_root"
         exec "$@"
     fi
-    native="$(_di_native "$__daemon_instance_root")" || return 1
     local -a admission=()
     if [[ -n "${__daemon_instance_ready_fd:-}" ]]; then
         admission=(--ready-fd "$__daemon_instance_ready_fd")
     fi
-    exec "$native" supervise "$__daemon_instance_record" "${admission[@]}" -- "$@"
+    # Replace this shell, rather than inserting a wrapper with another PID.
+    local python target
+    python="$(_di_python)" || return 1
+    target="$(_di_lifecycle_source)" || return 1
+    exec "$python" -I -S -B "$target" supervise "$__daemon_instance_record" "${admission[@]}" -- "$@"
 }
 
 _di_read_cursor() {
@@ -312,16 +343,18 @@ reconcile_daemon_instances() (
             else
                 awk -v n="$now" -v d="${record[deadline]:-0}" 'BEGIN { exit !(d>0 && n>=d) }' || continue
             fi
-            local native remaining
-            native="$(_di_native "$root")" || {
-                printf 'held\tnative-binding-unavailable\t%s\n' "$id"
-                printf 'daemon instance held: %s native-binding-unavailable\n' "$id" >&2
+            local python target remaining
+            if ! python="$(_di_python)" || ! target="$(_di_lifecycle_source)"; then
+                printf 'held\tlifecycle-binding-unavailable\t%s\n' "$id"
+                printf 'daemon instance held: %s lifecycle-binding-unavailable\n' "$id" >&2
                 continue
-            }
+            fi
             remaining="$(awk -v a="$start" -v b="$(date +%s.%N)" -v limit="$seconds" \
                 'BEGIN { printf "%.6f", limit-(b-a) }')"
             awk -v n="$remaining" 'BEGIN { exit !(n>0) }' || break
-            "$native" cleanup "$path" "$remaining" || true
+            "$python" -I -S -B "$target" cleanup "$path" "$remaining" || {
+                printf 'daemon instance reconciliation unavailable: %s\n' "$id" >&2
+            }
             continue
         fi
         [[ "$status" != held ]] || printf 'daemon instance held: %s %s\n' "$id" "$reason" >&2

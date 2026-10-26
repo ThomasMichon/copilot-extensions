@@ -17,7 +17,7 @@ SPEC.loader.exec_module(sync)
 NAMES = (
     sync.VRT_NAME, *sync.COMPONENT_NAMES,
     sync.DEPENDENCY_POLICY.name, sync.DEPENDENCY_CONFIG.name, *sync.RESOLVER_NAMES,
-    *sync.INSTALLER_INSTANCE_NAMES,
+    *sync.INSTALLER_INSTANCE_NAMES, sync.ARCHIVE_NAME,
 )
 
 
@@ -45,6 +45,9 @@ def repository(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "DEPENDENCY_POLICY", engine / sync.DEPENDENCY_POLICY.name)
     monkeypatch.setattr(sync, "DEPENDENCY_CONFIG", engine / sync.DEPENDENCY_CONFIG.name)
     monkeypatch.setattr(sync, "RESOLVER_DIR", runtime)
+    monkeypatch.setattr(
+        sync, "lifecycle_archive", lambda repo: (runtime / sync.ARCHIVE_NAME).read_bytes(),
+    )
     return scripts
 
 
@@ -150,19 +153,61 @@ def test_instance_only_sync_ships_only_native_ps_pair_to_wsl_payload(repository,
     }
 
 
-def test_explicit_native_wheel_fanout_preserves_the_built_executable(repository, monkeypatch):
-    import native_daemon_artifacts
-
-    relative = Path("native") / "linux-x86_64" / "daemon-instance"
-    monkeypatch.setattr(
-        native_daemon_artifacts, "wheel_assets",
-        lambda *args, **kwargs: {relative: b"verified built native fixture\n"},
-    )
+def test_native_wheel_fanout_is_not_an_available_build_route(repository, monkeypatch):
     monkeypatch.setattr(sys, "argv", [
         str(SCRIPT), "--only-installer-instances", "--native-wheel", str(sync.REPO / "built.whl"),
     ])
+    with pytest.raises(SystemExit) as error:
+        sync.main()
+    assert error.value.code == 2
+
+
+def test_lifecycle_source_archive_is_deterministic_and_contains_only_python():
+    import io
+    import zipfile
+    from daemon_lifecycle_assets import lifecycle_archive
+
+    first = lifecycle_archive(SCRIPT.parents[1])
+    assert lifecycle_archive(SCRIPT.parents[1]) == first
+    with zipfile.ZipFile(io.BytesIO(first)) as archive:
+        assert archive.namelist()
+        assert all(name.endswith(".py") for name in archive.namelist())
+        assert not any("build_native" in name for name in archive.namelist())
+        assert archive.read("agent_procutil/_daemon_instance_linux.py") == (
+            SCRIPT.parents[1] / "libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py"
+        ).read_bytes()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX source archive custody")
+def test_source_archive_publication_repairs_group_writable_bytes(repository, monkeypatch):
+    archive = repository / sync.ARCHIVE_NAME
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+    original = os.umask(0o002)
+    try:
+        assert sync.main() == 0
+    finally:
+        os.umask(original)
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o644
+    archive.chmod(0o664)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances", "--check"])
+    assert sync.main() == 1
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
     assert sync.main() == 0
-    executable = repository / relative
-    assert executable.read_bytes() == b"verified built native fixture\n"
-    if os.name != "nt":
-        assert executable.stat().st_mode & 0o111
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o644
+
+
+@pytest.mark.parametrize("linked", [False, True], ids=["ordinary", "redirected"])
+def test_package_archive_publishes_the_same_complete_closure(repository, monkeypatch, linked):
+    package_archive = (
+        sync.REPO / "libs/agent-procutil/src/agent_procutil" / sync.ARCHIVE_NAME
+    )
+    if linked:
+        target = sync.REPO / "foreign-archive"
+        target.write_bytes(b"retain foreign input")
+        package_archive.symlink_to(target)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--only-installer-instances"])
+    assert sync.main() == (1 if linked else 0)
+    if linked:
+        assert target.read_bytes() == b"retain foreign input"
+    else:
+        assert package_archive.read_bytes() == (repository / sync.ARCHIVE_NAME).read_bytes()

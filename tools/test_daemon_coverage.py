@@ -289,6 +289,34 @@ def test_native_kernel_commands_are_counted_not_python_decorated(tmp_path):
     assert any("command census differs" in p for p in GUARD.verify(tmp_path))
 
 
+@pytest.mark.parametrize("fault", ["none", "extra", "dynamic", "missing-entry", "syntax"])
+def test_shared_python_helper_has_an_exact_entrypoint_and_command_census(tmp_path, fault):
+    source = fixture(tmp_path, "pass\n")
+    code = (
+        "def main():\n"
+        "    parser.add_parser('supervise')\n"
+        "    parser.add_parser('cleanup')\n"
+    )
+    if fault == "extra":
+        code += "    parser.add_parser('unclassified')\n"
+    elif fault == "dynamic":
+        code = code.replace("'cleanup'", "unknown")
+    elif fault == "missing-entry":
+        code = code.replace("def main", "def different")
+    elif fault == "syntax":
+        code += "broken!\n"
+    source.write_text(code, encoding="utf-8")
+    path = tmp_path / "tools" / "daemon-coverage.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    document["native_helpers"] = [{
+        "source": source.relative_to(tmp_path).as_posix(), "entrypoint": "main",
+        "owner": "agent_procutil.daemon_instances", "protocol": 1,
+        "commands": {"supervise": "supervised-service-child", "cleanup": "finite-worker"},
+    }]
+    path.write_text(json.dumps(document), encoding="utf-8")
+    assert bool(GUARD.verify(tmp_path)) == (fault != "none")
+
+
 def test_finite_artifact_helper_cannot_acquire_an_unclassified_spawn(tmp_path):
     fixture(tmp_path, "pass\n")
     helper = tmp_path / "tools" / "test_artifact_helper.py"

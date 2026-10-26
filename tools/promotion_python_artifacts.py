@@ -443,10 +443,9 @@ def validate_wheel_sources(
         else:
             from plugin_runtime_resources import build_inputs
             data, injected = build_inputs(source_dir, root=candidate_root)
-        from native_daemon_artifacts import generated_members, trusted_setup as native_setup
+        from native_daemon_artifacts import generated_members
 
-        native_members = generated_members(bundle, source_dir=source_dir, data=data, prefix=prefix)
-        native_build = native_setup(source_dir, data) is not None
+        generated_members(bundle, source_dir=source_dir, data=data, prefix=prefix)
         tool = data.get("tool", {})
         settings = tool.get("setuptools", {}) if isinstance(tool, dict) else None
         if not isinstance(settings, dict):
@@ -486,10 +485,6 @@ def validate_wheel_sources(
         if {name for name in payload if name.endswith(".py")} != required_python:
             raise PromotionArtifactError("wheel Python member set differs from candidate source")
         for name in payload:
-            if name in native_members:
-                if hashlib.sha256(native_members[name]).hexdigest() != hashes[name]:
-                    raise PromotionArtifactError("native daemon payload differs from its explicit build")
-                continue
             path = injected.get(name, base / name)
             if (
                 not path.resolve().is_relative_to(
@@ -502,7 +497,6 @@ def validate_wheel_sources(
         if not isinstance(package_data, dict) or settings.get("exclude-package-data") or settings.get("data-files"):
             raise PromotionArtifactError("invalid wheel package-data configuration")
         required_data: set[str] = set()
-        required_data.update(native_members)
         for package, patterns in package_data.items():
             if not isinstance(package, str) or not isinstance(patterns, list) or any(
                 not isinstance(pattern, str) or "\\" in pattern or pattern.startswith("/")
@@ -518,7 +512,6 @@ def validate_wheel_sources(
             required_data.update({
                 path.relative_to(base).as_posix()
                 for root in roots for pattern in patterns for path in root.glob(pattern) if path.is_file()
-                and not (native_build and path.relative_to(base).as_posix().startswith("agent_procutil/native/"))
             })
         if payload != required_python | required_data:
             raise PromotionArtifactError("wheel payload set differs from declared candidate members")

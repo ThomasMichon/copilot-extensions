@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Original scope completed:** 2026-10-25
 - **Source:** #8720 (original implementation merged); compiler-free amendment
-  proposed before implementation
+  reviewed in #9120, replacement implementation open
 - **Vision:** `visions/plugin-services/README.md` - `attributed-daemon-instances`
 - **Umbrella issue:** #8403
 
@@ -151,9 +151,9 @@ replacement.
 
 ### Phase 5 - Compiler-free shared lifecycle amendment
 
-- [ ] Review the governing compiler-free vision and
+- [x] Review the governing compiler-free vision and
   [complete amendment](../lean-runtime-dependencies/compiler-free-execution.md)
-  through the existing #8403 owner.
+  through the existing #8403 owner (#9120).
 - [ ] Reuse shared Python reservation, schema, locks and identity operations;
   replace Linux C supervise/cleanup and preserve owner-loss, lease/hard maximum,
   subreaper descendant settlement and exact-artifact behavior.
@@ -195,8 +195,8 @@ replacement.
 ## Proposal
 
 Proposal #8433 and implementation #8720 completed the original shared ownership
-and caller/installer integration. The compiler-free amendment remains proposed;
-implementation does not begin until it clears review.
+and caller/installer integration. The compiler-free amendment cleared review
+and merged in #9120; replacement implementation and requalification remain open.
 The journal distinguishes actual supported-lane proof from unavailable
 hardware, dependency and production-venue lanes; those are not claimed as
 exercised. Release promotion and installed rollout are separate, and no

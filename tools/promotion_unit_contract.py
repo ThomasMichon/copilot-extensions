@@ -14,9 +14,7 @@ MAX_PACKET_FILE_BYTES = 128 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
-BUILD_SOURCE_DATA = frozenset({
-    "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c",
-})
+BUILD_SOURCE_DATA: frozenset[str] = frozenset()
 
 
 class UnitEvidenceError(ValueError):

@@ -15,86 +15,24 @@ ENTRYPOINTS = (
 )
 BUILD_INPUTS = (
     "libs/agent-procutil/setup.py",
-    "libs/agent-procutil/src/agent_procutil/_build_native.py",
-    "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c",
     "plugins/agent-containers/setup.py",
     "plugins/agent-containers/scripts/standalone_build.py",
     "libs/versioned-runtime/standalone_build.py",
 )
 DYNAMIC_INPUTS = {
-    "native_daemon_artifacts": ("libs/agent-procutil/src/agent_procutil/_build_native.py",),
     "installer_dependency_policy": ("libs/installer-engine/installer_dependency_config.py",),
 }
 BUILD_DECISIONS = {
-    "libs/agent-procutil/src/agent_procutil/_build_native.py",
     "libs/versioned-runtime/standalone_build.py",
 } | {path for paths in DYNAMIC_INPUTS.values() for path in paths}
 BUILD_ORIGINS = {
     "plugins/agent-containers/scripts/standalone_build.py": "libs/versioned-runtime/standalone_build.py",
 }
-_NATIVE_EXEC_BODY = ast.parse('''
-def _compile_expected(source_dir: Path, arch: str) -> bytes:
-    if not sys.platform.startswith("linux") or platform.machine() != arch:
-        _fail("native daemon artifact verification requires its explicit Linux build platform")
-    scratch = Path.cwd() / ".test-runs"
-    scratch.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="native-artifact-verify-", dir=scratch) as directory:
-        root = Path(directory)
-        helper = root / BUILD
-        helper.write_bytes(_ordinary(source_dir / PACKAGE / BUILD, source_dir))
-        (root / SOURCE).write_bytes(_ordinary(source_dir / PACKAGE / SOURCE, source_dir))
-        owner = ModuleType("_trusted_native_daemon_build")
-        owner.__file__ = str(helper)
-        exec(compile(helper.read_bytes(), str(helper), "exec"), owner.__dict__)
-        output = owner.build_native(root / "native" / f"linux-{arch}" / "daemon-instance")
-        return output.read_bytes()
-''').body[0]
-_NATIVE_EXEC_INPUTS = {
-    "PACKAGE": ast.parse('Path("src") / "agent_procutil"', mode="eval").body,
-    "BUILD": ast.Constant("_build_native.py"),
-    "SOURCE": ast.Constant("daemon_instance_native.c"),
-}
 
 
 def _registered_execs(tree: ast.Module, relative: str) -> set[ast.Call]:
-    """Admit one source-bound native build site, never a module-wide exemption."""
-    if relative != "tools/native_daemon_artifacts.py":
-        return set()
-    definitions = [
-        node for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        and node.name == "_compile_expected"
-    ]
-    if (
-        len(definitions) != 1 or definitions[0] not in tree.body
-        or ast.dump(definitions[0]) != ast.dump(_NATIVE_EXEC_BODY)
-    ):
-        return set()
-    for name, value in _NATIVE_EXEC_INPUTS.items():
-        bindings = [
-            node for node in ast.walk(tree)
-            if isinstance(node, ast.Name) and node.id == name
-            and isinstance(node.ctx, (ast.Store, ast.Del))
-            or isinstance(node, ast.arg) and node.arg == name
-            or isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-            and node.name == name
-            or isinstance(node, (ast.Import, ast.ImportFrom))
-            and any((alias.asname or alias.name.split(".")[0]) == name for alias in node.names)
-            or isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name == name
-            or isinstance(node, ast.MatchMapping) and node.rest == name
-        ]
-        if len(bindings) != 1 or not any(
-            isinstance(node, ast.Assign) and node.targets == bindings
-            and ast.dump(node.value) == ast.dump(value) for node in tree.body
-        ):
-            return set()
-    declared = "libs/agent-procutil/" + "src/agent_procutil/" + _NATIVE_EXEC_INPUTS["BUILD"].value
-    if DYNAMIC_INPUTS.get("native_daemon_artifacts") != (declared,):
-        return set()
-    return {
-        node for node in ast.walk(definitions[0])
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "exec"
-    }
+    """No release helper has authority to execute a dynamically loaded builder."""
+    return set()
 
 
 def _modules(root: Path) -> dict[str, Path]:

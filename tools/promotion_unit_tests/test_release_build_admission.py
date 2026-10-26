@@ -1,10 +1,8 @@
 """Source-bound release helper decisions without build or native actors."""
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import io
-import os
 from pathlib import Path
 import stat
 import subprocess
@@ -21,7 +19,6 @@ from artifact_source_build import PromotionArtifactError, validate_static_build
 
 ROOT = Path(__file__).resolve().parents[2]
 PROCUTIL = ROOT / "libs/agent-procutil"
-BUILDER = PROCUTIL / "src/agent_procutil/_build_native.py"
 PREFIX = "agent_procutil-1.0.dist-info/"
 RESOURCE_NAMES = {
     "versioned_runtime.py": "agent_containers/_versioned_runtime.py",
@@ -35,12 +32,6 @@ STATIC_BUILD = (
     '[build-system]\nrequires = ["setuptools>=68"]\n'
     'build-backend = "setuptools.build_meta"\n'
 )
-
-_spec = importlib.util.spec_from_file_location("release_unit_native_builder", BUILDER)
-assert _spec and _spec.loader
-builder = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(builder)
-
 
 def _write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -148,8 +139,7 @@ def test_ordinary_static_package_needs_no_runtime_resources(tmp_path):
 @pytest.fixture
 def native_project(tmp_path):
     source = tmp_path / "procutil"
-    for relative in (Path("setup.py"), native.PACKAGE / native.BUILD, native.PACKAGE / native.SOURCE):
-        _write(source / relative, (PROCUTIL / relative).read_bytes())
+    _write(source / "setup.py", (PROCUTIL / "setup.py").read_bytes())
     _write(
         source / "pyproject.toml",
         (STATIC_BUILD + '[project]\nname = "agent-procutil"\nversion = "1.0"\n').encode(),
@@ -175,20 +165,17 @@ def test_legacy_procutil_without_native_inputs_has_no_build_hook(tmp_path):
     assert native.trusted_setup(tmp_path, {"project": {"name": "agent-procutil"}}) is None
 
 
-@pytest.mark.parametrize("relative", [
-    "setup.py", "src/agent_procutil/_build_native.py", "src/agent_procutil/daemon_instance_native.c",
-], ids=["setup", "builder", "c-source"])
 @pytest.mark.parametrize("fault", ["missing", "directory", "tamper"])
-def test_native_setup_binds_hook_and_requires_ordinary_c_source(native_project, relative, fault):
-    path = native_project / relative
+def test_process_setup_requires_exact_ordinary_shim(native_project, fault):
+    path = native_project / "setup.py"
     if fault in {"missing", "directory"}:
         path.unlink()
         if fault == "directory":
             path.mkdir()
     else:
         path.write_bytes(b"/* changed source, never executed */\n")
-    if fault == "tamper" and relative.endswith(".c"):
-        assert native.trusted_setup(native_project, {"project": {"name": "agent-procutil"}})
+    if fault == "missing":
+        assert native.trusted_setup(native_project, {"project": {"name": "agent-procutil"}}) is None
     else:
         with pytest.raises(PromotionArtifactError, match="incomplete|ordinary file|trusted construction owner"):
             native.trusted_setup(native_project, {"project": {"name": "agent-procutil"}})
@@ -210,13 +197,6 @@ def test_native_input_refuses_escape_and_redirected_ancestor(tmp_path, fault):
         path = root / "linked/input.c"
     with pytest.raises(PromotionArtifactError, match="escapes|redirected"):
         native._ordinary(path, root)
-
-
-def _elf(arch, source):
-    data = bytearray(64)
-    data[:6] = b"\x7fELF\x02\x01"
-    data[18:20] = {"x86_64": 62, "aarch64": 183}[arch].to_bytes(2, "little")
-    return bytes(data) + hashlib.sha256(source).digest()
 
 
 def _archive(actual, *, arch="x86_64", tags=None, pure=False, mode=stat.S_IFREG | 0o755,
@@ -241,73 +221,37 @@ def _archive(actual, *, arch="x86_64", tags=None, pure=False, mode=stat.S_IFREG 
     return zipfile.ZipFile(stream)
 
 
-def _compiler(monkeypatch, arch):
-    calls = []
-    monkeypatch.setattr(native.sys, "platform", "linux")
-    monkeypatch.setattr(native.platform, "machine", lambda: arch)
-
-    def run(command, *, check, timeout, env):
-        assert check is True and timeout == 60
-        assert command[-2] == "-o"
-        source, pending = Path(command[-3]), Path(command[-1])
-        assert env["TMPDIR"] == str(pending.parent)
-        assert source.name == native.SOURCE
-        source_bytes = source.read_bytes()
-        pending.write_bytes(_elf(arch, source_bytes))
-        calls.append((command, source_bytes))
-        return subprocess.CompletedProcess(command, 0)
-
-    monkeypatch.setattr(subprocess, "run", run)
-    return calls
-
-
 @pytest.mark.parametrize("arch", ["x86_64", "aarch64"])
-@pytest.mark.parametrize("fault", ["matching", "stale-source"])
-def test_native_artifact_rebuilds_current_source_at_compiler_boundary(
-    native_project, tmp_path, monkeypatch, arch, fault,
+def test_legacy_native_artifact_is_refused_without_compiler_actor(
+    native_project, monkeypatch, arch,
 ):
-    source = native_project / native.PACKAGE / native.SOURCE
-    original = source.read_bytes()
-    actual = _elf(arch, original)
-    if fault == "stale-source":
-        source.write_bytes(original + b"\n/* changed candidate */\n")
-    calls = _compiler(monkeypatch, arch)
-    monkeypatch.chdir(tmp_path)
-    with _archive(actual, arch=arch) as archive:
-        kwargs = dict(
-            source_dir=native_project, data=validate_static_build(native_project), prefix=PREFIX,
-        )
-        if fault == "matching":
-            assert native.generated_members(archive, **kwargs) == {
-                f"agent_procutil/native/linux-{arch}/daemon-instance": actual,
-            }
-        else:
-            with pytest.raises(PromotionArtifactError, match="source-bound explicit build"):
-                native.generated_members(archive, **kwargs)
-    assert len(calls) == 1
-    assert calls[0][1] == source.read_bytes()
-    assert not list((tmp_path / ".test-runs").iterdir())
+    def refuse(*args, **kwargs):
+        pytest.fail("artifact admission must never invoke a compiler or subprocess")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    with _archive(b"legacy executable", arch=arch) as archive:
+        with pytest.raises(PromotionArtifactError, match="pure Python wheel"):
+            native.generated_members(
+                archive, source_dir=native_project,
+                data=validate_static_build(native_project), prefix=PREFIX,
+            )
 
 
 @pytest.mark.parametrize("fault,message", [
-    ("missing", "missing or unexpected"),
-    ("extra", "missing or unexpected"),
-    ("non-executable", "ordinary executable"),
-    ("directory", "ordinary executable"),
-    ("short", "wrong ELF platform"),
-    ("magic", "wrong ELF platform"),
-    ("class", "wrong ELF platform"),
-    ("endian", "wrong ELF platform"),
-    ("machine", "wrong ELF platform"),
-    ("pure", "platform wheel installation mode"),
-    ("unsupported", "unsupported native daemon artifact target"),
-    ("ambiguous", "ambiguous native daemon artifact target"),
+    ("missing", "pure Python wheel"),
+    ("extra", "pure Python wheel"),
+    ("non-executable", "pure Python wheel"),
+    ("directory", "pure Python wheel"),
+    ("pure", "pure Python wheel"),
+    ("unsupported", "pure Python wheel"),
+    ("ambiguous", "pure Python wheel"),
 ])
 def test_native_artifact_refuses_invalid_metadata_before_compilation(
     native_project, monkeypatch, fault, message,
 ):
-    calls = _compiler(monkeypatch, "x86_64")
-    actual = _elf("x86_64", b"fixture")
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: calls.append(args))
+    actual = b"legacy executable"
     options = {}
     if fault == "missing":
         actual = None
@@ -315,12 +259,6 @@ def test_native_artifact_refuses_invalid_metadata_before_compilation(
         options["extra"] = True
     elif fault in {"non-executable", "directory"}:
         options["mode"] = stat.S_IFREG | 0o644 if fault == "non-executable" else stat.S_IFDIR | 0o755
-    elif fault == "short":
-        actual = actual[:63]
-    elif fault in {"magic", "class", "endian", "machine"}:
-        value = bytearray(actual)
-        value[{"magic": 0, "class": 4, "endian": 5, "machine": 18}[fault]] = 0
-        actual = bytes(value)
     elif fault == "pure":
         options["pure"] = True
     elif fault == "unsupported":
@@ -337,87 +275,14 @@ def test_native_artifact_refuses_invalid_metadata_before_compilation(
 
 @pytest.mark.parametrize("registered", [False, True], ids=["foreign", "pure-procutil"])
 def test_pure_wheels_have_no_generated_native_assets(native_project, monkeypatch, registered):
-    calls = _compiler(monkeypatch, "x86_64")
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: calls.append(args))
     data = {"project": {"name": "agent-procutil" if registered else "ordinary"}}
     with _archive(None, tags=["any"], pure=True) as archive:
         assert native.generated_members(
             archive, source_dir=native_project, data=data, prefix=PREFIX,
         ) == {}
     assert calls == []
-
-
-@pytest.mark.parametrize("platform,machine", [
-    ("win32", "x86_64"), ("linux", "riscv64"),
-], ids=["non-linux", "unsupported-machine"])
-def test_native_builder_refuses_unsupported_host_before_output(
-    tmp_path, monkeypatch, platform, machine,
-):
-    calls = _compiler(monkeypatch, machine)
-    monkeypatch.setattr(builder.sys, "platform", platform)
-    output = tmp_path / "absent/daemon-instance"
-    with pytest.raises(RuntimeError, match="supported Linux"):
-        builder.build_native(output)
-    assert calls == []
-    assert not output.parent.exists()
-
-
-@pytest.mark.parametrize("compiler,cc,expected", [
-    (None, None, ["cc"]),
-    (None, "env-cc --sysroot='fixture root'", ["env-cc", "--sysroot=fixture root"]),
-    ("explicit-cc -g", "ignored-cc", ["explicit-cc", "-g"]),
-], ids=["default", "environment", "explicit"])
-def test_native_builder_preserves_compiler_argv_and_atomic_output(
-    tmp_path, monkeypatch, compiler, cc, expected,
-):
-    calls = _compiler(monkeypatch, "x86_64")
-    if cc is None:
-        monkeypatch.delenv("CC", raising=False)
-    else:
-        monkeypatch.setenv("CC", cc)
-    output = tmp_path / "native/daemon-instance"
-    _write(output, b"previous output")
-    chmod = Path.chmod
-    modes = []
-
-    def record_mode(path, mode, **options):
-        modes.append((path, mode))
-        return chmod(path, mode, **options)
-
-    monkeypatch.setattr(Path, "chmod", record_mode)
-    assert builder.build_native(output, compiler=compiler) == output.absolute()
-    assert len(calls) == 1
-    command, source = calls[0]
-    assert command[:-4] == expected + ["-O2", "-std=c11", "-Wall"]
-    assert command[-4] == "-Wextra"
-    assert Path(command[-3]) == BUILDER.with_name(native.SOURCE)
-    assert source == BUILDER.with_name(native.SOURCE).read_bytes()
-    assert output.read_bytes() == _elf("x86_64", source)
-    assert modes == [(output.with_name(output.name + f".{os.getpid()}.pending"), 0o755)]
-    if os.name != "nt":
-        assert stat.S_IMODE(output.stat().st_mode) == 0o755
-    assert not list(output.parent.glob("*.pending"))
-
-
-@pytest.mark.parametrize("failure", ["exit", "timeout"])
-def test_native_builder_propagates_compiler_failure_and_cleans_pending(
-    tmp_path, monkeypatch, failure,
-):
-    _compiler(monkeypatch, "x86_64")
-    output = tmp_path / "native/daemon-instance"
-    _write(output, b"preserved output")
-    error_type = subprocess.CalledProcessError if failure == "exit" else subprocess.TimeoutExpired
-    error = error_type(1, ["fixture-cc"]) if failure == "exit" else error_type(["fixture-cc"], 60)
-
-    def run(command, **kwargs):
-        Path(command[-1]).write_bytes(b"partial compiler output")
-        raise error
-
-    monkeypatch.setattr(subprocess, "run", run)
-    with pytest.raises(error_type) as raised:
-        builder.build_native(output)
-    assert raised.value is error
-    assert output.read_bytes() == b"preserved output"
-    assert not list(output.parent.glob("*.pending"))
 
 
 @pytest.fixture

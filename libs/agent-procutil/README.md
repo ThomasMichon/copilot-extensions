@@ -585,19 +585,31 @@ The standalone Python-free binding is `daemon_instances.ps1`, with
 `Exit-DaemonInstance`, and `Invoke-DaemonInstanceReconcile`. Bash exposes
 `new_daemon_instance_reservation`, `enter_daemon_instance`,
 `run_daemon_instance`, and `reconcile_daemon_instances`. Both use the same record
-protocol. Native Linux kernel binding source is `daemon_instance_native.c`;
-Supported Linux platform wheels include `native/linux-<architecture>/daemon-instance`
-for `x86_64` and `aarch64`. The setuptools package build compiles that resource;
-an explicit source/development build may instead run
-`python src/agent_procutil/_build_native.py --output
-src/agent_procutil/native/linux-<architecture>/daemon-instance`.
-The source-build environment needs its own C compiler, not the runtime host.
-The Linux native lane requires working pidfd syscalls (Linux 5.3 or newer);
-`daemon-instance check` reports unavailable kernel support without signaling work.
-Startup, install and update never compile a missing runtime helper or install a
-toolchain. A missing native artifact
-refuses disposable native admission or holds reconciliation with a diagnostic;
-it is not permission to fall back to numeric-PID signaling. Darwin external
+protocol. Linux supervision and cleanup use the shared standard-library Python
+implementation; the package is a pure Python wheel with no custom native
+executable or compiler build hook. Production shell admission still executes
+the application directly. Disposable shell supervision and reconciliation
+require Python 3.10 or newer, selected through the absolute
+`COPILOT_EXTENSIONS_DAEMON_PYTHON` when supplied, otherwise an owned `python3`
+resolved from the caller's PATH. They invoke the deterministic package/payload-local
+`daemon_instance_runtime.pyz` source archive with `-I -S -B`, so filesystem
+custody covers the complete import closure rather than just one entry script.
+The archive contains only canonical `.py` files, not bytecode or native code;
+`tools/sync-versioned-runtime.py --only-installer-instances` publishes it beside
+the source-only installer adapters with non-group-writable permissions.
+
+The interpreter and selected source must have attributable filesystem custody.
+Missing, redirected or writable helper inputs refuse rather than downloading
+dependencies or substituting an ambient package. Linux requires kernel pidfds,
+unreaped-child `waitid` observation and the existing libc subreaper interface.
+Optional Python pidfd wrappers may be absent: the shared binding then calls
+the existing libc interface through `ctypes`, without compiling a helper.
+Owner loss, monotonic lease/hard deadlines and reparented-descendant settlement
+retain the same record protocol and matched settlement witness. A missing
+facility refuses disposable admission or holds cleanup with diagnostics;
+there is no numeric-PID signaling fallback. Windows' pre-Python binding is
+unchanged by this Linux replacement and retains its separate compiler-free
+migration gate. Darwin external
 termination currently holds when kernel-pinned custody cannot be established.
 
 A long-lived daemon (one started by an installer, a hook, a CLI or a cutover
