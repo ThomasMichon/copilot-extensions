@@ -27,7 +27,7 @@ CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
 SUPPORT_FILES = (
     "installer_dependency_policy.py", "installer_dependency_config.py",
-    "installer_engine_uninstall.py", "installer_engine_commands.py",
+    "installer_engine_uninstall.py", "installer_engine_commands.py", "installer_engine_stop.py",
 )
 _NATIVE_BEGIN = "# native-executable:begin"
 _NATIVE_END = "# native-executable:end"
@@ -51,7 +51,7 @@ STANDALONE_NATIVE_ADOPTERS = (
 )
 STANDALONE_NATIVE_FILES = (
     "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
-    "installer_engine_uninstall.py", "installer_engine_commands.py",
+    "installer_engine_uninstall.py", "installer_engine_commands.py", "installer_engine_stop.py",
 )
 
 

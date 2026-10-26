@@ -1,0 +1,361 @@
+"""Actual daemon writers, original admission propagation, and pidfd STOP bounds."""
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+from dataclasses import asdict
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+SOURCE = REPO / "libs" / "installer-engine" / "installer_engine_stop.py"
+SPEC = importlib.util.spec_from_file_location("native_stop_subject", SOURCE)
+assert SPEC is not None and SPEC.loader is not None
+STOP = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = STOP
+SPEC.loader.exec_module(STOP)
+GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+BASH = str(GIT_BASH) if GIT_BASH.is_file() else shutil.which("bash")
+
+
+def _posix(path: Path) -> str:
+    value = path.as_posix()
+    return "/" + value[0].lower() + value[2:] if os.name == "nt" else value
+
+
+def _function(path: Path, name: str) -> str:
+    text = path.read_text(encoding="utf-8")
+    start = text.index(name + "() {")
+    return text[start:text.index("\n}\n", start) + 2]
+
+
+def _shell(tmp_path: Path, body: str) -> subprocess.CompletedProcess[str]:
+    if not BASH:
+        pytest.skip("Native Bash unavailable")
+    script = tmp_path / "fixture.sh"
+    script.write_text(body, encoding="utf-8", newline="\n")
+    return subprocess.run(  # noqa: S603 - fixed native host and fixture-owned script
+        [BASH, _posix(script)], cwd=tmp_path, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+
+
+@pytest.mark.parametrize("plugin", ("agent-bridge", "agent-vault"))
+def test_actual_unit_writer_is_accepted_by_daemon_admission(tmp_path: Path, plugin: str) -> None:
+    root = tmp_path / "runtime"
+    home = tmp_path / "home"
+    scripts = REPO / "plugins" / plugin / "scripts"
+    writer = "_install_systemd_unit" if plugin == "agent-bridge" else "_install_service"
+    unit = home / ".config" / "systemd" / "user" / "fixture.service"
+    body = "\n".join((
+        "set -euo pipefail",
+        '_skip() { :; }; _ok() { :; }; _fail() { echo "$1" >&2; }; _warn() { :; }',
+        'systemctl() { if [[ "${2:-}" == show ]]; then printf "%s\\n" "$UNIT_DIR/$SYSTEMD_UNIT"; '
+        'else [[ "${2:-}" != is-active ]]; fi; }',
+        f"HOME={shlex.quote(_posix(home))}; INSTALL_DIR={shlex.quote(_posix(root))}",
+        'VENV_DIR="$INSTALL_DIR/versions/1.0"; LINK_PYTHON="$VENV_DIR/bin/python"',
+        'UNIT_DIR="$HOME/.config/systemd/user"; SYSTEMD_UNIT=fixture.service',
+        'RUN_DIR="$INSTALL_DIR/run"; SOCKET_PATH="$RUN_DIR/vault.sock"; PIPE_PATH=fixture',
+        'PID_FILE="$RUN_DIR/service.pid"; LOG_FILE="$INSTALL_DIR/logs/service.log"',
+        "SERVICE_SUFFIX=''; INSTALLATION_ID=fixture; PORT_ENV_LINE=''; NO_SERVICE=0",
+        _function(scripts / "install.sh", writer),
+        writer,
+        *([
+            f"PY={shlex.quote(_posix(Path(sys.executable)))};STOP_HELPER={shlex.quote(_posix(SOURCE))}",
+            '_bridge_uninstall_tool() { "$PY" -I -B "$STOP_HELPER" "$@" --root "$INSTALL_DIR" --plugin agent-bridge; }',
+            "_bridge_uninstall_processes() { :; }",
+            _function(scripts / "install.sh", "_bridge_uninstall_preflight"),
+            "_bridge_uninstall_preflight",
+        ] if plugin == "agent-bridge" else []),
+    ))
+    result = _shell(tmp_path, body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    STOP.check_unit(unit, _posix(root), plugin)
+    start = next(line[10:] for line in unit.read_text().splitlines() if line.startswith("ExecStart="))
+    argv = shlex.split(start)
+    assert STOP.admits_argv(argv, _posix(root), plugin)
+    if plugin == "agent-bridge":
+        assert argv[-2:] == [f"{_posix(root)}/versions/1.0/bin/agent-bridge", "start"]
+        assert STOP.admits_argv(["/usr/bin/python3", *argv], _posix(root), plugin)
+    else:
+        assert argv[-3:] == ["--foreground", "--persistent", "--handoff-stdin"]
+    changed = unit.read_text().replace(_posix(root) + "/", _posix(root) + "-other/")
+    unit.write_text(changed)
+    with pytest.raises(RuntimeError, match="does not name"):
+        STOP.check_unit(unit, _posix(root), plugin)
+
+
+@pytest.mark.parametrize("historical", ("venv", ".venv"))
+@pytest.mark.parametrize("plugin", ("agent-bridge", "agent-dispatch", "agent-vault"))
+def test_closed_historical_inspection_is_not_a_launch(tmp_path: Path, historical: str, plugin: str) -> None:
+    root = "/fixture/runtime"
+    tail = {
+        "agent-bridge": ["agent_bridge", "start"],
+        "agent-dispatch": ["agent_dispatch", "serve"],
+        "agent-vault": ["agent_vault.service", "--foreground", "--persistent", "--handoff-stdin"],
+    }[plugin]
+    argv = [f"{root}/{historical}/bin/python", "-m", *tail]
+    assert STOP.admits_argv(argv, root, plugin)
+    assert not STOP.admits_argv(argv, root + "-other", plugin)
+    assert not STOP.admits_argv([*argv[:2], "unrelated_module", *argv[3:]], root, plugin)
+
+
+def _identity(root: Path, plugin: str, birth: int = 10) -> tuple[object, tuple[str, ...]]:
+    tail = {
+        "agent-bridge": ["agent_bridge", "start"],
+        "agent-dispatch": ["agent_dispatch", "serve"],
+        "agent-vault": ["agent_vault.service", "--foreground", "--persistent", "--handoff-stdin"],
+    }[plugin]
+    argv = (str(root / "versions" / "1.0" / "bin" / "python"), "-m", *tail)
+    raw = b"\0".join(value.encode() for value in argv) + b"\0"
+    return STOP.Identity(123, birth, hashlib.sha256(raw).hexdigest(), 1000), argv
+
+
+@pytest.mark.parametrize("change", ("birth", "command", "uid"))
+def test_replacement_before_first_fresh_read_never_receives_a_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    original, argv = _identity(tmp_path, "agent-dispatch")
+    replacement = asdict(original)
+    replacement[{"birth": "birth", "command": "command_digest", "uid": "uid"}[change]] = {
+        "birth": 20, "command": "0" * 64, "uid": 2000,
+    }[change]
+    current = STOP.Identity(**replacement)
+    monkeypatch.setattr(STOP.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(STOP, "_boot", lambda: "fixture-boot")
+    monkeypatch.setattr(STOP.os, "pidfd_open", lambda *_: 456, raising=False)
+    monkeypatch.setattr(STOP.os, "close", lambda *_: None)
+    monkeypatch.setattr(STOP, "_observe", lambda *_: (current, 0, argv))
+    signals = []
+    monkeypatch.setattr(STOP.signal, "pidfd_send_signal", lambda *args: signals.append(args), raising=False)
+    admission = {"version": 1, "root": str(tmp_path), "plugin": "agent-dispatch",
+                 "boot": "fixture-boot", "identities": [asdict(original)]}
+    with pytest.raises(RuntimeError, match="replaced"):
+        STOP.stop(tmp_path, "agent-dispatch", admission)
+    assert not signals
+
+
+def test_unknown_child_refuses_stop_and_admission_contains_no_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    identity, argv = _identity(tmp_path, "agent-dispatch")
+    monkeypatch.setattr(STOP.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(STOP, "_boot", lambda: "fixture-boot")
+    rows = {123: (identity, 0, argv)}
+    monkeypatch.setattr(STOP, "_inventory", lambda: rows)
+    admission = STOP.capture(tmp_path, "agent-dispatch")
+    assert "command_digest" in admission["identities"][0]
+    assert "agent_dispatch" not in json.dumps(admission)
+    rows[789] = (STOP.Identity(789, 30, "0" * 64, 1000), 123, ("unrelated",))
+    with pytest.raises(RuntimeError, match="unclassified child"):
+        STOP.capture(tmp_path, "agent-dispatch")
+
+
+@pytest.mark.parametrize("gone", (False, True))
+def test_original_process_stops_or_already_gone_settles_without_pid_signaling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gone: bool,
+) -> None:
+    original, argv = _identity(tmp_path, "agent-vault")
+    monkeypatch.setattr(STOP.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(STOP, "_boot", lambda: "fixture-boot")
+    monkeypatch.setattr(STOP, "_observe", lambda *_: None if gone else (original, 0, argv))
+    monkeypatch.setattr(STOP, "_inventory", lambda: {})
+
+    def open_descriptor(*_: object) -> int:
+        if gone:
+            raise ProcessLookupError
+        return 456
+
+    monkeypatch.setattr(STOP.os, "pidfd_open", open_descriptor, raising=False)
+    closed = []
+    monkeypatch.setattr(STOP.os, "close", lambda fd: closed.append(fd))
+    signals = []
+    monkeypatch.setattr(STOP.signal, "pidfd_send_signal", lambda *args: signals.append(args), raising=False)
+    monkeypatch.setattr(STOP.select, "select", lambda *_: ([456], [], []))
+    admission = {"version": 1, "root": str(tmp_path), "plugin": "agent-vault",
+                 "boot": "fixture-boot", "identities": [asdict(original)]}
+    STOP.stop(tmp_path, "agent-vault", admission)
+    assert signals == ([] if gone else [(456, STOP.signal.SIGTERM, None, 0)])
+    assert closed == ([] if gone else [456])
+
+
+def test_exit_and_reuse_after_last_observation_cannot_signal_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original, argv = _identity(tmp_path, "agent-bridge")
+    monkeypatch.setattr(STOP.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(STOP, "_boot", lambda: "fixture-boot")
+    monkeypatch.setattr(STOP.os, "pidfd_open", lambda *_: 456, raising=False)
+    monkeypatch.setattr(STOP.os, "close", lambda *_: None)
+    monkeypatch.setattr(STOP, "_inventory", lambda: {})
+    observed = []
+    replacement = []
+
+    def observe(_: int) -> tuple[object, int, tuple[str, ...]]:
+        observed.append(True)
+        if len(observed) == 2:
+            replacement.append(True)
+        return original, 0, argv
+
+    def send(fd: int, *_: object) -> None:
+        assert fd == 456 and replacement
+        # The descriptor still names the departed admitted process, not the
+        # replacement now occupying its numeric PID.
+        raise ProcessLookupError
+
+    monkeypatch.setattr(STOP, "_observe", observe)
+    monkeypatch.setattr(STOP.signal, "pidfd_send_signal", send, raising=False)
+    admission = {"version": 1, "root": str(tmp_path), "plugin": "agent-bridge",
+                 "boot": "fixture-boot", "identities": [asdict(original)]}
+    STOP.stop(tmp_path, "agent-bridge", admission)
+    assert len(observed) == 2
+
+
+def test_capture_exports_only_digest_not_secret_bearing_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    argv = (str(tmp_path / "versions" / "1.0" / "bin" / "python"),
+            "-m", "agent_dispatch", "serve", "--token", "fixture-secret")
+    raw = b"\0".join(value.encode() for value in argv) + b"\0"
+
+    class ProcessFiles:
+        def __truediv__(self, _: object) -> "ProcessFiles":
+            return self
+
+        def read_bytes(self) -> bytes:
+            return raw
+
+        def stat(self) -> object:
+            return type("Owner", (), {"st_uid": 1000})()
+
+    monkeypatch.setattr(STOP, "Path", lambda *_: ProcessFiles())
+    monkeypatch.setattr(STOP, "_stat", lambda *_: (10, 0, "S"))
+    monkeypatch.setattr(STOP.os, "getuid", lambda: 1000, raising=False)
+    monkeypatch.setattr(STOP, "_boot", lambda: "fixture-boot")
+    record = STOP._observe(123)
+    monkeypatch.setattr(STOP, "_inventory", lambda: {123: record})
+    admission = STOP.capture(tmp_path, "agent-dispatch")
+    serialized = json.dumps(admission)
+    assert "fixture-secret" not in serialized and "--token" not in serialized
+    assert admission["identities"][0]["command_digest"] == hashlib.sha256(raw).hexdigest()
+
+
+@pytest.mark.parametrize("plugin", ("agent-bridge", "agent-dispatch", "agent-vault"))
+@pytest.mark.parametrize("phase", ("before-first-read", "after-service-stop"))
+def test_native_caller_carries_original_identity_through_pid_reuse(
+    tmp_path: Path, plugin: str, phase: str,
+) -> None:
+    kernel = tmp_path / "kernel.json"
+    kernel.write_text('{"birth":10,"signals":[]}')
+    model = tmp_path / "kernel_model.py"
+    model.write_text(
+        "import argparse,hashlib,importlib.util,json,os,pathlib,sys\n"
+        f"spec=importlib.util.spec_from_file_location('stop_model',{str(SOURCE)!r})\n"
+        "m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m)\n"
+        "p=argparse.ArgumentParser();p.add_argument('action');p.add_argument('--root');"
+        "p.add_argument('--plugin');p.add_argument('--admission');p.add_argument('--pid-file');a=p.parse_args()\n"
+        f"file=pathlib.Path({str(kernel)!r});state=json.loads(file.read_text());root=pathlib.Path(a.root)\n"
+        "tails={'agent-bridge':['agent_bridge','start'],'agent-dispatch':['agent_dispatch','serve'],"
+        "'agent-vault':['agent_vault.service','--foreground','--persistent','--handoff-stdin']}\n"
+        "argv=(str(root/'versions'/'1.0'/'bin'/'python'),'-m',*tails[a.plugin])\n"
+        "digest=hashlib.sha256(b'\\0'.join(v.encode() for v in argv)+b'\\0').hexdigest()\n"
+        "identity=m.Identity(123,state['birth'],digest,1000)\n"
+        "os.getuid=lambda:1000;m._boot=lambda:'fixture-boot';m._observe=lambda pid:(identity,0,argv)\n"
+        "m._inventory=lambda:{123:(identity,0,argv)};os.pidfd_open=lambda *args:456;os.close=lambda fd:None\n"
+        "def send(*args):\n"
+        " state['signals'].append(state['birth']);file.write_text(json.dumps(state))\n"
+        "m.signal.pidfd_send_signal=send;m.select.select=lambda *args:([456],[],[])\n"
+        "try:\n"
+        " if a.action=='replace':state['birth']=20;file.write_text(json.dumps(state))\n"
+        " elif a.action=='capture':print(json.dumps(m.capture(root,a.plugin)))\n"
+        " elif a.action=='pids':print(123)\n"
+        " else:m.stop(root,a.plugin,json.loads(a.admission))\n"
+        "except RuntimeError as error:print(str(error),file=sys.stderr);raise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    bridge = plugin == "agent-bridge"
+    source = REPO / "plugins" / plugin / "scripts" / ("install.sh" if bridge else "uninstall-runtime.sh")
+    names = ("_bridge_uninstall_processes", "_bridge_uninstall_stop_owned") if bridge else (
+        "_finite_owned_pids", "_finite_stop_owned",
+    )
+    tool = "_bridge_uninstall_tool" if bridge else "_finite_stop_tool"
+    root = tmp_path / "runtime"
+    home = tmp_path / "home"
+    unit = home / ".config" / "systemd" / "user" / "fixture.service"
+    unit.parent.mkdir(parents=True)
+    unit.write_text("fixture owned unit")
+    call = f'"$PY" -B "$MODEL" replace --root "$INSTALL_DIR" --plugin {plugin}'
+    script = "\n".join((
+        "set -uo pipefail",
+        f"PY={shlex.quote(_posix(Path(sys.executable)))};MODEL={shlex.quote(_posix(model))}",
+        f"HOME={shlex.quote(_posix(home))};INSTALL_DIR={shlex.quote(_posix(root))}",
+        'PID_FILE="$INSTALL_DIR/service.pid"; SYSTEMD_UNIT=fixture.service',
+        f'{tool}() {{ "$PY" -B "$MODEL" "$@" --root "$INSTALL_DIR" --plugin {plugin}; }}',
+        f"systemctl() {{ {call if phase == 'after-service-stop' else ':'}; }}",
+        *[_function(source, name) for name in names],
+        f"{names[0]} >/dev/null || exit $?",
+        call if phase == "before-first-read" else ("" if bridge else "systemctl --user stop fixture"),
+        f"{names[1]}",
+    ))
+    result = _shell(tmp_path, script)
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "replaced" in result.stderr, result.stdout + result.stderr
+    assert json.loads(kernel.read_text())["signals"] == []
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux") or not hasattr(os, "pidfd_open"),
+                    reason="Requires real Linux pidfds")
+@pytest.mark.parametrize("mismatch", (False, True))
+@pytest.mark.parametrize("plugin,mode", (
+    ("agent-bridge", "module"), ("agent-bridge", "console"),
+    ("agent-vault", "module"),
+))
+def test_real_pidfd_same_process_stop_and_original_birth_refusal(
+    tmp_path: Path, mismatch: bool, plugin: str, mode: str,
+) -> None:
+    root = tmp_path / "runtime"
+    executable = root / "versions" / "1.0" / "bin" / "python"
+    executable.parent.mkdir(parents=True)
+    executable.symlink_to(sys.executable)
+    module = "agent_bridge"
+    tail = ["start"]
+    package = tmp_path / "agent_bridge.py"
+    if plugin == "agent-vault":
+        folder = tmp_path / "agent_vault"
+        folder.mkdir()
+        (folder / "__init__.py").touch()
+        package = folder / "service.py"
+        module = "agent_vault.service"
+        tail = ["--foreground", "--persistent", "--handoff-stdin"]
+    package.write_text("import time\ntime.sleep(90)\n")
+    command = [str(executable), "-B", "-m", module, *tail]
+    if mode == "console":
+        console = executable.with_name("agent-bridge")
+        console.write_text(f"#!{executable}\nimport time\ntime.sleep(90)\n")
+        console.chmod(0o755)
+        command = [str(console), "start"]
+    child = subprocess.Popen(  # noqa: S603 - owned fixture interpreter/module only
+        command, cwd=tmp_path,
+    )
+    try:
+        admission = STOP.capture(root, plugin)
+        assert [value["pid"] for value in admission["identities"]] == [child.pid]
+        if mismatch:
+            admission["identities"][0]["birth"] += 1
+            with pytest.raises(RuntimeError, match="replaced"):
+                STOP.stop(root, plugin, admission)
+            assert child.poll() is None
+        else:
+            STOP.stop(root, plugin, admission)
+            child.wait(timeout=5)
+    finally:
+        if child.poll() is None:
+            child.terminate()
+        child.wait(timeout=5)

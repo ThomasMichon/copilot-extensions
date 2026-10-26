@@ -43,7 +43,7 @@ function Copy-InstallerStageDirectory {
 }
 # === end install-contract:v4 payload-copy ===
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
-. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
+. (Join-Path $PSScriptRoot 'installer-engine.ps1')
 
 if (-not $PSBoundParameters.ContainsKey('Action')) {
     $PSBoundParameters['Action'] = $Action

@@ -2448,6 +2448,18 @@ peer; independently executable MCP/Machines cmd programs are checked against
 their complete native templates. Index separately admits its exact installed
 and product-verified session-stamped lifecycle-gate forms at the default root.
 
+Native Linux daemon STOP uses the separate co-packaged
+`installer_engine_stop.py`; the finite-removal helper still never stops a
+process. Before service control, the caller captures each admitted daemon's
+PID, kernel birth ticks, UID, boot identity and command-byte digest. After
+service STOP, it opens a pidfd and verifies that original admission before
+signaling the bound process. A replacement refuses rather than acquiring a
+fresh identity; an already-gone original settles without a numeric-PID signal.
+Unknown child/transport ownership and unavailable kernel-bound signaling refuse.
+Admission records contain no plaintext command arguments. Bridge console
+entrypoints and their shebang-expanded form, and Vault's persistent foreground
+handoff arguments, use the same admission as their actual native unit writers.
+
 Installation-cell/managed roots, mutable development claims, linked ancestry,
 unrecognized legacy venv directories, foreign ownership, conflicting leases
 and unattributed live consumers refuse explicitly. Released coordination files

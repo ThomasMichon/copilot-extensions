@@ -6,6 +6,7 @@ How to run the plugin test suites, explicit development checks, and the
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,
+`tools/test_installer_engine_stop.py`,
 `tools/test_runtime_uninstall_process.py`, CodeSpaces'
 `tests/native_uninstall/`, Machines' `test_legacy_runtime_uninstall.py` and
 `test_legacy_publisher_transaction.py`, Containers'
@@ -20,6 +21,12 @@ managed/foreign-root refusal and live/reconnect transport negatives.
 The command packet derives current native writer bodies from trusted sources
 and covers exact owned forms, custom/foreign roots, comments and modified
 programs, independently executable cmd forms and delegating-peer refusal.
+The native STOP packet derives daemon commands from actual unit writers,
+preserves original admission across service-stop/PID-reuse controls, and runs
+real Linux pidfd termination and birth-mismatch refusal against owned fixtures.
+`tools/test_budget_packaged_installer.py` additionally starts the actual
+materialized standalone Budget status entrypoints without a repository library
+tree; this detects a packaged caller that still sources repository-only helpers.
 Pull Requests' `test_install_lock_fallback.py` additionally exercises cold
 materialized staging on Windows PowerShell 5 and 7, including source hashing
 without the optional `Get-FileHash` command. Native platform skips are not

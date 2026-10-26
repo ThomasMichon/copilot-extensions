@@ -2020,14 +2020,22 @@ do_uninstall() {
     fi
 }
 
+_bridge_uninstall_tool() {
+    local python="" candidate helper="$SCRIPT_DIR/installer_engine_stop.py"
+    [[ -f "$helper" && ! -L "$helper" ]] || helper="$SCRIPT_DIR/../../../libs/installer-engine/installer_engine_stop.py"
+    for candidate in python3 python; do
+        python="$(command -v "$candidate")" || continue
+        case "$python" in "$INSTALL_DIR"/*) python=""; continue ;; esac
+        break
+    done
+    [[ -n "$python" ]] || { _fail "Native STOP requires an external metadata Python"; return 1; }
+    "$python" -I -B "$helper" "$@" --root "$INSTALL_DIR" --plugin agent-bridge
+}
+
 _bridge_uninstall_preflight() {
     local unit="$HOME/.config/systemd/user/$SYSTEMD_UNIT"
     if [[ -e "$unit" || -L "$unit" ]]; then
-        [[ -f "$unit" && ! -L "$unit" ]] &&
-            grep -F -- "$INSTALL_DIR/" "$unit" >/dev/null &&
-            grep -E -- 'ExecStart=.*-m agent_bridge (start|service start --direct)' "$unit" >/dev/null || {
-                _fail "Refusing unowned Bridge systemd unit"; return 1;
-            }
+        _bridge_uninstall_tool check-unit --unit "$unit" || return 1
         if command -v systemctl >/dev/null 2>&1; then
             local fragment
             fragment="$(systemctl --user show --property=FragmentPath --value "$SYSTEMD_UNIT")" || return 1
@@ -2038,58 +2046,18 @@ _bridge_uninstall_preflight() {
 }
 
 _bridge_uninstall_processes() {
-    local inventory line pid command
-    inventory="$(ps -eo pid=,args=)" || { _fail "Cannot inspect Bridge process ownership"; return 1; }
-    while IFS= read -r line; do
-        read -r pid command <<< "$line"
-        case "$command" in
-            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ start|\
-            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ start|\
-            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ service\ start\ --direct|\
-            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ service\ start\ --direct)
-                printf '%s\n' "$pid" ;;
-            "$INSTALL_DIR"/*)
-                _fail "Bridge runtime still in use by an unclassified process (pid=$pid)" >&2
-                return 1 ;;
-        esac
-    done <<< "$inventory"
-    if [[ -f "$PID_FILE" ]]; then
-        local receipt
-        receipt="$(cat "$PID_FILE")"
-        [[ "$receipt" =~ ^[1-9][0-9]*$ ]] || { _fail "Invalid Bridge PID receipt"; return 1; }
-        command="$(ps -p "$receipt" -o args= 2>/dev/null)" || return 0
-        case "$command" in
-            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ start|\
-            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ start|\
-            "$INSTALL_DIR"/venv/bin/python\ -m\ agent_bridge\ service\ start\ --direct|\
-            "$INSTALL_DIR"/versions/*/bin/python\ -m\ agent_bridge\ service\ start\ --direct) ;;
-            *) _fail "Bridge PID receipt names a foreign process" >&2; return 1 ;;
-        esac
-    fi
+    _bridge_uninstall_admission="$(_bridge_uninstall_tool capture --pid-file "$PID_FILE")" || return 1
+    _bridge_uninstall_tool pids --admission "$_bridge_uninstall_admission"
 }
 
 _bridge_uninstall_stop_owned() {
-    local owned pid before now children waited
-    owned="$(_bridge_uninstall_processes)" || return 1
-    for pid in $owned; do
-        children="$(ps -eo ppid=,pid= | awk -v p="$pid" '$1 == p { print $2 }')" || return 1
-        [[ -z "$children" ]] || { _fail "Bridge still owns a live child/transport"; return 1; }
-    done
+    if [[ -z "${_bridge_uninstall_admission:-}" ]]; then
+        _bridge_uninstall_processes >/dev/null || return 1
+    fi
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
         systemctl --user stop "$SYSTEMD_UNIT" || return 1
     fi
-    for pid in $owned; do
-        before="$(ps -p "$pid" -o lstart=,args=)" || continue
-        now="$(ps -p "$pid" -o lstart=,args=)" || continue
-        [[ "$before" == "$now" ]] || { _fail "Bridge process identity changed"; return 1; }
-        kill "$pid" || return 1
-        for waited in {1..15}; do
-            now="$(ps -p "$pid" -o lstart=,args=)" || break
-            [[ "$now" == "$before" ]] || break
-            sleep 1
-        done
-        [[ "$now" != "$before" ]] || { _fail "Owned Bridge daemon did not stop"; return 1; }
-    done
+    _bridge_uninstall_tool stop --admission "$_bridge_uninstall_admission"
 }
 
 _remove_bridge_runtime_code() {

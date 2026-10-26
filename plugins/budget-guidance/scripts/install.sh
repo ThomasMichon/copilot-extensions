@@ -254,7 +254,7 @@ fi
 if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 
 PKG_SRC_DIR="$PLUGIN_DIR/src/budget_guidance"
-. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
+. "$SCRIPT_DIR/installer-engine.sh"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.budget-guidance}"
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
