@@ -282,13 +282,26 @@ native compiler source is hash-bound data, not an executable unit or a coverage
 target. Real build/compiler behavior remains separate development validation.
 Synchronized executable copies borrow only their canonical origin's coverage;
 every run first verifies both admitted hashes and hard-refuses byte divergence.
+Self-file-relative `spec_from_file_location` implementations also join source
+and decision coverage; unresolved loaders, aliases and rebinding are refused.
+The existing Windows retention guardian retains its separate runtime-actor
+contract: only its exact adapter and two owned resource-call shapes are
+recognized as external runtime loads, never as qualified repository helpers.
+Release implementations cannot invoke that private loader interface.
 
 Source PR guards compare helper-required CLI inputs and complete-source
 construction/attestation/publication against both the prepared proposal and
 the actual immutable Main controller. An incompatible prepared proposal fails.
-A compatible prepared proposal with an older incompatible Main reports
+A compatible prepared proposal with the explicit legacy pinned-helper Main
+generation reports
 `active_compatible: false` and the required separately reviewed Main bootstrap;
-it never claims activation. This catches new required inputs before release
+it never claims activation. After source-coherent Main selection is active,
+an interface mismatch is a failing source gate, not another bootstrap warning.
+Required inputs are checked against each invocation's own arguments, including
+the promoter's literal base argument array and exact `runpy` trampoline;
+comments, adjacent commands and conditional additions cannot supply them.
+Unsupported shell or loader forms fail visibly rather than becoming an
+unverified compatibility result. This catches new required inputs before release
 without requiring a pin update. Controller-policy changes still need Main
 review. Mode-dependent publisher inputs are declared once and used by both
 the actual CLI validation and the compatibility checker; making an optional

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from promotion_unit_contract import UnitEvidenceError, verify_sources
 from release_controller_contract import helper_implementations
+from release_helper_loaders import dynamic_loads
 
 ENTRYPOINTS = (
     "promotion_frozen_candidate", "promote_release", "publish_python_artifacts",
@@ -73,6 +74,16 @@ def helper_closure(
     roots = set(entrypoints) | commands
     pending = list(roots)
     visited, sources, decisions = set(), set(), set()
+    by_path = {path.relative_to(root).as_posix(): name for name, path in modules.items()}
+
+    def enqueue_file(relative: str) -> None:
+        key = by_path.get(relative)
+        if key is None:
+            key = "@" + relative
+            modules[key] = root / relative
+            by_path[relative] = key
+        pending.append(key)
+
     for name in roots:
         if name not in modules:
             raise UnitEvidenceError(f"missing release implementation: {name}")
@@ -87,8 +98,11 @@ def helper_closure(
         pending.extend(".".join(parts[:index]) for index in range(1, len(parts)))
         path = modules[name]
         relative = path.relative_to(root).as_posix()
-        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
-            raise UnitEvidenceError(f"indirect release implementation: {relative}")
+        if (
+            path.is_symlink() or not path.is_file()
+            or not path.resolve().is_relative_to(root.resolve())
+        ):
+            raise UnitEvidenceError(f"missing or indirect release implementation: {relative}")
         sources.add(relative)
         try:
             tree = ast.parse(path.read_bytes(), filename=relative)
@@ -98,7 +112,11 @@ def helper_closure(
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) for node in ast.walk(tree)
         ):
             decisions.add(relative)
-        package = name if path.name == "__init__.py" else name.rpartition(".")[0]
+        for loaded in dynamic_loads(tree, relative):
+            enqueue_file(loaded)
+        package = "" if name.startswith("@") else (
+            name if path.name == "__init__.py" else name.rpartition(".")[0]
+        )
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 pending.extend(alias.name for alias in node.names)
@@ -115,16 +133,7 @@ def helper_closure(
                 pending.extend(f"{target}.{alias.name}" for alias in node.names)
             elif isinstance(node, ast.Call):
                 operation = getattr(node.func, "id", getattr(node.func, "attr", ""))
-                if operation == "_load_module":
-                    names = [
-                        value.value[:-3] for value in ast.walk(node.args[0])
-                        if isinstance(value, ast.Constant) and isinstance(value.value, str)
-                        and value.value.endswith(".py") and "/" not in value.value
-                    ] if node.args else []
-                    if len(names) != 1 or names[0] not in modules:
-                        raise UnitEvidenceError(f"unbound dynamic release implementation: {relative}")
-                    pending.extend(names)
-                elif relative.startswith("tools/") and operation in (
+                if relative.startswith("tools/") and operation in (
                     "exec", "eval", "import_module", "run_path",
                 ):
                     registered = operation == "exec" and name in DYNAMIC_INPUTS

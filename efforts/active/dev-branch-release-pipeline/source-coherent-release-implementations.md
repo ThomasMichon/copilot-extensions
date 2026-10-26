@@ -152,6 +152,14 @@ expression while leaving incompatible call sites.
 
 ## Journal
 
+- 2026-10-26: The next hosted review follow-up restricts migration warnings to
+  the explicit legacy pin generation, makes active source-coherent interface
+  mismatches fail, and checks each direct/indirect helper invocation separately.
+  File-spec loads now contribute qualified repository edges or fail explicitly;
+  the unchanged Windows retention actor retains only its exact private boundary.
+  All 2,270 admitted cases passed in 29.149 seconds, including 79 helper-source
+  inputs and 119 coverage targets. Prepared-controller/publication regressions
+  passed 94 cases and 222 subtests. Main bootstrap and release/rollout remain open.
 - 2026-10-26: Hosted review follow-up now derives qualification roots from
   controller-discovered commands, including development and preserved Main
   recipes, and requires actual executable function-body hits rather than

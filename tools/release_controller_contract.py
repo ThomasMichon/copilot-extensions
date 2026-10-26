@@ -5,6 +5,7 @@ import ast
 import re
 
 from promotion_unit_contract import UnitEvidenceError
+from release_controller_shell import controller_scripts, helper_references, script_invocations
 
 SOURCE_REF = "${{ needs.gate.outputs.sha }}"
 CONTROL_REF = "${{ github.workflow_sha }}"
@@ -84,6 +85,7 @@ def required_arguments(source: bytes) -> set[str]:
             flags = [value.value for value in node.args
                      if isinstance(value, ast.Constant) and isinstance(value.value, str)
                      and value.value.startswith("--")]
+            expanded_loop = False
             if not flags and node.args and isinstance(node.args[0], ast.JoinedStr):
                 expression = node.args[0].values
                 parent = parents.get(node)
@@ -101,9 +103,10 @@ def required_arguments(source: bytes) -> set[str]:
                             for value in parent.iter.elts)
                 ):
                     flags = ["--" + value.value for value in parent.iter.elts]
+                    expanded_loop = True
             if not flags:
                 raise UnitEvidenceError("required release CLI input has no literal long option or bounded literal loop")
-            required.update(flags)
+            required.update(flags if expanded_loop else flags[:1])
     return required
 
 
@@ -117,15 +120,16 @@ def required_mode_arguments(operation: str, profile: str, declaration: tuple) ->
 
 
 def helper_implementations(workflow: dict | str) -> set[str]:
-    scripts = workflow if isinstance(workflow, str) else "\n".join(
-        step.get("run", "") for job in workflow["jobs"].values() for step in job.get("steps", [])
-    )
-    return set(re.findall(r"reviewed-helpers/tools/([A-Za-z0-9_-]+\.py)", scripts)) | set(
-        re.findall(r'str\(tools / ["\']([A-Za-z0-9_-]+\.py)["\']\)', scripts)
-    )
+    try:
+        scripts = controller_scripts(workflow) if isinstance(workflow, str) else [
+            step.get("run", "") for job in workflow["jobs"].values() for step in job.get("steps", [])
+        ]
+        return {name for script in scripts for name in helper_references(script)}
+    except ValueError as error:
+        raise UnitEvidenceError(f"unsupported controller helper discovery: {error}") from error
 
 
-def _mode_inputs(source: bytes, name: str, script: str) -> set[str]:
+def _mode_inputs(source: bytes, name: str, arguments: list[str]) -> set[str]:
     tree = ast.parse(source)
     declarations = {}
     for node in tree.body:
@@ -141,13 +145,19 @@ def _mode_inputs(source: bytes, name: str, script: str) -> set[str]:
     if not declarations:
         return set()
     declaration = tuple(row for value in declarations.values() for row in ast.literal_eval(value))
-    operation = re.search(re.escape(name) + r"""["']?\s+([a-z][a-z-]*)\b""", script)
-    if operation is None:
+    if not arguments or not re.fullmatch(r"[a-z][a-z0-9_-]*", arguments[0]):
         raise UnitEvidenceError(f"{name}: controller operation is not a literal")
-    profile = re.search(r"""--qualification-profile\s+["']?([a-z0-9-]+)\b""", script)
-    if "--qualification-profile" in script and profile is None:
+    profiles = []
+    for index, argument in enumerate(arguments):
+        if argument == "--qualification-profile":
+            if index + 1 == len(arguments):
+                raise UnitEvidenceError(f"{name}: conditional controller profile has no value")
+            profiles.append(arguments[index + 1])
+        elif argument.startswith("--qualification-profile="):
+            profiles.append(argument.split("=", 1)[1])
+    if any(not re.fullmatch(r"[a-z0-9-]+", value) for value in profiles):
         raise UnitEvidenceError(f"{name}: conditional controller profile is not a literal")
-    selected = profile[1] if profile else None
+    selected = profiles[-1] if profiles else None
     if selected is None:
         for node in ast.walk(tree):
             if (
@@ -163,24 +173,69 @@ def _mode_inputs(source: bytes, name: str, script: str) -> set[str]:
                 ), None)
     if selected is None and any(profiles for _, profiles, _ in declaration):
         raise UnitEvidenceError(f"{name}: conditional controller profile is not a literal")
-    return required_mode_arguments(operation[1], selected or "", declaration)
+    return required_mode_arguments(arguments[0], selected or "", declaration)
+
+
+def _has_input(source: bytes, flag: str, arguments: list[str]) -> bool:
+    aliases, takes_value = {flag}, True
+    for node in ast.walk(ast.parse(source)):
+        if not (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "add_argument"
+        ):
+            continue
+        names = {value.value for value in node.args
+                 if isinstance(value, ast.Constant) and isinstance(value.value, str)}
+        if flag not in names:
+            continue
+        aliases = {name for name in names if name.startswith("-")}
+        fields = {item.arg: item.value.value for item in node.keywords
+                  if isinstance(item.value, ast.Constant)}
+        takes_value = fields.get("action") not in (
+            "store_true", "store_false", "store_const", "count", "help", "version",
+        ) and fields.get("nargs") not in (0, "?", "*")
+        break
+    found = False
+    for index, argument in enumerate(arguments):
+        matching = next((alias for alias in aliases if argument == alias
+                         or argument.startswith(alias + "=")), None)
+        if matching is None:
+            continue
+        found = True
+        if argument != matching:
+            if not takes_value or not argument.split("=", 1)[1]:
+                return False
+        elif takes_value:
+            if index + 1 == len(arguments) or not arguments[index + 1]:
+                return False
+            value = arguments[index + 1]
+            if value.startswith("-") and value != "-" and not re.fullmatch(r"-\d+(?:\.\d+)?", value):
+                return False
+    return found
 
 
 def verify_controller_inputs(workflow: dict, implementations: dict[str, bytes]) -> None:
     """Check every helper call and the complete-source producer/signer boundary."""
     jobs = workflow["jobs"]
+    calls = []
+    for job_name, job in jobs.items():
+        for step in job.get("steps", []):
+            try:
+                calls.extend((job_name, name, argv) for name, argv in script_invocations(step.get("run", "")))
+            except ValueError as error:
+                raise UnitEvidenceError(f"{job_name}: unsupported helper invocation: {error}") from error
     for name, source in implementations.items():
         required = required_arguments(source)
         invocations = [
-            (job_name, step["run"])
-            for job_name, job in jobs.items() for step in job.get("steps", [])
-            if name in step.get("run", "")
+            (job_name, argv) for job_name, helper, argv in calls if helper == name
         ]
         if not invocations:
             raise UnitEvidenceError(f"controller never invokes required implementation: {name}")
-        for job_name, script in invocations:
-            missing = [flag for flag in sorted(required | _mode_inputs(source, name, script))
-                       if not re.search(r"(?<![\w-])" + re.escape(flag) + r"(?![\w-])", script)]
+        for job_name, argv in invocations:
+            missing = [
+                flag for flag in sorted(required | _mode_inputs(source, name, argv))
+                if not _has_input(source, flag, argv)
+            ]
             if missing:
                 raise UnitEvidenceError(f"{job_name}: {name} missing required inputs: {','.join(missing)}")
     publisher = jobs["publish-python-artifacts"]
@@ -199,3 +254,34 @@ def verify_controller_inputs(workflow: dict, implementations: dict[str, bytes]) 
         or publisher["permissions"].get("id-token") != "write"
     ):
         raise UnitEvidenceError("controller must construct, attest and pass complete source before publication")
+
+
+def _legacy_bootstrap_controller(workflow: dict) -> bool:
+    pin = workflow.get("env", {}).get("RELEASE_HELPERS_SHA")
+    if (
+        not isinstance(pin, str) or not re.fullmatch(r"[0-9a-f]{40}", pin)
+        or pin == "0" * 40
+    ):
+        return False
+    selected = [
+        (name, step["with"]) for name, job in workflow["jobs"].items()
+        for step in job.get("steps", [])
+        if step.get("with", {}).get("path") == "reviewed-helpers"
+    ]
+    return (
+        {"gate", *HELPER_JOBS} <= {name for name, _ in selected}
+        and all(checkout.get("ref") == "${{ env.RELEASE_HELPERS_SHA }}"
+                and checkout.get("persist-credentials") is False for _, checkout in selected)
+    )
+
+
+def active_controller_compatibility(workflow: dict, implementations: dict[str, bytes]) -> tuple[bool, str]:
+    """Only the explicit legacy pin generation may await a separate bootstrap."""
+    try:
+        verify_controller_inputs(workflow, implementations)
+        verify_helper_selection(workflow)
+    except UnitEvidenceError as error:
+        if _legacy_bootstrap_controller(workflow):
+            return False, str(error)
+        raise
+    return True, ""

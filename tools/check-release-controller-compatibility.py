@@ -12,7 +12,10 @@ import yaml
 
 from promotion_unit_contract import UnitEvidenceError
 from promotion_release_helpers import verify_helper_contract
-from release_controller_contract import helper_implementations, verify_controller_inputs, verify_helper_selection
+from release_controller_contract import (
+    active_controller_compatibility, helper_implementations,
+    verify_controller_inputs, verify_helper_selection,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ".github/workflows/validate-and-promote.yml"
@@ -38,11 +41,9 @@ def main() -> int:
     ).stdout
     current = yaml.safe_load(current_bytes)
     verify_helper_contract(ROOT, manifest, controllers=(current_bytes.decode("utf-8"),))
-    try:
-        verify_controller_inputs(current, implementations)
-        verify_helper_selection(current)
-    except UnitEvidenceError as error:
-        print(f"::warning::Main {main} requires a separately reviewed controller bootstrap: {error}")
+    compatible, reason = active_controller_compatibility(current, implementations)
+    if not compatible:
+        print(f"::warning::Main {main} requires a separately reviewed legacy controller bootstrap: {reason}")
         print(json.dumps({"main": main, "active_compatible": False, "prepared_compatible": True}))
     else:
         print(json.dumps({"main": main, "active_compatible": True, "prepared_compatible": True}))

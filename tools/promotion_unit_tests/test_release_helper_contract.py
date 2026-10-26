@@ -121,6 +121,70 @@ def test_required_helper_inputs_expand_bounded_literal_declarations_only():
         control.required_arguments(b"parser.add_argument(unreviewed_name, required=True)")
 
 
+def test_active_source_coherent_controller_mismatch_is_not_a_bootstrap_warning():
+    active = _workflow()
+    source = b'parser.add_argument("--future-required-input", required=True)'
+    prepared = deepcopy(active)
+    prepared["jobs"]["publish-python-artifacts"]["steps"][-1]["run"] += " --future-required-input value"
+    implementations = {"publish_python_artifacts.py": source}
+    control.verify_controller_inputs(prepared, implementations)
+    with pytest.raises(UnitEvidenceError, match="future-required-input"):
+        control.active_controller_compatibility(active, implementations)
+    assert control.active_controller_compatibility(prepared, implementations) == (True, "")
+
+
+@pytest.mark.parametrize("separator", ["\n", "; ", " && ", " || "],
+                         ids=["newline", "semicolon", "and", "or"])
+def test_required_inputs_are_checked_for_each_helper_invocation(separator):
+    workflow = _workflow()
+    workflow["jobs"]["compose-candidate"]["steps"].append({
+        "run": "python reviewed-helpers/tools/entry.py" + separator
+        + "python reviewed-helpers/tools/entry.py --input value",
+    })
+    with pytest.raises(UnitEvidenceError, match="entry.py missing required inputs: --input"):
+        control.verify_controller_inputs(workflow, {
+            "entry.py": b'parser.add_argument("--input", required=True)',
+        })
+
+
+@pytest.mark.parametrize("tail", ["# --input value", "echo --input value", "python other.py --input value"])
+def test_other_commands_or_comments_cannot_supply_a_helper_input(tail):
+    workflow = _workflow()
+    workflow["jobs"]["compose-candidate"]["steps"].append({
+        "run": "python reviewed-helpers/tools/entry.py\n" + tail,
+    })
+    with pytest.raises(UnitEvidenceError, match="missing required inputs"):
+        control.verify_controller_inputs(workflow, {
+            "entry.py": b'parser.add_argument("--input", required=True)',
+        })
+
+
+@pytest.mark.parametrize("arguments,valid", [
+    (["--input"], False), (["--input", "--another"], False),
+    (["--input="], False), (["--input=value"], True), (["--alias", "value"], True),
+])
+def test_required_argument_values_and_aliases_match_the_own_invocation(arguments, valid):
+    source = b'parser.add_argument("--input", "--alias", required=True)'
+    assert control.required_arguments(source) == {"--input"}
+    assert control._has_input(source, "--input", arguments) is valid
+
+
+@pytest.mark.parametrize("mode", ["legacy", "zero-pin", "hybrid"])
+def test_only_explicit_legacy_helper_selection_can_await_bootstrap(mode):
+    active = _workflow()
+    active["env"] = {"RELEASE_HELPERS_SHA": ("0" if mode == "zero-pin" else "a") * 40}
+    for name in ("gate", *control.HELPER_JOBS):
+        active["jobs"][name]["steps"][0]["with"]["ref"] = "${{ env.RELEASE_HELPERS_SHA }}"
+    if mode == "hybrid":
+        active["jobs"]["python-artifacts"]["steps"][0]["with"]["ref"] = control.SOURCE_REF
+    if mode == "legacy":
+        compatible, reason = control.active_controller_compatibility(active, {})
+        assert compatible is False and "manual helper pin" in reason
+    else:
+        with pytest.raises(UnitEvidenceError, match="manual helper pin"):
+            control.active_controller_compatibility(active, {})
+
+
 def _source(root, name, raw):
     path = root / name
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,7 +193,10 @@ def _source(root, name, raw):
 
 def test_transitive_and_literal_dynamic_helper_imports_are_discovered(tmp_path):
     for name, raw in {
-        "tools/entry.py": b'import helper\n_load_module(Path("dynamic.py"), "loaded")',
+        "tools/entry.py": (
+            b'from pathlib import Path\nfrom promote_release import _load_module\nimport helper\n'
+            b'_load_module(Path(__file__).with_name("dynamic.py"), "loaded")'
+        ),
         "tools/helper.py": b"from library import decision",
         "tools/dynamic.py": b"def build(): return 1",
         "libs/example/library.py": b"def decision(): return True",
@@ -148,8 +215,21 @@ def test_transitive_and_literal_dynamic_helper_imports_are_discovered(tmp_path):
 ])
 def test_unregistered_executable_input_cannot_hide_outside_qualification(tmp_path, raw):
     _source(tmp_path, "tools/entry.py", raw)
-    with pytest.raises(UnitEvidenceError, match="dynamic release implementation"):
+    with pytest.raises(UnitEvidenceError, match="release implementation"):
         helpers.helper_closure(tmp_path, entrypoints=("entry",))
+
+
+def test_file_spec_implementation_is_in_the_required_source_and_decision_closure(tmp_path):
+    _source(tmp_path, "tools/entry.py", (
+        b"import importlib.util\nfrom pathlib import Path\n"
+        b'spec = importlib.util.spec_from_file_location("loaded", Path(__file__).with_name("loaded.py"))\n'
+        b"module = importlib.util.module_from_spec(spec)\n"
+        b"spec.loader.exec_module(module)\n"
+    ))
+    _source(tmp_path, "tools/loaded.py", b"def decide():\n    return True\n")
+    sources, decisions = helpers.helper_closure(tmp_path, entrypoints=("entry",))
+    assert sources == {"tools/entry.py", "tools/loaded.py"}
+    assert decisions == {"tools/loaded.py"}
 
 
 def _contract(root):

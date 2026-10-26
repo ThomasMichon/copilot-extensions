@@ -1659,7 +1659,12 @@ immutable Main/bootstrap and admitted-source/helper selection, the existing
 signer qualification dependency, required CLI inputs and complete-source
 producer/attestor/publisher ordering. The PR-time compatibility guard reports
 live Main separately from prepared compatibility; a source-only pass does not
-activate independently owned Main controls.
+activate independently owned Main controls. Warning-only migration applies
+only to the explicit legacy pinned-helper controller. An already source-coherent
+Main that lacks a required input fails before a source merge.
+Invocation regressions isolate repeated calls and exclude inputs mentioned only
+by comments or unrelated commands; the current indirect promoter is tested with
+its own base argument array, not the composition step's arguments.
 
 Use the bounded test supervisor around:
 

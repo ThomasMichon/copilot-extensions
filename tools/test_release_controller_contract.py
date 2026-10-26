@@ -74,3 +74,22 @@ def test_source_interface_change_cannot_wait_until_release_to_discover_missing_i
     sources["publish_python_artifacts.py"] += b'\nparser.add_argument("--new-input", required=True)\n'
     with pytest.raises(UnitEvidenceError, match="new-input"):
         verify_controller_inputs(workflow, sources)
+
+
+def test_actual_indirect_promoter_requires_its_own_inputs_not_composition_arguments():
+    workflow = _prepared()
+    sources = _implementations()
+    sources["promote_release.py"] += b'\nparser.add_argument("--future-required-input", required=True)\n'
+    compose = next(step for step in workflow["jobs"]["compose-candidate"]["steps"]
+                   if step.get("id") == "freeze")
+    compose["run"] = compose["run"].replace(
+        "args=(--repo", "args=(--future-required-input value --repo",
+    )
+    with pytest.raises(UnitEvidenceError, match="promote: promote_release.py missing required inputs"):
+        verify_controller_inputs(workflow, sources)
+    promote = next(step for step in workflow["jobs"]["promote"]["steps"]
+                   if step.get("id") == "promote")
+    promote["run"] = promote["run"].replace(
+        "args=(--repo", "args=(--future-required-input value --repo",
+    )
+    verify_controller_inputs(workflow, sources)
