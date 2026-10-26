@@ -10,7 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment proposed before implementation | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |
+| [Leased Daemon Instances](active/leased-daemon-instances/README.md) | Active; original custody source delivered, compiler-free Python amendment reviewed in #9120; replacement open | #8403; preserves identity, leases, descendant settlement and installer owners; no rollout |
 | [Instruction Source Resolution](active/instruction-source-resolution/README.md) | Draft; review the compatibility repair before implementation | #9097; effective enabled-source verification, exact generated output, unchanged trust/maintenance boundaries; no rollout |
 | [Incremental Indexing Delta Pipeline](active/incremental-indexing-delta-pipeline/README.md) | Active; shared delta seam and normal-round reuse slice, complete acquisition/store/adoption gates open | #9023; preserves #4222/#4220/#8733/#5302 correctness owners; generic engine first, consumer adoption separate |
 | [Large-Corpus Session Sync](active/large-corpus-session-sync/README.md) | Draft; reviewed plan before bounded accounting and scheduled-consumer changes | #8735; follows delivered #8460/#8688 without disabling accounting |

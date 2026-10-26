@@ -1,4 +1,4 @@
-"""Actual prebuilt native Linux protocol; explicit source build precedes tests."""
+"""Actual compiler-free Linux lifecycle protocol under the bounded test owner."""
 
 import os
 from pathlib import Path
@@ -9,6 +9,7 @@ import time
 import pytest
 
 from agent_procutil import _daemon_instance_store as store
+from agent_procutil._linux_pidfd import open_pidfd
 from agent_procutil.daemon_instances import (
     DaemonInstanceSpec, DaemonLeasePolicy, cleanup_instance, inspect_instances,
     reserve_instance, renew_instance,
@@ -22,15 +23,13 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def native_helper():
-    from agent_procutil._daemon_instance_native import native_helper_path
+    import agent_procutil
 
-    try:
-        helper = native_helper_path()
-    except OSError as error:
-        if os.environ.get("PROCUTIL_REQUIRE_NATIVE") == "1":
-            pytest.fail(str(error))
-        pytest.skip("explicit source build or platform wheel required")
-    subprocess.run([str(helper), "check"], check=True, timeout=5)
+    helper = [
+        sys.executable, "-I", "-S", "-B",
+        str(Path(agent_procutil.__file__).with_name("_daemon_instance_cli.py")),
+    ]
+    subprocess.run([*helper, "check"], check=True, timeout=5)
     return helper
 
 
@@ -41,7 +40,7 @@ def start_supervised(native_helper, tmp_path, *, code, ttl=.8, cap=3):
         lease=DaemonLeasePolicy(ttl, cap),
     ))
     process = subprocess.Popen(
-        [str(native_helper), "supervise", str(receipt.record_path), "--",
+        [*native_helper, "supervise", str(receipt.record_path), "--",
          sys.executable, "-c", code, str(tmp_path)],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
@@ -74,7 +73,7 @@ time.sleep(30)
             time.sleep(.01)
         assert (tmp_path / "grandchild").exists()
         grandchild = int((tmp_path / "grandchild").read_text())
-        descriptors = [os.pidfd_open(int(record["pid"])), os.pidfd_open(grandchild)]
+        descriptors = [open_pidfd(int(record["pid"])), open_pidfd(grandchild)]
         process.communicate(timeout=6)
         from agent_procutil._caller_owned import _pidfd_exited
         assert all(_pidfd_exited(fd) for fd in descriptors)
@@ -86,6 +85,159 @@ time.sleep(30)
         process.communicate(timeout=6)
         for descriptor in descriptors:
             os.close(descriptor)
+
+
+def test_compiler_free_supervisor_settles_reparented_session(native_helper, tmp_path):
+    code = """
+import subprocess,sys,time
+from pathlib import Path
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],
+                       start_new_session=True)
+(Path(sys.argv[1])/'escaped-child').write_text(str(child.pid))
+time.sleep(30)
+"""
+    process, receipt, _ = start_supervised(native_helper, tmp_path, code=code, ttl=1)
+    descriptor = None
+    try:
+        end = time.monotonic() + .8
+        while not (tmp_path / "escaped-child").exists() and time.monotonic() < end:
+            time.sleep(.01)
+        descriptor = open_pidfd(int((tmp_path / "escaped-child").read_text()))
+        _, error = process.communicate(timeout=7)
+        assert process.returncode == 124, error
+        from agent_procutil._caller_owned import _pidfd_exited
+        assert _pidfd_exited(descriptor)
+        assert cleanup_instance(receipt).status == "settled"
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.communicate(timeout=7)
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def test_compiler_free_owner_loss_stops_before_lease(native_helper, tmp_path):
+    import json
+
+    code = """
+import json,os,subprocess,sys,time
+from pathlib import Path
+from agent_procutil.daemon_instances import (
+    DaemonInstanceSpec,DaemonLeasePolicy,reserve_instance,inspect_instances)
+root=Path(sys.argv[1])
+receipt=reserve_instance(DaemonInstanceSpec('owner-loss',root,Path(sys.argv[2]),
+ purpose='unattended-test',registry_root=root/'registry',lease=DaemonLeasePolicy(20,30)))
+helper=json.loads(sys.argv[3])
+process=subprocess.Popen([*helper,'supervise',str(receipt.record_path),'--',
+ sys.executable,'-c','import time;time.sleep(30)'],stdout=subprocess.DEVNULL,
+ stderr=subprocess.DEVNULL)
+end=time.monotonic()+5
+while time.monotonic()<end:
+ record=inspect_instances(receipt.registry_root)[0]
+ if record.get('state')=='running':
+  (root/'owner-loss.json').write_text(json.dumps(record))
+  os._exit(0)
+ if process.poll() is not None: raise RuntimeError('supervisor refused')
+ time.sleep(.01)
+raise RuntimeError('admission timed out')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(tmp_path), str(Path(__file__).resolve()),
+         json.dumps(native_helper)], capture_output=True, timeout=8,
+    )
+    assert result.returncode == 0, result.stderr
+    record = json.loads((tmp_path / "owner-loss.json").read_text())
+    from agent_procutil.daemon_instances import DaemonInstanceReceipt
+    from agent_procutil._daemon_instance_identity import identity_state
+    receipt = DaemonInstanceReceipt(record["instance_id"], tmp_path / "registry")
+    end = time.monotonic() + 5
+    while time.monotonic() < end:
+        if identity_state(int(record["supervisor_pid"]), record["supervisor_birth"]) == "dead":
+            break
+        time.sleep(.01)
+    assert identity_state(int(record["pid"]), record["birth"]) == "dead"
+    assert cleanup_instance(receipt).status == "settled"
+
+
+@pytest.mark.parametrize("field", ["owner_birth", "launcher_birth", "runtime_inode"])
+def test_compiler_free_admission_refuses_changed_custody(native_helper, tmp_path, field):
+    receipt = reserve_instance(DaemonInstanceSpec(
+        "changed-custody", tmp_path, Path(__file__).resolve(), purpose="unattended-test",
+        registry_root=tmp_path / "registry", lease=DaemonLeasePolicy(2, 3),
+    ))
+    with store._locked(receipt) as path:
+        record = store._read(path)
+        record[field] = "different"
+        store._write(path, record)
+    marker = tmp_path / "must-not-run"
+    result = subprocess.run(
+        [*native_helper, "supervise", str(receipt.record_path), "--", sys.executable,
+         "-c", "from pathlib import Path;import sys;Path(sys.argv[1]).touch()", str(marker)],
+        capture_output=True, timeout=5,
+    )
+    assert result.returncode == 125
+    assert b"refused" in result.stderr
+    assert not marker.exists()
+    assert receipt.record_path.exists()
+
+
+def test_missing_lifecycle_interpreter_reports_a_held_record(tmp_path):
+    import agent_procutil
+
+    receipt = reserve_instance(DaemonInstanceSpec(
+        "missing-interpreter", tmp_path, Path(__file__).resolve(), purpose="unattended-test",
+        registry_root=tmp_path / "registry", lease=DaemonLeasePolicy(2, 3),
+    ))
+    with store._locked(receipt) as path:
+        record = store._read(path)
+        record["deadline_mono"] = str(time.monotonic() - 1)
+        store._write(path, record)
+    result = subprocess.run(
+        ["bash", "-c", '. "$1"; _di_python() { return 1; }; '
+         'reconcile_daemon_instances 128 5 "$2"', "missing-interpreter",
+         str(Path(agent_procutil.__file__).with_name("daemon_instances.sh")),
+         str(receipt.registry_root)],
+        capture_output=True, text=True, timeout=8,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"held\tlifecycle-binding-unavailable\t{receipt.instance_id}\n"
+    assert "lifecycle-binding-unavailable" in result.stderr
+    assert receipt.record_path.exists()
+
+
+def test_shell_reconciliation_accepts_a_total_budget_above_one_stop_limit(tmp_path):
+    import agent_procutil
+
+    receipt = reserve_instance(DaemonInstanceSpec(
+        "large-reconcile-budget", tmp_path, Path(__file__).resolve(),
+        purpose="unattended-test", registry_root=tmp_path / "registry",
+        lease=DaemonLeasePolicy(2, 3),
+    ))
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import sys;sys.stdin.read(1)"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+    )
+    try:
+        store.bind_process(receipt, process.pid)
+        _, error = process.communicate(b"x", timeout=5)
+        assert process.returncode == 0, error
+        with store._locked(receipt) as path:
+            record = store._read(path)
+            record["deadline_mono"] = str(time.monotonic() - 1)
+            store._write(path, record)
+        result = subprocess.run(
+            ["bash", "-c", '. "$1"; reconcile_daemon_instances 128 600 "$2"',
+             "large-budget", str(Path(agent_procutil.__file__).with_name("daemon_instances.sh")),
+             str(receipt.registry_root)],
+            capture_output=True, text=True, timeout=8,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == f"settled\tprocess-exit-observed\t{receipt.instance_id}\n"
+        assert not receipt.record_path.exists()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        process.communicate(timeout=5)
 
 
 def test_native_renewal_obeys_hard_cap(native_helper, tmp_path):
@@ -132,7 +284,7 @@ time.sleep(30)
             store._write(path, row)
         process.communicate(timeout=6)
         result = subprocess.run(
-            [str(native_helper), "cleanup", str(receipt.record_path), "3"],
+            [*native_helper, "cleanup", str(receipt.record_path), "3"],
             capture_output=True, text=True, timeout=5,
         )
         assert result.returncode == 0, result.stderr
@@ -194,7 +346,7 @@ def test_native_finite_production_cleanup_preserves_artifacts(native_helper, tmp
         row = inspect_instances(process.instance_receipt.registry_root)[0]
         assert row["state"] == "finished" and row["deadline"] == "0"
         result = subprocess.run(
-            [str(native_helper), "cleanup", str(process.instance_receipt.record_path), "3"],
+            [*native_helper, "cleanup", str(process.instance_receipt.record_path), "3"],
             capture_output=True, text=True, timeout=5,
         )
         assert result.returncode == 0, result.stderr

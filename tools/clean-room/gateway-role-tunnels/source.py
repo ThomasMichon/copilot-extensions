@@ -34,15 +34,16 @@ RUNNER_FILES = frozenset({
     "fixture_auth.py", "fixture_service.py", "probe.py",
 })
 PROCUTIL_MODULES = frozenset("""
-__init__ _async _build_native _caller_owned _daemon_instance_child
-_daemon_instance_identity _daemon_instance_native _daemon_instance_owner
+__init__ _async _caller_owned _daemon_instance_child _daemon_instance_cli _daemon_instance_clock
+_daemon_instance_identity _daemon_instance_linux _daemon_instance_native _daemon_instance_owner
 _daemon_instance_store _darwin_caller_owned _interactive_groups
 _interactive_session _interactive_terminal _interpreter _linux_pidfd
 _windows_caller_owned daemon daemon_broker daemon_instances diagnostics
 interactive metrics metrics_accounting native_child owned_process startup streaming wsl
 """.split())
 PROCUTIL_RESOURCES = frozenset("""
-daemon_instance_native.c daemon_instances.ps1 daemon_instances.sh
+daemon_instances.ps1 daemon_instances.sh
+daemon_instance_runtime.pyz
 native_daemon.ps1 native_daemon.sh native_owned.ps1 native_owned.sh
 """.split())
 REQUIRED = frozenset({

@@ -90,10 +90,13 @@ def test_only_test_owner_can_renew_and_deadline_never_revives(instance_store, mo
         lease=DaemonLeasePolicy(10, 30),
     ))
     now = store._wall_clock()
+    mono = store._monotonic_clock()
     monkeypatch.setattr(store, "_wall_clock", lambda: now + 5)
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: mono + 5)
     store.renew(receipt)
     assert float(store.inspect(receipt.registry_root)[0]["deadline"]) == pytest.approx(now + 15)
     monkeypatch.setattr(store, "_wall_clock", lambda: now + 16)
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: mono + 16)
     with pytest.raises(ValueError, match="cannot be revived"):
         store.renew(receipt)
 

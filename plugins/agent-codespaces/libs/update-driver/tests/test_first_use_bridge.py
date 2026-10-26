@@ -4,7 +4,6 @@ from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
-import platform
 import runpy
 import re
 import shutil
@@ -223,16 +222,11 @@ def test_bridge_missing_fingerprint_tool_refuses_before_acquisition(
 def build_bridge_native_test_assets(payload, procutil):
     if sys.platform != "linux":
         return
-    package = procutil / "src/agent_procutil"
-    relative = Path("native") / f"linux-{platform.machine()}" / "daemon-instance"
-    result = subprocess.run(
-        [sys.executable, str(package / "_build_native.py"), "--output", str(package / relative)],
-        capture_output=True, text=True, timeout=90, **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    destination = payload / "scripts" / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(package / relative, destination)
+    from daemon_lifecycle_assets import ARCHIVE_NAME, lifecycle_archive
+
+    destination = payload / "scripts" / ARCHIVE_NAME
+    destination.write_bytes(lifecycle_archive(procutil.parents[1]))
+    destination.chmod(0o644)
 
 
 @pytest.fixture

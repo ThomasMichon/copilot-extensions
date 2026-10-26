@@ -5,9 +5,7 @@ FROM python:3.13-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /build
 ENV TMPDIR=/build/.tmp
-RUN mkdir -p "$TMPDIR" \
-    && apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p "$TMPDIR" && ! command -v cc && ! command -v gcc
 COPY fleet-manager/pyproject.toml fleet-manager/setup.py fleet-manager/README.md ./fleet-manager/
 COPY fleet-manager/src/fleet_manager/*.py ./fleet-manager/src/fleet_manager/
 COPY libs/versioned-runtime/standalone_build.py libs/versioned-runtime/versioned_runtime.py libs/versioned-runtime/versioned_runtime_leases.py libs/versioned-runtime/versioned_runtime_construction.py libs/versioned-runtime/versioned_runtime_publication.py libs/versioned-runtime/versioned_runtime_source.py ./libs/versioned-runtime/
@@ -20,7 +18,7 @@ RUN uv build --no-cache --exclude-newer "7 days" --wheel --out-dir /wheels ./lib
     && for wheel in /wheels/fleet_manager-*.whl; do \
          uv pip install --no-cache --exclude-newer "7 days" --python /opt/gateway/bin/python "${wheel}[service-gateway]" /wheels/agent_procutil-*.whl; \
        done \
-    && /opt/gateway/bin/python -c "from fleet_manager.gateway_service_connector import ServiceConnector; from fleet_manager.gateway_service_server import serve; from agent_procutil.daemon_instances import admit_daemon_instance; from agent_procutil._daemon_instance_native import native_helper_path; assert native_helper_path().is_file()"
+    && /opt/gateway/bin/python -c "from fleet_manager.gateway_service_connector import ServiceConnector; from fleet_manager.gateway_service_server import serve; from agent_procutil.daemon_instances import admit_daemon_instance; from agent_procutil._daemon_instance_linux import check; check()"
 
 FROM python:3.13-slim
 ARG SOURCE_COMMIT
@@ -55,7 +53,7 @@ RUN set -eu; \
 USER ${GATEWAY_UID}:${GATEWAY_GID}
 WORKDIR /state
 RUN ! command -v cc && ! command -v gcc \
-    && python -I -c "import pwd,os,subprocess; from agent_procutil._daemon_instance_native import native_helper_path; assert pwd.getpwuid(os.getuid()).pw_dir == '/state'; subprocess.run([str(native_helper_path()), 'check'], check=True)"
+    && python -I -c "import pwd,os; from agent_procutil._daemon_instance_linux import check; assert pwd.getpwuid(os.getuid()).pw_dir == '/state'; check()"
 # Listener and authenticated role readiness are deployment-owned probes.
 HEALTHCHECK NONE
 ENTRYPOINT ["fleet-manager"]

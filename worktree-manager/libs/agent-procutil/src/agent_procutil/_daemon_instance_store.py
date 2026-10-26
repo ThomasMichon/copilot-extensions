@@ -19,6 +19,7 @@ import zipfile
 from dataclasses import replace
 from pathlib import Path
 
+from . import _daemon_instance_clock as lease_clock
 from ._daemon_instance_identity import (
     birth_identity, delete_owned_file, identity_state, path_identity, retire_self, stop_identity,
 )
@@ -231,7 +232,7 @@ def _read(path: Path) -> dict[str, str]:
             raise ValueError("invalid daemon instance field")
         record[name] = base64.b64decode(value, validate=True).decode("utf-8", errors="surrogateescape")
     if (
-        record.get("schema") != "1" or record.get("instance_id") != path.stem
+        record.get("schema") not in ("1", "2") or record.get("instance_id") != path.stem
         or not _ID.fullmatch(record.get("instance_id", ""))
     ):
         raise ValueError("invalid daemon instance record identity")
@@ -303,6 +304,9 @@ def reserve(spec: DaemonInstanceSpec, *, environment=None) -> DaemonInstanceRece
             lease=DaemonLeasePolicy(float(context["ttl"]), float(context["max_lifetime"])),
         )
     source, source_member = source_provenance(spec.source)
+    timing = lease_clock.fields(
+        spec.lease.ttl_seconds, spec.lease.max_lifetime_seconds, _monotonic_clock(),
+    ) if sys.platform.startswith("linux") and spec.lease else {}
     root = _root(spec.registry_root or registry_root(), create=True)
     runtime = _runtime_anchor(spec.runtime_root)
     receipt = DaemonInstanceReceipt(uuid.uuid4().hex, root)
@@ -327,6 +331,7 @@ def reserve(spec: DaemonInstanceSpec, *, environment=None) -> DaemonInstanceRece
     }
     if context:
         record.update(owner_pid=str(context["pid"]), owner_birth=context["birth"])
+    record.update(timing)
     with _locked(receipt, wait_seconds=1) as path:
         if path.exists():
             raise OSError("daemon instance reservation already exists")
@@ -407,6 +412,9 @@ def finish_failed_launch(receipt, identity, *, exit_confirmed, admission_possibl
 def _expire(record: dict[str, str], now: float) -> bool:
     if record["purpose"] == "production":
         return False
+    if sys.platform.startswith("linux") or record.get("schema") == "2":
+        deadline, hard = lease_clock.bounds(record)
+        return _monotonic_clock() >= min(deadline, hard)
     deadline, hard = float(record["deadline"]), float(record["hard_deadline"])
     if not 0 < deadline <= hard:
         raise ValueError("invalid daemon expiry policy")
@@ -496,7 +504,13 @@ def renew(receipt: DaemonInstanceReceipt) -> None:
         ):
             raise ValueError("daemon lease belongs to its test lifecycle owner")
         now = _wall_clock()
-        if _expire(record, now):
+        if sys.platform.startswith("linux") or record.get("schema") == "2":
+            deadline, hard = lease_clock.bounds(record)
+            monotonic = _monotonic_clock()
+            if monotonic >= deadline:
+                raise ValueError("expired daemon lease cannot be revived")
+            record["deadline_mono"] = str(min(monotonic + float(record["ttl"]), hard))
+        elif _expire(record, now):
             raise ValueError("expired daemon lease cannot be revived")
         record.update(deadline=str(min(now + float(record["ttl"]), float(record["hard_deadline"]))),
                       updated=str(now))
@@ -566,6 +580,9 @@ def test_lifecycle(owner, root, purpose, policy):
             try:
                 with _locked(receipt, wait_seconds=1) as path:
                     current = _read(path)
+                    if sys.platform.startswith("linux") or current.get("schema") == "2":
+                        deadline, _ = lease_clock.bounds(current)
+                        current["deadline_mono"] = str(min(_monotonic_clock(), deadline))
                     current["deadline"] = str(min(_wall_clock(), float(current["deadline"])))
                     _write(path, current)
                 outcome = cleanup(receipt)
@@ -600,11 +617,17 @@ def _observe_expiry():
                     "reserved", "bound", "running",
                 ):
                     continue
-                if _wall_clock() < float(record["deadline"]) - float(record["ttl"]) / 3:
-                    continue
                 try:
+                    if sys.platform.startswith("linux") or record.get("schema") == "2":
+                        deadline, _ = lease_clock.bounds(record)
+                        remaining = deadline - _monotonic_clock()
+                    else:
+                        remaining = float(record["deadline"]) - _wall_clock()
+                    if remaining > float(record["ttl"]) / 3:
+                        continue
                     renew(DaemonInstanceReceipt(record["instance_id"], Path(context["registry_root"])))
-                except (OSError, ValueError, KeyError):
+                except (OSError, ValueError, KeyError) as error:
+                    _log.warning("daemon lease renewal held: %s %s", record["instance_id"], error)
                     continue
         for receipt, stopped in entries:
             if stopped.is_set():
@@ -612,10 +635,18 @@ def _observe_expiry():
             try:
                 with _locked(receipt) as path:
                     record = _read(path)
-                if (record.get("pid"), record.get("birth")) != (
-                    str(os.getpid()), birth_identity(os.getpid()),
-                ):
-                    raise ValueError("daemon monitor instance identity changed")
+                    if (record.get("pid"), record.get("birth")) != (
+                        str(os.getpid()), birth_identity(os.getpid()),
+                    ):
+                        raise ValueError("daemon monitor instance identity changed")
+                    if sys.platform.startswith("linux") or record.get("schema") == "2":
+                        deadline, hard = lease_clock.bounds(record)
+                        previous = observations.setdefault(receipt.instance_id, hard)
+                        if hard != previous:
+                            raise ValueError("daemon monotonic hard bound changed")
+                        if _monotonic_clock() >= min(deadline, hard):
+                            retire_self()
+                        continue
                 previous = observations.get(receipt.instance_id)
                 monotonic = _monotonic_clock()
                 if previous is None:
@@ -636,6 +667,11 @@ def _observe_expiry():
                     retire_self()
             except OSError as error:
                 if error.errno in (errno.EACCES, errno.EAGAIN):
+                    hard = observations.get(receipt.instance_id)
+                    if sys.platform.startswith("linux") and hard is not None and (
+                        _monotonic_clock() >= hard
+                    ):
+                        retire_self()
                     continue
                 retire_self()
             except (ValueError, KeyError):

@@ -375,7 +375,7 @@ def test_source_ast_selector_omits_only_closed_packet_inputs(tmp_path, event, pa
     "worktree-manager/bin/manager-runtime.ps1",
     "fleet-manager/src/fleet_manager/gateway_server.py",
     "services/pr/src/agent_pull_requests_service/hosting.py",
-    "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c",
+    "libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py",
     "tools/clean-room/scenarios/example/fixtures/worker.py",
     "plugins/agent-worktrees/bin/agent-worktrees-update-entry.ps1",
 ])

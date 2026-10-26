@@ -7,7 +7,7 @@ import hashlib
 import pytest
 
 import promotion_release_helpers as helpers
-from promotion_unit_contract import UnitEvidenceError, admit_manifest, relative_file, verify_sources
+from promotion_unit_contract import UnitEvidenceError, admit_manifest, relative_file
 import release_controller_contract as control
 
 
@@ -317,53 +317,21 @@ def test_dynamic_edge_enrolls_a_decision_already_visited_as_a_static_import(tmp_
     assert relative in sources and relative in decisions
 
 
-@pytest.mark.parametrize("fault", [
-    "none", "second-function", "second-same-function", "changed-read", "changed-build",
-    "rebound-package", "rebound-import", "rebound-argument", "rebound-match", "wrong-declaration",
+@pytest.mark.parametrize("relative", ["tools/native_daemon_artifacts.py", "tools/unrelated.py"])
+@pytest.mark.parametrize("body", [
+    'exec(Path("helper.py").read_text())',
+    'exec(compile(Path("helper.py").read_bytes(), "helper.py", "exec"))',
 ])
-def test_native_exec_admission_is_the_exact_site_and_declared_input(tmp_path, monkeypatch, fault):
+def test_release_helpers_have_no_native_builder_exec_exception(tmp_path, relative, body):
     import ast
-    from pathlib import Path
 
-    root = Path(__file__).resolve().parents[2]
-    raw = (root / "tools/native_daemon_artifacts.py").read_text()
-    if fault == "second-function":
-        raw += '\ndef another():\n    exec(Path("second_helper.py").read_text())\n'
-    elif fault == "second-same-function":
-        raw = raw.replace(
-            '        return output.read_bytes()',
-            '        exec(Path("second_helper.py").read_text())\n        return output.read_bytes()',
-        )
-    elif fault == "changed-read":
-        raw = raw.replace("compile(helper.read_bytes()", 'compile(Path("second_helper.py").read_bytes()')
-    elif fault == "changed-build":
-        raw = raw.replace('BUILD = "_build_native.py"', 'BUILD = "second_helper.py"')
-    elif fault == "rebound-package":
-        raw += '\nPACKAGE = Path("other")\n'
-    elif fault == "rebound-import":
-        raw += "\nimport other as BUILD\n"
-    elif fault == "rebound-argument":
-        raw += "\ndef unrelated(BUILD):\n    return BUILD\n"
-    elif fault == "rebound-match":
-        raw += "\nmatch other:\n    case {'path': BUILD}:\n        pass\n"
-    elif fault == "wrong-declaration":
-        monkeypatch.setitem(helpers.DYNAMIC_INPUTS, "native_daemon_artifacts", ("other/helper.py",))
+    raw = "from pathlib import Path\n\ndef build():\n    " + body + "\n"
     tree = ast.parse(raw)
-    sites = helpers._registered_execs(tree, "tools/native_daemon_artifacts.py")
-    calls = {node for node in ast.walk(tree) if isinstance(node, ast.Call) and (
-        isinstance(node.func, ast.Name) and node.func.id == "exec"
-    )}
-    if fault == "none":
-        assert len(sites) == 1 and sites == calls
-        assert helpers._registered_execs(tree, "tools/unrelated.py") == set()
-    elif fault == "second-function":
-        assert len(sites) == 1 and len(calls - sites) == 1
-    else:
-        assert sites == set()
-    _source(tmp_path, "tools/native_daemon_artifacts.py", raw.encode())
-    if fault != "none":
-        with pytest.raises(UnitEvidenceError, match="unregistered dynamic release implementation"):
-            helpers.helper_closure(tmp_path, entrypoints=("native_daemon_artifacts",))
+    assert helpers._registered_execs(tree, relative) == set()
+    _source(tmp_path, relative, raw.encode())
+    module = relative.removeprefix("tools/").removesuffix(".py")
+    with pytest.raises(UnitEvidenceError, match="unregistered dynamic release implementation"):
+        helpers.helper_closure(tmp_path, entrypoints=(module,))
 
 
 def _contract(root):
@@ -418,7 +386,7 @@ def test_new_helper_and_native_build_inputs_require_binding_and_coverage(tmp_pat
     elif fault == "coverage":
         manifest["coverage_targets"].remove(path)
     elif fault == "build-input":
-        manifest["sources"].pop("libs/agent-procutil/src/agent_procutil/_build_native.py")
+        manifest["sources"].pop("libs/agent-procutil/setup.py")
     elif fault == "changed":
         (tmp_path / path).write_bytes(b"def changed(): return False")
     if fault == "none":
@@ -492,22 +460,17 @@ def test_import_inside_a_test_is_not_executable_decision_body_coverage(tmp_path)
     helpers.verify_helper_coverage(tmp_path, manifest, {"files": files})
 
 
-def test_native_compiler_source_is_hash_bound_data_not_a_unit_or_coverage_target(tmp_path):
+def test_native_compiler_source_has_no_release_unit_admission(tmp_path):
     native = "libs/agent-procutil/src/agent_procutil/daemon_instance_native.c"
-    assert relative_file(native) == native
-    _source(tmp_path, native, b"int main(void) { return 0; }")
-    digests = {native: hashlib.sha256((tmp_path / native).read_bytes()).hexdigest()}
-    verify_sources(tmp_path, digests)
-    (tmp_path / native).write_bytes(b"int main(void) { return 1; }")
-    with pytest.raises(UnitEvidenceError, match="changed without admission"):
-        verify_sources(tmp_path, digests)
+    with pytest.raises(UnitEvidenceError):
+        relative_file(native)
     test = "tools/promotion_unit_tests/test_example.py"
     manifest = {
         "profile": "copilot-extensions.promotion-units/v1",
         "sources": {test: "a" * 64, native: "b" * 64}, "nodes": [test + "::test_case"],
         "coverage_targets": [native], "max_seconds": 300,
     }
-    with pytest.raises(UnitEvidenceError, match="coverage target"):
+    with pytest.raises(UnitEvidenceError):
         admit_manifest(manifest)
     with pytest.raises(UnitEvidenceError):
         relative_file("tools/arbitrary.c")

@@ -54,8 +54,9 @@ class _FakeMultiStore:
         self.content_upserts.append(list(chunks))
         return len(chunks)
 
-    def upsert_vectors(self, model_id: str, chunks: list[Chunk], vectors) -> None:
+    def upsert_vectors(self, model_id: str, chunks: list[Chunk], vectors: np.ndarray) -> int:
         self.vector_upserts.append((model_id, list(chunks)))
+        return len(chunks)
 
 
 class _RaisingClient:
