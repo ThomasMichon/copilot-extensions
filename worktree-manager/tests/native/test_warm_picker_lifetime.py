@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -66,6 +68,15 @@ def _startup_diagnostics(root, command):
                 "metadata": metadata.stdout[-4096:],
                 "metadata_returncode": metadata.returncode,
             })
+            pane_pid = metadata.stdout.split(":", 1)[0].strip()
+            if os.name == "nt" and pane_pid.isdigit():
+                from mux_windows_observer import descendants, processes
+
+                table = processes()
+                panes[-1]["processes"] = [
+                    {"pid": pid, "name": table[pid][0], "parent": table[pid][1]}
+                    for pid in sorted(descendants(int(pane_pid), table))[:32] if pid in table
+                ]
         except (OSError, subprocess.TimeoutExpired) as error:
             panes.append({"session": session, "error": type(error).__name__})
     children = []
@@ -309,6 +320,65 @@ def sentinel_mux(tmp_path_factory):
         assert_live()
         stopped = command("kill-session", "-t", "sentinel")
         assert stopped.returncode == 0, stopped.stderr
+
+
+def _probe_argv(marker, powershell):
+    script = (
+        "import json,os,sys,time; from pathlib import Path; "
+        "from zdd.diagnostics import process_start_time; "
+        "Path(sys.argv[1]).write_text(json.dumps({"
+        "'pid':os.getpid(),'start':process_start_time(os.getpid()),"
+        "'stdin_tty':sys.stdin.isatty(),'stdout_tty':sys.stdout.isatty()})); "
+        "time.sleep(120)"
+    )
+    argv = [sys.executable, "-I", "-B", "-X", "utf8", "-c", script, str(marker)]
+    if powershell is None:
+        return argv
+    command = "& " + " ".join("'" + part.replace("'", "''") + "'" for part in argv)
+    encoded = base64.b64encode((command + "; exit $LASTEXITCODE").encode("utf-16-le")).decode("ascii")
+    return [powershell, "-NoLogo", "-NoProfile", "-EncodedCommand", encoded]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="diagnoses Windows native launch boundaries")
+@pytest.mark.parametrize("launcher", ["direct-python", "powershell"])
+def test_private_native_mux_launch_preconditions(tmp_path, launcher, sentinel_mux):
+    from plugin_test_command_safety import private_mux_args
+
+    mux, powershell = shutil.which("psmux"), shutil.which("pwsh")
+    if not mux or not powershell:
+        pytest.skip("native mux and its shell are required")
+    env = _environment(tmp_path)
+    namespace = private_mux_args(tmp_path)
+    session = "picker-" + secrets.token_hex(12)
+    marker = tmp_path / "probe.json"
+    (tmp_path / "owner-debug.json").write_text(json.dumps({
+        "states": [{"launcher": launcher, "slots": [{"session": session}]}],
+    }))
+
+    def command(*args, timeout=5):
+        return subprocess.run(
+            [mux, *namespace, *args], env=env, cwd=tmp_path,
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout, **no_window_kwargs(),
+        )
+
+    worker = None
+    try:
+        created = command(
+            "new-session", "-d", "-s", session, "--",
+            *_probe_argv(marker, powershell if launcher == "powershell" else None),
+        )
+        assert created.returncode == 0, created.stderr
+        worker = _wait(
+            lambda: _read(marker),
+            lambda: launcher + " did not run:\n" + _startup_diagnostics(tmp_path, command),
+        )
+        assert _live(worker)
+        assert worker["stdin_tty"] and worker["stdout_tty"], worker
+        sentinel_mux()
+    finally:
+        _kill(worker)
+        command("kill-session", "-t", session)
 
 
 @pytest.mark.parametrize("phase", ["pending", "bound"])

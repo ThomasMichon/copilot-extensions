@@ -573,3 +573,24 @@ def test_native_fixture_environment_disables_shell_network_side_effects(tmp_path
     assert environment["POWERSHELL_UPDATECHECK"] == "Off"
     assert "AGENT_BRIDGE_TEST_VALUE" not in environment
     assert Path(environment["USERPROFILE"]).is_relative_to(tmp_path)
+
+
+def test_native_startup_probes_preserve_the_exact_python_command_without_running_it(tmp_path):
+    import ast
+
+    source = Path(__file__).resolve().parents[1] / "worktree-manager" / "tests" / "native" / "test_warm_picker_lifetime.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_probe_argv"
+    ]
+    namespace = {"sys": sys, "base64": base64}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
+    marker = tmp_path / "probe with 'quotes'.json"
+    direct = namespace["_probe_argv"](marker, None)
+    wrapped = namespace["_probe_argv"](marker, "pwsh")
+    assert direct[:6] == [sys.executable, "-I", "-B", "-X", "utf8", "-c"]
+    assert direct[-1] == str(marker)
+    assert wrapped[:4] == ["pwsh", "-NoLogo", "-NoProfile", "-EncodedCommand"]
+    decoded = base64.b64decode(wrapped[-1]).decode("utf-16-le")
+    assert decoded == "& " + " ".join("'" + part.replace("'", "''") + "'" for part in direct) + "; exit $LASTEXITCODE"
