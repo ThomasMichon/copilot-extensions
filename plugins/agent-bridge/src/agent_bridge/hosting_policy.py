@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -202,7 +203,7 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
     """Read the actual receiving owner without starting an agent channel."""
     if not target.host or not target.project:
         raise unsupported_receiver("SSH without an execution owner", operation=operation)
-    from ssh_manager import SSHProfileSource, get_default_manager
+    from ssh_manager import SSHProfileResolutionError, SSHProfileSource, get_default_manager
 
     from .worktree_owner_operation import owner_ssh_command
 
@@ -225,7 +226,10 @@ async def query_ssh_policy(target: SpawnTarget, *, operation: str) -> dict[str, 
 
     try:
         result = await asyncio.wait_for(read_policy(), timeout=30)
-    except (OSError, ConnectionError, TimeoutError, asyncio.TimeoutError) as exc:
+    except (
+        OSError, ConnectionError, TimeoutError, asyncio.TimeoutError,
+        SSHProfileResolutionError, subprocess.TimeoutExpired,
+    ) as exc:
         raise unsupported_receiver("SSH policy check", operation=operation) from exc
     if result.timed_out or result.exit_code != 0:
         detail = (result.stderr or result.stdout or "receiver check unavailable").strip()

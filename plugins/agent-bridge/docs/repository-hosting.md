@@ -116,6 +116,10 @@ and does not prepare auth hooks, plugins, worktrees or an agent channel.
 Connection establishment and the policy command share a 30-second deadline;
 connection failure, timeout and invalid or refused receiver results remain
 explicit hosting refusals. Successful connectivity is not policy admission.
+Expected OpenSSH profile-resolution failures and bounded `ssh -G` timeouts
+also become hosting refusals. The shared library distinguishes operational
+resolution errors from unrelated programming `RuntimeError`s; Bridge does not
+catch all runtime errors or infer permission from a failed profile read.
 
 ## Provider admission and capability limits
 
@@ -187,7 +191,8 @@ The isolated effect-ledger coverage is in:
 
 The required unit packet also admits
 `tools/promotion_unit_tests/test_ssh_hosting_policy.py`: cold connection ordering,
-preserved warm forwards, connection/receiver refusal and the shared deadline.
+preserved warm forwards, connection/receiver refusal, real profile-resolution
+failures and the shared deadline.
 Its stateful SSH boundary refuses execution before connection; no native
 process, network or OS event loop runs in these units.
 

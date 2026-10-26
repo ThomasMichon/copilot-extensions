@@ -25,12 +25,6 @@ class AsyncDeadlineError(Exception):
 
 
 @dataclass
-class Profile:
-    host_alias: str
-    resolve_timeout: float | None = None
-
-
-@dataclass
 class ColdManager:
     connected: bool = False
     under_deadline: bool = False
@@ -42,7 +36,7 @@ class ColdManager:
     ))
 
     async def ensure_connected(
-        self, host: str, source: Profile, port_forwards: list[str] | None = None,
+        self, host: str, source: Any, port_forwards: list[str] | None = None,
         *, preserve_existing_forwards: bool = False,
     ) -> None:
         assert self.under_deadline, "connection setup escaped the shared query deadline"
@@ -74,8 +68,20 @@ def boundary(monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, ColdManager, 
 
     root = ROOT / "plugins/agent-bridge/src/agent_bridge"
     module(PACKAGE, __path__=[str(root)])
+    config_name = "promotion_ssh_profile_source"
+    config_spec = importlib.util.spec_from_file_location(
+        config_name, ROOT / "libs/ssh-manager/src/ssh_manager/config_sources.py",
+    )
+    assert config_spec and config_spec.loader
+    config = importlib.util.module_from_spec(config_spec)
+    monkeypatch.setitem(sys.modules, config_name, config)
+    config_spec.loader.exec_module(config)
     manager = ColdManager()
-    module("ssh_manager", get_default_manager=lambda: manager, SSHProfileSource=Profile)
+    module(
+        "ssh_manager", get_default_manager=lambda: manager,
+        SSHProfileSource=config.SSHProfileSource,
+        SSHProfileResolutionError=config.SSHProfileResolutionError,
+    )
     module(
         "repository_policy", AgentHostingError=HostingRefused,
         require_agent_hosting=unavailable, validate_hosting_result=unavailable,
@@ -135,8 +141,8 @@ def test_cold_policy_query_connects_before_exec(boundary: tuple) -> None:
     assert result == {"version": 1, "allowed": True}
     assert [name for name, _ in manager.calls] == ["connect", "exec"]
     host, profile, forwards, preserve = manager.calls[0][1]
-    assert host == profile.host_alias == "receiver"
-    assert profile.resolve_timeout == 30
+    assert host == profile._host_alias == "receiver"
+    assert profile._resolve_timeout == 30
     assert forwards is None and preserve is True
     assert manager.calls[1][1] == ("receiver", "fixed-owner-policy-query", 30)
     assert commands == [("example-harness", [
@@ -183,5 +189,43 @@ def test_unexpected_connection_bug_is_not_hidden_as_policy_refusal(boundary: tup
     policy, manager, _commands = boundary
     manager.failure = RuntimeError("unexpected connection-owner defect")
     with pytest.raises(RuntimeError, match="unexpected connection-owner defect"):
+        run(policy.query_ssh_policy(target(), operation="launch"))
+    assert [name for name, _ in manager.calls] == ["connect"]
+
+
+@pytest.mark.parametrize("condition", [
+    "missing-client", "invalid-config", "empty-config", "profile-timeout",
+])
+def test_real_profile_resolution_failure_is_a_hosting_refusal(
+    boundary: tuple, monkeypatch: pytest.MonkeyPatch, condition: str,
+) -> None:
+    policy, manager, _commands = boundary
+    config = sys.modules["promotion_ssh_profile_source"]
+    monkeypatch.setattr(
+        config.shutil, "which", lambda _name: None if condition == "missing-client" else "ssh-fixture",
+    )
+
+    def resolve(arguments: list[str], **options: Any) -> SimpleNamespace:
+        assert condition != "missing-client"
+        assert arguments == ["ssh-fixture", "-G", "receiver"]
+        assert options["timeout"] == 30
+        if condition == "profile-timeout":
+            raise config.subprocess.TimeoutExpired(arguments, 30)
+        return SimpleNamespace(
+            returncode=255 if condition == "invalid-config" else 0,
+            stdout="", stderr="invalid SSH configuration" if condition == "invalid-config" else "",
+        )
+
+    monkeypatch.setattr(config.subprocess, "run", resolve)
+
+    async def connect(host: str, source: Any, **options: Any) -> None:
+        assert manager.under_deadline
+        assert host == source._host_alias
+        assert options == {"preserve_existing_forwards": True}
+        manager.calls.append(("connect", None))
+        source.get_ssh_config()
+
+    monkeypatch.setattr(manager, "ensure_connected", connect)
+    with pytest.raises(HostingRefused, match="SSH policy check"):
         run(policy.query_ssh_policy(target(), operation="launch"))
     assert [name for name, _ in manager.calls] == ["connect"]
