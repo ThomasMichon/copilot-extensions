@@ -377,6 +377,16 @@ fi
 if [[ "$INSTALL_DIR" != /* ]]; then
     INSTALL_DIR="$PWD/$INSTALL_DIR"
 fi
+_normalize_install_root() {
+    local remaining="$1" component normalized=""
+    while [[ -n "$remaining" ]]; do
+        component="${remaining%%/*}"
+        if [[ "$remaining" == */* ]]; then remaining="${remaining#*/}"; else remaining=""; fi
+        case "$component" in ""|.) ;; *) normalized="$normalized/$component" ;; esac
+    done
+    printf '%s\n' "${normalized:-/}"
+}
+INSTALL_DIR="$(_normalize_install_root "$INSTALL_DIR")"
 if [[ "$ACTION" == uninstall ]]; then
     py="$(_bootstrap_python)" || {
         printf '%s\n' 'Cannot validate Logger uninstall ownership without a bootstrap Python' >&2
@@ -385,7 +395,7 @@ if [[ "$ACTION" == uninstall ]]; then
     INSTALL_DIR="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
         --root "$INSTALL_DIR" --resolve-root)" || exit 1
 fi
-LEGACY_INSTALL_DIR="$HOME/.agent-logger"
+LEGACY_INSTALL_DIR="$(_normalize_install_root "$HOME/.agent-logger")"
 legacy_cmp="$(printf '%s' "$LEGACY_INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
 install_cmp="$(printf '%s' "$INSTALL_DIR" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
 PUBLISH_GLOBAL_BINSTUBS=1
@@ -1648,12 +1658,17 @@ case "${ACTION}" in
       _fail "Cannot validate Logger uninstall ownership without a bootstrap Python"; exit 1;
     }
     "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" || exit 1
+    legacy_units="$("$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" \
+        --root "$INSTALL_DIR" --unit-names --unit-dir "$UNIT_DIR")" || exit 1
+    uninstall_units="$(printf '%s\n' "$TIMER_NAME" "$legacy_units" | sed '/^$/d' | sort -u)"
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "(dry run -- nothing will be changed)"
-      if systemctl --user is-enabled "${TIMER_NAME}.timer" >/dev/null 2>&1 || \
-         [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" ]]; then
-        echo "[dry-run] would disable + remove: ${TIMER_NAME}.service / .timer"
-      fi
+      while IFS= read -r unit; do
+        if systemctl --user is-enabled "${unit}.timer" >/dev/null 2>&1 || \
+           [[ -f "${UNIT_DIR}/${unit}.timer" ]]; then
+          echo "[dry-run] would disable + remove: ${unit}.service / .timer"
+        fi
+      done <<< "$uninstall_units"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
         for name in session-sync agent-logger collate-session read-session-digest prepare-session-log ramp-up-session; do
           [[ -e "${LOCAL_BIN}/${name}" ]] && echo "[dry-run] would remove binstub: ${LOCAL_BIN}/${name}"
@@ -1663,20 +1678,24 @@ case "${ACTION}" in
       echo "[dry-run] config/session-state at ${INSTALL_DIR} would be kept (agent-logger uninstall never removes it)"
       echo "agent-logger uninstall dry run complete -- nothing was changed"
     else
-      if [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" || -f "${UNIT_DIR}/${TIMER_NAME}.service" ]]; then
-        if [[ -f "${UNIT_DIR}/${TIMER_NAME}.timer" ]]; then
-          systemctl --user disable --now "${TIMER_NAME}.timer" || exit 1
+      while IFS= read -r unit; do
+        if [[ -f "${UNIT_DIR}/${unit}.timer" || -f "${UNIT_DIR}/${unit}.service" ]]; then
+          if [[ -f "${UNIT_DIR}/${unit}.timer" ]]; then
+            systemctl --user disable --now "${unit}.timer" || exit 1
+          fi
+          service_state=0
+          systemctl --user is-active --quiet "${unit}.service" || service_state=$?
+          case "$service_state" in
+            0) _fail 'Active Logger sync service; uninstall refused after disabling new scheduled starts'; exit 1 ;;
+            3|4) ;;
+            *) _fail 'Cannot determine Logger sync service state; uninstall refused'; exit 1 ;;
+          esac
         fi
-        service_state=0
-        systemctl --user is-active --quiet "${TIMER_NAME}.service" || service_state=$?
-        case "$service_state" in
-          0) _fail 'Active Logger sync service; uninstall refused after disabling new scheduled starts'; exit 1 ;;
-          3|4) ;;
-          *) _fail 'Cannot determine Logger sync service state; uninstall refused'; exit 1 ;;
-        esac
-      fi
+      done <<< "$uninstall_units"
       "$py" -I -B "$SCRIPT_DIR/uninstall_guard.py" --root "$INSTALL_DIR" --idle --prepare || exit 1
-      rm -f "${UNIT_DIR}/${TIMER_NAME}.service" "${UNIT_DIR}/${TIMER_NAME}.timer" || exit 1
+      while IFS= read -r unit; do
+        rm -f "${UNIT_DIR}/${unit}.service" "${UNIT_DIR}/${unit}.timer" || exit 1
+      done <<< "$uninstall_units"
       systemctl --user daemon-reload || true
       chg "timer removed (config at ${INSTALL_DIR} kept)"
       if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then

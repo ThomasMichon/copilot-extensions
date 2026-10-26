@@ -726,3 +726,72 @@ def test_logger_native_process_inventory_refuses_uncertain_consumers(tmp_path, m
         }
         with pytest.raises(RuntimeError, match=expected[outcome]):
             helper.refuse_live_runtime(tmp_path)
+
+
+@pytest.mark.parametrize("alias", ["/", "/./"])
+@pytest.mark.parametrize("active", [False, True])
+@pytest.mark.parametrize("selector", [".venv", "versions/1.0.0"])
+def test_posix_logger_custom_alias_normalizes_and_retires_legacy_units(tmp_path, alias, active, selector):
+    bash = shutil.which("bash") if os.name != "nt" else None
+    if bash is None:
+        pytest.skip("native POSIX Bash required")
+    root, durable, env = _fixture(tmp_path, "owned")
+    requested = str(root) + alias
+    canonical_suffix = hashlib.sha256(str(root).lower().encode()).hexdigest()[:12]
+    legacy_suffix = hashlib.sha256(requested.lower().encode()).hexdigest()[:12]
+    canonical_name = f"agent-logger-sync-{canonical_suffix}"
+    legacy_name = f"agent-logger-sync-{legacy_suffix}"
+    units = root.parent / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
+    service = units / f"{legacy_name}.service"
+    source = (INSTALLERS / "install.sh").read_text(encoding="utf-8")
+    start = source.index("write_units() {")
+    end = source.index('\ncase "$ACTION" in\n  install|update|provision)', start)
+    writer = source[start:end]
+    generated = subprocess.run(
+        [bash, "-c",
+         'set -euo pipefail\nINSTALL_DIR="$1"; UNIT_DIR="$2"; TIMER_NAME="$3"; VENV="$INSTALL_DIR/$4"\n'
+         '_fail() { printf "%s\\n" "$1" >&2; }; chg() { :; }\n'
+         + writer + "\nwrite_units\n",
+         "logger-unit-fixture", requested, str(units), legacy_name, selector],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert generated.returncode == 0, generated.stdout + generated.stderr
+    timer = units / f"{legacy_name}.timer"
+    assert timer.is_file()
+    assert f"ExecStart={requested}/{selector}/bin/session-sync run --prune" in service.read_text()
+    foreign = units / "agent-logger-sync-foreign.service"
+    foreign.write_text("Environment=AGENT_LOGGER_HOME=/another/installation\n")
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    log = tmp_path / "systemctl-calls"
+    env["LOGGER_TEST_CALLS"] = str(log)
+    env["LOGGER_TEST_ACTIVE"] = "0" if active else "3"
+    systemctl = fakebin / "systemctl"
+    systemctl.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOGGER_TEST_CALLS"\n'
+        'case "$2" in\n'
+        'disable|daemon-reload) exit 0;;\n'
+        'is-active) exit "$LOGGER_TEST_ACTIVE";;\n'
+        '*) exit 1;;\nesac\n',
+    )
+    systemctl.chmod(0o755)
+    env["PATH"] = str(fakebin) + os.pathsep + env["PATH"]
+    status = subprocess.run(
+        [bash, str(INSTALLERS / "install.sh"), "status", "--install-dir", requested],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert status.returncode == 0, status.stdout + status.stderr
+    assert f"--user is-active {canonical_name}.timer" in log.read_text().splitlines()
+    result = subprocess.run(
+        [bash, str(INSTALLERS / "install.sh"), "uninstall", "--install-dir", str(root)],
+        capture_output=True, text=True, timeout=45, env=env,
+    )
+    assert result.returncode == (1 if active else 0), result.stdout + result.stderr
+    calls = log.read_text().splitlines()
+    assert f"--user disable --now {legacy_name}.timer" in calls
+    assert f"--user is-active --quiet {legacy_name}.service" in calls
+    assert service.exists() is active
+    assert timer.exists() is active
+    assert foreign.read_text() == "Environment=AGENT_LOGGER_HOME=/another/installation\n"
+    _assert_state(root, durable, removed=not active)

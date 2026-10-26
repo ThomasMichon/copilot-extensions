@@ -272,10 +272,44 @@ def remove_runtime(root: Path, shell: str) -> None:
             remove(root, (name,))
 
 
+def legacy_unit_names(root: Path, directory: Path) -> list[str]:
+    """Find old root-alias units by their generated service binding, not a guessed hash."""
+    if directory != Path.home() / ".config" / "systemd" / "user":
+        raise RuntimeError("Logger unit discovery requires the current user's unit directory")
+    _plain(directory)
+    if not directory.exists():
+        return []
+    names = []
+    for service in directory.glob("agent-logger-sync*.service"):
+        if not re.fullmatch(r"agent-logger-sync(?:-[a-z0-9]+)?", service.stem):
+            continue
+        _plain(service)
+        lines = service.read_text(encoding="utf-8-sig").splitlines()
+        roots = [line.removeprefix("Environment=AGENT_LOGGER_HOME=") for line in lines
+                 if line.startswith("Environment=AGENT_LOGGER_HOME=")]
+        if len(roots) != 1:
+            continue
+        value = Path(roots[0])
+        if not value.is_absolute() or ".." in value.parts:
+            continue
+        _plain(value)
+        if Path(os.path.abspath(value)) != root:
+            continue
+        command = re.escape(f"ExecStart={roots[0]}/")
+        command += r"(?:\.venv|versions/[A-Za-z0-9][A-Za-z0-9._+-]*)/bin/session-sync run --prune"
+        if not any(re.fullmatch(command, line) for line in lines):
+            raise RuntimeError("Logger unit runtime binding cannot be revalidated")
+        _plain(service.with_suffix(".timer"))
+        names.append(service.stem)
+    return sorted(names)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True)
     parser.add_argument("--resolve-root", action="store_true")
+    parser.add_argument("--unit-names", action="store_true")
+    parser.add_argument("--unit-dir", type=Path)
     parser.add_argument("--idle", action="store_true")
     parser.add_argument("--prepare", action="store_true")
     parser.add_argument("--remove-runtime", action="store_true")
@@ -288,6 +322,11 @@ def main() -> int:
         owner = validate(root)
         if args.resolve_root:
             print(root)
+        if args.unit_names:
+            if args.unit_dir is None:
+                raise RuntimeError("Logger unit discovery requires a unit directory")
+            for name in legacy_unit_names(root, args.unit_dir):
+                print(name)
         if args.idle:
             refuse_live_runtime(root)
         if args.prepare:
