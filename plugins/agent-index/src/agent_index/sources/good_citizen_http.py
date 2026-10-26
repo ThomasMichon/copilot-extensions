@@ -42,6 +42,7 @@ class ApiResult:
     data: Any
     headers: httpx.Headers
     not_modified: bool = False
+    request: httpx.Request | None = None
 
 
 class GoodCitizenSession:
@@ -153,7 +154,9 @@ class GoodCitizenSession:
             self._last_request_at = time.monotonic()
 
             if response.status_code == httpx.codes.NOT_MODIFIED:
-                return ApiResult(data=None, headers=response.headers, not_modified=True)
+                return ApiResult(
+                    data=None, headers=response.headers, not_modified=True, request=response.request,
+                )
 
             if response.status_code in self._retry_statuses:
                 if retries >= self._max_retries:
@@ -173,7 +176,7 @@ class GoodCitizenSession:
             if etag and (response_etag := response.headers.get("ETag")):
                 self._etag_cache[cache_key] = response_etag
             self._respect_rate_limit(response)
-            return ApiResult(data=response.json(), headers=response.headers)
+            return ApiResult(data=response.json(), headers=response.headers, request=response.request)
 
     def paginate_continuation(
         self,

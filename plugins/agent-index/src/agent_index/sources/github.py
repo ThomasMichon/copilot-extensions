@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import json
 import os
+import hashlib
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -88,17 +89,43 @@ class GitHubConnector:
             if self._token or self._token_provider is not None or (
                 self._client.auth is not None or "authorization" in self._client.headers
             ):
-                data = self._http.get_json("/user").data
-                user_id = data.get("id") if isinstance(data, dict) else None
-                if type(user_id) not in (int, str) or not str(user_id):
-                    raise ValueError("GitHub /user did not include an authenticated account id")
-                self._recovery_account = str(user_id)
+                self._recovery_account = self._authenticated_recovery_account()
             else:
                 self._recovery_account = "anonymous"
         return (
-            nonsecret_target(self.api_base), self.owner, self.repo,
+            nonsecret_target(str(self._client.base_url).rstrip("/")), self.owner, self.repo,
             self._recovery_account, json.dumps(self._default_since),
         )
+
+    def _authenticated_recovery_account(self) -> str:
+        try:
+            data = self._http.get_json("/user", etag=False).data
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (403, 404):
+                raise
+            # Installation tokens have no /user principal endpoint. Verify their
+            # installation API access, then fence this opaque credential rather
+            # than guessing an account from repository ownership or token syntax.
+            installation = self._http.get_json(
+                "/installation/repositories", params={"per_page": 1}, etag=False,
+            )
+            data = installation.data
+            if not isinstance(data, dict) or not isinstance(data.get("repositories"), list):
+                raise ValueError("GitHub installation response did not include repositories")
+            credential = (
+                installation.request.headers.get("authorization") if installation.request else None
+            )
+            if not credential:
+                raise ValueError("GitHub installation recovery requires an explicit credential")
+            log.warning(
+                "GitHub installation recovery is credential-scoped; rotate credentials "
+                "only after completing pending crawls",
+            )
+            return "installation-credential:" + hashlib.sha256(credential.encode()).hexdigest()
+        user_id = data.get("id") if isinstance(data, dict) else None
+        if type(user_id) not in (int, str) or not str(user_id):
+            raise ValueError("GitHub /user did not include an authenticated account id")
+        return str(user_id)
 
     def discover(self, cancel_check: Callable[[], None] | None = None) -> list[FileEntry]:
         """Discover all issues and pull requests."""

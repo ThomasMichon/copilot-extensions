@@ -361,6 +361,119 @@ def test_github_effective_scope_change_refuses_pending_replay(tmp_path: Path, ch
         journal.load(before.source_name, recovery_scope("same-spec", after))
 
 
+def test_github_installation_credentials_can_crawl_and_fence_recovery(tmp_path: Path) -> None:
+    probes: list[httpx.Request] = []
+
+    def transport(request: httpx.Request) -> httpx.Response:
+        probes.append(request)
+        if request.url.path == "/user":
+            return httpx.Response(403, json={"message": "Resource not accessible by integration"})
+        if request.url.path == "/installation/repositories":
+            assert request.url.params["per_page"] == "1"
+            return httpx.Response(200, json={"total_count": 2, "repositories": [{"id": 1}]})
+        assert request.url.path == "/repos/org/repo/issues"
+        return httpx.Response(200, json=[])
+
+    def connector(token: str) -> GitHubConnector:
+        value = GitHubConnector(
+            "github:org/repo", token=token, min_interval_s=0,
+            transport=httpx.MockTransport(transport),
+        )
+        value._http._max_retries = 0
+        return value
+
+    before = connector("installation-fixture")
+    scope = recovery_scope("spec", before)
+    assert recovery_scope("spec", before) == scope
+    assert before.discover() == []
+    assert len(probes) == 3
+    assert "installation-fixture" not in repr(before.recovery_identity)
+    journal = PendingCrawls(PathIndex(tmp_path / "paths.db"))
+    manifest = CrawlManifest(
+        source=before.source_name, accounting_family=before.source_name,
+        upserts=[FileEntry("a.md", "pending", "markdown", before.source_name)],
+    )
+    journal.save(manifest, scope=scope, full=False)
+    assert journal.load(before.source_name, recovery_scope("spec", connector("installation-fixture")))
+    with pytest.raises(ValueError, match="configuration"):
+        journal.load(before.source_name, recovery_scope("spec", connector("other-installation-fixture")))
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_github_failed_credentials_never_become_anonymous(status: int) -> None:
+    def transport(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, json={"message": "Denied"})
+
+    connector = GitHubConnector(
+        "github:org/repo", token="invalid-fixture", min_interval_s=0,
+        transport=httpx.MockTransport(transport),
+    )
+    connector._http._max_retries = 0
+    with pytest.raises(httpx.HTTPStatusError):
+        recovery_scope("spec", connector)
+    assert connector._recovery_account is None
+
+
+def test_github_injected_client_endpoint_is_in_recovery_fence() -> None:
+    def connector(endpoint: str) -> GitHubConnector:
+        client = httpx.Client(
+            base_url=endpoint,
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"id": 1})),
+        )
+        return GitHubConnector(
+            "github:org/repo", api_base="https://configured.test", client=client,
+            token="user-fixture", min_interval_s=0,
+        )
+
+    assert recovery_scope("spec", connector("https://first.test")) != recovery_scope(
+        "spec", connector("https://second.test"),
+    )
+
+
+def test_github_user_token_rotation_preserves_principal() -> None:
+    def connector(token: str) -> GitHubConnector:
+        return GitHubConnector(
+            "github:org/repo", token=token, min_interval_s=0,
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"id": 1})),
+        )
+
+    assert recovery_scope("spec", connector("first-fixture")) == recovery_scope(
+        "spec", connector("renewed-fixture"),
+    )
+
+
+def test_github_installation_fence_uses_credential_of_successful_request() -> None:
+    def transport(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/user":
+            return httpx.Response(404, json={"message": "Not Found"})
+        assert request.url.path == "/installation/repositories"
+        return httpx.Response(200, json={"repositories": []})
+
+    tokens = iter(["expired-fixture", "verified-fixture"])
+    renewed = GitHubConnector(
+        "github:org/repo", token_provider=lambda: next(tokens), min_interval_s=0,
+        transport=httpx.MockTransport(transport),
+    )
+    static = GitHubConnector(
+        "github:org/repo", token="verified-fixture", min_interval_s=0,
+        transport=httpx.MockTransport(transport),
+    )
+    assert recovery_scope("spec", renewed) == recovery_scope("spec", static)
+
+
+def test_github_installation_identity_rejects_malformed_success() -> None:
+    connector = GitHubConnector(
+        "github:org/repo", token="fixture", min_interval_s=0,
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                404 if request.url.path == "/user" else 200, json={},
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="repositories"):
+        recovery_scope("spec", connector)
+
+
 @pytest.mark.parametrize("stale", [False, True])
 @pytest.mark.parametrize("source_aware", [False, True])
 def test_gc_cannot_retire_state_while_a_crawl_is_pending(

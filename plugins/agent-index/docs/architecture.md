@@ -73,9 +73,15 @@ work under a new scope. The same constructed connector supplies both acquisition
 and its canonical/effective recovery identity: delta connectors declare a
 nonsecret `recovery_identity` tuple. Built-in Git binds the resolved checkout,
 remote target and selected ref, including environment/registry resolution;
-GitHub binds the API/repository target, configured initial window and
-authenticated account ID (one cached `/user` metadata probe, not a token
-fingerprint, so token renewal preserves identity). Azure DevOps binds its effective
+GitHub binds the actual HTTP client's API/repository target, configured initial
+window and authenticated account ID (one cached `/user` metadata probe, so user
+token renewal preserves identity). Installation tokens cannot call `/user`;
+after verifying `/installation/repositories`, their recovery scope conservatively
+binds an opaque credential fingerprint. GitHub exposes no installation ID through
+that token's identity API, so a rotated installation token refuses an existing
+journal rather than guessing that repository ownership proves the same principal.
+Complete pending crawls before rotation; no token bytes are persisted or logged.
+Authentication failures never become anonymous identity. Azure DevOps binds its effective
 endpoint, authenticated account and resolved work-item/pull-request queries.
 Legacy CLI providers bind their registered command. Providers remain responsible
 for stable backend identity.
