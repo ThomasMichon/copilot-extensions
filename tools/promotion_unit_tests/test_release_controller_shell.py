@@ -163,6 +163,22 @@ def test_literal_helper_assignment_without_call_remains_a_reference():
     assert script_invocations(script) == []
 
 
+@pytest.mark.parametrize("capture", [
+    'result=$(python reviewed-helpers/tools/helper.py)',
+    'result="$(python reviewed-helpers/tools/helper.py)"',
+    'result=`python reviewed-helpers/tools/helper.py`',
+    'export result=$(python reviewed-helpers/tools/helper.py)',
+    'echo "$(python reviewed-helpers/tools/helper.py)"',
+    'result=$(python "$helper")',
+    '''result=$(python -c 'import runpy; runpy.run_path(str(tools / "helper.py"))')''',
+], ids=["unquoted", "quoted", "backticks", "export", "echo", "variable", "inline-runpy"])
+def test_captured_helper_cannot_hide_beside_a_valid_call(capture):
+    script = ('helper="reviewed-helpers/tools/helper.py"\n' + capture
+              + "\npython reviewed-helpers/tools/helper.py --input x")
+    with pytest.raises(ValueError, match="helper command substitution"):
+        script_invocations(script)
+
+
 def test_inline_runpy_loader_is_discovered_but_refused():
     script = '''python -c 'import runpy; runpy.run_path(str(tools / "helper.py"))'
 '''

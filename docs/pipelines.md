@@ -283,7 +283,10 @@ target. Real build/compiler behavior remains separate development validation.
 Synchronized executable copies borrow only their canonical origin's coverage;
 every run first verifies both admitted hashes and hard-refuses byte divergence.
 Self-file-relative `spec_from_file_location` implementations also join source
-and decision coverage; unresolved loaders, aliases and rebinding are refused.
+and decision coverage regardless of directory or earlier static-import traversal;
+unresolved loaders, aliases and rebinding are refused. The native build `exec`
+exception is restricted to its exact source-bound site and declared input
+bindings, not all executable loads in that module.
 Dynamic module-import aliases use lexical provenance too; renaming a loader
 cannot hide an unadmitted dependency.
 The existing Windows retention guardian retains its separate runtime-actor
@@ -295,6 +298,8 @@ Source PR guards compare helper-required CLI inputs and complete-source
 construction/attestation/publication against both the prepared proposal and
 the actual immutable Main controller, each against its own discovered helper
 inventory. A helper used only by Main cannot escape its interface check.
+Unsupported helper-bearing shell command substitutions fail explicitly, even
+beside a later valid invocation; they cannot hide a missing required input.
 An incompatible prepared proposal fails.
 A compatible prepared proposal with the explicit legacy pinned-helper Main
 generation reports

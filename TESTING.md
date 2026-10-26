@@ -1671,6 +1671,13 @@ The command-line compatibility regression also supplies a helper used only by
 Main, proving that active Main is checked against its own implementation
 inventory. File-loader regressions retain imported-alias provenance through
 lexical scopes and shadowing; a renamed dynamic import is not qualification.
+File-loaded decision bodies outside `tools/` also require positive call
+coverage, including bodies visited before their dynamic edge is discovered.
+The native build `exec` exception admits only its exact source-bound load site
+and declared input bindings; an additional executable load is not exempt.
+Captured helper calls are refused rather than silently borrowing a later
+invocation's arguments. Literal helper-path assignments and the supported
+runpy heredoc trampoline remain distinct supported forms.
 
 Use the bounded test supervisor around:
 

@@ -152,6 +152,13 @@ expression while leaving incompatible call sites.
 
 ## Journal
 
+- 2026-10-26: Hosted review follow-up closes non-tools and already-visited
+  file-loader decision enrollment, narrows native `exec` admission to its exact
+  declared-input site, and refuses captured helper calls beside valid calls.
+  All 2,352 admitted cases passed in 26.381 seconds without unit effects.
+  Prepared-controller/publication controls passed 70 cases and 222 subtests.
+  Main remains the explicit legacy generation pending the independent bootstrap;
+  source qualification is not activation or release completion.
 - 2026-10-26: Hosted follow-up now checks actual Main against Main's own helper
   inventory, including commands absent from the source proposal. Lexical loader
   provenance refuses dynamic import aliases and shadowing. Source-contract tests

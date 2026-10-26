@@ -306,6 +306,14 @@ def script_invocations(script: str) -> list[tuple[str, list[str]]]:
             conditional += 1
         command = re.sub(r"^(?:then|else|do|if|elif)\s+", "", command)
         words = _words(command)
+        if ("$(" in command or "`" in command) and (
+            _REFERENCE.search(command) or "runpy" in command
+            or any(
+                spelling in command for variable in helper_variables
+                for spelling in ("$" + variable, "${" + variable + "}")
+            )
+        ):
+            raise ValueError("unsupported helper command substitution")
         array = _ARRAY.fullmatch(command)
         if array:
             name, append, content = array.groups()

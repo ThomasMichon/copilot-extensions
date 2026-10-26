@@ -193,6 +193,18 @@ def test_required_inputs_are_checked_for_each_helper_invocation(separator):
         })
 
 
+def test_captured_call_with_a_valid_later_call_is_not_controller_compatibility():
+    workflow = _workflow()
+    workflow["jobs"]["compose-candidate"]["steps"].append({
+        "run": "result=$(python reviewed-helpers/tools/entry.py)\n"
+        "python reviewed-helpers/tools/entry.py --input value",
+    })
+    with pytest.raises(UnitEvidenceError, match="helper command substitution"):
+        control.verify_controller_inputs(workflow, {
+            "entry.py": b'parser.add_argument("--input", required=True)',
+        })
+
+
 @pytest.mark.parametrize("tail", ["# --input value", "echo --input value", "python other.py --input value"])
 def test_other_commands_or_comments_cannot_supply_a_helper_input(tail):
     workflow = _workflow()
@@ -278,6 +290,82 @@ def test_file_spec_implementation_is_in_the_required_source_and_decision_closure
     assert decisions == {"tools/loaded.py"}
 
 
+@pytest.mark.parametrize("relative", ["libs/example/loaded.py", "other/loaded.py"])
+def test_file_loaded_decisions_require_coverage_outside_tools(tmp_path, relative):
+    _source(tmp_path, "tools/entry.py", (
+        "import importlib.util\nfrom pathlib import Path\n"
+        f'spec = importlib.util.spec_from_file_location("loaded", Path(__file__).parents[1] / "{relative}")\n'
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+    ).encode())
+    _source(tmp_path, relative, b"def decide():\n    return True\n")
+    sources, decisions = helpers.helper_closure(tmp_path, entrypoints=("entry",))
+    assert sources == {"tools/entry.py", relative}
+    assert decisions == {relative}
+
+
+def test_dynamic_edge_enrolls_a_decision_already_visited_as_a_static_import(tmp_path):
+    _source(tmp_path, "tools/entry.py", b"import loader\nimport loaded\n")
+    _source(tmp_path, "tools/loader.py", (
+        b"import importlib.util\nfrom pathlib import Path\n"
+        b'spec = importlib.util.spec_from_file_location("loaded", Path(__file__).parents[1] / "libs/example/loaded.py")\n'
+        b"module = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\n"
+    ))
+    relative = "libs/example/loaded.py"
+    _source(tmp_path, relative, b"def decide():\n    return True\n")
+    sources, decisions = helpers.helper_closure(tmp_path, entrypoints=("entry",))
+    assert relative in sources and relative in decisions
+
+
+@pytest.mark.parametrize("fault", [
+    "none", "second-function", "second-same-function", "changed-read", "changed-build",
+    "rebound-package", "rebound-import", "rebound-argument", "rebound-match", "wrong-declaration",
+])
+def test_native_exec_admission_is_the_exact_site_and_declared_input(tmp_path, monkeypatch, fault):
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    raw = (root / "tools/native_daemon_artifacts.py").read_text()
+    if fault == "second-function":
+        raw += '\ndef another():\n    exec(Path("second_helper.py").read_text())\n'
+    elif fault == "second-same-function":
+        raw = raw.replace(
+            '        return output.read_bytes()',
+            '        exec(Path("second_helper.py").read_text())\n        return output.read_bytes()',
+        )
+    elif fault == "changed-read":
+        raw = raw.replace("compile(helper.read_bytes()", 'compile(Path("second_helper.py").read_bytes()')
+    elif fault == "changed-build":
+        raw = raw.replace('BUILD = "_build_native.py"', 'BUILD = "second_helper.py"')
+    elif fault == "rebound-package":
+        raw += '\nPACKAGE = Path("other")\n'
+    elif fault == "rebound-import":
+        raw += "\nimport other as BUILD\n"
+    elif fault == "rebound-argument":
+        raw += "\ndef unrelated(BUILD):\n    return BUILD\n"
+    elif fault == "rebound-match":
+        raw += "\nmatch other:\n    case {'path': BUILD}:\n        pass\n"
+    elif fault == "wrong-declaration":
+        monkeypatch.setitem(helpers.DYNAMIC_INPUTS, "native_daemon_artifacts", ("other/helper.py",))
+    tree = ast.parse(raw)
+    sites = helpers._registered_execs(tree, "tools/native_daemon_artifacts.py")
+    calls = {node for node in ast.walk(tree) if isinstance(node, ast.Call) and (
+        isinstance(node.func, ast.Name) and node.func.id == "exec"
+    )}
+    if fault == "none":
+        assert len(sites) == 1 and sites == calls
+        assert helpers._registered_execs(tree, "tools/unrelated.py") == set()
+    elif fault == "second-function":
+        assert len(sites) == 1 and len(calls - sites) == 1
+    else:
+        assert sites == set()
+    _source(tmp_path, "tools/native_daemon_artifacts.py", raw.encode())
+    if fault != "none":
+        with pytest.raises(UnitEvidenceError, match="unregistered dynamic release implementation"):
+            helpers.helper_closure(tmp_path, entrypoints=("native_daemon_artifacts",))
+
+
 def _contract(root):
     sources = {}
     _source(root, ".github/workflows/validate-and-promote.yml", b"jobs: {}\n")
@@ -294,6 +382,31 @@ def _contract(root):
             *sorted(helpers.BUILD_DECISIONS),
         ], "nodes": ["tools/promotion_unit_tests/test_example.py::test_decision"],
     }
+
+
+def test_hash_only_non_tools_file_loaded_helper_is_not_qualified(tmp_path):
+    manifest = _contract(tmp_path)
+    entry = "tools/tag_promotion.py"
+    loaded = "libs/example/loaded.py"
+    _source(tmp_path, entry, (
+        b"import importlib.util\nfrom pathlib import Path\n"
+        b'spec = importlib.util.spec_from_file_location("loaded", Path(__file__).parents[1] / "libs/example/loaded.py")\n'
+        b"module = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(module)\n"
+        b"def decision():\n    return True\n"
+    ))
+    _source(tmp_path, loaded, b"def decide():\n    return True\n")
+    for relative in (entry, loaded):
+        manifest["sources"][relative] = hashlib.sha256((tmp_path / relative).read_bytes()).hexdigest()
+    with pytest.raises(UnitEvidenceError, match="uncovered=libs/example/loaded.py"):
+        helpers.verify_helper_contract(tmp_path, manifest)
+    manifest["coverage_targets"].append(loaded)
+    assert loaded in helpers.verify_helper_contract(tmp_path, manifest)
+    coverage = {"files": {
+        name: {"contexts": {"2": [manifest["nodes"][0] + "|call"]}}
+        for name in manifest["coverage_targets"] if name != loaded
+    }}
+    with pytest.raises(UnitEvidenceError, match="positive call coverage: libs/example/loaded.py"):
+        helpers.verify_helper_coverage(tmp_path, manifest, coverage)
 
 
 @pytest.mark.parametrize("fault", ["none", "source", "coverage", "build-input", "changed"])
