@@ -86,7 +86,8 @@ def test_exit_only_repair_cannot_silently_substitute_marketplace(selected, monke
     assert "No update was run" in capsys.readouterr().err
 
 
-def test_source_validation_on_release_precedes_success_settlement(selected, monkeypatch):
+@pytest.mark.parametrize("trigger", ["manual", "automatic"])
+def test_source_validation_on_release_precedes_success_settlement(selected, monkeypatch, trigger):
     calls = []
 
     @contextmanager
@@ -95,6 +96,9 @@ def test_source_validation_on_release_precedes_success_settlement(selected, monk
         raise SourceAcquisitionError("checkout changed while consuming selection")
 
     class Run:
+        def __init__(self, *, trigger: str):
+            calls.append(trigger)
+
         def say(self, *a, **k):
             calls.append("diagnostic")
 
@@ -109,8 +113,8 @@ def test_source_validation_on_release_precedes_success_settlement(selected, monk
     monkeypatch.setattr(bootstrap, "prepare_update", lambda *a, **k: bootstrap.PreparedUpdate([], True))
     monkeypatch.setattr(manager, "_cmd_update_steps", lambda *a, **k: 0)
     monkeypatch.setattr(update_events, "UpdateRun", Run)
-    assert manager._cmd_update(["--repair-engine", "/fresh/source"]) == 1
-    assert calls == ["diagnostic", "recorded", 1]
+    assert manager._cmd_update_recorded(["--repair-engine", "/fresh/source"], trigger=trigger) == 1
+    assert calls == [trigger, "diagnostic", "recorded", 1]
 
 
 def test_suite_reuses_original_dev_selection_without_acquisition(selected, monkeypatch):
