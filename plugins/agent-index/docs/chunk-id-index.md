@@ -50,6 +50,27 @@ They are **not** certified bounded merely because their returned row count is
 small. No ordinary-round migration, legacy writer adoption, model backfill,
 retention policy or automatic consolidation is supplied by this API.
 
+### Embedding coverage
+
+The existing `EmbeddingCoverage` owner accepts `bounded=True` on `missing`
+and `record`. Both use the same prepared-index vector reads, retaining raw
+input/profile hashes, actual stored-vector verification and 200-ID batches:
+
+```python
+missing = coverage.missing(vector_table, selected_chunks, profile, bounded=True)
+# After embeddings are stored and explicit tail preparation succeeds:
+coverage.record(vector_table, completed_chunks, profile, vectors, bounded=True)
+```
+
+Receipt publication refuses missing preparation, unindexed tails, backend
+errors and mismatched stored vectors before committing any new receipts.
+No method prepares indices, acknowledges a failed read as vector absence, or
+changes the default content-first embedding writer. A new profile with no
+candidate receipts needs no vector read to establish missing pairs.
+Existing calls without the keyword remain unchanged. This opt-in is a
+backfill prerequisite, not a resumable backfill operation or a new cursor,
+source-lock, reader-currentness or coverage authority.
+
 ## Qualification and limits
 
 `tests/test_chunk_id_index.py` exercises actual content/vector stores at 100,

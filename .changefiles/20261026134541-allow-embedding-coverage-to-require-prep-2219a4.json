@@ -1,0 +1,9 @@
+{
+  "comment": "Allow embedding coverage to require prepared-index vector verification",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

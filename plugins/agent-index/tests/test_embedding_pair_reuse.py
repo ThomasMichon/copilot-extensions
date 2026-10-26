@@ -245,6 +245,92 @@ def test_receipt_lookup_is_bounded_by_selected_pairs(tmp_path: Path, size: int) 
     assert steps < 100
 
 
+def test_bounded_coverage_batches_and_read_failures_before_publication(
+    tmp_path: Path,
+) -> None:
+    class PreparedTable(Table):
+        fail = False
+
+        def get_vectors(
+            self, ids: list[str], *, strict: bool = False, bounded: bool = False,
+        ) -> dict[str, np.ndarray]:
+            assert bounded
+            if self.fail:
+                raise RuntimeError("point read failed")
+            return super().get_vectors(ids, strict=strict)
+
+    paths, model = PathIndex(tmp_path / "paths.db"), profile()
+    coverage = EmbeddingCoverage(paths)
+    table = PreparedTable(model.table_name)
+    items = [chunk(path=f"{i}.md") for i in range(505)]
+    vectors = np.ones((505, 2), dtype=np.float32)
+    table.rows.update({item.chunk_id: vec for item, vec in zip(items, vectors, strict=True)})
+    coverage.record(table, items, model, vectors, bounded=True)
+    assert coverage.missing(table, items, model, bounded=True) == []
+    assert table.reads == [200, 200, 105] * 2
+    table.fail = True
+    with pytest.raises(RuntimeError, match="point read failed"):
+        coverage.missing(table, items, model, bounded=True)
+    coverage.invalidate(table, items)
+    with pytest.raises(RuntimeError, match="point read failed"):
+        coverage.record(table, items, model, vectors, bounded=True)
+    assert coverage.missing(table, items, model, bounded=True) == items
+    table.fail = False
+    table.rows.pop(items[-1].chunk_id)
+    with pytest.raises(RuntimeError, match="Stored embeddings"):
+        coverage.record(table, items, model, vectors, bounded=True)
+    assert coverage.missing(table, items, model, bounded=True) == items
+
+
+def test_native_bounded_coverage_refuses_unprepared_tail_without_receipts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_index.store.chunk_id_index import (
+        ChunkIdIndexPreparationRequired,
+        prepare_chunk_id_index,
+    )
+
+    monkeypatch.setenv("AGENT_INDEX_STORE_LAYOUT", LAYOUT)
+    model, item = profile(), chunk()
+    config = IndexConfig(data_dir=tmp_path, model_profiles={"a": model})
+    store = initialize_source_store(config)
+    table = store.get_vector_table("a")
+    paths = PathIndex(tmp_path / "paths.db")
+    coverage = EmbeddingCoverage(paths)
+    vectors = np.ones((1, 2), dtype=np.float32)
+    store.upsert("a", [item], vectors)
+    before = store.projection_snapshot()
+    with pytest.raises(ChunkIdIndexPreparationRequired, match="missing"):
+        coverage.record(table, [item], model, vectors, bounded=True)
+    assert coverage.missing(table, [item], model, bounded=True) == [item]
+    assert store.projection_snapshot() == before
+    assert store._source_domain.receipt()["state"] == "clean"
+    prepare_chunk_id_index(table, max_rows=1)
+    coverage.record(table, [item], model, vectors, bounded=True)
+    assert coverage.missing(table, [item], model, bounded=True) == []
+
+    changed = np.array([[42, 1]], dtype=np.float32)
+    store.upsert_vectors("a", [item], changed)
+    before = store.projection_snapshot()
+    with pytest.raises(ChunkIdIndexPreparationRequired, match="budget"):
+        coverage.missing(table, [item], model, bounded=True)
+    with pytest.raises(ChunkIdIndexPreparationRequired, match="budget"):
+        coverage.record(table, [item], model, changed, bounded=True)
+    assert store.projection_snapshot() == before
+    assert store._source_domain.receipt()["state"] == "clean"
+    prepare_chunk_id_index(table, max_rows=1)
+    assert coverage.missing(table, [item], model, bounded=True) == [item]
+    with pytest.raises(RuntimeError, match="Stored embeddings"):
+        coverage.record(table, [item], model, vectors, bounded=True)
+    coverage.record(table, [item], model, changed, bounded=True)
+    assert EmbeddingCoverage(PathIndex(tmp_path / "paths.db")).missing(
+        table, [item], model, bounded=True,
+    ) == []
+    assert coverage.missing(table, [item], replace(model, revision="new"), bounded=True) == [item]
+    store.delete_by_file(item.source, item.file_path)
+    assert coverage.missing(table, [item], model, bounded=True) == [item]
+
+
 @pytest.mark.parametrize("selected", [False, True])
 def test_native_metadata_reuse_preserves_vector_version_and_lazy_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selected: bool,

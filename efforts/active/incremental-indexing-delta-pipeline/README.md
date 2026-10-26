@@ -679,3 +679,40 @@ source-owner coordination rather than one large rewrite.
 - The bounded repo-filter/FTS/currentness/consumer selection passes 39 tests.
   This is another staged consumer seam; actual published consumption and the
   remaining full effort matrix are still open.
+
+### 2026-10-26 - Repo naming policy reviewed and merged
+
+- PR #9119 merged as `6acc2e38ac4daac47324dbcddbdf055298c75e60`
+  after exact-head Copilot approval with no open issues and green required
+  checks. Strengthened the review's regression-test finding: distinct documents,
+  both repo directions and both one-result and wide-result limits now reject
+  early limiting and sibling wildcard leakage.
+- The final bounded repo-policy/FTS/currentness/consumer selection passes 39
+  tests. Reconciled the reusable worktree and re-read this effort's Plan and
+  Validation Plan; remaining acquisition, model backfill, logical maintenance
+  and complete consumer qualification are still open.
+- Next, qualify a published source containing both reviewed consumer policies
+  through the actual consumer path, rather than treating a development source
+  overlay as consumed release evidence. Rollout retains its separate gate.
+
+### 2026-10-26 - Prepared-index embedding coverage
+
+- Actual released consumer qualification now uses the shared engine and both
+  reviewed consumer policies rather than a development-source overlay. This
+  does not close the separate rollout or full acquisition/backfill matrix.
+- Added opt-in `bounded=True` to the existing embedding coverage selection and
+  receipt verification methods. It requires prepared-index vector reads without
+  changing defaults, building indices automatically or inventing a second
+  coverage, cursor, reader or source ownership mechanism.
+- Missing preparation, unindexed tails, backend failures and actual-vector
+  mismatches refuse before new receipts are published. Existing raw-input and
+  model identity, vector hashes, 200-ID batches and restart reuse remain intact.
+- The bounded native/recovery packet passes 60 tests, including actual prepared
+  coverage at 100, 10,000 and 100,000 vector rows, 505-pair batch boundaries,
+  failed/late-incomplete verification, explicit tail preparation and clean
+  refusal, profile changes, vector overwrites/loss and restart reuse. Changed
+  Python lint/types and runtime install contracts pass.
+- This prerequisite does not opt the ordinary embedding writer into bounded
+  reads or implement unchanged-content backfill. Next factor the shared pair
+  write seam with source-bound current-row checks, then qualify separately
+  budgeted, resumable discovery. #4220, #8733 and #5302 retain their scopes.
