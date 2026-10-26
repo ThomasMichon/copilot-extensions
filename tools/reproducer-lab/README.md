@@ -9,6 +9,8 @@ deletes resources. Source publication does not authorize those observations
 against an existing installation.
 The separate guest operation context is effectful only when explicitly invoked
 in a separately authorized guest; the host reader never invokes it.
+The [image/runtime recipe](image-runtime.md) supplies source for separately
+approved builds and first guest preparation; it has not been built or qualified.
 
 `boundary.py` provides:
 
