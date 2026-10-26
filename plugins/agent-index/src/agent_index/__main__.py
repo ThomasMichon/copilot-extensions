@@ -623,7 +623,9 @@ def _dispatch_to_server_venv(
 
     cmd = [str(server_python), "-I", "-X", "utf8", "-m", "agent_index"]
     if raw_args is not None:
-        cmd.extend(raw_args)
+        from .index_command import absolute_hint_file_argv
+
+        cmd.extend(absolute_hint_file_argv(raw_args))
     else:
         cfg = _config_from_args(args)
         cmd.extend([subcommand, "--host", cfg.host, "--port", str(cfg.port)])

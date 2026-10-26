@@ -582,7 +582,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
 
     @app.post("/reindex/hints")
     async def reindex_hints(request: Request) -> dict[str, Any]:
-        from .reindex_intake import read_hinted_request
+        from .reindex_intake import enqueue_hinted_request, read_hinted_request
 
         with track_read(request):
             body = await read_hinted_request(request)
@@ -593,13 +593,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
             runner = getattr(request.app.state, "task_runner", None)
             if store is None or runner is None or not request.app.state.promoted:
                 return {"accepted": False, "error": "indexing task runner unavailable"}
-            task = store.enqueue(
-                source=body.source,
-                full=False,
-                change_hints=body.change_hints,
-                trigger_source="api:agent_index_reindex_hints",
-            )
-            runner.notify()
+            task = await enqueue_hinted_request(store, body, runner.notify)
             return {
                 "accepted": True,
                 "task": task.to_dict(),

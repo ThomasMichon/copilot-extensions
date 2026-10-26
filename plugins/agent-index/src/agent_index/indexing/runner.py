@@ -761,8 +761,24 @@ class TaskRunner:
                 if proc is not None:
                     alive = proc.poll() is None
                 else:
-                    alive = _pid_alive(rec.worker_pid if rec else task.worker_pid)
+                    alive = _pid_alive(
+                        rec.worker_pid if rec and rec.worker_pid else task.worker_pid
+                    )
                 if not alive:
+                    rec = await _settle(asyncio.create_task(
+                        asyncio.to_thread(self.store.get_task, task.id)
+                    ))
+                    if rec is not None and rec.status in _TERMINAL_VALUES:
+                        break
+                    if (
+                        rec is not None and rec.status == TaskStatus.QUEUED_HINTS.value
+                        and getattr(rec, "change_hints", None) is not None
+                    ):
+                        if task.id in self._cancel_requested:
+                            await _settle(asyncio.create_task(
+                                asyncio.to_thread(self.store.cancel, task.id)
+                            ))
+                        break
                     # Worker gone without a terminal status: reconcile it.
                     if task.id in self._cancel_requested:
                         final, err = TaskStatus.CANCELLED.value, None
@@ -798,13 +814,18 @@ class TaskRunner:
                         log.warning("Post-index hook failed", exc_info=True)
             elif status in (TaskStatus.FAILED.value, TaskStatus.INTERRUPTED.value):
                 self.tasks_failed += 1
-            log.info("Task %s finished: %s", task.id, status)
-            self.event_bus.publish("task_complete", {
-                "task_id": task.id,
-                "success": status == TaskStatus.COMPLETE.value,
-                "status": status,
-                "result_stats": rec.result_stats if rec else None,
-            })
+            log.info("Task %s worker settled: %s", task.id, status)
+            if status == TaskStatus.QUEUED_HINTS.value:
+                self.event_bus.publish("queue_update", {
+                    "task_id": task.id, "reason": "capability-rollback",
+                })
+            else:
+                self.event_bus.publish("task_complete", {
+                    "task_id": task.id,
+                    "success": status == TaskStatus.COMPLETE.value,
+                    "status": status,
+                    "result_stats": rec.result_stats if rec else None,
+                })
         except asyncio.CancelledError:
             # Service is stopping (e.g. cutover): LEAVE the detached worker
             # running — the next service adopts it. Do not mark the task.

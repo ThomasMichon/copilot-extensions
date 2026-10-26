@@ -280,7 +280,10 @@ this runtime advertises v1 support. It rechecks before launch; the worker checks
 its own selected callable again before execution. A capability loss returns a
 claimed hinted task to `queued_hints`, without calling the engine or advancing
 its checkpoints. An unclaimed hinted task cannot be executed directly by the
-new worker.
+new worker. The monitor preserves intentional re-parking after the worker
+exits, publishes a queue update rather than a terminal failure, and allows
+dequeue when capability returns without requiring a manual retry. A pending
+cancellation still cancels the parked row.
 
 The execution seam is
 `agent_index.indexing.engine.run_reindex(..., change_hints: ChangeHints | None = None)`.
@@ -302,6 +305,9 @@ Advertising durable intake is not a claim that hinted execution is available.
 versions, duplicate JSON keys, mismatched scopes and oversized bodies before
 queue effects. Ordinary runner/dependency/drain availability checks still apply.
 Accepted responses include the stored task and its complete unioned payload.
+SQLite admission runs off the service event loop. Request cancellation does
+not release drain admission until the queue write and runner notification
+settle; the service remains responsive while a database writer is contended.
 The legacy `/reindex` source/full contract is unchanged, but extra properties
 are rejected rather than silently discarding required hints.
 
@@ -315,6 +321,9 @@ The direct local CLI form `index --source S --change-hints-file FILE` strictly
 reads the same v1 JSON and requires callable execution capability before
 calling the engine; it never retries without hints. Older CLIs reject the new
 option. With no hints file, the existing direct CLI execution path is retained.
+Split-runtime forwarding makes relative hint-file paths absolute in the
+caller's working directory before the hosted child changes directory. Both
+`--change-hints-file FILE` and `--change-hints-file=FILE` retain that binding.
 
 Deploy receivers before producers, and enable hinted execution only with a
 qualified capable engine. This transport expansion does not itself add engine
