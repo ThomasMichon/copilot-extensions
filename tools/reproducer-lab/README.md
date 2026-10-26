@@ -153,6 +153,8 @@ is never overwritten, deleted, resumed or retried automatically.
 
 Git reads only the selected immutable objects, not the index or dirty/untracked
 working-tree bytes. Preflight refuses symlinks, submodules, malformed paths,
+case-folded or Unicode-normalization path aliases (including directory prefixes
+and reserved Git metadata components), even on case-sensitive hosts,
 more than 16,000 files, any blob over 8 MiB or logical source content over
 256 MiB. A shallow local-file fetch produces one detached commit and its tree
 without copying the source's config, hooks, refs, reflogs, index or object store.

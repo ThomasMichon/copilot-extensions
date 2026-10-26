@@ -8,6 +8,7 @@ import re
 import stat
 import subprocess
 import time
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
@@ -32,6 +33,20 @@ class SourceTree:
     logical_bytes: int
 
 
+def _check_path_aliases(name: str, prefixes: dict[str, tuple[str, bool]]) -> None:
+    parts = name.split("/")
+    for length in range(1, len(parts) + 1):
+        original = "/".join(parts[:length])
+        key = unicodedata.normalize("NFD", original.casefold())
+        entry = (original, length == len(parts))
+        if (
+            unicodedata.normalize("NFD", parts[length - 1].casefold()) == ".git"
+            or key in prefixes and (prefixes[key] != entry or entry[1])
+        ):
+            raise SourceError("source tree contains filesystem path aliases")
+        prefixes[key] = entry
+
+
 def inspect_tree(commit: str, tree: str, listing: str) -> SourceTree:
     """Bound regular source inputs before materializing their shallow closure."""
     if (
@@ -40,6 +55,7 @@ def inspect_tree(commit: str, tree: str, listing: str) -> SourceTree:
     ):
         raise SourceError("source commit or tree identity is incomplete")
     seen: set[str] = set()
+    prefixes: dict[str, tuple[str, bool]] = {}
     total = 0
     if not listing.endswith("\0"):
         raise SourceError("source tree listing is incomplete")
@@ -62,6 +78,7 @@ def inspect_tree(commit: str, tree: str, listing: str) -> SourceTree:
             raise SourceError("source blob size is unavailable") from error
         if size < 0 or size > MAX_BLOB_BYTES:
             raise SourceError("source blob exceeds its supported byte ceiling")
+        _check_path_aliases(name, prefixes)
         seen.add(name)
         total += size
         if len(seen) > MAX_FILES or total > MAX_SOURCE_BYTES:

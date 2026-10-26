@@ -51,6 +51,39 @@ def test_source_tree_aggregate_input_ceilings(monkeypatch: Any) -> None:
         source.inspect_tree(COMMIT, TREE, LISTING)
 
 
+@pytest.mark.parametrize("names", [
+    ("A.py", "a.py"),
+    ("Package/a.py", "package/b.py"),
+    ("module", "MODULE/child.py"),
+    ("module/child.py", "MODULE"),
+    ("\u00e9.py", "e\u0301.py"),
+    ("Stra\u00dfe/a.py", "STRASSE/b.py"),
+    (".GIT/config",),
+    ("package/.GiT/config",),
+])
+def test_case_normalization_and_directory_aliases_refuse_before_checkout(
+    tmp_path: Path, names: tuple[str, ...],
+) -> None:
+    listing = "".join(f"100644 blob {BLOB} 7\t{name}\0" for name in names)
+    repository, results = roots(tmp_path)
+    runner = FakeGit(listing=listing)
+    with pytest.raises(source.SourceError, match="path aliases"):
+        source.SourceReader(Path("/selected/git"), run=runner).materialize(
+            repository, COMMIT, results, "attempt",
+        )
+    assert len(runner.calls) == 3
+    assert not (results / "attempt" / "source.json").exists()
+    assert not (results / "attempt" / "source").exists()
+
+
+def test_shared_exact_directory_prefixes_remain_supported() -> None:
+    listing = "".join(
+        f"100644 blob {BLOB} 7\t{name}\0"
+        for name in ("Package/a.py", "Package/b.py", "other/Package/a.py")
+    )
+    assert source.inspect_tree(COMMIT, TREE, listing).files == 3
+
+
 def test_exact_tree_and_blob_input_ceilings(monkeypatch: Any) -> None:
     maximum = f"100644 blob {BLOB} {source.MAX_BLOB_BYTES}\tmodule.py\0"
     assert source.inspect_tree(COMMIT, TREE, maximum).logical_bytes == source.MAX_BLOB_BYTES

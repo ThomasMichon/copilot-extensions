@@ -74,3 +74,12 @@ def test_real_git_snapshot_excludes_dirty_untracked_configuration_and_hooks(
     prior = run([git, "-C", str(checkout), "cat-file", "-e", previous], timeout=15, env=env)
     assert prior.returncode != 0
     assert (repository / "module.py").read_text() == "print('dirty')\n"
+    invoke("config", "core.ignoreCase", "false")
+    (repository / "MODULE.py").write_text("print('colliding')\n")
+    invoke("add", "MODULE.py")
+    invoke("commit", "--quiet", "-m", "synthetic colliding paths")
+    colliding = invoke("rev-parse", "HEAD")
+    with pytest.raises(source.SourceError, match="path aliases"):
+        source.SourceReader(Path(git)).materialize(repository, colliding, results, "collision")
+    assert not (results / "collision" / "source").exists()
+    assert not (results / "collision" / "source.json").exists()
