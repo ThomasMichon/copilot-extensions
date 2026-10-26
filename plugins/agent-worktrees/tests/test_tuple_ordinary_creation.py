@@ -121,7 +121,7 @@ def test_ordinary_new_selects_tuple_without_test_mode_injection(
     assert record.worktree_id.startswith(prefix)
     if surface == "interactive":
         assert len(preflights) >= 2
-        assert all(path.split("/")[-1].startswith(prefix) for path in preflights)
+        assert all(Path(path).name.startswith(prefix) for path in preflights)
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])

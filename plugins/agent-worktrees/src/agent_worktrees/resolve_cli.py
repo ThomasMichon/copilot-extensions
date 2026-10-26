@@ -739,7 +739,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
         except LaunchSeedStagingFailure as exc:
             return exc.emit(json_out=True)
-        except RuntimeError as exc:
+        except (ValueError, RuntimeError) as exc:
             return output._json_error(str(exc))
         output._json_output(result)
         return 0

@@ -303,7 +303,6 @@ def cmd_create(args: argparse.Namespace) -> int:
         else (
             getattr(args, "owner_ref", None)
             or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-            or _resolve_owner_ref()
             or None
         )
     )
@@ -358,6 +357,8 @@ def cmd_create(args: argparse.Namespace) -> int:
             if project_state.namespaced():
                 project_state.ensure_project_state(cfg.project_name())
             config = cfg.load_config()
+            if not owner_ref and not (is_system or no_owner):
+                owner_ref = _resolve_owner_ref()
             result = _create_worktree_core(
                 config,
                 no_mux=True,
@@ -420,7 +421,8 @@ def _resolve_owner_ref() -> str | None:
     except Exception:
         project = config.repo_name
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    return tracking.format_claim_ref(config.machine, project, caller_id, session)
+    machine = worktree_identity.reference_machine(config, caller_id, project=project)
+    return tracking.format_claim_ref(machine, project, caller_id, session)
 
 
 def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
@@ -450,7 +452,8 @@ def _resolve_anchor_owner_ref(config: cfg.Config) -> str | None:
     except Exception:
         return None
     session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-    return tracking.format_anchor_ref(config.machine, project, session)
+    machine = worktree_identity.reference_machine(config, tracking.ANCHOR_ID, project=project)
+    return tracking.format_anchor_ref(machine, project, session)
 
 
 def _claim_from_run_output(stdout: str) -> tracking.ResourceClaim | None:
@@ -604,7 +607,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"machine/project/worktree_id ref (got {owner_ref!r})"
         )
         return 1
-    if parsed_owner.machine != run_config.machine:
+    from .execution_spaces import ExecutionSpaceError, require_owner_identity
+
+    try:
+        local_owner = (
+            parsed_owner.machine == run_config.machine
+            or require_owner_identity(parsed_owner.machine, run_config)
+        )
+    except ExecutionSpaceError as exc:
+        output.err(f"run: cannot resolve owner execution space: {exc}")
+        return 1
+    if not local_owner:
         output.err(
             f"run: cross-machine owner {owner_ref} cannot synchronously reserve "
             "this resource; use a dispatch/lease flow that persists remote "

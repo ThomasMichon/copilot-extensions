@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from . import config as cfg, tracking
+from . import config as cfg, tracking, worktree_identity
 
 
 def _core():
@@ -35,9 +35,10 @@ def _self_owner_ref(work_dir: str | None, *, config: cfg.Config | None = None) -
         except Exception:
             project = config.repo_name
         session = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
-        return tracking.format_claim_ref(config.machine, project, wid, session)
     except Exception:
         return None
+    machine = worktree_identity.reference_machine(config, wid, project=project)
+    return tracking.format_claim_ref(machine, project, wid, session)
 
 
 def _build_env(
