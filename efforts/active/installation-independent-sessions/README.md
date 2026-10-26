@@ -135,6 +135,14 @@ round trip works. The [literal follow-up](inception-transcript.md#operator---sel
 redacts only the private host name. Concrete host identity and operational
 records remain private; the generic execution contract is [live-roundtrip.md](live-roundtrip.md).
 
+**Legacy-session decision:** after the agent identified runtime-Python
+ancestors in existing sessions, the operator explicitly selected controlled
+closure and relaunch **after verified backups and fixed-launcher
+qualification**, preserving resumable state. The [literal selection](inception-transcript.md#operator---legacy-session-migration)
+and live charter retain that ordering. Migration is not same-process survival;
+the qualified replacement's later uninstall/reinstall test must preserve its
+own original processes.
+
 ## Plan
 
 ### Phase 1 - Reviewed contract and shared ownership
@@ -297,6 +305,27 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-10-26 - Live charter reviewed; runtime coupling confirmed
+
+- #9074 merged as `bad5db98a52f844d614832b43b1c0cc310dbf4f1`
+  after exact-head Copilot approval with no findings and green required CI.
+  Managed completion used the normal Maintainer CODEOWNER-review exception;
+  no CI gate was bypassed. Re-read the parent plan: the effort remains Active.
+- Read-only live process ancestry and the refreshed source trace identify
+  nested `launch_seed_exec` waiters below the existing Windows pane wrapper.
+  Preserve those ancestors rather than terminate them to manufacture removal.
+  The launch-contract inventory now includes both seed/setup boundaries.
+- Normal admitted promotion run `40308349413` failed artifact construction:
+  its pinned helper rejected `setup.py`. The existing source/helper-coherence
+  repair #9061 owns that failure class; sent the exact normal-lane evidence
+  there rather than opening a competing implementation. A later duplicate
+  admission refusal is not the underlying build failure or permission to retry.
+- A first bounded backup attempt did not complete and is not accepted evidence.
+  The revised task-specific backup has native Windows WAL/restore and
+  whole-command synthetic tests, explicit reconstructible-runtime exclusions,
+  and progress/entry journaling. Live backup acceptance remains pending.
+  No host services or installations have been stopped or changed.
 
 ### 2026-10-26 - Selected live-host round trip authorized
 

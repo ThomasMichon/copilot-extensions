@@ -56,11 +56,17 @@ New/short-ID lookup/Resume source proof merged in #8886, including optional-map
 and managed/external namespace boundaries. Actual project registration/install
 source proof merged in #8898 after current-head approval and required CI,
 including retained target-map, ordinary/explicit configuration and platform-path
-precedence. The [current journal](journal/2026/10.25%20progress.md) records that
-source boundary and the contained Manager actual-reader candidate. Manager review,
-qualified release
-and installed acceptance remain open. The parent effort remains Active.
-These source merges do not establish release, installation or default activation.
+precedence. Manager actual-reader, bootstrap, local-only entry and routing
+source proof merged in #8929 after current-head approval and required CI.
+The corrective source through #8929 qualified in natural run `40185301956`
+and released through #8956 to Main `56cc5f40c838ba33982c9679351d40934e5a115d`.
+The [current journal](journal/2026/10.25%20progress.md) records the exact
+candidate and qualification boundary. Installed opt-in allocation, keyed replay,
+lookup and Resume-plan acceptance is now recorded for every registered native
+and guest project, retaining explicit source-only hosting refusals. The remaining
+structured-policy work and separately reviewed ordinary activation remain open.
+The parent effort remains Active.
+The qualified release does not establish installation or default activation.
 
 **Physical-machine clarification:** machine name, OS hostname and execution
 environment are separate dimensions. A compact host/environment address is
@@ -460,17 +466,26 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       consumers in #7414, keeping ordinary creation producers legacy.
 - [x] Review and execute the [shared raw-JSON codec integration](physical-machine-environment-boundary.md#shared-raw-json-codec-integration)
       before enabling producers; retain independent plugin installation.
-- [ ] Review and execute the [gated producer source plan](physical-machine-environment-boundary.md#gated-producer-implementation),
+- [x] Review and execute the [gated producer source plan](physical-machine-environment-boundary.md#gated-producer-implementation),
       preserving retained allocations before any ordinary-default activation.
+      Source slices #7572, #7582, #7588 and #7592, subsequent local-context
+      corrections and installed opt-in acceptance close this source gate.
+      Ordinary call-site activation remains the separately reviewed gate in
+      that plan; no low-level default is changed.
 - [ ] Review and execute the [manifest-independent local-identity amendment](manifest-independent-local-identity.md);
       machine maps customize rather than admit ordinary local use.
-      The intent and corrective plan passed review in #7773; implementation and
-      installed acceptance remain open. Registration/load source proof merged
-      in #8898; Manager source/entry and installed acceptance remain separate.
+      The intent and corrective plan passed review in #7773. Registration/load source proof merged
+      in #8898 and Manager source/entry proof in #8929; qualified release and
+      installed opt-in acceptance are recorded above. The remaining read-only
+      guidance correction and separately reviewed ordinary activation remain open.
 - [ ] Make runtime admission, structured machine guidance and prospective
       worktree naming/metadata consume the correct dimension. Keep native and
       guest execution authority distinct and use the same policy in update and
       launch reconciliation.
+      Runtime admission #7321 and structured-dimension guidance #7334 already
+      merged. The current guidance follow-up removes the remaining
+      matching-manifest precondition without changing deployment policy or
+      enabling ordinary tuple producers.
 - [ ] Preserve existing IDs, paths, refs, records, queued work and live sessions;
       retain supported legacy lookup and allocation replay. No automatic
       relabel, rename, policy widening or data migration.
@@ -485,14 +500,24 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
       settlement, then verify the supported full repair/update. All 16 registered
       targets are current, the durable request completed with exit zero, and no
       queue fence or restart requirement remains.
-- [ ] Verify the installed Windows/WSL deployment and all-worktree resolution
+- [x] Verify the installed Windows/WSL deployment and all-worktree resolution
       matrix; record or explicitly transfer any reproducible Manager regression.
+      Both supported update requests completed successfully. Real Manager entry
+      passed all eight project/environment contexts; 470 existing-record previews
+      preserve ID/path, with source-only refusals and missing checkouts reported
+      separately. Actual new tuple allocation/replay and allowed Resume plans
+      passed in disposable resources, all normally finalized after validation.
 
 ### Phase 4 - Installed acceptance and closure
 - [x] Enumerate all registered projects and existing Windows/WSL worktrees;
   report removed checkouts separately from identity-resolution failures.
-- [ ] Prove installed creation and resume for historical and current identity
+- [x] Prove installed creation and resume for historical and current identity
   forms, including hostname/preferred-name differences.
+  Existing-record previews preserve historical IDs/paths without resuming live
+  sessions. Eight new native/guest tuple allocations retain their exact records
+  through both producer-mode replays; allowed Resume plans preserve tuple and
+  nonce, while source-only projects retain their hosting-policy refusal.
+  No returned agent command was executed.
 - [x] Verify the current Manager source is in-process, its rows remain visible,
   and its logical sibling uses the correct separate transport.
   Actual selected Manager packages loaded each local source without SSH,
@@ -523,8 +548,14 @@ _(Agent-recommended realization of the operator's explicit model clarification.)
   Windows lanes; distinguish conditional skips from executed proof.
 - [x] Pass applicable lint, install-contract, module ceilings, publication
   safety, documentation-impact review and required provider checks.
-- [ ] Verify released and installed behavior in both environments, preserving
+- [x] Verify released and installed behavior in both environments, preserving
   queued prompts, live sessions, historical strings and unrelated records.
+  Each installed producer fixture changes only its newly allocated validation
+  record; pre-existing tracking bytes remain unchanged within that fixture.
+  Normal owner status and new-resource claim journaling remain separate.
+  All test checkouts and
+  branches are removed through normal finalization, retaining records/receipts.
+  This does not activate ordinary producers or close the remaining Phase 3d work.
 - [ ] Satisfy the [guest-identity validation matrix](guest-execution-identity.md#validation-plan)
   before declaring the #6945 containing rollout gap closed.
 - [x] For Phase 3c, prove read-only dry-run, exact selection and JSON, local

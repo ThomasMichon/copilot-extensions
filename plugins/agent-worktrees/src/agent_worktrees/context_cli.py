@@ -249,6 +249,8 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     """sessionStart hook entrypoint: emit machine identity as additionalContext."""
     del args
     import json as _json
+    import yaml
+    from machine_transport import resolve_local_execution_context
 
     def _empty() -> int:
         print("{}")
@@ -293,22 +295,25 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
     try:
         registry = cfg.load_machines_yaml(repo_dir, config=config)
     except FileNotFoundError:
-        return _identity_only()
-    except ValueError as exc:
+        registry = {}
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         print(f"warning: Cannot load machine topology: {exc}", file=sys.stderr)
         return _identity_only()
 
     try:
-        entry = cfg.find_machine_metadata(registry, machine)
+        context = resolve_local_execution_context(
+            registry, hostname=cfg.socket.gethostname(), environment=cfg.detect_platform(),
+            configured_machine=getattr(config, "configured_machine", None),
+        )
     except ValueError as exc:
         print(f"warning: Cannot resolve machine metadata: {exc}", file=sys.stderr)
         return _identity_only()
-    if entry is None:
-        print(f"warning: Machine topology has no metadata for {machine!r}", file=sys.stderr)
-        return _identity_only()
 
     try:
-        raw = cfg.render_copilot_instructions(entry, project=project, machine=machine).rstrip()
+        entry = registry.get(context.customization_key) if context.customization_key else None
+        raw = machine_instructions.render_local_context(
+            context, entry=entry, project=project,
+        ).rstrip()
     except Exception as exc:
         print(f"warning: Cannot render machine context: {exc}", file=sys.stderr)
         return _identity_only()

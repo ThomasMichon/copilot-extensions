@@ -2,8 +2,10 @@
 
 Back to the [canonical effort](README.md).
 
-This is the initial source-grounded inventory at
-`32b43c74e7e0f35a947eb605f8ef5ea83ad5b718`, not a claim of implemented behavior.
+Initial inventory used `32b43c74e7e0f35a947eb605f8ef5ea83ad5b718`;
+the seed/setup boundary was refreshed at
+`bad5db98a52f844d614832b43b1c0cc310dbf4f1`.
+This is not a claim of implemented behavior.
 Proposed refinements are **agent-recommended** until their production slice
 clears review.
 
@@ -14,6 +16,8 @@ clears review.
 | Ordinary Manager launch, resume and new-window modifier | `worktree-manager/src/worktree_manager/relocated_launch.py` delegates to the Manager payload's `launch-session` script. POSIX exec-replaces; ordinary Windows waits; new-window delegates a separate terminal spawn. | Preserve launch mode, prepared seed/attempt identity, arguments and environment. #5579 retains forwarding-layer changes. |
 | Linux mux pane construction | `worktree-manager/bin/launch-session.sh` selects its sibling `pane-wrapper.sh` and passes worktree/project/mux session and optional prompt/AHP controls. | Copy a self-contained session shell before starting the pane; an installed script must not be its lifetime dependency. Preserve existing prepared-command and credential-isolation behavior. |
 | Windows mux pane construction | `worktree-manager/bin/launch-session.ps1` builds a one-shot file-based argv handoff to `pane-launch.ps1`, then its sibling `pane-wrapper.ps1`. | Preserve file-consumption/receipt semantics and literal argv. A copied wrapper cannot reach back to an installed pane launcher after startup. |
+| Deferred seed/admission command | `agent_worktrees.launch_seed_exec.deferred_command` places a runtime Python above the setup command. On Windows `_launch` waits for that command; even POSIX retains a waiter when admission or execution correlation needs it. | Preparation/admission must settle before handing the execution leg to the stable shell. Copying the pane wrapper alone leaves this removable interpreter alive. Preserve admission, correlation and unknown-seed custody. |
+| Actual Copilot boundary in default setup | `scripts/default-setup.ps1::Invoke-CopilotBackend` calls `launch_seed_exec --invoke` when a staged seed is present. That Python starts Copilot and waits for its full lifetime. The setup script also owns post-exit fsmonitor teardown. | Prepare literal backend argv and seed custody without retaining the runtime as Copilot's waiter. Move supported post-exit policy to the current boundary owner, not out of the contract. Cover actual seeded/resume launches as well as seed-free fixtures. |
 | Registration at create/join | `Invoke-ManagedMuxRegister` / `_aw_publish_managed_mux_live` use the current launch script's sibling `manager-runtime` helper. | Preserve joins of an existing live session and daemon status routing. Distinguish a new leg's start from an attach; do not re-register an unrelated incarnation. |
 | Windows wrapper ownership | `worktree-manager/bin/pane-wrapper.ps1` owns a kernel kill-on-close Job for the pane subtree. | The copied shell must keep this handle for its entire lifetime. Moving it into a short-lived hook would kill the session or lose containment. |
 | Pane end | Both pane wrappers record exit activity and use a sibling `manager-runtime` helper to dispatch removal. | Resolve the current compatible same-installation implementation at end, not the payload captured at start. Remove policy-only installed imports from the waiting shell. |
@@ -56,6 +60,11 @@ against the real baseline rather than guessing:
   handshake alone must not be described as lifecycle delivery.
 - Existing launch-depth source ownership on #5579. Keep its wait-only
   forwarding acceptance distinct even if the same launch contract is shared.
+- The real Windows baseline also contains nested `launch_seed_exec` waiters
+  below the pane wrapper. Their source is the deferred setup and final
+  `--invoke` boundaries above, not proof of duplicate application work.
+  Removing only `manager_launch_cli` / `relocated_launch` cannot close this
+  installation-survival gate; those remain separately owned by #5579.
 
 ## Validation boundaries
 

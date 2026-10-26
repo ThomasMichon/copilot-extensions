@@ -70,6 +70,10 @@ def inspection() -> dict[str, Any]:
             "NanoCpus": budget.cpus * 10**9,
             "PidsLimit": budget.pids,
             "NetworkMode": experiment.resource_prefix + "-internal",
+            "Tmpfs": {
+                "/tmp": f"rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size={budget.tmp_bytes}",
+                "/run": f"rw,nosuid,nodev,uid=1000,gid=1000,mode=0700,size={budget.run_bytes}",
+            },
             "Mounts": [
                 {"Type": "volume", "Source": name, "Target": destination, "ReadOnly": False}
                 for destination, name in experiment.volumes.items()
@@ -298,3 +302,47 @@ def test_explicit_null_cap_add_is_distinct_from_missing_observation() -> None:
     assert mod.inspect_static_boundary(experiment, observed).violations == ()
     del observed["HostConfig"]["CapAdd"]
     assert mod.inspect_static_boundary(experiment, observed).violations
+
+
+@pytest.mark.parametrize("value", [
+    None, {}, [], {"/tmp": "rw"}, {"/tmp": "rw", "/run": "rw", "/": "rw"},
+])
+def test_volatile_inventory_is_complete_and_exclusive(value: object) -> None:
+    observed = inspection()
+    observed["HostConfig"]["Tmpfs"] = value
+    assert mod.inspect_static_boundary(mod.parse_declaration(declaration()), observed).violations
+
+
+@pytest.mark.parametrize("destination", ["/tmp", "/run"])
+@pytest.mark.parametrize("change", [
+    "missing-size", "zero", "larger", "uid", "gid", "mode", "suid", "device",
+    "duplicate", "conflict", "malformed",
+])
+def test_volatile_flags_and_exact_byte_budgets(destination: str, change: str) -> None:
+    observed = inspection()
+    original = observed["HostConfig"]["Tmpfs"][destination]
+    options = original.split(",")
+    size = options[-1]
+    if change == "missing-size":
+        options.remove(size)
+    elif change == "zero":
+        options[-1] = "size=0"
+    elif change == "larger":
+        options[-1] = f"size={int(size.split('=')[1]) + 1}"
+    elif change in {"uid", "gid", "mode"}:
+        options = [item for item in options if not item.startswith(change + "=")]
+        options.append({"uid": "uid=0", "gid": "gid=0", "mode": "mode=0777"}[change])
+    elif change in {"suid", "device"}:
+        options.remove("nosuid" if change == "suid" else "nodev")
+    elif change == "duplicate":
+        options.append(size)
+    elif change == "conflict":
+        options.append("suid")
+    observed["HostConfig"]["Tmpfs"][destination] = None if change == "malformed" else ",".join(options)
+    assert mod.inspect_static_boundary(mod.parse_declaration(declaration()), observed).violations
+
+
+def test_missing_tmpfs_observation_is_not_an_unbounded_default() -> None:
+    observed = inspection()
+    del observed["HostConfig"]["Tmpfs"]
+    assert mod.inspect_static_boundary(mod.parse_declaration(declaration()), observed).violations

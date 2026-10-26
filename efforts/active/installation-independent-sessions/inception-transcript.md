@@ -85,3 +85,17 @@ Only the private host name is redacted below. The authorization applies to
 that one operator-selected machine, not to an arbitrary host or fleet.
 
 > As you continue this effort, feel free to use \<selected-test-host> as your test machine: you may audit the install footprint, separate state files from runtime data, and then carefully uninstall copilot-extensions services and tools from it, taking care to leave SSH-gateway connectivity running. Try to get to the point where you only leave muxed copilot processes alive, with all our services stopped and gone. Then focus on being able to perform a reinstall which stitches back up to the runtime data and carries on as though nothing was amiss. YOu have my full approval to uninstall, reinstall, re-release, and unblock main promotion with workflow fixes as needed until \<selected-test-host> demonstrates a "round trip" through install and reinstall, with a "clean state" in the middle. Definitiely worth making backups of data we store in ~/.agent- and ~/.&lt;repo&gt; first!
+
+## Operator - Legacy session migration
+
+The agent explained that the existing muxed sessions have legacy runtime-Python
+ancestors which a source update cannot retrofit. It asked how to handle those
+sessions after verified backups and qualification of the fixed launcher.
+
+The operator selected the structured-form value:
+
+> controlled-relaunch-after-fix
+
+The option's full label was:
+
+> Authorize controlled closure and relaunch after backups and launcher qualification, preserving resumable session state

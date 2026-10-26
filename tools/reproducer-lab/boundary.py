@@ -154,6 +154,7 @@ def inspect_static_boundary(
         violations.append("network selection differs from the experiment")
     _check_mounts(experiment, observed.get("Mounts"), violations)
     _check_mount_declarations(experiment, host.get("Mounts"), violations)
+    _check_volatile(experiment, host.get("Tmpfs"), violations)
     _check_environment(config.get("Env"), violations)
     # Static inspection cannot establish persistence, actual egress or ownership.
     return StaticObservation(tuple(violations), _UNRESOLVED)
@@ -239,3 +240,25 @@ def _check_environment(environment: object, violations: list[str]) -> None:
         seen[name] = value
     if seen != expected:
         violations.append("guest environment differs from the fixed synthetic baseline")
+
+
+def _check_volatile(experiment: Experiment, tmpfs: object, violations: list[str]) -> None:
+    expected = {
+        "/tmp": experiment.budgets.tmp_bytes,
+        "/run": experiment.budgets.run_bytes,
+    }
+    if not isinstance(tmpfs, dict) or set(tmpfs) != set(expected):
+        violations.append("volatile mount inventory must contain only bounded /tmp and /run")
+        return
+    fixed = {"rw", "nosuid", "nodev", "uid=1000", "gid=1000", "mode=0700"}
+    for destination, budget in expected.items():
+        options = tmpfs[destination]
+        if not isinstance(options, str):
+            violations.append("volatile mount options are malformed")
+            continue
+        tokens = options.split(",")
+        if (
+            len(tokens) != len(set(tokens))
+            or set(tokens) != fixed | {f"size={budget}"}
+        ):
+            violations.append("volatile mount flags or byte ceiling differ from declaration")
