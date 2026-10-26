@@ -788,6 +788,21 @@ exact acceptance/full commands. Deterministic workspace clock-boundary controls
 also require forwarded owner timeouts to stay within the original 60-second
 budget; no floating-point tolerance is added to that assertion.
 
+## Persistent reproducer boundary controls
+
+`tools/test_reproducer_lab_boundary.py` exercises the pure
+[`tools/reproducer-lab/`](tools/reproducer-lab/README.md) declaration and static
+Docker-observation controls. Run that selector through the caller's bounded
+test supervisor and selected Python/pytest environment. It invokes no Docker,
+service, network, dependency installation or resource lifecycle operation.
+Exact integer budget boundaries, forbidden/missing exposures, foreign or
+duplicate mounts, minimal environment and physical-identity fields are tested.
+Even a clean synthetic observation retains explicit unavailable capacity,
+egress, exclusive-custody and guest/runtime qualification requirements; this
+is not an admission result or persistence proof. Actual host readers, bounded
+storage backend, strict pre-effect support and separately authorized native
+experiments remain open. No unconditional promotion or platform matrix is added.
+
 ## Wheel-input inspection
 
 `tools/test_installer_dependency_compile.py` covers both ordinary metadata-only

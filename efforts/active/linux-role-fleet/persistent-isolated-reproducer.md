@@ -4,7 +4,7 @@ Back to [Linux role fleet](README.md) and the
 [logging integration plan](logging-conventions.md). Tracker: #8377.
 Complements the merged [first causal-record source](dispatch-spawn-causal-logging.md).
 
-**Status: proposed source plan, not an implemented or provisioned lab.**
+**Status: source plan reviewed in #9069; pure source controls in progress.**
 This is an agent-recommended decomposition of the remaining isolated
 failure-reproduction and logging qualification work. It does not authorize
 resource creation, production fault injection, deployment or credential access.
@@ -187,6 +187,13 @@ Each step stops on its named failed prerequisite; do not self-heal the subject.
 
 ## Immediate next action
 
-Obtain review of this proposal, then implement the pure declaration/boundary
-controls in step 2. Keep persistent provisioning blocked until its exact
+The first [pure controls](../../../tools/reproducer-lab/README.md) parse the
+declaration and identify known unsafe or missing static Docker observations.
+They retain explicit unavailable backend, egress, custody and guest/runtime
+requirements, never a lab-ready result. Source review and the actual bounded
+host/storage implementation remain open; synthetic tests cannot close step 2's
+real boundary qualification or any persistence/fault gate.
+
+Review this bounded source, then implement the selected host-reader/storage
+boundary before a provisioning path. Keep persistent provisioning blocked until its exact
 backend, budgets and resource actions receive separate approval.

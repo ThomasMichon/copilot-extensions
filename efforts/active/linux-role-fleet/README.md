@@ -484,6 +484,14 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+- #9069 merged the persistent isolated reproducer source proposal as
+  `2a17f7219697a4b324754d0d000f6eab5c429894` after exact-head Copilot approval
+  and all required checks. Re-read this complete Plan and Validation Plan.
+  The next bounded source slice implements pure experiment declaration and
+  boundary controls; no persistent resources or guest services are created.
+  Actual backend/quota support, provisioning approval, native capture, strict
+  pre-effect observation and running qualification remain open. Existing
+  restricted-provider policy and ephemeral test behavior remain unchanged.
 - #9044 merged the bounded Dispatch spawn-causal-logging source as
   `649c58cce494f0703c86e580647d7c0ad3b37880` after exact-head Copilot
   approval, resolved feedback and required checks. Actual worker-lane stages,
