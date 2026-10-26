@@ -6,10 +6,16 @@ lock + status file). The *apply* half lives in the shell launch wrappers.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event
+from types import SimpleNamespace
 
 import pytest
 
@@ -75,6 +81,23 @@ def test_unconfirmed_acquisition_cleanup_preserves_native_custody(monkeypatch):
 # Single-flight lock
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _release_test_stage_locks(monkeypatch):
+    acquired = []
+    original = us.acquire_lock
+
+    def acquire(lock=None, *, pid=None):
+        result = original(lock, pid=pid)
+        if result:
+            acquired.append((lock, pid))
+        return result
+
+    monkeypatch.setattr(us, "acquire_lock", acquire)
+    yield
+    for lock, pid in acquired:
+        us.release_lock(lock, pid=pid)
+
+
 def test_acquire_then_second_is_blocked(tmp_path: Path):
     lock = tmp_path / "updater.lock"
     # We (this live pid) take the lock.
@@ -92,23 +115,209 @@ def test_stale_lock_by_dead_pid_is_reclaimed(tmp_path: Path):
     assert us.acquire_lock(lock, pid=os.getpid()) is True
 
 
-def test_stale_lock_by_age_is_reclaimed(tmp_path: Path):
+def test_old_live_legacy_lock_is_not_reclaimed_by_age(tmp_path: Path):
     lock = tmp_path / "updater.lock"
-    old = us.time.time() - (us._LOCK_TTL_SECS + 10)
-    # Even our own live pid, if the lock is older than the TTL, is reclaimable.
+    old = us.time.time() - 3600
     lock.write_text(json.dumps({"pid": os.getpid(), "started": old}),
                     encoding="utf-8")
-    assert us.acquire_lock(lock, pid=os.getpid()) is True
+    assert us.acquire_lock(lock, pid=os.getpid()) is False
 
 
 def test_release_only_removes_own_lock(tmp_path: Path):
     lock = tmp_path / "updater.lock"
-    lock.write_text(json.dumps({"pid": 4242, "started": us.time.time()}),
-                    encoding="utf-8")
-    us.release_lock(lock, pid=os.getpid())      # not our lock -> untouched
+    assert us.acquire_lock(lock)
+    us.release_lock(lock, pid=4242)
     assert lock.exists()
-    us.release_lock(lock, pid=4242)             # owner releases
+    us.release_lock(lock)
     assert not lock.exists()
+
+
+def test_simultaneous_stages_have_exactly_one_owner(tmp_path: Path, monkeypatch):
+    lock = tmp_path / "updater.lock"
+    barrier = Barrier(2)
+    original = Path.exists
+
+    def exists(path):
+        result = original(path)
+        if path == lock and not result:
+            barrier.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(Path, "exists", exists)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: us.acquire_lock(lock), range(2)))
+    assert sorted(results) == [False, True]
+
+
+def test_lock_io_failure_is_not_misreported_as_contention(tmp_path: Path):
+    parent = tmp_path / "not-a-directory"
+    parent.write_text("sentinel", encoding="utf-8")
+    with pytest.raises(OSError):
+        us.acquire_lock(parent / "updater.lock")
+    assert parent.read_text(encoding="utf-8") == "sentinel"
+
+
+def test_kernel_io_failure_is_not_relabelled_as_another_owner(tmp_path: Path, monkeypatch):
+    from single_instance_lease import lease
+
+    def fail(_stream):
+        raise OSError(errno.EIO, "injected kernel lease failure")
+
+    monkeypatch.setattr(lease, "_acquire_os_lock", fail)
+    with pytest.raises(OSError, match="injected kernel lease failure"):
+        us.acquire_lock(tmp_path / "updater.lock")
+
+
+def test_failed_metadata_publication_releases_the_native_lease(tmp_path: Path, monkeypatch):
+    lock = tmp_path / "updater.lock"
+    original = us._write_status
+
+    def fail(_path, _data):
+        raise PermissionError("injected lock publication failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(us, "_write_status", fail)
+        with pytest.raises(PermissionError, match="publication failure"):
+            us.acquire_lock(lock)
+    assert us._write_status is original
+    assert us.acquire_lock(lock)
+
+
+def test_unknown_lock_protocol_refuses_without_overwriting_metadata(tmp_path: Path):
+    lock = tmp_path / "updater.lock"
+    original = b'{"protocol":"future-lease","pid":999999999}\n'
+    lock.write_bytes(original)
+    with pytest.raises(ValueError, match="Unsupported update-stage lock protocol"):
+        us.acquire_lock(lock)
+    assert lock.read_bytes() == original
+    lock.unlink()
+    assert us.acquire_lock(lock)
+
+
+def test_locked_contender_does_not_replace_the_owner_status(tmp_path: Path):
+    lock = tmp_path / "updater.lock"
+    status = tmp_path / "status.json"
+    lock.write_text(
+        json.dumps({"pid": os.getpid(), "started": us.time.time()}), encoding="utf-8",
+    )
+    original = b'{"stage_done":true,"plugin_changed":true,"fingerprint":"candidate"}\n'
+    status.write_bytes(original)
+    assert us.stage(status=status, lock=lock)["skipped"] == "locked"
+    assert status.read_bytes() == original
+
+
+def test_lock_failure_has_an_explicit_nonzero_cli_result(tmp_path: Path, monkeypatch, capsys):
+    parent = tmp_path / "not-a-directory"
+    parent.write_text("sentinel", encoding="utf-8")
+    status = tmp_path / "status.json"
+    monkeypatch.setattr(us, "lock_path", lambda: parent / "updater.lock")
+    assert us.cmd_stage_update(SimpleNamespace(status=str(status), json=True)) == 1
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["stage_done"] is False
+    assert "Update-stage lock unavailable" in result["stage_error"]
+    assert "Update-stage lock unavailable" in captured.err
+    assert "skipped" not in result
+    assert us.indicator_state(status=status, lock=tmp_path / "absent") == "idle"
+
+
+@pytest.mark.parametrize("failure", ["guard-open", "metadata-publication"])
+def test_lock_acquisition_failure_preserves_shared_completion(tmp_path, monkeypatch, failure):
+    status = tmp_path / "status.json"
+    completion = b'{"stage_done":true,"plugin_changed":true,"fingerprint":"successor"}\n'
+    status.write_bytes(completion)
+    lock = tmp_path / "updater.lock"
+    if failure == "guard-open":
+        parent = tmp_path / "not-a-directory"
+        parent.write_text("sentinel", encoding="utf-8")
+        lock = parent / "updater.lock"
+    else:
+        original = us._write_status
+
+        def publish(path, data):
+            if path == lock:
+                raise PermissionError("injected lock publication failure")
+            original(path, data)
+
+        monkeypatch.setattr(us, "_write_status", publish)
+    result = us.stage(status=status, lock=lock)
+    assert result["stage_done"] is False
+    assert "Update-stage lock unavailable" in result["stage_error"]
+    assert status.read_bytes() == completion
+
+
+def test_release_does_not_remove_a_foreign_record_and_always_frees_lease(tmp_path: Path):
+    lock = tmp_path / "updater.lock"
+    assert us.acquire_lock(lock)
+    record = json.loads(lock.read_text(encoding="utf-8"))
+    record["token"] = "foreign"
+    lock.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="metadata changed"):
+        us.release_lock(lock)
+    assert json.loads(lock.read_text(encoding="utf-8")) == record
+    assert us.acquire_lock(lock)
+
+
+def test_real_stage_lease_survives_age_and_recovers_after_owner_crash(tmp_path: Path):
+    lock = tmp_path / "updater.lock"
+    holder_report = tmp_path / "holder.json"
+    code = (
+        "import json,sys,time\n"
+        "from pathlib import Path\n"
+        "from agent_worktrees import update_stage as us\n"
+        "lock,report=map(Path,sys.argv[1:3])\n"
+        "acquired=us.acquire_lock(lock)\n"
+        "report.write_text(json.dumps({'acquired':acquired}),encoding='utf-8')\n"
+        "if acquired:\n"
+        "    if sys.argv[3]=='hold': time.sleep(60)\n"
+        "    us.release_lock(lock)\n"
+    )
+    environment = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
+    interpreter = getattr(sys, "_base_executable", sys.executable)
+    flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    holder = subprocess.Popen(
+        [interpreter, "-c", code, str(lock), str(holder_report), "hold"],
+        cwd=tmp_path, env=environment, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, **flags,
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                report = json.loads(holder_report.read_text(encoding="utf-8"))
+                break
+            except (FileNotFoundError, json.JSONDecodeError):
+                assert holder.poll() is None, holder.stderr.read()
+                assert time.monotonic() < deadline, "stage holder did not publish its result"
+                time.sleep(0.02)
+        assert report["acquired"] is True
+        guard = lock.with_name(lock.name + ".guard")
+        identity = (guard.stat().st_dev, guard.stat().st_ino)
+        record = json.loads(lock.read_text(encoding="utf-8"))
+        record["started"] = time.time() - 3600
+        lock.write_text(json.dumps(record), encoding="utf-8")
+
+        def contender(name):
+            report_path = tmp_path / f"{name}.json"
+            child = subprocess.run(
+                [interpreter, "-c", code, str(lock), str(report_path), "once"],
+                cwd=tmp_path, env=environment, capture_output=True, text=True,
+                timeout=15, **flags,
+            )
+            assert child.returncode == 0, child.stderr
+            return json.loads(report_path.read_text(encoding="utf-8"))["acquired"]
+
+        assert contender("while-live") is False
+        holder.terminate()
+        holder.wait(timeout=10)
+        assert contender("after-crash") is True
+        assert (guard.stat().st_dev, guard.stat().st_ino) == identity
+        assert not lock.exists()
+    finally:
+        if holder.poll() is None:
+            holder.kill()
+            holder.wait(timeout=10)
+        holder.stderr.close()
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +470,56 @@ def test_stage_detects_change(tmp_path: Path, monkeypatch):
     assert result["stage_done"] is True
     assert result["plugin_changed"] is True
     assert result["prelaunch"] == {"action": "continue"}
+
+
+@pytest.mark.parametrize("pause_at", ["discovery", "download"])
+def test_new_stage_invalidates_prior_completion_before_payload_work(
+    tmp_path: Path, monkeypatch, pause_at
+):
+    home = tmp_path / "home"
+    payload = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    prior = {
+        "stage_done": True, "plugin_changed": True, "plugin_dir": str(payload),
+        "fingerprint": us.fingerprint(payload),
+    }
+    status.write_text(json.dumps(prior), encoding="utf-8")
+    entered, resume = Event(), Event()
+    discover = us.discover_plugin_dir
+
+    def pause():
+        entered.set()
+        assert resume.wait(timeout=10), "stage was not resumed"
+
+    def discover_payload(home):
+        if pause_at == "discovery":
+            pause()
+        return discover(home)
+
+    def download():
+        if pause_at == "download":
+            pause()
+        return True, "already at latest"
+
+    monkeypatch.setattr(us, "discover_plugin_dir", discover_payload)
+    monkeypatch.setattr(us, "_run_copilot_update", download)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        owner = pool.submit(us.stage, status=status, lock=lock, home=home)
+        try:
+            assert entered.wait(timeout=10), "stage did not reach payload work"
+            in_progress = us.read_status(status)
+            assert in_progress["stage_done"] is False
+            assert not in_progress.get("plugin_changed")
+            assert us.stage(status=status, lock=lock, home=home)["skipped"] == "locked"
+            assert us.read_status(status) == in_progress
+        finally:
+            resume.set()
+        result = owner.result(timeout=10)
+    assert result["stage_done"] is True
+    assert result["before_fingerprint_source"] == "cached"
+    assert result["plugin_changed"] is False
+    assert us.read_status(status) == result
 
 
 def test_stage_no_change_when_download_noop(tmp_path: Path, monkeypatch):
@@ -619,8 +878,8 @@ def test_indicator_paused_ignores_stale_available_status(
     assert us.indicator_state(status=status, lock=lock) == "paused"
 
 
-def test_indicator_locked_skip_reads_as_checking(tmp_path: Path):
+def test_indicator_locked_skip_without_a_live_owner_is_idle(tmp_path: Path):
     status = tmp_path / "status.json"
     status.write_text(json.dumps({"stage_done": True, "skipped": "locked",
                                   "plugin_changed": False}), encoding="utf-8")
-    assert us.indicator_state(status=status, lock=tmp_path / "none.lock") == "checking"
+    assert us.indicator_state(status=status, lock=tmp_path / "none.lock") == "idle"

@@ -716,3 +716,37 @@ source-owner coordination rather than one large rewrite.
   reads or implement unchanged-content backfill. Next factor the shared pair
   write seam with source-bound current-row checks, then qualify separately
   budgeted, resumable discovery. #4220, #8733 and #5302 retain their scopes.
+
+### 2026-10-26 - Prepared coverage reviewed and merged
+
+- PR #9132 merged as `3ad04065f` after exact-head Copilot approval with no active
+  findings and successful required checks. Reconciled the reusable worktree and
+  re-read this effort's own Plan and Validation Plan; the effort remains Active.
+- The 60-test bounded packet qualifies prepared coverage selection/publication,
+  not a complete backfill. The next admitted prerequisite is the canonical
+  provenance lookup inside vector writes, followed by shared pair-write
+  factoring and source-bound budgeted snapshot progress.
+
+### 2026-10-26 - Prepared canonical provenance for vector writes
+
+- Added optional `bounded_provenance=True` to the existing vector write/facade
+  methods. It selects the qualified prepared canonical point-read path for the
+  existing source/language check without rewriting canonical content, changing
+  defaults or introducing another source owner.
+- Input and provenance preflight precede writer entry; current canonical
+  provenance is rechecked under the existing exclusion. Typed known pre-effect
+  refusals preserve the clean receipt after an intervening content commit.
+  Actual vector effects and subsequent errors retain dirty/uncertain recovery.
+- Actual source/index/coverage tests pass 79 cases with 7 existing opt-in skips;
+  default multi-model, fail-loud, checkpoint and source-family tests pass 53.
+  The 100/10,000/100,000-row fixture exercises real opt-in vector writes with
+  unchanged canonical versions and explicit post-write vector preparation.
+- This certifies the canonical provenance lookup, not total vector delete/add
+  I/O, raw embedding-input currentness, resumable backfill, release or rollout.
+  Complete source/account/profile binding and current-input verification remain
+  with the next batch/backfill slice; #4220/#8733/#5302 retain their scopes.
+- The final composed packet passes 107 tests with 7 existing opt-in skips,
+  including a caller-owned outer transaction that must remain dirty after its
+  own escaping failure. Changed Python lint and the two storage-owner type
+  checks pass; existing search-filter kwargs prevent claiming a clean full
+  facade type check and are outside this write-path change.

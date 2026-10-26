@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from typing import TYPE_CHECKING, Any
 
 from .repo_filter import _sql_str
 from .source_layout import SourceLayoutError
+
+if TYPE_CHECKING:
+    from agent_index.chunking.base import Chunk
+
+    from .content_store import ContentStore
 
 PAGE_SIZE = 512
 
@@ -70,21 +76,33 @@ def sync_content_projection(db, chunks) -> None:
                 )
 
 
-def projection_records(db, content_name, chunks) -> dict:
-    table = db.open_table(content_name)
-    result = {}
-    for start in range(0, len(chunks), PAGE_SIZE):
-        ids = ", ".join(
-            f"'{_sql_str(chunk.chunk_id)}'" for chunk in chunks[start:start + PAGE_SIZE]
+def projection_records(
+    db: Any, content_name: str, chunks: list[Chunk],
+    *, bounded_content: ContentStore | None = None,
+) -> dict[str, dict[str, Any]]:
+    if bounded_content is not None:
+        from .chunk_id_index import indexed_chunk_rows
+
+        rows = indexed_chunk_rows(
+            bounded_content, [chunk.chunk_id for chunk in chunks],
+            columns=["chunk_id", "source", "language"],
         )
-        rows = (
-            table.search().where(f"chunk_id IN ({ids})", prefilter=True)
-            .select(["chunk_id", "source", "language"]).limit(PAGE_SIZE + 1).to_list()
-        )
-        for row in rows:
-            if row["chunk_id"] in result and result[row["chunk_id"]] != row:
-                raise SourceLayoutError("conflicting canonical provenance")
-            result[row["chunk_id"]] = row
+        result = {row["chunk_id"]: row for row in rows}
+    else:
+        table = db.open_table(content_name)
+        result = {}
+        for start in range(0, len(chunks), PAGE_SIZE):
+            ids = ", ".join(
+                f"'{_sql_str(chunk.chunk_id)}'" for chunk in chunks[start:start + PAGE_SIZE]
+            )
+            rows = (
+                table.search().where(f"chunk_id IN ({ids})", prefilter=True)
+                .select(["chunk_id", "source", "language"]).limit(PAGE_SIZE + 1).to_list()
+            )
+            for row in rows:
+                if row["chunk_id"] in result and result[row["chunk_id"]] != row:
+                    raise SourceLayoutError("conflicting canonical provenance")
+                result[row["chunk_id"]] = row
     for chunk in chunks:
         row = result.get(chunk.chunk_id)
         if row is None or row["source"] != chunk.source or row["language"] != chunk.language:
